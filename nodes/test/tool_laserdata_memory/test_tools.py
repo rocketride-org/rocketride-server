@@ -58,11 +58,18 @@ def _tool_function(**_meta):
 
 def _ensure_rocketlib() -> None:
     """Install a fresh rocketlib stub so the node imports without the engine."""
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_laserdata_memory (rocketlib.filters is never stubbed).
+    import importlib
+
+    from rocketlib.filters import IGlobalBase
+
     mod = types.ModuleType('rocketlib')
     mod.IInstanceBase = type('IInstanceBase', (), {})
-    mod.IGlobalBase = type('IGlobalBase', (), {})
+    mod.IGlobalBase = IGlobalBase
+    mod.engine = importlib.import_module('rocketlib.engine')
+    mod.config = importlib.import_module('rocketlib.config')
     mod.tool_function = _tool_function
-    mod.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
     for name in ('debug', 'error', 'warning'):
         setattr(mod, name, lambda *a, **k: None)
     sys.modules['rocketlib'] = mod
@@ -125,7 +132,7 @@ def _config_int(cfg, key, default, *, min_value=None, max_value=None):
 
 def _ensure_ai_common() -> None:
     """Install fresh ``ai.common.*`` stubs so the node imports without the engine."""
-    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+    for name in ('ai', 'ai.common', 'ai.common.utils'):
         sys.modules[name] = types.ModuleType(name)
     # Mark containers as packages so sub-imports resolve even if not pre-inserted.
     sys.modules['ai'].__path__ = []
@@ -136,16 +143,6 @@ def _ensure_ai_common() -> None:
     utils.optional_str = _optional_str
     utils.int_arg = _int_arg
     utils.config_int = _config_int
-
-    class _Config:
-        """Minimal Config stub returning an empty node config."""
-
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            """Return an empty config dict."""
-            return {}
-
-    sys.modules['ai.common.config'].Config = _Config
 
 
 def _ensure_pkg() -> None:
@@ -163,7 +160,6 @@ _CORE_STUBS = (
     'ai',
     'ai.common',
     'ai.common.utils',
-    'ai.common.config',
 )
 _saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
 
@@ -297,19 +293,20 @@ def _depends_stub():
     return mod
 
 
-def _real_global(monkeypatch, cfg, open_mode='run'):
-    """Build a real IGlobal and run beginGlobal against a stubbed config."""
+def _conn_config(flat: dict) -> dict:
+    """Nest a flat test config into the stored shape: the connection string lives under its deployment branch."""
+    profile = flat.get('profile', 'local')
+    nested = {key: value for key, value in flat.items() if key != 'connection_string'}
+    if 'connection_string' in flat:
+        nested[profile] = {'connection_string': flat['connection_string']}
+    return nested
+
+
+def _real_global(monkeypatch, cfg):
+    """Build a real IGlobal and run beginGlobal on the stored config ``cfg`` (resolved through the engine's schema)."""
     monkeypatch.setitem(sys.modules, 'depends', _depends_stub())
-
-    class _Config:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return dict(cfg)
-
-    monkeypatch.setattr(IGlobalMod, 'Config', _Config)
     glb = IGlobal()
-    glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode))
-    glb.glb = SimpleNamespace(logicalType='tool_laserdata_memory', connConfig={})
+    glb.glb = SimpleNamespace(logicalType='tool_laserdata_memory', connConfig=_conn_config(cfg))
     glb.beginGlobal()
     return glb
 
@@ -330,59 +327,60 @@ def bridge(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# IGlobal — config
+# IGlobal - config
 # ---------------------------------------------------------------------------
 
 
-def test_begin_global_config_mode_skips(monkeypatch):
-    glb = _real_global(monkeypatch, {}, open_mode='config')
-    assert glb._loop is None  # no loop, no depends, no validation
-
-
 def test_begin_global_requires_connection_string(monkeypatch):
-    with pytest.raises(ValueError, match='connection_string is required'):
+    """The schema requires the selected deployment's connection string; the resolver names the leaf."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='"local.connection_string" is required'):
         _real_global(monkeypatch, {'connection_string': ''})
 
 
-def test_begin_global_env_fallback(monkeypatch, bridge):
+def test_begin_global_has_no_process_env_fallback(monkeypatch):
+    """The connection string arrives through the node config only."""
+    from rocketlib.config import ConfigError
+
     monkeypatch.setenv('LASER_CONNECTION_STRING', 'iggy:laser@envhost:8090')
-    glb = bridge(cfg={'connection_string': ''})
-    assert glb.connection_string == 'iggy:laser@envhost:8090'
+    with pytest.raises(ConfigError, match='connection_string'):
+        _real_global(monkeypatch, {})
 
 
-def test_begin_global_clamps_and_guards(bridge):
-    glb = bridge(
-        cfg={
-            'connection_string': 'iggy:laser@localhost:8090',
-            'recall_limit': 500,
-            'op_timeout': 1,
-            'folded': 'nope',
-            'allow_namespace_override': 'nope',
-        }
-    )
-    assert glb.recall_limit == 200
-    assert glb.op_timeout == 5
-    assert glb.folded is True  # non-bool falls back to default
-    assert glb.allow_namespace_override is True
-    assert glb.stream == 'rocketride-memory'  # default when unset
+def test_begin_global_reads_the_cloud_branch(bridge):
+    glb = bridge(cfg={'profile': 'cloud', 'connection_string': 'u:p@acme.laserdata.cloud:8090'})
+    assert glb.connection_string == 'u:p@acme.laserdata.cloud:8090'
 
 
-def test_begin_global_malformed_numbers_fall_back(bridge):
-    glb = bridge(
-        cfg={
-            'connection_string': 'iggy:laser@localhost:8090',
-            'recall_limit': 'lots',
-            'op_timeout': 'forever',
-        }
-    )
-    assert glb.recall_limit == 10  # malformed config must not crash beginGlobal
-    assert glb.op_timeout == 30
-
-
-def test_begin_global_zero_means_default(bridge):
-    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'op_timeout': 0, 'recall_limit': 0})
-    assert glb.op_timeout == 30  # config_int semantics: <=0 is "unspecified"
+def test_begin_global_unset_leaves_mean_the_defaults(bridge):
+    glb = bridge()
     assert glb.recall_limit == 10
+    assert glb.op_timeout == 30
+    assert glb.folded is True
+    assert glb.allow_namespace_override is True
+    assert glb.stream == 'rocketride-memory'
+
+
+@pytest.mark.parametrize(
+    ('key', 'value'),
+    [
+        ('recall_limit', 500),
+        ('recall_limit', 0),
+        ('recall_limit', 'lots'),
+        ('op_timeout', 1),
+        ('op_timeout', 0),
+        ('op_timeout', 'forever'),
+        ('folded', 'nope'),
+        ('allow_namespace_override', 'nope'),
+    ],
+)
+def test_begin_global_rejects_values_outside_the_schema(monkeypatch, key, value):
+    """The schema bounds replace the old clamps: a bad value is a hard error naming the key."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match=f'"{key}"'):
+        _real_global(monkeypatch, {'connection_string': 'iggy:laser@localhost:8090', key: value})
 
 
 def test_begin_global_reads_stream(bridge, monkeypatch):
@@ -399,25 +397,8 @@ def test_begin_global_reads_stream(bridge, monkeypatch):
     assert streams == ['shared-memory']  # pinned at connect for laser.memory()
 
 
-def test_validate_config_warns_without_raising(monkeypatch):
-    warnings = []
-    monkeypatch.setattr(IGlobalMod, 'warning', warnings.append)
-    monkeypatch.delenv('LASER_CONNECTION_STRING', raising=False)
-
-    class _Config:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {}
-
-    monkeypatch.setattr(IGlobalMod, 'Config', _Config)
-    glb = IGlobal()
-    glb.glb = SimpleNamespace(logicalType='tool_laserdata_memory', connConfig={})
-    glb.validateConfig()
-    assert warnings == ['connection_string is required']
-
-
 # ---------------------------------------------------------------------------
-# IGlobal — bridge
+# IGlobal - bridge
 # ---------------------------------------------------------------------------
 
 

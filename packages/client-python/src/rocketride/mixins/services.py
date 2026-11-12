@@ -62,7 +62,7 @@ class ServicesMixin(DAPClient):
         """Initialize services functionality."""
         super().__init__(**kwargs)
 
-    async def get_services(self) -> SERVICES_RESPONSE:
+    async def get_services(self, *, definitions: bool = False) -> SERVICES_RESPONSE:
         """
         Retrieve all service summaries from the server.
 
@@ -72,6 +72,12 @@ class ServicesMixin(DAPClient):
         'version'. The configuration schema is served by get_service()
         on demand.
 
+        Args:
+            definitions: When True, every entry is the FULL definition
+                (configuration schema included) and there is no 'icons'
+                table — the bulk form of get_service(), for callers that
+                need every service's properties at once.
+
         Returns:
             Dict containing 'services', 'icons', and 'version'. Returns
             {} if the response has no body.
@@ -79,6 +85,8 @@ class ServicesMixin(DAPClient):
         Raises:
             RuntimeError: If the server returns an error.
         """
+        if definitions:
+            return await self.call('rrext_services', definitions=True)
         return await self.call('rrext_services')
 
     async def get_service(self, service: str) -> SERVICE_DEFINITION:
@@ -109,21 +117,24 @@ class ServicesMixin(DAPClient):
         """
         Resolve a component config the way the node will receive it.
 
-        Applies the engine's own profile and default merging, so an author can
-        see the effective config instead of inferring it. Resolution is
-        engine-side because the service catalog does not carry ``preconfig``.
+        Runs the engine's own resolver on the node's schema: defaults applied,
+        the selected branch flattened, so an author can see the effective
+        config instead of inferring it.
 
         Args:
             provider: Component provider, e.g. 'llm_openai'.
             config: The component's config block. Defaults to empty.
 
         Returns:
-            ``{'provider', 'profile', 'resolved', 'dropped'}``, where ``dropped``
-            lists top-level keys the resolver discarded.
+            ``{'provider', 'resolved', 'paths', 'params', 'paramKeys', 'envKeys'}``:
+            the resolved values by key, each key's stored path, the node's
+            parameter descriptors, the keys that are per-call parameters and
+            the keys the caller's environment fills at run time.
 
         Raises:
             ValueError: If provider is empty.
-            RuntimeError: If the service is unknown or has no preconfig section.
+            RuntimeError: If the service is unknown or the config does not fit
+                its schema (the message names the key).
         """
         if not provider:
             raise ValueError('Provider name is required')

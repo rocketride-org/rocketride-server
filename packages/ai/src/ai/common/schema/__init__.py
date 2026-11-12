@@ -1,5 +1,3 @@
-from .autopipe import Autopipe
-
 from rocketride import (
     Answer,
     Question,
@@ -24,5 +22,4 @@ __all__ = [
     'DocMetadata',
     'Doc',
     'DocGroup',
-    'Autopipe',
 ]

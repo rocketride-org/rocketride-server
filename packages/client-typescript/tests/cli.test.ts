@@ -36,6 +36,7 @@
  *     CLI (dist/cli), which `builder test` produces before running jest.
  */
 
+import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -65,6 +66,16 @@ async function ensureCleanPipeline(client: RocketRideClient, token: string): Pro
 	} catch {
 		// Ignore errors - pipeline might not be running
 	}
+}
+
+/**
+ * A unique token so a run gets an address of its own: use({ token }) and
+ * start --token override the pipeline-id segment of the task address, so a
+ * unique value keeps the run apart from every other test, worker and client
+ * on the same server.
+ */
+function privateToken(base: string): string {
+	return `${base}-${randomUUID().slice(0, 8)}`;
 }
 
 /** Connection arguments every CLI command needs. */
@@ -99,6 +110,13 @@ function runCli(args: string[]): Promise<{ code: number; output: string }> {
 			resolve({ code: code ?? 0, output });
 		});
 	});
+}
+
+/** The task address a start or managed upload command printed on its "Token:" line. */
+function startedToken(output: string): string {
+	const line = output.split(/\r?\n/).find((text) => text.startsWith('Token: '));
+	if (!line) throw new Error(`command printed no token:\n${output}`);
+	return line.slice('Token: '.length).trim();
 }
 
 /** Every task token the server currently reports. */
@@ -138,9 +156,9 @@ afterEach(() => {
 });
 
 /** Write the echo pipeline to a file the CLI can load. */
-function writePipeline(projectId: string): string {
+function writePipeline(): string {
 	const file = path.join(workDir, 'echo.pipe');
-	fs.writeFileSync(file, JSON.stringify(getEchoPipeline(projectId)), 'utf8');
+	fs.writeFileSync(file, JSON.stringify(getEchoPipeline()), 'utf8');
 	return file;
 }
 
@@ -154,44 +172,47 @@ function writeUploadFiles(): string[] {
 }
 
 describe('CLI start Integration Tests', () => {
-	const PIPELINE_TOKEN = 'TS-CLI-START';
-	const PROJECT_ID = '1a4d7f22-3b65-4e19-8c47-2d9b6e05f731';
+	const TOKEN_BASE = 'ts-cli-start';
 
 	let client: RocketRideClient;
+	let pipelineToken: string | undefined;
 
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
+		pipelineToken = undefined;
 	});
 
 	afterEach(async () => {
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
+		if (pipelineToken) await ensureCleanPipeline(client, pipelineToken);
 		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should start a pipeline the server reports', async () => {
-		const pipeline = writePipeline(PROJECT_ID);
+		const pipeline = writePipeline();
 
-		const { code, output } = await runCli(['start', '--pipeline', pipeline, '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code, output } = await runCli(['start', '--pipeline', pipeline, '--token', privateToken(TOKEN_BASE), ...serverArgs()]);
 
 		expect(code).toBe(0);
 		expect(output).not.toContain('Execution Error');
+		pipelineToken = startedToken(output);
 
 		// The task the CLI started is a task the server knows about
-		const status = await client.getTaskStatus(PIPELINE_TOKEN);
+		const status = await client.getTaskStatus(pipelineToken);
 		expect(status).toHaveProperty('state');
 	});
 
 	it('should report a task token the user can act on', async () => {
-		const pipeline = writePipeline(PROJECT_ID);
+		const pipeline = writePipeline();
 
-		const { code, output } = await runCli(['start', '--pipeline', pipeline, '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code, output } = await runCli(['start', '--pipeline', pipeline, '--token', privateToken(TOKEN_BASE), ...serverArgs()]);
 
 		expect(code).toBe(0);
+		pipelineToken = startedToken(output);
 
 		// The follow-up command it prints has to name the real token
-		expect(output).toContain(PIPELINE_TOKEN);
+		expect(output).toContain(`rocketride stop --token ${pipelineToken}`);
+		expect(await listTaskTokens(client)).toContain(pipelineToken);
 		expect(output).not.toContain('[object Object]');
 	});
 
@@ -204,51 +225,50 @@ describe('CLI start Integration Tests', () => {
 
 	it('should fail on a missing pipeline file without leaving a task behind', async () => {
 		const missing = path.join(workDir, 'no-such.pipe');
+		// A private token names the only address this invocation could have
+		// started, so other clients' tasks cannot affect the check
+		const token = privateToken(TOKEN_BASE);
 
-		const { code } = await runCli(['start', '--pipeline', missing, '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code } = await runCli(['start', '--pipeline', missing, '--token', token, ...serverArgs()]);
 
 		expect(code).toBe(1);
-		expect(await listTaskTokens(client)).not.toContain(PIPELINE_TOKEN);
+		expect((await listTaskTokens(client)).filter((address) => address.split('.')[1] === token)).toEqual([]);
 	});
 });
 
 describe('CLI upload Integration Tests', () => {
-	const PIPELINE_TOKEN = 'TS-CLI-UPLOAD';
-	const PROJECT_ID = '2b5e8a33-4c76-4f2a-9d58-3e0c7f16a842';
-
-	// The token the upload command hardcodes when it starts its own task
-	const MANAGED_TOKEN = 'UPLOAD_TASK';
+	const TOKEN_BASE = 'ts-cli-upload';
 
 	let client: RocketRideClient;
+	let pipelineToken: string | undefined;
 
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		await ensureCleanPipeline(client, MANAGED_TOKEN);
+		pipelineToken = undefined;
 	});
 
 	afterEach(async () => {
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		await ensureCleanPipeline(client, MANAGED_TOKEN);
+		// The test's own run, or the one the upload command started for itself
+		if (pipelineToken) await ensureCleanPipeline(client, pipelineToken);
 		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should upload files to an existing task and leave it running', async () => {
-		await client.use({ pipeline: getEchoPipeline(PROJECT_ID), token: PIPELINE_TOKEN });
+		pipelineToken = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(TOKEN_BASE) })).token;
 
 		const files = writeUploadFiles();
-		const { code, output } = await runCli(['upload', ...files, '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code, output } = await runCli(['upload', ...files, '--token', pipelineToken, ...serverArgs()]);
 
 		expect(code).toBe(0);
 		expect(output).not.toContain('Upload Error');
 
 		// A task the CLI did not create is a task it must leave running
-		expect(await listTaskTokens(client)).toContain(PIPELINE_TOKEN);
+		expect(await listTaskTokens(client)).toContain(pipelineToken);
 	});
 
 	it('should start and terminate its own task', async () => {
-		const pipeline = writePipeline(PROJECT_ID);
+		const pipeline = writePipeline();
 		const files = writeUploadFiles();
 
 		const { code, output } = await runCli(['upload', ...files, '--pipeline', pipeline, ...serverArgs()]);
@@ -256,8 +276,10 @@ describe('CLI upload Integration Tests', () => {
 		expect(code).toBe(0);
 		expect(output).not.toContain('Upload Error');
 
-		// A task the CLI created is a task it has to clean up
-		expect(await waitUntilGone(client, MANAGED_TOKEN)).toBe(true);
+		// A task the CLI created is a task it has to clean up: the one at
+		// the private address it printed
+		pipelineToken = startedToken(output);
+		expect(await waitUntilGone(client, pipelineToken)).toBe(true);
 	});
 
 	it('should fail without a pipeline or a token', async () => {
@@ -270,10 +292,10 @@ describe('CLI upload Integration Tests', () => {
 	});
 
 	it('should fail when no file matches', async () => {
-		await client.use({ pipeline: getEchoPipeline(PROJECT_ID), token: PIPELINE_TOKEN });
+		pipelineToken = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(TOKEN_BASE) })).token;
 
 		const missing = path.join(workDir, 'nothing-*.txt');
-		const { code, output } = await runCli(['upload', missing, '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code, output } = await runCli(['upload', missing, '--token', pipelineToken, ...serverArgs()]);
 
 		expect(code).toBe(1);
 		expect(output).toContain('No files found');
@@ -282,7 +304,8 @@ describe('CLI upload Integration Tests', () => {
 	it('should reject a non-positive --max-concurrent', async () => {
 		const files = writeUploadFiles();
 
-		const { code, output } = await runCli(['upload', ...files, '--token', PIPELINE_TOKEN, ...serverArgs(), '--max-concurrent', '0']);
+		// Refused before connecting, so the token names no task
+		const { code, output } = await runCli(['upload', ...files, '--token', 'local.no-such-pipe', ...serverArgs(), '--max-concurrent', '0']);
 
 		expect(code).toBe(1);
 		expect(output).toContain('--max-concurrent must be a positive integer');
@@ -290,31 +313,31 @@ describe('CLI upload Integration Tests', () => {
 });
 
 describe('CLI stop Integration Tests', () => {
-	const PIPELINE_TOKEN = 'TS-CLI-STOP';
-	const PROJECT_ID = '3c6f9b44-5d87-4a3b-ae69-4f1d8027b953';
+	const TOKEN_BASE = 'ts-cli-stop';
 
 	let client: RocketRideClient;
+	let pipelineToken: string | undefined;
 
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
+		pipelineToken = undefined;
 	});
 
 	afterEach(async () => {
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
+		if (pipelineToken) await ensureCleanPipeline(client, pipelineToken);
 		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should stop a running pipeline', async () => {
-		await client.use({ pipeline: getEchoPipeline(PROJECT_ID), token: PIPELINE_TOKEN });
-		expect(await listTaskTokens(client)).toContain(PIPELINE_TOKEN);
+		pipelineToken = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(TOKEN_BASE) })).token;
+		expect(await listTaskTokens(client)).toContain(pipelineToken);
 
-		const { code, output } = await runCli(['stop', '--token', PIPELINE_TOKEN, ...serverArgs()]);
+		const { code, output } = await runCli(['stop', '--token', pipelineToken, ...serverArgs()]);
 
 		expect(code).toBe(0);
 		expect(output).not.toContain('Stop Error');
-		expect(await waitUntilGone(client, PIPELINE_TOKEN)).toBe(true);
+		expect(await waitUntilGone(client, pipelineToken)).toBe(true);
 	});
 
 	it('should fail without a token', async () => {
@@ -329,116 +352,116 @@ describe('CLI stop Integration Tests', () => {
 // would profile everything else using this shared server, and leave data
 // behind that other suites expect to be absent.
 describe('CLI profile Integration Tests', () => {
-	const PIPELINE_TOKEN = 'TS-CLI-PROFILE';
-	const PROJECT_ID = '6f2d3b01-8c4e-4a79-8b32-d5e9f7a14c28';
-	const TOKEN_ARGS = ['--token', PIPELINE_TOKEN];
+	const TOKEN_BASE = 'ts-cli-profile';
 
 	let client: RocketRideClient;
+	let pipelineToken: string;
+	let tokenArgs: string[];
 
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		await client.use({ pipeline: getEchoPipeline(PROJECT_ID), token: PIPELINE_TOKEN });
+		pipelineToken = '';
+		pipelineToken = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(TOKEN_BASE) })).token;
+		tokenArgs = ['--token', pipelineToken];
 	});
 
 	afterEach(async () => {
-		await ensureCleanPipeline(client, PIPELINE_TOKEN);
+		if (pipelineToken) await ensureCleanPipeline(client, pipelineToken);
 		if (client.isConnected()) await client.disconnect();
 	});
 
 	// A task's session belongs to the server's link to it, so it outlives each CLI process
 	it('should profile a task across separate invocations', async () => {
-		let result = await runCli(['profile', 'start', ...TOKEN_ARGS, '--session', 'ts-cli', ...serverArgs()]);
+		let result = await runCli(['profile', 'start', ...tokenArgs, '--session', 'ts-cli', ...serverArgs()]);
 		expect(result.code).toBe(0);
-		expect(result.output).toContain(`Profiling started: session 'ts-cli' on task ${PIPELINE_TOKEN}`);
+		expect(result.output).toContain(`Profiling started: session 'ts-cli' on task ${pipelineToken}`);
 
-		result = await runCli(['profile', 'status', ...TOKEN_ARGS, ...serverArgs()]);
+		result = await runCli(['profile', 'status', ...tokenArgs, ...serverArgs()]);
 		expect(result.code).toBe(0);
-		expect(result.output).toContain(`Profiling active on task ${PIPELINE_TOKEN}: session 'ts-cli'`);
+		expect(result.output).toContain(`Profiling active on task ${pipelineToken}: session 'ts-cli'`);
 
-		result = await runCli(['profile', 'stop', ...TOKEN_ARGS, ...serverArgs()]);
+		result = await runCli(['profile', 'stop', ...tokenArgs, ...serverArgs()]);
 		expect(result.code).toBe(0);
 		expect(result.output).toContain("Profiling stopped: session 'ts-cli'");
 
-		result = await runCli(['profile', 'report', ...TOKEN_ARGS, ...serverArgs()]);
+		result = await runCli(['profile', 'report', ...tokenArgs, ...serverArgs()]);
 		expect(result.code).toBe(0);
 		expect(result.output.startsWith('Session: ts-cli')).toBe(true);
 	});
 
 	it("should list threads and draw one thread's tree", async () => {
 		// Data goes through so engine worker threads run while profiled
-		expect((await client.cprofileStart(PIPELINE_TOKEN)).status).toBe('started');
-		await client.send(PIPELINE_TOKEN, 'profile me', {}, 'text/plain');
-		expect((await client.cprofileStop(PIPELINE_TOKEN)).status).toBe('completed');
+		expect((await client.cprofileStart(pipelineToken)).status).toBe('started');
+		await client.send(pipelineToken, 'profile me', {}, 'text/plain');
+		expect((await client.cprofileStop(pipelineToken)).status).toBe('completed');
 
-		let result = await runCli(['profile', 'threads', ...TOKEN_ARGS, '--json', ...serverArgs()]);
+		let result = await runCli(['profile', 'threads', ...tokenArgs, '--json', ...serverArgs()]);
 		expect(result.code).toBe(0);
 		const threads = JSON.parse(result.output).threads as Array<{ id: number; calls: number }>;
 		const busiest = threads[0];
 
-		result = await runCli(['profile', 'threads', ...TOKEN_ARGS, ...serverArgs()]);
+		result = await runCli(['profile', 'threads', ...tokenArgs, ...serverArgs()]);
 		expect(result.code).toBe(0);
 		expect(result.output.split('\n')[0].split(/\s+/)).toEqual(['ID', 'NAME', 'TID', 'TIME', 'SHARE']);
 		expect(result.output).toContain(`${threads.length} thread(s)`);
 
 		const thread = ['--thread', String(busiest.id), '--min-pct', '0'];
-		result = await runCli(['profile', 'tree', ...TOKEN_ARGS, ...thread, '--json', ...serverArgs()]);
+		result = await runCli(['profile', 'tree', ...tokenArgs, ...thread, '--json', ...serverArgs()]);
 		expect(result.code).toBe(0);
 		// Only that thread's calls, so the total is the one listed for it
 		expect(JSON.parse(result.output).total_calls).toBe(busiest.calls);
 
-		result = await runCli(['profile', 'tree', ...TOKEN_ARGS, ...thread, ...serverArgs()]);
+		result = await runCli(['profile', 'tree', ...tokenArgs, ...thread, ...serverArgs()]);
 		expect(result.code).toBe(0);
 		expect(result.output.startsWith(`Call tree, thread ${busiest.id}:`)).toBe(true);
 		expect(result.output).toContain('FUNCTION');
 
 		const missing = String(Math.max(...threads.map((t) => t.id)) + 1000);
-		result = await runCli(['profile', 'tree', ...TOKEN_ARGS, '--thread', missing, ...serverArgs()]);
+		result = await runCli(['profile', 'tree', ...tokenArgs, '--thread', missing, ...serverArgs()]);
 		expect(result.code).toBe(1);
 		expect(result.output).toContain(`Thread ${missing} not found in the last session`);
 	});
 
 	it('should run a timed session to completion', async () => {
-		const { code, output } = await runCli(['profile', 'run', ...TOKEN_ARGS, '--duration', '1', ...serverArgs()]);
+		const { code, output } = await runCli(['profile', 'run', ...tokenArgs, '--duration', '1', ...serverArgs()]);
 
 		expect(code).toBe(0);
 		expect(output).toContain('Profiling stopped: session');
 		// A task's session outlives this command, so it says how to end one left behind
-		expect(output).toContain(`Killing this command leaves the session running: rocketride profile stop --token ${PIPELINE_TOKEN}`);
+		expect(output).toContain(`Killing this command leaves the session running: rocketride profile stop --token ${pipelineToken}`);
 
 		// The session it stopped left data behind to read
-		const status = await client.cprofileStatus(PIPELINE_TOKEN);
+		const status = await client.cprofileStatus(pipelineToken);
 		expect(status.active).toBe(false);
 		expect(status.has_report).toBe(true);
 	});
 
 	it('should list which tasks are being profiled', async () => {
-		const other = 'TS-CLI-LIST-OTHER';
-		await ensureCleanPipeline(client, other);
+		let other: string | undefined;
 		try {
-			await client.use({ pipeline: getEchoPipeline('9b4e2d63-7e8f-4ca1-8d2b-3f5e7a9c1b24'), token: other });
-			expect((await client.cprofileStart(PIPELINE_TOKEN)).status).toBe('started');
+			other = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(`${TOKEN_BASE}-other`) })).token;
+			expect((await client.cprofileStart(pipelineToken)).status).toBe('started');
 
 			let result = await runCli(['profile', 'list', '--json', ...serverArgs()]);
 			expect(result.code).toBe(0);
 			const processes = JSON.parse(result.output).processes as Array<{ token: string | null; status?: { active?: boolean } }>;
 			// The server process, listed under a null token
 			expect(processes.some((process) => process.token === null)).toBe(true);
-			expect(processes.find((process) => process.token === PIPELINE_TOKEN)?.status?.active).toBe(true);
+			expect(processes.find((process) => process.token === pipelineToken)?.status?.active).toBe(true);
 			expect(processes.find((process) => process.token === other)?.status?.active).toBe(false);
 
 			result = await runCli(['profile', 'list', '--active', ...serverArgs()]);
 			expect(result.code).toBe(0);
-			expect(result.output).toContain(PIPELINE_TOKEN);
+			expect(result.output).toContain(pipelineToken);
 			expect(result.output).not.toContain(other);
 		} finally {
-			await ensureCleanPipeline(client, other);
+			if (other) await ensureCleanPipeline(client, other);
 		}
 	});
 
 	it('should fail when the task has no session yet', async () => {
-		const { code, output } = await runCli(['profile', 'tree', ...TOKEN_ARGS, ...serverArgs()]);
+		const { code, output } = await runCli(['profile', 'tree', ...tokenArgs, ...serverArgs()]);
 
 		expect(code).toBe(1);
 		expect(output).toContain('No profiling data available');

@@ -60,12 +60,18 @@ import type { PipelineHostOpMap, PipelineLoadPayload } from 'shared/ops/pipeline
 // the editor re-resolves empty after a restart. Cleared when the editor closes.
 const UNTITLED_BACKUP_PREFIX = 'rocketride.untitledBackup:';
 
-/** Parses a readonly live-task doc (`task:<projectId>.<sourceId>`), else null. */
+/**
+ * Parses a readonly live-task doc (`task:<projectId>.<sourceId>`), else null.
+ *
+ * Splits on the LAST dot: the source is one dot-free component id, so the
+ * segment after the last dot is exactly the source and everything before it
+ * is the project id, whatever that id looks like.
+ */
 function parseTaskDoc(doc: string): { projectId: string; sourceId: string } | null {
 	if (!doc.startsWith('task:')) return null;
 	const rest = doc.slice('task:'.length);
-	const dot = rest.indexOf('.');
-	if (dot <= 0) return null;
+	const dot = rest.lastIndexOf('.');
+	if (dot <= 0 || dot === rest.length - 1) return null;
 	return { projectId: rest.slice(0, dot), sourceId: rest.slice(dot + 1) };
 }
 

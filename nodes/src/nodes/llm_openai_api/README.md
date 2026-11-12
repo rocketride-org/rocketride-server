@@ -26,53 +26,47 @@ and message, truncated to 500 characters.
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Generic endpoint default: **Custom OpenAI-compatible endpoint** (`custom`).
-Nebius preset default: **Llama 3.3 70B Instruct** (`llama-3-3-70b`).
-
-The directory documents the generic endpoint and the Nebius branded preset in one
-combined profile table.
-
-| Profile | Model | Context tokens | Source |
-| ------- | ----- | -------------- | ------ |
-| Generic `custom` **(default)** | _(user-specified)_ | 32,768 | Any OpenAI-compatible API |
-| `llama-3-3-70b` **(default)** | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | Nebius Token Factory |
-| `qwen3-235b` | `Qwen/Qwen3-235B-A22B` | 131,072 | Nebius Token Factory |
-| `deepseek-v3` | `deepseek-ai/DeepSeek-V3` | 131,072 | Nebius Token Factory |
-
 ## Configuration
 
-Choose `custom` for a generic provider and set its model ID, base URL, context limit,
-output limit (4,096 tokens unless changed) and API key. Choose one of the named Nebius profiles when using Token Factory; those
-profiles pin the model ID, endpoint, and context limit.
+The generic endpoint has no model list: set `model` to the provider's exact model id,
+then set its context limit, output limit, API key and base URL. Choose the Nebius preset
+when using Token Factory; it offers a **Model** selector whose listed models pin the model
+id and context limit.
 
 ### Generic OpenAI-compatible endpoints
 
 Set `base_url` to the provider's OpenAI-compatible API root and `model` to its exact
 model identifier. When `base_url` is empty, the OpenAI SDK uses its default endpoint.
-Use a positive `modelTotalTokens` value that matches the selected model.
+Use a positive `modelTotalTokens` value that matches the selected model; it starts at
+32,768 tokens. Leave `modelOutputTokens` empty to keep the 4,096-token default.
 
 ### Nebius preset
 
 `services.nebius.json` registers **Nebius** (`llm_nebius://`) as a branded preset of
-this node. It uses the same Python implementation and pins the base URL to
-`https://api.tokenfactory.nebius.com/v1/`. The three named Nebius profiles in the
-combined table require no model or endpoint edits.
+this node. It uses the same Python implementation, and its base URL defaults to
+`https://api.tokenfactory.nebius.com/v1/`. The default model is **Llama 3.3 70B
+Instruct** (`meta-llama/Llama-3.3-70B-Instruct`).
 
-Nebius profiles default the API key to the `${ROCKETRIDE_NEBIUS_KEY}` environment
-substitution, so no per-node key entry is needed when that variable is set. The Nebius
-service also exposes its own `custom` option for another Token Factory model, retaining
-the pinned endpoint, environment-backed key, and 131,072-token context limit, with an
-output limit of 4,096 tokens unless changed. The
-combined table represents the duplicate `custom` key once, using the generic service's
-merged 32,768-token default.
+#### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| Llama 3.3 70B Instruct **(default)** | `meta-llama/Llama-3.3-70B-Instruct` | 131,072 | — |
+| Qwen3 235B | `Qwen/Qwen3-235B-A22B` | 131,072 | — |
+| DeepSeek V3 | `deepseek-ai/DeepSeek-V3` | 131,072 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+The listed Nebius models pin no output limit, so the 4,096-token default applies.
+Select **Custom model** to enter another Token Factory model id, its context limit
+(131,072 tokens unless changed), and an output limit (4,096 tokens unless changed).
 
 ## Authentication
 
-For `custom`, provide the API key expected by the configured endpoint. Nebius named
-profiles use `${ROCKETRIDE_NEBIUS_KEY}` by default; replace it only when the credential
-must be supplied directly in the node configuration.
+For the generic endpoint, provide the API key expected by the configured endpoint; the
+key is optional there. The Nebius preset requires a key, and its schema declares the
+field env-backed by `ROCKETRIDE_NEBIUS_KEY`: enter the key itself, or the placeholder
+`${ROCKETRIDE_NEBIUS_KEY}` to take it from that account variable when the pipeline
+runs. Defining the variable does not fill an empty field.
 
 ## Notes
 
@@ -83,33 +77,18 @@ Provider errors are mapped to friendly messages and classified for retry:
 | Provider exception    | Retried | Surfaced as                                     |
 |-----------------------|---------|-------------------------------------------------|
 | `AuthenticationError` | no      | `Invalid API key.`                              |
-| `APIError`            | no      | `An error occurred with the API.`               |
-| `RateLimitError`      | yes     | `Rate limit exceeded. Please try again later.`  |
-| `APIConnectionError`  | yes     | `Failed to connect to the API.`                 |
+| Any other `APIError`  | no      | `An error occurred with the API.`               |
 
-Anything else falls through to the shared LLM base's default retry and mapping logic.
+`RateLimitError` and `APIConnectionError` are subclasses of `APIError` in the openai
+SDK, and the node checks `APIError` first, so rate-limit and connection errors are not
+retried and surface as `An error occurred with the API.` Anything else falls through to
+the shared LLM base's default retry and mapping logic.
 
 ### Testing
 
-`services.json` includes a `test` block that runs the `custom` profile against a local
-test server with a mocked `langchain_openai`, so no real API key is required.
+`services.json` includes a `test` block that runs model `custom` against a local test
+server with a mocked `langchain_openai`, so no real API key is required.
 `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
-
-### Model sync (Nebius service only)
-
-The profiles in `services.nebius.json` are maintained by the `sync_models` tooling
-(`llm_nebius` provider, `ROCKETRIDE_NEBIUS_KEY`), which reads Nebius Token Factory's
-own model list. New profiles are written with the Nebius base URL and the same
-`${ROCKETRIDE_NEBIUS_KEY}` reference the existing ones use.
-
-Token limits come only from Nebius: it runs open-weight models on its own hardware,
-so the context window is its choice, and the same model is served with a different
-window by every other host. The sync runs **only** with that key, because Nebius IDs
-(`Qwen/Qwen3-235B-A22B`) appear in no other catalogue and a keyless run would mark
-these profiles deprecated — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
-
-The generic `services.json` profiles are **not** synced: the model is whatever the
-user types for their own OpenAI-compatible endpoint.
 
 ---
 

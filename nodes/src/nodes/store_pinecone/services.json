@@ -65,7 +65,7 @@
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": ["Mode: ${parameters.pinecone.profile}", "Collection: ${parameters.pinecone.${profile}.collection}"],
+	"tile": ["Mode: ${parameters.pinecone.profile}", "Collection: ${parameters.pinecone.collection}"],
 	//
 	// Optional:
 	//      As a pipe component, define what this pipe component takes
@@ -130,39 +130,17 @@
 		]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "serverless-dense",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"pod-based": {
-				"mode": "pod-based",
-				"title": "Pinecone Pod-Based Index",
-				"apikey": "",
-				"collection": "rocketride",
-				"serverName": "pinecone"
-			},
-			"serverless-dense": {
-				"mode": "serverless-dense",
-				"title": "Pinecone Serverless Dense Index",
-				"apikey": "",
-				"collection": "rocketride",
-				"serverName": "pinecone"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The index type is the selector; every
+	//     property is referenced by both branches, so all of them are shared
+	//     and stored flat. The key is required: Pinecone has no local server.
 	//
-	"fields": {
+	"propertyDefinitions": {
+		"pinecone.apikey": {
+			"base": "vector.apikey",
+			"env": "ROCKETRIDE_PINECONE_APIKEY",
+			"required": true
+		},
 		"pinecone.collection": {
 			"type": "string",
 			"title": "Collection",
@@ -175,70 +153,29 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names pinecone.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "pinecone",
 			"minLength": 1
-		},
-		"pinecone.pod-based": {
-			"object": "pod-based",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
-		},
-		"pinecone.serverless-dense": {
-			"object": "serverless-dense",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
-		},
-		"pinecone.profile": {
-			"title": "Type of Pinecone Connection",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "pod-based",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "pod-based",
-					"properties": ["pinecone.pod-based"]
-				},
-				{
-					"value": "serverless-dense",
-					"properties": ["pinecone.serverless-dense"]
-				}
-			]
-		},
-		"pinecone.provider": {
-			"type": "string",
-			"const": "pinecone",
-			"default": "pinecone"
-		},
-		"pinecone.pinecone": {
-			"object": "pinecone",
-			"properties": ["pinecone.profile"]
-		},
-		"pinecone.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["pinecone.provider", "pinecone.pinecone"]
-		},
-		"pinecone.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "pinecone.store", "all.embedding"]
-		},
-		"pinecone.target.parameters": {
-			"object": "parameters",
-			"properties": ["pinecone.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Pinecone Vector Store",
-			"properties": ["pinecone.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "Pinecone",
-			"properties": ["type", "pinecone.target.parameters", "target.mode"]
+			"name": "profile",
+			"title": "Type of Pinecone index",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "serverless-dense",
+			"enum": {
+				"serverless-dense": {
+					"title": "Pinecone Serverless Dense Index",
+					"properties": ["pinecone.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+				},
+				"pod-based": {
+					"title": "Pinecone Pod-Based Index",
+					"properties": ["pinecone.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+				}
+			}
 		}
 	]
 }

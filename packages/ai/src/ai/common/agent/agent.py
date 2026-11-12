@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Union
 
 from rocketlib import debug, error, warning
 from ai.common.schema import Answer, Question
-from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
 
 from ai.common.utils import parse_bool, safe_str
@@ -81,14 +80,12 @@ class AgentBase(ABC):
         # Get the logical type (nodeId) of our invoker
         self._node_id = self._iGlobal.glb.logicalType
 
-        # Retrieve node-specific configuration by using the logical type and
-        # the connection configuration from the global context.
-        # Config.getNodeConfig likely returns structured config data tailored
-        # for this node instance.
-        config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
+        # The resolver's view of the node's config: defaults applied, the active
+        # branch flattened, keys read by path.
+        config = self._iGlobal.config
 
         # Keep the resolved config so subclasses can read their own extra fields
-        # without re-resolving (and without re-implementing shape handling).
+        # without re-resolving.
         self._config = config
 
         # And save any specific instructions
@@ -176,11 +173,10 @@ class AgentBase(ABC):
                 for inst in self._instructions:
                     question.addInstruction('Additional Instruction', inst.strip())
 
-                # The task's id is deliberately not read here. It is the task's
-                # private control token (tk_...): whoever holds it can stop the
-                # task or send it data. This payload is what a parent agent hands
-                # to its model when this agent runs as its tool, so it must never
-                # carry the token.
+                # The task's id is deliberately not read here. It is the
+                # control's registry key, an internal handle. This payload is
+                # what a parent agent hands to its model when this agent runs
+                # as its tool, so it must never carry server internals.
 
                 # Build the per-call context inline.  Channels come from the
                 # cached host; metadata is stamped fresh per call.

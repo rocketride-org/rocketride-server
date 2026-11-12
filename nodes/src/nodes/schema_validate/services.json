@@ -60,44 +60,10 @@
 		"answers": ["answers"]
 	},
 	//
-	//	Note: no "test" block. The dynamic node-test harness injects lane input
-	//	via data_conn, which builds answers with `Answer.model_validate_json`.
-	//	The Answer schema's field validator forbids populating `answer` at
-	//	construction, so a webhook-injected `answers` input is always empty —
-	//	an engine-level dynamic test for an answers-consuming node cannot deliver
-	//	a populated fact. Validation logic is covered by the unit tests in
-	//	nodes/test/test_schema_validate.py and the contract suite.
-	//
-	//	Optional:
-	//		Profile section - configuration defaults used by the driver.
-	//		A single "default" profile supplies the base values; individual
-	//		fields below override them from the UI.
-	//
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Flag inconsistencies, preserve provenance",
-				"amount_field": "amount",
-				"currency_field": "currency",
-				"metric_field": "metric",
-				"category_field": "category",
-				"category_metric_map": {
-					"revenue": ["revenue", "revenues", "sales", "net sales", "turnover", "income", "net income", "gross profit", "operating income", "earnings", "proceeds", "bookings"],
-					"expense": ["cost", "costs", "expense", "expenses", "cogs", "cost of goods", "cost of revenue", "opex", "operating expense", "depreciation", "amortization", "impairment", "interest expense", "tax", "spend"],
-					"asset": ["asset", "assets", "cash", "receivable", "receivables", "inventory", "goodwill"],
-					"liability": ["liability", "liabilities", "payable", "payables", "debt", "loan", "borrowing"]
-				},
-				"sign": "warning",
-				"require_provenance": "error"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions
+	//		Local property definitions. One validation profile, stored flat.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"schema_validate.amount_field": {
 			"type": "string",
 			"title": "Amount field",
@@ -117,7 +83,7 @@
 		"schema_validate.metric_field": {
 			"type": "string",
 			"title": "Metric field",
-			"description": "The fact field naming the line item (e.g. 'Cost of goods sold') — the classifier input for the mismatch check.",
+			"description": "The fact field naming the line item (e.g. 'Cost of goods sold') - the classifier input for the mismatch check.",
 			"default": "metric",
 			"minLength": 1,
 			"maxLength": 128
@@ -125,57 +91,56 @@
 		"schema_validate.category_field": {
 			"type": "string",
 			"title": "Category field",
-			"description": "The fact field holding the declared classification (e.g. revenue, expense) — checked against the metric.",
+			"description": "The fact field holding the declared classification (e.g. revenue, expense) - checked against the metric.",
 			"default": "category",
 			"minLength": 1,
 			"maxLength": 128
 		},
 		"schema_validate.category_metric_map": {
 			"type": "object",
-			"title": "Category → metric keywords",
-			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. Leave unset to use the built-in map covering revenue, expense, asset, and liability; set an explicit empty map to disable the metric/category mismatch check."
+			"title": "Category to metric keywords",
+			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. The default map covers revenue, expense, asset, and liability; set an explicit empty map to disable the metric/category mismatch check.",
+			"default": {
+				"revenue": ["revenue", "revenues", "sales", "net sales", "turnover", "income", "net income", "gross profit", "operating income", "earnings", "proceeds", "bookings"],
+				"expense": ["cost", "costs", "expense", "expenses", "cogs", "cost of goods", "cost of revenue", "opex", "operating expense", "depreciation", "amortization", "impairment", "interest expense", "tax", "spend"],
+				"asset": ["asset", "assets", "cash", "receivable", "receivables", "inventory", "goodwill"],
+				"liability": ["liability", "liabilities", "payable", "payables", "debt", "loan", "borrowing"]
+			}
 		},
 		"schema_validate.sign": {
 			"type": "string",
 			"title": "Sign check severity",
 			"description": "Severity for a sign-convention violation (e.g. an expense with a positive amount). Set to 'off' to disable the check.",
 			"default": "warning",
-			"enum": ["off", "warning", "error"]
+			"enum": [
+				["off", "Off"],
+				["warning", "Warning"],
+				["error", "Error"]
+			]
 		},
 		"schema_validate.require_provenance": {
 			"type": "string",
 			"title": "Require provenance",
 			"description": "Severity for a fact that arrives with no usable provenance list (absent, empty, or not a list). Set to 'off' to disable the flag; a provenance entry is still appended.",
 			"default": "error",
-			"enum": ["off", "warning", "error"]
-		},
-		"schema_validate.default": {
-			"object": "default",
-			"properties": ["schema_validate.amount_field", "schema_validate.currency_field", "schema_validate.metric_field", "schema_validate.category_field", "schema_validate.category_metric_map", "schema_validate.sign", "schema_validate.require_provenance"]
-		},
-		"schema_validate.profile": {
-			"title": "Validation",
-			"description": "Schema validation configuration",
-			"type": "string",
-			"default": "default",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["schema_validate.default"]
-				}
+			"enum": [
+				["off", "Off"],
+				["warning", "Warning"],
+				["error", "Error"]
 			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Schema Validate",
-			"properties": ["schema_validate.profile"]
-		}
+	"properties": [
+		"schema_validate.amount_field",
+		"schema_validate.currency_field",
+		"schema_validate.metric_field",
+		"schema_validate.category_field",
+		"schema_validate.category_metric_map",
+		"schema_validate.sign",
+		"schema_validate.require_provenance"
 	]
 }

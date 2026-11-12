@@ -24,31 +24,24 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Mapping, Tuple
 
 from ai.common.store import StoreGlobalBase
-from nodes.store_chroma.mode import is_local
+
+from .mode import is_local
 
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'chroma'
 
-    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
-        """The token goes to a cloud or remote server only, never to a local one."""
+    def _credentials(self, config: Mapping) -> List[Tuple[str, Any]]:
+        """The token goes to a cloud server only, never to a local one."""
         if is_local(config):
             return []
-        return [('apikey', config.get('apikey'))]
+        return [('apikey', config['apikey'])]
 
-    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        """Return the driver's Store, imported lazily so config mode never loads the driver."""
+    def _open_store(self, logical_type: str, config: Mapping, bag: Dict[str, Any]):
+        """Return the driver's Store, imported lazily so the validator path never loads the driver."""
         from .chroma import Store
 
-        return Store(logical_type, conn_config, bag)
-
-    def _sub_key(self) -> str:
-        """Return the transform sub-key: host/port/collection."""
-        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
-
-    def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Chroma has no save-time probe; nothing to validate here."""
-        return
+        return Store(logical_type, config, bag)

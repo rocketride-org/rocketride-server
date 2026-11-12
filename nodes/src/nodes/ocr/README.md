@@ -59,7 +59,7 @@ On the `documents` lane, every incoming document must be of type `Image` (the no
 
 ## Profiles
 
-Profiles are preconfigured combinations of engine, script family, and table engine. Selecting a profile sets all three at once. Default: **Latin (English)**
+Profiles are ready-made combinations of engine, script family, and table engine. Selecting a profile sets the defaults of all three at once; each can still be adjusted. Default: **Latin (English)**
 (`latin`).
 
 | Profile key            | Title                         | Engine  | Script family         | Table engine |
@@ -122,7 +122,7 @@ Every family except plain `latin` also loads English as a fallback:
 | `tamil`               | ta, en                                                                                                                                 |
 | `telugu`              | te, en                                                                                                                                 |
 
-The `bengali`, `thai`, `tamil`, and `telugu` families are selectable via `ocr.script_family` but have no preconfigured profile. The Japanese EasyOCR models may misread English text; the full test suite uses a relaxed assertion (`contains: "quick"` instead of `"quick brown fox"`) for that profile.
+The `bengali`, `thai`, `tamil`, and `telugu` families are selectable via `ocr.script_family` but have no ready-made profile. The Japanese EasyOCR models may misread English text; the full test suite uses a relaxed assertion (`contains: "quick"` instead of `"quick brown fox"`) for that profile.
 
 ### Detection / Recognition Architecture (DocTR)
 
@@ -198,7 +198,7 @@ The `_IMG2TABLE_V2` flag is set at import time and gates each code path. `extern
 |---|---|---|---|
 | `ocr.det_arch` | `string` | **Detection Architecture (DocTR)**<br/>Choose the architecture used for table text detection.<br/> Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html | `"db_resnet50"` |
 | `ocr.engine` | `string` | **OCR Engine**<br/>Select the OCR engine for text extraction. EasyOCR supports many languages with script families. DocTR is language-agnostic and good for documents. Surya supports multi-language. TrOCR uses transformer models. | `"easyocr"` |
-| `ocr.profile` | `string` | **OCR Profile**<br/>Select a preconfigured OCR profile optimized for different languages and use cases. | `"latin"` |
+| `ocr.profile` | `string` | **OCR Profile**<br/>Select a ready-made OCR profile optimized for different languages and use cases. | `"latin"` |
 | `ocr.reco_arch` | `string` | **Recognition Architecture (DocTR)**<br/>Choose the architecture used for table text recognition.<br/> Documentation: https://mindee.github.io/doctr/latest/using_doctr/using_models.html | `"crnn_vgg16_bn"` |
 | `ocr.script_family` | `string` | **Script Family**<br/>Select the script family for OCR. This determines which languages are loaded for text recognition. Only applies to EasyOCR engine. | `"latin"` |
 | `ocr.table_engine` | `string` | **Table OCR Engine**<br/>Select the OCR engine used for table text extraction. DocTR is optimized for document tables. EasyOCR and Surya are general-purpose alternatives. | `"doctr"` |

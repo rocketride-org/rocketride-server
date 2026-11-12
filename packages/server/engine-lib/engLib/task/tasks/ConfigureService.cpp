@@ -77,39 +77,6 @@ Error Task::exec() noexcept {
         auto service = IServices::getServiceDefinition(*type);
         if (!service) return service.ccode();
 
-        // Get a reference to the schema
-        auto &serviceSchema = (*service)->serviceSchema;
-
-        // Get the mode
-        const auto mode = serviceConfig.lookup<Text>("mode").lowerCase();
-
-        // Check that this mode is supported
-        // @@HACK: Get service schema name.
-        //         All the target services Target/Export/Transform have the same
-        //         mode Target.
-        // @@TODO: Resolve ambiguity between Source/Target mode and
-        // Source/Target/Export/Transform services
-        Text serviceType;
-        if (serviceSchema.isMember(mode))
-            serviceType = mode;
-        else if (mode == "target" && serviceSchema.isMember("export"))
-            serviceType = "export";
-        else if (mode == "target" && serviceSchema.isMember("transform"))
-            serviceType = "transform";
-        else
-            return APERR(Ec::InvalidCommand, type, "is not supported in", mode,
-                         "mode");
-
-        // Get the validaton schema
-        const auto &validator = serviceSchema[serviceType];
-        validator;
-
-        // Now, once we get rid of jsoncpp, which doesn't have a good json
-        // validator, and put in a real one like (nlohmann/json: JSON for Modern
-        // C++ - GitHub, https://github.com/nlohmann/json), we can actually do
-        // most of the basic validation here (at least that all the fields are
-        // there...)
-
         // Get a source endpoint
         auto endpoint = IServiceEndpoint::getSourceEndpoint(
             {.jobConfig = jobConfig(),

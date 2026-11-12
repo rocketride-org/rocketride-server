@@ -419,6 +419,13 @@ export interface ConnectResult {
 	 */
 	sysPermissions?: string[];
 
+	/**
+	 * The API key's task-address scope: patterns (`developerId.pipelineId.source`
+	 * or `developerId.pipelineId.*`) the key may send to; null/absent for an
+	 * unscoped key. Enforced server-side where a task address is resolved.
+	 */
+	endpoints?: string[] | null;
+
 	/** Credit wallet balance snapshot — resource→balance pairs. */
 	credits?: Record<string, unknown>;
 

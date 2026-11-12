@@ -50,7 +50,7 @@ class MediaInstance(IInstanceBase):
         self._active = {}
         self._inputs = {}
         self._input_bytes = 0
-        self._input_limit = self.IGlobal.config.get('max_input_bytes', 16 * 1024**3)
+        self._input_limit = self.IGlobal.max_input_bytes
         self._assets = []
         self._handled = False
         self._t0 = time.time()
@@ -60,7 +60,7 @@ class MediaInstance(IInstanceBase):
         self._spec = None
 
     def _request(self):
-        raw = self.IGlobal.config.get('request') or '{}'
+        raw = self.IGlobal.config['request'] or '{}'
         request = json.loads(raw) if isinstance(raw, str) else copy.deepcopy(raw)
         if not isinstance(request, dict):
             raise ValueError('request must be a JSON object')
@@ -191,7 +191,7 @@ class MediaInstance(IInstanceBase):
             try:
                 monitorSSE(
                     pipe,
-                    self.IGlobal.config.get('event_type', self.node),
+                    self.IGlobal.config['event_type'],
                     {'schema_version': 1, 'node': self.node, 'stage': stage, **data},
                 )
             except Exception as exc:  # noqa: BLE001 — progress cannot invalidate media output

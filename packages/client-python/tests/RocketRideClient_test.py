@@ -67,6 +67,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
@@ -117,6 +118,23 @@ async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
     except Exception:
         # Ignore errors - pipeline might not be running
         pass
+
+
+def private_token(base: str) -> str:
+    """
+    Return a unique use() token so the run gets an address of its own.
+
+    use(token=X) overrides the pipeline-id segment of the task address, so a
+    unique X keeps this run apart from every other test, worker and client on
+    the same server. The test then works with the address use() returns.
+
+    Args:
+        base: Readable prefix naming the test family.
+
+    Returns:
+        The token: the prefix plus eight random hex characters.
+    """
+    return f'{base}-{uuid4().hex[:8]}'
 
 
 class TestServerConnection:
@@ -245,60 +263,61 @@ class TestServicesOperations:
 class TestPipelineOperations:
     """Test pipeline lifecycle operations."""
 
-    PIPELINE_TOKEN = 'PY-PL'
-
     @pytest.mark.asyncio
     async def test_should_start_a_pipeline(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.PIPELINE_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
+            pipeline_token = result['token']
 
             assert 'token' in result
             assert isinstance(result['token'], str)
             assert len(result['token']) > 0
-
-            await client.terminate(result['token'])
         finally:
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
             if client.is_connected():
                 await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_should_get_pipeline_status(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.PIPELINE_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
+            pipeline_token = result['token']
 
-            status = await client.get_task_status(result['token'])
+            status = await client.get_task_status(pipeline_token)
 
             assert 'state' in status
             assert status['state'] in [state.value for state in TASK_STATE]
-
-            await client.terminate(result['token'])
         finally:
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
             if client.is_connected():
                 await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_should_terminate_a_pipeline(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.PIPELINE_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
+            pipeline_token = result['token']
 
             # Should not raise an exception
-            await client.terminate(result['token'])
+            await client.terminate(pipeline_token)
+            pipeline_token = None
         finally:
-            await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
             if client.is_connected():
                 await client.disconnect()
 
@@ -306,17 +325,14 @@ class TestPipelineOperations:
 class TestDataOperations:
     """Test data sending and processing operations."""
 
-    DATA_TOKEN = 'PY-DA'
-
     @pytest.mark.asyncio
     async def test_should_send_text_data_no_mime_type(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Hello from integration test!'
@@ -352,9 +368,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Hello from integration test!'
@@ -398,9 +413,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             binary_data = bytes([72, 101, 108, 108, 111])  # "Hello" in bytes
@@ -436,9 +450,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             pipe = await client.pipe(pipeline_token, {'name': 'test-stream.txt'}, 'text/plain')
@@ -486,9 +499,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             pipe = await client.pipe(pipeline_token, {'name': 'test-split.txt'}, 'text/plain')
@@ -515,9 +527,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             name = 'test.txt'
@@ -574,9 +585,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_data = 'Multi-field result type test'
@@ -604,9 +614,8 @@ class TestDataOperations:
         pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.DATA_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_token = result['token']
 
             test_cases = [
@@ -651,17 +660,14 @@ class TestDataOperations:
 class TestChatOperations:
     """Test chat functionality."""
 
-    CHAT_TOKEN = 'PY-CH'
-
     @pytest.mark.asyncio
     async def test_should_send_simple_chat_question(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         chat_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.CHAT_TOKEN)
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=self.CHAT_TOKEN)
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -707,9 +713,8 @@ class TestChatOperations:
         chat_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.CHAT_TOKEN)
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=self.CHAT_TOKEN)
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question(expectJson=True)
@@ -754,9 +759,8 @@ class TestChatOperations:
         chat_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.CHAT_TOKEN)
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=self.CHAT_TOKEN)
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -800,9 +804,8 @@ class TestChatOperations:
         chat_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.CHAT_TOKEN)
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=self.CHAT_TOKEN)
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -846,9 +849,8 @@ class TestChatOperations:
         chat_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.CHAT_TOKEN)
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=self.CHAT_TOKEN)
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             chat_token = result['token']
 
             question = Question()
@@ -947,8 +949,6 @@ class TestConnectionEvents:
 class TestEventHandling:
     """Test event subscription and handling."""
 
-    EVENT_TOKEN = 'PY-EV'
-
     @pytest.mark.asyncio
     async def test_should_subscribe_to_events_and_receive_them(self):
         received_events = []
@@ -965,9 +965,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             await client.set_events(event_token, ['summary'])
@@ -1011,9 +1010,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to status update events
@@ -1112,9 +1110,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to task lifecycle events
@@ -1188,9 +1185,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Test subscribing to multiple event types using flag combinations
@@ -1238,9 +1234,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Subscribe to all relevant event types
@@ -1347,9 +1342,8 @@ class TestEventHandling:
         event_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.EVENT_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.EVENT_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             event_token = result['token']
 
             # Test that we only receive events we subscribed to
@@ -1501,14 +1495,11 @@ class TestValidationOperations:
 class TestErrorHandling:
     """Test error handling scenarios."""
 
-    ERROR_TOKEN = 'PY-ER'
-
     @pytest.mark.asyncio
     async def test_should_handle_invalid_pipeline_configuration(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.ERROR_TOKEN)
 
             invalid_pipeline = {
                 'components': [{'id': 'invalid_1', 'provider': 'nonexistent_provider', 'config': {}}],
@@ -1517,27 +1508,28 @@ class TestErrorHandling:
             }
 
             with pytest.raises(Exception):
-                await client.use(pipeline=invalid_pipeline, token=self.ERROR_TOKEN)
+                await client.use(pipeline=invalid_pipeline)
         finally:
-            await ensure_clean_pipeline(client, self.ERROR_TOKEN)
             if client.is_connected():
                 await client.disconnect()
 
     @pytest.mark.asyncio
     async def test_should_handle_operations_on_terminated_pipeline(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.ERROR_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.ERROR_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
+            pipeline_token = result['token']
 
-            await client.terminate(result['token'])
+            await client.terminate(pipeline_token)
 
             with pytest.raises(Exception):
-                await client.send(result['token'], 'data')
+                await client.send(pipeline_token, 'data')
         finally:
-            await ensure_clean_pipeline(client, self.ERROR_TOKEN)
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
             if client.is_connected():
                 await client.disconnect()
 
@@ -1553,17 +1545,14 @@ class TestErrorHandling:
 class TestEndToEndWorkflow:
     """Test complete end-to-end workflows."""
 
-    E2E_TOKEN = 'PY-E2'
-
     @pytest.mark.asyncio
     async def test_should_complete_full_data_processing_workflow(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, self.E2E_TOKEN)
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=self.E2E_TOKEN)
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             await client.set_events(token, ['summary', 'task'])
@@ -1590,7 +1579,6 @@ class TestEndToEndWorkflow:
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, self.E2E_TOKEN)
             if client.is_connected():
                 await client.disconnect()
 
@@ -1600,9 +1588,8 @@ class TestEndToEndWorkflow:
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-file')
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.E2E_TOKEN}-file')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Set up event monitoring
@@ -1643,7 +1630,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-file')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1653,9 +1639,8 @@ Line 3: random data {random.random()}"""
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-multi')
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.E2E_TOKEN}-multi')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             await client.set_events(token, ['summary'])
@@ -1702,7 +1687,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-multi')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1713,9 +1697,8 @@ Line 3: random data {random.random()}"""
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-chat')
 
-            result = await client.use(pipeline=get_chat_pipeline(), token=f'{self.E2E_TOKEN}-chat')
+            result = await client.use(pipeline=get_chat_pipeline(), token=private_token('py-chat'))
             token = result['token']
 
             await client.set_events(token, ['summary', 'task'])
@@ -1759,7 +1742,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-chat')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1779,9 +1761,8 @@ Line 3: random data {random.random()}"""
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-mixed')
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.E2E_TOKEN}-mixed')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Set up comprehensive event monitoring
@@ -1841,7 +1822,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-mixed')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1851,9 +1831,8 @@ Line 3: random data {random.random()}"""
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-error')
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.E2E_TOKEN}-error')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Send valid data first
@@ -1878,7 +1857,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-error')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1888,9 +1866,8 @@ Line 3: random data {random.random()}"""
         token = None
         try:
             await client.connect()
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-large')
 
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.E2E_TOKEN}-large')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             token = result['token']
 
             # Generate large text content (10KB)
@@ -1928,7 +1905,6 @@ Line 3: random data {random.random()}"""
         finally:
             if token:
                 await ensure_clean_pipeline(client, token)
-            await ensure_clean_pipeline(client, f'{self.E2E_TOKEN}-large')
             if client.is_connected():
                 await client.disconnect()
 
@@ -1936,7 +1912,6 @@ Line 3: random data {random.random()}"""
 class TestConcurrentPipelineOperations:
     """Test concurrent pipeline operations."""
 
-    CONCURRENT_TOKEN = 'PY-CC'
     PIPELINE_COUNT = 16  # Full 16 pipeline testing
 
     @pytest.mark.asyncio
@@ -1946,17 +1921,20 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Clean up any existing pipeline
-            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
+            # Create 16 concurrent use() calls — all share one subprocess via
+            # use_existing on one private token
+            shared_token = private_token('py-cc')
 
-            # Create 16 concurrent use() calls — all share one subprocess via useExisting
             async def create_pipeline(index):
-                result = await client.use(pipeline=get_echo_pipeline(), token=self.CONCURRENT_TOKEN, use_existing=True)
+                result = await client.use(pipeline=get_echo_pipeline(), token=shared_token, use_existing=True)
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(self.PIPELINE_COUNT)]
             pipelines = await asyncio.gather(*pipeline_tasks)
             pipeline_tokens = [p['token'] for p in pipelines]
+
+            # Every call attached to the same run, so one address came back
+            assert len(set(pipeline_tokens)) == 1
 
             # Generate unique test data for each pipeline
             def generate_test_data(pipeline, index):
@@ -2028,14 +2006,12 @@ class TestConcurrentPipelineOperations:
             print(f'- Received {len(results)} responses')
             print(f'- All responses unique: {len(unique_texts) == self.PIPELINE_COUNT}')
         finally:
-            # Clean up all pipelines
+            # Clean up the one shared run
             cleanup_tasks = []
-            for token in pipeline_tokens:
+            for token in set(pipeline_tokens):
                 cleanup_tasks.append(ensure_clean_pipeline(client, token))
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-
-            await ensure_clean_pipeline(client, self.CONCURRENT_TOKEN)
 
             if client.is_connected():
                 await client.disconnect()
@@ -2048,7 +2024,7 @@ class TestConcurrentPipelineOperations:
             await client.connect()
 
             # Create a single pipeline
-            result = await client.use(pipeline=get_echo_pipeline(), token=f'{self.CONCURRENT_TOKEN}-1p')
+            result = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo'))
             pipeline_tokens = [result['token']]
 
             SEND_COUNT = 10
@@ -2109,7 +2085,6 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-1p')
             if client.is_connected():
                 await client.disconnect()
 
@@ -2123,28 +2098,20 @@ class TestConcurrentPipelineOperations:
             PIPELINE_COUNT = 4
             SENDS_PER_PIPELINE = 3
 
-            # Clean up any leftover pipelines from previous runs
-            for i in range(PIPELINE_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
-
-            # Create pipelines concurrently — each needs a unique project_id
-            # to avoid server-side contention during concurrent startup.
-            MIXED_PROJECT_IDS = [
-                'a1b2c3d4-1111-4000-a000-000000000001',
-                'a1b2c3d4-1111-4000-a000-000000000002',
-                'a1b2c3d4-1111-4000-a000-000000000003',
-                'a1b2c3d4-1111-4000-a000-000000000004',
-            ]
+            # Create pipelines concurrently — each gets a private token, so
+            # each run has an address of its own.
+            mixed_tokens = [private_token(f'py-mixed-{index}') for index in range(PIPELINE_COUNT)]
 
             async def create_pipeline(index):
-                result = await client.use(
-                    pipeline=get_echo_pipeline(MIXED_PROJECT_IDS[index]), token=f'{self.CONCURRENT_TOKEN}-m{index}'
-                )
+                result = await client.use(pipeline=get_echo_pipeline(), token=mixed_tokens[index])
                 return {'index': index, 'token': result['token']}
 
             pipeline_tasks = [create_pipeline(i) for i in range(PIPELINE_COUNT)]
             pipelines = await asyncio.gather(*pipeline_tasks)
             pipeline_tokens = [p['token'] for p in pipelines]
+
+            # Distinct tokens produced distinct runs
+            assert len(set(pipeline_tokens)) == PIPELINE_COUNT
 
             # Generate test data for multiple sends per pipeline
             all_send_data = []
@@ -2214,9 +2181,6 @@ class TestConcurrentPipelineOperations:
             if cleanup_tasks:
                 await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
-            for i in range(4):  # PIPELINE_COUNT
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-m{i}')
-
             if client.is_connected():
                 await client.disconnect()
 
@@ -2230,25 +2194,15 @@ class TestConcurrentPipelineOperations:
         try:
             await client.connect()
 
-            # Clean up any leftover pipelines from previous runs
-            for i in range(SUBPROCESS_COUNT):
-                await ensure_clean_pipeline(client, f'{self.CONCURRENT_TOKEN}-s{i}')
-
-            # Create 4 independent subprocesses concurrently — each needs a
-            # unique project_id to avoid server-side contention during startup.
-            CYCLE_PROJECT_IDS = [
-                'b2c3d4e5-2222-4000-b000-000000000001',
-                'b2c3d4e5-2222-4000-b000-000000000002',
-                'b2c3d4e5-2222-4000-b000-000000000003',
-                'b2c3d4e5-2222-4000-b000-000000000004',
-            ]
-            sub_tokens = [f'{self.CONCURRENT_TOKEN}-s{i}' for i in range(SUBPROCESS_COUNT)]
-            await asyncio.gather(
-                *[
-                    client.use(pipeline=get_echo_pipeline(CYCLE_PROJECT_IDS[i]), token=token)
-                    for i, token in enumerate(sub_tokens)
-                ]
+            # Create 4 independent subprocesses concurrently — each gets a
+            # private token; keep the returned addresses for the sends and
+            # the cleanup.
+            cycle_tokens = [private_token(f'py-cycle-{index}') for index in range(SUBPROCESS_COUNT)]
+            results = await asyncio.gather(
+                *[client.use(pipeline=get_echo_pipeline(), token=token) for token in cycle_tokens]
             )
+            sub_tokens = [result['token'] for result in results]
+            assert len(set(sub_tokens)) == SUBPROCESS_COUNT
 
             # Each pipeline independently cycles 32 send/recv — all 4 run in parallel
             async def run_pipeline(token, pipeline_index):
@@ -2300,8 +2254,8 @@ class TestConcurrentPipelineOperations:
         collides with itself. Two independent clients fanning into one task are
         the necessary precondition.
         """
-        SHARED_TOKEN = f'{self.CONCURRENT_TOKEN}-cs'
         SENDS_PER_CLIENT = 12
+        shared_token = None
 
         # Two independent clients.  Each has its own DAP connection, its own
         # seq counter, and its own _pending_requests map.
@@ -2314,15 +2268,19 @@ class TestConcurrentPipelineOperations:
             # Both clients use the SAME task via use_existing so the second
             # client.use() attaches to the existing task instead of starting a
             # fresh one.  This is what makes both clients fan into ONE shared
-            # eaas->subprocess _data_client.
+            # eaas->subprocess _data_client. One private token gives both
+            # calls the same address, so the second use() names the first
+            # one's task.
+            two_client_token = private_token('py-2c')
             res_a = await client_a.use(
-                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
-                token=SHARED_TOKEN,
+                pipeline=get_echo_pipeline(),
+                token=two_client_token,
                 use_existing=True,
             )
+            shared_token = res_a['token']
             res_b = await client_b.use(
-                pipeline=get_echo_pipeline('c3d4e5f6-3333-4000-c000-000000000001'),
-                token=SHARED_TOKEN,
+                pipeline=get_echo_pipeline(),
+                token=two_client_token,
                 use_existing=True,
             )
             assert res_b['token'] == res_a['token']
@@ -2384,7 +2342,8 @@ class TestConcurrentPipelineOperations:
             for c in (client_a, client_b):
                 if c.is_connected():
                     try:
-                        await c.terminate(SHARED_TOKEN)
+                        if shared_token:
+                            await c.terminate(shared_token)
                     except Exception:
                         pass
                     try:

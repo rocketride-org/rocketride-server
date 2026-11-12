@@ -28,7 +28,7 @@
 # ------------------------------------------------------------------------------
 import re
 import sys
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 from uuid import uuid4
 
 import numpy as np
@@ -37,15 +37,13 @@ from elasticsearch.helpers import bulk, scan, BulkIndexError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config, check_credential_resolved
+from ai.common.config import check_credential_resolved
 
 from .constants import (
     CONTENT_FIELD,
     DEFAULT_HIGHLIGHT_FRAGMENT_SIZE,
-    DEFAULT_INDEX_NAME,
     DEFAULT_SCROLL,
     DEFAULT_TEXT_BATCH_SIZE,
-    ELASTICSEARCH_DEFAULT_PORT,
 )
 
 
@@ -85,28 +83,28 @@ class Store(DocumentStoreBase):
     client: Elasticsearch | None = None
     mode: str = 'self-managed'
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> None:
-        """Initialize the Elasticsearch store from node config."""
-        super().__init__(provider, connConfig, bag)
-        config = Config.getNodeConfig(provider, connConfig)
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]) -> None:
+        """Initialize the Elasticsearch store from the resolved node config.
 
-        self.index = config.get('index', DEFAULT_INDEX_NAME)
-        self.mode = config.get('mode', 'self-managed')
-        raw_host = (config.get('host') or '').strip()
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
+        """
+        super().__init__(provider, config, bag)
+
+        self.index = config['index']
+        # The deployment type: self-managed, cloud-hosted or cloud-serverless
+        self.mode = config['profile']
+        raw_host = (config['host'] or '').strip()
         self.host = re.sub(r'^https?://', '', raw_host).rstrip('/')
-        self.port = config.get('port', ELASTICSEARCH_DEFAULT_PORT)
+        self.port = config['port']
 
+        # The key exists on the cloud branches only
         self.apikey = (config.get('apikey') or '').strip() or None
         # An unfilled key names the missing variable instead of reaching the server.
-        check_credential_resolved(provider, 'apikey', self.apikey, connConfig)
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.payload_limit = config.get('payloadLimit', self.payload_limit)
-        self.threshold_search = config.get('score', 0.5)
-
-        similarity = config.get('similarity', 'cosine')
-        if similarity not in ('cosine', 'l2_norm', 'dot_product'):
-            raise Exception('Similarity must be one of: cosine, l2_norm, dot_product')
-        self.similarity = similarity
+        check_credential_resolved(provider, 'apikey', self.apikey)
+        self.threshold_search = config['score']
 
         # Use explicit scheme from host if present; else derive from mode (self-managed -> http)
         if raw_host.lower().startswith('http://'):

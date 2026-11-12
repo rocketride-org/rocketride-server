@@ -34,6 +34,24 @@ with scoped_stubs():
 KEY = 'mky_SECRET_KEY_123'  # gitleaks:allow -- fake key; tests assert it never appears in errors
 
 
+def _resolved(partial: dict):
+    """Resolve a partial stored config through the engine's schema for tool_masky, as ``IGlobal.config`` does."""
+    import rocketlib
+    from rocketlib.config import resolveConfig
+
+    schema = rocketlib.getServiceSchema('tool_masky')
+    assert schema is not None, 'tool_masky is not registered with the engine'
+    return resolveConfig(schema, {'apikey': KEY, **partial})
+
+
+def _read_settings(partial: dict):
+    return IGlobalMod.read_settings(_resolved(partial))
+
+
+def _config_warnings(partial: dict):
+    return IGlobalMod.config_warnings(_resolved(partial))
+
+
 # ---------------------------------------------------------------------------
 # Fakes and fixtures
 # ---------------------------------------------------------------------------
@@ -627,21 +645,16 @@ def test_client_get_timeout_keeps_try_again_wording(http):
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_api_key_configured_wins(monkeypatch):
+def test_resolve_api_key_strips_the_configured_key(monkeypatch):
     monkeypatch.setenv('ROCKETRIDE_MASKY_KEY', 'envkey')
     assert core.resolve_api_key(' cfgkey ') == 'cfgkey'
 
 
-def test_resolve_api_key_blank_falls_back_to_env(monkeypatch):
+def test_resolve_api_key_has_no_process_env_fallback(monkeypatch):
+    """The key arrives through the node config only (a ${ROCKETRIDE_MASKY_KEY} reference resolved per call)."""
     monkeypatch.setenv('ROCKETRIDE_MASKY_KEY', ' envkey ')
-    assert core.resolve_api_key('') == 'envkey'
-    assert core.resolve_api_key('   ') == 'envkey'
-    assert core.resolve_api_key(None) == 'envkey'
-
-
-def test_resolve_api_key_old_env_name_not_read(monkeypatch):
-    monkeypatch.delenv('ROCKETRIDE_MASKY_KEY', raising=False)
-    monkeypatch.setenv('ROCKETRIDE_MASKY_API_KEY', 'oldkey')
+    assert core.resolve_api_key('') == ''
+    assert core.resolve_api_key('   ') == ''
     assert core.resolve_api_key(None) == ''
 
 
@@ -651,7 +664,7 @@ def test_resolve_api_key_old_env_name_not_read(monkeypatch):
 
 
 def test_read_settings_defaults():
-    s = IGlobalMod.read_settings({})
+    s = _read_settings({})
     assert s['action'] == 'talking_head'
     assert s['output'] == 'video'
     assert s['quality'] == '720p-draft'
@@ -683,24 +696,28 @@ def test_read_settings_defaults():
 )
 def test_read_settings_rejects_bad_values(cfg):
     with pytest.raises(ValueError):
-        IGlobalMod.read_settings(cfg)
+        _read_settings(cfg)
 
 
-@pytest.mark.parametrize('raw', ['nan', 'NaN', 'inf', '-inf', 'Infinity', float('nan'), float('inf'), float('-inf')])
+@pytest.mark.parametrize('raw', [float('nan'), float('inf')])
 def test_read_settings_rejects_non_finite_cap(raw):
+    """A float the schema's number type admits but no JSON can carry: the node's own check."""
     with pytest.raises(ValueError, match='finite'):
-        IGlobalMod.read_settings({'maxCreditsPerCall': raw})
+        _read_settings({'maxCreditsPerCall': raw})
 
 
-@pytest.mark.parametrize('raw', [True, False, 'abc', [1]])
+@pytest.mark.parametrize('raw', [True, False, 'abc', 'nan', 'inf', [1]])
 def test_read_settings_rejects_non_numeric_cap(raw):
-    with pytest.raises(ValueError):
-        IGlobalMod.read_settings({'maxCreditsPerCall': raw})
+    """The schema types the cap as a number; the resolver refuses every other spelling."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='"maxCreditsPerCall"'):
+        _read_settings({'maxCreditsPerCall': raw})
 
 
-@pytest.mark.parametrize(('raw', 'expected'), [(0, 0.0), ('0.07', 0.07), (2, 2.0), (None, 1.0), ('', 1.0)])
+@pytest.mark.parametrize(('raw', 'expected'), [(0, 0.0), (0.07, 0.07), (2, 2.0), (None, 1.0)])
 def test_read_settings_accepts_finite_cap(raw, expected):
-    assert IGlobalMod.read_settings({'maxCreditsPerCall': raw})['max_credits_per_call'] == expected
+    assert _read_settings({'maxCreditsPerCall': raw})['max_credits_per_call'] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -708,41 +725,46 @@ def test_read_settings_accepts_finite_cap(raw, expected):
 # ---------------------------------------------------------------------------
 
 
-def test_config_warnings_missing_key(monkeypatch):
-    monkeypatch.delenv('ROCKETRIDE_MASKY_KEY', raising=False)
-    msgs = IGlobalMod.config_warnings({})
-    assert any('API key' in m for m in msgs)
-    assert IGlobalMod.config_warnings({'apikey': KEY}) == []
+def test_config_warnings_clean_config_is_silent():
+    assert _config_warnings({'apikey': KEY}) == []
 
 
-def test_config_warnings_env_key_satisfies(monkeypatch):
-    monkeypatch.setenv('ROCKETRIDE_MASKY_KEY', KEY)
-    assert IGlobalMod.config_warnings({}) == []
+def test_config_warnings_unfilled_key_placeholder():
+    msgs = _config_warnings({'apikey': '${ROCKETRIDE_MASKY_KEY}'})
+    assert any('unfilled placeholder' in m for m in msgs)
 
 
 @pytest.mark.parametrize(
     'action, warns', [('scene_video', True), ('image', True), ('talking_head', False), ('live', False)]
 )
 def test_config_warnings_source_image_url_by_action(action, warns):
-    msgs = IGlobalMod.config_warnings({'apikey': KEY, 'action': action, 'sourceImageUrl': 'file:///tmp/a.png'})
+    msgs = _config_warnings({'apikey': KEY, 'action': action, 'sourceImageUrl': 'file:///tmp/a.png'})
     assert any('Source image URL' in m for m in msgs) is warns
 
 
 def test_config_warnings_http_source_image_ok():
     cfg = {'apikey': KEY, 'action': 'image', 'sourceImageUrl': 'https://x.example/a.png'}
-    assert IGlobalMod.config_warnings(cfg) == []
+    assert _config_warnings(cfg) == []
 
 
 def test_config_warnings_long_speech_line():
-    msgs = IGlobalMod.config_warnings({'apikey': KEY, 'speechLine': 'x' * 301})
+    msgs = _config_warnings({'apikey': KEY, 'speechLine': 'x' * 301})
     assert any('301' in m for m in msgs)
-    assert IGlobalMod.config_warnings({'apikey': KEY, 'speechLine': 'x' * 300}) == []
+    assert _config_warnings({'apikey': KEY, 'speechLine': 'x' * 300}) == []
 
 
-def test_config_warnings_never_raises_on_bad_values():
-    msgs = IGlobalMod.config_warnings({'apikey': KEY, 'fps': 30})
-    assert msgs and 'fps' in msgs[0]
-    assert IGlobalMod.config_warnings({'apikey': KEY, 'durationSec': 'abc'})
+@pytest.mark.parametrize('cfg', [{'fps': 30}, {'durationSec': 'abc'}])
+def test_bad_values_are_schema_errors_before_config_warnings_runs(cfg):
+    """The resolver refuses a value outside the schema; config_warnings only sees valid configs."""
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        _config_warnings(cfg)
+
+
+def test_config_warnings_never_raises_on_a_bad_base_url():
+    msgs = _config_warnings({'baseUrl': 'http://masky.ai/api'})
+    assert msgs and 'https://' in msgs[0]
 
 
 # ---------------------------------------------------------------------------
@@ -750,61 +772,51 @@ def test_config_warnings_never_raises_on_bad_values():
 # ---------------------------------------------------------------------------
 
 
-def _iglobal(monkeypatch, open_mode, cfg):
+def _iglobal(cfg):
+    """An IGlobal on the stored config ``cfg``; ``self.config`` resolves it through the engine's schema."""
     ig = IGlobalMod.IGlobal()
-    ig.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode=open_mode))
-    ig.glb = types.SimpleNamespace(logicalType='tool_masky', connConfig={})
-    monkeypatch.setattr(IGlobalMod.Config, 'getNodeConfig', staticmethod(lambda *a, **k: cfg))
+    ig.glb = types.SimpleNamespace(logicalType='tool_masky', connConfig=cfg)
     return ig
 
 
-def test_begin_global_config_mode_no_network_no_depends(stubs, http, monkeypatch):
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.CONFIG, {'apikey': KEY})
-    ig.beginGlobal()
-    assert ig.driver is None
-    assert stubs.depends.calls == []
-    assert http['calls'] == []
-
-
-def test_begin_global_normal_mode_loads_depends_and_builds_driver(stubs, http, monkeypatch):
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': KEY, 'serverName': 'avatars'})
+def test_begin_global_loads_depends_and_builds_driver(stubs, http):
+    ig = _iglobal({'apikey': KEY})
     ig.beginGlobal()
     assert len(stubs.depends.calls) == 1
     assert isinstance(ig.driver, MaskyDriver)
-    assert [t['name'] for t in ig.driver._tool_query()][0] == 'avatars.list_avatars'
+    assert [t['name'] for t in ig.driver._tool_query()][0] == 'masky.list_avatars'
     assert ig.settings['action'] == 'talking_head'
     assert http['calls'] == []
 
 
-def test_begin_global_config_mode_never_fetches_pricing(stubs, http, monkeypatch):
-    """Opening the node's settings on the canvas (CONFIG mode) must make no network call, pricing included."""
+def test_begin_global_fetches_pricing_once(stubs, http, monkeypatch):
     fetched = []
     monkeypatch.setattr(MaskyDriver, 'load_pricing', lambda self: fetched.append('pricing'))
-    gets = []
-    monkeypatch.setattr(sys.modules['requests'], 'get', lambda *a, **k: gets.append(a), raising=False)
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.CONFIG, {'apikey': KEY})
-    ig.beginGlobal()
-    assert fetched == [] and gets == [] and http['calls'] == []
-
-
-def test_begin_global_normal_mode_fetches_pricing_once(stubs, http, monkeypatch):
-    fetched = []
-    monkeypatch.setattr(MaskyDriver, 'load_pricing', lambda self: fetched.append('pricing'))
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': KEY})
+    ig = _iglobal({'apikey': KEY})
     ig.beginGlobal()
     assert fetched == ['pricing']
 
 
-def test_begin_global_without_key_raises(stubs, monkeypatch):
-    monkeypatch.delenv('ROCKETRIDE_MASKY_KEY', raising=False)
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {})
-    with pytest.raises(ValueError):
+def test_begin_global_without_key_is_a_schema_error(stubs, monkeypatch):
+    """The schema requires the key and there is no process-env fallback."""
+    from rocketlib.config import ConfigError
+
+    monkeypatch.setenv('ROCKETRIDE_MASKY_KEY', KEY)
+    ig = _iglobal({})
+    with pytest.raises(ConfigError, match='"apikey" is required'):
         ig.beginGlobal()
     assert ig.driver is None
 
 
-def test_end_global_clears_client_key_and_driver(stubs, monkeypatch):
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': KEY})
+def test_begin_global_rejects_a_value_outside_the_schema(stubs):
+    from rocketlib.config import ConfigError
+
+    with pytest.raises(ConfigError, match='"fps"'):
+        _iglobal({'apikey': KEY, 'fps': 30}).beginGlobal()
+
+
+def test_end_global_clears_client_key_and_driver(stubs):
+    ig = _iglobal({'apikey': KEY})
     ig.beginGlobal()
     client = ig.driver._client
     assert client._api_key == KEY
@@ -828,61 +840,38 @@ def _load_services():
 
 
 def _shape_props(svc):
-    return [p for section in svc['shape'] for p in section['properties'] if p != 'type']
+    return [p for p in svc['properties'] if p != 'type']
 
 
-def _conditional_props(svc):
-    out = []
-    for field in svc['fields'].values():
-        for cond in field.get('conditional', []):
-            out.extend(cond['properties'])
-    return out
-
-
-def test_services_shape_properties_exist_in_fields():
+def test_services_properties_exist_in_definitions():
     svc = _load_services()
     for prop in _shape_props(svc):
-        assert prop in svc['fields'], prop
+        assert prop in svc['propertyDefinitions'], prop
 
 
-def test_services_conditional_properties_exist_in_fields():
+def test_services_every_definition_is_shown():
+    """The agent tools read every render setting whatever the pipeline action, so none hides behind a branch."""
     svc = _load_services()
-    for prop in _conditional_props(svc):
-        assert prop in svc['fields'], prop
+    shown = set(_shape_props(svc))
+    for name in svc['propertyDefinitions']:
+        assert name in shown, name
 
 
-def test_services_preconfig_defaults_have_fields():
+def test_services_every_setting_read_settings_reads_has_a_default_or_is_optional():
     svc = _load_services()
-    profile = svc['preconfig']['profiles'][svc['preconfig']['default']]
-    for key in profile:
-        if key == 'title':
+    for name, field in svc['propertyDefinitions'].items():
+        if name == 'tool_masky.apikey':
+            assert field['required'] is True and field['env'] == 'ROCKETRIDE_MASKY_KEY'
             continue
-        assert f'tool_masky.{key}' in svc['fields'], key
-
-
-def test_services_every_visible_field_is_reachable():
-    svc = _load_services()
-    reachable = set(_shape_props(svc)) | set(_conditional_props(svc))
-    for name, field in svc['fields'].items():
-        if field.get('hidden'):
-            continue
-        assert name in reachable, name
+        assert 'default' in field or field.get('optional'), name
 
 
 def test_begin_global_rejects_unfilled_key_placeholder(stubs, http, monkeypatch):
     """A ${ROCKETRIDE_MASKY_KEY} placeholder with no saved value must stop the node, not reach Masky as the key."""
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': '${ROCKETRIDE_MASKY_KEY}'})
+    ig = _iglobal({'apikey': '${ROCKETRIDE_MASKY_KEY}'})
     with pytest.raises(ValueError, match='unfilled placeholder'):
         ig.beginGlobal()
     assert ig.driver is None and http['calls'] == []
-
-
-def test_validate_config_warns_on_unfilled_key_placeholder(stubs, monkeypatch):
-    seen = []
-    monkeypatch.setattr(IGlobalMod, 'warning', seen.append)
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': '${ROCKETRIDE_MASKY_KEY}'})
-    ig.validateConfig()
-    assert any('unfilled placeholder' in str(m) for m in seen)
 
 
 # ---------------------------------------------------------------------------
@@ -903,7 +892,7 @@ def test_validate_config_warns_on_unfilled_key_placeholder(stubs, monkeypatch):
     ],
 )
 def test_base_url_accepted(url):
-    assert IGlobalMod.read_settings({'baseUrl': url})['base_url'] == url
+    assert _read_settings({'baseUrl': url})['base_url'] == url
 
 
 @pytest.mark.parametrize(
@@ -922,11 +911,11 @@ def test_base_url_accepted(url):
 )
 def test_base_url_refused(url):
     with pytest.raises(ValueError, match='https://'):
-        IGlobalMod.read_settings({'baseUrl': url})
+        _read_settings({'baseUrl': url})
 
 
 def test_default_base_url_is_https():
-    assert IGlobalMod.read_settings({})['base_url'].startswith('https://')
+    assert _read_settings({})['base_url'].startswith('https://')
 
 
 # ---------------------------------------------------------------------------
@@ -935,16 +924,13 @@ def test_default_base_url_is_https():
 
 
 def test_read_settings_permission_switches_default_off():
-    s = IGlobalMod.read_settings({})
+    s = _read_settings({})
     assert (s['read_only'], s['allow_delete'], s['allow_public_sharing']) == (False, False, False)
 
 
-@pytest.mark.parametrize(
-    'raw,expected',
-    [('true', True), ('false', False), ('True', True), (True, True), (False, False)],
-)
+@pytest.mark.parametrize('raw,expected', [(True, True), (False, False)])
 def test_read_settings_permission_switches_parse(raw, expected):
-    s = IGlobalMod.read_settings({'readOnly': raw, 'allowDelete': raw, 'allowPublicSharing': raw})
+    s = _read_settings({'readOnly': raw, 'allowDelete': raw, 'allowPublicSharing': raw})
     assert (s['read_only'], s['allow_delete'], s['allow_public_sharing']) == (expected,) * 3
 
 
@@ -956,7 +942,7 @@ def test_services_permission_fields():
         'tool_masky.allowPublicSharing': 'Making something private is never gated',
     }
     for name, phrase in expected.items():
-        field = svc['fields'][name]
+        field = svc['propertyDefinitions'][name]
         assert field['type'] == 'boolean', name
         assert field['default'] is False, name
         assert phrase in field['description'], name
@@ -964,23 +950,22 @@ def test_services_permission_fields():
 
 def test_services_permission_fields_sit_between_language_and_max_credits():
     svc = _load_services()
-    props = [p for section in svc['shape'] for p in section['properties']]
+    props = svc['properties']
     i = props.index('tool_masky.language')
     j = props.index('tool_masky.maxCreditsPerCall')
     assert props[i + 1 : j] == ['tool_masky.readOnly', 'tool_masky.allowDelete', 'tool_masky.allowPublicSharing']
 
 
-def test_services_default_profile_has_read_only_false():
+def test_services_read_only_defaults_to_false():
     svc = _load_services()
-    profile = svc['preconfig']['profiles'][svc['preconfig']['default']]
-    assert profile['readOnly'] is False
+    assert svc['propertyDefinitions']['tool_masky.readOnly']['default'] is False
 
 
 _PUBLIC_WARNING = "'allowPublicSharing'"
 
 
 def _public_warnings(cfg):
-    return [m for m in IGlobalMod.config_warnings({'apikey': KEY, **cfg}) if _PUBLIC_WARNING in m]
+    return [m for m in _config_warnings({'apikey': KEY, **cfg}) if _PUBLIC_WARNING in m]
 
 
 def test_config_warns_for_public_scene_video_without_switch():
@@ -988,7 +973,7 @@ def test_config_warns_for_public_scene_video_without_switch():
 
 
 def test_config_no_public_warning_when_switch_on_private_or_other_action():
-    assert _public_warnings({'action': 'scene_video', 'share': 'public', 'allowPublicSharing': 'true'}) == []
+    assert _public_warnings({'action': 'scene_video', 'share': 'public', 'allowPublicSharing': True}) == []
     assert _public_warnings({'action': 'scene_video', 'share': 'private'}) == []
     assert _public_warnings({'action': 'talking_head', 'share': 'public'}) == []
     assert _public_warnings({'action': 'image', 'share': 'public'}) == []
@@ -1131,7 +1116,7 @@ def test_begin_global_wires_rocketlib_is_cancelled_into_the_driver(stubs, http, 
         return False
 
     sys.modules['rocketlib'].isCancelled = is_cancelled
-    ig = _iglobal(monkeypatch, IGlobalMod.OPEN_MODE.SOURCE, {'apikey': KEY})
+    ig = _iglobal({'apikey': KEY})
     ig.beginGlobal()
     assert ig.driver._is_cancelled is is_cancelled
 
@@ -1139,8 +1124,6 @@ def test_begin_global_wires_rocketlib_is_cancelled_into_the_driver(stubs, http, 
 def test_a_cancelled_pipeline_stops_waiting_through_that_wiring(stubs, http, monkeypatch):
     sys.modules['rocketlib'].isCancelled = lambda: True
     ig = _iglobal(
-        monkeypatch,
-        IGlobalMod.OPEN_MODE.SOURCE,
         {'apikey': KEY, 'defaultAvatar': 'A', 'timeoutSec': 10, 'pollIntervalSec': 1},
     )
     ig.beginGlobal()

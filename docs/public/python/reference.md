@@ -35,7 +35,7 @@ Context manager: `async with RocketRideClient(...) as client:` — entering call
 
 | Method | Signature | Returns | Description |
 | --- | --- | --- | --- |
-| `use` | `async def use(self, *, token: str = None, filepath: str = None, pipeline: PipelineConfig = None, source: str = None, threads: int = None, use_existing: bool = None, args: List[str] = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: Dict[str, str] = None) -> dict` | `dict` | Starts a pipeline. Requires `filepath` or `pipeline`. `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. Returns a dict with at least `'token'`, plus `'reused': True` when `use_existing` handed back an already-running instance instead of starting this pipeline. |
+| `use` | `async def use(self, *, token: str = None, filepath: str = None, pipeline: PipelineConfig = None, source: str = None, threads: int = None, use_existing: bool = None, args: List[str] = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: Dict[str, str] = None) -> dict` | `dict` | Starts a pipeline. Requires `filepath` or `pipeline`. `pipelineTraceLevel` sets run-log trace verbosity, `name` a task display name, `env` per-run variable overrides. `token` overrides the pipeline-id segment of the address (the pipeline's `project_id`); it is not a credential. Returns a dict with at least `'token'`, which carries the task's address `developerId.pipelineId[.source]`, plus `'reused': True` when `use_existing` handed back an already-running instance instead of starting this pipeline. |
 | `terminate` | `async def terminate(self, token: str) -> None` | - | Stops the pipeline and frees server resources. |
 | `get_task_status` | `async def get_task_status(self, token: str) -> dict` | `dict` | Current task status (`completedCount`, `totalCount`, `completed`, `state`, `exitCode`, …). |
 
@@ -59,7 +59,7 @@ Context manager: `async with RocketRideClient(...) as client:` — entering call
 
 | Method | Signature | Returns | Description |
 | --- | --- | --- | --- |
-| `get_services` | `async def get_services(self) -> dict` | `dict` | Lightweight **summaries** of every service, plus a deduplicated `icons` table and the server `version`. Full definitions come from `get_service`. |
+| `get_services` | `async def get_services(self, *, definitions: bool = False) -> SERVICES_RESPONSE` | `SERVICES_RESPONSE` | Lightweight **summaries** of every service, plus a deduplicated `icons` table and the server `version`. With `definitions=True`, every entry is the service's **full** definition (resolved `properties` and `params` included) and there is no `icons` table; each definition carries its own `icon`. One service's full definition comes from `get_service`. |
 | `get_service` | `async def get_service(self, service: str) -> dict` | `dict` | One service's full definition (config schema included). **Raises** `ValueError` (empty name) or `RuntimeError` (unknown service); never returns `None`. |
 | `validate` | `async def validate(self, pipeline: PipelineConfig, *, source: str = None) -> dict` | `dict` | Validates a pipeline configuration without starting it; returns errors and warnings. |
 | `ping` | `async def ping(self) -> None` | - | Liveness check; raises on failure. (A legacy `token` argument is accepted but not sent.) |
@@ -269,7 +269,10 @@ From `rocketride.schema`. Parses chat response content — see
 - **PIPELINE_RESULT**: TypedDict with `name`, `path`, `objectId`, optional `result_types`, and dynamic fields.
 - **UPLOAD_RESULT**: Per-file result with `action`, `filepath`, `error?`, `result?`, `upload_time?`, etc.
 - **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
-- **ConnectResult**: Identity payload returned by `connect()`/`login()` — `userToken`, `userId`, `displayName`, organizations, apps, teams (all optional).
+- **ConnectResult**: Identity payload returned by `connect()`/`login()` — `userToken`, `userId`, `displayName`, organizations, apps, teams (all optional). `endpoints` (`list[str] | None`) is the API key's task-address scope (`developerId.pipelineId.source` or `developerId.pipelineId.*` patterns the key may reach); `None` means an unscoped key.
+- **SERVICES_RESPONSE**: `{ 'services': dict, 'icons'?, 'version'? }` — the result of `get_services()`; each entry is a **SERVICE_SUMMARY**, or a **SERVICE_DEFINITION** with `definitions=True` (no `icons` table then).
+- **SERVICE_DEFINITION**: A `SERVICE_SUMMARY` plus the configuration: the resolved `properties` (every leaf with its dotted `path`) and `params` (the `param`-flagged properties, in schema order). The TypedDict does not declare these dynamic keys; read them with `definition.get('properties')` / `definition.get('params')`. The TypeScript SDK types them as `ServiceProperty` and `ServiceParamDescriptor`.
+- **PROTOCOL_CAPS**: `Flag` for `SERVICE_SUMMARY['capabilities']` (`GPU`, `INVOKE`, `NETWORK`, ...); `PROTOCOL_CAPS.MULTITENANT` (`1 << 17`) marks a node certified reentrant-safe for cross-user sharing.
 - **DAPMessage**: Dict with `type`, `seq`, and optional `command`, `arguments`, `body`, `success`, `message`, `event`, `token`, etc.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.

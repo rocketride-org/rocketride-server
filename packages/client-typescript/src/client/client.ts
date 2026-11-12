@@ -28,7 +28,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -1395,17 +1395,17 @@ export class RocketRideClient extends DAPClient {
 	 * `{ pipeline: { ... } }`.
 	 *
 	 * @param options - Pipeline execution options
-	 * @param options.token - Custom token for the pipeline (auto-generated if not provided)
+	 * @param options.token - Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. The returned `token` is the full address. Not a credential: the developer id and the owner come from the account
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
 	 * @param options.threads - Number of threads for execution (omit to let the server decide)
-	 * @param options.useExisting - Use existing pipeline instance
+	 * @param options.useExisting - Attach to the task already running at the same address instead of failing with "Pipeline is already running"
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
 	 * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
 	 *
-	 * @returns Promise resolving to an object containing the task token and other metadata
+	 * @returns Promise resolving to an object whose `token` is the task address `developerId.pipelineId[.source]`, plus other metadata
 	 * @throws Error if neither pipeline nor filepath is provided
 	 *
 	 * @example
@@ -3339,8 +3339,17 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	async getServices(): Promise<ServicesResponse> {
-		return this.call<ServicesResponse>('rrext_services', {});
+	getServices(): Promise<ServicesResponse>;
+	getServices(options: { definitions: true }): Promise<ServiceDefinitionsResponse>;
+	getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse>;
+	async getServices(options?: { definitions?: boolean }): Promise<ServicesResponse | ServiceDefinitionsResponse> {
+		// definitions: every entry is the FULL definition (configuration
+		// schema included) and there is no icons table — the bulk form of
+		// getService(), for callers that need every service's properties
+		return this.call<ServicesResponse | ServiceDefinitionsResponse>(
+			'rrext_services',
+			options?.definitions ? { definitions: true } : {}
+		);
 	}
 
 	/**

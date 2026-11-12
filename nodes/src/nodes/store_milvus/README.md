@@ -72,19 +72,13 @@ The collection is the destination for stored chunks. The save-time probe accepts
 
 ### Similarity and retrieval score
 
-The runtime accepts `L2`, `IP`, `COSINE`, `JACCARD`, `HAMMING`, or `BM25` as the similarity setting, defaulting to `COSINE`; another value stops initialization. It builds the vector index using this metric, so select the metric that matches the embeddings already in the collection before writing its first data. Changing it later does not rebuild an existing index.
+The metric is not configurable: the driver builds every vector index with `COSINE`, and the score conversion assumes it. A collection whose index was built earlier with another metric keeps it; recreate it under a new collection name to get scores on the cosine scale.
 
-The retrieval score defaults to `0.5` and filters converted result scores. For cosine results the driver converts the returned distance to `(distance + 1) / 2`; for other metrics it applies a sigmoid conversion. Raise the score when retrieved context is noisy or unrelated; lower it when the expected source material is absent. The tradeoff is recall versus the amount of weak context passed downstream, and a threshold can only be meaningful with the same metric used to create the collection.
+The retrieval score (`score`, default `0.7`) filters converted result scores. The driver converts the returned cosine value to `(distance + 1) / 2`. Raise the score when retrieved context is noisy or unrelated; lower it when the expected source material is absent. The tradeoff is recall versus the amount of weak context passed downstream.
 
 ### Write batch size and timeout
 
-The driver uses a 60-second connection timeout and writes chunks in batches of
-50 by default. These settings are read from the node configuration even though
-most deployments can leave them alone. Increase a batch size only when a larger
-write has been demonstrated to be reliable for the endpoint; reduce it when
-bulk writes fail partway through or the service cannot absorb the requested
-load. Increase the timeout for a slow but healthy remote service, rather than
-using it to mask a host, port, or authentication mismatch.
+The driver uses a fixed 60-second connection timeout and writes chunks in batches of 50. Neither is a node setting. A timeout at startup points at a host, port, or authentication mismatch, or a remote service too slow to answer within that window.
 
 ### Tool Server Name
 

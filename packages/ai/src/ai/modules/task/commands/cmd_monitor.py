@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
 from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
+from ..address import in_endpoint_scope
 
 
 # Only import for type checking to avoid circular import errors
@@ -159,9 +160,10 @@ class MonitorCommands(DAPConn):
 
         Filtering order (each check short-circuits if it fails):
         1. Connection must have '*' in its monitor subscriptions
-        2. The event_type bitmask must match the subscription
-        3. If org_id is specified, connection's primary org must match
-        4. If user_id is specified, connection's userId must match
+        2. Connection must not be authenticated with an endpoints-scoped key
+        3. The event_type bitmask must match the subscription
+        4. If org_id is specified, connection's primary org must match
+        5. If user_id is specified, connection's userId must match
 
         Args:
             event_type: Event type bitmask (e.g. EVENT_TYPE.DASHBOARD, EVENT_TYPE.BILLING).
@@ -172,10 +174,18 @@ class MonitorCommands(DAPConn):
         # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
-        # Step 2: bitmask must match
+        # Step 2: an endpoints-scoped key receives no server events. They
+        # describe the owner's account and the server (connections and their
+        # subscriptions, failed sign-ins, deployments, billing), not runs, so
+        # the scope cannot filter them; the key carries the owner's userId and
+        # org and would pass steps 4 and 5. Its '*' subscription still gets
+        # task events, which send_task_event filters by the scope.
+        if getattr(getattr(self, '_account_info', None), 'endpoints', None) is not None:
+            return
+        # Step 3: bitmask must match
         if not (event_type & self._monitors['*']):
             return
-        # Step 3: org scoping
+        # Step 4: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
             conn_org = ''
             if hasattr(self._account_info, 'organization') and self._account_info.organization:
@@ -183,7 +193,7 @@ class MonitorCommands(DAPConn):
                 conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
             if conn_org != org_id:
                 return
-        # Step 4: user scoping
+        # Step 5: user scoping
         if user_id is not None and hasattr(self, '_account_info') and self._account_info:
             if self._account_info.userId != user_id:
                 return
@@ -192,7 +202,7 @@ class MonitorCommands(DAPConn):
     async def send_task_event(
         self,
         event_type: EVENT_TYPE,
-        token: str,
+        key: str,
         event: Dict[str, Any] = None,
     ) -> None:
         """
@@ -205,13 +215,13 @@ class MonitorCommands(DAPConn):
         Args:
             type (EVENT_TYPE): The type/category of the event being forwarded
             id (str): Unique identifier for the specific task instance
-            token (str): Unique task identifier associated with the event
+            key (str): The originating control's registry key
             event (Dict[str, Any]): The event payload containing:
                 - event: String identifier for the event type
                 - body: Event-specific data payload
 
         Event Routing Logic:
-        - Events are only sent to monitors with matching apikey:token subscriptions
+        - Events are only sent to monitors subscribed to the run's owner-scoped key
         - No forwarding occurs if no monitors are subscribed to the task
         """
 
@@ -242,8 +252,8 @@ class MonitorCommands(DAPConn):
             # protocol (each connection mints its own header seq).
             await self.send_event(evt_name, id=control.id, body=body)
 
-        # Get the task by token
-        control = self._server.get_task_control(token)
+        # Get the task by its registry key
+        control = self._server.control_by_key(key)
 
         # Verify we are allowed to receive events for this task - for SSE events, it requires data
         # access, for all others, it's monitor access
@@ -253,8 +263,11 @@ class MonitorCommands(DAPConn):
             self.verify_permission('task.monitor')
 
         # Verify the caller may see this run (run-scoped: a user-owned run
-        # delivers only to its owner; a team-owned run to team members)
+        # delivers only to its owner; a team-owned run to team members; a key
+        # with an endpoints scope receives only the runs inside it)
         if not resolve_run_permissions(self._account_info, control):
+            return
+        if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
             return
 
         # Build the base owner-scoped key: events land on the key of the
@@ -302,8 +315,8 @@ class MonitorCommands(DAPConn):
         events, so they are held to the permission ``send_task_event`` checks
         for those types. A credential without it is skipped quietly, the way
         ``broadcast_task_event`` skips it for live events: the subscription
-        still stands (a ``pk_`` public key holds ``task.data`` only and
-        subscribes for SSE).
+        still stands (a machine key scoped to ``task.data`` subscribes for
+        its data pipe's SSE and nothing else).
 
         Returns:
             bool: True if the connection may receive monitor events.
@@ -390,10 +403,14 @@ class MonitorCommands(DAPConn):
             try:
                 # Loop through all active tasks the caller has access to
                 tasks: List[Dict[str, Any]] = []
+                endpoints = getattr(self._account_info, 'endpoints', None)
                 for token, target in self._server._task_control.items():
                     # Skip runs the caller may not see (run-scoped: user-owned
-                    # runs are owner-only; team runs need team membership)
+                    # runs are owner-only; team runs need team membership; a
+                    # scoped key sees only the runs inside its endpoints)
                     if not resolve_run_permissions(self._account_info, target):
+                        continue
+                    if not in_endpoint_scope(endpoints, target.address):
                         continue
 
                     # Get the task status once
@@ -504,14 +521,10 @@ class MonitorCommands(DAPConn):
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
 
-            # Resolve the token to a project key
-            control = self._server.get_task_control(token)
-
-            # Verify the caller may reach this run (run-scoped: a user-owned
-            # run is subscribable only by its owner; a team-owned run by
-            # anyone with permissions on the run's team)
-            if not resolve_run_permissions(self._account_info, control):
-                raise PermissionError('Access denied: no permissions for this task')
+            # Resolve the address under the caller's account (run-scoped: a
+            # user-owned run is subscribable only by its owner; a team-owned
+            # run by anyone with task.monitor on the run's team)
+            control = self._server.resolve_control(token, self._account_info, 'task.monitor')
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
@@ -693,8 +706,8 @@ class MonitorCommands(DAPConn):
                     print(f"Warning: Unknown event type '{event_str}' ignored")
             return bitmask
 
-        # Verify permission
-        token = self.get_task_token(request, 'task.monitor')
+        # The address (token slot), if the subscription is task-addressed
+        token = self.get_task_address(request)
 
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})

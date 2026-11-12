@@ -135,11 +135,11 @@ def test_clean_entity_types_drops_non_string_items():
 
 def test_default_labels_match_services_json():
     # services.json is JSONC (// comments, and "//" appears inside the protocol
-    # string), so a plain json.load fails. Extract just the entityTypes.default
-    # array — its contents are plain JSON with no comments.
+    # string), so a plain json.load fails. Extract just the anonymize.entityTypes
+    # definition's default array — its contents are plain JSON with no comments.
     with open(os.path.join(_ANON_DIR, 'services.json'), encoding='utf-8') as f:
         raw = f.read()
-    key = raw.index('"entityTypes"')
+    key = raw.index('"anonymize.entityTypes"')
     default = raw.index('"default"', key)
     start = raw.index('[', default)
     end = raw.index(']', start)

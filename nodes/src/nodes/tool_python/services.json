@@ -12,19 +12,14 @@
 	"description": ["Executes Python code in a restricted in-process sandbox via exec().", "Only whitelisted modules can be imported. Dangerous builtins are removed.", "By default the code has no network, filesystem or subprocess access.", "For web calls use the HTTP Request node (tool_http_request). For code that needs network access or extra packages use the Daytona node (tool_daytona)."],
 	"tile": ["Tool: python.execute"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Default",
-				"serverName": "python"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The server name is a pinned constant (the tool
+	//		namespace); the timeout is unset by default so the sandbox default applies.
+	//
+	"propertyDefinitions": {
 		"tool_python.serverName": {
-			"hidden": true,
-			"type": "string",
+			"type": "constant",
 			"title": "Server name",
 			"description": "Namespace prefix for the tool: <serverName>.execute",
 			"default": "python"
@@ -37,8 +32,7 @@
 		"tool_python.timeout": {
 			"type": "integer",
 			"title": "Execution timeout (seconds)",
-			"description": "Maximum seconds a script may run before it is killed. Default is 20s, max is 1200s.",
-			"default": 20,
+			"description": "Maximum seconds a script may run before it is killed. Leave unset for the sandbox default (20s); max is 1200s.",
 			"minimum": 1,
 			"maximum": 1200,
 			"optional": true
@@ -47,6 +41,7 @@
 			"title": "Additional Allowed Modules",
 			"description": "Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). This setting has no effect on RocketRide Cloud, where only the built-in defaults can be imported.",
 			"type": "array",
+			"optional": true,
 			"minItems": 0,
 			"items": {
 				"type": "object",
@@ -54,11 +49,5 @@
 			}
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Python",
-			"properties": ["type", "tool_python.timeout", "tool_python.allowedModules"]
-		}
-	]
+	"properties": ["type", "tool_python.serverName", "tool_python.timeout", "tool_python.allowedModules"]
 }

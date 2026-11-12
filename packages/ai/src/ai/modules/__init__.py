@@ -7,7 +7,6 @@ ALL = frozenset(
         'dropper',
         'mcp',
         'pipe',
-        'remote',
         'services',
         'shell',
         'task',

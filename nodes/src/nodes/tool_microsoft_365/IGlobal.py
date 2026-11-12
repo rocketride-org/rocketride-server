@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -30,21 +28,21 @@ Each service subpackage (excel/, word/, onedrive/, outlook mail/, outlook
 calendar/) subclasses :class:`MicrosoftToolGlobalBase`, sets ``SERVICE`` (its
 :class:`GraphService` profile) and ``SPEC_NAME`` (its AccessSpec in
 ``nodes.core.microsoft_access``), and inherits the whole beginGlobal /
-validateConfig / endGlobal lifecycle. Unlike the Google Workspace base, there
-is no discovery-service build here — Graph is plain REST, so ``build_auth``
-returns a :class:`GraphAuth` credential object rather than a service handle.
-Service-specific post-build state hooks in via :meth:`_after_begin`.
+endGlobal lifecycle. Save-time validation lives in the sibling ``IValidator``
+modules. Unlike the Google Workspace base, there is no discovery-service build
+here - Graph is plain REST, so ``build_auth`` returns a :class:`GraphAuth`
+credential object rather than a service handle. Service-specific post-build
+state hooks in via :meth:`_after_begin`.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Mapping
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
-from .graph_client import GraphService, build_auth, token_scope_report
+from .graph_client import GraphService, build_auth
 
 
 class MicrosoftToolGlobalBase(IGlobalBase):
@@ -63,13 +61,10 @@ class MicrosoftToolGlobalBase(IGlobalBase):
 
         return getattr(microsoft_access, self.SPEC_NAME)
 
-    def _after_begin(self, cfg: dict) -> None:
+    def _after_begin(self, cfg: Mapping) -> None:
         """Hook for service-specific post-build state (default: none)."""
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         from depends import depends  # type: ignore
 
         # The shared requirements.txt lives at the tool_microsoft_365/ level.
@@ -77,52 +72,14 @@ class MicrosoftToolGlobalBase(IGlobalBase):
 
         from nodes.core.microsoft_access import resolve_microsoft_access
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        # Pass the full config: gate flags (allowPublicSharing, allowHardDelete)
-        # live beside 'access' and must reach _resolve_flags.
+        # The resolved view holds the active authType branch flattened beside the
+        # access tier and the gate flags (allowPublicSharing, allowHardDelete),
+        # which _resolve_flags reads next to 'access'.
+        cfg = self.config
         self.access = resolve_microsoft_access(cfg, self._spec())
         self.cfg = cfg
-        auth_type = (cfg.get('authType') or 'service').strip()
-        self.auth = build_auth(self.SERVICE, auth_type, cfg, self.access.scopes)
+        self.auth = build_auth(self.SERVICE, cfg['authType'], cfg, self.access.scopes)
         self._after_begin(cfg)
-
-    def validateConfig(self) -> None:
-        product = self.SERVICE.product
-        try:
-            from nodes.core.microsoft_access import resolve_microsoft_access
-
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            # Surfaces tier/flag misconfig (unknown tier, non-bool flag) as a warning.
-            resolved = resolve_microsoft_access(cfg, self._spec())
-            auth_type = (cfg.get('authType') or 'service').strip()
-            if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
-                if not token_str:
-                    warning(f'{product}: sign in with Microsoft to provide an access token')
-                else:
-                    try:
-                        _granted, covered, missing = token_scope_report(self.SERVICE, cfg, resolved.scopes)
-                        if not covered:
-                            warning(
-                                f'{product}: your Microsoft account authorization is missing scopes '
-                                'for the selected access tier. Please disconnect and reconnect '
-                                f'your Microsoft account. Missing: {", ".join(missing)}'
-                            )
-                    except Exception as exc:
-                        # A corrupt token must warn at config time, not surface later
-                        # as a cryptic run-time failure.
-                        warning(f'{product}: invalid user token data ({exc})')
-            else:
-                for key, title in (
-                    ('tenantId', 'Tenant ID'),
-                    ('clientId', 'Client ID'),
-                    ('clientSecret', 'Client Secret'),
-                    ('userPrincipalName', 'Acting User'),
-                ):
-                    if not str(cfg.get(key) or '').strip():
-                        warning(f'{product}: {title} ({key}) is required for App authentication')
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self.auth = None

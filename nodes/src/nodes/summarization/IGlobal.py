@@ -21,36 +21,27 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+import os
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
+    # The four counts; the schema defaults until beginGlobal runs
     numberOfSummaries: int = 2
     numberOfSummaryWords: int = 1500
     numberOfKeyPointWords: int = 250
     numberOfEntities: int = 25
 
     def beginGlobal(self) -> None:
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Install what we need
-            import os
-            from depends import depends  # type: ignore
+        """Install the dependencies and read the four counts from the resolved config."""
+        from depends import depends  # type: ignore
 
-            # Load the requirements
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)
 
-            # Get our configuration
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Get the parameters
-            self.numberOfSummaries = config.get('numberOfSummaries', 2)
-            self.numberOfSummaryWords = config.get('numberOfSummaryWords', 1500)
-            self.numberOfKeyPointWords = config.get('numberOfKeyPointWords', 250)
-            self.numberOfEntities = config.get('numberOfEntities', 25)
+        config = self.config
+        self.numberOfSummaries = int(config.numberOfSummaries)
+        self.numberOfSummaryWords = int(config.numberOfSummaryWords)
+        self.numberOfKeyPointWords = int(config.numberOfKeyPointWords)
+        self.numberOfEntities = int(config.numberOfEntities)

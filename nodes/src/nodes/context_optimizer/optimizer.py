@@ -73,10 +73,10 @@ class ContextOptimizer:
     Context-window sizes are resolved in three steps (see
     :meth:`resolve_model_limit`):
 
-    1. the live model catalog -- the ``modelTotalTokens`` values carried by the
-       ``preconfig.profiles`` of every LLM node's service definition, read
-       through the engine's own registry (``rocketlib.getServiceDefinitions``
-       / ``getServiceDefinition``) so it works wherever the engine loaded the
+    1. the live model catalog -- the ``modelTotalTokens`` each LLM node's
+       resolved schema declares beside its ``model`` selector, read through
+       the engine's own registry (``rocketlib.getServiceDefinitions`` /
+       ``getServiceSchema``) so it works wherever the engine loaded the
        nodes from: the source tree, an installed node store, or a
        ``--node_path`` materialisation. The ``sync-models`` workflow keeps
        those values in step with the providers;
@@ -252,38 +252,42 @@ class ContextOptimizer:
 
     @classmethod
     def _engine_model_definitions(cls) -> Dict[str, Dict[str, Any]]:
-        """Fetch every registered node's raw service definition from the engine.
+        """Fetch every registered node's class types and resolved schema from the engine.
 
         ``rocketlib.getServiceDefinitions()`` returns an *envelope*,
-        ``{"services": {<logicalType>: <config schema>, ...}, "version": N}``
+        ``{"services": {<logicalType>: <summary>, ...}, "version": N}``
         (engLib ``store/services/services.cpp``, ``getServiceSchemas``); the
         ``services`` member is the index of every registered, non-INTERNAL
-        service, keyed by logical type. It carries only each node's config
-        schema, so the model windows are read with the second call:
-        ``rocketlib.getServiceDefinition(logicalType)`` returns that node's raw
-        ``services*.json`` -- where ``preconfig.profiles[*].modelTotalTokens``
-        lives. (``--serviceCategory`` rewrites the index *values* and so does
-        not affect this node, which reads only the keys; ``--serviceName``,
-        however, narrows the index to a single entry for every caller
-        including this one -- the catalog is then near-empty and known ids
-        fall back to :meth:`conservative_model_limit`, quietly but never
-        above a real window.)
+        service, keyed by logical type, and each summary carries the node's
+        ``classType``. The model windows are read with the second call:
+        ``rocketlib.getServiceSchema(logicalType)`` returns that node's
+        RESOLVED schema -- ``properties`` with a ``path`` on every leaf --
+        which is where a ``model`` selector and its ``modelTotalTokens`` live.
+        (``--serviceCategory`` rewrites the index *values* and so does not
+        affect this node, which reads only the keys and ``classType``;
+        ``--serviceName``, however, narrows the index to a single entry for
+        every caller including this one -- the catalog is then near-empty and
+        known ids fall back to :meth:`conservative_model_limit`, quietly but
+        never above a real window.)
         Using the registry instead of globbing next to ``__file__`` means the
         catalog is found wherever the engine loaded the nodes from.
 
         Every registered type is fetched: which nodes publish model windows
-        is a property of their definition (the chat ``llm_*`` nodes, the
+        is a property of their schema (the chat ``llm_*`` nodes, the
         ``image_vision_*`` nodes, embedding and search nodes all do), not of
         a naming convention, and :meth:`_load_model_catalog` keeps only the
-        definitions that actually carry usable profiles. This runs once per
+        schemas that actually carry a model with a window. This runs once per
         pipeline start (``IGlobal.beginGlobal``) against the engine's
-        in-memory registry (~8 ms measured); the server-side
-        ``services_catalog`` caches the same call per process, this node
-        deliberately does not so a reloaded registry is seen at once.
+        in-memory registry; the server-side ``services_catalog`` caches the
+        same call per process, this node deliberately does not so a reloaded
+        registry is seen at once.
 
         Any failure (no engine binding, an engine without the registry, an
         unexpected envelope, a per-type fetch raising) degrades to fewer or no
         definitions; the caller then falls through to :attr:`MODEL_LIMITS`.
+
+        Returns:
+            Logical type -> ``{"classType": [...], "schema": <resolved schema>}``.
         """
         try:
             import rocketlib  # the engine binding; resolved at call time so tests can substitute it
@@ -300,52 +304,133 @@ class ContextOptimizer:
         if not isinstance(index, dict):
             return {}
         definitions: Dict[str, Dict[str, Any]] = {}
-        for logical_type in index:
+        for logical_type, summary in index.items():
             if not isinstance(logical_type, str) or not logical_type:
                 continue
             try:
-                definition = rocketlib.getServiceDefinition(logical_type)
+                schema = rocketlib.getServiceSchema(logical_type)
             except Exception:  # noqa: BLE001 -- one broken node must not hide the others
                 continue
-            if isinstance(definition, dict):
-                definitions[logical_type] = definition
+            if not isinstance(schema, dict):
+                continue
+            class_types = summary.get('classType') if isinstance(summary, dict) else None
+            definitions[logical_type] = {
+                'classType': class_types if isinstance(class_types, list) else [],
+                'schema': schema,
+            }
         return definitions
 
     @staticmethod
-    def _load_model_catalog(definitions: Dict[str, Dict[str, Any]]) -> Dict[str, int]:
-        """Build the model id -> ``modelTotalTokens`` mapping from raw definitions.
+    def _window_of(properties: Any) -> Optional[int]:
+        """The ``modelTotalTokens`` a level declares, searched into its groups and branches.
 
-        Ids are keyed exactly as the profiles declare them; where two
-        definitions publish the same id with different windows the smaller is
-        kept, which is the safe budget.
+        Args:
+            properties: One level's resolved ``properties`` list.
+
+        Returns:
+            The first positive integer default found, or None.
+        """
+        if not isinstance(properties, list):
+            return None
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+            if prop.get('name') == 'modelTotalTokens':
+                limit = prop.get('default')
+                if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
+                    return limit
+                continue
+            enum = prop.get('enum')
+            if isinstance(enum, dict):
+                for body in enum.values():
+                    found = ContextOptimizer._window_of(body.get('properties') if isinstance(body, dict) else None)
+                    if found is not None:
+                        return found
+            elif isinstance(prop.get('properties'), list):
+                found = ContextOptimizer._window_of(prop['properties'])
+                if found is not None:
+                    return found
+        return None
+
+    @classmethod
+    def _model_windows(cls, properties: Any, inherited: Optional[int]) -> List[Any]:
+        """Walk one level of a resolved schema for the model ids it publishes.
+
+        A ``model`` leaf that is a selector (its ``enum`` is an object keyed
+        by model id) publishes every branch, with the branch's own
+        ``modelTotalTokens`` when it declares one and the level's otherwise;
+        a plain ``model`` leaf publishes its default with the level's window.
+        Groups and the branches of other selectors are walked with the window
+        in force at their level.
+
+        Args:
+            properties: The level's resolved ``properties`` list.
+            inherited: The ``modelTotalTokens`` in force above this level.
+
+        Returns:
+            ``(model id, window)`` pairs; the window is None when nothing declares one.
+        """
+        if not isinstance(properties, list):
+            return []
+        window = cls._window_of([p for p in properties if isinstance(p, dict) and p.get('name') == 'modelTotalTokens'])
+        if window is None:
+            window = inherited
+        found: List[Any] = []
+        for prop in properties:
+            if not isinstance(prop, dict):
+                continue
+            enum = prop.get('enum')
+            if prop.get('name') == 'model':
+                if isinstance(enum, dict):
+                    for model, body in enum.items():
+                        branch = body.get('properties') if isinstance(body, dict) else None
+                        found.append((model, cls._window_of(branch) or window))
+                else:
+                    found.append((prop.get('default'), window))
+            elif isinstance(enum, dict):
+                for body in enum.values():
+                    if isinstance(body, dict):
+                        found.extend(cls._model_windows(body.get('properties'), window))
+            elif isinstance(prop.get('properties'), list):
+                found.extend(cls._model_windows(prop['properties'], window))
+        return found
+
+    @classmethod
+    def _load_model_catalog(cls, definitions: Dict[str, Dict[str, Any]]) -> Dict[str, int]:
+        """Build the model id -> ``modelTotalTokens`` mapping from resolved schemas.
+
+        Ids are keyed exactly as the schemas declare them; where two schemas
+        publish the same id with different windows the smaller is kept, which
+        is the safe budget.
 
         A provider-scoped id (``models/gemini-3.1-pro-preview``,
         ``openai/gpt-5``) is additionally registered under its bare name, but
-        only when that name is unambiguous: an unscoped profile always wins
+        only when that name is unambiguous: an unscoped model always wins
         (so ``gpt-5`` keeps ``llm_openai``'s window rather than a gateway's
         re-host), and a bare name two gateways disagree about is dropped
         entirely so it falls through to :attr:`MODEL_LIMITS` instead of
         silently picking one.
 
-        Malformed definitions (no ``preconfig``, non-dict profiles, missing or
+        Malformed definitions (no schema, no ``model`` leaf, missing or
         non-positive windows) are skipped, never raised on.
+
+        Args:
+            definitions: As :meth:`_engine_model_definitions` returns them.
+
+        Returns:
+            Model id -> context window in tokens.
         """
-        published: Dict[str, int] = {}  # ids exactly as the profiles declare them
+        published: Dict[str, int] = {}  # ids exactly as the schemas declare them
         alias_values: Dict[str, set] = {}  # bare name -> every window seen for it
 
         def _record(table: Dict[str, int], key: str, limit: int) -> None:
             table[key] = min(table[key], limit) if key in table else limit
 
         for definition in (definitions or {}).values():
-            preconfig = definition.get('preconfig') if isinstance(definition, dict) else None
-            profiles = preconfig.get('profiles') if isinstance(preconfig, dict) else None
-            if not isinstance(profiles, dict):
+            schema = definition.get('schema') if isinstance(definition, dict) else None
+            if not isinstance(schema, dict):
                 continue
-            for profile in profiles.values():
-                if not isinstance(profile, dict):
-                    continue
-                model = profile.get('model')
-                limit = profile.get('modelTotalTokens')
+            for model, limit in cls._model_windows(schema.get('properties'), None):
                 if not isinstance(model, str) or not model:
                     continue
                 if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
@@ -355,7 +440,7 @@ class ContextOptimizer:
                 if bare and bare != model:
                     alias_values.setdefault(bare, set()).add(limit)
 
-        # A bare alias only fills a gap that no unscoped profile claims, and
+        # A bare alias only fills a gap that no unscoped model claims, and
         # only when every gateway publishing it agrees on the window.
         catalog = {bare: next(iter(v)) for bare, v in alias_values.items() if len(v) == 1}
         catalog.update(published)

@@ -62,53 +62,13 @@
 		"documents": ["documents"]
 	},
 	//
-	//	Optional:
-	//		Profile section for configuration options
-	//
-	"preconfig": {
-		"default": "z_score",
-		"profiles": {
-			"z_score": {
-				"title": "Z-Score - Standard deviation based detection",
-				"method": "z_score",
-				"sensitivity": 2.0,
-				"windowSize": 100,
-				"metric": "value",
-				"warningThreshold": 2.0,
-				"criticalThreshold": 3.0
-			},
-			"iqr": {
-				"title": "IQR - Interquartile range based detection",
-				"method": "iqr",
-				"sensitivity": 1.5,
-				"windowSize": 100,
-				"metric": "value",
-				"warningThreshold": 1.5,
-				"criticalThreshold": 3.0
-			},
-			"rolling_avg": {
-				"title": "Rolling Average - Moving average deviation detection",
-				"method": "rolling_avg",
-				"sensitivity": 2.0,
-				"windowSize": 50,
-				"metric": "value",
-				"warningThreshold": 2.0,
-				"criticalThreshold": 3.0
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions
+	//		Local property definitions. The detection method is the selector;
+	//		a method whose default differs from the shared one aliases the
+	//		shared definition with its own default, so each method keeps its
+	//		own stored values.
 	//
-	"fields": {
-		"anomaly_detector.method": {
-			"type": "string",
-			"title": "Detection method",
-			"description": "Statistical method used for anomaly detection",
-			"default": "z_score",
-			"enum": ["z_score", "iqr", "rolling_avg"]
-		},
+	"propertyDefinitions": {
 		"anomaly_detector.sensitivity": {
 			"type": "number",
 			"title": "Sensitivity",
@@ -117,6 +77,10 @@
 			"minimum": 0.1,
 			"maximum": 10.0
 		},
+		"anomaly_detector.iqr.sensitivity": {
+			"base": "anomaly_detector.sensitivity",
+			"default": 1.5
+		},
 		"anomaly_detector.windowSize": {
 			"type": "integer",
 			"title": "Window size",
@@ -124,6 +88,10 @@
 			"default": 100,
 			"minimum": 10,
 			"maximum": 10000
+		},
+		"anomaly_detector.rolling_avg.windowSize": {
+			"base": "anomaly_detector.windowSize",
+			"default": 50
 		},
 		"anomaly_detector.metric": {
 			"type": "string",
@@ -141,6 +109,10 @@
 			"minimum": 0.1,
 			"maximum": 10.0
 		},
+		"anomaly_detector.iqr.warningThreshold": {
+			"base": "anomaly_detector.warningThreshold",
+			"default": 1.5
+		},
 		"anomaly_detector.criticalThreshold": {
 			"type": "number",
 			"title": "Critical threshold",
@@ -148,50 +120,34 @@
 			"default": 3.0,
 			"minimum": 0.5,
 			"maximum": 20.0
-		},
-		"anomaly_detector.z_score": {
-			"object": "z_score",
-			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
-		},
-		"anomaly_detector.iqr": {
-			"object": "iqr",
-			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
-		},
-		"anomaly_detector.rolling_avg": {
-			"object": "rolling_avg",
-			"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.metric", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
-		},
-		"anomaly_detector.profile": {
-			"title": "Detection Method",
-			"description": "Anomaly detection configuration",
-			"type": "string",
-			"default": "z_score",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "z_score",
-					"properties": ["anomaly_detector.z_score"]
-				},
-				{
-					"value": "iqr",
-					"properties": ["anomaly_detector.iqr"]
-				},
-				{
-					"value": "rolling_avg",
-					"properties": ["anomaly_detector.rolling_avg"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Anomaly Detection",
-			"properties": ["anomaly_detector.profile"]
-		}
+			"name": "method",
+			"type": "string",
+			"title": "Detection method",
+			"description": "Statistical method used for anomaly detection",
+			"default": "z_score",
+			"enum": {
+				"z_score": {
+					"title": "Z-Score - Standard deviation based detection",
+					"properties": ["anomaly_detector.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
+				},
+				"iqr": {
+					"title": "IQR - Interquartile range based detection",
+					"properties": ["anomaly_detector.iqr.sensitivity", "anomaly_detector.windowSize", "anomaly_detector.iqr.warningThreshold", "anomaly_detector.criticalThreshold"]
+				},
+				"rolling_avg": {
+					"title": "Rolling Average - Moving average deviation detection",
+					"properties": ["anomaly_detector.sensitivity", "anomaly_detector.rolling_avg.windowSize", "anomaly_detector.warningThreshold", "anomaly_detector.criticalThreshold"]
+				}
+			}
+		},
+		"anomaly_detector.metric"
 	]
 }

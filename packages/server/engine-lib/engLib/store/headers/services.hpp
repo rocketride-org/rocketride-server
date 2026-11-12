@@ -30,7 +30,7 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 class IServices {
 public:
-    _const int VERSION = 2;
+    _const int VERSION = 3;
 
     //-----------------------------------------------------------------
     /// @details
@@ -146,19 +146,6 @@ public:
         ///		transformed value of the service definition
         //---------------------------------------------------------
         json::Value serviceSchema;
-
-        //---------------------------------------------------------
-        ///	@details
-        ///		Has this driver been resolved?
-        //---------------------------------------------------------
-        bool isResolved = false;
-
-        //---------------------------------------------------------
-        ///	@details
-        ///		The class types its combo fields list, so a call
-        ///		that brings nodes of one of them resolves it again
-        //---------------------------------------------------------
-        std::vector<Text> comboClassTypes;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -166,6 +153,15 @@ public:
 public:
     //-----------------------------------------------------------------
     ///	Public API
+    //-----------------------------------------------------------------
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Holds a call's custom services in front of every lookup the
+    ///		calling thread makes (getServiceDefinition,
+    ///		getServiceSchemas, isCustomService) until it is destroyed.
+    ///		Scopes nest: an inner one with services hides the outer
+    ///		one's while it lives; an empty one changes nothing. Made by
+    ///		withCustomServices
     //-----------------------------------------------------------------
     class CustomServicesScope {
     public:
@@ -195,15 +191,74 @@ public:
 
     static Error init() noexcept;
     static Error deinit() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Walks one directory of service definitions: every
+    ///		services.*json under it (recursively) is parsed, refused
+    ///		if still in the old format, resolved and registered.
+    ///		init() runs it over the nodes tree and --node_path; public
+    ///		so a fixture directory can be loaded in a test
+    //-----------------------------------------------------------------
+    static Error loadServices(const Path &path, const Text &mask) noexcept;
+
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
         const Text &type) noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Is this one of the calling thread's custom services, not a
+    ///		registered one? Its code is not on this engine, so it has no
+    ///		factory
+    //-----------------------------------------------------------------
     static bool isCustomService(const Text &logicalType) noexcept;
 
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Parses a caller's own service definitions (a JSON array of
+    ///		services.json objects) through the same parse and property
+    ///		expansion the start-up scan uses - an old-format definition
+    ///		is refused - and returns the scope that makes them visible
+    ///		to the calling thread for one call. Nothing is registered: no
+    ///		factory, no url mapper, and the registry is the same before
+    ///		and after. A definition whose logical type is registered or
+    ///		listed twice is refused, its icon must be inline (a data:
+    ///		URL), its JSON and its property expansion nest at most 64
+    ///		deep, and the expansion is bounded per definition and per
+    ///		call. A non-empty list replaces the thread's active custom
+    ///		services while the scope lives; an empty or null list brings
+    ///		none and yields an empty scope, so the active ones stay
+    ///		visible
+    //-----------------------------------------------------------------
     static ErrorOr<CustomServicesScope> withCustomServices(
         const json::Value &custom) noexcept;
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Rejects a parsed services.*json that is still in the old
+    ///		format ("fields"/"shape" instead of "propertyDefinitions"/
+    ///		"properties"). The error names the file. Public so a
+    ///		fixture can be checked without walking the nodes tree
+    //-----------------------------------------------------------------
+    static Error requireNewFormat(const json::Value &serviceInfo,
+                                  const Path &definitionPath);
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Expands one service definition's "properties" into its
+    ///		fully-resolved schema (def.serviceSchema): every leaf
+    ///		carries its "path", "params" lists the flat descriptors of
+    ///		the "param"-flagged properties, and "capabilities" is the
+    ///		node's PROTOCOL_CAPS bitmask. Public so a
+    ///		fixture definition can be resolved without being loaded.
+    ///		total, when given, accumulates the JSON values expanded by
+    ///		every definition of one call (custom services). A
+    ///		definition of the wrong JSON shape may throw
+    //-----------------------------------------------------------------
+    static Error buildSchema(ServiceDefinition &def, size_t *total = nullptr);
 
 private:
     //-----------------------------------------------------------------
@@ -231,44 +286,39 @@ private:
         ServiceDefinition &def;
         ServiceFields privateFields;
 
-        // The definitions resolved with this one, and the field ids
-        // being resolved, outermost first
-        const ServiceDefinitions *scope = nullptr;
-        std::vector<iText> chain;
+        // The property references being expanded, outermost first: one
+        // reached again inside its own expansion would recurse without end
+        std::vector<Text> chain;
+
+        // The property expansions nested so far, each a recursion: bounded
+        // by MaxDepth
+        size_t depth = 0;
 
         // JSON values expanded so far for this definition, and by every
         // definition of the call (nullptr on the start-up scan)
         size_t expanded = 0;
         size_t *total = nullptr;
-    };
 
-    //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema;
-    struct ServiceSchemaConditional {
-        json::Value value;
-        std::vector<ServiceSchema> fields;
-    };
+        // The flat descriptors of every "param"-flagged property seen so
+        // far, in schema order - becomes schema["params"]
+        json::Value params{json::arrayValue};
 
-    //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema {
-        ServiceSchema(TextView name) : name(name) {}
-        const Text name;
-        bool isRequired = false;
-        bool isReadonly = false;
-        bool isSecured = false;
-        bool isSection = false;
-        bool isArray = false;
-        bool isCombo = false;
-        bool isResolved = true;
-        json::Value field;
-        json::Value ui;
-        std::vector<ServiceSchema> children;
-        std::vector<ServiceSchema> arrayItem;
-        std::vector<ServiceSchemaConditional> conditionals;
+        // The dotted "path" prefix of the level being expanded: a group
+        // pushes its name, a selector branch pushes the branch name, a
+        // hoisted leaf pushes nothing
+        std::vector<Text> pathPrefix;
+
+        // Empty at the top level or inside a plain group. Inside an enum
+        // branch or an array item it names that construct ("an enum
+        // branch" / "an array item") - "param" is a load error there,
+        // because such a property resolves branch- or item-dependently
+        Text nestedIn;
+
+        // The names recorded for the level currently being expanded.
+        // A selector registers its branch names and its hoisted leaves
+        // here, because they share the level's namespace with its
+        // sibling leaves
+        std::vector<Text> *levelNames{};
     };
 
     //-------------------------------------------------------------
@@ -276,22 +326,27 @@ private:
     //-------------------------------------------------------------
     static Error declareDefaultUrlMappers() noexcept;
     static Error loadGlobalFields(json::Value &definition) noexcept;
-    static Text getFieldName(TextView fieldName) noexcept;
     static ErrorOr<json::Value> lookupField(ServiceContext &context,
                                             TextView fieldId);
-    static ErrorOr<IServices::ServiceSchema> getField(
-        ServiceContext &context, TextView fieldName, json::Value &field);
-    static ErrorOr<IServices::ServiceSchema> getFields(
-        ServiceContext &context, json::Value &section) noexcept;
-    static Error updateDefinitions(ServiceDefinitions &services);
+    static ErrorOr<json::Value> expandProperty(ServiceContext &context,
+                                               json::Value &property);
+    static ErrorOr<json::Value> expandChildren(ServiceContext &context,
+                                               json::Value property);
+    static ErrorOr<json::Value> expandProperties(ServiceContext &context,
+                                                 json::Value &specifiers);
+    static ErrorOr<json::Value> expandBranches(ServiceContext &context,
+                                               json::Value branches);
+    static Error applyParam(ServiceContext &context, json::Value &field);
+    static Error requireUniqueName(std::vector<Text> &seen, const Text &name,
+                                   ServiceContext &context) noexcept;
+    static Error charge(ServiceContext &context, size_t count) noexcept;
+    static Error updateDefinitions(ServiceDefinitions &services,
+                                   size_t *total = nullptr);
     static ErrorOr<std::optional<ServiceDefinition>> parseDefinition(
         json::Value serviceInfo, const Path &definitionPath);
     static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
-    static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
-    static json::Value getChildConditionalUIElements(
-        const ServiceSchema &schema) noexcept;
 
     //-----------------------------------------------------------------
     /// @details

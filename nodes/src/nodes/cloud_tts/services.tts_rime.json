@@ -48,7 +48,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["Converts incoming text into speech using the Rime text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Rime speakers are model-specific, so each model exposes its own curated speaker list; the API key falls back to the RIME_API_KEY environment variable when blank."],
+	"description": ["Converts incoming text into speech using the Rime text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Rime speakers are model-specific, so each model exposes its own curated speaker list; the API key is read from the node config, a ${ROCKETRIDE_TTS_RIME_APIKEY} reference resolved per call."],
 	//
 	// Optional:
 	//	  The icon to display in the UI for this node
@@ -67,79 +67,20 @@
 		"answers": ["audio"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself. One profile per model (maintained manually).
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "coda",
-		// Defines profiles used with the "profile": key. model + voice live here so
-		// Config.getNodeConfig merges them under the selected profile. `voice` is the
-		// Rime speaker; the shared cloud_tts engine reads it as cfg['voice']. astra is
-		// valid across all four shipped models and is the default.
-		"profiles": {
-			"coda": {
-				"title": "Coda    - Flagship, best quality",
-				"model": "coda",
-				"voice": "astra",
-				"apikey": ""
-			},
-			"arcana": {
-				"title": "Arcana  - Expressive, multilingual",
-				"model": "arcana",
-				"voice": "astra",
-				"apikey": ""
-			},
-			"mistv3": {
-				"title": "Mist v3 - Lowest latency",
-				"model": "mistv3",
-				"voice": "astra",
-				"apikey": ""
-			},
-			"mistv2": {
-				"title": "Mist v2 - Pronunciation control",
-				"model": "mistv2",
-				"voice": "astra",
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local field definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector; Rime rejects
+	//		an out-of-model speaker at request time, so each model carries its
+	//		own speaker enum (every one resolves to the "voice" key the shared
+	//		engine reads). The API key is shared and stored flat. Speakers are
+	//		sourced from the live catalog and maintained manually.
 	//
-	"fields": {
-		// ── Form objects (one per model profile; api key + model-specific voice) ──
-		// The voice field MUST live inside the form-object so it is merged under the
-		// selected profile; in the top-level shape it would be silently dropped by
-		// getNodeConfig. Each profile references its OWN voice field
-		// (tts_rime.<model>.voice) whose leaf key is `voice`, so the shared engine
-		// reads cfg['voice'] regardless of the model — matching how vendor voices
-		// merge for OpenAI/ElevenLabs, but with a model-scoped speaker enum.
-		"tts_rime.coda": {
-			"object": "coda",
-			"properties": ["llm.cloud.apikey", "tts_rime.coda.voice"]
+	"propertyDefinitions": {
+		"tts_rime.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "Rime API key",
+			"env": "ROCKETRIDE_TTS_RIME_APIKEY",
+			"required": true
 		},
-		"tts_rime.arcana": {
-			"object": "arcana",
-			"properties": ["llm.cloud.apikey", "tts_rime.arcana.voice"]
-		},
-		"tts_rime.mistv3": {
-			"object": "mistv3",
-			"properties": ["llm.cloud.apikey", "tts_rime.mistv3.voice"]
-		},
-		"tts_rime.mistv2": {
-			"object": "mistv2",
-			"properties": ["llm.cloud.apikey", "tts_rime.mistv2.voice"]
-		},
-		// ── Speaker (model-specific; one curated enum per model). Rime rejects an
-		//    out-of-model speaker at request time, so the list is scoped per model.
-		//    Each field's leaf key is `voice`, delivered to the shared engine as
-		//    cfg['voice']. Sourced from the live catalog; maintained manually. ──────
 		"tts_rime.coda.voice": {
 			"type": "string",
 			"title": "Speaker",
@@ -201,49 +142,44 @@
 				["bayou", "Bayou"],
 				["blaze", "Blaze"]
 			]
-		},
-		// ── Profile selector (drives conditional form rendering) ───────────────
-		"tts_rime.profile": {
-			"title": "Model",
-			"description": "Rime TTS model",
-			"type": "string",
-			"default": "coda",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "coda",
-					"properties": ["tts_rime.coda"]
-				},
-				{
-					"value": "arcana",
-					"properties": ["tts_rime.arcana"]
-				},
-				{
-					"value": "mistv3",
-					"properties": ["tts_rime.mistv3"]
-				},
-				{
-					"value": "mistv2",
-					"properties": ["tts_rime.mistv2"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Rime Text To Speech",
-			"properties": ["tts_rime.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "Rime TTS model",
+			"default": "coda",
+			"enum": {
+				"coda": {
+					"title": "Coda    - Flagship, best quality",
+					"properties": ["tts_rime.coda.voice"]
+				},
+				"arcana": {
+					"title": "Arcana  - Expressive, multilingual",
+					"properties": ["tts_rime.arcana.voice"]
+				},
+				"mistv3": {
+					"title": "Mist v3 - Lowest latency",
+					"properties": ["tts_rime.mistv3.voice"]
+				},
+				"mistv2": {
+					"title": "Mist v2 - Pronunciation control",
+					"properties": ["tts_rime.mistv2.voice"]
+				}
+			}
+		},
+		"tts_rime.apikey"
 	],
 	//
 	// Optional:
-	//		Test configuration for automated node testing
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector.
 	//
 	"test": [
 		{

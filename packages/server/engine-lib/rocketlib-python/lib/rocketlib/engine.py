@@ -107,18 +107,22 @@ def monitorOther(*args) -> None:
 globals()['monitorOther'] = engLib.monitorOther  # noqa
 
 
-def monitorSSE(pipe_id: int, type: str, data: dict = None) -> None:
+def monitorSSE(pipe_id: int, type: str, data: dict = None, binding_id: int = 0, root_binding_id: int = 0) -> None:
     """
-    Send a real-time SSE event to the UI for the current pipe.
+    Send a real-time SSE event to the UI for the current binding.
 
     Args:
-        pipe_id: The current pipe's ID (self.instance.pipeId)
-        type:    Event type string (e.g. 'thinking', 'acting', 'confirm')
-        data:    Optional dict payload to include in the event (passed as-is from kwargs)
+        pipe_id:         The current pipe's slot (self.instance.pipeId)
+        type:            Event type string (e.g. 'thinking', 'acting', 'confirm')
+        data:            Optional dict payload to include in the event (passed as-is from kwargs)
+        binding_id:      The binding that produced the event (self.instance.bindingId)
+        root_binding_id: The root of that binding's tree (self.instance.rootBindingId)
     """
     import json
 
-    payload = {'pipe_id': pipe_id, 'type': type}
+    # pipe_id stays until the SSE readers (cmd_monitor, run_log) move to pipeId
+    # together with the data-op bodies in the Step 3 wire rename
+    payload = {'pipe_id': pipe_id, 'bindingId': binding_id, 'rootBindingId': root_binding_id, 'type': type}
     if data:
         payload['data'] = data
     engLib.monitorOther('SSE', json.dumps(payload, separators=(',', ':')))
@@ -274,6 +278,12 @@ expand = engLib.expand  # noqa
 def validatePipeline(config: dict, custom: list = []) -> dict:
     """
     Validate the pipeline configuration, with the caller's custom service definitions if any.
+
+    ``custom`` is a list of service definitions in the services.json
+    format, seen by this call only. A non-empty list replaces the custom
+    services of any call this one runs inside; an empty list brings none,
+    so a call made from a node's code during a call with custom services
+    still sees those. A definition may nest at most 64 levels deep.
     """
     pass
 
@@ -301,9 +311,27 @@ def getServiceDefinition(logicalType: str) -> Dict:
 getServiceDefinition = engLib.getServiceDefinition  # noqa
 
 
+def getServiceSchema(logicalType: str) -> Dict:
+    """
+    Return the RESOLVED service schema for a logical name: ``properties``
+    with a ``path`` on every leaf, the ``params`` descriptors and the
+    ``capabilities`` bitmask. This is what ``resolveConfig`` consumes.
+    """
+    ...
+
+
+getServiceSchema = engLib.getServiceSchema  # noqa
+
+
 def getServiceDefinitions(custom: list = []) -> Dict:
     """
     Return every service schema, plus the caller's custom service definitions if any.
+
+    ``custom`` is a list of service definitions in the services.json
+    format, seen by this call only. A non-empty list replaces the custom
+    services of any call this one runs inside; an empty list brings none,
+    so a call made from a node's code during a call with custom services
+    still sees those. A definition may nest at most 64 levels deep.
     """
     ...
 

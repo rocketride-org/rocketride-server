@@ -67,7 +67,6 @@ def answer_documents_iinstance(monkeypatch):
     rocketlib.IInstanceBase = object
     rocketlib.IGlobalBase = object
     rocketlib.Entry = object
-    rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
 
     ai = types.ModuleType('ai')
     common = types.ModuleType('ai.common')

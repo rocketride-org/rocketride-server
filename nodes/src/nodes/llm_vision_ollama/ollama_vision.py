@@ -26,7 +26,6 @@ from typing import Any, Dict
 from langchain_openai import ChatOpenAI
 from ai.common.schema import Answer, Question
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from rocketlib import warning
 
 
@@ -42,16 +41,16 @@ class Chat(ChatBase):
         """Initialize the Ollama Vision chat instance."""
         super().__init__(provider, connConfig, bag)
 
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
-        serverbase = config.get('serverbase', 'http://localhost:11434/v1')
+        serverbase = config['serverbase']
         # Normalize serverbase to end with /v1
         if not serverbase.rstrip('/').endswith('/v1'):
             serverbase = serverbase.rstrip('/') + '/v1'
         self._serverbase = serverbase
 
-        self._system_prompt = config.get('vision.systemPrompt') or config.get('systemPrompt') or ''
-        self._prompt = config.get('vision.prompt') or config.get('prompt') or ''
+        self._system_prompt = config['systemPrompt'] or ''
+        self._prompt = config['prompt']
 
         bag['chat'] = self
 

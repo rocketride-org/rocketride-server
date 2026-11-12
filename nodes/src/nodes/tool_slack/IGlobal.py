@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -26,35 +24,27 @@
 """
 Slack tool node - global (shared) state.
 
-Reads the bot token or incoming-webhook URL from the node config and builds
-the shared SlackClient. Exactly one of the two auth modes must be configured.
+Reads the bot token or incoming-webhook URL from the resolved node config and
+builds the shared SlackClient. Exactly one of the two auth modes must be
+configured; both are optional in the schema, so that check lives here.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-
-# Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
-# and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
-SLACK_TOKEN_ENV = 'ROCKETRIDE_SLACK_TOKEN'
-SLACK_WEBHOOK_URL_ENV = 'ROCKETRIDE_SLACK_WEBHOOK_URL'
+from rocketlib import IGlobalBase
 
 
-def _resolve_auth(cfg: dict) -> tuple[str, str]:
-    """Resolve ``(token, webhook_url)`` from config with env fallback.
+def _resolve_auth(cfg: Mapping) -> tuple[str, str]:
+    """Return ``(token, webhook_url)`` from the resolved config.
 
-    Explicit node config wins; the ``ROCKETRIDE_SLACK_*`` env vars are only
-    consulted when neither config field is set, so a stray env var can never
-    conflict with an explicitly configured mode.
+    The credentials reach the node through its config (``${ROCKETRIDE_SLACK_*}``
+    references resolved per call); there is no process-env fallback.
     """
     token = str(cfg.get('token') or '').strip()
     webhook_url = str(cfg.get('webhookUrl') or '').strip()
-    if not token and not webhook_url:
-        token = os.environ.get(SLACK_TOKEN_ENV, '').strip()
-        webhook_url = os.environ.get(SLACK_WEBHOOK_URL_ENV, '').strip()
     return token, webhook_url
 
 
@@ -63,7 +53,7 @@ def _auth_config_error(token: str, webhook_url: str) -> str | None:
     if token and webhook_url:
         return 'configure either a bot token or a webhook URL, not both'
     if not token and not webhook_url:
-        return f'a bot token or webhook URL is required — set one in the node config or via {SLACK_TOKEN_ENV}/{SLACK_WEBHOOK_URL_ENV}'
+        return 'a bot token or webhook URL is required (set one in the node config, a ${ROCKETRIDE_SLACK_*} reference)'
     return None
 
 
@@ -76,22 +66,19 @@ class IGlobal(IGlobalBase):
         """Install the real SDK unless the test runner has injected mocks."""
         if os.environ.get('ROCKETRIDE_MOCK'):
             return
-
         from depends import depends
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         self._ensure_dependencies()
-
         from .slack_client import SlackClient
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        token, webhook_url = _resolve_auth(cfg)
+        token, webhook_url = _resolve_auth(self.config)
+        problem = _auth_config_error(token, webhook_url)
+        if problem:
+            raise ValueError(f'tool_slack: {problem}')
         try:
             self._slack = SlackClient(
                 self.glb.logicalType,
@@ -100,17 +87,6 @@ class IGlobal(IGlobalBase):
             )
         except ValueError as e:
             raise ValueError(f'tool_slack: {e}') from e
-
-    def validateConfig(self) -> None:
-        """Check config presence/format ONLY — never makes a live API call."""
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            token, webhook_url = _resolve_auth(cfg)
-            problem = _auth_config_error(token, webhook_url)
-            if problem:
-                warning(problem)
-        except Exception as e:
-            warning(str(e))
 
     def endGlobal(self) -> None:
         self._slack = None

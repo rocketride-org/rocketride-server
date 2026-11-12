@@ -9,7 +9,7 @@ Usage:
     from embedding_image_pipeline import get_embedding_image_pipeline
 
     pipeline = get_embedding_image_pipeline()
-    result = await client.use(pipeline=pipeline, token='E2E-EMBEDDING-IMAGE')
+    result = await client.use(pipeline=pipeline)
     # Send a document with page_content = base64 image (e.g. data:image/png;base64,...)
 """
 

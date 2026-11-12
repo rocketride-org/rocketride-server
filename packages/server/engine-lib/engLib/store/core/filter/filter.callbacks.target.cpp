@@ -95,8 +95,8 @@ void IServiceFilterInstance::cb_control(std::string &classType,
         throw APERR(Ec::InvalidParam, "No control listeners registered for ",
                     classType);
 
-    // Get the trace level
-    auto traceLevel = endpoint->config.pipelineTraceLevel;
+    // Get the trace level of this binding
+    auto traceLevel = pipe->traceLevel;
 
     // ---- Targeted dispatch: if nodeId is provided, call that node directly
     if (!nodeId.empty()) {
@@ -117,7 +117,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
                         control.attr("model_dump")());
             }
 
-            this->pipe->debugger.debugEnter(filter.get(), enterTrace);
+            this->pipe->emitTrace("ENTER", filter.get(), enterTrace);
 
             ccode = filter->control(control);
 
@@ -136,7 +136,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
                         control.attr("model_dump")());
             }
 
-            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+            this->pipe->emitTrace("LEAVE", filter.get(), leaveTrace);
 
             if (ccode) throw ccode;
             return;
@@ -163,7 +163,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
                     control.attr("model_dump")());
         }
 
-        this->pipe->debugger.debugEnter(filter.get(), enterTrace);
+        this->pipe->emitTrace("ENTER", filter.get(), enterTrace);
 
         // Call the control function
         ccode = filter->control(control);
@@ -183,7 +183,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
             }
 
             // And inform we are leaving
-            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+            this->pipe->emitTrace("LEAVE", filter.get(), leaveTrace);
             return;
         }
 
@@ -202,7 +202,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
             }
 
             // And inform we are leaving
-            this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+            this->pipe->emitTrace("LEAVE", filter.get(), leaveTrace);
             continue;
         }
 
@@ -216,7 +216,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
             leaveTrace["error"] = ccode.message();
         }
 
-        this->pipe->debugger.debugLeave(filter.get(), leaveTrace);
+        this->pipe->emitTrace("LEAVE", filter.get(), leaveTrace);
         throw ccode;
     }
 

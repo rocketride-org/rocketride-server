@@ -45,6 +45,7 @@ and ensuring consistent event handling across the distributed system.
 """
 
 from enum import Enum
+from typing import Any
 
 
 class LAUNCH_TYPE(Enum):
@@ -103,19 +104,32 @@ class TaskError(RuntimeError):
     existing ``except RuntimeError`` handling is unchanged.
 
     Codes:
-    - TASK_NOT_REGISTERED: the token, public key or project/source names no live
-      task — never started, terminated, replaced, or the engine restarted and
-      rebuilt its in-memory registry
-    - TASK_AMBIGUOUS: an unscoped lookup matched several running tasks
+    - TASK_NOT_REGISTERED: the address or project/source names no live task
+      on any rung the caller may reach — never started, terminated,
+      replaced, or the engine restarted and rebuilt its in-memory registry
+    - TASK_AMBIGUOUS: a lookup matched several running tasks
     - TASK_COMPLETED: the task finished before the request could be served
     - TASK_STOPPED: the task was stopped or cancelled before the request
+    - TASK_INVALID_ARGUMENT: a request value breaks the grammar — an address
+      that is not 2 or 3 dot-free segments, a component or project id with
+      a character outside ``[A-Za-z0-9_-]``, an identity carrying ``/``,
+      whitespace or ``~``, or a client trying to name the registry key
+    - TASK_SOURCE_REQUIRED: a two-segment address names a pipe with several
+      live sources and no default; ``sources`` lists them
+
+    Extra keyword fields (``field``, ``address``, ``sources``, …) become
+    attributes so a caller can classify on more than the code.
     """
 
     NOT_REGISTERED = 'TASK_NOT_REGISTERED'
     AMBIGUOUS = 'TASK_AMBIGUOUS'
     COMPLETED = 'TASK_COMPLETED'
     STOPPED = 'TASK_STOPPED'
+    INVALID_ARGUMENT = 'TASK_INVALID_ARGUMENT'
+    SOURCE_REQUIRED = 'TASK_SOURCE_REQUIRED'
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, **fields: Any):
         super().__init__(message)
         self.code = code
+        for name, value in fields.items():
+            setattr(self, name, value)

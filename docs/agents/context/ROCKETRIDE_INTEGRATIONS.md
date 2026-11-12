@@ -207,17 +207,14 @@ server strips it if present. Three credential types are accepted:
 | Credential | Prefix | Scope | Use it for |
 |---|---|---|---|
 | Public Authorization Key | `pk_` | data submission only, locked to this one run | handing to external systems (n8n, partners, webhooks) |
-| Private Token | `tk_` | this one run only: send data, monitor, read status and pipeline, terminate, restart | your own server-side automation; never share |
+| Private Token | `tk_` | full task scope (data, monitor, control, debug, store) | your own server-side automation; never share |
 | Account API key | — | your whole account | first-party callers; enables the selectors below |
 
 With an **account API key** and the path-addressed URL, the server resolves *your* running
 task for that project/source — your dev run by default. Two query selectors change that:
 `?teamId=<id>` addresses the team's deploy run of the same project, and `?runKind=deploy`
 addresses your personal deploy run. `pk_`/`tk_` keys are already locked to their run, so
-they need no token or selector at all. They are task-capability keys, not account keys: over
-WebSocket or HTTP they can only send that run's own commands (a `pk_` only data and event
-subscription; a `tk_` also status, pipeline, terminate and restart). Account, deploy, store,
-log and launch commands are refused for both, so use an account API key for those.
+they need no token or selector at all.
 
 If the pipeline is not running, the call fails with `Your pipeline is not running` —
 webhook endpoints exist only while their pipeline is up.

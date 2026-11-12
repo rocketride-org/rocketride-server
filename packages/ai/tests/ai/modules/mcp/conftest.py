@@ -96,7 +96,6 @@ class FakeEngineClient:
         self._nodes = nodes if nodes is not None else [{'type': 'parse'}]
         self._token = token
         self._result = result
-        self._public_token = public_token
         self.base_url = base_url
         self.sent = []
         self.used = []
@@ -195,7 +194,7 @@ class FakeEngineClient:
         self.sent.append({'token': token, 'data': data, 'objinfo': objinfo, 'mimetype': mimetype})
         return self._result
 
-    async def get_services(self):
+    async def get_services(self, *, definitions=False):
         self.get_services_calls += 1
         return self._services
 
@@ -218,8 +217,7 @@ class FakeEngineClient:
         self.used.append(kwargs)
         return {
             'token': self._token,
-            'publicToken': self._public_token,
-            'id': 'abcd1234.websrc',
+            'id': 'acme.proj-fake.src-fake',
             'projectId': 'proj-fake',
             'source': 'src-fake',
             **kwargs,

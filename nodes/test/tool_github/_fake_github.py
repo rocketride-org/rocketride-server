@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 import requests
 
-from ._stubs import scoped_stubs
+from ._stubs import conn_config, scoped_stubs
 
 RATE_HEADERS = {
     'X-RateLimit-Remaining': '4999',
@@ -122,7 +122,7 @@ def real_node(cfg: dict):
 
         glb = IGlobal()
         glb.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode='open'))
-        glb.glb = SimpleNamespace(logicalType='tool_github', connConfig={})
+        glb.glb = SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
         glb.beginGlobal()
         inst = IInstance()
         inst.IGlobal = glb

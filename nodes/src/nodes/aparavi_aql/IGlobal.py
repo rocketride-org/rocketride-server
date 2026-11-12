@@ -29,8 +29,7 @@ Reads configuration and creates the AqlClient HTTP client for Aparavi REST API a
 
 from __future__ import annotations
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, warning
+from rocketlib import IGlobalBase
 
 from .aql_client import AqlClient
 
@@ -46,27 +45,21 @@ class IGlobal(IGlobalBase):
     db_description: str = ''
 
     def beginGlobal(self) -> None:
-        """Initialize the Aparavi HTTP client from node configuration."""
-        # Skip initialization during config-only mode
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
+        """Initialize the Aparavi HTTP client from node configuration.
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-        # Validate required URL
-        url = (cfg.get('url') or '').strip()
-        if not url:
-            warning('aparavi_aql: url is required')
-            return
+        The resolver has already applied the defaults and refused an empty URL
+        (the schema marks it required).
+        """
+        cfg = self.config
 
         # Store data description for LLM prompt injection
-        self.db_description = str(cfg.get('db_description') or '')
+        self.db_description = cfg.db_description
 
         # Create the HTTP client
         self.client = AqlClient(
-            url=url,
-            user=str(cfg.get('user') or ''),
-            password=str(cfg.get('password') or ''),
+            url=cfg.url.strip(),
+            user=cfg.user,
+            password=cfg.password or '',
         )
 
     def endGlobal(self) -> None:

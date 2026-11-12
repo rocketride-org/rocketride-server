@@ -33,7 +33,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -124,23 +124,22 @@ class AccountBase(ABC):
     # CONCRETE SHARED — both editions use these; override if needed
     # =========================================================================
 
-    def generate_token(self, content: dict, prefix: str = '') -> str:
+    async def get_developer_id(self, org_id: str) -> Optional[str]:
         """
-        Generate a deterministic SHA-256 token from a content dict.
+        The developer id (address namespace) of an organization.
+
+        Every task address starts with the owning org's developer id, so the
+        trusted deploy-run dispatch — which carries no session — resolves it
+        here. SaaS reads the org row; OSS answers its fixed namespace.
 
         Args:
-            content: JSON-serialisable dict; keys are sorted for determinism.
-            prefix:  Optional string prepended to the 32-char hex digest
-                     (e.g. ``'pk_'``, ``'tk_'``).
+            org_id: The organization id.
 
         Returns:
-            ``f'{prefix}{sha256_hex[:32]}'``
+            The developer id, or ``None`` when the org has not claimed one.
         """
-        import hashlib
-        import json
-
-        raw = json.dumps(content, sort_keys=True).encode('utf-8')
-        return f'{prefix}{hashlib.sha256(raw).hexdigest()[:32]}'
+        org = await self.get_organization(org_id)
+        return (org or {}).get('developerId') or None
 
     # =========================================================================
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three

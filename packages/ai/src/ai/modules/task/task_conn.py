@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -79,7 +80,6 @@ from .commands.cmd_store import StoreCommands
 from ai.account.models import (
     AccountInfo,
     RequestContext,
-    resolve_run_permissions,
     resolve_task_permissions,
     resolve_team_permissions,
 )
@@ -88,7 +88,7 @@ from ai.common.account import AccountPipelineValidation
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from .task_engine import Task
-    from .task_server import TaskServer
+    from .task_server import TaskServer, TASK_CONTROL
 
 """
 Permissions Management
@@ -101,25 +101,35 @@ task.debug          Allow debugging a specific task
 
 
 # ---------------------------------------------------------------------------
-# Credential-class gate for task-capability sockets
+# Command gate for endpoints-scoped API keys
 # ---------------------------------------------------------------------------
 #
-# ``pk_`` (public key; the credential embedded in the chat widget) and ``tk_``
-# (private task token) authenticate a synthetic identity that still carries the
-# LAUNCHING user's ``userId`` and org (``TaskServer._build_task_account_info``).
-# Handlers that act on that identity (account, deploy, app pins, history,
-# key issuance, the user's file/pipeline stores) cannot tell such a socket
-# from the user, so the socket's command set is fixed here, at dispatch, as an
-# explicit allow-list. Everything else -- including commands added later --
-# is refused (fail closed). Full-user credentials are not affected.
+# A key with an ``endpoints`` scope (a machine webhook's key, the MCP widget's
+# caller-minted upload key) is the OWNER's ``rr_`` key: its session carries
+# the owner's ``userId`` and org. The scope binds it to addresses, and only
+# the commands that resolve runs apply that binding. Handlers that act on the
+# account itself (account and key issuance, deploy, app pins, history, the
+# user's file and pipeline stores, the profiler, starting a new run) check
+# only the identity and never look at the scope, so a key that is public by
+# nature (configured into a third party, handed to a sandboxed widget) would
+# reach them. The socket's command set is therefore fixed here, at dispatch,
+# as an explicit allow-list. Everything else -- including commands added
+# later -- is refused (fail closed). Unscoped credentials are not affected.
 #
-# Both classes: the SDK handshake (``auth``/``deauth``), liveness and identity,
-# the data pipe (``rrext_process``) and the per-pipe event subscription the
-# data pipe opens (``rrext_monitor``; ``get_task_token`` binds it to the
-# credential's own task). That is everything the chat widget
-# (packages/chat-widget) and chat UI (apps/chat-ui) send through the SDK.
-TASK_CREDENTIAL_PREFIXES = ('pk_', 'tk_')
-TASK_KEY_COMMANDS = frozenset(
+# Allowed: the SDK handshake (``auth``/``deauth``), liveness and identity, and
+# every command whose targets are runs and which applies the scope to each of
+# them -- through the shared resolver (``get_control``: the data pipe, the
+# per-pipe monitor subscription, status, pipeline, terminate, restart) or the
+# listing filters (``rrext_get_tasks``, ``rrext_list_tasks``, the run-log
+# streams). Each of those still applies its own run-scoped permission check.
+# Not allowed although run-shaped: ``rrext_get_token`` (resolves by project
+# and source without the scope), ``rrext_dashboard`` and
+# ``rrext_list_connections`` (they list the owner's connections, which the
+# scope does not filter). ``rrext_monitor`` is allowed, but a ``'*'``
+# subscription on a scoped socket delivers only task events inside the scope:
+# ``MonitorCommands.send_server_event`` drops every server event (dashboard,
+# deploy, billing) for it, for the same reason the dashboard commands are out.
+SCOPED_KEY_COMMANDS = frozenset(
     {
         'auth',
         'deauth',
@@ -127,34 +137,27 @@ TASK_KEY_COMMANDS = frozenset(
         'rrext_identify',
         'rrext_process',
         'rrext_monitor',
-    }
-)
-# ``tk_`` carries the full scope of its ONE task (task.control/monitor): it
-# may also read that task's status and pipeline and stop or restart it. Each of
-# these resolves its task through ``get_task``/``get_task_token``, which ignore
-# any caller-supplied token for pk_/tk_ and use the credential's own.
-TASK_TOKEN_COMMANDS = TASK_KEY_COMMANDS | frozenset(
-    {
         'rrext_get_task_status',
         'rrext_get_pipeline',
         'terminate',
         'restart',
+        'rrext_get_tasks',
+        'rrext_list_tasks',
+        'rrext_log',
     }
 )
 
 
-def task_credential_commands(account_info: Any) -> Optional[frozenset]:
-    """Return the allowed command set for a task-capability identity, else None.
+def scoped_key_commands(account_info: Any) -> Optional[frozenset]:
+    """Return the allowed command set for an endpoints-scoped key, else None.
 
-    ``None`` means the identity is a full-user credential and is not gated here.
-    The class is read from the raw credential recorded on the identity at
-    authentication (``AccountInfo.auth``), the same marker ``get_task`` and
-    ``resolve_run_permissions`` use to bind pk_/tk_ to their task.
+    ``None`` means the session is unscoped and is not gated here. The scope is
+    read from the session (``AccountInfo.endpoints``, loaded at hydration),
+    the same field the resolver and the listing filters enforce.
     """
-    auth = getattr(account_info, 'auth', '') or ''
-    if not isinstance(auth, str) or not auth.startswith(TASK_CREDENTIAL_PREFIXES):
+    if getattr(account_info, 'endpoints', None) is None:
         return None
-    return TASK_TOKEN_COMMANDS if auth.startswith('tk_') else TASK_KEY_COMMANDS
+    return SCOPED_KEY_COMMANDS
 
 
 class TaskConn(
@@ -274,6 +277,20 @@ class TaskConn(
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
 
+        # Session generation: bumped by _end_session so a handler that was
+        # awaiting when its session ended (a store open) can tell, once it
+        # resumes, that what it acquired belongs to an ended session.
+        self._session_epoch: int = 0
+
+        # Serialises session transitions (on_auth, on_deauth, _end_session).
+        # The transport dispatches requests concurrently, so without it an
+        # auth could install a new identity while the previous session's
+        # cleanup is still closing handles and detaching debuggers.
+        self._session_lock = asyncio.Lock()
+        # True while a replacing auth ends the previous session: the dispatch
+        # gate answers "session changing" instead of serving or disconnecting
+        self._session_transition: bool = False
+
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
         self._client_ip: str = ''
@@ -335,16 +352,24 @@ class TaskConn(
             self._transport.disconnect()
             return
 
-        # Task-capability sockets (pk_/tk_) may only send their allow-listed
-        # commands. Checked on the same ``command`` string DAPConn turns into
+        # A replacing auth is ending the previous session: nothing is served
+        # under the old identity (it could re-create the monitors and handles
+        # being cleared) and nothing is created for the new one until the
+        # switch completes. The caller retries; the connection is kept.
+        if self._session_transition:
+            await self.send(self.build_error(message, 'Session is changing; retry'))
+            return
+
+        # Endpoints-scoped keys may only send their allow-listed commands.
+        # Checked on the same ``command`` string DAPConn turns into
         # ``on_<command>``, before any handler is looked up.
-        allowed = task_credential_commands(self._account_info)
+        allowed = scoped_key_commands(self._account_info)
         if allowed is not None:
             if message.get('type') != 'request':
                 # Nothing but requests is dispatched; do not forward the rest.
                 return
             if not isinstance(cmd, str) or cmd not in allowed:
-                err = self.build_error(message, 'Command not permitted for task-scoped credentials')
+                err = self.build_error(message, 'Command not permitted for an API key with an endpoints scope')
                 await self.send(err)
                 return
 
@@ -370,63 +395,81 @@ class TaskConn(
             self._transport.disconnect()
             return
 
-        credential = args.get('auth') or ''
+        # Session transitions run one at a time: an auth that arrives while a
+        # previous session is being ended waits for that cleanup to finish
+        async with self._session_lock:
+            credential = args.get('auth') or ''
 
-        result = await self._server._server.authenticate_credential(credential)
-        if isinstance(result, tuple):
-            error_code, error_message = result
+            result = await self._server._server.authenticate_credential(credential)
+            if isinstance(result, tuple):
+                error_code, error_message = result
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'auth_failed',
+                            'timestamp': time.time(),
+                            'connectionId': self.get_connection_id(),
+                            'reason': error_message,
+                            'code': error_code,
+                        },
+                    },
+                )
+
+                # Send an error message
+                err = self.build_error(request, error_message)
+                await self.send(err)
+
+                # Schedules the disconnect after we return
+                self._transport.disconnect()
+                return
+
+            # A replacement identity on a live connection ends the previous
+            # session first: its handles, monitors and debugger attachments are
+            # owned by the connection, so they would otherwise pass to the new
+            # identity. The connection already gave up its unauthenticated slot
+            # when that session began, so the slot is released only on a first
+            # authentication.
+            replacing = self._authenticated
+            if replacing:
+                try:
+                    await self._end_session(replacing=True)
+                    self._account_info = result
+                finally:
+                    self._session_transition = False
+            else:
+                self._account_info = result
+            self._authenticated = True
+            if not replacing:
+                self._server.release_unauthed_slot(self._client_ip)
+
+            # Capture optional client identification from auth arguments
+            if args.get('clientName'):
+                self._client_info['name'] = str(args['clientName'])
+            if args.get('clientVersion'):
+                self._client_info['version'] = str(args['clientVersion'])
+
+            # Notify dashboard subscribers
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
                 {
                     'event': 'apaevt_dashboard',
                     'body': {
-                        'action': 'auth_failed',
+                        'action': 'connection_added',
                         'timestamp': time.time(),
                         'connectionId': self.get_connection_id(),
-                        'reason': error_message,
-                        'code': error_code,
+                        'clientName': self._client_info.get('name'),
+                        'clientVersion': self._client_info.get('version'),
+                        'clientId': self._account_info.userId if self._account_info else None,
                     },
                 },
+                user_id=self._account_info.userId,
             )
 
-            # Send an error message
-            err = self.build_error(request, error_message)
-            await self.send(err)
-
-            # Schedules the disconnect after we return
-            self._transport.disconnect()
-            return
-
-        self._account_info = result
-        self._authenticated = True
-        self._server.release_unauthed_slot(self._client_ip)
-
-        # Capture optional client identification from auth arguments
-        if args.get('clientName'):
-            self._client_info['name'] = str(args['clientName'])
-        if args.get('clientVersion'):
-            self._client_info['version'] = str(args['clientVersion'])
-
-        # Notify dashboard subscribers
-        await self._server.broadcast_server_event(
-            EVENT_TYPE.DASHBOARD,
-            {
-                'event': 'apaevt_dashboard',
-                'body': {
-                    'action': 'connection_added',
-                    'timestamp': time.time(),
-                    'connectionId': self.get_connection_id(),
-                    'clientName': self._client_info.get('name'),
-                    'clientVersion': self._client_info.get('version'),
-                    'clientId': self._account_info.userId if self._account_info else None,
-                },
-            },
-            user_id=self._account_info.userId,
-        )
-
-        # Apps are already populated in AccountInfo by the account service
-        # (desktop apps with full manifest + subscription status).
-        return self.build_response(request, body=result.to_connect_result())
+            # Apps are already populated in AccountInfo by the account service
+            # (desktop apps with full manifest + subscription status).
+            return self.build_response(request, body=result.to_connect_result())
 
     async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -434,21 +477,81 @@ class TaskConn(
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
-        open — callers can re-authenticate later via ``auth``.
+        open — callers can re-authenticate later via ``auth``. The
+        session's subscriptions, debugger attachments and open file-store
+        handles end with it (see ``_end_session``).
         """
-        # Nothing to do if not authenticated
-        if not self._authenticated:
-            return self.build_response(request, body={})
+        async with self._session_lock:
+            # Nothing to do if not authenticated
+            if not self._authenticated:
+                return self.build_response(request, body={})
 
-        # Re-acquire an unauthenticated slot for this IP
-        if self._client_ip:
-            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
+            # Re-acquire an unauthenticated slot for this IP
+            if self._client_ip:
+                self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
 
-        # Clear authentication state
-        self._authenticated = False
-        self._account_info = None
+            # End the session: identity, subscriptions, attachments, handles
+            await self._end_session()
 
         return self.build_response(request, body={})
+
+    async def _end_session(self, replacing: bool = False) -> None:
+        """
+        End the connection's current session: on deauth, and on an auth that
+        replaces the identity of a live connection.
+
+        Args:
+            replacing: True when a new identity is about to be installed on
+                this same connection. The connection then enters a transition:
+                the dispatch gate answers every request with "Session is
+                changing; retry" and keeps the socket, so the old identity can
+                neither be served nor re-create what is being cleared, and the
+                socket is not dropped. The caller clears the transition once
+                the new identity is installed. On deauth the identity is
+                cleared first instead.
+
+        Everything the session acquired on the socket is owned by the
+        connection rather than the identity, so whatever is left behind would
+        be usable by whoever authenticates next: every monitor is dropped, the
+        connection is detached from any task it debugs, and its open
+        file-store handles are closed.
+
+        The caller holds ``_session_lock``, so no new session can start until
+        this cleanup has finished.
+        """
+        # Step 1: end the session before the first await. The transport
+        # dispatches requests concurrently: on deauth, clearing the identity
+        # makes the dispatch gate refuse every request that arrives from here
+        # on; on a replacing auth the old identity stays until the new one is
+        # installed, so an in-window request is served rather than dropped.
+        # Either way the epoch bump lets a store open still in flight see,
+        # when it resumes, that its session ended (StoreCommands._store_fs_open)
+        if replacing:
+            self._session_transition = True
+        else:
+            self._authenticated = False
+            self._account_info = None
+        self._session_epoch += 1
+
+        # Step 2: drop every subscription made under the ending session.
+        # Event delivery filters by the session's account, so one retained
+        # past it would keep receiving: a '*' monitor would get every server
+        # event (no account left to scope it)
+        self._monitors.clear()
+
+        # Step 3: detach from every task this connection debugs, so an
+        # attached debugger stops getting its task's debug events
+        for control in list(self._server._task_control.values()):
+            try:
+                await control.task.detach_task(self)
+            except Exception as e:
+                self.debug_message(f'Error detaching from task "{control.id}" on session end: {e}')
+
+        # Step 4: close the session's file-store handles, as disconnect does
+        try:
+            await self._server.store.close_all_handles(self._connection_id)
+        except Exception as e:
+            self.debug_message(f'Error closing file handles on session end: {e}')
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the user holds the permission on ANY of their membership teams.
@@ -461,8 +564,8 @@ class TaskConn(
         environment layering only. Commands that target a SPECIFIC object
         use verify_team_permission against the addressed team instead.
 
-        Task-scoped synthetic identities are unchanged by the union: their
-        organization carries exactly the run's one team.
+        The deploy dispatch's synthetic identities are unchanged by the union:
+        their organization carries exactly the run's one team.
         """
         if not self._account_info:
             return False
@@ -604,84 +707,71 @@ class TaskConn(
 
         return True
 
-    def get_task_token(self, request: Dict[str, Any], permissions: str = '') -> str:
+    def get_task_address(self, request: Dict[str, Any]) -> str:
         """
-        Retrieve the task token associated with a command request and verify permissions if needed.
+        Read the task address from a command request's token slot.
+
+        Clients send the address (``developerId.pipelineId[.source]``) in
+        ``arguments.token`` — the slot that once carried a task token. No
+        credential type locks a connection to a task: every request names
+        its task and is authorized against it.
 
         Args:
-            request (Dict[str, Any]): The command request containing task token
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            str: The address as sent (validated by the resolver).
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: The connection is not authenticated.
         """
         if not self._account_info:
             raise PermissionError('Not authenticated')
-        # If we authenticated with a public key, we are locked to that task
-        if self._account_info.auth.startswith('pk_'):
-            control = self._server.get_task_control_by_public_key(self._account_info.auth)
-            return control.token
-
-        # If we authenticated with a task token, we are locked to that task
-        if self._account_info.auth.startswith('tk_'):
-            return self._account_info.auth
-
-        # Extract token from arguments, falling back to request root
-        # for backward compatibility with older clients.
         args = request.get('arguments') or {}
-        token = args.get('token') or request.get('token')
+        return args.get('token') or ''
 
-        # Permission checks are deferred to get_task() / callers where the
-        # task's team is known, so we can resolve against the correct team.
-        return token
+    def get_control(self, request: Dict[str, Any], permissions: str = '') -> 'TASK_CONTROL':
+        """
+        Resolve the control a command request addresses, under this connection's account.
+
+        ONE path for every task-addressed command: the address from the
+        token slot, the request's account, and the required permission go
+        through ``TaskServer.resolve_control`` — which walks the caller's
+        rungs, checks the run-scoped permission on EVERY call (sys.admin
+        passes inside the resolver) and enforces a scoped key's endpoints.
+
+        Args:
+            request (Dict[str, Any]): The command request.
+            permissions (str): The permission the command needs.
+
+        Returns:
+            TASK_CONTROL: The resolved control.
+
+        Raises:
+            TaskError: Bad address grammar, or no rung answered.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
+        """
+        address = self.get_task_address(request)
+        return self._server.resolve_control(address, self._account_info, permissions or None)
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
         """
-        Retrieve the task instance associated with the given request.
-
-        If a task token is specified in request.arguments:
-            - If the initial auth token is an apikey, no problem
-            - If the initial auth token is a task or public key token,
-            the token pass here must match (no cross task access)
-        If a task token is not specfied, we use the initial auth token
+        Retrieve the task instance a command request addresses.
 
         Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
+            request (Dict[str, Any]): The command request (address in ``arguments.token``).
+            permissions (str): The permission the command needs.
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            Task: The task behind the resolved control.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            TaskError: Bad address grammar, or no rung answered.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
         """
-        # Get the token
-        token = self.get_task_token(request, permissions)
-
-        # Get the task control and verify access for API key auth
-        control = self._server.get_task_control(token)
-
-        # pk_ and tk_ auth are already scoped to their task by get_task_token.
-        # For all other auth types, resolve permissions against the task's team.
-        # sys.admin bypasses all team permission checks.
-        if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if 'sys.admin' not in (self._account_info.sysPermissions or []):
-                # Run-scoped resolution: a USER-owned run (dev or @me deploy)
-                # is private — full access for its owner (surviving an org
-                # switch: the owner is unchanged even when the run's team is
-                # now foreign), none for anyone else, and the billing teamId
-                # never grants a teammate access. Team-owned runs resolve
-                # through team membership.
-                perms = resolve_run_permissions(self._account_info, control)
-                if not perms:
-                    raise PermissionError('Access denied: no permissions for this task')
-                if permissions and permissions not in perms:
-                    raise PermissionError(f'Permission {permissions!r} denied for this task')
-
-        return control.task
+        return self.get_control(request, permissions).task
 
     def get_connection_id(self) -> int:
         """

@@ -30,7 +30,6 @@ _STUB_MODULE_NAMES = (
     'ai',
     'ai.common',
     'ai.common.schema',
-    'ai.common.config',
 )
 
 
@@ -48,10 +47,6 @@ def _install_stubs() -> None:
     schema = types.ModuleType('ai.common.schema')
     schema.Answer = type('Answer', (), {})
     sys.modules['ai.common.schema'] = schema
-
-    config = types.ModuleType('ai.common.config')
-    config.Config = type('Config', (), {'getNodeConfig': staticmethod(lambda *_a, **_k: {})})
-    sys.modules['ai.common.config'] = config
 
 
 @contextmanager
@@ -71,7 +66,6 @@ def _scoped_stubs() -> Iterator[None]:
 with _scoped_stubs():
     _iglobal_module = importlib.import_module('authoritative_overlay.IGlobal')
     _iinstance_module = importlib.import_module('authoritative_overlay.IInstance')
-    from authoritative_overlay.IGlobal import IGlobal
     from authoritative_overlay.IInstance import IInstance, _normalize_number
     from authoritative_overlay.connectors.sec import PERIOD_SCOPE_KEYS, query_sec, select_official_values
 
@@ -986,29 +980,43 @@ def test_write_answers_historical_value_wrong_year_abstains():
 
 
 # --- IGlobal CIK padding -----------------------------------------------------
+#
+# These run the real IGlobal through the real resolver (the engine's schema for
+# services.json), so they load IGlobal.py again with the real rocketlib rather
+# than the stubbed module the instance tests above import.
+
+
+def _begin_real_iglobal(conn_config):
+    """Build the node's IGlobal on the engine's resolver and start it.
+
+    Args:
+        conn_config: The node config in its stored shape.
+
+    Returns:
+        The started IGlobal.
+    """
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'authoritative_overlay' / 'IGlobal.py'
+    spec = importlib.util.spec_from_file_location('_authoritative_overlay_iglobal_under_test', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    iglobal = module.IGlobal()
+    iglobal.glb = types.SimpleNamespace(logicalType='authoritative-overlay', connConfig=conn_config)
+    iglobal.beginGlobal()
+    return iglobal
 
 
 def test_blank_cik_is_not_zero_padded_to_truthy():
-    iglobal = IGlobal.__new__(IGlobal)
-    iglobal.regulator_type = 'sec'
-    iglobal.cik = ''
-    iglobal.glb = MagicMock()
-    iglobal.glb.logicalType = 'authoritative_overlay'
-    iglobal.glb.connConfig = {}
-
-    with patch.object(_iglobal_module.Config, 'getNodeConfig', return_value={'regulator_type': 'sec', 'cik': ''}):
-        IGlobal.beginGlobal(iglobal)
-    assert iglobal.cik == ''
+    assert _begin_real_iglobal({'cik': ''}).cik == ''
 
 
 def test_numeric_cik_is_zero_padded():
-    iglobal = IGlobal.__new__(IGlobal)
-    iglobal.regulator_type = 'sec'
-    iglobal.cik = ''
-    iglobal.glb = MagicMock()
-    iglobal.glb.logicalType = 'authoritative_overlay'
-    iglobal.glb.connConfig = {}
+    assert _begin_real_iglobal({'cik': '320193'}).cik == '0000320193'
 
-    with patch.object(_iglobal_module.Config, 'getNodeConfig', return_value={'regulator_type': 'sec', 'cik': '320193'}):
-        IGlobal.beginGlobal(iglobal)
+
+def test_an_unconfigured_node_takes_the_schema_defaults():
+    iglobal = _begin_real_iglobal({})
+    assert iglobal.regulator_type == 'sec'
     assert iglobal.cik == '0000320193'

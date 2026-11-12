@@ -28,7 +28,6 @@ Baidu Qianfan binding for the ChatLLM.
 from typing import Any, Dict
 
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
 
@@ -49,9 +48,9 @@ class Chat(ChatBase):
         """
         super().__init__(provider, connConfig, bag)
 
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
         apikey = config.get('apikey')
-        serverbase = (config.get('serverbase') or DEFAULT_QIANFAN_BASE_URL).rstrip('/')
+        serverbase = config['serverbase'].rstrip('/')
 
         if not isinstance(apikey, str) or not apikey.strip():
             raise ValueError('Baidu Qianfan API key is required.')

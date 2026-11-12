@@ -46,6 +46,7 @@ import sys
 import types
 
 import pytest
+import rocketlib as _real_rocketlib
 
 # ---------------------------------------------------------------------------
 # Load the guardrails_engine module directly without requiring runtime deps
@@ -564,7 +565,6 @@ class TestIInstanceLifecycle:
             'ai': types.ModuleType('ai'),
             'ai.common': types.ModuleType('ai.common'),
             'ai.common.schema': types.ModuleType('ai.common.schema'),
-            'ai.common.config': types.ModuleType('ai.common.config'),
             'depends': types.ModuleType('depends'),
         }
 
@@ -580,15 +580,8 @@ class TestIInstanceLifecycle:
             def preventDefault(self):
                 pass
 
-        class FakeIGlobalBase:
-            IEndpoint = None
-            glb = None
-
         class FakeEntry:
             pass
-
-        class FakeOPEN_MODE:
-            CONFIG = 'config'
 
         class FakeQuestion:
             def __init__(self, **kwargs):
@@ -611,20 +604,14 @@ class TestIInstanceLifecycle:
             def getText(self):
                 return self._text
 
-        class FakeConfig:
-            @staticmethod
-            def getNodeConfig(logicalType, connConfig):
-                return {}
-
         stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
-        stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
+        # The real base: IGlobal.config resolves through the engine's schema.
+        stubs['rocketlib'].IGlobalBase = _real_rocketlib.IGlobalBase
         stubs['rocketlib'].Entry = FakeEntry
-        stubs['rocketlib'].OPEN_MODE = FakeOPEN_MODE
         stubs['rocketlib'].debug = lambda *a, **kw: None
         stubs['rocketlib'].warning = lambda *a, **kw: None
         stubs['ai.common.schema'].Question = FakeQuestion
         stubs['ai.common.schema'].Answer = FakeAnswer
-        stubs['ai.common.config'].Config = FakeConfig
         stubs['depends'].depends = lambda *a, **kw: None
 
         for name, stub in stubs.items():
@@ -1052,95 +1039,57 @@ class TestIInstanceDeliveredExactlyOnce:
 
 
 class TestConfigWiring:
-    """Verify that services.json field IDs match the keys GuardrailsEngine reads."""
+    """Verify that services.json, resolved by the real resolver, feeds GuardrailsEngine every key it reads."""
+
+    ENGINE_KEYS = {
+        'policy_mode',
+        'enable_prompt_injection',
+        'enable_content_safety',
+        'enable_pii_detection',
+        'enable_hallucination_check',
+        'max_input_length',
+        'max_tokens_estimate',
+        'blocked_topics',
+        'allowed_topics',
+        'expected_format',
+    }
+    PROFILES = ('basic', 'strict', 'custom')
 
     @staticmethod
-    def _load_services_json():
-        """Load and parse services.json, stripping JS-style comments."""
-        import json
-        import re
+    def _resolve(conn_config):
+        """Resolve a stored config exactly as IGlobal.beginGlobal() would."""
+        from rocketlib import getServiceSchema
+        from rocketlib.config import resolveConfig
 
-        services_path = os.path.join(_GUARDRAILS_DIR, 'services.json')
-        with open(services_path, encoding='utf-8') as f:
-            text = f.read()
-        # Strip single-line // comments (but not inside strings)
-        text = re.sub(r'(?m)^\s*//.*$', '', text)
-        text = re.sub(r'(?<!:)//.*$', '', text, flags=re.MULTILINE)
-        return json.loads(text)
+        schema = getServiceSchema('guardrails')
+        assert schema is not None, 'guardrails is not registered with the engine'
+        return resolveConfig(schema, conn_config)
 
-    def test_preconfig_keys_match_engine_constructor(self):
-        """Every key used by GuardrailsEngine.__init__ must appear in at least one preconfig profile."""
-        services = self._load_services_json()
-        profiles = services['preconfig']['profiles']
-
-        # Keys that GuardrailsEngine reads from config
-        engine_keys = {
-            'policy_mode',
-            'enable_prompt_injection',
-            'enable_content_safety',
-            'enable_pii_detection',
-            'enable_hallucination_check',
-            'max_input_length',
-            'max_tokens_estimate',
-            'blocked_topics',
-            'allowed_topics',
-            'expected_format',
-        }
-
-        # Collect all keys from all profiles
-        profile_keys = set()
-        for profile_config in profiles.values():
-            profile_keys.update(k for k in profile_config if k != 'title')
-
-        missing = engine_keys - profile_keys
-        assert not missing, f'Engine reads keys not defined in any preconfig profile: {missing}'
-
-    def test_field_ids_resolvable_from_preconfig(self):
-        """Config field IDs referenced by object groups must not use a prefix that conflicts with preconfig keys."""
-        services = self._load_services_json()
-        fields = services['fields']
-        profiles = services['preconfig']['profiles']
-
-        # Collect all property references from object fields
-        for field_id, field_def in fields.items():
-            if 'object' not in field_def:
-                continue
-            profile_name = field_def['object']
-            if profile_name not in profiles:
-                continue
-            for prop_id in field_def.get('properties', []):
-                # The prop_id should be a valid field key OR match a preconfig key
-                assert prop_id in fields, f'Property "{prop_id}" referenced by "{field_id}" is not defined in fields'
+    @pytest.mark.parametrize('profile', PROFILES)
+    def test_every_profile_resolves_every_engine_key(self, profile):
+        """Each profile flattens to the full set of keys GuardrailsEngine.__init__ reads."""
+        config = self._resolve({'profile': profile})
+        missing = self.ENGINE_KEYS - set(config)
+        assert not missing, f'profile {profile} resolves without engine keys: {missing}'
 
     def test_custom_profile_exposes_all_engine_knobs(self):
-        """The custom profile should include every configurable engine parameter."""
-        services = self._load_services_json()
-        custom_profile = services['preconfig']['profiles']['custom']
-        custom_keys = {k for k in custom_profile if k != 'title'}
+        """The custom profile should make every engine parameter editable, not a pinned constant."""
+        config = self._resolve({'profile': 'custom'})
+        pinned = {key for key in self.ENGINE_KEYS if config.descriptor_of(key).get('type') == 'constant'}
+        assert not pinned, f'Custom profile pins knobs as constants: {pinned}'
 
-        required_knobs = {
-            'policy_mode',
-            'enable_prompt_injection',
-            'enable_content_safety',
-            'enable_pii_detection',
-            'enable_hallucination_check',
-            'max_input_length',
-            'max_tokens_estimate',
-            'expected_format',
-        }
+    def test_strict_profile_blocks_by_default(self):
+        """Strict aliases the shared policy_mode with its own default."""
+        config = self._resolve({'profile': 'strict'})
+        assert config['policy_mode'] == 'block'
+        assert config['max_tokens_estimate'] == 4096
+        assert config['enable_hallucination_check'] is True
 
-        missing = required_knobs - custom_keys
-        assert not missing, f'Custom profile is missing knobs: {missing}'
-
-    def test_config_roundtrip_creates_valid_engine(self):
-        """Simulate Config.getNodeConfig merging a profile and verify the engine can be instantiated."""
-        services = self._load_services_json()
-
-        for profile_name, profile_config in services['preconfig']['profiles'].items():
-            config = {k: v for k, v in profile_config.items() if k != 'title'}
-            # This should not raise
-            engine = GuardrailsEngine(config)
-            assert engine.policy_mode in ('block', 'warn', 'log'), f'Invalid policy_mode in profile {profile_name}'
+    @pytest.mark.parametrize('profile', PROFILES)
+    def test_config_roundtrip_creates_valid_engine(self, profile):
+        """The resolved view of every profile constructs an engine with a legal policy mode."""
+        engine = GuardrailsEngine(self._resolve({'profile': profile}))
+        assert engine.policy_mode in ('block', 'warn', 'log'), f'Invalid policy_mode in profile {profile}'
 
 
 class TestSerialization:

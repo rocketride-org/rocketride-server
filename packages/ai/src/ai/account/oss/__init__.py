@@ -147,6 +147,11 @@ def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dic
     return env, None
 
 
+# The ONE developer id (address namespace) of a standalone server: every
+# task address and every published artifact on this install lives under it.
+CONST_DEVELOPER_ID = 'rocketride'
+
+
 class Account(AccountBase):
     """
     Open-source authentication and account management.
@@ -225,7 +230,7 @@ class Account(AccountBase):
                 # single-operator server). Upstreaming a change to the
                 # common apps still happens via PR, and every rung is local
                 # to this install, so the namespace grant never leaves it.
-                'developerId': 'rocketride',
+                'developerId': CONST_DEVELOPER_ID,
                 'permissions': ['org.admin'],
                 'teams': [
                     {
@@ -397,6 +402,10 @@ class Account(AccountBase):
 
     async def get_organization(self, org_id: str) -> Optional[Dict]:
         self._saas_only()
+
+    async def get_developer_id(self, org_id: str) -> Optional[str]:
+        """The fixed standalone namespace — there is one org and it is this one."""
+        return CONST_DEVELOPER_ID
 
     async def update_organization(self, org_id: str, name: str):
         self._saas_only()
@@ -611,5 +620,3 @@ class Account(AccountBase):
         except BaseException:
             os.unlink(tmp)
             raise
-
-    # generate_token is inherited from AccountBase.

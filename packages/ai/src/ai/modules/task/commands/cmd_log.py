@@ -42,6 +42,8 @@ from ai.account.models import resolve_task_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.modules.task.run_log import RunLogReader
 
+from ..address import in_endpoint_scope
+
 if TYPE_CHECKING:
     from ..task_server import TaskServer
 
@@ -166,7 +168,8 @@ class LogCommands(DAPConn):
             perm: 'task.monitor' for reads, 'task.control' for delete.
 
         Raises:
-            PermissionError: Caller lacks ``perm`` in the resolved scope.
+            PermissionError: Caller lacks ``perm`` in the resolved scope, or
+                the key's endpoints scope excludes the stream's address.
         """
         # Step 1: resolve the scope the request addresses.
         team_id, _ = self._scope_for(args)
@@ -177,6 +180,42 @@ class LogCommands(DAPConn):
             self.verify_team_permission(team_id, perm)
         else:
             self.verify_permission(perm)
+
+        # Step 3: a key with an endpoints scope reaches only the streams of
+        # the addresses inside it.
+        self._verify_log_endpoint_scope(args)
+
+    def _verify_log_endpoint_scope(self, args: Dict[str, Any]) -> None:
+        """
+        Apply the API key's ``endpoints`` scope to the stream a request names.
+
+        Team permissions say WHOSE logs the caller may read; the scope says
+        WHICH addresses this credential may reach at all, and the permission
+        resolvers never look at it. A stream is the log of the address
+        ``developerId.projectId.source``: every run in the caller's own tree
+        and in its org's teams was started under the org's developer id. A
+        stream outside the scope (or an address that does not parse, such as
+        a missing projectId) is denied exactly like a permission miss, so a
+        scoped key holding ``task.monitor`` cannot replay other runs.
+
+        Args:
+            args: The subcommand arguments (``projectId`` and ``source``).
+
+        Raises:
+            PermissionError: The key's endpoints scope excludes the stream.
+        """
+        # Step 1: an unscoped key reaches every stream its permissions allow.
+        endpoints = getattr(self._account_info, 'endpoints', None)
+        if endpoints is None:
+            return
+
+        # Step 2: the stream's address under the caller's developer namespace.
+        org = self._account_info.organization or {}
+        address = f'{org.get("developerId") or ""}.{args.get("projectId") or ""}.{args.get("source") or ""}'
+
+        # Step 3: outside the scope reads the same as any other denial.
+        if not in_endpoint_scope(endpoints, address):
+            raise PermissionError('This API key is scoped to other endpoints')
 
     def _reader_for(self, args: Dict[str, Any]) -> RunLogReader:
         """
@@ -243,6 +282,7 @@ class LogCommands(DAPConn):
         deploy, then each team deploy the caller can monitor. Never-logged scopes are left out.
         """
         self.verify_permission('task.monitor')
+        self._verify_log_endpoint_scope(args)
 
         # Own tree first (dev run, @me deploy), then the deploy stream of each team the caller can monitor.
         org = self._account_info.organization or {}

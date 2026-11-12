@@ -12,29 +12,14 @@
 	"description": ["Exposes the Pipedrive CRM REST API v1 as agent tools.", "Covers deals, persons, organizations, activities, pipelines, stages, notes, leads,", "products, files, users, teams, goals, projects, and every other v1 resource."],
 	"tile": ["Pipedrive${parameters.pipedrive.companyDomain ? ': ' + parameters.pipedrive.companyDomain : ''}"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Pipedrive",
-				"apiToken": "",
-				"companyDomain": "",
-				"readOnly": false,
-				"toolGroups": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"],
-				"allowRawRequest": true
-			}
-		}
-	},
-	"fields": {
+	"propertyDefinitions": {
 		"pipedrive.apiToken": {
 			"type": "string",
 			"title": "API Token",
 			"description": "Pipedrive API token (Settings -> Personal preferences -> API), or an OAuth access token. Tokens starting with a JWT-style prefix are sent as a Bearer header; everything else is sent as the api_token query parameter.",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"secret": true,
+			"env": "ROCKETRIDE_PIPEDRIVE_TOKEN",
+			"required": true
 		},
 		"pipedrive.companyDomain": {
 			"type": "string",
@@ -102,11 +87,5 @@
 			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Pipedrive",
-			"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"]
-		}
-	]
+	"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"]
 }

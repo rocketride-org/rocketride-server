@@ -12,22 +12,12 @@
 	"description": ["Exposes Microsoft Word document operations as agent tools.", "Read text, create documents from paragraph lists, append text, find/replace text, and export to PDF. Operates on docx files in the acting user's OneDrive via the Microsoft Graph drive content API, round-tripping through python-docx.", "Authenticates via an Entra app (client credentials) or user OAuth."],
 	"tile": ["Word (${parameters.word.access})"],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Word",
-				"authType": "service",
-				"tenantId": "",
-				"clientId": "",
-				"clientSecret": "",
-				"userPrincipalName": "",
-				"userToken": "",
-				"access": "write"
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Authentication comes from the shared Microsoft
+	//		definitions (microsoft.authType selects the app or the signed-in user).
+	//
+	"propertyDefinitions": {
 		"word.access": {
 			"type": "string",
 			"title": "Access level",
@@ -39,11 +29,5 @@
 			]
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Word",
-			"properties": ["type", "microsoft.authType", "word.access"]
-		}
-	]
+	"properties": ["type", "microsoft.authType", "word.access"]
 }

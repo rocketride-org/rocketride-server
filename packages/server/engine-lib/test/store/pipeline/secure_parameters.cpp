@@ -49,8 +49,11 @@ Text makeToken(const json::Value &values, TextView secret) {
         *crypto::paramTokenEncrypt(values.stringify(), secret));
 }
 
-// A pipeline whose source keeps one secure value in its profile section and
-// one in its parameters
+// A pipeline whose source keeps one secure value directly under its config
+// (a root secret) and one under its selected branch block (a branch secret).
+// The config is the root of the path-addressed stored tree, so both values
+// are encrypted into the one "secureParameters" section there, keyed by the
+// leaf's dotted path
 json::Value makePipeline(TextView secret) {
     auto root = R"({
         "pipeline": {
@@ -60,13 +63,11 @@ json::Value makePipeline(TextView secret) {
                     "id": "source_1",
                     "provider": "filesys",
                     "config": {
-                        "profile": "default",
-                        "default": {
-                            "secureParameters": { "secure": ["apikey"] }
-                        },
-                        "parameters": {
-                            "user": "example-user",
-                            "secureParameters": { "secure": ["password"] }
+                        "profile": "cloud",
+                        "user": "example-user",
+                        "cloud": { "host": "example.host" },
+                        "secureParameters": {
+                            "secure": ["apikey", "cloud.password"]
                         }
                     }
                 }
@@ -74,11 +75,12 @@ json::Value makePipeline(TextView secret) {
         }
     })"_json;
 
+    json::Value values;
+    values["apikey"] = "example-api-key";           // gitleaks:allow
+    values["cloud.password"] = "example-password";  // gitleaks:allow
+
     auto &config = root["pipeline"]["components"][0]["config"];
-    config["default"]["secureParameters"]["token"] = makeToken(
-        R"({"apikey": "example-api-key"})"_json, secret);  // gitleaks:allow
-    config["parameters"]["secureParameters"]["token"] = makeToken(
-        R"({"password": "example-password"})"_json, secret);  // gitleaks:allow
+    config["secureParameters"]["token"] = makeToken(values, secret);
     return root;
 }
 
@@ -92,12 +94,11 @@ TEST_CASE("PipelineConfig::resolveSecureParameters") {
         REQUIRE_NO_ERROR(pipeline.resolveSecureParameters());
 
         auto &config = pipeline.components()[0]["config"];
-        REQUIRE(config["default"]["apikey"].asString() == "example-api-key");
-        REQUIRE(config["parameters"]["password"].asString() ==
-                "example-password");
-        REQUIRE(config["parameters"]["user"].asString() == "example-user");
-        REQUIRE_FALSE(config["default"].isMember("secureParameters"));
-        REQUIRE_FALSE(config["parameters"].isMember("secureParameters"));
+        REQUIRE(config["apikey"].asString() == "example-api-key");
+        REQUIRE(config["cloud"]["password"].asString() == "example-password");
+        REQUIRE(config["cloud"]["host"].asString() == "example.host");
+        REQUIRE(config["user"].asString() == "example-user");
+        REQUIRE_FALSE(config.isMember("secureParameters"));
     }
 
     SECTION("versioned tokens") {
@@ -107,11 +108,9 @@ TEST_CASE("PipelineConfig::resolveSecureParameters") {
         REQUIRE_NO_ERROR(pipeline.resolveSecureParameters());
 
         auto &config = pipeline.components()[0]["config"];
-        REQUIRE(config["default"]["apikey"].asString() == "example-api-key");
-        REQUIRE(config["parameters"]["password"].asString() ==
-                "example-password");
-        REQUIRE_FALSE(config["default"].isMember("secureParameters"));
-        REQUIRE_FALSE(config["parameters"].isMember("secureParameters"));
+        REQUIRE(config["apikey"].asString() == "example-api-key");
+        REQUIRE(config["cloud"]["password"].asString() == "example-password");
+        REQUIRE_FALSE(config.isMember("secureParameters"));
     }
 
     SECTION("versioned tokens without the secret") {
@@ -130,9 +129,8 @@ TEST_CASE("PipelineConfig::resolveSecureParameters") {
         PipelineConfig pipeline(makePipeline(Secret));
 
         // Flip a bit in the last byte of the authentication tag
-        auto &secure =
-            pipeline
-                .components()[0]["config"]["parameters"]["secureParameters"];
+        auto &config = pipeline.components()[0]["config"];
+        auto &secure = config["secureParameters"];
         Text encoded = secure["token"].asString();
         auto token = *crypto::base64Decode(encoded);
         token[token.size() - 1] ^= 0x01;
@@ -141,25 +139,26 @@ TEST_CASE("PipelineConfig::resolveSecureParameters") {
         auto ccode = pipeline.resolveSecureParameters();
         REQUIRE_ERROR(ccode, Ec::InvalidCipher, "failed authentication");
         REQUIRE_FALSE(_ts(ccode).contains(Secret));
-        REQUIRE_FALSE(pipeline.components()[0]["config"]["parameters"].isMember(
-            "password"));
+        REQUIRE_FALSE(config.isMember("apikey"));
+        REQUIRE_FALSE(config["cloud"].isMember("password"));
     }
 
     SECTION("values already set are kept") {
         SecretEnvScope scope({});
         PipelineConfig pipeline(makePipeline({}));
-        pipeline.components()[0]["config"]["parameters"]["password"] =
-            "updated-password";
+        auto &config = pipeline.components()[0]["config"];
+        config["apikey"] = "updated-api-key";             // gitleaks:allow
+        config["cloud"]["password"] = "updated-password";  // gitleaks:allow
 
         REQUIRE_NO_ERROR(pipeline.resolveSecureParameters());
-        REQUIRE(pipeline.components()[0]["config"]["parameters"]["password"]
-                    .asString() == "updated-password");
+        REQUIRE(config["apikey"].asString() == "updated-api-key");
+        REQUIRE(config["cloud"]["password"].asString() == "updated-password");
+        REQUIRE_FALSE(config.isMember("secureParameters"));
     }
 
     SECTION("malformed section") {
         PipelineConfig pipeline(makePipeline({}));
-        pipeline.components()[0]["config"]["parameters"]["secureParameters"]
-                             ["token"] = 42;
+        pipeline.components()[0]["config"]["secureParameters"]["token"] = 42;
 
         REQUIRE_ERROR(pipeline.resolveSecureParameters(), Ec::InvalidParam,
                       "'secureParameters' must have a 'token' string");

@@ -22,14 +22,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from os.path import dirname, join, realpath
-from depends import depends
-
-requirements = join(dirname(realpath(__file__)), 'requirements.txt')
-depends(requirements)
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-__all__ = ['IGlobal', 'IInstance']

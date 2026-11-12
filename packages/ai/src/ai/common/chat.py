@@ -12,20 +12,17 @@ communication with their respective APIs.
 
 import time
 import json
-import importlib
 import contextvars
 from typing import Dict, Any, Callable, Optional
 from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
-from ai.common.config import Config, check_credential_resolved
+from ai.common.config import check_credential_resolved
 from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
 from ai.common.validation import (
     validate_model_name,
     validate_max_tokens,
     sanitize_prompt,
     validate_prompt,
-    check_output_token_config,
-    hand_supplied_token_fields,
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
@@ -112,34 +109,31 @@ class ChatBase:
         Raises:
             ConfigurationError: If the provider configuration is invalid or missing
         """
-        # Load the provider-specific configuration using the Config utility
-        # This will merge default settings with provider-specific overrides
-        config = Config.getNodeConfig(provider, connConfig)
+        # connConfig is the resolver's view of the node's config (the IGlobal's
+        # self.config): defaults applied, the active branch flattened, keys read
+        # by path. The provider subclasses read their own keys (serverbase,
+        # region, temperature, ...) from here, never resolving again.
+        config = connConfig
+        self._config = config
 
         # A key still written as ${ROCKETRIDE_...} would go to the provider as the key,
         # and the user would see an "invalid API key" reply instead of the missing name.
-        check_credential_resolved(provider, 'apikey', config.get('apikey'), connConfig)
+        check_credential_resolved(provider, 'apikey', config.get('apikey'))
 
         # Extract model configuration - these are the core settings that control
-        # how the chat driver behaves with respect to token limits
-        self._model = validate_model_name(config.get('model'))
-        self._modelTotalTokens = config.get('modelTotalTokens', 16384)  # Default to 16K if not specified
-        self._modelOutputTokens = config.get('modelOutputTokens', 4096)  # Default to 4K if not specified
-
-        # Check what the author wrote, before the clamp below rewrites it — a value the
-        # provider would reject can be clamped into a plausible-looking one, and then
-        # there is nothing left to report. Only when a token field was hand-supplied:
-        # catalogue profiles are checked by the model sync, and warning about those on
-        # every run would be noise. Hand-written config is what the sync never sees.
-        if hand_supplied_token_fields(connConfig):
-            problem = check_output_token_config(
-                self._model,
-                self._modelOutputTokens,
-                self._modelTotalTokens,
-                Config.getNodeProfiles(provider),
-            )
-            if problem:
-                warning(f'{provider}: {problem}')
+        # how the chat driver behaves with respect to token limits. A model
+        # selector may have a "custom" branch whose free-text id lives in
+        # customModel; that leaf is reachable only on that branch, so its
+        # presence (not the selector value) says the id lives there.
+        model = config.get('customModel') or config.get('model')
+        self._model = validate_model_name(model)
+        # An unset optional leaf resolves to None in the view (defaults are never
+        # written): only None takes the node's fallback, so a configured 0 still
+        # reaches validate_max_tokens and is refused there
+        total = config.get('modelTotalTokens')
+        output = config.get('modelOutputTokens')
+        self._modelTotalTokens = 16384 if total is None else total  # Default to 16K if not specified
+        self._modelOutputTokens = 4096 if output is None else output  # Default to 4K if not specified
 
         # Validate and clamp output tokens against known safe maximums
         self._modelOutputTokens = validate_max_tokens(self._modelOutputTokens, self._modelTotalTokens)
@@ -154,8 +148,9 @@ class ChatBase:
         debug(f'    Total tokens             : {self._modelTotalTokens}')
         debug(f'    Output tokens            : {self._modelOutputTokens}')
 
-        # Reasoning capability comes from services.json (stamped by the model sync).
-        self._is_reasoning = bool((config.get('capabilities') or {}).get('reasoning'))
+        # Reasoning capability comes from services.json (stamped by the model sync),
+        # pinned as the model branch's constant "reasoning".
+        self._is_reasoning = bool(config.get('reasoning'))
 
     def _ensure_openai_compat_reasoning_stream(self) -> None:
         """Lazily build the raw openai client used to stream reasoning for
@@ -704,51 +699,3 @@ class ChatBase:
 
             # And return it
             return answer
-
-
-def getChat(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]) -> ChatBase:
-    """
-    Create and initialize a chat driver for the specified provider.
-
-    This function uses dynamic module loading to instantiate the appropriate
-    chat driver based on the provider name. It follows a naming convention
-    where each provider has a module in the 'connectors' package with a
-    'Chat' class that extends ChatBase.
-
-    The factory pattern allows for easy extension of the system with new
-    providers without modifying existing code.
-
-    Args:
-        provider (str): The name of the AI provider (e.g., 'openai', 'anthropic')
-                       This corresponds to a module name in the connectors package
-        connConfig (Dict[str, Any]): Configuration dictionary specific to the provider
-        bag (Dict[str, Any]): Additional context/state information
-
-    Returns:
-        ChatBase: An instance of the appropriate chat driver subclass
-
-    Raises:
-        ImportError: If the provider module cannot be imported
-        Exception: If the provider module doesn't have a 'Chat' class
-
-    Example:
-        >>> chat = getChat('openai', {'api_key': 'sk-...', 'model': 'gpt-4'}, {})
-        >>> response = chat.chat_string('Hello, world!')
-    """
-    # Construct the module name following the naming convention
-    # All provider modules are expected to be in the 'connectors' package
-    name = 'connectors.' + provider
-
-    # Dynamically import the provider module
-    # This allows for runtime loading of different providers without
-    # having to import all possible providers at startup
-    module = importlib.import_module(name)
-
-    # Validate that the module has the expected 'Chat' class
-    # This ensures that the provider follows the required interface
-    if not hasattr(module, 'Chat'):
-        raise Exception(f'Module {provider} is not a chat provider')
-
-    # Instantiate and return the Chat class from the provider module
-    # The Chat class is expected to be a subclass of ChatBase
-    return getattr(module, 'Chat')(provider, connConfig, bag)

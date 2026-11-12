@@ -14,8 +14,9 @@ queueing here one frame at a time. (A single video's frames are embedded in orde
 either way.)
 
 ``IGlobal.py`` and ``IInstance.py`` are loaded by file path under a synthetic
-package. The embedding model is stubbed and ``nodes.embedding_image.embedding`` is
-replaced while ``beginGlobal`` imports it; OpenCV, the document schema and
+package. The embedding model is stubbed: ``nodes.embedding_image.embedding`` is
+replaced while ``IGlobal.py`` imports it; the config resolves through the real
+resolver against the engine's schema; OpenCV, the document schema and
 ``ai.common.models.base.make_device_lock`` are the real ones, and every test video
 is written with OpenCV itself.
 
@@ -37,10 +38,40 @@ _PKG = '_embedding_video_lock_pkg_under_test'
 _SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'embedding_video'
 
 
+class _StubEmbedding:
+    """Stand-in for ``nodes.embedding_image.embedding.Embedding``; ``on_embed`` runs inside every call."""
+
+    on_embed = staticmethod(lambda: None)
+    model_name = 'stub/clip'
+
+    def __init__(self, *_a: object, **_kw: object) -> None:
+        pass
+
+    def create_image_embedding(self, _image) -> list:
+        type(self).on_embed()
+        return [0.0, 1.0]
+
+
+def _mk(name: str, **attrs: object) -> types.ModuleType:
+    m = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(m, k, v)
+    return m
+
+
 def _load_node_modules() -> tuple:
     pkg = types.ModuleType(_PKG)
     pkg.__path__ = [str(_SRC)]
     sys.modules[_PKG] = pkg
+    # IGlobal.py imports the adapter from the sibling node at module scope; serve
+    # the stub while it binds, then put whatever was there back.
+    adapters = {
+        'nodes': _mk('nodes', __path__=[]),
+        'nodes.embedding_image': _mk('nodes.embedding_image', __path__=[]),
+        'nodes.embedding_image.embedding': _mk('nodes.embedding_image.embedding', Embedding=_StubEmbedding),
+    }
+    saved = {name: sys.modules.get(name) for name in adapters}
+    sys.modules.update(adapters)
     try:
         mods = []
         for name in ('IGlobal', 'IInstance'):
@@ -54,32 +85,20 @@ def _load_node_modules() -> tuple:
     finally:
         for name in [n for n in sys.modules if n == _PKG or n.startswith(f'{_PKG}.')]:
             sys.modules.pop(name, None)
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
 
 _iglobal_mod, _iinstance_mod = _load_node_modules()
 IGlobal = _iglobal_mod.IGlobal
 IInstance = _iinstance_mod.IInstance
 
-
-class _Config:
-    @staticmethod
-    def getNodeConfig(*_a: object, **_kw: object) -> dict:
-        # One frame per second of video; the test clips are two seconds long.
-        return {'interval': 1, 'max_frames': 50}
-
-
-class _StubEmbedding:
-    """Stand-in for ``nodes.embedding_image.embedding.Embedding``; ``on_embed`` runs inside every call."""
-
-    on_embed = staticmethod(lambda: None)
-    model_name = 'stub/clip'
-
-    def __init__(self, *_a: object, **_kw: object) -> None:
-        pass
-
-    def create_image_embedding(self, _image) -> list:
-        type(self).on_embed()
-        return [0.0, 1.0]
+# One frame per second of video; the test clips are two seconds long. Stored in
+# the path-addressed shape: the extraction settings live under their group.
+_CONN_CONFIG = {'extraction': {'interval': 1, 'max_frames': 50}}
 
 
 class _StubInstance:
@@ -95,37 +114,16 @@ class _StubInstance:
         self.documents.extend(documents)
 
 
-def _mk(name: str, **attrs: object) -> types.ModuleType:
-    m = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(m, k, v)
-    return m
-
-
 @pytest.fixture
 def make_global(monkeypatch):
-    """Build an ``IGlobal`` through the real ``beginGlobal``, in the given run mode."""
+    """Build an ``IGlobal`` through the real ``beginGlobal`` and resolver, in the given run mode."""
 
     def _make(model_server: bool) -> IGlobal:
         argv = ['node.py'] + (['--modelserver=5590'] if model_server else [])
         monkeypatch.setattr(sys, 'argv', argv)
-        monkeypatch.setattr(_iglobal_mod, 'Config', _Config)
-        # beginGlobal imports the adapter from the sibling node; serve the stub instead.
-        nodes_pkg = _mk('nodes')
-        nodes_pkg.__path__ = []
-        image_pkg = _mk('nodes.embedding_image')
-        image_pkg.__path__ = []
-        monkeypatch.setitem(sys.modules, 'nodes', nodes_pkg)
-        monkeypatch.setitem(sys.modules, 'nodes.embedding_image', image_pkg)
-        monkeypatch.setitem(
-            sys.modules,
-            'nodes.embedding_image.embedding',
-            _mk('nodes.embedding_image.embedding', Embedding=_StubEmbedding),
-        )
 
         glb = IGlobal.__new__(IGlobal)
-        glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(bag={}, openMode='RUN'))
-        glb.glb = types.SimpleNamespace(logicalType='embedding_video', connConfig={})
+        glb.glb = types.SimpleNamespace(logicalType='embedding_video', connConfig=_CONN_CONFIG)
         glb.beginGlobal()
         return glb
 

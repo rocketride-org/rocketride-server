@@ -465,12 +465,12 @@ async def _webserver_mcp_app(monkeypatch, make_engine_client_fn):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('credential', ['tk_leaked_task_key', 'rr_valid_user_key'])
+@pytest.mark.parametrize('credential', ['rr_valid_user_key'])
 async def test_query_string_credential_through_auth_middleware_is_refused(monkeypatch, credential):
-    """The exploit: `POST /mcp/?auth=<key>` passes AuthMiddleware (which falls
-    back to the query string when no header is sent) but carried no header for
-    auth.authorize() to check -- so tk_ refusal, JWT verification and audience
-    were all skipped and tools ran on the server's shared engine client.
+    """`POST /mcp/?auth=<key>` carries no credential at all: AuthMiddleware
+    reads the Authorization header ONLY (there is no query-string fallback on
+    any HTTP door), so the request is refused before the account layer ever
+    sees the key, and no tool runs on the server's shared engine client.
     """
     built = []
     headers = {k: v for k, v in _E2E_HEADERS.items() if k != 'authorization'}
@@ -478,8 +478,8 @@ async def test_query_string_credential_through_auth_middleware_is_refused(monkey
     async with _webserver_mcp_app(monkeypatch, _recording_factory(built)) as (app, accepted):
         resp = await app.post(f'/mcp/?auth={credential}', json=_E2E_TOOLS_CALL, headers=headers)
 
-    # Precondition of the exploit: the account layer did accept it.
-    assert accepted == [credential]
+    # The account layer never saw it: the query string is not a credential.
+    assert accepted == []
     assert resp.status_code == 401
     assert 'resource_metadata=' in resp.headers['www-authenticate']
     assert built == [], 'a query-string credential must never reach an engine client'

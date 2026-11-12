@@ -1032,7 +1032,7 @@ class DataConn(DAPConn):
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
 
-    def _emit_tool_trace(self, op: str, pipe_id: int, component: str, trace: Dict[str, Any]) -> None:
+    def _emit_tool_trace(self, op: str, pipe: Any, component: str, trace: Dict[str, Any]) -> None:
         """
         Emit one ``>DBG`` trace event for a tool invocation.
 
@@ -1041,14 +1041,16 @@ class DataConn(DAPConn):
         stdio transport parses it into an ``apaevt_trace`` event and
         everything downstream follows for free: the derived ``apaevt_flow``
         events, the live Trace/Flow panes, the run-log continuum, and replay.
-        The ``total_pipes`` field is emitted as 0, which the supervisor treats
-        as "unknown — keep the current count" (getPipeCount is not exposed to
-        Python).
+        The wire is the engine's 8-field form (``op*pipeId*totalPipes*
+        componentId*bindingId*rootBindingId*trace``, ints hex); ``totalPipes``
+        is emitted as 0, which the supervisor treats as "unknown — keep the
+        current count" (getPipeCount is not exposed to Python).
 
         Args:
             op: Trace operation (BEGIN / ENTER / LEAVE / END).
-            pipe_id: The REAL pipe id the call runs on (the caller's open
-                pipe or the borrowed pool pipe).
+            pipe: The REAL pipe the call runs on (the caller's open pipe or
+                the borrowed pool pipe); its slot id and binding ids ride the
+                line so the supervisor routes the trace by binding.
             component: The component field — the target node id for
                 enter/leave, the call label for begin/end.
             trace: Trace payload (lane/result/data), JSON-serialized inline.
@@ -1063,7 +1065,16 @@ class DataConn(DAPConn):
         # node/tool name degrades to a readable label instead of shifting
         # every field after it.
         component = component.replace('*', '')
-        monitorOther('DBG', f'{op}*{pipe_id:x}*0*{component}*{payload}')
+        # Observability is best-effort: the BEGIN call sits before the tool's
+        # cleanup try and END inside its finally, so a failure reading the pipe's
+        # ids or writing the monitor line must never abort the call, skip
+        # returning a borrowed pipe, or replace the tool's result or error.
+        try:
+            monitorOther(
+                'DBG', f'{op}*{pipe.pipeId:x}*0*{component}*{pipe.bindingId:x}*{pipe.rootBindingId:x}*{payload}'
+            )
+        except Exception:
+            pass
 
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1129,15 +1140,13 @@ class DataConn(DAPConn):
             # Use caller's open pipe if provided, otherwise borrow one
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
-                trace_pipe_id = conn_pipe.pipe_id
             else:
                 pipe = self._target.getPipe()
-                trace_pipe_id = pipe.pipeId
 
             # Open the trace for this call ON ITS REAL PIPE — a plain nested
             # BEGIN/ENTER/LEAVE/END sequence, exactly like a document
             # traversal (the END in the finally below closes it).
-            self._emit_tool_trace('BEGIN', trace_pipe_id, call_label, {})
+            self._emit_tool_trace('BEGIN', pipe, call_label, {})
 
             try:
                 # Walk the filter chain to find candidate node(s).
@@ -1171,7 +1180,7 @@ class DataConn(DAPConn):
                     # leave with the outcome (return / skip / error) + timing.
                     self._emit_tool_trace(
                         'ENTER',
-                        trace_pipe_id,
+                        pipe,
                         component,
                         {'lane': 'tool', 'data': {'tool': tool_name, 'input': _trim_tool_data(tool_input)}},
                     )
@@ -1180,7 +1189,7 @@ class DataConn(DAPConn):
                         py_instance.invoke(param)
                         self._emit_tool_trace(
                             'LEAVE',
-                            trace_pipe_id,
+                            pipe,
                             component,
                             {
                                 'lane': 'tool',
@@ -1196,11 +1205,11 @@ class DataConn(DAPConn):
                         if e.ec == Ec.PreventDefault:
                             # This node does not own the tool — record the probe
                             # and move on to the next candidate.
-                            self._emit_tool_trace('LEAVE', trace_pipe_id, component, {'lane': 'tool', 'result': 'skip'})
+                            self._emit_tool_trace('LEAVE', pipe, component, {'lane': 'tool', 'result': 'skip'})
                             continue
                         self._emit_tool_trace(
                             'LEAVE',
-                            trace_pipe_id,
+                            pipe,
                             component,
                             {
                                 'lane': 'tool',
@@ -1218,7 +1227,7 @@ class DataConn(DAPConn):
             finally:
                 # Retire the synthetic document (removes it from byPipe) and
                 # return a borrowed pipe to the pool.
-                self._emit_tool_trace('END', trace_pipe_id, call_label, {})
+                self._emit_tool_trace('END', pipe, call_label, {})
                 if borrowed:
                     self._target.putPipe(pipe)
 

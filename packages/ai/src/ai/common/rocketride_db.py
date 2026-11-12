@@ -59,10 +59,9 @@ DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
 # The node providers that use a RocketRide cloud database.
 DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
 
-# Source providers whose callers reach the run as its owner with no identity
-# of their own: a pk_ chat, dropper or webhook link, or a chat bot. A pipeline
-# with any of them exposes a public endpoint (SDD 4.4 hard rule 2). Every task
-# gets a pk_ token, so the token alone can't decide this (open question 14).
+# Source providers that expose a public endpoint (SDD 4.4 hard rule 2): a
+# chat, dropper or webhook door, or a chat bot. The provider decides this;
+# every task is addressed the same way, so nothing on the task itself can.
 PUBLIC_SOURCE_PROVIDERS = frozenset({'chat', 'dropper', 'webhook', 'discord', 'telegram'})
 
 DB_SCOPES = ('org', 'team', 'user')
@@ -86,7 +85,7 @@ def db_target(config: Mapping) -> tuple[str, str]:
     """Read and check a DB node's ``(scope, target)`` from its resolved config.
 
     Args:
-        config: The node config after ``Config.getNodeConfig`` (flat keys).
+        config: The node's resolved config (``rocketlib.resolveConfig`` view, flat keys).
 
     Returns:
         ``(scope, target)``. scope defaults to ``'org'``; target ``''`` means
@@ -117,22 +116,6 @@ def dsn_key(scope: str, target: str = '') -> str:
 def exposes_public_endpoint(components: Iterable) -> bool:
     """True when any component is a public source (``PUBLIC_SOURCE_PROVIDERS``)."""
     return any(isinstance(c, dict) and c.get('provider') in PUBLIC_SOURCE_PROVIDERS for c in components or ())
-
-
-def source_is_public(pipeline: Mapping | None, source: str | None) -> bool:
-    """True when the run's own source component is a public source.
-
-    This is what a run's ``pk_`` key may reach: the public endpoint the run
-    serves is its source's. Read from the pipeline as submitted. A literal
-    provider name has no ``${...}`` to expand, so it is the provider that
-    runs; a placeholder is not a public provider name and reads as not public.
-    """
-    if not isinstance(pipeline, Mapping) or not source:
-        return False
-    for component in pipeline.get('components') or ():
-        if isinstance(component, Mapping) and component.get('id') == source:
-            return component.get('provider') in PUBLIC_SOURCE_PROVIDERS
-    return False
 
 
 def _describe(scope: str, target: str) -> str:

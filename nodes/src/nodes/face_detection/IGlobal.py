@@ -24,7 +24,9 @@
 
 import threading
 
-from rocketlib import IGlobalBase, OPEN_MODE
+from rocketlib import IGlobalBase
+
+from .face_detection import FaceDetector
 
 
 class IGlobal(IGlobalBase):
@@ -36,18 +38,9 @@ class IGlobal(IGlobalBase):
     """
 
     def beginGlobal(self):
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
-        from depends import load_depends
-
-        load_depends(__file__)
-
-        from .face_detection import FaceDetector
-
-        bag = self.IEndpoint.endpoint.bag
-
-        self.detector = FaceDetector(self.glb.logicalType, self.glb.connConfig, bag)
+        """Build the detector from the resolved config (threshold bounded by the schema)."""
+        config = self.config
+        self.detector = FaceDetector(config.threshold, config.emit_landmarks)
 
         self.device_lock = threading.Lock()
 

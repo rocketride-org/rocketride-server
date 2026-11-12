@@ -3,8 +3,9 @@
  * Copyright (c) 2026 Aparavi Software AG
  * See LICENSE file for details.
  *
- * Dropper widget: drag-drop upload to the pk_-tokenized upload_url from the
- * run_dropper_pipe tool result. The POST is synchronous — its response is the
+ * Dropper widget: drag-drop upload to the address-keyed upload_url from the
+ * run_dropper_pipe tool result (header-authenticated; the widget's scoped
+ * upload key is the widget work package). The POST is synchronous — its response is the
  * standard engine envelope {status: 'OK', data: DataResult} (or
  * {status: 'Error', error}), where DataResult is
  * {objectsRequested, objectsCompleted, resultTypes, objects}.

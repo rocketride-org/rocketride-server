@@ -22,9 +22,8 @@
 # =============================================================================
 
 import numpy as np
-from typing import Dict, Any, List
+from typing import List
 from ai.common.models.vision import CLIPModel, ViTModel
-from ai.common.config import Config
 from ai.common.image.image import Image
 
 
@@ -48,25 +47,18 @@ class Embedding:
            model_type (str): Type of model loaded ('clip' or 'vit').
     """
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, model_name: str):
         """
         Initialize the Embedding instance.
 
-        Loads node-specific configuration to determine which image model to use (CLIP or ViT),
-        and sets up the model with appropriate output specification.
-
-        The model proxy automatically determines whether to run locally or on the model server.
+        Loads the named image model (CLIP or ViT) and sets up the model with
+        the appropriate output specification. The model proxy automatically
+        determines whether to run locally or on the model server.
 
         Args:
-            provider (str): The logical type or provider identifier for the node.
-            connConfig (Dict[str, Any]): node-specific configuration dictionary.
-            bag (Dict[str, Any]): Additional data bag, not used here but available for extension.
+            model_name (str): The Hugging Face model identifier the node's resolved config names.
         """
-        # Retrieve configuration for the node using a global config helper
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Fetch the model name from the config or use the default CLIP model
-        self.model_name = config.get('model', 'openai/clip-vit-base-patch16')
+        self.model_name = model_name
 
         if 'clip' in self.model_name.lower():
             # CLIP model - extract and normalize image features

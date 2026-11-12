@@ -34,6 +34,7 @@ from fnmatch import fnmatch
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .discovery import NodeTestConfig
+from .pipeline import SchemaPaths
 
 # Files no loader here reads: other weight formats (several repos ship them next
 # to the torch weights) and repository housekeeping.
@@ -109,7 +110,7 @@ def _hf(profile: Dict[str, Any], prefer_safetensors: bool = True) -> Optional[Mo
     """Map a profile's ``model`` (+ ``revision``) to a snapshot.
 
     Args:
-        profile: Node profile from ``preconfig.profiles``.
+        profile: The declared defaults reachable with the node's branch selected.
         prefer_safetensors: See :attr:`ModelRef.prefer_safetensors`.
 
     Returns:
@@ -186,11 +187,11 @@ def collect_refs(pairs: Iterable[Tuple[NodeTestConfig, Optional[str]]]) -> List[
     """
     refs: Dict[Tuple[str, Optional[str], Tuple[str, ...]], ModelRef] = {}
     for config, profile_name in pairs:
-        preconfig = config.preconfig or {}
-        name = profile_name or preconfig.get('default')
-        profile = preconfig.get('profiles', {}).get(name) if name else None
-        if not isinstance(profile, dict):
-            continue
+        # The profile object is the declared defaults reachable with that branch
+        # selected (plan section 5.6.2).
+        paths = SchemaPaths(config.property_definitions, config.properties)
+        profile = paths.profile_values(profile_name)
+        name = profile_name or next((profile[s] for s in paths.selectors if s in profile), 'default')
         ref = RESOLVERS.get(config.node_name, _hf)(profile)
         if ref is None:
             continue

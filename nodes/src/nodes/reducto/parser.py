@@ -21,9 +21,8 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Mapping, Optional, List
 from ai.common.reader import ReaderBase
-from ai.common.config import Config
 from rocketlib import debug
 
 
@@ -36,32 +35,26 @@ class Parser(ReaderBase):
     - Table detection and parsing
     """
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """Initialize the Reducto parser with provider, connection config, and bag.
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
+        """Initialize the Reducto parser with provider, the resolved config, and bag.
 
         Args:
             provider: The provider identifier
-            connConfig: Connection configuration dictionary
+            config: The resolved node config (api_key, parse_mode and the mode's options)
             bag: Shared resource bag from the endpoint
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
         # Store the bag explicitly
         self.bag = bag
 
-        # Get the nodes configuration
-        self.config = Config.getNodeConfig(provider, connConfig)
-
-        # Check if config has nested structure
-        if 'default' in self.config:
-            debug('Reducto Parser: Found nested config structure, extracting from default profile')
-            self.config = self.config.get('default', {})
-            debug(f'Reducto Parser: Extracted config: {self.config}')
+        # Keep the resolved configuration for the per-parse options
+        self.config = config
 
         # Get configuration values
-        self._api_key = self.config.get('api_key')
-        self._parse_mode = self.config.get('parse_mode', False)  # False = Simple, True = Advanced
+        self._api_key = config['api_key']
+        self._parse_mode = bool(config['parse_mode'])  # False = Simple, True = Advanced
 
         # Track whether figure summarization was requested for this parser instance
         self._summarize_text = False

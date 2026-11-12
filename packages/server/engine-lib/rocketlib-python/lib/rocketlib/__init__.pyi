@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Protocol, TypedDict, overload
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Protocol, TypedDict, overload
 
 # ---------------------------------------------------------------------------
 # Re-exports — everything listed in __all__
@@ -142,6 +142,7 @@ class PROTOCOL_CAPS:
     GPU: int
     DEPRECATED: int
     EXPERIMENTAL: int
+    MULTITENANT: int
 
     @staticmethod
     def getProtocolCaps(protocol: str) -> int: ...
@@ -578,14 +579,15 @@ class IServiceEndpoint(Protocol):
     parameters: Dict[str, Any]
     bag: Dict[str, Any]
     target: Any
-    debugger: Any
 
     def insertFilter(self, filterName: str, filterConfig: Dict[str, Any]) -> None: ...
     def getToken(self, serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig', key: str) -> str: ...
     def setToken(
         self, serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig', key: str, value: str
     ) -> None: ...
-    def getPipe(self) -> 'IServiceFilterPipe': ...
+    def getPipe(self, traceLevel: Optional[str] = None, parentBindingId: int = 0) -> 'IServiceFilterPipe':
+        """Take a pipe as a new binding: traceLevel none/metadata/summary/full (None = endpoint default); a parentBindingId makes it a child binding that inherits root and level."""
+        ...
     def putPipe(self, pipe: 'IServiceFilterPipe') -> None: ...
 
 class IServiceFilterPipe(Protocol):
@@ -601,6 +603,9 @@ class IServiceFilterPipe(Protocol):
     currentObject: Entry
     pipeType: 'IServiceFilterPipe.IServiceFilterInstance_PipeType'
     pipeId: int
+    bindingId: int
+    rootBindingId: int
+    traceLevel: str
     next: Optional['IServiceFilterPipe']
     targetObjectPath: str
     targetObjectUrl: str
@@ -681,15 +686,67 @@ class IEndpointBase:
     def scanObjects(self, path: str, callback: Callable[[Dict[str, Any]], int]) -> None: ...
     def endEndpoint(self) -> None: ...
 
+# ---- config.py ----
+
+class ConfigError(ValueError):
+    """A node configuration does not fit its schema (hard error at validate and execute)."""
+
+class TenancyViolation(Exception):
+    """A node read per-caller data where only shared state may live."""
+
+class ConfigView(Mapping[str, Any]):
+    """Read-only, schema-only node configuration with attribute and item access."""
+
+    def __getitem__(self, key: str) -> Any: ...
+    def __getattr__(self, name: str) -> Any: ...
+    def __iter__(self) -> Iterator[str]: ...
+    def __len__(self) -> int: ...
+    @property
+    def param_keys(self) -> frozenset[str]: ...
+    @property
+    def env_keys(self) -> frozenset[str]: ...
+    @property
+    def params(self) -> List[Dict[str, Any]]: ...
+    @property
+    def capabilities(self) -> int: ...
+    def path_of(self, key: str) -> str: ...
+    def descriptor_of(self, key: str) -> Dict[str, Any]: ...
+    def to_dict(self) -> Dict[str, Any]: ...
+    def restricted(self, *, refuse_params: bool, refuse_env: bool) -> ConfigView: ...
+    def expand_env(self, env: Optional[Mapping[str, Any]]) -> ConfigView: ...
+    def overlay(self, params: Optional[Mapping[str, Any]]) -> ConfigView: ...
+
+def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView: ...
+
 class IGlobalBase:
     """Base class for all Python global driver implementations."""
 
     IEndpoint: IEndpointBase
     glb: Any  # IFilterGlobal Protocol — logicalType, physicalType, connConfig
 
+    @property
+    def config(self) -> ConfigView: ...
     def preventDefault(self) -> None: ...
     def beginGlobal(self) -> None: ...
     def endGlobal(self) -> None: ...
+
+class IValidatorBase(IGlobalBase):
+    """Framework default IValidator: resolving self.config is the schema validation."""
+
+    def validateConfig(self, syntaxOnly: bool = ...) -> None: ...
+
+class BindingLogger:
+    """A node's message channel captured for ONE binding (IInstanceBase.logger())."""
+
+    pipeId: int
+    bindingId: int
+    rootBindingId: int
+
+    def __init__(self, pipe_id: int, binding_id: int, root_binding_id: int) -> None: ...
+    def debug(self, *args: Any) -> None: ...
+    def warning(self, *args: Any) -> None: ...
+    def error(self, *args: Any) -> None: ...
+    def sendSSE(self, type: str, **data: Any) -> None: ...
 
 class IInstanceBase:
     """Base class for all Python instance driver implementations."""
@@ -697,7 +754,21 @@ class IInstanceBase:
     IEndpoint: IEndpointBase
     IGlobal: IGlobalBase
     instance: IServiceFilterPipe
+    iglobal_methods_only: bool
+    _caller: Optional[Dict[str, Any]]
+    _settings: Optional[ConfigView]
 
+    @property
+    def settings(self) -> ConfigView: ...
+    @property
+    def bindingId(self) -> int: ...
+    @property
+    def rootBindingId(self) -> int: ...
+    def getPipe(self, traceLevel: Optional[str] = None) -> IServiceFilterPipe:
+        """Open a sub-pipe as a child of this binding (same rootBindingId, inherited trace level, caller stamped)."""
+        ...
+    def putPipe(self, pipe: IServiceFilterPipe) -> None: ...
+    def logger(self) -> BindingLogger: ...
     def preventDefault(self) -> None: ...
     def invoke(self, *args: Any, **kwargs: Any) -> Any: ...
     def control(self, control: IControl) -> None: ...
@@ -782,8 +853,10 @@ def monitorOther(*args: Any) -> None:
     """Emit any other monitor information."""
     ...
 
-def monitorSSE(pipe_id: int, type: str, data: Optional[Dict[str, Any]] = None) -> None:
-    """Send a real-time SSE event to the UI for the current pipe."""
+def monitorSSE(
+    pipe_id: int, type: str, data: Optional[Dict[str, Any]] = None, binding_id: int = 0, root_binding_id: int = 0
+) -> None:
+    """Send a real-time SSE event to the UI, tagged with the binding that produced it."""
     ...
 
 def isLevelEnabled(level: Lvl) -> bool:
@@ -824,6 +897,10 @@ def validatePipeline(config: Dict[str, Any], custom: List[Dict[str, Any]] = ...)
 
 def resolveSecureParameters(pipeline: Dict[str, Any]) -> Dict[str, Any]:
     """Return the pipeline with its secure parameter tokens replaced by the values they hold."""
+    ...
+
+def getServiceSchema(logicalType: str) -> Dict[str, Any]:
+    """The RESOLVED schema (properties with `path`, `params`, `capabilities` bitmask); None for an unknown type."""
     ...
 
 def getServiceDefinition(logicalType: str) -> Dict[str, Any]:

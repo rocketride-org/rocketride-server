@@ -23,8 +23,9 @@ retryable; authentication and other API errors are mapped to friendly messages
 Two safety behaviors are enforced on the endpoint URL: it must use **HTTPS**, and the
 hostname must be `gmi-serving.com` or a subdomain of it (an SSRF guard on user-supplied
 endpoints). This is checked both at save time and when the pipeline starts. An API key is
-required at pipeline start; the shared endpoint `https://api.gmi-serving.com/v1` is used
-when no endpoint URL is configured.
+required. Shared models pin the shared endpoint `https://api.gmi-serving.com/v1`;
+deploy-on-demand models require an endpoint URL, and the Custom model's endpoint
+defaults to the shared one.
 
 ## Lanes
 
@@ -32,62 +33,57 @@ when no endpoint URL is configured.
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **DeepSeek V3** (`deepseek-v3`).
-
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| DeepSeek V3 **(default)** | `deepseek-ai/DeepSeek-V3-0324` | 163,840 |
-| Gemini 3.1 Pro | `google/gemini-3.1-pro-preview` | 128,000 |
-| Gemini 3.1 Flash Lite | `google/gemini-3.1-flash-lite-preview` | 128,000 |
-| GPT-5.2 | `openai/gpt-5.2` | 128,000 |
-
-<details>
-<summary><strong>View 18 more models</strong></summary>
-
-| Profile | Model | Context tokens |
-| ------- | ----- | -------------- |
-| `custom` | _(user-specified)_ | editable |
-| Llama 4 Scout | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | 1,048,576 |
-| Llama 4 Maverick | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` | 1,048,576 |
-| Qwen3 235B | `Qwen/Qwen3-235B-A22B-FP8` | 131,072 |
-| Qwen3 32B | `Qwen/Qwen3-32B-FP8` | 131,072 |
-| Qwen3 30B | `Qwen/Qwen3-30B-A3B` | 131,072 |
-| Qwen3 Coder 480B | `Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8` | 131,072 |
-| DeepSeek V3.2 | `deepseek-ai/DeepSeek-V3.2` | 163,840 |
-| DeepSeek R1 | `deepseek-ai/DeepSeek-R1` | 131,072 |
-| DeepSeek R1 Distill 32B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 131,072 |
-| DeepSeek R1 Distill 1.5B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 131,072 |
-| DeepSeek Prover V2 | `deepseek-ai/DeepSeek-Prover-V2-671B` | 131,072 |
-| GPT-5.1 | `openai/gpt-5.1` | 128,000 |
-| GPT-5 | `openai/gpt-5` | 128,000 |
-| GPT-4o | `openai/gpt-4o` | 128,000 |
-| Claude Opus 4.5 | `anthropic/claude-opus-4.5` | 200,000 |
-| Claude Sonnet 4.5 | `anthropic/claude-sonnet-4.5` | 200,000 |
-| Gemini 3 Flash | `google/gemini-3-flash-preview` | 128,000 |
-
-</details>
-
 ## Configuration
 
-Choose a profile for a shared or deployed model. Named profiles set the model and
-context limit; shared models also use the default endpoint, so most pipelines only
-need an API key.
+Choose a model from the **Model** selector for a shared or deployed model. Each listed
+model pins its model id and context limit; shared models also pin the shared endpoint,
+so most pipelines only need an API key. The default is **DeepSeek V3**
+(`deepseek-ai/DeepSeek-V3-0324`).
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| DeepSeek V3 **(default)** | `deepseek-ai/DeepSeek-V3-0324` | 163,840 | — |
+| Llama 4 Scout | `meta-llama/Llama-4-Scout-17B-16E-Instruct` | 1,048,576 | — |
+| Llama 4 Maverick | `meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8` | 1,048,576 | — |
+| Qwen3 235B | `Qwen/Qwen3-235B-A22B-FP8` | 131,072 | — |
+| Qwen3 32B | `Qwen/Qwen3-32B-FP8` | 131,072 | — |
+| Qwen3 30B | `Qwen/Qwen3-30B-A3B` | 131,072 | — |
+| Qwen3 Coder 480B | `Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8` | 131,072 | — |
+| DeepSeek V3.2 | `deepseek-ai/DeepSeek-V3.2` | 163,840 | — |
+| DeepSeek R1 | `deepseek-ai/DeepSeek-R1` | 131,072 | — |
+| DeepSeek R1 Distill 32B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 131,072 | — |
+| DeepSeek R1 Distill 1.5B | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 131,072 | — |
+| DeepSeek Prover V2 | `deepseek-ai/DeepSeek-Prover-V2-671B` | 131,072 | — |
+| GPT-5.2 | `openai/gpt-5.2` | 128,000 | — |
+| GPT-5.1 | `openai/gpt-5.1` | 128,000 | — |
+| GPT-5 | `openai/gpt-5` | 128,000 | — |
+| GPT-4o | `openai/gpt-4o` | 128,000 | — |
+| Claude Opus 4.5 | `anthropic/claude-opus-4.5` | 200,000 | — |
+| Claude Sonnet 4.5 | `anthropic/claude-sonnet-4.5` | 200,000 | — |
+| Gemini 3.1 Pro | `google/gemini-3.1-pro-preview` | 128,000 | — |
+| Gemini 3 Flash | `google/gemini-3-flash-preview` | 128,000 | — |
+| Gemini 3.1 Flash Lite | `google/gemini-3.1-flash-lite-preview` | 128,000 | — |
+| Custom model | _(user-specified)_ | editable | editable |
+
+The listed models pin no output limit, so replies are capped at the node's default of
+4,096 tokens.
 
 ### Endpoint URL
 
-Deploy-on-demand profiles require the endpoint supplied by the GMI Cloud console.
+Deploy-on-demand models require the endpoint supplied by the GMI Cloud console.
 The URL must use HTTPS and its hostname must be `gmi-serving.com` or a subdomain;
-other hosts are rejected. The shared endpoint defaults to
+other hosts are rejected. Shared models pin the shared endpoint
 `https://api.gmi-serving.com/v1`.
 
-### Custom models
+### Custom model
 
-Select `custom` to provide a GMI Cloud model identifier, its context limit, its
-output limit (4,096 by default), and an endpoint URL directly. Open-weight identifiers use `org/model-name`, such as
-`deepseek-ai/DeepSeek-R1`; proxied identifiers use `provider/model-name`, such as
-`openai/gpt-4o`.
+Select **Custom model** to provide a GMI Cloud model id, its context limit (16,384 by
+default), its output limit (4,096 when left empty), and a **Server URL**
+(`https://api.gmi-serving.com/v1` by default). Open-weight identifiers use
+`org/model-name`, such as `deepseek-ai/DeepSeek-R1`; proxied identifiers use
+`provider/model-name`, such as `openai/gpt-4o`.
 
 ## Authentication
 
@@ -101,18 +97,17 @@ endpoint URL.
 ### Model tiers
 
 Shared models are available immediately at the shared endpoint with an API key.
-Llama, Qwen, and R1 Distill profiles are deploy-on-demand and require an endpoint
-created in the GMI Cloud console. The custom profile accepts any GMI Cloud model ID,
+The Llama, Qwen, and R1 Distill models are deploy-on-demand and require an endpoint
+created in the GMI Cloud console. The Custom model accepts any GMI Cloud model id,
 token limit, and endpoint URL directly.
 
 ### Save-time validation
 
 When the node configuration is saved, it is validated against the live API:
 
-- Validation is skipped when the model or API key is not set yet.
-- A deploy-on-demand profile whose endpoint URL is still empty is reported right
-  there: the pipeline could not start without it, and the message belongs next to
-  the field, not at run time.
+- The configuration is first checked against the schema: a missing API key, or a
+  missing endpoint URL on a deploy-on-demand model, is rejected there, since both
+  fields are required.
 - The endpoint URL is checked for HTTPS and the `gmi-serving.com` domain.
 - If the model name looks like a vision/multimodal model (contains `vl`, `vision`,
   `visual`, or `multimodal`), a warning is raised suggesting a vision node instead, and
@@ -124,24 +119,19 @@ When the node configuration is saved, it is validated against the live API:
 
 ### Model sync
 
-Profiles are maintained by the `sync_models` tooling (`llm_gmi_cloud` provider,
-`ROCKETRIDE_GMI_CLOUD_KEY`), which reads GMI Cloud's own model list.
-
-A profile the sync adds carries the shared endpoint
-(`https://api.gmi-serving.com/v1`), since that is where discovery verified the
-model answers. Selecting it needs only an API key. A deploy-on-demand model
-still requires the endpoint URL from the GMI Cloud console.
+The `sync_models` tooling has a provider for this node (`llm_gmi_cloud`,
+`ROCKETRIDE_GMI_CLOUD_KEY`) that reads GMI Cloud's own model list.
 
 Token limits come from GMI Cloud itself, with one exception: for the models GMI
 resells rather than hosts (`openai/…`, `anthropic/…`, `google/…`), the vendor's
-published limits apply, so those profiles track `llm_openai`, `llm_anthropic` and
+published limits apply, so those models track `llm_openai`, `llm_anthropic` and
 `llm_gemini`. For a model GMI runs on its own hardware, the context window is
 GMI's choice, and no third-party database can state it: OpenRouter and LiteLLM
 list the same open-weight model with different windows per host.
 
 For the same reason the sync runs **only** with that key. GMI's IDs
 (`Qwen/Qwen3-32B-FP8`) appear in no other catalogue, so a keyless run would mark
-every profile here deprecated. Without the key the provider is skipped and
+every model here deprecated. Without the key the provider is skipped and
 nothing changes — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
 
 ## Upstream docs

@@ -15,13 +15,10 @@ Two things it deliberately does not break:
 
 * **Persistent user API keys.** ``rr_`` keys and bare API keys are opaque
   strings, not JWTs. They keep taking the existing authenticator path with no
-  audience check, so Cursor and the CLI are unaffected. Task-scoped keys
-  (``tk_``/``pk_``) and PKCE exchange codes (``cd_``) are NOT callers: they
-  are minted per-task (or per-exchange), and the authenticator chain scopes
-  their *permissions* but not their *routes* — so without an explicit reject
-  here, a leaked ``pk_`` (which travels in dropper URLs by design) could reach
-  the tools that never consult engine permissions at all. They are refused at
-  this boundary.
+  audience check, so Cursor and the CLI are unaffected. PKCE exchange codes
+  (``cd_``) are NOT callers: they are minted per-exchange and consumed by the
+  code exchange, so they are refused at this boundary rather than handed to
+  the authenticator chain.
 * **Local development.** When no expected audience is configured the check is
   skipped on a loopback bind, but *refused* on a public one — the same
   posture ``MCP_DEV_NO_AUTH`` already takes elsewhere in this module. A
@@ -47,8 +44,8 @@ ENV_JWKS_URL = 'MCP_JWKS_URL'
 ENV_DEV_NO_AUTH = 'MCP_DEV_NO_AUTH'
 
 # Static credentials the account layer resolves without OAuth: persistent user
-# API keys (``rr_``), task-scoped keys (``tk_``/``pk_``), and PKCE code
-# exchanges (``cd_``). These are opaque by design and carry no audience.
+# API keys (``rr_``) and PKCE code exchanges (``cd_``). These are opaque by
+# design and carry no audience.
 #
 # Together the two tuples are exhaustive on purpose. Anything that is neither
 # a known API-key prefix nor a verifiable JWT is treated as an unverifiable
@@ -57,13 +54,12 @@ ENV_DEV_NO_AUTH = 'MCP_DEV_NO_AUTH'
 # instead of JWTs, and those would otherwise sail past the audience check as
 # if they were API keys.
 #
-# Only ``rr_`` (a persistent per-user key) identifies a caller. ``tk_``/``pk_``
-# are locked to a single task and ``cd_`` is consumed by the code exchange —
-# none of them is ever a legitimate MCP caller, so they are rejected outright
-# rather than handed to the authenticator chain (which scopes permissions,
-# not routes).
+# Only ``rr_`` (a persistent per-user key) identifies a caller. ``cd_`` is
+# consumed by the code exchange and is never a legitimate MCP caller, so it is
+# rejected outright rather than handed to the authenticator chain (which
+# scopes permissions, not routes).
 ACCEPTED_API_KEY_PREFIXES = ('rr_',)
-REJECTED_API_KEY_PREFIXES = ('tk_', 'pk_', 'cd_')
+REJECTED_API_KEY_PREFIXES = ('cd_',)
 # Backwards-compatible union used by the opaque-vs-JWT discrimination.
 API_KEY_PREFIXES = ACCEPTED_API_KEY_PREFIXES + REJECTED_API_KEY_PREFIXES
 
@@ -162,8 +158,8 @@ def looks_like_jwt(credential: str) -> bool:
     """Report whether a credential is a JWT rather than an opaque API key.
 
     Shape is a more reliable discriminator than a prefix allowlist: it covers
-    ``rr_``, ``tk_``, ``pk_`` and bare API keys without having to enumerate
-    them, and it will not misclassify a future key format.
+    ``rr_`` and bare API keys without having to enumerate them, and it will
+    not misclassify a future key format.
 
     Args:
         credential: The bearer credential, without the ``Bearer`` prefix.
@@ -251,11 +247,9 @@ def authorize(scope: Dict[str, Any], *, bind_host: str, dev_bypass: bool = False
             None to let it proceed.
     """
     # The MCP authorization spec requires the Authorization header and forbids
-    # access tokens in the URI query string. The auth middleware's ``?auth=``
-    # fallback exists for browser/WebSocket routes; here it would authenticate
-    # a credential this function never sees, skipping every check below and
-    # running tools as the server's shared engine client. Refuse the parameter
-    # outright, whatever its value. Parsed exactly as Starlette's
+    # access tokens in the URI query string. The auth middleware honors no
+    # ``?auth=`` either, but a credential there must still be refused as a
+    # request error rather than silently ignored. Parsed exactly as Starlette's
     # ``request.query_params`` does, so the two layers agree on what ``auth`` is.
     query = scope.get('query_string') or b''
     if any(name == 'auth' for name, _ in parse_qsl(query.decode('latin-1'), keep_blank_values=True)):
@@ -288,15 +282,13 @@ def authorize(scope: Dict[str, Any], *, bind_host: str, dev_bypass: bool = False
 
     scope.setdefault('state', {})['mcp_credential'] = credential
 
-    # Task-scoped keys and exchange codes are never MCP callers. The upstream
-    # authenticator would accept them (it scopes permissions, not routes), and
-    # several tools never consult engine permissions — so the reject has to
-    # happen at this boundary, before the authenticator ever sees them.
+    # Exchange codes are never MCP callers. The upstream authenticator would
+    # accept them (it scopes permissions, not routes), and several tools never
+    # consult engine permissions — so the reject has to happen at this
+    # boundary, before the authenticator ever sees them.
     if credential.startswith(REJECTED_API_KEY_PREFIXES):
-        logger.warning('rejected /mcp credential: task-scoped or exchange-only key (%s...)', credential[:3])
-        return (
-            'task-scoped keys (tk_/pk_) and exchange codes (cd_) cannot call /mcp; use an rr_ API key or an OAuth token'
-        )
+        logger.warning('rejected /mcp credential: exchange-only code (%s...)', credential[:3])
+        return 'exchange codes (cd_) cannot call /mcp; use an rr_ API key or an OAuth token'
 
     # Persistent user API keys keep the existing path untouched — they are
     # opaque by design and there is no audience to check.

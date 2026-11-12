@@ -7,8 +7,8 @@ over the LLM preprocessor when deterministic, local splitter behavior is enough.
 ## About LangChain
 
 LangChain provides the `langchain_text_splitters` classes used by this node.
-The node selects one of those classes from its profile and supplies the chunk
-size and length function it uses for splitting.
+The node creates the class named by its splitter selector and supplies the
+chunk size and length function it uses for splitting.
 
 ## What it does
 
@@ -25,36 +25,21 @@ object closes; tables are split as they arrive.
 | `text` | `documents` | Split accumulated text when the object closes. |
 | `table` | `documents` | Split each incoming table immediately. |
 
-## Profiles
-
-Default: `default`, the recursive character splitter.
-
-| Profile | Splitter |
-| --- | --- |
-| `default` *(default)* | `RecursiveCharacterTextSplitter` |
-| `recursive` | `RecursiveCharacterTextSplitter` |
-| `character` | `CharacterTextSplitter` |
-| `markdown` | `MarkdownTextSplitter` |
-| `latex` | `LatexTextSplitter` |
-| `nltk` | `NLTKTextSplitter` |
-| `spacy` | `SpacyTextSplitter` |
-| `custom` | `RecursiveCharacterTextSplitter` |
-
 ## Configuration
 
-Start with the default profile and string-length mode for ordinary prose. Pick
-a content-specific profile when its boundaries matter, then set the size in
-characters or estimated tokens. The generated schema lists the profile-owned
-fields; the choices below explain their operational effects.
+Start with the default recursive character splitter and string-length mode for
+ordinary prose. Pick a content-specific splitter when its boundaries matter,
+then set the size in characters or estimated tokens. The generated schema
+lists every field; the choices below explain their operational effects.
 
 ### Text splitter
 
-The profile fixes the splitter class; changing the class field to another
-value fails configuration validation. Use `markdown` for Markdown, `latex` for
-LaTeX, `character` for one fixed separator, `nltk` for the NLTK splitter, or
-`spacy` for the spaCy splitter. The `custom` selector is present in the
-configuration but is also fixed to `RecursiveCharacterTextSplitter`, so it
-currently behaves like `default`.
+The selector names the LangChain class directly and defaults to
+`RecursiveCharacterTextSplitter`. Each choice shows only its own options next
+to the shared size settings. Use `MarkdownTextSplitter` for Markdown,
+`LatexTextSplitter` for LaTeX, `CharacterTextSplitter` for one fixed
+separator, `NLTKTextSplitter` for the NLTK splitter, or `SpacyTextSplitter`
+for the spaCy splitter.
 
 ### Split by and chunk size
 
@@ -66,15 +51,15 @@ when chunks are rejected for being too long.
 
 ### Split separators
 
-For the recursive profile, write a comma-separated sequence of quoted Python
+For the recursive splitter, write a comma-separated sequence of quoted Python
 string literals, such as `'\n\n', '\n', ' ', ''`. The node parses that
 sequence with `ast.literal_eval`; every item must be a string or startup fails.
-For the character profile, supply exactly one such literal. Change recursive
+For the character splitter, supply exactly one such literal. Change recursive
 separators to prefer domain boundaries before falling back to shorter ones.
 
 ### Model
 
-The spaCy profile uses the selected spaCy pipeline, defaulting to
+The spaCy splitter uses the selected spaCy pipeline, defaulting to
 `en_core_web_sm`. Choose one of the listed English, German, French, or Spanish
 models for text in that language. If the pipeline is absent, the node downloads
 it before creating the splitter; this may delay the first run.
@@ -83,18 +68,10 @@ it before creating the splitter; this may delay the first run.
 
 ### Downloads and output
 
-The NLTK profile installs its extra dependencies when selected and downloads
+The NLTK splitter installs its extra dependencies when selected and downloads
 `punkt` when it cannot find it; it also attempts to download `punkt_tab` when
 needed. All splitters use zero chunk overlap. Every emitted document receives a
 sequential `chunkId` per object; table documents also receive a `tableId`.
-
-### Token-budget safety net
-
-When token mode also has a positive `max_model_tokens` configuration value,
-the node subtracts `token_safety_margin` (32 by default), caps the requested
-chunk size to the result, and force-splits any remaining oversized output. The
-byte-per-token estimate defaults to 3.0 and can be changed through
-`bytes_per_token`; lowering it estimates more tokens and is the safer choice.
 
 ## Upstream docs
 

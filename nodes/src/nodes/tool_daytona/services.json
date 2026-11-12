@@ -12,25 +12,19 @@
 	"description": ["Gives agents an isolated Daytona cloud sandbox for running code and shell commands.", "Provides run_code, run_command, upload_file and download_file on one shared ephemeral sandbox."],
 	"tile": [],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Daytona",
-				"apikey": ""
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The API key is a required secret the account
+	//		variable supplies; the bounds cap every agent-driven execution.
+	//
+	"propertyDefinitions": {
 		"tool_daytona.apikey": {
 			"type": "string",
 			"title": "API Key",
-			"description": "Daytona API key (app.daytona.io → Keys).",
-			"default": "",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "Daytona API key (app.daytona.io -> Keys).",
+			"secret": true,
+			"env": "ROCKETRIDE_DAYTONA_APIKEY",
+			"required": true
 		},
 		"tool_daytona.api_url": {
 			"type": "string",
@@ -89,6 +83,7 @@
 			"maximum": 1000000
 		}
 	},
+	"properties": ["type", "tool_daytona.apikey", "tool_daytona.api_url", "tool_daytona.target", "tool_daytona.snapshot", "tool_daytona.language", "tool_daytona.auto_stop_minutes", "tool_daytona.exec_timeout_secs", "tool_daytona.max_output_chars"],
 	"test": {
 		"profiles": ["default"],
 		"outputs": [],
@@ -98,12 +93,5 @@
 				"text": "test query"
 			}
 		]
-	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Daytona",
-			"properties": ["type", "tool_daytona.apikey", "tool_daytona.api_url", "tool_daytona.target", "tool_daytona.snapshot", "tool_daytona.language", "tool_daytona.auto_stop_minutes", "tool_daytona.exec_timeout_secs", "tool_daytona.max_output_chars"]
-		}
-	]
+	}
 }

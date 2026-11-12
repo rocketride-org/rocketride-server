@@ -1,6 +1,4 @@
 # =============================================================================
-# RocketRide Engine
-# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -23,13 +21,28 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Google Cloud Storage tool node - global (shared) state.
+
+Reads the bucket, prefix and download cap from the resolved node config,
+authenticates through the shared GCP definitions (gcp.authType) and holds
+the storage client every instance call goes through.
+"""
+
 from __future__ import annotations
 
 import os
 from typing import List
 
-from ai.common.config import Config
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+from rocketlib import IGlobalBase, debug, warning
+
+from depends import depends
+
+# google.cloud.storage is imported at module scope, so the requirements are
+# installed before that happens. This module is only imported on the run path
+# (config mode imports the validator alone), so the install never runs while a
+# user is merely opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 try:
     from google.cloud import storage
@@ -37,8 +50,6 @@ except ImportError:
     storage = None
 
 _GCS_SCOPES = ['https://www.googleapis.com/auth/devstorage.read_only']
-# 50 MiB default download cap — keeps agents from filling server disk.
-_DEFAULT_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 # Only the most recent download is kept; a new download deletes the previous temp file.
 _MAX_RETAINED_TEMP_FILES = 1
 
@@ -49,28 +60,23 @@ class IGlobal(IGlobalBase):
     client: storage.Client | None = None
     bucket_name: str = ''
     prefix: str = ''
-    max_download_bytes: int = _DEFAULT_MAX_DOWNLOAD_BYTES
+    max_download_bytes: int = 52428800
     temp_files: List[str] | None = None
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         if storage is None:
             raise ImportError('google-cloud-storage is not installed.')
 
         # deferred: engine-path import
         from nodes.core.gcp_auth import get_gcp_credentials
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        # The resolved config: the active gcp.authType branch flattened beside
+        # the bucket settings, maxDownloadBytes a validated positive integer
+        cfg = self.config
 
-        self.bucket_name = str((cfg.get('bucketName') or '')).strip()
-        self.prefix = str((cfg.get('prefix') or '')).strip()
-        try:
-            max_bytes = int(cfg.get('maxDownloadBytes') or _DEFAULT_MAX_DOWNLOAD_BYTES)
-        except (TypeError, ValueError):
-            max_bytes = _DEFAULT_MAX_DOWNLOAD_BYTES
-        self.max_download_bytes = max(1, max_bytes)
+        self.bucket_name = str(cfg.bucketName or '').strip()
+        self.prefix = str(cfg.prefix or '').strip()
+        self.max_download_bytes = cfg.maxDownloadBytes
         self.temp_files = []
 
         # Auth
@@ -92,20 +98,6 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             warning(f'GCS connection check failed: {e}')
             raise
-
-    def validateConfig(self) -> None:
-        # deferred: engine-path import
-        from nodes.core.gcp_auth import get_gcp_credentials, GCPAuthError
-
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            get_gcp_credentials(cfg, scopes=_GCS_SCOPES)
-            if not str(cfg.get('bucketName') or '').strip():
-                warning('bucketName is required')
-        except GCPAuthError as e:
-            warning(f'Auth configuration error: {e}')
-        except Exception as e:
-            warning(str(e))
 
     def _remove_temp_path(self, path: str) -> None:
         try:

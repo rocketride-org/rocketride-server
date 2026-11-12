@@ -20,19 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Text Output node.
-
-Write indexed text of the source objects to the destination SMB storage.
-Optionally, anonymize PII - replace classification hits with depersonalized strings.
-
-"""
-
-from .endpoint import Endpoint as IEndpoint
-
-type(IEndpoint)
-
-from .instance import Instance as IInstance
-
-type(IInstance)

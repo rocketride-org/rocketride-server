@@ -74,49 +74,32 @@
 		"questions": ["table", "text", "answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"graph": "rocketride"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The RocketRide cloud database has one
+	//		connection, delivered by the task engine, so every property is
+	//		stored flat: no host, user or password.
 	//
-	"fields": {
-		"rocketridegraph.graph": {
-			"type": "string",
-			"title": "Graph name",
-			"default": "rocketride",
-			"description": "Name of the AGE graph to query in your RocketRide cloud database"
-		},
+	"propertyDefinitions": {
 		"rocketridegraph.db_description": {
 			"type": "string",
 			"title": "Graph description",
 			"default": "",
 			"description": "What is this graph used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"format": "textarea"
+		},
+		"rocketridegraph.graph": {
+			"type": "string",
+			"title": "Graph name",
+			"default": "rocketride",
+			"minLength": 1,
+			"description": "Name of the AGE graph to query in your RocketRide cloud database"
 		},
 		"rocketridegraph.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
 			"default": 5,
 			"minimum": 1,
-			"maximum": 20,
+			"maximum": 10,
 			"description": "Maximum number of times to re-ask the LLM if validation rejects the generated Cypher"
 		},
 		"rocketridegraph.max_rows": {
@@ -154,39 +137,20 @@
 			"title": "Team or user",
 			"default": "",
 			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
-		},
-		"rocketridegraph.default": {
-			"object": "default",
-			"properties": ["rocketridegraph.db_description", "rocketridegraph.graph", "rocketridegraph.max_attempts", "rocketridegraph.max_rows", "rocketridegraph.query_timeout_ms", "rocketridegraph.allow_execute", "rocketridegraph.scope", "rocketridegraph.target"]
-		},
-		"rocketridegraph.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["rocketridegraph.default"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "RocketRide Graph",
-			"properties": ["rocketridegraph.profile"],
-			"ui": {
-				"ui:options": {
-					"compactDescriptions": true
-				}
-			}
-		}
+	"properties": [
+		"rocketridegraph.db_description",
+		"rocketridegraph.graph",
+		"rocketridegraph.max_attempts",
+		"rocketridegraph.max_rows",
+		"rocketridegraph.query_timeout_ms",
+		"rocketridegraph.allow_execute",
+		"rocketridegraph.scope",
+		"rocketridegraph.target"
 	]
 }

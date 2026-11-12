@@ -3,8 +3,7 @@ Unit tests for small ai.account helpers.
 
 Covers three files that are too small for their own test modules:
 
-- ``ai/account/base.py`` — ``AccountBase.generate_token`` (deterministic
-  SHA-256 token derivation), ``init_account`` no-op, and the OSS defaults
+- ``ai/account/base.py`` — ``init_account`` no-op and the OSS defaults
   that raise NotImplementedError for SaaS-only operations.
 - ``ai/account/report.py`` — the ``Reporter`` class: ``LS_REPORT`` env
   toggles real HTTP POSTs vs. silent no-op; exceptions are swallowed.
@@ -34,33 +33,6 @@ class _ConcreteAccount(AccountBase):
     async def authenticate(self, credential: str):
         """No-op authenticate so the ABC contract is satisfied."""
         return None
-
-
-def test_generate_token_is_deterministic_for_same_content():
-    """The same content dict + same prefix always yields the same token."""
-    acct = _ConcreteAccount()
-    t1 = acct.generate_token({'a': 1, 'b': 2}, prefix='tk_')
-    t2 = acct.generate_token({'b': 2, 'a': 1}, prefix='tk_')  # different order
-    assert t1 == t2
-    assert t1.startswith('tk_')
-    # Token body is exactly 32 hex chars.
-    assert len(t1) == len('tk_') + 32
-
-
-def test_generate_token_differs_for_different_content():
-    """Distinct content dicts produce distinct tokens."""
-    acct = _ConcreteAccount()
-    a = acct.generate_token({'k': 'v1'})
-    b = acct.generate_token({'k': 'v2'})
-    assert a != b
-
-
-def test_generate_token_default_prefix_is_empty():
-    """Without an explicit prefix, the token is just the 32-char hex digest."""
-    acct = _ConcreteAccount()
-    t = acct.generate_token({'k': 'v'})
-    assert len(t) == 32
-    assert all(c in '0123456789abcdef' for c in t)
 
 
 @pytest.mark.asyncio

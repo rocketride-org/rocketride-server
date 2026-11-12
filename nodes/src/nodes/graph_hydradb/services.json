@@ -48,41 +48,31 @@
 	//
 	"lanes": {},
 	//
-	// Optional: Profiles used with the "profile": key.
+	// Optional:
+	//		Local property definitions. Every field is stored flat; the API
+	//		key and database are required, the key a secret an account
+	//		variable can supply.
 	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {
-				"collection": "default"
-			}
-		}
-	},
-	//
-	// Optional: Field definitions for the config schema (RJSF)
-	//
-	"fields": {
+	"propertyDefinitions": {
 		"hydradb.api_key": {
 			"type": "string",
 			"title": "API Key",
-			"description": "HydraDB API key. Falls back to the HYDRA_DB_API_KEY environment variable if left blank.",
-			"secure": true,
-			"ui": {
-				"ui:widget": "ApiKeyWidget"
-			}
+			"description": "HydraDB API key.",
+			"secret": true,
+			"env": "ROCKETRIDE_GRAPH_HYDRADB_APIKEY",
+			"required": true
 		},
 		"hydradb.database": {
 			"type": "string",
 			"title": "Database",
-			"description": "HydraDB database - the space that stores your context. Create one in the HydraDB dashboard."
+			"description": "HydraDB database - the space that stores your context. Create one in the HydraDB dashboard.",
+			"required": true
 		},
 		"hydradb.collection": {
 			"type": "string",
 			"title": "Collection",
 			"default": "default",
+			"minLength": 1,
 			"description": "Collection scope within the database (per-user/workspace partition for memories)."
 		},
 		"hydradb.max_results": {
@@ -92,29 +82,11 @@
 			"minimum": 1,
 			"maximum": 100,
 			"description": "Default maximum number of results returned by recall_memory."
-		},
-		"hydradb.default": {
-			"object": "default",
-			"properties": ["hydradb.api_key", "hydradb.database", "hydradb.collection", "hydradb.max_results"]
-		},
-		"hydradb.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{ "value": "default", "properties": ["hydradb.default"] }
-			]
 		}
 	},
 	//
-	// Required: The shape (side-panel layout) of the service
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "HydraDB",
-			"properties": ["hydradb.profile"]
-		}
-	]
+	"properties": ["hydradb.api_key", "hydradb.database", "hydradb.collection", "hydradb.max_results"]
 }

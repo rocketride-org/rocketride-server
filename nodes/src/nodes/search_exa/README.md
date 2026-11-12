@@ -41,13 +41,9 @@ When highlights are enabled, the node sends a `contents.highlights` request with
 
 ## Authentication
 
-The API key is resolved in the following order:
+The API key comes from the node config only; there is no process-environment fallback. Enter the key, or reference an account variable as `${ROCKETRIDE_EXA_APIKEY}`, which is resolved from the org, team or user environment variables when the pipeline runs.
 
-1. `apikey` in the node config
-2. `apikey` in the connection config
-3. The `ROCKETRIDE_EXA_KEY` environment variable
-
-If none of these sources provides a non-empty value, the pipeline fails at startup with `search_exa: apikey is required`. The editor also surfaces a validation warning while you are configuring the node.
+The schema marks the key required, so a node without one fails validation before the pipeline starts.
 
 ---
 

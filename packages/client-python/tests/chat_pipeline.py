@@ -58,40 +58,28 @@ def _create_llm_component() -> Dict[str, Any]:
         return {
             'id': 'llm_openai_1',
             'provider': 'llm_openai',
-            'config': {
-                'profile': 'openai-5',
-                'openai-5': {'apikey': openai_key},
-            },
+            'config': {'model': 'gpt-5.2', 'apikey': openai_key},
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     elif anthropic_key:
         return {
             'id': 'llm_anthropic_1',
             'provider': 'llm_anthropic',
-            'config': {
-                'profile': 'claude-3_7-sonnet',
-                'claude-3-sonnet': {'apikey': anthropic_key},
-            },
+            'config': {'model': 'claude-sonnet-4-6', 'apikey': anthropic_key},
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     elif gemini_key:
         return {
             'id': 'llm_gemini_1',
             'provider': 'llm_gemini',
-            'config': {
-                'profile': 'gemini-1_5-pro',
-                'gemini-1_5-pro': {'apikey': gemini_key},
-            },
+            'config': {'model': 'models/gemini-3.1-pro-preview', 'apikey': gemini_key},
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     elif ollama_host:
         return {
             'id': 'llm_ollama_1',
             'provider': 'llm_ollama',
-            'config': {
-                'profile': 'llama3_3',
-                'llama3_3': {'serverbase': ollama_host},
-            },
+            'config': {'model': 'llama3.3:latest', 'serverbase': ollama_host},
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }
     else:

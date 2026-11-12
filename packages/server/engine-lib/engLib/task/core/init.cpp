@@ -31,10 +31,9 @@ Error init() noexcept {
         // Pipe oriented tasks
         task::actionCopy::Task::Factory, task::actionExport::Task::Factory,
         task::actionRemove::Task::Factory, task::actionVerify::Task::Factory,
-        task::actionTransform::Task::Factory, task::classify::Task::Factory,
-        task::instance::Task::Factory, task::stat::Task::Factory,
-        task::transform::Task::Factory, task::updateObjects::Task::Factory,
-        task::permissions::Task::Factory, task::pipeline::Task::Factory,
+        task::stat::Task::Factory, task::transform::Task::Factory,
+        task::updateObjects::Task::Factory, task::permissions::Task::Factory,
+        task::pipeline::Task::Factory,
 
         // Non-pipe oriented tasks
         task::classifyFiles::Task::Factory,
@@ -59,10 +58,9 @@ void deinit() noexcept {
         // Pipe oriented tasks
         task::actionCopy::Task::Factory, task::actionExport::Task::Factory,
         task::actionRemove::Task::Factory, task::actionVerify::Task::Factory,
-        task::actionTransform::Task::Factory, task::classify::Task::Factory,
-        task::instance::Task::Factory, task::stat::Task::Factory,
-        task::transform::Task::Factory, task::updateObjects::Task::Factory,
-        task::permissions::Task::Factory, task::pipeline::Task::Factory,
+        task::stat::Task::Factory, task::transform::Task::Factory,
+        task::updateObjects::Task::Factory, task::permissions::Task::Factory,
+        task::pipeline::Task::Factory,
 
         // Non-pipe oriented tasks
         task::classifyFiles::Task::Factory,

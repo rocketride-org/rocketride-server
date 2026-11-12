@@ -33,7 +33,7 @@ Primary Responsibilities:
 --------------------------
 1. Manages WebSocket connections for multiple concurrent DAP clients
 2. Orchestrates task creation, execution, and termination with security controls
-3. Provides task registry with API key-based access control and isolation
+3. Provides an address-keyed task registry resolved with the caller's account
 4. Handles task lifecycle management (launch, execute, attach, detach, stop)
 5. Implements event broadcasting system for real-time task monitoring
 6. Performs automatic cleanup of completed tasks to prevent memory leaks
@@ -50,8 +50,9 @@ Task Lifecycle Management:
 
 Security Features:
 ------------------
-- API key-based task authentication prevents cross-tenant access
-- Task token validation ensures only authorized clients can access tasks
+- Every lookup runs with the request's account: tasks are addressed by name
+  (``developerId.pipelineId[.source]``) and authorized per run, never by a
+  bearer token (there are none)
 - Secure task isolation with per-tenant resource management
 - Connection tracking and audit logging for security monitoring
 
@@ -67,12 +68,6 @@ Central orchestration server managing:
 
 import time
 import errno
-import hashlib
-import hmac
-import json
-import os
-import re
-import secrets
 import socket
 import sys
 import asyncio
@@ -80,29 +75,37 @@ import uuid
 from typing import List
 from fastapi import WebSocket
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Any, Mapping, Optional, Set
+from typing import Awaitable, Callable, Dict, Any, Optional, Set
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
+    CONST_TEARDOWN_WAIT_TIMEOUT,
     CONST_DEFAULT_TTL,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
-    CONST_TASK_TOKEN_KEY_ENV,
-    CONST_TASK_TOKEN_KEY_MIN_LENGTH,
 )
 from ai.common.dap import TransportWebSocket, DAPBase
-from rocketride import TASK_STATUS, EVENT_TYPE
+from rocketride import EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
+from ai.account.app_deploy import developer_id_required
+from ai.account.models import AccountInfo, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
+from .address import (
+    build_address,
+    check_endpoint_scope,
+    parse_address,
+    validate_component_ids,
+    validate_identity,
+    validate_segment,
+)
 
-from rocketlib import debug, warning
+from rocketlib import debug
 
 
 @dataclass
@@ -115,19 +118,29 @@ class TASK_CONTROL:
     central registry entry that tracks task ownership, configuration, and status.
 
     Attributes:
-        token (str): Unique identifier for the task instance
-        apikey (str): Authentication key for task access control and tenant isolation
+        address (str): The task's public name ``developerId.pipelineId.source``
+            — what clients send in the token slot, the display id, and the
+            name every event carries
+        key (str): The registry key ``runKind.ownerId.address`` — internal,
+            never sent to a client
         task (Optional[Task]): Reference to the actual Task instance managing execution
         launch_type (LAUNCH_TYPE): The method used to create this task (launch/execute)
         pipeline (Optional[Dict[str, Any]]): Task configuration and execution parameters
     """
 
-    # Short of the pipe — used for display and events
+    # Display id — the address (used for display and events)
     id: str = ''
 
-    # Connection and task identifiers
+    # Connection identifier (the launching user's id on every dev run)
     client_id: str = ''
-    token: str = ''
+
+    # The address ``developerId.pipelineId.source`` and the registry key
+    # ``runKind.ownerId.address``. The address omits the owner on purpose:
+    # the same address names different controls for different callers, and
+    # the resolver picks the caller's own.
+    developer_id: str = ''
+    address: str = ''
+    key: str = ''
 
     # User, team, and org identity (derived from AccountInfo after auth)
     userId: str = ''
@@ -136,7 +149,7 @@ class TASK_CONTROL:
 
     # Run classification: 'dev' | 'deploy'. Part of task identity — the
     # OWNER of a dev run is its user, the owner of a deploy run is its
-    # team, and the token digest, monitor keys, and lookups all scope by
+    # team, and the registry key, monitor keys, and lookups all scope by
     # that owner. teamId above remains billing/permission attribution and
     # is NOT the owner for dev runs.
     run_kind: str = 'dev'
@@ -146,9 +159,6 @@ class TASK_CONTROL:
     # (@me, a personal deploy). Empty falls back to the run_kind default
     # (deploy -> team, else user) for a control built before it is stamped.
     owner_kind: str = ''
-
-    # Public token - used in as alt auth
-    public_auth: str = ''
 
     # Launch type and owning connection
     launch_owner: TaskConn = None
@@ -166,7 +176,7 @@ class TASK_CONTROL:
     @property
     def owner_id(self) -> str:
         """
-        The identity that OWNS this run — what monitor keys, the token digest,
+        The identity that OWNS this run — what monitor keys, the registry key,
         and identity lookups scope by (never the attribution teamId of a
         user-owned run).
 
@@ -206,49 +216,6 @@ def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, A
     raise ValueError(f'Pipeline source component "{source}" not found in components list')
 
 
-def resolve_task_token_key(environ: Mapping[str, str]) -> Optional[bytes]:
-    """
-    Return the configured task-token key, or None when it is unset.
-
-    Args:
-        environ: The process environment.
-
-    Raises:
-        ValueError: If the key is set but shorter than
-            CONST_TASK_TOKEN_KEY_MIN_LENGTH. A configured key is an explicit
-            choice, so a weak one is refused rather than used.
-    """
-    raw = environ.get(CONST_TASK_TOKEN_KEY_ENV, '')
-    if not raw:
-        return None
-    if len(raw) < CONST_TASK_TOKEN_KEY_MIN_LENGTH:
-        raise ValueError(f'{CONST_TASK_TOKEN_KEY_ENV} must be at least {CONST_TASK_TOKEN_KEY_MIN_LENGTH} characters')
-    return raw.encode('utf-8')
-
-
-def keyed_task_token(key: bytes, content: Dict[str, Any]) -> str:
-    """
-    Build a run's private token: ``tk_`` + HMAC-SHA256(key, identity)[:32].
-
-    Same content and shape as the unkeyed ``AccountBase.generate_token`` digest
-    it replaces, so one identity still maps to one token under one key, but the
-    token cannot be computed without the key.
-    """
-    raw = json.dumps(content, sort_keys=True).encode('utf-8')
-    return f'tk_{hmac.new(key, raw, hashlib.sha256).hexdigest()[:32]}'
-
-
-# What a caller-chosen tk_ token must look like: at least as long as a minted
-# one (32 hex), from a URL-safe alphabet. A UUID (hex or with hyphens) passes.
-_STRONG_TASK_TOKEN = re.compile(r'tk_[A-Za-z0-9_-]{32,}')
-
-
-def _owner_identity(control: 'TASK_CONTROL') -> tuple:
-    """The owner a run's token is scoped by: (owner kind, owner id, run kind)."""
-    kind = control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user')
-    return (kind, control.owner_id, control.run_kind)
-
-
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -274,8 +241,8 @@ class TaskServer(DAPBase):
     - Performance metrics and usage tracking
 
     Security Model:
-    - API key-based tenant isolation prevents cross-tenant access
-    - Task tokens provide fine-grained access control
+    - Every task lookup runs with the request's account (owner-scoped,
+      permission-checked); nothing is reachable by bearer token
     - Connection tracking for audit and security monitoring
     - Secure task lookup with ownership validation
 
@@ -313,12 +280,6 @@ class TaskServer(DAPBase):
         4. Start background task cleanup process
         5. Configure DAP base class for protocol handling
         """
-        # Resolve the task-token key now (the web server has loaded .env by
-        # this point), so a misconfigured RR_TASK_TOKEN_KEY stops the engine at
-        # startup instead of failing every task start.
-        self._tk_key: Optional[bytes] = None
-        self._task_token_key()
-
         # Initialize registries for connection and task management
         self._task_control: Dict[str, TASK_CONTROL] = {}  # Task registry and metadata
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
@@ -347,9 +308,6 @@ class TaskServer(DAPBase):
         # Store reference to parent server for statistics integration
         self._server = server
         self._config = server.config
-
-        # Register authentication handler for our keys
-        server.add_authenticator(self.authenticate)
 
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
@@ -415,7 +373,7 @@ class TaskServer(DAPBase):
                     task_status = control.task.get_status()
                     if task_status.endTime + CONST_CLEANUP_DELAY_TIME < current_time:
                         # Remove the expired completed task
-                        await self.remove_task(control.token)
+                        await self.remove_task(control.key)
 
             except Exception as e:
                 # Log cleanup errors but continue operation to maintain system stability
@@ -481,7 +439,7 @@ class TaskServer(DAPBase):
                         )
                         # Terminate the idle task — reason 'ttl', so the
                         # run records as completed, never as cancelled.
-                        await self.stop_task(control.token, reason='ttl')
+                        await self.stop_task(control.key, reason='ttl')
 
                 self._debug_task_census()
 
@@ -647,99 +605,11 @@ class TaskServer(DAPBase):
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
 
-    def _task_token_key(self) -> bytes:
-        """
-        The key this process mints private task tokens (tk_) with.
-
-        Resolved on first use, so a .env loaded after import still counts, and
-        then kept for the life of the process: one identity must keep mapping to
-        one token, or the "already running" guard and the useExisting reconnect
-        stop working. Unset or empty, the key is random per process, and that
-        is a warning, not debug: on a deployed engine every restart would
-        change everyone's tk_ tokens, so it must show in the default log.
-
-        Raises:
-            ValueError: If RR_TASK_TOKEN_KEY is set but too short.
-        """
-        key = getattr(self, '_tk_key', None)
-        if key is None:
-            key = resolve_task_token_key(os.environ)
-            if key is None:
-                key = secrets.token_bytes(32)
-                warning(
-                    f'{CONST_TASK_TOKEN_KEY_ENV} is unset or empty: task tokens use a key of this process only and '
-                    'change when it restarts. Set it (the same value on every replica) to keep them.'
-                )
-            self._tk_key = key
-        return key
-
-    def _build_task_account_info(self, token: str, control: 'TASK_CONTROL', permissions: list) -> AccountInfo:
-        """Build a minimal AccountInfo for pk_*/tk_* task-scoped authentication."""
-        return AccountInfo(
-            auth=token,
-            userToken=token,
-            userId=control.userId,
-            displayName='',
-            givenName='',
-            familyName='',
-            preferredUsername='',
-            email='',
-            emailVerified=False,
-            phoneNumber='',
-            phoneNumberVerified=False,
-            locale='',
-            devTeam=control.teamId,
-            organization={
-                'id': control.orgId,
-                'name': '',
-                'permissions': [],
-                'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
-            },
-        )
-
-    async def authenticate(self, authorization: str) -> Optional[AccountInfo]:
-        """
-        Validate task-scoped keys (pk_*, tk_*) and return a minimal AccountInfo.
-        All other credential types fall through to account.authenticate().
-
-        Args:
-            authorization (str): Authentication key
-
-        Raises:
-            TaskError: Code TASK_NOT_REGISTERED if the key names no live task.
-                Subclasses RuntimeError; these two branches raised ValueError
-                before task errors carried codes.
-        """
-        if authorization.startswith('pk_'):
-            # Only a run whose source is a public endpoint: a pk_ is derivable
-            # from the run's identity, so on any other run it would hand task.data
-            # to whoever can name the run. Refused as not running, which is what
-            # an unknown key gets, so the answer does not say the run exists.
-            control = self.get_task_control_by_public_key(authorization)
-            return self._build_task_account_info(
-                authorization,
-                control,
-                ['task.data'],
-            )
-
-        if authorization.startswith('tk_'):
-            control = self._task_control.get(authorization)
-            if control:
-                return self._build_task_account_info(
-                    authorization,
-                    control,
-                    ['task.control', 'task.data', 'task.monitor', 'task.debug', 'task.store'],
-                )
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
-
-        # Not a task key — delegate to account layer
-        return None
-
     def get_task_control_by_project(
         self,
         project_id: str,
         source: str,
-        account_info: Optional[AccountInfo] = None,
+        account_info: AccountInfo,
         require: Optional[str] = None,
         team_id: str = '',
         run_kind: str = '',
@@ -754,17 +624,14 @@ class TaskServer(DAPBase):
         'deploy' is the caller's personal @me deploy run — deploy-kind but
         user-owned, the one case teamId-presence cannot express. All are
         unique by construction — task identity is
-        {runKind}.{owner}.{project}.{source}.
-
-        Without ``account_info`` (legacy/OSS/HTTP fallback) the pair is
-        scanned unscoped: a single match returns, multiple matches raise
-        instead of silently returning an arbitrary run.
+        {runKind}.{owner}.{project}.{source}. There is no account-less
+        scan: every lookup is scoped to the caller.
 
         Args:
             project_id (str): Project identity of the run
             source (str): Source component id of the run
-            account_info (Optional[AccountInfo]): Caller identity for scoping
-                and permission checks
+            account_info (AccountInfo): Caller identity for scoping and
+                permission checks (required)
             require (Optional[str]): Permission that must be granted on the
                 run's team (e.g. 'task.monitor')
             team_id (str): Owner team — addresses that team's team-owned
@@ -774,32 +641,22 @@ class TaskServer(DAPBase):
                 Ignored when team_id is set.
 
         Raises:
-            RuntimeError: If no (or ambiguously many) matching tasks exist
-            PermissionError: If the permission check fails
+            TaskError: Code TASK_NOT_REGISTERED if no matching task exists
+            PermissionError: If the caller is unauthenticated or the
+                permission check fails
         """
+        if account_info is None:
+            raise PermissionError('Not authenticated')
 
         def _verify(control: TASK_CONTROL) -> TASK_CONTROL:
             """Run-scoped permission check (owner-private for user-owned runs)."""
-            if account_info is not None:
-                # A user-owned run grants its OWNER full access by identity —
-                # surviving an org switch (the owner is unchanged, the team is
-                # now foreign) — and nobody else; a team-owned run resolves
-                # through team membership.
-                perms = resolve_run_permissions(account_info, control)
-                if not perms:
-                    raise PermissionError('Access denied: no permissions for this task')
-                if require and require not in perms:
-                    raise PermissionError(f'Permission {require!r} denied for this task')
-            return control
+            return self._verify_control(control, account_info, require)
 
-        # Team scope: the team's TEAM-OWNED deploy run. A team scope without
-        # a caller identity is never legitimate — permission must resolve
-        # somewhere. owner_kind must be checked: an @me deploy carries the
-        # SAME billing teamId, and matching it here would let any teammate
-        # reach a personal run through team permissions.
+        # Team scope: the team's TEAM-OWNED deploy run. owner_kind must be
+        # checked: an @me deploy carries the SAME billing teamId, and
+        # matching it here would let any teammate reach a personal run
+        # through team permissions.
         if team_id:
-            if account_info is None:
-                raise PermissionError('Not authenticated')
             for control in self._task_control.values():
                 if (
                     control.run_kind == 'deploy'
@@ -814,120 +671,241 @@ class TaskServer(DAPBase):
         # Own scope: the caller's run in the selected continuum (dev by
         # default; the caller's @me deploy when run_kind says so) — unique
         # per user per continuum by construction.
-        if account_info is not None:
-            wanted_kind = run_kind or 'dev'
-            for control in self._task_control.values():
-                if (
-                    control.run_kind == wanted_kind
-                    and control.owner_id == account_info.userId
-                    and control.project_id == project_id
-                    and control.source == source
-                ):
-                    return _verify(control)
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
-
-        # Legacy unscoped scan (OSS single-user / HTTP fallback): tolerate a
-        # unique match; refuse to guess between several runs.
-        matches = [
-            control
-            for control in self._task_control.values()
-            if control.project_id == project_id and control.source == source
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        if matches:
-            raise TaskError(TaskError.AMBIGUOUS, 'Multiple pipelines are running for this project; specify a scope')
+        wanted_kind = run_kind or 'dev'
+        for control in self._task_control.values():
+            if (
+                control.run_kind == wanted_kind
+                and control.owner_id == account_info.userId
+                and control.project_id == project_id
+                and control.source == source
+            ):
+                return _verify(control)
         raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
-    def get_task_control_by_public_key(self, public_auth: str) -> TASK_CONTROL:
+    @staticmethod
+    def _verify_control(control: TASK_CONTROL, account_info: AccountInfo, require: Optional[str]) -> TASK_CONTROL:
         """
-        Retrieve task control structure with a given project/source id.
+        Run-scoped permission check, applied to EVERY resolution.
+
+        A user-owned run grants its OWNER full access by identity — surviving
+        an org switch (the owner is unchanged, the team is now foreign) — and
+        nobody else; a team-owned run resolves through team membership;
+        sys.admin and internal identities pass inside the resolver.
 
         Args:
-            token (str): The token to retrieve
+            control: The candidate control.
+            account_info: The request's account.
+            require: The permission the request needs, or None for reachability only.
 
         Returns:
-            TASK_CONTROL: Complete task control structure with metadata and references
+            ``control`` when the caller may reach it.
 
         Raises:
-            TaskError: Code TASK_NOT_REGISTERED if the key names no live task
+            PermissionError: No access, or the required permission is missing.
         """
-        # Look for it. A run whose source is not a public endpoint does not
-        # answer to its pk_ (see authenticate).
-        for control in self._task_control.values():
-            if control.public_auth == public_auth and public_key_reaches(control):
-                return control
+        perms = resolve_run_permissions(account_info, control)
+        if not perms:
+            raise PermissionError('Access denied: no permissions for this task')
+        if require and require not in perms:
+            raise PermissionError(f'Permission {require!r} denied for this task')
+        return control
 
-        # Couldn't find it
-        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
+    def control_by_key(self, key: str) -> TASK_CONTROL:
+        """
+        Internal registry lookup by the control's own key.
 
-    def get_task_control(
+        For code that already holds a control's key (the engine reporting
+        back, cleanup, the scheduler) — never for a client-supplied value:
+        clients send addresses, which ``resolve_control`` turns into a
+        control under the request's account.
+
+        Args:
+            key (str): The registry key ``runKind.ownerId.address``.
+
+        Returns:
+            TASK_CONTROL: The live control.
+
+        Raises:
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task.
+        """
+        control = self._task_control.get(key) if key else None
+        if not control:
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
+        return control
+
+    def resolve_control(
         self,
-        token: str,
-        account_info: Optional[AccountInfo] = None,
+        address: str,
+        account_info: AccountInfo,
         require: Optional[str] = None,
     ) -> TASK_CONTROL:
         """
-        Retrieve task control structure by token.
+        THE resolver: an address plus the request's account yields one control.
 
-        If account_info is provided and require is specified, checks that the
-        authenticated user has the required permission for the task's team.
+        Walks the rungs in the fixed order and takes the first that answers
+        (``@dev`` — the caller's own live presence, attach-only; ``@me`` — the
+        caller's personal deployment run; ``@team`` — a team-owned deployment
+        run on a team where the caller holds ``require``). Published rungs
+        that are not live start from the artifact — that step is
+        ``_resolve_published_rungs``, which the TaskControl/TaskEngine split
+        fills in with ``resolve_pipe_pins``. Every hit is permission-checked;
+        a key with an ``endpoints`` scope skips ``@dev`` (a production webhook
+        must never land on the owner's Play'd run) and is refused outside
+        its scope. There is NO owner qualifier: nobody can name another
+        user's control.
 
-        Raises:
-            ValueError: If token is not specified
-            RuntimeError: If task doesn't exist
-            PermissionError: If permission check fails
-        """
-        if not token:
-            raise ValueError('Task token is required')
+        The walk runs over LIVE controls first: a stopped run never answers
+        its address while another rung has a live one (a dead ``@dev`` falls
+        through). Only when no rung has a live control is the walk repeated
+        over every registered control, so a run that just finished keeps its
+        final status readable until the cleanup pass removes it.
 
-        control = self._task_control.get(token, None)
-        if not control:
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
-
-        # Run-scoped resolution (user-owned runs are owner-private; team
-        # runs resolve against the task's team — the old
-        # resolve_team_permissions call raised on foreign teams instead of
-        # denying uniformly). sys.admin and internal identities bypass
-        # INSIDE the resolver — it returns the full permission set for
-        # them — so no outer short-circuit.
-        if account_info is not None and require:
-            perms = resolve_run_permissions(account_info, control)
-            if not perms:
-                raise PermissionError('Access denied: no permissions for this task')
-            if require not in perms:
-                raise PermissionError(f'Permission {require!r} denied for this task')
-
-        return control
-
-    def get_task(self, token: str) -> Task:
-        """
-        Retrieve task instance.
-
-        This is a convenience method that combines task control lookup
-        with task instance extraction in a single operation. It provides
-        direct access to task objects while maintaining security controls.
+        A two-segment address (no source) resolves when exactly one live
+        source answers; several live sources raise ``TASK_SOURCE_REQUIRED``.
+        A finished source never counts against a live one.
 
         Args:
-            token (str): Private key for task ownership validation
+            address (str): ``developerId.pipelineId[.source]`` (the token slot).
+            account_info (AccountInfo): The request's account (required).
+            require (Optional[str]): The permission the request needs
+                (``'task.data'``, ``'task.control'``, ``'task.monitor'`` ...).
 
         Returns:
-            Task: The authenticated task instance ready for operations
+            TASK_CONTROL: The resolved control.
 
         Raises:
-            ValueError: If token is not specified
-            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
-
-        Usage:
-        This method is the primary way to access task instances throughout
-        the system. It ensures consistent security validation and simplifies
-        task access patterns in command handlers and other components.
+            TaskError: TASK_INVALID_ARGUMENT (grammar), TASK_SOURCE_REQUIRED,
+                TASK_AMBIGUOUS (several of the caller's teams run the address
+                and none is the caller's development team), or
+                TASK_NOT_REGISTERED when no rung answers.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
         """
-        # Get authenticated task control structure
-        control = self.get_task_control(token)
+        if account_info is None:
+            raise PermissionError('Not authenticated')
+        parsed = parse_address(address)
+        endpoints = getattr(account_info, 'endpoints', None)
 
-        # Extract and return the task instance
-        return control.task
+        def _matches(control: TASK_CONTROL) -> bool:
+            return (
+                control.developer_id == parsed.developer_id
+                and control.project_id == parsed.pipe_id
+                and (parsed.source is None or control.source == parsed.source)
+            )
+
+        def _pick(candidates: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
+            """One control, or the source-required error when several sources are live."""
+            if not candidates:
+                return None
+            if len(candidates) > 1:
+                sources = sorted({c.source for c in candidates})
+                raise TaskError(
+                    TaskError.SOURCE_REQUIRED,
+                    f'{address!r} has several live sources ({", ".join(sources)}); name one',
+                    address=address,
+                    sources=sources,
+                )
+            return candidates[0]
+
+        user_id = account_info.userId
+        rungs: List[str] = []
+
+        def _walk(pool: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
+            """The rungs in order over ``pool``: the first hit, verified, or None."""
+            rungs.clear()
+
+            # @dev: the caller's own presence. Attach-only, and skipped for a
+            # scoped (machine) credential.
+            if endpoints is None:
+                rungs.append('@dev')
+                control = _pick([c for c in pool if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)])
+                if control is not None:
+                    return self._verify_control(control, account_info, require)
+
+            # @me: the caller's personal (user-owned) deployment run.
+            rungs.append('@me')
+            control = _pick(
+                [
+                    c
+                    for c in pool
+                    if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
+                ]
+            )
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
+
+            # @team: a team-owned deployment run the caller may reach. The address
+            # carries no owner, so two of the caller's teams can each have it live:
+            # the caller's active (development) team answers; with neither run on
+            # it the choice is the caller's, so the lookup is ambiguous, not a guess.
+            rungs.append('@team')
+            team_runs = [
+                c
+                for c in pool
+                if c.run_kind == 'deploy'
+                and c.owner_kind != 'user'
+                and _matches(c)
+                and resolve_run_permissions(account_info, c)
+            ]
+            teams = sorted({c.owner_id for c in team_runs})
+            if len(teams) > 1:
+                active_team = getattr(account_info, 'devTeam', None)
+                team_runs = [c for c in team_runs if c.owner_id == active_team]
+                if not team_runs:
+                    raise TaskError(
+                        TaskError.AMBIGUOUS,
+                        f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
+                        'make the one you mean your development team',
+                        address=address,
+                        teams=teams,
+                    )
+            control = _pick(team_runs)
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
+            return None
+
+        # Live controls first: a finished run never shadows a running one on
+        # this or a later rung
+        controls = list(self._task_control.values())
+        control = _walk([c for c in controls if not c.task.is_task_complete()])
+        if control is not None:
+            return control
+
+        # Nothing live answers: a finished run still in the registry does, so
+        # its final status stays readable until the cleanup pass removes it
+        control = _walk(controls)
+        if control is not None:
+            return control
+
+        return self._resolve_published_rungs(address, account_info, require, rungs)
+
+    def _resolve_published_rungs(
+        self,
+        address: str,
+        account_info: AccountInfo,
+        require: Optional[str],
+        rungs_tried: List[str],
+    ) -> TASK_CONTROL:
+        """
+        SEAM for the published rungs (@me/@team/@public from the artifact).
+
+        The TaskControl/TaskEngine split replaces this with ``resolve_pipe_pins``
+        (the twin of ``resolve_app_pins``): find the caller's deployment or
+        publication for ``address`` and start it from the artifact when no
+        control is live. Until then a name with no live control is not found,
+        and the error says which rungs were tried.
+
+        Raises:
+            TaskError: Code TASK_NOT_REGISTERED with ``address`` and ``rungsTried``.
+        """
+        raise TaskError(
+            TaskError.NOT_REGISTERED,
+            f'Your pipeline is not running ({address!r}; tried {", ".join(rungs_tried)})',
+            address=address,
+            rungsTried=list(rungs_tried),
+        )
 
     def assign_port(self) -> int:
         """
@@ -1091,14 +1069,8 @@ class TaskServer(DAPBase):
                 continue
             if conn._account_info.userId != user_id:
                 continue
-            # Skip task-scoped connections. pk_/tk_ identities carry the
-            # LAUNCHING user's id (so they match here), but their identity is
-            # deliberately minimal (task permissions only). Rebuilding them as
-            # the full user would escalate them AND leak the user's rr_ session
-            # key into a task-scoped socket. The pushed body also blanks
-            # userToken (to_push_result) for the full-user connections.
-            if (getattr(conn._account_info, 'auth', '') or '').startswith(('pk_', 'tk_')):
-                continue
+            # The pushed body blanks userToken (to_push_result) so a
+            # connection on a narrower key never adopts the session key.
             try:
                 fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
                 conn._account_info = fresh
@@ -1130,11 +1102,6 @@ class TaskServer(DAPBase):
                 conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
             if conn_org != org_id:
                 continue
-            # Skip task-scoped connections: a pk_/tk_ socket carries the launching
-            # user's id/org (so it matches this org fan-out) but must never be
-            # rebuilt as the full user or handed the user's rr_ session key.
-            if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
-                continue
             try:
                 fresh = await account._service.get_authentication_result(info.userId, info.auth)
                 conn._account_info = fresh
@@ -1158,42 +1125,39 @@ class TaskServer(DAPBase):
         resolves the new default org. A connection that ignores the event
         simply keeps its current identity until its next re-auth.
 
-        Connections on THIS server only (one process today). Task-scoped
-        pk_/tk_ sockets are skipped: they carry no switchable user session.
+        Connections on THIS server only (one process today).
         """
         for conn in list(self._connections.values()):
             if not getattr(conn, '_account_info', None):
                 continue
             if conn._account_info.userId != user_id:
                 continue
-            if (getattr(conn._account_info, 'auth', '') or '').startswith(('pk_', 'tk_')):
-                continue
             try:
                 await conn.send_event('apaext_org_changed', body={'orgId': org_id})
             except Exception as e:
                 self.debug_message(f'push_org_changed failed for conn {conn.get_connection_id()}: {e}')
 
-    async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+    async def broadcast_task_event(self, event_type: EVENT_TYPE, key: str, event: Dict[str, Any]) -> None:
         """
         Broadcast a task-scoped event to all connections that are subscribed to the given task.
 
         Iterates over every active connection and calls send_task_event on each one.
-        PermissionError is treated as a normal condition (e.g. a public-key connection that
-        does not hold task.monitor) and silently skipped. All other exceptions are logged
-        but do not abort the broadcast to remaining connections.
+        PermissionError is treated as a normal condition (a connection that does not
+        hold task.monitor on the run) and silently skipped. All other exceptions are
+        logged but do not abort the broadcast to remaining connections.
 
         Args:
             event_type (EVENT_TYPE): Event type bitmask (e.g. SUMMARY, SSE) used by each
                 connection's send_task_event to decide whether it should receive the event.
-            token (str): Unique task token identifying the originating task. Each connection
-                resolves this token to its subscription key independently.
+            key (str): The originating control's registry key. Each connection
+                resolves it to its subscription key independently.
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
         """
         # If the task has already been removed from the registry (e.g.
         # cleanup raced with pending broadcasts), skip silently instead of
         # spamming "Your pipeline is not running" for every connection.
-        if token not in self._task_control:
+        if key not in self._task_control:
             return
 
         # Snapshot to list() so a connection joining or dropping mid-broadcast
@@ -1201,43 +1165,17 @@ class TaskServer(DAPBase):
         # pattern used by broadcast_server_event / push_account_update above.
         for conn in list(self._connections.values()):
             try:
-                await conn.send_task_event(event_type, token=token, event=event)
+                await conn.send_task_event(event_type, key=key, event=event)
 
             except PermissionError:
-                # This is a normal error - when the connection is typically
-                # using a public key
+                # A normal outcome: the connection may not see this run
                 continue
 
             except Exception as e:
                 # Log individual monitor failures but continue broadcasting
                 self.debug_message(f'Failed to broadcast event to connection: {e}')
 
-    def get_task_status(self, token: str) -> TASK_STATUS:
-        """
-        Retrieve comprehensive status information for a specific task.
-
-        This method combines secure task lookup with status retrieval to
-        provide authenticated access to task status information. It's used
-        for status queries, monitoring, and administrative interfaces.
-
-        Args:
-            token (str): Unique task identifier
-
-        Returns:
-            TASK_STATUS: Complete task status including runtime state,
-                        performance metrics, and completion information
-
-        Raises:
-            ValueError: If token is not specified
-            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
-        """
-        # Perform secure task lookup with authentication
-        task = self.get_task(token)
-
-        # Retrieve and return current task status
-        return task.get_status()
-
-    async def remove_task(self, token: str) -> TASK_CONTROL:
+    async def remove_task(self, key: str) -> TASK_CONTROL:
         """
         Remove task from registry and perform comprehensive cleanup.
 
@@ -1246,47 +1184,46 @@ class TaskServer(DAPBase):
         resources are leaked and all associated components are properly cleaned up.
 
         Args:
-            token (str): Unique task identifier
+            key (str): The control's registry key
 
         Returns:
             TASK_CONTROL: The removed task control structure for caller cleanup
 
         Raises:
-            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live task
 
         Cleanup Process:
         1. Validate task ownership and existence
         2. Remove task from central registry
-        3. Stop task execution and cleanup resources
-        4. Remove all monitoring subscriptions
+        3. Remove all monitoring subscriptions
+        4. Stop task execution and cleanup resources
         5. Log removal for audit trail
         6. Return control structure for additional caller-specific cleanup
         """
         # Remove task from central registry
-        # pop with a default: without one an unknown token raises KeyError and the
+        # pop with a default: without one an unknown key raises KeyError and the
         # TaskError below never runs, so the failure reaches the caller unclassified.
-        control = self._task_control.pop(token, None)
+        control = self._task_control.pop(key, None)
 
         # If not there, it wasn't running
         if not control:
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
-        # Ensure task is properly stopped and resources are cleaned up
-        await control.task.stop_task()
-
         # Remove monitor subscriptions that reference this task from all
-        # connections — keys are owner-scoped, so build from the control
+        # connections — keys are owner-scoped, so build from the control.
+        # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
+        # key whose prefix (everything before the last dot) IS that key —
+        # never a prefix test, which a longer sibling source could satisfy.
         project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
-                # Remove exact source key, pipe-scoped keys, and token-scoped keys
-                keys_to_remove = [
-                    k
-                    for k in conn._monitors
-                    if k == project_key or k.startswith(f'{project_key}.') or k == token or k.startswith(f'{token}.')
-                ]
-                for key in keys_to_remove:
-                    conn._monitors.pop(key, None)
+                keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
+                for monitor_key in keys_to_remove:
+                    conn._monitors.pop(monitor_key, None)
+
+        # Stop the run only after its subscriptions are gone: a subscription a
+        # client installs for a replacement run during the await must survive
+        await control.task.stop_task()
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -1317,7 +1254,8 @@ class TaskServer(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = '',
-    ) -> str:
+        developer_id: str = '',
+    ) -> Dict[str, Any]:
         """
         Create and start a new computational task with full lifecycle management.
 
@@ -1327,30 +1265,37 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Task creation request containing:
-                - arguments: Task configuration including Optional(token), pipeline
+                - arguments: Task configuration including the pipeline; an
+                  optional ``token`` overrides the pipeline-id segment of the
+                  address (the spec's ``project_id``) and is not a credential
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
             env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
+            developer_id: The owner org's developer id — the address namespace.
+                Required: the address exists from the first run.
 
         Returns:
-            str: Unique task token for subsequent operations
+            Dict[str, Any]: The task's identity; ``token`` carries the ADDRESS
+                (``developerId.pipelineId.source``) for subsequent operations
 
         Raises:
+            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id
+                (or the ``token`` override of it), the source or a component id
+                breaks the address grammar, or when a dev launch does not name
+                the authenticated user
             ValueError: If launch type is invalid or task already exists
             RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
 
         Task Creation Process:
-        1. Parse and validate request parameters
-        2. Validate pipeline configuration (before anything reads it)
-        3. Generate unique task token if not provided
-        4. Check for task uniqueness and handle conflicts
-        5. Create Task instance with full configuration
-        6. Register task in central registry with security metadata
-        7. Update performance metrics and tracking
-        8. Set up initial monitoring if connection provided
-        9. Start task execution
-        10. Return task token for client use
+        1. Parse and validate request parameters and identities
+        2. Validate the pipeline and derive the address and registry key
+        3. Check for task uniqueness and handle conflicts
+        4. Create Task instance with full configuration
+        5. Register task in central registry with security metadata
+        6. Set up initial monitoring if connection provided
+        7. Start task execution
+        8. Return the address for client use
 
         Launch Types:
         - LAUNCH:
@@ -1364,11 +1309,9 @@ class TaskServer(DAPBase):
                 of the task controls its life cycle
         """
 
-        def _return_results(control: TASK_CONTROL, reused: bool = False) -> str:
+        def _return_results(control: TASK_CONTROL, reused: bool = False) -> Dict[str, Any]:
             """
-            Return task token for the task.
-
-            This inner function encapsulates the logic for returning the tokens.
+            Return the task's identity, the address in the token slot.
 
             Args:
                 control (TASK_CONTROL): The existing task control structure
@@ -1380,8 +1323,7 @@ class TaskServer(DAPBase):
             """
             return {
                 'id': control.id,
-                'token': control.token,
-                'publicToken': control.public_auth,
+                'token': control.address,
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
@@ -1399,27 +1341,50 @@ class TaskServer(DAPBase):
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
 
-        # Parse task configuration from request arguments
+        # The token argument overrides the pipeline-id segment of the address
+        # (the spec's project_id). It is an identity choice inside the
+        # caller's own namespace, never a credential: it is validated with the
+        # same segment grammar as project_id, and the developer id, the owner
+        # and the registry key are still derived by the server.
+        token_override = args.get('token')
+        if token_override is not None:
+            validate_segment(token_override, 'token')
+
+        # Identity boundary: the ids that enter the registry key, the monitor
+        # keys and the storage tree carry no path or audience characters.
+        # A deploy run owned by its team carries no user id.
         control.client_id = client_id
-        control.userId = user_id
-        control.teamId = team_id
+        control.userId = validate_identity(user_id, 'userId') if (user_id or run_kind == 'dev') else ''
+        control.teamId = validate_identity(team_id, 'teamId')
         control.orgId = org_id
-        # Run classification MUST be set before token generation below: the
-        # token digest scopes by the run's OWNER (user for dev, team for
+        # Run classification MUST be set before the key is built below: the
+        # registry key scopes by the run's OWNER (user for dev, team for
         # deploy), which is derived from run_kind.
         control.run_kind = run_kind
+        # The identity block of the task file is filled from client_id; on a
+        # dev launch that MUST be the authenticated user (plan S13).
+        if run_kind == 'dev' and client_id != user_id:
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                'A dev run must be launched as the authenticated user',
+                field='userId',
+            )
         # Owner scope: explicit when the launch path knows the rung (@me -> user,
-        # @team -> team); else derived from run_kind. MUST precede token
-        # generation and monitor-key building — both scope by the owner.
+        # @team -> team); else derived from run_kind. MUST precede key
+        # building and monitor-key building — both scope by the owner.
         # A team-owned DEV run is rejected outright: no launch path produces
-        # it, and its token digest would be byte-identical to the same team's
-        # deploy run (only the @me-deploy case adds a run_kind discriminator),
-        # so the registry would silently treat the second run as the first.
+        # it, and its key would collide with the same team's deploy run.
         if owner_kind == 'team' and run_kind == 'dev':
             raise ValueError('owner_kind="team" is only valid for deploy runs')
         control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
-        control.token = args.get('token', None)
-        supplied_token = control.token is not None
+        # The address namespace: every run has one from its first start.
+        if not developer_id:
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                developer_id_required('Running a pipeline'),
+                field='developerId',
+            )
+        control.developer_id = developer_id
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
 
@@ -1433,6 +1398,12 @@ class TaskServer(DAPBase):
                 'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
                 'to run a .pipe file, pass its path as filepath.'
             )
+
+        # Apply the token override as the spec's project_id. The pipeline is
+        # copied so the caller's object is not rewritten, and the control
+        # records the spec it actually runs (useExisting compares against it).
+        if token_override is not None:
+            control.pipeline = {**control.pipeline, 'project_id': token_override}
 
         # If a source was not specified, in the args, get it from the pipeline
         if not control.source:
@@ -1452,15 +1423,21 @@ class TaskServer(DAPBase):
         # shape a launched one is, and the two compare equal.
         _apply_source_defaults(control.pipeline, control.source)
 
-        # Project identity is project_id on the flat project.
+        # Project identity is project_id on the flat project: the SHORT,
+        # dot-free id. A missing id is minted as a GUID (dot-free by
+        # construction).
         control.project_id = control.pipeline.get('project_id', None)
         if not control.project_id:
             control.project_id = str(uuid.uuid4())
 
+        # The address grammar, enforced at execute: project id, source and
+        # every component id are single dot-free segments.
+        validate_component_ids(control.pipeline)
+        control.address = build_address(control.developer_id, control.project_id, control.source)
+        control.id = control.address
+
         # Find the component so we can look up the provider
         components = control.pipeline.get('components', [])
-        if type(components) is not list:
-            raise ValueError('Invalid components in pipeline')
 
         # Find the component
         for component in components:
@@ -1472,64 +1449,11 @@ class TaskServer(DAPBase):
         if not control.provider:
             raise ValueError(f'Source "{control.source}" not found in pipeline')
 
-        # Owner-scoped token identity: a task is uniquely
-        # {owner}.{projectId}.{source} — the owner FIELD NAME (userId vs
-        # teamId) disambiguates dev from deploy even if the id spaces ever
-        # collided, so a dev run and a deploy run of the same pipeline
-        # never hash to the same token, and neither do two teams' deploys
-        # or two users' dev runs. Dev = once per user (total); deploy =
-        # once per team (actor-independent — deploy dispatch carries no
-        # user identity). The 'kind' discriminator keeps the tk_ and pk_
-        # DIGESTS distinct, not just their prefixes.
-        #
-        # A USER-OWNED DEPLOY (@me) shares its owner field with the same
-        # user's dev run — {'userId': u}.{project}.{source} would collide —
-        # so it alone adds run_kind to the digest. Deliberately ONLY that
-        # case: dev and @team digests stay byte-identical to every token
-        # ever minted, so persisted pk_ share links keep resolving with no
-        # transition machinery.
-        owner_is_team = (control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user')) == 'team'
-        if owner_is_team:
-            owner_content = {'teamId': control.teamId}
-        else:
-            owner_content = {'userId': control.userId}
-            if control.run_kind == 'deploy':
-                owner_content['run_kind'] = 'deploy'
-
-        # Build the token. It is the run's private credential (full task
-        # control), so it is derived with the engine's server-held key rather
-        # than from the run identity alone.
-        if control.token is None:
-            control.token = keyed_task_token(
-                self._task_token_key(),
-                {
-                    'kind': 'task',
-                    **owner_content,
-                    'project_id': control.project_id,
-                    'source': control.source,
-                },
-            )
-
-        # Build the public token. Unkeyed on purpose: a pk_ is a share link,
-        # and persisted links must keep resolving.
-        control.public_auth = self._server.account.generate_token(
-            content={
-                'kind': 'public',
-                **owner_content,
-                'project_id': control.project_id,
-                'source': control.source,
-            },
-            prefix='pk_',
-        )
-
-        # Display id: 8-char hash (stripping known auth prefixes) + source component id
-        _AUTH_PREFIXES = ('tk_', 'pk_')
-        token_hash = control.token
-        for _p in _AUTH_PREFIXES:
-            if token_hash.startswith(_p):
-                token_hash = token_hash[len(_p) :]
-                break
-        control.id = f'{token_hash[:8]}.{control.source}'
+        # The registry key: one control per (owner, address, rung). The
+        # owner FIELD (user for dev and @me, team for @team) rides owner_id,
+        # and run_kind separates a user's dev run from their @me deploy of
+        # the same pipeline — the only pair that shares an owner.
+        control.key = f'{control.run_kind}.{control.owner_id}.{control.address}'
 
         # Parse and validate launch type from request command
         try:
@@ -1543,26 +1467,9 @@ class TaskServer(DAPBase):
             control.launch_owner = conn
 
         # Handle task uniqueness and potential conflicts
-        if control.token in self._task_control:
+        if control.key in self._task_control:
             # Get the existing task control
-            existing_control = self._task_control[control.token]
-
-            # A token names one owner's run. A caller-supplied token that names
-            # another owner's run must neither reuse it nor take over its slot
-            # once it finishes: holding a run's token must require being
-            # allowed to get it. A derived token cannot get here for another
-            # owner, since the owner is inside its HMAC.
-            #
-            # One exception keeps fixed names working (the CLIs' 'UPLOAD_TASK'):
-            # a FINISHED run under a name without the tk_ prefix may be
-            # replaced by anyone, as before. Such a name never authenticates,
-            # so taking over its slot hands the newcomer no access to the old
-            # run, and the old owner's clients reach the new run only through
-            # their own permissions on it, which a user-owned run denies.
-            if _owner_identity(existing_control) != _owner_identity(control):
-                finished_name = not control.token.startswith('tk_') and existing_control.task.is_task_complete()
-                if not finished_name:
-                    raise PermissionError('This task token belongs to another owner')
+            existing_control = self._task_control[control.key]
 
             # Prevent duplicate active tasks
             if not existing_control.task.is_task_complete():
@@ -1583,29 +1490,16 @@ class TaskServer(DAPBase):
                         await existing_control.task.wait_for_running()
                     return _return_results(existing_control, reused=True)
 
-                # We are absolutely supposed to create a task or the user did
-                # not specify the token (which means a random collision). Name
-                # the running task, not this request's id: a caller's token is
-                # not scoped by source, so the two can differ.
+                # We are absolutely supposed to create a task. Name the running
+                # task, not this request's id: the two can differ by source.
                 raise ValueError(
                     f'Pipeline is already running (task {existing_control.id}). '
                     'Reuse it (useExisting / use_existing), or stop it and run again.'
                 )
 
-            # Clean up completed task with same token
-            self._task_control.pop(control.token, None)
+            # Clean up completed task with the same key
+            self._task_control.pop(control.key, None)
             self.debug_message(f'Replaced completed task "{control.id}"...')
-
-        # A new run under a caller-chosen tk_ token: that value becomes the run's
-        # private credential (authenticate accepts any live tk_), so it must be
-        # as hard to guess as a minted one. Other custom tokens are names only:
-        # authenticate never accepts them, and every use is checked against the
-        # caller's own permissions on the run.
-        if supplied_token and control.token.startswith('tk_') and not _STRONG_TASK_TOKEN.fullmatch(control.token):
-            raise ValueError(
-                'A custom token that starts with tk_ is the private credential of the run: use tk_ followed by at '
-                'least 32 letters, digits, "-" or "_" (tk_ plus a random UUID, for example)'
-            )
 
         try:
             # Create new Task instance with complete configuration
@@ -1614,8 +1508,8 @@ class TaskServer(DAPBase):
                 id=control.id,
                 project_id=control.project_id,
                 source=control.source,
-                token=control.token,
-                public_auth=control.public_auth,
+                key=control.key,
+                address=control.address,
                 pipeline=control.pipeline,
                 launch_args=args,
                 launch_type=control.launch_type,
@@ -1632,7 +1526,7 @@ class TaskServer(DAPBase):
             )
 
             # Register task in central registry
-            self._task_control[control.token] = control
+            self._task_control[control.key] = control
 
             # Start task execution
             await control.task.start_task()
@@ -1665,7 +1559,7 @@ class TaskServer(DAPBase):
                         self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
                     except Exception:
                         self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
-            self._task_control.pop(control.token, None)
+            self._task_control.pop(control.key, None)
             raise
 
     async def restart_task(
@@ -1699,7 +1593,7 @@ class TaskServer(DAPBase):
             Dict[str, Any]: Task information including:
                 - id: Task identifier (unchanged)
                 - token: Task token (unchanged)
-                - publicToken: Public authentication token (unchanged)
+                - projectId / source / provider (unchanged)
                 - projectId: Project identifier (unchanged - must match existing)
                 - source: Source identifier (unchanged - must match existing)
                 - provider: Provider name (may be updated)
@@ -1727,7 +1621,7 @@ class TaskServer(DAPBase):
         13. Return task information
 
         Note:
-        - Task identity (token, public_auth, project_id, source) remains unchanged
+        - Task identity (address, project_id, source) remains unchanged
         - Task statistics are preserved across restart
         - Monitoring connections remain active
         - Registry entry is updated but not recreated
@@ -1739,29 +1633,22 @@ class TaskServer(DAPBase):
             # Parse request arguments
             args = request.get('arguments', {})
 
-            # Extract token from request
-            token = args.get('token', None)
-            if not token:
-                raise ValueError('Task token is required for restart')
+            # Extract the address from the token slot
+            address = args.get('token', None)
+            if not address:
+                raise ValueError('Task address is required for restart')
 
             # Extract pipeline from request
             pipeline = args.get('pipeline', None)
             if not pipeline:
                 raise ValueError('Missing pipeline configuration in restart request')
 
-            # Validate task existence and get control structure
-            control = self.get_task_control(token)
+            # Resolve under the caller's account with task.control (run-scoped:
+            # a user-owned run restarts only for its owner)
+            account_info = getattr(conn, '_account_info', None) if conn else None
+            control = self.resolve_control(address, account_info, 'task.control')
 
             self.debug_message(f'Restart requested for task "{control.id}"')
-
-            # Verify the caller has control permissions for this task
-            # (run-scoped: a user-owned run restarts only for its owner)
-            if conn and hasattr(conn, '_account_info') and conn._account_info:
-                perms = resolve_run_permissions(conn._account_info, control)
-                if not perms:
-                    raise PermissionError('Cannot restart task: no permissions for this task')
-                if 'task.control' not in perms:
-                    raise PermissionError("Permission 'task.control' denied for this task")
 
             # Check if debugger is attached - fail if so
             if control.task.has_attached_debugger():
@@ -1782,6 +1669,10 @@ class TaskServer(DAPBase):
                     f'Cannot change the source on restart: task "{control.id}" runs '
                     f'"{control.source}", the request asks for "{requested_source}"'
                 )
+
+            # The address grammar holds on restart too: a restarted pipeline
+            # must not smuggle in a dotted component id.
+            validate_component_ids(pipeline)
 
             # Normalise BEFORE anything is stopped. This is also the validation: it
             # raises when the source component is missing, and doing that after the
@@ -1818,11 +1709,10 @@ class TaskServer(DAPBase):
             # Log successful restart
             self.debug_message(f'Task "{control.id}" restarted successfully')
 
-            # Return task information
+            # Return task information, the address in the token slot
             return {
                 'id': control.id,
-                'token': control.token,
-                'publicToken': control.public_auth,
+                'token': control.address,
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
@@ -1833,7 +1723,7 @@ class TaskServer(DAPBase):
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
-    async def stop_task(self, token: str, reason: str = 'user'):
+    async def stop_task(self, key: str, reason: str = 'user'):
         """
         Stop a running task with proper cleanup and resource management.
 
@@ -1842,9 +1732,9 @@ class TaskServer(DAPBase):
         proper resource cleanup while handling various edge cases gracefully.
 
         Args:
-            request (Dict[str, Any]): Stop request containing:
-                - token: Unique task identifier to stop
-            conn (TaskConn): Connection requesting the task stop
+            key (str): The control's registry key (resolved by the caller
+                under the request's account)
+            reason (str): Why the task stops ('user', 'ttl', ...)
 
         Termination Logic:
         - Only LAUNCH and EXECUTE type tasks are terminated by stop requests
@@ -1858,13 +1748,32 @@ class TaskServer(DAPBase):
         - Task termination errors are logged but don't propagate to client
         """
         try:
-            # Attempt to locate and validate task ownership
-            control = self.get_task_control(token)
+            # Locate the task by its key (ownership was validated by the caller)
+            control = self.control_by_key(key)
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 await control.task.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
+
+                # A @dev control ends with its run: no grace window and no
+                # reaper (plan 7.1). Wait for the teardown first, because the
+                # final status, the terminal events and the run-log close are
+                # delivered through the registered control. A new run started
+                # under the same key meanwhile is not this control's to remove.
+                # The wait is bounded: a stalled terminal-event forward must not
+                # hold this caller (the ttl monitor stops tasks serially); on a
+                # timeout the control is left to the cleanup pass instead.
+                if control.run_kind == 'dev':
+                    try:
+                        await asyncio.wait_for(control.task.wait_terminated(), timeout=CONST_TEARDOWN_WAIT_TIMEOUT)
+                    except asyncio.TimeoutError:
+                        self.debug_message(
+                            f'Task "{control.id}" teardown exceeded {CONST_TEARDOWN_WAIT_TIMEOUT}s; left to cleanup'
+                        )
+                        return
+                    if self._task_control.get(control.key) is control:
+                        await self.remove_task(control.key)
 
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
@@ -1880,8 +1789,8 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Detach request containing:
-                - token: Task identifier to detach from
                 - arguments: Optional parameters including:
+                    - token: The task address to detach from
                     - terminateDebuggee: Boolean flag to terminate task on detach
             conn (TaskConn): Connection to detach from the task
 
@@ -1898,14 +1807,13 @@ class TaskServer(DAPBase):
         - Task may have been auto-cleaned up between request and processing
         """
         # Extract task identification and termination preference
-        token = request.get('token', 'not-specified')
-
         args = request.get('arguments', {})
+        address = args.get('token', 'not-specified')
         terminate_task = args.get('terminateDebuggee', False)
 
         try:
-            # Locate task with ownership validation
-            control = self.get_task_control(token)
+            # Resolve under the connection's account (ownership validated inside)
+            control = self.resolve_control(address, getattr(conn, '_account_info', None) if conn else None)
 
             # Detach connection from task's debugging interface
             await control.task.detach_task(conn)
@@ -1913,20 +1821,20 @@ class TaskServer(DAPBase):
             # Remove monitoring subscription for this connection
             if conn:
                 await conn.set_monitor(
-                    token=control.token,
+                    token=control.address,
                     type=EVENT_TYPE.NONE,
                 )
 
             # Terminate task if requested by client
             if terminate_task:
-                await self.stop_task(token)
+                await self.stop_task(control.key)
 
             # Log successful detachment
             self.debug_message(f'Connection detached from task "{control.id}"')
 
         except Exception as e:
             # Handle errors gracefully - task may not exist or be accessible
-            self.debug_message(f'Task detachment handled (task may be gone): "{token}": {e}')
+            self.debug_message(f'Task detachment handled (task may be gone): "{address}": {e}')
 
     def get_connection_count(self) -> int:
         """

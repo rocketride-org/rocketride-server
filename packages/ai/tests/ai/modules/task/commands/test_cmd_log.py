@@ -207,6 +207,81 @@ class TestTeamGate:
         assert reader_stub['team_id'] == TEAM
 
 
+# ============================================================================
+# API key endpoints scope
+# ============================================================================
+
+
+def _scoped_info(endpoints, developer_id='acme'):
+    """A team member whose API key is scoped to ``endpoints``, in an org with ``developer_id``."""
+    info = _account_info()
+    info.organization['developerId'] = developer_id
+    info.endpoints = endpoints
+    return info
+
+
+class TestEndpointScope:
+    @pytest.mark.asyncio
+    async def test_a_stream_inside_the_scope_is_readable(self, reader_stub):
+        # The stream of acme.proj-1.chat_1 is exactly what the key names.
+        conn = _make_conn(_scoped_info(['acme.proj-1.chat_1']))
+        await conn._log_read({}, _args())
+        assert reader_stub['args'] == ('user-1', 'proj-1', 'chat_1')
+
+    @pytest.mark.asyncio
+    async def test_a_pipe_wildcard_admits_every_source(self, reader_stub):
+        conn = _make_conn(_scoped_info(['acme.proj-1.*']))
+        await conn._log_chapters({}, _args(source='webhook_1'))
+        assert reader_stub['args'] == ('user-1', 'proj-1', 'webhook_1')
+
+    @pytest.mark.asyncio
+    async def test_a_stream_outside_the_scope_is_denied_on_every_subcommand(self, reader_stub):
+        # task.monitor/task.control on the team are held; the scope alone
+        # refuses, and no reader is built for the foreign stream.
+        conn = _make_conn(_scoped_info(['acme.proj-1.chat_1']))
+        for handler, extra in (
+            (conn._log_chapters, {}),
+            (conn._log_read, {}),
+            (conn._log_segment, {'segment': 0}),
+            (conn._log_delete, {'all': True}),
+        ):
+            with pytest.raises(PermissionError):
+                await handler({}, _args(projectId='proj-2', **extra))
+        assert 'args' not in reader_stub
+
+    @pytest.mark.asyncio
+    async def test_the_own_dev_stream_is_scoped_too(self, reader_stub):
+        conn = _make_conn(_scoped_info(['acme.proj-1.chat_1']))
+        with pytest.raises(PermissionError):
+            await conn._log_read({}, _args(teamId=None, source='other_1'))
+
+    @pytest.mark.asyncio
+    async def test_streams_outside_the_scope_are_denied(self, reader_stub):
+        conn = _make_conn(_scoped_info(['acme.proj-1.chat_1']))
+        with pytest.raises(PermissionError):
+            await conn.on_rrext_log({'arguments': {'subcommand': 'streams', 'projectId': 'proj-2', 'source': 'chat_1'}})
+
+    @pytest.mark.asyncio
+    async def test_another_developer_namespace_is_outside_the_scope(self, reader_stub):
+        # The stream's address is built under the caller's org developer id,
+        # so a scope naming another namespace does not reach it.
+        conn = _make_conn(_scoped_info(['other.proj-1.chat_1']))
+        with pytest.raises(PermissionError):
+            await conn._log_read({}, _args())
+
+    @pytest.mark.asyncio
+    async def test_an_org_without_a_developer_id_reaches_nothing_with_a_scoped_key(self, reader_stub):
+        conn = _make_conn(_scoped_info(['acme.proj-1.chat_1'], developer_id=None))
+        with pytest.raises(PermissionError):
+            await conn._log_read({}, _args())
+
+    @pytest.mark.asyncio
+    async def test_an_empty_scope_allows_nothing(self, reader_stub):
+        conn = _make_conn(_scoped_info([]))
+        with pytest.raises(PermissionError):
+            await conn._log_read({}, _args())
+
+
 # streams: real writer, real store, real reader — no stubs
 
 

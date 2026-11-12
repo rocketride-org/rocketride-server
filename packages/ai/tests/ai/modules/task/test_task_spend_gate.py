@@ -34,8 +34,8 @@ def _task(org_id='org-1'):
         id='t-1',
         project_id='p-1',
         source='s-1',
-        token='tk',
-        public_auth='pk',
+        key='dev.u-1.acme.p-1.s-1',
+        address='acme.p-1.s-1',
         pipeline={},
         org_id=org_id,
     )

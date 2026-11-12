@@ -21,37 +21,29 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+import os
+
+from depends import depends  # type: ignore
+
+# Load the requirements (no external deps, but follow the pattern)
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
+from rocketlib import IGlobalBase
+
+from .guardrails_engine import GuardrailsEngine
 
 
 class IGlobal(IGlobalBase):
-    config = None
     engine = None
 
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the engine for that
-            pass
-        else:
-            import os
-            from depends import depends  # type: ignore
+        """Create the guardrails engine from the resolved config.
 
-            # Load the requirements (no external deps, but follow the pattern)
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
-
-            # Get the configuration
-            self.config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-
-            # Create the guardrails engine
-            from .guardrails_engine import GuardrailsEngine
-
-            self.engine = GuardrailsEngine(self.config)
+        The selected profile flattens to the full set of checks: Basic and
+        Strict pin most of them as constants, Custom exposes every one.
+        """
+        self.engine = GuardrailsEngine(self.config)
 
     def endGlobal(self):
         # Clean up resources
         self.engine = None
-        self.config = None

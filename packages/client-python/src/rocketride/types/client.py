@@ -349,6 +349,9 @@ class ConnectResult(TypedDict, total=False):
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
         serverVersion (str): Version string of the server that handled the handshake; newer servers only.
         waitlisted (bool): True when authenticated but not yet granted full app access.
+        endpoints (list[str] | None): The API key's task-address scope — patterns
+            (``developerId.pipelineId.source`` or ``developerId.pipelineId.*``) the key may send
+            to; None for an unscoped key. Enforced server-side where a task address is resolved.
     """
 
     userToken: str
@@ -370,6 +373,7 @@ class ConnectResult(TypedDict, total=False):
     credits: dict
     apps: list[AppManifestEntry]
     waitlisted: bool
+    endpoints: list[str] | None
 
 
 class ServerInfoResult(TypedDict, total=False):

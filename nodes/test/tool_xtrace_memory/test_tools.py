@@ -64,19 +64,12 @@ def _ensure_ai_common() -> None:
     Deterministic behavior for THIS node is pinned locally after import (see
     below); the fresh stubs never leak thanks to the _saved_core restore.
     """
-    for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+    for name in ('ai', 'ai.common', 'ai.common.utils'):
         sys.modules[name] = types.ModuleType(name)
     # Mark containers as packages so sub-imports resolve even if not pre-inserted.
     sys.modules['ai'].__path__ = []
     sys.modules['ai.common'].__path__ = []
     sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
-
-    class _Config:
-        @staticmethod
-        def getNodeConfig(*_a, **_k):
-            return {}
-
-    sys.modules['ai.common.config'].Config = _Config
 
 
 def _ensure_requests() -> None:
@@ -117,7 +110,6 @@ _CORE_STUBS = (
     'ai',
     'ai.common',
     'ai.common.utils',
-    'ai.common.config',
     'requests',
     'requests.exceptions',
     'tenacity',
@@ -197,6 +189,42 @@ def _instance(glb):
     inst.IGlobal = glb
     inst._conv_id = 'conv_fixed'
     return inst
+
+
+# ---------------------------------------------------------------------------
+# IGlobal: resolved config
+# ---------------------------------------------------------------------------
+
+
+def test_begin_global_reads_the_resolved_config(monkeypatch):
+    """Starting the node copies every schema leaf off ``self.config``: ids stripped, booleans and bounds as typed.
+
+    The resolver itself (defaults, bounds, ``${ROCKETRIDE_XTRACE_APIKEY}``) is
+    rocketlib's contract, covered by its own matrix; this pins what the node
+    does with the resolved view.
+    """
+    resolved = types.SimpleNamespace(
+        api_key=' xtk_resolved ',
+        org_id=' org_1 ',
+        base_url='https://api.production.xtrace.ai/',
+        user_id=' alice ',
+        agent_id='',
+        app_id='',
+        group_ids='grp_a, grp_b',
+        wait=False,
+        ingest_timeout=45,
+        extract_artifacts=True,
+        search_mode='retrieve',
+        search_limit=5,
+    )
+    monkeypatch.setattr(IGlobal, 'config', property(lambda self: resolved), raising=False)
+    glb = IGlobal()
+    glb.beginGlobal()
+    assert (glb.api_key, glb.org_id, glb.user_id) == ('xtk_resolved', 'org_1', 'alice')
+    assert glb.base_url == 'https://api.production.xtrace.ai'
+    assert glb.group_ids == ['grp_a', 'grp_b']
+    assert (glb.wait, glb.extract_artifacts) == (False, True)
+    assert (glb.ingest_timeout, glb.search_mode, glb.search_limit) == (45, 'retrieve', 5)
 
 
 # ---------------------------------------------------------------------------

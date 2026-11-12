@@ -24,9 +24,9 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import IGlobalBase, OPEN_MODE, warning
-from ai.common.config import Config
 import os
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -42,56 +42,19 @@ class IGlobal(IGlobalBase):
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
-    def validateConfig(self):
-        """
-        Validate the configuration for the Cohere Rerank node.
-
-        Only checks presence and format of required fields.  Does NOT make
-        a live API call — a Cohere outage or rate-limit at config time would
-        otherwise surface a misleading error to the user.
-        """
-        try:
-            self._ensure_dependencies()
-
-            # Get config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = config.get('apikey')
-            model = config.get('model', 'rerank-english-v3.0')
-
-            if not isinstance(apikey, str) or not apikey.strip():
-                warning('Cohere API key is required')
-                return
-
-            if not isinstance(model, str) or not model.strip():
-                warning('Cohere model name must not be empty')
-                return
-
-        except Exception as e:
-            warning(str(e))
-            return
-
     def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            self._ensure_dependencies()
+        """Create the rerank client from the resolved config (model, top_n, min_score, apikey).
 
-            # Import the rerank client
-            from .rerank_client import RerankClient
+        The schema pins the model of the named entries, requires a name for
+        the custom one and requires the key, so the client gets a usable config.
+        """
+        self._ensure_dependencies()
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+        # Import the rerank client
+        from .rerank_client import RerankClient
 
-            # Get the passed configuration
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            try:
-                self._reranker = RerankClient(self.glb.logicalType, config, bag)
-            except ValueError as e:
-                warning(f'Cohere Rerank configuration error for {self.glb.logicalType}: {e}')
-                self._reranker = None
+        bag = self.IEndpoint.endpoint.bag
+        self._reranker = RerankClient(self.glb.logicalType, self.config, bag)
 
     def endGlobal(self):
         self._reranker = None

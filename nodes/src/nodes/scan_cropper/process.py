@@ -36,8 +36,6 @@ successful detection, in a module that by design cannot import numpy to work aro
 region dicts are built with explicit casts rather than by handing values through.
 """
 
-import math
-
 from ai.common.opencv import cv2
 import numpy as np
 from rocketlib import debug, warning
@@ -46,60 +44,6 @@ from .detect import DetectParams, find_photos
 from .geometry import DESKEW_MIN_ANGLE, bbox_crop, cut_out, normalise_rect, ratio_error
 from .ordering import reading_order
 from ai.common.utils import matched_quality, source_quality
-
-# Field ranges, mirrored from services.json. Clamping here as well as in the UI keeps a
-# hand-edited pipeline config from reaching the algorithm with a value it was never tried at —
-# and in `skew`'s case, with a value that would divide by zero inside the seam search.
-_RANGES = {
-    'detectSize': (800, 8000),
-    'texture': (0.5, 50.0),
-    'minArea': (0.0001, 0.5),
-    'maxArea': (0.5, 1.0),
-    'maxAspect': (1.0, 20.0),
-    'minRelative': (0.0, 1.0),
-    'maxDepth': (0, 8),
-    'skew': (0.1, 10.0),
-    'ratioTolerance': (0.0, 50.0),
-    'qualityTolerance': (0.2, 1.5),
-}
-
-
-def _number(config: dict, key: str, default, cast):
-    """
-    Read one numeric config value, clamped to its documented range.
-
-    The config arrives flat. services.json groups these fields under the selected Scan type
-    and behind that type's "Show advanced settings" switch, but ``Config.getNodeConfig``
-    unwraps the group — it takes the user's settings from ``connConfig[profile]`` — so what
-    lands here is a plain mapping of bare field names.
-
-    Args:
-        config: The node's resolved config, keyed on bare field names.
-        key: The field name.
-        default: Value to use when absent or unparseable.
-        cast: ``int`` or ``float``.
-
-    Returns:
-        The clamped value, or ``default`` when the config holds something non-numeric.
-    """
-    raw = config.get(key, default)
-    if isinstance(raw, bool):
-        # bool is a subclass of int, so `true` would cast to 1 without complaint.
-        warning(f'scan_cropper: config {key}={raw!r} is not a number; using {default}')
-        return default
-    try:
-        value = cast(raw)
-    except (TypeError, ValueError, OverflowError):
-        # OverflowError is not a ValueError: `int(float('inf'))` raises it.
-        warning(f'scan_cropper: config {key}={raw!r} is not a number; using {default}')
-        return default
-    if not math.isfinite(value):
-        # Clamping cannot rescue these: every comparison against nan is false, so it would
-        # travel on into DetectParams and turn each threshold that reads it into a no-op.
-        warning(f'scan_cropper: config {key}={raw!r} is not a finite number; using {default}')
-        return default
-    low, high = _RANGES[key]
-    return cast(max(low, min(high, value)))
 
 
 def resolve_quality(value):
@@ -128,27 +72,30 @@ def resolve_quality(value):
         return 'auto'
 
 
-def _params_from_config(config: dict) -> DetectParams:
+def _params_from_config(config) -> DetectParams:
     """
     Build the frozen detection tunables from the node's resolved config.
 
+    The resolver applied the selected scan type's defaults and checked every value against its
+    type and documented range, so the values are read as they are.
+
     Args:
-        config: The node's config, keyed on bare field names (the ``scan_cropper.`` prefix in
-            services.json is UI-schema only and never reaches here).
+        config: The node's resolved config, keyed on bare field names (the ``scan_cropper.``
+            prefix in services.json is schema-only and never reaches here).
 
     Returns:
-        DetectParams: The tunables, clamped to their documented ranges.
+        DetectParams: The tunables.
     """
     return DetectParams(
-        detect_size=_number(config, 'detectSize', 3000, int),
-        texture=_number(config, 'texture', 4.0, float),
-        min_area=_number(config, 'minArea', 0.005, float),
-        max_area=_number(config, 'maxArea', 0.95, float),
-        max_aspect=_number(config, 'maxAspect', 5.0, float),
-        min_relative=_number(config, 'minRelative', 0.40, float),
-        max_depth=_number(config, 'maxDepth', 4, int),
-        skew=_number(config, 'skew', 1.5, float),
-        ratio_tolerance=_number(config, 'ratioTolerance', 8.0, float),
+        detect_size=int(config['detectSize']),
+        texture=float(config['texture']),
+        min_area=float(config['minArea']),
+        max_area=float(config['maxArea']),
+        max_aspect=float(config['maxAspect']),
+        min_relative=float(config['minRelative']),
+        max_depth=int(config['maxDepth']),
+        skew=float(config['skew']),
+        ratio_tolerance=float(config['ratioTolerance']),
     )
 
 
@@ -181,7 +128,7 @@ def _region(rect, page_area: float) -> dict:
     }
 
 
-def build_split_scan(config: dict):
+def build_split_scan(config):
     """
     Bind the node's config into the single callable ``IInstance`` uses.
 
@@ -197,9 +144,9 @@ def build_split_scan(config: dict):
         Callable: ``split_scan(image_bytes, want_images)``.
     """
     params = _params_from_config(config)
-    deskew = bool(config.get('deskew', True))
-    quality_setting = resolve_quality(config.get('quality', 'auto'))
-    quality_tolerance = _number(config, 'qualityTolerance', 0.5, float)
+    deskew = bool(config['deskew'])
+    quality_setting = resolve_quality(config['quality'])
+    quality_tolerance = float(config['qualityTolerance'])
 
     def split_scan(image_bytes: bytes, want_images: bool):
         """

@@ -317,7 +317,7 @@ Start a RocketRide pipeline for processing data.
 
 - `pipeline` (dict, optional): Flat pipeline configuration dict (`components`, `source`, `project_id` at top level). A dict wrapped as `{'pipeline': {...}}` is automatically unwrapped.
 - `filepath` (str, optional): Path to a `.pipe` or JSON/JSON5 file containing pipeline configuration. Files with a top-level `pipeline` key are automatically unwrapped.
-- `token` (str, optional): Custom token for the pipeline (auto-generated if not provided). Pass a distinct token per instance to run the same pipeline more than once at a time; tokens share one namespace across users, so use an unguessable value that keeps the `tk_` prefix
+- `token` (str, optional): Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. Pass a distinct value per instance to run the same pipeline more than once at a time, and terminate what you start. Not a credential: the developer id and the owner still come from your account
 - `source` (str, optional): Override the pipeline source (which source component this task runs from)
 - `threads` (int, optional): Number of threads for execution (default: None, the server decides)
 - `use_existing` (bool, optional): Reuse an existing pipeline instance with the same identity
@@ -327,7 +327,7 @@ Start a RocketRide pipeline for processing data.
 - `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`/`.pipe.json`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
 
-**Returns:** Dictionary containing the task `token` and other startup metadata.
+**Returns:** Dictionary containing `token` (the full task address `developerId.pipelineId[.source]`) and other startup metadata.
 
 **Raises:** `ValueError` (no pipeline/filepath given), `FileNotFoundError` (bad filepath), `RuntimeError` (server refused to start or returned no token).
 
@@ -408,9 +408,9 @@ Validate a pipeline configuration server-side (structure, required fields, compo
 result = await client.validate(pipeline, source='webhook_1')
 ```
 
-### `async get_services() -> SERVICES_RESPONSE`
+### `async get_services(*, definitions: bool = False) -> SERVICES_RESPONSE`
 
-Retrieve all service (component/connector) summaries from the server. Returns a dict with `services` (logical type -> summary), `icons` (icon id -> raw SVG, deduplicated; each summary's `icon` field indexes into it), and `version`.
+Retrieve all service (component/connector) summaries from the server. Returns a dict with `services` (logical type -> summary), `icons` (icon id -> raw SVG, deduplicated; each summary's `icon` field indexes into it), and `version`. With `definitions=True` every entry is the FULL definition (configuration schema included) and there is no `icons` table: the bulk form of `get_service()`.
 
 ### `async get_service(service: str) -> SERVICE_DEFINITION`
 

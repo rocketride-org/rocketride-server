@@ -35,34 +35,40 @@
 	//
 	// Optional:
 	//		The path is the executable/script code - it is node dependent
-	// 		and is optional for most node
+	//		and is optional for most node
 	//
 	"path": "nodes.llm_minimax",
 	//
 	// Required:
-	//		The prefix map when added/removed when convertting URLs <=> paths
+	//		The prefix map when added/removed when converting URLs <=> paths
 	//
 	"prefix": "llm",
 	//
 	// Optional:
-	//		Description to of this driver
+	//		Description of this driver
 	//
-	"description": ["A component that connects to MiniMax's large language models for advanced ", "natural language processing. It enables capabilities like long-context reasoning, ", "agentic workflows, multi-step tool use, and high-quality conversational generation. ", "MiniMax offers an OpenAI-compatible API with strong performance across reasoning, ", "writing, and coding tasks. The component is suitable for integrating MiniMax models ", "into pipelines where extended context windows and efficient inference are important."],
+	"description": [
+		"A component that connects to MiniMax's large language models for advanced ",
+		"natural language processing. It enables capabilities like long-context reasoning, ",
+		"agentic workflows, multi-step tool use, and high-quality conversational generation. ",
+		"MiniMax offers an OpenAI-compatible API with strong performance across reasoning, ",
+		"writing, and coding tasks. The component is suitable for integrating MiniMax models ",
+		"into pipelines where extended context windows and efficient inference are important."
+	],
 	//
 	// Optional:
-	//	  The icon is the icon to display in the UI for this node
+	//		The icon is the icon to display in the UI for this node
 	//
 	"icon": "minimax.svg",
 	"documentation": "https://docs.rocketride.org/nodes/llm_minimax",
 	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which fields of
+	//		the configuration should be used to display information
 	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
+	"tile": ["Model: ${parameters.llm_minimax.model}"],
 	//
-	"tile": ["Model: ${parameters.llm_minimax.profile}"],
-	//
-	//	Optional:
+	// Optional:
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
@@ -70,503 +76,199 @@
 		"questions": ["answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "minimax-m2",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom Model",
-				"model": "",
-				"modelTotalTokens": 200000,
-				"modelOutputTokens": 8192,
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
-			},
-			"minimax-m2": {
-				"title": "MiniMax M2",
-				"model": "MiniMax-M2",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"minimax-m2-1": {
-				"title": "MiniMax M2.1",
-				"model": "MiniMax-M2.1",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"minimax-m2-1-highspeed": {
-				"title": "MiniMax M2.1 Highspeed",
-				"model": "MiniMax-M2.1-highspeed",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 65536, // manual
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
-			},
-			"minimax-m2-5": {
-				"title": "MiniMax M2.5",
-				"model": "MiniMax-M2.5",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"minimax-m2-5-highspeed": {
-				"title": "MiniMax M2.5 Highspeed",
-				"model": "MiniMax-M2.5-highspeed",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 65536, // manual
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
-			},
-			"minimax-m2-7": {
-				"title": "MiniMax M2.7",
-				"model": "MiniMax-M2.7",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"minimax-m2-7-highspeed": {
-				"title": "MiniMax M2.7 Highspeed",
-				"model": "MiniMax-M2.7-highspeed",
-				"modelSource": "provider",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 65536, // manual
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
-			},
-			"minimax-m2-local": {
-				"title": "MiniMax M2 (Local)",
-				"model": "MiniMaxAI/MiniMax-M2",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 8192, // manual
-				"serverbase": "http://localhost:8000/v1"
-			},
-			"minimax-m2-5-local": {
-				"title": "MiniMax M2.5 (Local)",
-				"model": "MiniMaxAI/MiniMax-M2.5",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 8192, // manual
-				"serverbase": "http://localhost:8000/v1"
-			},
-			"minimax-m2-7-local": {
-				"title": "MiniMax M2.7 (Local)",
-				"model": "MiniMaxAI/MiniMax-M2.7",
-				"modelSource": "manual",
-				"modelTotalTokens": 204800, // manual
-				"modelOutputTokens": 8192, // manual
-				"serverbase": "http://localhost:8000/v1"
-			},
-			"minimax-m3": {
-				"title": "MiniMax M3",
-				"model": "MiniMax-M3",
-				"modelSource": "provider",
-				"modelTotalTokens": 1000000, // sync_models.config.json
-				"modelOutputTokens": 131072, // sync_models.config.json
-				"serverbase": "https://api.minimax.io/v1",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
-			"minimax-01": {
-				"title": "MiniMax: MiniMax-01",
-				"model": "minimax-01",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 1000192, // openrouter
-				"modelOutputTokens": 900172, // openrouter
-				"apikey": ""
-			},
-			"minimax-m1": {
-				"title": "MiniMax: MiniMax M1",
-				"model": "minimax-m1",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
-				"modelOutputTokens": 40000, // openrouter
-				"capabilities": {
-					"reasoning": true
-				},
-				"apikey": ""
-			},
-			"minimax-m2-her": {
-				"title": "MiniMax: MiniMax M2-her",
-				"model": "minimax-m2-her",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 65536, // openrouter
-				"modelOutputTokens": 2048, // openrouter
-				"apikey": ""
-			},
-			"minimax-m2-7-free": {
-				"title": "MiniMax: MiniMax M2.7 (free)",
-				"model": "minimax-m2.7:free",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 196608, // openrouter
-				"modelOutputTokens": 176947, // openrouter
-				"deprecated": true,
-				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M2.7' instead.",
-				"capabilities": {
-					"reasoning": true
-				},
-				"apikey": ""
-			},
-			"minimax-m3-batch": {
-				"title": "MiniMax: MiniMax M3 (batch)",
-				"model": "minimax-m3:batch",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 524288, // openrouter
-				"modelOutputTokens": 471859, // openrouter
-				"deprecated": true,
-				"migration": "OpenRouter batch routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
-				"capabilities": {
-					"reasoning": true
-				},
-				"apikey": ""
-			},
-			"minimax-m3-free": {
-				"title": "MiniMax: MiniMax M3 (free)",
-				"model": "minimax-m3:free",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 943718, // openrouter
-				"deprecated": true,
-				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
-				"capabilities": {
-					"reasoning": true
-				},
-				"apikey": ""
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector (one branch per
+	//		model, the branch value is the model id); each branch pins its context
+	//		window and capabilities as constants, and the leaves every model shares
+	//		(credentials, generation settings) sit at the root and are stored flat.
+	//		The "custom" branch takes a model id the catalog does not list.
 	//
-	"fields": {
-		"model": {
+	"propertyDefinitions": {
+		"llm_minimax.apikey": {
+			"base": "llm.cloud.apikey",
+			"description": "MiniMax API key (cloud models; local models need none)",
+			"env": "ROCKETRIDE_LLM_MINIMAX_APIKEY",
+			"required": false
+		},
+		"llm_minimax.customModel": {
 			"type": "string",
-			"title": "Model",
-			"description": "MiniMax model"
+			"title": "Model id",
+			"description": "Model id exactly as the provider names it",
+			"required": true
 		},
-		"modelTotalTokens": {
-			"type": "number",
-			"title": "Tokens",
-			"description": "Total Tokens"
-		},
-		"modelOutputTokens": {
+		"llm_minimax.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 200000 },
+		"llm_minimax.custom.modelOutputTokens": {
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
 			"minimum": 1024,
-			"optional": true
+			"default": 65536
 		},
-		"minimax.serverbase": {
+		"llm_minimax.custom.serverbase": {
 			"type": "string",
-			"title": "Server base URL",
-			"description": "OpenAI-compatible base URL for the MiniMax endpoint (e.g. https://api.minimax.io/v1 for international, https://api.minimaxi.com/v1 for China).",
+			"title": "Server URL",
+			"description": "Base URL of the OpenAI-compatible endpoint serving the model",
 			"default": "https://api.minimax.io/v1"
-		},
-		"minimax.custom": {
-			"object": "custom",
-			"properties": [
-				"model",
-				"modelTotalTokens",
-				"modelOutputTokens",
-				"minimax.serverbase",
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2": {
-			"object": "minimax-m2",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-1": {
-			"object": "minimax-m2-1",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-1-highspeed": {
-			"object": "minimax-m2-1-highspeed",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-5": {
-			"object": "minimax-m2-5",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-5-highspeed": {
-			"object": "minimax-m2-5-highspeed",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-7": {
-			"object": "minimax-m2-7",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-7-highspeed": {
-			"object": "minimax-m2-7-highspeed",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-local": {
-			"object": "minimax-m2-local",
-			"properties": [
-				"llm.local.serverbase"
-			]
-		},
-		"minimax.minimax-m2-5-local": {
-			"object": "minimax-m2-5-local",
-			"properties": [
-				"llm.local.serverbase"
-			]
-		},
-		"minimax.minimax-m2-7-local": {
-			"object": "minimax-m2-7-local",
-			"properties": [
-				"llm.local.serverbase"
-			]
-		},
-		"minimax.profile": {
-			"title": "Model",
-			"description": "MiniMax LLM model",
-			"type": "string",
-			"default": "minimax-m2",
-			"enum": [
-				"*>preconfig.profiles.*.title"
-			],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": [
-						"minimax.custom"
-					]
-				},
-				{
-					"value": "minimax-m2",
-					"properties": [
-						"minimax.minimax-m2"
-					]
-				},
-				{
-					"value": "minimax-m2-1",
-					"properties": [
-						"minimax.minimax-m2-1"
-					]
-				},
-				{
-					"value": "minimax-m2-1-highspeed",
-					"properties": [
-						"minimax.minimax-m2-1-highspeed"
-					]
-				},
-				{
-					"value": "minimax-m2-5",
-					"properties": [
-						"minimax.minimax-m2-5"
-					]
-				},
-				{
-					"value": "minimax-m2-5-highspeed",
-					"properties": [
-						"minimax.minimax-m2-5-highspeed"
-					]
-				},
-				{
-					"value": "minimax-m2-7",
-					"properties": [
-						"minimax.minimax-m2-7"
-					]
-				},
-				{
-					"value": "minimax-m2-7-highspeed",
-					"properties": [
-						"minimax.minimax-m2-7-highspeed"
-					]
-				},
-				{
-					"value": "minimax-m2-local",
-					"properties": [
-						"minimax.minimax-m2-local"
-					]
-				},
-				{
-					"value": "minimax-m2-5-local",
-					"properties": [
-						"minimax.minimax-m2-5-local"
-					]
-				},
-				{
-					"value": "minimax-m2-7-local",
-					"properties": [
-						"minimax.minimax-m2-7-local"
-					]
-				},
-				{
-					"value": "minimax-m3",
-					"properties": [
-						"minimax.minimax-m3"
-					]
-				},
-				{
-					"value": "minimax-01",
-					"properties": [
-						"minimax.minimax-01"
-					]
-				},
-				{
-					"value": "minimax-m1",
-					"properties": [
-						"minimax.minimax-m1"
-					]
-				},
-				{
-					"value": "minimax-m2-her",
-					"properties": [
-						"minimax.minimax-m2-her"
-					]
-				},
-				{
-					"value": "minimax-m2-7-free",
-					"properties": [
-						"minimax.minimax-m2-7-free"
-					]
-				},
-				{
-					"value": "minimax-m3-batch",
-					"properties": [
-						"minimax.minimax-m3-batch"
-					]
-				},
-				{
-					"value": "minimax-m3-free",
-					"properties": [
-						"minimax.minimax-m3-free"
-					]
-				}
-			]
-		},
-		"minimax.minimax-m3": {
-			"object": "minimax-m3",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-01": {
-			"object": "minimax-01",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m1": {
-			"object": "minimax-m1",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-her": {
-			"object": "minimax-m2-her",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m2-7-free": {
-			"object": "minimax-m2-7-free",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m3-batch": {
-			"object": "minimax-m3-batch",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
-		},
-		"minimax.minimax-m3-free": {
-			"object": "minimax-m3-free",
-			"properties": [
-				"llm.cloud.apikey",
-				"llm.cloud.modelSource"
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "MiniMax",
-			"properties": ["minimax.profile"]
-		}
+			"name": "model",
+			"type": "string",
+			"title": "Model",
+			"description": "MiniMax LLM model",
+			"default": "MiniMax-M2",
+			"enum": {
+				"MiniMax-M2": {
+					"title": "MiniMax M2",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.1": {
+					"title": "MiniMax M2.1",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.1-highspeed": {
+					"title": "MiniMax M2.1 Highspeed",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.5": {
+					"title": "MiniMax M2.5",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.5-highspeed": {
+					"title": "MiniMax M2.5 Highspeed",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.7": {
+					"title": "MiniMax M2.7",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMax-M2.7-highspeed": {
+					"title": "MiniMax M2.7 Highspeed",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 65536 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"MiniMaxAI/MiniMax-M2": {
+					"title": "MiniMax M2 (Local)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 8192 },
+						{ "base": "llm.local.serverbase", "default": "http://localhost:8000/v1" }
+					]
+				},
+				"MiniMaxAI/MiniMax-M2.5": {
+					"title": "MiniMax M2.5 (Local)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 8192 },
+						{ "base": "llm.local.serverbase", "default": "http://localhost:8000/v1" }
+					]
+				},
+				"MiniMaxAI/MiniMax-M2.7": {
+					"title": "MiniMax M2.7 (Local)",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 204800 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 8192 },
+						{ "base": "llm.local.serverbase", "default": "http://localhost:8000/v1" }
+					]
+				},
+				"MiniMax-M3": {
+					"title": "MiniMax M3",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 131072 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"minimax-01": {
+					"title": "MiniMax: MiniMax-01",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1000192 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 900172 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"minimax-m1": {
+					"title": "MiniMax: MiniMax M1",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 1000000 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 40000 },
+						{ "name": "reasoning", "type": "constant", "default": true },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"minimax-m2-her": {
+					"title": "MiniMax: MiniMax M2-her",
+					"properties": [
+						{ "name": "modelTotalTokens", "type": "constant", "default": 65536 },
+						{ "name": "modelOutputTokens", "type": "constant", "default": 2048 },
+						{ "name": "serverbase", "type": "constant", "default": "https://api.minimax.io/v1" }
+					]
+				},
+				"custom": {
+					"title": "Custom model",
+					"properties": [
+						"llm_minimax.customModel",
+						"llm_minimax.custom.modelTotalTokens",
+						"llm_minimax.custom.modelOutputTokens",
+						"llm_minimax.custom.serverbase"
+					]
+				}
+			}
+		},
+		"llm_minimax.apikey"
 	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing. "profiles" lists
+	//		values of the "model" selector; the framework writes the selected one
+	//		at "model" and the mock credentials at their paths.
+	//
 	"test": {
-		"profiles": ["minimax-m2"],
+		"profiles": ["MiniMax-M2"],
 		"outputs": ["answers"],
 		"cases": [
 			{
 				"name": "LLM returns mock response",
 				"text": "What is 2+2?",
 				"expect": {
-					"answers": {
-						"contains": "Mock LLM response"
-					}
+					"answers": { "contains": "Mock LLM response" }
 				}
 			}
 		]

@@ -60,7 +60,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Host/Port: ${parameters.milvus.${profile}.host}:${parameters.milvus.${profile}.port}", "Collection: ${parameters.milvus.${profile}.collection}"],
+	"tile": ["Host/Port: ${parameters.milvus.${profile}.host}:${parameters.milvus.${profile}.port}", "Collection: ${parameters.milvus.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -125,53 +125,36 @@
 		]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "cloud",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Your own Milvus server",
-				"host": "localhost",
-				"port": 19530,
-				"collection": "ROCKETRIDE",
-				"serverName": "milvus"
-			},
-			"cloud": {
-				"mode": "cloud",
-				"title": "Milvus cloud server",
-				"host": "",
-				"port": 443,
-				"apikey": "",
-				"collection": "ROCKETRIDE",
-				"serverName": "milvus"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions. The host type is the selector: host,
+	//     port and the cloud-only token are branch-specific; the score,
+	//     collection and tool name are referenced by both branches, so they
+	//     are shared and stored flat.
 	//
-	"fields": {
-		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.zillizcloud.com"
+	"propertyDefinitions": {
+		"milvus.cloud.host": {
+			"base": "vector.host",
+			"description": "Enter the server address e.g. <your-instance-name>.<region>.zillizcloud.com",
+			"required": true
 		},
-		"vector.cloud.port": {
+		"milvus.cloud.port": {
+			"base": "vector.port",
+			"type": "integer",
 			"default": 443
 		},
-		"vector.local.host": {
+		"milvus.local.host": {
+			"base": "vector.host",
 			"default": "localhost"
 		},
-		"vector.local.port": {
+		"milvus.local.port": {
+			"base": "vector.port",
+			"type": "integer",
 			"default": 19530
+		},
+		"milvus.apikey": {
+			"base": "vector.apikey",
+			"env": "ROCKETRIDE_MILVUS_APIKEY",
+			"required": true
 		},
 		"milvus.serverName": {
 			"type": "string",
@@ -179,68 +162,29 @@
 			"description": "Label for this store in tool-response messages (for example, a refused write names milvus.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "milvus",
 			"minLength": 1
-		},
-		"milvus.cloud": {
-			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "milvus.serverName"]
-		},
-		"milvus.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "milvus.serverName"]
-		},
-		"milvus.profile": {
-			"title": "Type of Milvus host",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "cloud",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["milvus.cloud"]
-				},
-				{
-					"value": "local",
-					"properties": ["milvus.local"]
-				}
-			]
-		},
-		"milvus.provider": {
-			"type": "string",
-			"const": "milvus",
-			"default": "milvus"
-		},
-		"milvus.milvus": {
-			"object": "milvus",
-			"properties": ["milvus.profile"]
-		},
-		"milvus.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["milvus.provider", "milvus.milvus"]
-		},
-		"milvus.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "milvus.store", "all.embedding"]
-		},
-		"milvus.target.parameters": {
-			"object": "parameters",
-			"properties": ["milvus.target.autopipe"]
 		}
 	},
 	//
 	// Required:
+	//     Defines the properties shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Milvus VectorDB",
-			"properties": ["milvus.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "Milvus",
-			"properties": ["type", "milvus.target.parameters", "target.mode"]
+			"name": "profile",
+			"title": "Type of Milvus host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "cloud",
+			"enum": {
+				"cloud": {
+					"title": "Milvus cloud server",
+					"properties": ["milvus.cloud.host", "milvus.cloud.port", "milvus.apikey", "vector.score", "vector.collection", "milvus.serverName"]
+				},
+				"local": {
+					"title": "Your own Milvus server",
+					"properties": ["milvus.local.host", "milvus.local.port", "vector.score", "vector.collection", "milvus.serverName"]
+				}
+			}
 		}
 	]
 }

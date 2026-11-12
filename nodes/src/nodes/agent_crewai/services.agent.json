@@ -23,41 +23,24 @@
 	"lanes": {
 		"questions": ["answers"]
 	},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"agent_description": "",
-				"instructions": [],
-				"advanced_mode": false,
-				"role": "Assistant",
-				"task_description": "",
-				"goal": "",
-				"backstory": "",
-				"expected_output": "",
-				"require_tool_call": false
-			}
-		}
-	},
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. Every field is stored flat; the CrewAI
+	//		Agent/Task fields are always declared.
+	//
+	"propertyDefinitions": {
 		"agent_description": {
 			"type": "string",
+			"format": "textarea",
 			"title": "Agent description",
 			"default": "",
-			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent.",
-			"items": {
-				"type": "string",
-				"format": "textarea"
-			}
+			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
 			"type": "boolean",
@@ -65,67 +48,44 @@
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
-		"advanced_mode": {
-			"type": "boolean",
-			"title": "Advanced Mode",
-			"description": "Expose CrewAI Agent and Task configuration directly.",
-			"default": false,
-			"enum": [
-				[false, "Off"],
-				[true, "On"]
-			],
-			"conditional": [
-				{
-					"value": true,
-					"properties": ["agent_crewai.agent_config_header", "role", "goal", "backstory", "agent_crewai.task_config_header", "task_description", "expected_output"]
-				}
-			]
-		},
-		"agent_crewai.agent_config_header": {
-			"type": "null",
-			"title": "Agent Config",
-			"default": null
-		},
 		"role": {
 			"type": "string",
 			"title": "Role",
-			"description": "Agent role name (e.g. 'Financial Analyst'). Maps to CrewAI Agent(role=...)."
+			"description": "Agent role name (e.g. 'Financial Analyst'). Maps to CrewAI Agent(role=...).",
+			"default": "Assistant"
 		},
 		"goal": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Goal",
-			"description": "What this agent is trying to achieve. Maps to CrewAI Agent(goal=...)."
+			"description": "What this agent is trying to achieve. Maps to CrewAI Agent(goal=...).",
+			"default": ""
 		},
 		"backstory": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Backstory",
-			"description": "Background context for this agent's persona. Maps to CrewAI Agent(backstory=...)."
-		},
-		"agent_crewai.task_config_header": {
-			"type": "null",
-			"title": "Task Config",
-			"default": null
+			"description": "Background context for this agent's persona. Maps to CrewAI Agent(backstory=...).",
+			"default": ""
 		},
 		"task_description": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Task",
-			"description": "What this agent should do. If blank, the incoming question is used. Maps to CrewAI Task(description=...)."
+			"description": "What this agent should do. If blank, the incoming question is used. Maps to CrewAI Task(description=...).",
+			"default": ""
 		},
 		"expected_output": {
 			"type": "string",
 			"format": "textarea",
 			"title": "Expected Output",
-			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
+			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...).",
+			"default": ""
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "CrewAI Agent",
-			"properties": ["agent_description", "instructions", "require_tool_call", "advanced_mode"]
-		}
-	]
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": ["type", "agent_description", "instructions", "require_tool_call", "role", "goal", "backstory", "task_description", "expected_output"]
 }

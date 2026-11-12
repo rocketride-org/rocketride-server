@@ -50,7 +50,7 @@ CANONICAL_ORDER = [
     'Connections',  # conditional: invoke
     'Lanes',  # conditional: lanes
     'As a tool',  # conditional: tool in classType
-    'Profiles',  # conditional: >=2 real profiles
+    'Profiles',  # conditional: allowed with >=2 real selector branches
     'Configuration',  # core (usage guidance + ### field details)
     'Authentication',  # optional: credential setup
     'Requirements',  # conditional: gpu
@@ -131,12 +131,17 @@ def load_services(node_dir: Path):
     # llm_openai_api) is a different node from the engine's point of view, so its
     # default is a fact about that service, not a competing claim about this one.
     # Order follows file order, primary service first.
+    # The profiles of every service merge into one map; the primary service's
+    # entry wins a key two services share.
     defaults = []
+    profiles = {}
     for e in entries:
-        d = (e.get('preconfig') or {}).get('default')
+        entry_profiles, d = selector_profiles(e)
+        profiles = {**entry_profiles, **profiles}
         if d and d not in defaults:
             defaults.append(d)
     merged['_defaults'] = defaults
+    merged['_profiles'] = profiles
     for e in entries[1:]:
         merged['classType'] = sorted(set(merged.get('classType') or []) | set(e.get('classType') or []))
         merged['capabilities'] = sorted(set(merged.get('capabilities') or []) | set(e.get('capabilities') or []))
@@ -144,21 +149,78 @@ def load_services(node_dir: Path):
         inv = {**(e.get('invoke') or {}), **(merged.get('invoke') or {})}
         merged['invoke'] = inv or None
         merged['fields'] = {**(e.get('fields') or {}), **(merged.get('fields') or {})}
-        pc_m = merged.get('preconfig') or {}
-        pc_e = e.get('preconfig') or {}
-        pc_m['profiles'] = {**(pc_e.get('profiles') or {}), **(pc_m.get('profiles') or {})}
-        merged['preconfig'] = pc_m
     return merged
 
 
+def resolve_property(prop, definitions: dict) -> tuple[str | None, dict]:
+    """Resolve one `properties` entry to its (name, descriptor).
+
+    An entry is an inline descriptor, a bare string naming a
+    propertyDefinitions key, or `{"base": key, ...overrides}`. A referenced
+    definition is named by its last dotted segment unless it names itself. A
+    base defined outside this file (a shared fragment) contributes nothing
+    here; the overrides still apply.
+    """
+    if isinstance(prop, str):
+        descriptor = definitions.get(prop)
+        if not isinstance(descriptor, dict):
+            return None, {}
+        return descriptor.get('name') or prop.rsplit('.', 1)[-1], descriptor
+    if not isinstance(prop, dict):
+        return None, {}
+    base = prop.get('base')
+    if isinstance(base, str):
+        _, inherited = resolve_property(base, definitions)
+        descriptor = {**inherited, **{k: v for k, v in prop.items() if k != 'base'}}
+        return descriptor.get('name') or base.rsplit('.', 1)[-1], descriptor
+    return prop.get('name'), prop
+
+
+def selector_profiles(entry: dict) -> tuple[dict, str | None]:
+    """Return one service's profiles map and default key, from its property model.
+
+    Profiles are the branches of the service's first root-level SELECTOR: a
+    `properties` entry whose `enum` is a dict `{key: {title, properties?}}`.
+    A profile's metadata is its branch body without `properties` (title,
+    deprecated, ...), plus the selector's value under the selector's own
+    name (a `model` selector's key IS the model id), plus every `constant`
+    the branch declares (`model`, `modelTotalTokens`, `modelOutputTokens`).
+    The selector's `default` is the default key. A service without a
+    selector has no profiles.
+    """
+    definitions = entry.get('propertyDefinitions') or {}
+    for prop in entry.get('properties') or []:
+        # Step 1: the first selector at the root is the profile selector
+        name, descriptor = resolve_property(prop, definitions)
+        enum = descriptor.get('enum')
+        if not isinstance(enum, dict):
+            continue
+
+        # Step 2: one metadata record per branch
+        profiles = {}
+        for key, body in enum.items():
+            body = body if isinstance(body, dict) else {}
+            metadata = {k: v for k, v in body.items() if k != 'properties'}
+            if name:
+                metadata[name] = key
+            for branch_prop in body.get('properties') or []:
+                leaf, leaf_descriptor = resolve_property(branch_prop, definitions)
+                if leaf and leaf_descriptor.get('type') == 'constant' and 'default' in leaf_descriptor:
+                    metadata[leaf] = leaf_descriptor['default']
+            profiles[key] = metadata
+
+        # Step 3: the selector's default names the default profile
+        default = descriptor.get('default')
+        return profiles, default if default in profiles else None
+    return {}, None
+
+
 def real_profiles(svc) -> dict:
-    pc = svc.get('preconfig') or {}
-    profs = pc.get('profiles') or {}
-    return {k: v for k, v in profs.items() if k != 'custom'}
+    return {k: v for k, v in declared_profiles(svc).items() if k != 'custom'}
 
 
 def declared_profiles(svc) -> dict:
-    return (svc.get('preconfig') or {}).get('profiles') or {}
+    return svc.get('_profiles') or {}
 
 
 def section_body(text: str, section: str) -> str:
@@ -223,9 +285,6 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
         return []
 
     defaults = [key for key in (svc.get('_defaults') or []) if key in profiles]
-    if not defaults:
-        fallback = (svc.get('preconfig') or {}).get('default')
-        defaults = [fallback] if fallback else []
     # The primary service's default leads the visible table in the large layout.
     default = defaults[0] if defaults else None
     large = 'llm' in (svc.get('classType') or []) and len(profiles) > 6
@@ -283,9 +342,9 @@ def profile_results(svc: dict, hand: str) -> list[tuple[str, str, str]]:
     add(not unknown, 'Profiles unknown rows', f'unknown: {unknown}')
 
     semantic_fields = (
-        ('model', 'Profiles model matches preconfig'),
-        ('modelTotalTokens', 'Profiles context tokens match preconfig'),
-        ('modelOutputTokens', 'Profiles output tokens match preconfig'),
+        ('model', 'Profiles model matches the selector'),
+        ('modelTotalTokens', 'Profiles context tokens match the selector'),
+        ('modelOutputTokens', 'Profiles output tokens match the selector'),
     )
     for field, check in semantic_fields:
         mismatches = []
@@ -404,7 +463,11 @@ def required_sections(svc):
     (req if svc.get('invoke') else forb).add('Connections')
     (req if svc.get('lanes') else forb).add('Lanes')
     (req if 'tool' in svc.get('classType', []) else forb).add('As a tool')
-    (req if len(real_profiles(svc)) >= 2 else forb).add('Profiles')
+    # A selector with >=2 real branches PERMITS a Profiles table; it never
+    # requires one, because a README may describe the selector under
+    # Configuration instead (### Models). Without one the section is forbidden.
+    if len(real_profiles(svc)) < 2:
+        forb.add('Profiles')
     caps = set(svc.get('capabilities', []))
     (req if 'gpu' in caps else forb).add('Requirements')
     (req if caps & LIMITATION_CAPS else forb).add('Limitations')

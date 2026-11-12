@@ -39,17 +39,9 @@ def _ensure_iglobal_import_stubs():
         rocketlib.warning = lambda *_args, **_kwargs: None
     sys.modules['rocketlib'] = rocketlib
 
-    for name in ('ai', 'ai.common', 'ai.common.config'):
+    for name in ('ai', 'ai.common'):
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
-    if not hasattr(sys.modules['ai.common.config'], 'Config'):
-
-        class _Config:
-            @staticmethod
-            def getNodeConfig(*_args, **_kwargs):
-                return {}
-
-        sys.modules['ai.common.config'].Config = _Config
 
     if 'tool_mcp_client' not in sys.modules:
         package = types.ModuleType('tool_mcp_client')

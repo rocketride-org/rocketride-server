@@ -8,9 +8,9 @@
 Two defects stacked here and each is silent in its own way, so each gets a
 test that fails if the fix is undone:
 
-- the cloud branch was never taken, because ``getNodeConfig`` consumes the
-  ``profile`` key while merging that profile's contents, so the store only ever
-  saw ``local``;
+- the cloud branch was never taken: the host type is the ``profile`` value of
+  the resolved config, and a store that read anything else only ever saw
+  ``local``;
 - authentication moved off the removed ``Settings`` / ``TokenAuthClientProvider``
   path onto the ``x-chroma-token`` header, and Chroma Cloud additionally wants
   the tenant and database;
@@ -103,69 +103,69 @@ def _load_module():
     return module
 
 
-def _connect(monkeypatch: pytest.MonkeyPatch, config: dict) -> dict:
-    """Build a Store with `config` and return the kwargs it passed to HttpClient.
+#: What the resolver hands the store for an unconfigured local node; a test overrides what it needs.
+_RESOLVED_LOCAL = {
+    'profile': 'local',
+    'host': 'localhost',
+    'port': 8000,
+    'score': 0.5,
+    'collection': 'ROCKETRIDE',
+    'top_k': None,
+    'serverName': 'chroma',
+}
 
-    Both the import and the construction run inside the stub context: the shim
-    installs itself while the Store is being built, so `chromadb.api.fastapi`
-    has to still be the stub at that point, not just while importing.
+
+def _connect(monkeypatch: pytest.MonkeyPatch, config: dict) -> dict:
+    """Build a Store with `config` over the local defaults and return the kwargs it passed to HttpClient.
+
+    The config is the resolved view's content: the profile and the keys of the
+    active branch, flat. Both the import and the construction run inside the
+    stub context: the shim installs itself while the Store is being built, so
+    `chromadb.api.fastapi` has to still be the stub at that point, not just
+    while importing.
     """
     _CLIENT_CALLS.clear()
     with _scoped_stubs():
         module = _load_module()
-
-        # getNodeConfig merges the selected profile and is exercised elsewhere;
-        # here the point is what the store does with the config it holds.
-        monkeypatch.setattr(module.Config, 'getNodeConfig', staticmethod(lambda *_a, **_k: config))
         monkeypatch.setattr(module.DocumentStoreBase, '__init__', lambda self, *_a, **_k: None)
 
-        module.Store('chroma', {}, {})
+        module.Store('chroma', {**_RESOLVED_LOCAL, **config}, {})
 
     assert _CLIENT_CALLS, 'the store never constructed a client'
     return _CLIENT_CALLS[-1]
 
 
 class TestProfileResolution:
-    """Which branch runs: `getNodeConfig` eats `profile`, so `mode` carries it."""
+    """Which branch runs: the selector's own value, `profile`, carries it."""
 
-    def test_mode_cloud_takes_the_cloud_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'api.trychroma.com', 'apikey': 'k'})
-        assert kwargs.get('ssl') is True
-
-    def test_profile_cloud_still_works_for_direct_configs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # A config that reaches the node without going through profile merging
-        # still has `profile`, so it stays a fallback rather than being dropped.
+    def test_profile_cloud_takes_the_cloud_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
         kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'api.trychroma.com', 'apikey': 'k'})
         assert kwargs.get('ssl') is True
 
-    def test_absent_selection_stays_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_the_local_default_stays_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
         kwargs = _connect(monkeypatch, {'host': 'localhost'})
         assert 'ssl' not in kwargs
-
-    def test_mode_wins_over_a_stale_profile(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'profile': 'local', 'host': 'h', 'apikey': 'k'})
-        assert kwargs.get('ssl') is True
 
 
 class TestCloudTransport:
     """TLS and the header: plain HTTP against the TLS port is the hang."""
 
     def test_tls_is_requested(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'api.trychroma.com', 'apikey': 'k'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'api.trychroma.com', 'apikey': 'k'})
         assert kwargs['ssl'] is True
 
     def test_api_key_travels_in_the_x_chroma_token_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'secret'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'secret'})
         assert kwargs['headers'] == {'x-chroma-token': 'secret'}
 
     def test_no_api_key_sends_no_headers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A self-hosted server behind TLS needs no token; sending an empty one
         # would be rejected rather than ignored.
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h'})
         assert kwargs['headers'] is None
 
     def test_local_sends_neither(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'local', 'host': 'localhost', 'apikey': 'k'})
+        kwargs = _connect(monkeypatch, {'profile': 'local', 'host': 'localhost', 'apikey': 'k'})
         assert 'ssl' not in kwargs
         assert 'headers' not in kwargs
 
@@ -176,7 +176,7 @@ class TestTenantAndDatabase:
     def test_both_are_forwarded_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
         kwargs = _connect(
             monkeypatch,
-            {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': 't1', 'database': 'db1'},
+            {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': 't1', 'database': 'db1'},
         )
         assert kwargs['tenant'] == 't1'
         assert kwargs['database'] == 'db1'
@@ -184,17 +184,17 @@ class TestTenantAndDatabase:
     def test_omitted_rather_than_passed_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Passing tenant='' is not the same as not passing it: chromadb would
         # send an empty tenant instead of using its default.
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': '', 'database': ''})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': '', 'database': ''})
         assert 'tenant' not in kwargs
         assert 'database' not in kwargs
 
     def test_one_without_the_other_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': 't1'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': 't1'})
         assert kwargs['tenant'] == 't1'
         assert 'database' not in kwargs
 
     def test_whitespace_only_counts_as_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': '   '})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'tenant': '   '})
         assert 'tenant' not in kwargs
 
 
@@ -202,21 +202,19 @@ class TestTlsIsConfigurable:
     """Chroma Cloud is HTTPS-only, but this profile also covers plain-HTTP servers."""
 
     def test_tls_is_on_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k'})
         assert kwargs['ssl'] is True
 
     def test_tls_can_be_turned_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A self-hosted server behind plain HTTP with token auth worked before
         # the Settings path was removed; it must keep working.
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'ssl': False})
-        assert kwargs['ssl'] is False
-
-    def test_the_string_false_from_an_env_var_turns_it_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'ssl': 'false'})
+        kwargs = _connect(monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'ssl': False})
         assert kwargs['ssl'] is False
 
     def test_an_unresolved_placeholder_keeps_tls_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # '${...}' is a missing env var, not a deliberate opt-out, so it must not
         # silently downgrade the connection to plaintext.
-        kwargs = _connect(monkeypatch, {'mode': 'cloud', 'host': 'h', 'apikey': 'k', 'ssl': '${ROCKETRIDE_CHROMA_SSL}'})
+        kwargs = _connect(
+            monkeypatch, {'profile': 'cloud', 'host': 'h', 'apikey': 'k', 'ssl': '${ROCKETRIDE_CHROMA_SSL}'}
+        )
         assert kwargs['ssl'] is True

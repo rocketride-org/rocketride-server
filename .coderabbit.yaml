@@ -8,6 +8,7 @@ reviews:
     base_branches:
       - develop
       - release/.*
+      - feat/named-pipes-v3
     drafts: false
     ignore_title_keywords:
       - '[bot]'

@@ -67,48 +67,24 @@ def _json_answer(value):
     return a
 
 
-def _load_classes(node_config):
+def _load_classes():
     """Load the node's IGlobal/IInstance classes from source in isolation.
 
-    Stubs ``rocketlib`` and ``ai.common.*`` in ``sys.modules`` (so the node
-    imports without the engine), loads ``convert``/``IGlobal``/``IInstance`` from
-    the node dir via ``importlib``, and restores the original ``sys.modules``
-    entries in a ``finally`` block so no stub leaks into other test modules.
-    ``Config.getNodeConfig`` is stubbed to return ``node_config``.
+    ``rocketlib`` is the engine's real one, so the IGlobal reads its config through
+    the real resolver. ``ai.common.schema`` is stubbed with ``FakeAnswer`` (the
+    answer surface the test drives), ``convert``/``IGlobal``/``IInstance`` are
+    loaded from the node dir via ``importlib``, and the original ``sys.modules``
+    entries are restored in a ``finally`` block so no stub leaks into other test
+    modules.
     """
     saved = {}
 
-    class FakeIInstanceBase:
-        IGlobal = None
-        instance = None
-
-        def __init__(self):
-            pass
-
-        def preventDefault(self):
-            pass
-
-    class FakeIGlobalBase:
-        glb = None
-
-    class FakeEntry:
-        pass
-
     stubs = {
-        'rocketlib': types.ModuleType('rocketlib'),
         'ai': types.ModuleType('ai'),
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
-        'ai.common.config': types.ModuleType('ai.common.config'),
     }
-    stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
-    stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
-    stubs['rocketlib'].Entry = FakeEntry
-    stubs['rocketlib'].warning = lambda *a, **kw: None
     stubs['ai.common.schema'].Answer = FakeAnswer
-    stubs['ai.common.config'].Config = type(
-        'FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: node_config)}
-    )
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)
@@ -153,9 +129,9 @@ def _load_classes(node_config):
 
 
 def _build_instance(node_config):
-    IGlobal, IInstance = _load_classes(node_config)
+    IGlobal, IInstance = _load_classes()
     glob = IGlobal.__new__(IGlobal)
-    glob.glb = types.SimpleNamespace(logicalType='currency_convert_explicit', connConfig={})
+    glob.glb = types.SimpleNamespace(logicalType='currency_convert_explicit', connConfig=node_config)
     glob.beginGlobal()
 
     inst = IInstance.__new__(IInstance)

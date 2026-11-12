@@ -82,7 +82,7 @@ def resolve_account_domain(auth_type: str, cfg: dict) -> str | None:
     grants and allowing user/group.
     """
     if auth_type == 'user':
-        token = str(cfg.get('userToken') or '').strip()
+        token = str(cfg.get('userAuth') or '').strip()
         if not token:
             return None
         try:

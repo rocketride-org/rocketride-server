@@ -1,8 +1,7 @@
 {
 	//
 	// TEST ONLY: minimal definition so a task can reach the Outlook Personal endpoint.
-	// The shipped definitions were removed from OSS in 3cf3cf32 and referenced
-	// ms.* fields that went with them.
+	// The shipped definitions were removed from OSS in 3cf3cf32.
 	//
 	"title": "Outlook Personal",
 	"protocol": "outlook-personal://",
@@ -37,7 +36,14 @@
 			]
 		}
 	],
-	"fields": {
+	//
+	// Optional:
+	//		Local property definitions. The app registration lives in the
+	//		"parameters" group, which is where the C++ node reads it; the
+	//		client secret and the refresh token of the personal account flow
+	//		are secrets the account variables supply.
+	//
+	"propertyDefinitions": {
 		"ms.tenant": {
 			"type": "string",
 			"title": "Tenant",
@@ -46,45 +52,53 @@
 		"ms.clientId": {
 			"type": "string",
 			"title": "Client id",
-			"description": "Application (client) id."
+			"description": "Application (client) id.",
+			"required": true
 		},
-		//
-		// A credential-shaped field needs an entry in the shared catalog
-		// (nodes:credentials-check). Left undeclared rather than adding one for
-		// an unsupported service
-		//
-		// "ms.clientSecret": {
-		// 	"type": "string",
-		// 	"title": "Client secret",
-		// 	"description": "Application client secret."
-		// },
-		// "ms.refreshToken": {
-		// 	"type": "string",
-		// 	"title": "Refresh token",
-		// 	"description": "OAuth refresh token, for the personal account flow."
-		// },
-		"outlookp.source.parameters": {
-			"section": "parameters",
-			"title": "Parameters",
-			"properties": [
-				"ms.tenant",
-				"ms.clientId"
-				// "ms.clientSecret",
-				// "ms.refreshToken"
-			]
+		"ms.clientSecret": {
+			"type": "string",
+			"title": "Client secret",
+			"description": "Application client secret.",
+			"secret": true,
+			"env": "ROCKETRIDE_OUTLOOK_PERSONAL_CLIENT_SECRET",
+			"required": true
+		},
+		"ms.refreshToken": {
+			"type": "string",
+			"title": "Refresh token",
+			"description": "OAuth refresh token, for the personal account flow.",
+			"secret": true,
+			"env": "ROCKETRIDE_OUTLOOK_PERSONAL_REFRESH_TOKEN",
+			"required": true
 		}
 	},
-	"shape": [
+	//
+	// Required:
+	//		Defines the properties shown in the pipeline builder side panel, in order
+	//
+	"properties": [
+		"type",
+		"source.mode",
 		{
-			"section": "Source",
-			"title": "Outlook Personal",
+			"name": "parameters",
 			"properties": [
-				"type",
-				"source.mode",
-				"outlookp.source.parameters",
-				"include",
-				"exclude"
+				"ms.tenant",
+				"ms.clientId",
+				"ms.clientSecret",
+				"ms.refreshToken"
 			]
+		},
+		{
+			"name": "include",
+			"type": "array",
+			"description": "Example path: mailbox/folder/*",
+			"item": "Pipe.include.path"
+		},
+		{
+			"name": "exclude",
+			"type": "array",
+			"description": "Example path: mailbox/folder/*",
+			"item": "Pipe.exclude.path"
 		}
 	]
 }

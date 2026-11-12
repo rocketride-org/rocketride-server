@@ -67,9 +67,7 @@ _englib_stub = MagicMock()
 _depends_stub = ModuleType('depends')
 _depends_stub.depends = lambda *args, **kwargs: None
 
-_ai_config_stub = MagicMock()
 _ai_common_stub = MagicMock()
-_ai_common_stub.config = _ai_config_stub
 _ai_stub = MagicMock()
 _ai_stub.common = _ai_common_stub
 
@@ -98,7 +96,6 @@ with patch.dict(
         'pygit2.credentials': _pygit2_stub,
         'ai': _ai_stub,
         'ai.common': _ai_common_stub,
-        'ai.common.config': _ai_config_stub,
         'ai.common.utils': _ai_utils_stub,
     },
 ):

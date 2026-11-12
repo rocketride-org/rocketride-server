@@ -20,15 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-Local Text Output node.
-
-Write indexed text of the source objects to the local filesystem.
-
-"""
-
-from .IGlobal import IGlobal  # noqa: E402
-from .IInstance import IInstance  # noqa: E402
-
-__all__ = ['IGlobal', 'IInstance']

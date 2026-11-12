@@ -262,6 +262,48 @@ def _developer_id_of(conn: Any) -> Optional[str]:
     return getattr(org, 'developerId', None)
 
 
+def namespace_of(artifact_id: str) -> str:
+    """The developer namespace an artifact id lives in: the id up to its FIRST dot.
+
+    ``acme.docBrain`` -> ``acme`` and ``acme.tools.viewer`` -> ``acme``; a
+    bare slug is its own namespace. A developer id is a dot-free slug (letters
+    and underscores only), so the first segment is always the whole namespace
+    whatever follows it. This is the ONLY source of a listing's publisher: it
+    is derived from the id, which the namespace guarantee
+    (``_assert_owns_namespace``) ties to the publishing org, so nothing a
+    manifest says can claim another publisher.
+    """
+    return artifact_id.split('.', 1)[0]
+
+
+def developer_id_required(action: str) -> str:
+    """
+    The one refusal for an organization that has no developer id yet.
+
+    Apps, pipeline runs and deployments all live under the org's developer
+    id (the address namespace), so every door that needs one says the same
+    thing: what was refused, and the ways an org admin claims the id. The
+    claim itself is ``rrext_deploy_app developer_register`` (SaaS only);
+    users reach it through the App Builder's Deploy tab, the npm CLI's
+    ``rocketride app developer register <id>`` or
+    ``client.registerDeveloper(id)`` (Python: ``client.register_developer(id)``),
+    so the message names those, never the raw verb.
+
+    Args:
+        action: What was refused, as the sentence's subject
+            (``'Deploying or publishing an app'``).
+
+    Returns:
+        The message.
+    """
+    return (
+        f'{action} requires a registered developer id, and your organization has none. An org admin '
+        'claims it once, permanently: on the Deploy tab in the App Builder, with the npm CLI '
+        '(rocketride app developer register <id>), or in code with client.registerDeveloper(id) '
+        '(Python: client.register_developer(id)).'
+    )
+
+
 def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     """GUARANTEE the app id lives in the caller org's developer namespace.
 
@@ -274,25 +316,15 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     by nobody else.
 
     An org with no developer-id owns no namespace and cannot deploy or publish
-    apps until an org admin claims one with ``rrext_deploy_app
-    developer_register`` (SaaS only). Users reach that verb through the App
-    Builder's Deploy tab, the npm CLI's ``rocketride app developer register
-    <id>`` or ``client.registerDeveloper(id)`` (Python:
-    ``client.register_developer(id)``), so the error below names those, never
-    the raw verb.
+    apps until an org admin claims one (``developer_id_required`` names the
+    ways in).
 
     Raises:
         ValueError: no developer-id, or app_id outside the owned namespace.
     """
     dev = _developer_id_of(conn)
     if not dev:
-        raise ValueError(
-            'Deploying or publishing an app requires a registered developer id, and your organization '
-            'has none. An org admin claims it once, permanently: on the Deploy tab in the App Builder, '
-            'with the npm CLI (rocketride app developer register <id>), or in code with '
-            'client.registerDeveloper(id) (Python: client.register_developer(id)). '
-            'App ids must then be <id>.<name>.'
-        )
+        raise ValueError(developer_id_required('Deploying or publishing an app') + ' App ids must then be <id>.<name>.')
     if app_id != dev and not app_id.startswith(f'{dev}.'):
         raise ValueError(
             f'App id {app_id!r} is outside your developer namespace — it must be {dev!r} '
@@ -1123,7 +1155,9 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
-        'publisher': str(manifest.get('publisher') or ''),
+        # DERIVED, never authored: the manifest's own publisher/author fields
+        # are ignored (plan S7).
+        'publisher': namespace_of(str(artifact.get('appId') or manifest.get('id') or '')),
         'description': str(manifest.get('description') or ''),
         'iconPath': str(manifest.get('icon') or ''),
         'readmePath': str(manifest.get('readme') or ''),
@@ -1339,38 +1373,6 @@ def _holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
 
 
-# The scaffold's publisher when no developer id is known; a reserved slug no
-# org can register, so a listing treats it as no publisher at all.
-_PLACEHOLDER_PUBLISHER = 'local'
-
-
-def _publisher_of(app_id: str, manifest: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
-    """
-    The DEVELOPER a listing entry names, never empty (#2977).
-
-    First declared name wins: the version's own ``appManifest.publisher``
-    (metadata.manifest, the listing truth on both editions, and present on
-    versions deployed before the snapshot kept a publisher), then the binding
-    snapshot's copy, then the app id's namespace. Every deployed app id is
-    ``<developerId>`` or ``<developerId>.<name>`` inside the publishing org's
-    registered developer namespace (``_assert_owns_namespace``), so its first
-    segment IS that org's developer id, the same slug the app scaffold writes
-    as ``appManifest.publisher``. Seeded platform apps are ``rocketride.*``,
-    and on OSS the org's developer id is ``rocketride``, so an OSS app that
-    declares no publisher lists ``rocketride``.
-
-    Blank and non-string values count as missing, and so does ``local``: the
-    placeholder the scaffold writes (with the id ``local.<slug>``) when no
-    developer id is known. Deploying renames the id into a real namespace but
-    often leaves that publisher behind, and ``local`` is a reserved slug no
-    org can register, so it never names a real developer.
-    """
-    for value in (manifest.get('publisher'), snapshot.get('publisher')):
-        if isinstance(value, str) and value.strip() and value.strip().lower() != _PLACEHOLDER_PUBLISHER:
-            return value.strip()
-    return app_id.split('.', 1)[0]
-
-
 async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[str]) -> List[Dict[str, Any]]:
     """
     Resolves the caller's published apps via the scope walk over the binding
@@ -1423,11 +1425,6 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             continue
         snapshot = row.get('snapshot') or {}
-        # The version's stored appManifest (metadata.manifest): the listing
-        # truth, and the only publisher source on the DB edition (its fixed
-        # snapshot columns drop `publisher`).
-        artifact_meta = artifact.get('metadata') if isinstance(artifact.get('metadata'), dict) else {}
-        artifact_manifest = artifact_meta.get('manifest') if isinstance(artifact_meta.get('manifest'), dict) else {}
         rung = 'personal' if audience_type == 'user' else audience_type
         mode = snapshot.get('mode') or 'free'
         # Internal-pin serving status. A public (store) entry gets its real
@@ -1448,7 +1445,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'id': app_id,
             'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
-            'publisher': _publisher_of(app_id, artifact_manifest, snapshot),
+            'publisher': namespace_of(app_id),
             'description': snapshot.get('description') or '',
             'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
             'readme': snapshot.get('readmePath') or '',

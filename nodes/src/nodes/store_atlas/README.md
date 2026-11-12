@@ -44,17 +44,17 @@ Pipeline agents address the functions below as `<node id>.<function>`. The confi
 
 ## Configuration
 
-Provide the Atlas connection URI, database, collection, similarity, and retrieval score. The node creates the collection and its indexes when it first receives documents. Keep those index choices stable for an existing collection; this implementation checks for an index name but does not rebuild a differently shaped vector index for you.
+Provide the Atlas connection URI, database, collection, and retrieval score. The node creates the collection and its indexes when it first receives documents. Keep those index choices stable for an existing collection; this implementation checks for an index name but does not rebuild a differently shaped vector index for you.
 
 ### Connection URI, database, and collection
 
-The host must be a non-empty MongoDB SRV URI in the form `mongodb+srv://user:password@cluster.example.mongodb.net/?...`, and a non-empty API key value is required when the configuration is saved. The runtime client is constructed from the URI, including its credentials. Use this node only with an Atlas endpoint that supports the indexes it creates; a connection string for some other MongoDB deployment is not an equivalent replacement.
+The host must be a non-empty MongoDB SRV URI in the form `mongodb+srv://user:password@cluster.example.mongodb.net`, optionally followed by a path and query options such as `/?retryWrites=true`. The URI carries the credentials; the node has no separate API key. The runtime client is constructed from the URI, including its credentials. Use this node only with an Atlas endpoint that supports the indexes it creates; a connection string for some other MongoDB deployment is not an equivalent replacement.
 
 Database names cannot contain `/`, `\\`, spaces, quotes, `$`, `*`, `<`, `>`, `:`, `|`, or `?`, and are at most 64 characters. Collection names cannot start with `system.`, cannot contain `$`, and are at most 120 characters. Correct invalid names before saving: the validation is intended to catch a doomed deployment rather than let the first ingest fail later.
 
 ### Vector indexes and similarity
 
-On first ingestion the node creates ordinary metadata indexes, a text index on `content`, and a vector search index named `vector_index`. That vector index takes its dimension from the incoming embeddings. Similarity defaults to `cosine`; `euclidean` and `dotproduct` are the other accepted values. Keep the selected metric and embedding dimension aligned with the vectors you will query; changing either after collection creation calls for a new compatible index or collection.
+On first ingestion the node creates ordinary metadata indexes, a text index on `content`, and a vector search index named `vector_index`. That vector index takes its dimension from the incoming embeddings. The similarity metric is pinned to `cosine` by the driver and is not configurable. Keep the embedding dimension aligned with the vectors you will query; changing either after collection creation calls for a new compatible index or collection.
 
 The implementation logs and continues if Atlas rejects vector-index creation, with a message that it may need to be created in Atlas. If semantic retrieval then fails while keyword retrieval works, inspect the Atlas vector index rather than changing the question text. The node also builds metadata indexes and a text index, so first ingest is doing setup work as well as writing data.
 
@@ -82,7 +82,7 @@ The name defaults to `atlas` and labels this store in tool-response messages. Pi
 
 ## Authentication
 
-Supply the MongoDB SRV URI, including its credentials, as the host value. The save-time check also requires a non-empty API key value; the runtime client is constructed from the configured URI. The node has no separate local or unauthenticated profile.
+Supply the MongoDB SRV URI, including its credentials, as the host value; it is the only credential the node takes, and the runtime client is constructed from it. The node has no separate local or unauthenticated profile.
 
 ## Notes
 

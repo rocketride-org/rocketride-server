@@ -27,11 +27,10 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Dict, Any, Callable, cast
+from typing import List, Dict, Any, Callable, Mapping, cast
 import chromadb
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
 from nodes.store_chroma.mode import is_local
 from rocketlib import debug
 import uuid
@@ -73,7 +72,7 @@ class Store(DocumentStoreBase):
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
     payload_limit: int = 32 * 1024 * 1024
-    similarity: str = 'Cosine'
+    similarity: str = 'cosine'
     top_k: int | None = None
     client: chromadb.HttpClient
     collectionObj: chromadb.Collection | None = None
@@ -96,32 +95,34 @@ class Store(DocumentStoreBase):
         # keeps the safe default rather than silently dropping TLS.
         return True
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the chroma vector store.
+
+        Args:
+            provider: The node's logical type.
+            config: The resolved node config (defaults applied, active branch flattened).
+            bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        super().__init__(provider, config, bag)
 
         # Save our parameters
-        self.collection = config.get('collection')
+        self.collection = config['collection']
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = re.sub(r'^https?://', '', config.get('host', 'localhost').strip()).rstrip('/')
-        self.port = self._coercePort(config.get('port', 8000))
-        self.threshold_search = config.get('score', 0.5)
+        self.host = re.sub(r'^https?://', '', (config['host'] or '').strip()).rstrip('/')
+        self.port = self._coercePort(config['port'])
+        self.threshold_search = config['score']
 
         # Optional per-node retrieval limit. When set, it controls how many
         # candidate documents are fetched from Chroma before score filtering,
         # overriding the incoming DocFilter default (25). Left unset it falls
         # back to the caller-supplied limit, so existing pipelines are unchanged.
-        self.top_k = self._coerceTopK(config.get('top_k', None))
+        self.top_k = self._coerceTopK(config.get('top_k'))
 
-        # Strip API key also
-        self.apikey = config.get('apikey', None)
+        # The key, tenant, database and TLS switch exist on the cloud branch only
+        self.apikey = config.get('apikey')
         if self.apikey is not None:
             self.apikey = self.apikey.strip()
 
@@ -130,26 +131,18 @@ class Store(DocumentStoreBase):
         self.tenant = (config.get('tenant') or '').strip() or None
         self.database = (config.get('database') or '').strip() or None
 
-        # TLS for the cloud/remote profile. Defaults on, since Chroma Cloud is
+        # TLS for the cloud profile. Defaults on, since Chroma Cloud is
         # HTTPS-only; a self-hosted server behind plain HTTP turns it off.
         self.ssl = self._coerceBool(config.get('ssl', True))
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.payload_limit = config.get('payloadLimit', self.payload_limit)
+        # The metric is pinned for new collections: Chroma accepts l2, ip or
+        # cosine (hnsw:space); a collection created before the pin keeps its
+        # own space, which _distanceSpace reads back for the score rescaling
+        self.similarity = 'cosine'
 
         # Read the same way as the key check (IGlobal._credentials), so the key is
         # checked exactly when it is sent.
         local = is_local(config)
-
-        # check if the similarity matches qdrant configuration options
-        similarity = config.get('similarity', 'cosine')
-        supported = ('cosine', 'l2', 'ip')
-        if similarity in supported:
-            self.similarity = similarity
-        else:
-            raise Exception(
-                f'Chroma: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
-            )
 
         # The Chroma client connects eagerly (identity/tenant validation on construction),
         # so an incompatible/old server surfaces here as a cryptic error (e.g.
@@ -429,6 +422,20 @@ class Store(DocumentStoreBase):
         else:
             return None
 
+    def _distanceSpace(self) -> str:
+        """
+        Return the distance space the open collection was created in.
+
+        New collections take the pinned cosine space. A collection created
+        while the metric was still a setting keeps the l2 or ip space it was
+        built in, and Chroma returns its distances in that space, so the
+        rescaling must follow the collection, not the pin.
+        """
+        metadata = getattr(self.collectionObj, 'metadata', None)
+        if isinstance(metadata, dict) and isinstance(metadata.get('hnsw:space'), str):
+            return metadata['hnsw:space']
+        return self.similarity
+
     def _convertToDocs(self, results: Dict) -> List[Doc]:
         """
         Convert ChromaDB results to a list of Docs.
@@ -441,6 +448,9 @@ class Store(DocumentStoreBase):
             results['distances'] = results['distances'][0]
             results['documents'] = results['documents'][0]
 
+        # The space the distances were computed in decides their rescaling
+        space = self._distanceSpace()
+
         # Now, add the documents to the results
         for i in range(len(results['ids'])):
             # Get the payload content and meadata
@@ -448,8 +458,11 @@ class Store(DocumentStoreBase):
             content = results['documents'][i]
 
             if results.get('distances', None) is not None:
-                if self.similarity == 'cosine':
-                    score = (results['distances'][i] + 1) / 2
+                if space == 'cosine':
+                    # Chroma's cosine distance is 1 - cosine similarity, in
+                    # [0, 2] with 0 for identical vectors; map it to a [0, 1]
+                    # score where 1 is the closest match
+                    score = 1.0 - results['distances'][i] / 2
                 else:
                     score = float(1.0 / (1.0 + np.exp(results['distances'][i] / -100)))
 

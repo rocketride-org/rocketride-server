@@ -17,23 +17,13 @@ For every input image frame, the node estimates people and emits a JSON array of
 | `image` | `image` | JPEG copy of the frame annotated with person boxes, skeleton edges, and qualifying keypoints. |
 | `image` | `text` | JSON array of people, each with a `person` label, a box, and 17 named COCO keypoints containing coordinates and scores. |
 
-## Profiles
-
-Default: **RTMPose Medium** (`rtmpose-medium`).
-
-| Profile | Default keypoint threshold | Default maximum persons |
-| ------- | -------------------------- | ----------------------- |
-| RTMPose Tiny | `0.3` | `20` |
-| RTMPose Medium **(default)** | `0.3` | `20` |
-| RTMPose Large | `0.3` | `20` |
-
 ## Configuration
 
-Select a pose profile first, then use the threshold and person cap to balance useful annotation against work on each frame. The implementation normalizes invalid values at startup, so keeping the configuration within its declared range makes the chosen behavior explicit.
+Select a model first, then use the threshold and person cap to balance useful annotation against work on each frame. The schema declares each value's range and the node reads the values as they are, so a value outside its range is rejected when the configuration is validated rather than normalized at startup.
 
 ### Model
 
-The Tiny, Medium, and Large profiles select their corresponding RTMPose modes; the default is Medium. Use a smaller profile where response time matters more than pose detail, and a larger profile where the available compute justifies it. An unknown profile falls back to the implementation's default mode.
+The Tiny, Medium, and Large models select their corresponding RTMPose modes; the default is Medium. Use a smaller model where response time matters more than pose detail, and a larger model where the available compute justifies it.
 
 ### Keypoint score threshold
 
@@ -41,7 +31,7 @@ This `0.0`–`1.0` threshold controls skeleton rendering: keypoints below it are
 
 ### Max persons per frame
 
-The node keeps at most this many people after sorting by detection score. The default is `20`; reduce it for crowd scenes when latency or memory usage matters, and increase it when every person in a dense image is important. The runtime clamps the value to the `1`–`200` range.
+The node keeps at most this many people after sorting by detection score. The default is `20`; reduce it for crowd scenes when latency or memory usage matters, and increase it when every person in a dense image is important. The declared range is `1`–`200`.
 
 ## Requirements
 

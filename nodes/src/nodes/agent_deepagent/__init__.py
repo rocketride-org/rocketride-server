@@ -20,19 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-"""
-DeepAgent framework node package for RocketRide Engine.
-
-This package does not directly export `IInstance` / `IGlobal` — each of the
-two DeepAgent logical types lives in its own sub-package and the engine loads
-them via the `path` field in their respective services.json files:
-
-- `nodes.agent_deepagent.deepagent_agent`    — `agent_deepagent` (standalone or hierarchical orchestrator)
-- `nodes.agent_deepagent.deepagent_subagent` — `agent_deepagent_subagent` (managed sub-agent)
-
-The shared DeepAgent framework code that both sub-packages import lives at
-this package level: `deepagent.py` and the shared `requirements.txt`.
-"""
-
-__all__: list[str] = []

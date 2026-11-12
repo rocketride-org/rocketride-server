@@ -37,8 +37,8 @@ while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from text_output import endpoint as endpoint_module  # noqa: E402
-from text_output.endpoint import Endpoint  # noqa: E402
+from text_output import IEndpoint as endpoint_module  # noqa: E402
+from text_output.IEndpoint import IEndpoint  # noqa: E402
 
 smbprotocol_exceptions = pytest.importorskip('smbprotocol.exceptions')
 smbprotocol_header = pytest.importorskip('smbprotocol.header')
@@ -59,7 +59,7 @@ def recorded(monkeypatch):
 
 
 def make_endpoint(connect_error=None, **overrides):
-    """Build an Endpoint whose connect() raises the given error.
+    """Build an IEndpoint whose connect() raises the given error.
 
     The configuration accessors are properties over ``endpoint.parameters``, so a
     stub carrying that dict is enough; no engine object is needed.
@@ -73,7 +73,7 @@ def make_endpoint(connect_error=None, **overrides):
     }
     parameters.update(overrides)
 
-    instance = Endpoint.__new__(Endpoint)
+    instance = IEndpoint.__new__(IEndpoint)
     instance.endpoint = types.SimpleNamespace(parameters=parameters, jobConfig={'type': 'config'})
 
     def connect():
@@ -139,8 +139,8 @@ def test_configuration_mistakes_fail_validation(recorded, label, error):
 
 def test_classifier_reports_configuration_mistakes_directly():
     """The predicate is public, so exercise it without going through engLib."""
-    assert Endpoint.is_smb_config_error(SMBAuthenticationError('nope')) is True
-    assert Endpoint.is_smb_config_error(SMBOSError(NtStatus.STATUS_ACCESS_DENIED, '//s/x')) is True
+    assert IEndpoint.is_smb_config_error(SMBAuthenticationError('nope')) is True
+    assert IEndpoint.is_smb_config_error(SMBOSError(NtStatus.STATUS_ACCESS_DENIED, '//s/x')) is True
 
 
 # -----------------------------------------------------------------------------

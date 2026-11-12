@@ -406,11 +406,11 @@ def test_batch_delete_enforces_cap_and_gate():
 
 
 def test_services_json_declares_access_and_gmail_flags():
-    fields = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['fields']
-    assert 'gmail.access' in fields
-    # Every GMAIL spec flag must be exposed as a gmail.* config field.
+    definitions = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['propertyDefinitions']
+    assert 'access' in definitions
+    # Every GMAIL spec flag must be exposed as a config property.
     for flag in ga.GMAIL.flags:
-        assert f'gmail.{flag}' in fields, f'missing config field for GMAIL flag {flag!r}'
+        assert flag in definitions, f'missing config property for GMAIL flag {flag!r}'
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ def test_mock_sdk_user_auth_builds_service(mock_google_sdk):
     pytest.importorskip('google.oauth2.credentials')
     from nodes.tool_google_workspace.gmail import client as gmail_client
 
-    svc = gmail_client.build_service('user', {'userToken': '{"access_token": "mock-tok"}'}, ['scope'])
+    svc = gmail_client.build_service('user', {'userAuth': '{"access_token": "mock-tok"}'}, ['scope'])
     assert gmail_client.execute(svc.users().labels().list(userId='me'))['labels'][0]['id'] == 'INBOX'
 
 
@@ -522,7 +522,7 @@ def test_expired_token_no_refresh_path_raises(mock_google_sdk):
         }
     )
     with pytest.raises(ValueError, match='expired'):
-        gmail_client.build_service('user', {'userToken': expired_token}, ['scope'])
+        gmail_client.build_service('user', {'userAuth': expired_token}, ['scope'])
 
 
 def test_valid_token_sets_expiry_on_credentials(mock_google_sdk):
@@ -534,7 +534,7 @@ def test_valid_token_sets_expiry_on_credentials(mock_google_sdk):
 
     future_expiry_ms = int((time.time() + 3600) * 1000)
     token = json.dumps({'access_token': 'mock-tok', 'expiry_date': future_expiry_ms})
-    svc = gmail_client.build_service('user', {'userToken': token}, ['scope'])
+    svc = gmail_client.build_service('user', {'userAuth': token}, ['scope'])
     assert svc is not None
 
 
@@ -553,7 +553,7 @@ def test_build_service_raises_on_scope_mismatch(mock_google_sdk):
     with pytest.raises(ValueError, match='missing required scopes'):
         gmail_client.build_service(
             'user',
-            {'userToken': token},
+            {'userAuth': token},
             ['https://www.googleapis.com/auth/gmail.settings.basic'],
         )
 
@@ -567,7 +567,7 @@ def test_build_service_full_scope_token_not_blocked(mock_google_sdk):
     token = json.dumps({'access_token': 'tok', 'scope': 'https://mail.google.com/'})
     svc = gmail_client.build_service(
         'user',
-        {'userToken': token},
+        {'userAuth': token},
         ['https://www.googleapis.com/auth/gmail.settings.basic'],
     )
     assert svc is not None
@@ -583,7 +583,7 @@ def test_build_service_no_scope_field_does_not_raise(mock_google_sdk):
     # Should not raise even though settings scope is required — no scope metadata to check against
     svc = gmail_client.build_service(
         'user',
-        {'userToken': token},
+        {'userAuth': token},
         ['https://www.googleapis.com/auth/gmail.settings.basic'],
     )
     assert svc is not None
@@ -595,8 +595,8 @@ def test_build_service_no_scope_field_does_not_raise(mock_google_sdk):
 
 
 def test_services_json_access_enum_matches_gmail_spec():
-    fields = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['fields']
-    enum_tiers = {v for v, _ in fields['gmail.access']['enum']}
+    definitions = json.loads(_SERVICES_JSON.read_text(encoding='utf-8'))['propertyDefinitions']
+    enum_tiers = {v for v, _ in definitions['access']['enum']}
     spec_tiers = set(ga.GMAIL.scopes)
     assert spec_tiers == enum_tiers, f'tier mismatch between GMAIL spec and services.json: {spec_tiers ^ enum_tiers}'
 
@@ -650,22 +650,13 @@ class _HttpErr(Exception):
         self.content = content
 
 
-def _inst_with_token(access_tier: str, token: dict | None) -> 'IInstance.IInstance':
-    """Return an IInstance whose IGlobal.glb simulates a persisted user token."""
+def _inst_with_token(monkeypatch, access_tier: str, token: dict | None) -> 'IInstance.IInstance':
+    """Return an IInstance whose settings simulate a persisted user token."""
     inst = make_inst(access_tier)
     token_json = json.dumps(token) if token is not None else ''
-    inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_gmail', connConfig={})
-    inst.IGlobal._token_cfg = {'authType': 'user', 'userToken': token_json}
+    settings = {'authType': 'user', 'userAuth': token_json}
+    monkeypatch.setattr(IInstance.IInstance, 'settings', property(lambda self: settings))
     return inst
-
-
-def _patch_config(monkeypatch, inst):
-    """Make Config.getNodeConfig return the inst's _token_cfg."""
-    monkeypatch.setattr(
-        google_workspace_instance.Config,
-        'getNodeConfig',
-        MagicMock(return_value=inst.IGlobal._token_cfg),
-    )
 
 
 def test_check_connection_missing_scope(monkeypatch):
@@ -673,9 +664,8 @@ def test_check_connection_missing_scope(monkeypatch):
     mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     inst = _inst_with_token(
-        'settings', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
+        monkeypatch, 'settings', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
     )
-    _patch_config(monkeypatch, inst)
     result = inst.check_connection({})
     assert not result['connection_ok']
     assert any('gmail.settings.basic' in s for s in result['missingScopes'])
@@ -686,8 +676,7 @@ def test_check_connection_ok_with_full_scope(monkeypatch):
     """check_connection reports OK when the token carries https://mail.google.com/ (full scope)."""
     mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
-    inst = _inst_with_token('settings', {'access_token': 'tok', 'scope': 'https://mail.google.com/'})
-    _patch_config(monkeypatch, inst)
+    inst = _inst_with_token(monkeypatch, 'settings', {'access_token': 'tok', 'scope': 'https://mail.google.com/'})
     result = inst.check_connection({})
     assert result['connection_ok']
     assert result.get('missingScopes', []) == []
@@ -699,9 +688,8 @@ def test_check_connection_readonly_satisfied_by_modify(monkeypatch):
     mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     inst = _inst_with_token(
-        'readonly', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
+        monkeypatch, 'readonly', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
     )
-    _patch_config(monkeypatch, inst)
     result = inst.check_connection({})
     assert result['connection_ok']
     # The shared _check_connection_impl omits missingScopes when nothing is missing.

@@ -89,33 +89,28 @@ Store = atlas_mod.Store
 @pytest.fixture
 def store():
     """Create a Store instance with all MongoDB calls mocked out."""
-    mock_config = MagicMock()
-    mock_config.get = lambda key, default=None: {
+    # The resolved config: the keys the driver reads, flat
+    config = {
         'database': 'testdb',
         'collection': 'testcol',
         'host': 'mongodb://localhost:27017',
-        'vectorIndexName': 'vector_index',
-        'textIndexName': 'text_index',
-        'similarity': 'cosine',
         'score': 0.5,
-        'payloadLimit': 32 * 1024 * 1024,
-        'renderChunkSize': 32 * 1024 * 1024,
-    }.get(key, default)
+        'serverName': 'atlas',
+    }
 
-    with patch.object(atlas_mod.Config, 'getNodeConfig', return_value=mock_config):
-        with patch.object(atlas_mod, 'MongoClient') as MockClient:
-            mock_client = MagicMock()
-            mock_db = MagicMock()
-            mock_collection = MagicMock()
-            mock_client.__getitem__ = MagicMock(return_value=mock_db)
-            mock_db.__getitem__ = MagicMock(return_value=mock_collection)
-            MockClient.return_value = mock_client
+    with patch.object(atlas_mod, 'MongoClient') as MockClient:
+        mock_client = MagicMock()
+        mock_db = MagicMock()
+        mock_collection = MagicMock()
+        mock_client.__getitem__ = MagicMock(return_value=mock_db)
+        mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+        MockClient.return_value = mock_client
 
-            s = Store('atlas', {}, {})
-            s.collection = mock_collection
-            s.database = mock_db
-            s.doesCollectionExist = lambda *_a, **_kw: True
-            yield s
+        s = Store('mongodb+srv', config, {})
+        s.collection = mock_collection
+        s.database = mock_db
+        s.doesCollectionExist = lambda *_a, **_kw: True
+        yield s
 
 
 # ============================================================================

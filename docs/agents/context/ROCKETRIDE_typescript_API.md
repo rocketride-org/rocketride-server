@@ -315,7 +315,7 @@ Start a RocketRide pipeline. Returns the server response body; `token` is the ta
 
 - `pipeline?: PipelineConfig` — flat pipeline object (`components`, `source`, `project_id` at top level — do **not** wrap it in `{ pipeline: { ... } }`)
 - `filepath?: string` — path to a `.pipe` or JSON file (Node.js only); `{ "pipeline": { ... } }` wrappers are unwrapped automatically
-- `token?: string` — custom task token (auto-generated if not provided). Pass a distinct token per instance to run the same pipeline more than once at a time; tokens share one namespace across users, so use an unguessable value that keeps the `tk_` prefix
+- `token?: string` — overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. Pass a distinct value per instance to run the same pipeline more than once at a time, and terminate what you start. Not a credential: the developer id and the owner still come from your account
 - `source?: string` — override the pipeline's source component
 - `threads?: number` — number of execution threads. **No client default** — when omitted, the server decides
 - `useExisting?: boolean` — reuse an existing pipeline instance
@@ -406,7 +406,7 @@ if (result.errors.length > 0) {
 
 ### `getServices()` / `getService(service)`
 
-`getServices(): Promise<ServicesResponse>` returns the server's service catalog: one summary per service (title, classType, lanes, capabilities bitmask, ...) plus a deduplicated `icons` table (icon id → raw SVG) that each summary's `icon` id points into. Configuration schemas are **not** included — `getService(service: string): Promise<ServiceDefinition>` returns one service's FULL definition by name (e.g. `'ocr'`, `'chat'`): the summary fields plus the dynamic configuration sections (schema + UI schema per section). An unknown service name is an error, not an `undefined` result.
+`getServices(options?: { definitions?: boolean }): Promise<ServicesResponse>` returns the server's service catalog. By default every entry is a summary (title, classType, lanes, capabilities bitmask, ...) **without** its configuration schema, plus a deduplicated `icons` table (icon id → raw SVG) that each summary's `icon` id points into. With `{ definitions: true }` every entry is the FULL definition (configuration schema included) and there is no icons table: the bulk form of `getService()`. `getService(service: string): Promise<ServiceDefinition>` returns one service's FULL definition by name (e.g. `'ocr'`, `'chat'`): the summary fields plus the dynamic configuration sections (schema + UI schema per section). An unknown service name is an error, not an `undefined` result.
 
 ```typescript
 const { services, icons } = await client.getServices();

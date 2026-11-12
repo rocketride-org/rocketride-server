@@ -6,7 +6,7 @@ A RocketRide LLM node that connects MiniMax models to a pipeline via the MiniMax
 
 Provides MiniMax chat models as an `llm` invoke connection for agents and other nodes that need an LLM, and can also be used directly via lanes. It works against the MiniMax cloud API or a self-hosted OpenAI-compatible server (vLLM, SGLang, MLX, or Ollama).
 
-The MiniMax API is OpenAI-compatible, so the node uses **langchain-openai** (`ChatOpenAI`) pointed at the configured base URL, with `temperature: 0` and the profile's output-token limit as `max_tokens`. Config validation at save time runs a minimal one-token probe through the **openai** SDK and surfaces provider errors as warnings.
+The MiniMax API is OpenAI-compatible, so the node uses **langchain-openai** (`ChatOpenAI`) pointed at the configured base URL, with `temperature: 0` and the selected model's output-token limit as `max_tokens`. Config validation at save time runs a minimal one-token probe through the **openai** SDK and surfaces provider errors as warnings.
 
 MiniMax M2-series models return chain-of-thought wrapped in `<think>...</think>` inside the `content` field; the node strips that block so downstream pipeline nodes only see the final answer.
 
@@ -16,54 +16,51 @@ MiniMax M2-series models return chain-of-thought wrapped in `<think>...</think>`
 | ----------- | --------- | ---------------------------------------------------- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **MiniMax M2** (`minimax-m2`).
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `minimax-m2` **(default)** | `MiniMax-M2` | 204,800 | 65,536 |
-| `minimax-m3` | `MiniMax-M3` | 1,000,000 | 131,072 |
-| `minimax-m2-7` | `MiniMax-M2.7` | 204,800 | 65,536 |
-| `minimax-m2-7-highspeed` | `MiniMax-M2.7-highspeed` | 204,800 | 65,536 |
-| `minimax-m2-7-local` | `MiniMaxAI/MiniMax-M2.7` | 204,800 | 8,192 |
-
-<details>
-<summary><strong>View 13 more models</strong></summary>
-
-| Profile | Model | Context | Output |
-| ------- | ----- | ------- | ------ |
-| `custom` | _(user-specified)_ | 200,000 | 8,192 |
-| `minimax-m2-1` | `MiniMax-M2.1` | 204,800 | 65,536 |
-| `minimax-m2-1-highspeed` | `MiniMax-M2.1-highspeed` | 204,800 | 65,536 |
-| `minimax-m2-5` | `MiniMax-M2.5` | 204,800 | 65,536 |
-| `minimax-m2-5-highspeed` | `MiniMax-M2.5-highspeed` | 204,800 | 65,536 |
-| `minimax-m2-local` | `MiniMaxAI/MiniMax-M2` | 204,800 | 8,192 |
-| `minimax-m2-5-local` | `MiniMaxAI/MiniMax-M2.5` | 204,800 | 8,192 |
-| `minimax-01` | `minimax-01` | 1,000,192 | 900,172 |
-| `minimax-m1` | `minimax-m1` | 1,000,000 | 40,000 |
-| `minimax-m2-her` | `minimax-m2-her` | 65,536 | 2,048 |
-| `minimax-m2-7-free` | `minimax-m2.7:free` | 196,608 | 176,947 |
-| `minimax-m3-batch` | `minimax-m3:batch` | 524,288 | 471,859 |
-| `minimax-m3-free` | `minimax-m3:free` | 1,048,576 | 943,718 |
-
-</details>
-
-The `-highspeed` variants are MiniMax's faster tier of the same generation. MiniMax M3 is multimodal at the API level, though this node exposes only text.
-
 ## Configuration
 
-Choose a profile to set the model and token limits. Cloud profiles target MiniMax's API; local profiles prefill the Hugging Face model path and a local OpenAI-compatible server, while `custom` exposes the model, context budget, output limit (8,192 tokens by default), and server URL for manual configuration.
+Choose a model from the **Model** selector to set the model id and token limits. The
+default is **MiniMax M2** (`MiniMax-M2`). Cloud models target MiniMax's API; local
+models use the Hugging Face model path as their model id and an editable local
+OpenAI-compatible server URL, while **Custom model** exposes the model id, context
+budget, output limit, and server URL for manual configuration.
+
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| MiniMax M2 **(default)** | `MiniMax-M2` | 204,800 | 65,536 |
+| MiniMax M2.1 | `MiniMax-M2.1` | 204,800 | 65,536 |
+| MiniMax M2.1 Highspeed | `MiniMax-M2.1-highspeed` | 204,800 | 65,536 |
+| MiniMax M2.5 | `MiniMax-M2.5` | 204,800 | 65,536 |
+| MiniMax M2.5 Highspeed | `MiniMax-M2.5-highspeed` | 204,800 | 65,536 |
+| MiniMax M2.7 | `MiniMax-M2.7` | 204,800 | 65,536 |
+| MiniMax M2.7 Highspeed | `MiniMax-M2.7-highspeed` | 204,800 | 65,536 |
+| MiniMax M2 (Local) | `MiniMaxAI/MiniMax-M2` | 204,800 | 8,192 |
+| MiniMax M2.5 (Local) | `MiniMaxAI/MiniMax-M2.5` | 204,800 | 8,192 |
+| MiniMax M2.7 (Local) | `MiniMaxAI/MiniMax-M2.7` | 204,800 | 8,192 |
+| MiniMax M3 | `MiniMax-M3` | 1,000,000 | 131,072 |
+| MiniMax: MiniMax-01 | `minimax-01` | 1,000,192 | 900,172 |
+| MiniMax: MiniMax M1 | `minimax-m1` | 1,000,000 | 40,000 |
+| MiniMax: MiniMax M2-her | `minimax-m2-her` | 65,536 | 2,048 |
+| Custom model | _(user-specified)_ | editable | editable |
+
+The Highspeed variants are MiniMax's faster tier of the same generation. MiniMax M3 is
+multimodal at the API level, though this node exposes only text. The custom defaults
+are 200,000 total tokens and 65,536 output tokens.
 
 ### Server base URL
 
-Use `https://api.minimax.io/v1` for the international cloud API or `https://api.minimaxi.com/v1` for China. Local profiles default to vLLM or SGLang at `http://localhost:8000/v1`; change the URL when using MLX, Ollama, or another OpenAI-compatible server.
+Cloud models pin the international cloud API, `https://api.minimax.io/v1`. To reach the
+China API, select **Custom model** and set its server URL to
+`https://api.minimaxi.com/v1`. Local models default to vLLM or SGLang at
+`http://localhost:8000/v1`; change the URL when using MLX, Ollama, or another
+OpenAI-compatible server that serves the same model id.
 
 ## Authentication
 
-Cloud profiles require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` at startup.
+Cloud models require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` at startup.
 
-Local profiles (vLLM / SGLang / MLX / Ollama) have no `apikey` field; local OpenAI-compatible servers accept any token, so the node passes a dummy key (`sk-local-dummy-key`).
+Local models (vLLM / SGLang / MLX / Ollama) need no key: leave `apikey` empty and the node passes a dummy key (`sk-local-dummy-key`), which local OpenAI-compatible servers accept.
 
 ## Notes
 
@@ -71,9 +68,9 @@ Local profiles (vLLM / SGLang / MLX / Ollama) have no `apikey` field; local Open
 
 MiniMax's open-weight M2-family models are MIT-licensed 230B-parameter MoE models with about 10B parameters active per token. They require substantial memory:
 
-- **Linux + GPU (at least 96 GB total VRAM):** Run vLLM or SGLang on port `8000` and use the profile's Hugging Face model path.
-- **Apple Silicon Mac Studio (at least 128 GB unified memory):** Run MLX on port `8080`, set the server URL to `http://localhost:8080/v1`, and use a quantized build such as `mlx-community/MiniMax-M2.7-4bit`.
-- **Ollama on lower-memory systems:** Set the server URL to `http://localhost:11434/v1` and use the tag you pulled. Verify that the tag exists before configuring it.
+- **Linux + GPU (at least 96 GB total VRAM):** Run vLLM or SGLang on port `8000` and use the local model's Hugging Face model path.
+- **Apple Silicon Mac Studio (at least 128 GB unified memory):** Run MLX on port `8080`, select **Custom model**, set its server URL to `http://localhost:8080/v1`, and enter a quantized build such as `mlx-community/MiniMax-M2.7-4bit` as the model id.
+- **Ollama on lower-memory systems:** Select **Custom model**, set its server URL to `http://localhost:11434/v1`, and enter the tag you pulled as the model id. Verify that the tag exists before configuring it.
 
 These models do not fit on a typical laptop without aggressive quantization. M2.7 is a reasoning model whose API separates `message.content` from `message.reasoning_content`, so allow a generous output budget even for short prompts.
 

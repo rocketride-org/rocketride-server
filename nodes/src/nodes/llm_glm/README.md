@@ -18,39 +18,44 @@ The GLM-4.5 through GLM-5 generations are hybrid-reasoning MoE models with think
 | --- | --- | --- |
 | `questions` | `answers` | Send a question directly, receive a generated answer |
 
-## Profiles
-
-Default: **GLM-5.2** (`glm-5-2`). The profile set matches the live Z.ai `/models` catalog (verified 2026-08).
-
-| Profile | Model | Context | Output | Notes |
-| ------- | ----- | ------- | ------ | ----- |
-| GLM-5.2 **(default)** | `glm-5.2` | 1,000,000 | 32,768 | Frontier long-context reasoning and coding |
-| GLM-5.1 | `glm-5.1` | 204,800 | 32,768 | Previous flagship |
-| GLM-5 | `glm-5` | 204,800 | 32,768 | First GLM-5 generation |
-| GLM-5 Turbo | `glm-5-turbo` | 204,800 | 32,768 | Fast cost-effective tier |
-| GLM-4.7 | `glm-4.7` | 204,800 | 32,768 | Enhanced-reasoning 4.x flagship |
-| GLM-4.6 | `glm-4.6` | 204,800 | 32,768 | Open-weight 4.x flagship |
-
-<details>
-<summary><strong>View 3 more models</strong></summary>
-
-| Profile | Model | Context | Output | Notes |
-| ------- | ----- | ------- | ------ | ----- |
-| GLM-4.5 | `glm-4.5` | 131,072 | 32,768 | Open-weight |
-| GLM-4.5 Air | `glm-4.5-air` | 131,072 | 32,768 | Open-weight, efficient cost/quality balance |
-| `custom` | _(user-specified)_ | 131,072 | 8,192 | Any model on an OpenAI-compatible endpoint |
-
-</details>
-
 ## Configuration
 
-Choose a model profile. The profile supplies the model identifier and context window, so a cloud pipeline needs no additional model settings. Budget generous output tokens for reasoning-heavy prompts.
+Choose a model from the **Model** selector. Each listed model pins its model id,
+context window, and output limit, so a cloud pipeline needs no additional model
+settings. Budget generous output tokens for reasoning-heavy prompts. The default is
+**GLM-5.2** (`glm-5.2`). The model list matches the live Z.ai `/models` catalog
+(verified 2026-08).
 
-To use a self-hosted vLLM or SGLang deployment, select the **Custom Model** profile and point its server base URL at your OpenAI-compatible endpoint. Its output limit starts at 8,192 tokens and can be changed there. The API key may be left empty there: the node passes a dummy token, and local servers accept any value.
+### Models
+
+| Model | Model id | Context tokens | Output tokens |
+| ----- | -------- | -------------- | ------------- |
+| GLM-5.2 **(default)** | `glm-5.2` | 1,000,000 | 32,768 |
+| GLM-5.1 | `glm-5.1` | 204,800 | 32,768 |
+| GLM-5 | `glm-5` | 204,800 | 32,768 |
+| GLM-5 Turbo | `glm-5-turbo` | 204,800 | 32,768 |
+| GLM-4.7 | `glm-4.7` | 204,800 | 32,768 |
+| GLM-4.6 | `glm-4.6` | 204,800 | 32,768 |
+| GLM-4.5 | `glm-4.5` | 131,072 | 32,768 |
+| GLM-4.5 Air | `glm-4.5-air` | 131,072 | 32,768 |
+| Custom model | _(user-specified)_ | editable | editable |
+
+GLM-5.2 is the frontier long-context reasoning and coding model, GLM-5 Turbo the fast
+cost-effective tier, and GLM-4.5 Air the efficient cost/quality balance of the 4.5
+generation.
+
+### Self-hosted endpoints
+
+The **Server base URL** (`serverbase`) applies to every model and defaults to the Z.ai
+cloud API (`https://api.z.ai/api/paas/v4`). To use a self-hosted vLLM or SGLang
+deployment, point it at your OpenAI-compatible endpoint, and select **Custom model** to
+enter the model id that server serves, its token limit (131,072 by default), and its
+output limit (32,768 by default). The API key may be left empty for such an endpoint:
+the node passes a dummy token, and local servers accept any value.
 
 ## Authentication
 
-Cloud profiles require a Z.ai or Zhipu AI API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.z.ai` or `bigmodel.cn` and no key is set, the node raises `GLM API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
+Cloud endpoints require a Z.ai or Zhipu AI API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.z.ai` or `bigmodel.cn` and no key is set, the node raises `GLM API key is required for cloud profiles.` at startup. Key format is not validated beyond presence.
 
 ## Notes
 
@@ -60,7 +65,7 @@ GLM-4.5+ models are reasoning models. The Z.ai cloud returns reasoning in a sepa
 
 ### Model sync
 
-Profiles are maintained by the `sync_models` tooling (`llm_glm` provider, `ROCKETRIDE_GLM_KEY`). The include filter keeps only the `glm-*` text chat models; vision (4V and 4.5V), embedding, rerank, audio, and reward variants are excluded, because they belong in dedicated nodes.
+The `sync_models` tooling has a provider for this node (`llm_glm`, `ROCKETRIDE_GLM_KEY`). Its include filter keeps only the `glm-*` text chat models; vision (4V and 4.5V), embedding, rerank, audio, and reward variants are excluded, because they belong in dedicated nodes.
 
 ## Upstream docs
 

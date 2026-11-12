@@ -21,37 +21,40 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
+from typing import Any, Dict, Optional
 
-from .convert import _to_decimal
+from rocketlib import IGlobalBase, warning
 
 
 class IGlobal(IGlobalBase):
     """Global lifecycle: read and normalise the node configuration once per run."""
 
-    def beginGlobal(self):
-        raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig) or {}
+    # The normalised conversion settings convert_fact reads; None outside a run.
+    conversion: Optional[Dict[str, Any]] = None
 
-        self.config = {
-            'source_currency': str(raw.get('source_currency') or '').strip(),
-            'target_currency': str(raw.get('target_currency') or '').strip(),
-            'rate': raw.get('rate'),
-            'rate_date': str(raw.get('rate_date') or '').strip(),
-            'amount_field': str(raw.get('amount_field') or 'amount').strip() or 'amount',
-            'currency_field': str(raw.get('currency_field') or 'currency').strip() or 'currency',
-            'decimals': raw.get('decimals', 2),
+    def beginGlobal(self):
+        # The resolver has applied the defaults and typed every value (a
+        # numeric rate, an integer decimals, non-empty currency codes); the
+        # codes are stripped here because the fact comparison is textual.
+        config = self.config
+
+        self.conversion = {
+            'source_currency': config.source_currency.strip(),
+            'target_currency': config.target_currency.strip(),
+            'rate': config.rate,
+            'rate_date': config.rate_date.strip(),
+            'amount_field': config.amount_field.strip() or 'amount',
+            'currency_field': config.currency_field.strip() or 'currency',
+            'decimals': config.decimals,
         }
 
-        # Conversion is opt-in: surface misconfiguration loudly but never crash
+        # Conversion is opt-in: surface a blank code loudly but never crash
         # the pipeline — an unconfigured node simply passes answers through.
-        if not self.config['source_currency'] or not self.config['target_currency']:
+        if not self.conversion['source_currency'] or not self.conversion['target_currency']:
             warning(
                 'currency_convert_explicit: both source_currency and target_currency '
                 'must be set; answers will pass through unchanged.'
             )
-        elif _to_decimal(self.config['rate']) is None:
-            warning("currency_convert_explicit: 'rate' is not a valid number; answers will pass through unchanged.")
 
     def endGlobal(self):
-        self.config = None
+        self.conversion = None

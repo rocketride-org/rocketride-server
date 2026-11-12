@@ -8,7 +8,7 @@ Three categories:
   delegate to rocketlib + ``resolve_implied_source``. Mock those.
 - ``on_rrext_dashboard`` — large method that walks ``_task_control`` and
   ``_connections``. We cover the happy paths (caller filtering,
-  tk_ scoping) with seeded state and bypassed __init__.
+  owner scoping) with seeded state and bypassed __init__.
 """
 
 from __future__ import annotations
@@ -441,6 +441,61 @@ async def test_on_rrext_validate_propagates_validate_pipeline_errors(monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# on_rrext_validate — secret encryption through the real engine
+#
+# Runs inside the engine (engine.exe -m pytest): validatePipeline is the real
+# rocketlib binding on the loaded node catalog, so the encrypt walk runs on a
+# converted node's stored shape (plan section 5.6.2 / 12 F).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_moves_a_stored_secret_into_secure_parameters():
+    """A secret in a converted node's config comes back encrypted under secureParameters, never in plaintext."""
+    pytest.importorskip('engLib')
+    import json
+
+    branch_secret = 'kb-1'
+    unselected_secret = 'ku-1'
+    root_secret = 'kr-1'
+    pipeline = {
+        'source': 'q1',
+        'components': [
+            {
+                'id': 'q1',
+                'provider': 'qdrant',
+                'config': {'profile': 'cloud', 'cloud': {'host': 'https://x.cloud.qdrant.io', 'apikey': branch_secret}},
+            },
+            {
+                'id': 'q2',
+                'provider': 'qdrant',
+                'config': {'profile': 'local', 'local': {'host': 'localhost'}, 'cloud': {'apikey': unselected_secret}},
+            },
+            {'id': 'd1', 'provider': 'tool_deepl', 'config': {'apikey': root_secret, 'targetLang': 'DE'}},
+        ],
+    }
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    body = result['body']
+    assert 'errors' not in body, body.get('errors')
+    for secret in (branch_secret, unselected_secret, root_secret):
+        assert secret not in json.dumps(body), f'{secret} is in plaintext somewhere in the response'
+
+    qdrant, unselected, deepl = (c['config'] for c in body['pipeline']['components'])
+    assert 'apikey' not in qdrant['cloud'], 'the branch secret must leave its stored position'
+    assert qdrant['secureParameters']['secure'] == ['cloud.apikey'], 'registered and reported by its stored path'
+    assert isinstance(qdrant['secureParameters']['token'], str) and qdrant['secureParameters']['token']
+    assert qdrant['cloud']['host'] == 'https://x.cloud.qdrant.io', 'plain leaves stay where they are'
+    assert 'apikey' not in unselected['cloud'], 'a secret under the unselected branch block is a stored secret too'
+    assert unselected['secureParameters']['secure'] == ['cloud.apikey']
+    assert 'apikey' not in deepl, 'the root secret must leave its stored position'
+    assert deepl['secureParameters']['secure'] == ['apikey']
+    assert deepl['targetLang'] == 'DE'
+
+
+# ---------------------------------------------------------------------------
 # on_rrext_validate — the reply returns the config as submitted
 # ---------------------------------------------------------------------------
 
@@ -457,13 +512,31 @@ def _template_message(env, kind):
     return f'Pipeline validation {kind} for config with template references: {references}'
 
 
-def _validate_conn(monkeypatch, env=None):
-    """A connection whose account environment is ``env`` (default ``ENV``)."""
+def _validate_conn(monkeypatch, env=None, schemas=False):
+    """A connection whose account environment is ``env`` (default ``ENV``).
+
+    The resolver pass of ``on_rrext_validate`` (every component's config
+    against its engine-resolved schema) is pinned by its own tests below; the
+    echo-contract tests here stub the validator and send any config shape, so
+    the pass sees no schema unless ``schemas`` asks for the engine's.
+    """
     from ai.account import account
+    from ai.common import node_config
 
     merged = AsyncMock(return_value=ENV if env is None else env)
     monkeypatch.setattr(account, 'get_merged_env', merged)
+    if not schemas:
+        monkeypatch.setattr(node_config, 'getServiceSchema', lambda provider: None)
     return _make_conn(account_info=SimpleNamespace(userId='user-1', devTeam='', organization=None))
+
+
+def _openai(component_id, model_ref, apikey_ref):
+    """An llm_openai component in the property model: a custom model id and a key, both references."""
+    return {
+        'id': component_id,
+        'provider': 'llm_openai',
+        'config': {'model': 'custom', 'custom': {'customModel': model_ref}, 'apikey': apikey_ref},
+    }
 
 
 def _llm(component_id, provider):
@@ -746,10 +819,10 @@ async def test_on_rrext_validate_transformed_messages_use_template_references(
 @pytest.mark.parametrize('value', [' configured-value-xyz ', 'Configured-Value-XYZ', 'configured\x07value'])
 async def test_on_rrext_validate_engine_formatted_messages_use_template_references(monkeypatch, value):
     """The native node validator may normalize or escape a configured setting."""
-    if not cmd_misc.getServiceDefinition('tool_git'):
+    if not cmd_misc.node_schema('tool_git'):
         pytest.skip('tool_git service definition is not loaded')
     env = {'ROCKETRIDE_CUSTOM_MODEL': value}
-    conn = _validate_conn(monkeypatch, env=env)
+    conn = _validate_conn(monkeypatch, env=env, schemas=True)
     component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
 
     reply = await _reply(conn, {'version': 1, 'component': component})
@@ -846,14 +919,15 @@ def _spy_validator(monkeypatch):
 @pytest.mark.asyncio
 async def test_on_rrext_validate_engine_returns_submitted_config(monkeypatch):
     """The engine's own validator: the reply matches validating the submitted config directly."""
-    if not cmd_misc.getServiceDefinition('llm_openai'):
+    if not cmd_misc.node_schema('llm_openai'):
         pytest.skip('llm_openai service definition is not loaded')
+    from rocketlib import resolveSecureParameters
 
     direct = cmd_misc.validatePipeline
     calls = _spy_validator(monkeypatch)
-    conn = _validate_conn(monkeypatch)
-    literal = {'id': 'llm_3', 'provider': 'llm_openai', 'config': {'profile': 'p', 'p': {'apikey': 'typed-literal'}}}
-    components = [_llm('llm_1', 'llm_openai'), _llm('llm_2', 'llm_opnai'), literal]
+    conn = _validate_conn(monkeypatch, schemas=True)
+    literal = {'id': 'llm_3', 'provider': 'llm_openai', 'config': {'model': 'gpt-5.4', 'apikey': 'typed-literal'}}
+    components = [_openai('llm_1', CUSTOM_MODEL_REF, SERVICE_TOKEN_REF), _llm('llm_2', 'llm_opnai'), literal]
 
     reply = await _reply(conn, {'version': 1, 'components': components})
 
@@ -866,27 +940,34 @@ async def test_on_rrext_validate_engine_returns_submitted_config(monkeypatch):
     assert not _has_expanded_value(reply)
 
     llm_1, llm_2, llm_3 = reply['pipeline']['components']
-    assert llm_1['config']['openai-4o-mini']['secureParameters']['secure'] == ['apikey']
-    assert llm_1['config']['openai-4o-mini']['model'] == CUSTOM_MODEL_REF
+    # The key at the config root is a secret: it leaves its stored position and
+    # is registered in secureParameters by its path
+    assert 'apikey' not in llm_1['config']
+    assert llm_1['config']['secureParameters']['secure'] == ['apikey']
+
+    # Every reference comes back as written: the key (inside its token), the custom
+    # model id inside its branch, the misspelled provider's fields untouched
+    decoded = resolveSecureParameters(copy.deepcopy(reply['pipeline']))
+    assert decoded['components'][0]['config']['apikey'] == SERVICE_TOKEN_REF
+    assert not _has_expanded_value(decoded)
+    assert llm_1['config']['custom']['customModel'] == CUSTOM_MODEL_REF
     assert llm_2['config']['openai-4o-mini']['apikey'] == SERVICE_TOKEN_REF
     assert llm_2['config']['note'] == f'served from {SERVICE_TOKEN_REF}'
-    # A literal value the caller typed still moves into secureParameters, as before
-    assert 'apikey' not in llm_3['config']['p']
-    assert llm_3['config']['p']['secureParameters']['secure'] == ['apikey']
-    assert 'typed-literal' not in json.dumps(reply)
+    assert llm_3['config']['model'] == 'gpt-5.4'
 
 
 @pytest.mark.asyncio
 async def test_on_rrext_validate_engine_single_component_returns_submitted_config(monkeypatch):
-    """The engine's single-component validator, stopped by an empty profile name before any node code runs."""
-    if not cmd_misc.getServiceDefinition('llm_openai'):
+    """The engine's single-component validator, stopped by an unknown model id before any node code runs."""
+    if not cmd_misc.node_schema('llm_openai'):
         pytest.skip('llm_openai service definition is not loaded')
+    from rocketlib import resolveSecureParameters
 
     direct = cmd_misc.validatePipeline
     calls = _spy_validator(monkeypatch)
-    conn = _validate_conn(monkeypatch)
-    config = {'profile': '', 'parameters': {'apikey': SERVICE_TOKEN_REF}}
-    component = {'id': 'llm_1', 'provider': 'llm_openai', 'config': config}
+    conn = _validate_conn(monkeypatch, schemas=True)
+    component = _openai('llm_1', CUSTOM_MODEL_REF, SERVICE_TOKEN_REF)
+    component['config']['model'] = 'no-such-model'
 
     reply = await _reply(conn, {'version': 1, 'component': component})
 
@@ -897,7 +978,14 @@ async def test_on_rrext_validate_engine_single_component_returns_submitted_confi
     direct_component = direct(copy.deepcopy(submitted))['pipeline']['components'][0]
     assert _with_fixed_tokens(reply['component']) == _with_fixed_tokens(direct_component)
     assert reply['errors']
-    assert reply['component']['config']['parameters']['secureParameters']['secure'] == ['apikey']
+    assert all(entry['message'] == _template_message(ENV, 'error') for entry in reply['errors'])
+
+    # The key moved into secureParameters, and its token holds the reference as written
+    assert 'apikey' not in reply['component']['config']
+    assert reply['component']['config']['secureParameters']['secure'] == ['apikey']
+    decoded = resolveSecureParameters({'components': [copy.deepcopy(reply['component'])]})
+    assert decoded['components'][0]['config']['apikey'] == SERVICE_TOKEN_REF
+    assert not _has_expanded_value(decoded)
     assert not _has_expanded_value(reply)
 
 
@@ -911,7 +999,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     """The dashboard only includes tasks owned by the caller."""
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
-    # Caller is a member of team-1 only; team-other is invisible to them.
+    # Caller is a member of team-1 with task.monitor.
     caller_account = SimpleNamespace(
         userId='user-1',
         auth='ak_caller',
@@ -923,7 +1011,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         },
     )
 
-    # Server state: one task in caller's team, one in a team they cannot see.
+    # Server state: two dev runs in the caller's team, owned by different
+    # users. Team membership must not expose the other user's private run.
     own_status = SimpleNamespace(
         name='task.reader',
         startTime=900.0,
@@ -943,10 +1032,11 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         _ttl=600,
     )
     own_control = SimpleNamespace(
-        id='task-1',
+        id='acme.proj-1.reader',
+        key='dev.user-1.acme.proj-1.reader',
+        address='acme.proj-1.reader',
         userId='user-1',
         teamId='team-1',
-        token='tk_1',
         source='reader',
         project_id='proj-1',
         run_kind='dev',
@@ -957,10 +1047,11 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
     other_control = SimpleNamespace(
-        id='task-2',
+        id='acme.proj-2.other-source',
+        key='dev.other-user.acme.proj-2.other-source',
+        address='acme.proj-2.other-source',
         userId='other-user',
-        teamId='team-other',
-        token='tk_2',
+        teamId='team-1',
         source='other-source',
         project_id='proj-2',
         run_kind='dev',
@@ -971,7 +1062,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     )
 
     server = MagicMock()
-    server._task_control = {'tk_1': own_control, 'tk_2': other_control}
+    server._task_control = {own_control.key: own_control, other_control.key: other_control}
     server._connections = {}
     server._server = SimpleNamespace(_startTime=900.0)
 
@@ -981,73 +1072,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     body = result['body']
     assert body['overview']['activeTasks'] == 1
     assert len(body['tasks']) == 1
-    assert body['tasks'][0]['id'] == 'task-1'
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
-    """Task-token (tk_*) auth restricts the view to just that task."""
-    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
-
-    # Both tasks belong to caller's team; the tk_ auth filter narrows further.
-    caller_account = SimpleNamespace(
-        userId='user-1',
-        auth='tk_my-only-task',
-        userToken='tk_token',
-        organization={
-            'id': 'org-1',
-            'permissions': [],
-            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-        },
-    )
-
-    def _make_control(token):
-        """Build a minimal task control with the matching token."""
-        return SimpleNamespace(
-            id=token,
-            userId='user-1',
-            teamId='team-1',
-            token=token,
-            source='s',
-            project_id='p',
-            run_kind='dev',
-            # Real controls always expose owner_id (dev run -> the user).
-            owner_id='user-1',
-            provider='node-x',
-            task=SimpleNamespace(
-                get_status=lambda: SimpleNamespace(
-                    name='task.s',
-                    startTime=900.0,
-                    endTime=0,
-                    completed=False,
-                    state=3,
-                    totalCount=0,
-                    completedCount=0,
-                    rateCount=0,
-                    rateSize=0,
-                    metrics=None,
-                ),
-                get_connection_count=lambda: 0,
-                _idle_time=0,
-                _ttl=600,
-            ),
-            launch_type=SimpleNamespace(value='LAUNCH'),
-        )
-
-    server = MagicMock()
-    server._task_control = {
-        'tk_my-only-task': _make_control('tk_my-only-task'),
-        'tk_other-task': _make_control('tk_other-task'),
-    }
-    server._connections = {}
-    server._server = SimpleNamespace(_startTime=900.0)
-
-    conn = _make_conn(account_info=caller_account, server=server)
-    result = await MiscCommands.on_rrext_dashboard(conn, {})
-
-    body = result['body']
-    assert len(body['tasks']) == 1
-    assert body['tasks'][0]['id'] == 'tk_my-only-task'
+    assert body['tasks'][0]['id'] == 'acme.proj-1.reader'
 
 
 @pytest.mark.asyncio
@@ -1079,8 +1104,24 @@ def _caller_account(auth='ak_caller'):
     )
 
 
-def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id='team-1', completed=False):
-    """Build a minimal task control whose get_status() yields a stable row."""
+def _list_control(
+    task_id,
+    *,
+    name=None,
+    start=900.0,
+    provider='node-x',
+    team_id='team-1',
+    completed=False,
+    user_id='user-1',
+    legacy=False,
+):
+    """Build a minimal task control whose get_status() yields a stable row.
+
+    The control mirrors what launch stamps: id is the address, the key is
+    runKind.ownerId.address, and a dev run is owned by its user. legacy=True
+    builds an ownerless control (OSS single-user run), which resolves
+    through team permissions instead of ownership.
+    """
     status = SimpleNamespace(
         name=name or f'task.{task_id}',
         startTime=start,
@@ -1093,14 +1134,20 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         rateSize=0,
         metrics=None,
     )
+    # Controls are keyed runKind.ownerId.address; each task runs its own
+    # pipeline (the task id), so every control has its own address and key
+    address = f'acme.{task_id}.reader'
     return SimpleNamespace(
-        id=task_id,
-        userId='user-1',
+        id=address,
+        key=f'dev.{user_id}.{address}',
+        address=address,
+        userId=user_id,
         teamId=team_id,
-        token=f'tk_{task_id}',
         source='reader',
-        project_id='proj-1',
+        project_id=task_id,
         run_kind='dev',
+        # A dev run is owned by its user; a legacy control carries no owner
+        owner_id='' if legacy else user_id,
         provider=provider,
         task=SimpleNamespace(
             get_status=lambda: status,
@@ -1143,7 +1190,7 @@ def _list_ws_conn(
 def _make_server(controls=(), connections=None):
     """Build a server stand-in seeded with task controls and connections."""
     server = MagicMock()
-    server._task_control = {c.token: c for c in controls}
+    server._task_control = {c.key: c for c in controls}
     server._connections = connections or {}
     server._server = SimpleNamespace(_startTime=900.0)
     return server
@@ -1165,7 +1212,7 @@ async def test_list_tasks_paging_math(monkeypatch):
     assert body['total'] == 5
     assert body['page'] == 2
     assert body['pageSize'] == 2
-    assert [row['id'] for row in body['rows']] == ['task-3', 'task-4']
+    assert [row['id'] for row in body['rows']] == ['acme.task-3.reader', 'acme.task-4.reader']
 
 
 @pytest.mark.asyncio
@@ -1204,7 +1251,7 @@ async def test_list_tasks_filter_by_provider(monkeypatch):
 
     body = result['body']
     assert body['total'] == 2
-    assert {row['id'] for row in body['rows']} == {'task-2', 'task-3'}
+    assert {row['id'] for row in body['rows']} == {'acme.task-2.reader', 'acme.task-3.reader'}
 
 
 @pytest.mark.asyncio
@@ -1222,40 +1269,32 @@ async def test_list_tasks_search_matches_name(monkeypatch):
 
     body = result['body']
     assert body['total'] == 1
-    assert body['rows'][0]['id'] == 'task-1'
+    assert body['rows'][0]['id'] == 'acme.task-1.reader'
 
 
 @pytest.mark.asyncio
 async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
-    """Tasks in teams the caller cannot monitor never enter the row set."""
+    """Only runs the caller may reach enter the row set: their own dev runs,
+    and ownerless (legacy) runs in a team they can monitor.
+    """
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
     controls = [
-        _list_control('task-1', team_id='team-1'),
-        _list_control('task-2', team_id='team-other'),  # invisible to caller
+        # The caller's own dev run
+        _list_control('task-1'),
+        # Another user's dev run in the caller's team: private to its owner
+        _list_control('task-2', user_id='other-user'),
+        # Legacy ownerless runs resolve through team permissions
+        _list_control('task-3', legacy=True),
+        _list_control('task-4', team_id='team-other', legacy=True),
     ]
     conn = _make_conn(account_info=_caller_account(), server=_make_server(controls))
 
     result = await MiscCommands.on_rrext_list_tasks(conn, {'arguments': {}})
 
     body = result['body']
-    assert body['total'] == 1
-    assert body['rows'][0]['id'] == 'task-1'
-
-
-@pytest.mark.asyncio
-async def test_list_tasks_tk_auth_locks_to_owning_task(monkeypatch):
-    """Task-token (tk_*) auth narrows the list to just the owning task."""
-    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
-
-    controls = [_list_control('task-1'), _list_control('task-2')]
-    conn = _make_conn(account_info=_caller_account(auth='tk_task-2'), server=_make_server(controls))
-
-    result = await MiscCommands.on_rrext_list_tasks(conn, {'arguments': {}})
-
-    body = result['body']
-    assert body['total'] == 1
-    assert body['rows'][0]['id'] == 'task-2'
+    assert body['total'] == 2
+    assert {row['id'] for row in body['rows']} == {'acme.task-1.reader', 'acme.task-3.reader'}
 
 
 @pytest.mark.asyncio
@@ -1460,140 +1499,104 @@ def test_misc_commands_init_is_noop():
 
 
 # ---------------------------------------------------------------------------
-# on_rrext_resolve_config
+# Config resolution: on_rrext_resolve_config and the config errors of on_rrext_validate
+#
+# Both run rocketlib.resolveConfig on the engine-resolved schema, the pass
+# IGlobalBase.config runs at start. The schema is the QDRANT fixture of the
+# resolver's own tests: a selector (mode: cloud | local) with branch-specific
+# leaves, root leaves with defaults and ranges.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_returns_what_the_node_receives(monkeypatch):
-    """Resolution runs through the engine's own getNodeConfig, not a reimplementation."""
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-4o', 'temp': 0}))
+def _schemas(monkeypatch):
+    """Serve the QDRANT fixture as store_qdrant's engine-resolved schema; nothing else is known."""
+    from ai.common import node_config
+    from tests.rocketlib.schemas import QDRANT
 
-    conn = _make_conn()
-    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}}
-    result = await MiscCommands.on_rrext_resolve_config(conn, request)
-
-    body = result['body']
-    assert body['provider'] == 'llm_openai'
-    assert body['profile'] == 'default'
-    assert body['resolved'] == {'model': 'gpt-4o', 'temp': 0}
-    assert body['dropped'] == []
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_reports_keys_a_profile_discards(monkeypatch):
-    """
-    The #1839 shape: with a profile set, sibling top-level keys never reach the node.
-
-    Reporting them is the point of the tool. Inferring it from an absence is what
-    cost the issue author a day.
-    """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'host': 'localhost'}))
-
-    conn = _make_conn()
-    request = {
-        'arguments': {
-            'provider': 'store_chroma',
-            'config': {'profile': 'local', 'apikey': 'sk-x', 'local': {'host': 'localhost'}},
-        },
-    }
-    result = await MiscCommands.on_rrext_resolve_config(conn, request)
-
-    body = result['body']
-    assert body['profile'] == 'local'
-    assert body['dropped'] == ['apikey'], 'the profile sub-object itself is not a dropped key'
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_reports_a_key_the_profile_overwrote(monkeypatch):
-    """The discard that hides itself: the profile defines the key, so it stays present.
-
-    Reporting only absent keys misses this, which is the common shape in the
-    catalog: nearly every profile declares apikey, so an apikey written beside
-    'profile' is silently replaced rather than dropped from the result.
-    """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': '', 'model': 'gpt-5'}))
-
-    conn = _make_conn()
-    request = {
-        'arguments': {
-            'provider': 'llm_openai',
-            'config': {'profile': 'openai-5-4', 'apikey': 'sk-authors-key'},
-        },
-    }
-    result = await MiscCommands.on_rrext_resolve_config(conn, request)
-
-    body = result['body']
-    assert body['resolved']['apikey'] == '', 'the profile value wins, which is the bug being surfaced'
-    assert body['dropped'] == ['apikey'], 'present-but-overwritten still means the author key never lands'
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_reports_a_sibling_that_matches_the_profile(monkeypatch):
-    """A sibling whose value coincides with the profile's is still never read.
-
-    Comparing values would stay quiet here and leave the author believing the
-    line is in effect, when the same key inside the profile is what applied.
-    """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
-
-    conn = _make_conn()
-    request = {
-        'arguments': {
-            'provider': 'llm_openai',
-            'config': {'profile': 'openai-5-4', 'model': 'gpt-5.4'},
-        },
-    }
-    result = await MiscCommands.on_rrext_resolve_config(conn, request)
-
-    assert result['body']['dropped'] == ['model']
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_reports_nothing_without_a_profile(monkeypatch):
-    """Without a profile the user layer is read from the top level, so nothing is lost."""
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
-
-    conn = _make_conn()
-    request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-5.4'}}}
-    result = await MiscCommands.on_rrext_resolve_config(conn, request)
-
-    assert result['body']['dropped'] == []
-
-
-@pytest.mark.asyncio
-async def test_on_rrext_resolve_config_ignores_structural_and_unselected_profiles(monkeypatch):
-    """A config shaped like a real .pipe, not a hand-written fixture.
-
-    Every component in the repo's own pipelines that selects a profile also carries
-    `parameters`, and an editor-saved config keeps a sub-object per profile. Neither
-    is user configuration the resolver threw away, and telling an author to move
-    `parameters` inside the profile would break the component.
-    """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'claude-sonnet-4-6'}))
     monkeypatch.setattr(
-        cmd_misc,
-        '_service_profile_names',
-        lambda provider: frozenset({'claude-sonnet-4-6', 'claude-opus-4-1'}),
+        node_config, 'getServiceSchema', lambda provider: QDRANT if provider == 'store_qdrant' else None
     )
 
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_returns_the_view_the_node_receives(monkeypatch):
+    """Defaults applied, the selected branch flattened, each key's stored path reported."""
+    _schemas(monkeypatch)
+
     conn = _make_conn()
-    request = {
-        'arguments': {
-            'provider': 'llm_anthropic',
-            'config': {
-                'profile': 'claude-sonnet-4-6',
-                'claude-sonnet-4-6': {'apikey': '${ROCKETRIDE_ANTHROPIC_KEY}'},
-                'claude-opus-4-1': {'apikey': ''},
-                'name': 'Anthropic',
-                'parameters': {'temperature': 0.2},
-                'apikey': 'sk-written-beside-the-profile',
-            },
-        },
-    }
+    request = {'arguments': {'provider': 'store_qdrant', 'config': {'mode': 'local', 'local': {'port': 7000}}}}
     result = await MiscCommands.on_rrext_resolve_config(conn, request)
 
-    assert result['body']['dropped'] == ['apikey'], 'only the key an author actually lost'
+    body = result['body']
+    assert body['provider'] == 'store_qdrant'
+    assert body['resolved'] == {
+        'type': 'store_qdrant',
+        'mode': 'local',
+        'host': 'localhost',
+        'port': 7000,
+        'score': 0.7,
+        'collection': 'documents',
+    }
+    assert body['paths']['host'] == 'local.host', 'the short key is reported with where it is stored'
+    assert body['paths']['port'] == 'local.port'
+    assert body['params'] == []
+    assert body['paramKeys'] == []
+    assert body['envKeys'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_leaves_the_unselected_branch_out(monkeypatch):
+    """A key under the branch that is not selected is kept in the file but is not what the node sees."""
+    _schemas(monkeypatch)
+
+    conn = _make_conn()
+    config = {'mode': 'local', 'cloud': {'host': 'https://cloud.qdrant.io', 'apikey': {'key': 'abcd'}}}
+    result = await MiscCommands.on_rrext_resolve_config(
+        conn, {'arguments': {'provider': 'store_qdrant', 'config': config}}
+    )
+
+    assert result['body']['resolved']['host'] == 'localhost'
+    assert 'key' not in result['body']['resolved']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_names_an_env_filled_key(monkeypatch):
+    """A ${ROCKETRIDE_*} value is filled per call; the tool says which keys those are."""
+    _schemas(monkeypatch)
+
+    conn = _make_conn()
+    config = {'mode': 'local', 'collection': '${ROCKETRIDE_COLLECTION}'}
+    result = await MiscCommands.on_rrext_resolve_config(
+        conn, {'arguments': {'provider': 'store_qdrant', 'config': config}}
+    )
+
+    assert result['body']['envKeys'] == ['collection']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_rejects_a_key_the_schema_does_not_declare(monkeypatch):
+    """Resolving is validating: an unknown key is a hard error naming it, not a silent drop."""
+    from rocketlib import ConfigError
+
+    _schemas(monkeypatch)
+
+    conn = _make_conn()
+    config = {'mode': 'local', 'bogus': 1}
+    with pytest.raises(ConfigError, match='unknown config key "bogus"'):
+        await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'store_qdrant', 'config': config}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_resolve_config_rejects_a_stale_selector_value(monkeypatch):
+    from rocketlib import ConfigError
+
+    _schemas(monkeypatch)
+
+    conn = _make_conn()
+    with pytest.raises(ConfigError, match='"mode" is set to'):
+        await MiscCommands.on_rrext_resolve_config(
+            conn, {'arguments': {'provider': 'store_qdrant', 'config': {'mode': 'nope'}}}
+        )
 
 
 @pytest.mark.asyncio
@@ -1614,13 +1617,140 @@ async def test_on_rrext_resolve_config_rejects_a_non_object_config():
 
 @pytest.mark.asyncio
 async def test_on_rrext_resolve_config_propagates_an_unknown_service(monkeypatch):
-    """An unknown service raises out of getNodeConfig; the caller should see that, not a blank."""
+    """An unknown service is an error the caller should see, not a blank."""
+    from rocketlib import ConfigError
 
-    def _raise(provider, config):
-        raise Exception(f'The service {provider} was not found')
-
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(_raise))
+    _schemas(monkeypatch)
 
     conn = _make_conn()
-    with pytest.raises(Exception, match='was not found'):
+    with pytest.raises(ConfigError, match='was not found'):
         await MiscCommands.on_rrext_resolve_config(conn, {'arguments': {'provider': 'nope'}})
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_reports_config_errors_on_the_engine_list(monkeypatch):
+    """A config that does not fit its schema is a hard error at validate, on the same list as the engine's."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(
+        cmd_misc, 'validatePipeline', lambda payload: {'errors': [{'id': 'x', 'ccode': 1, 'message': 'engine'}]}
+    )
+
+    conn = _make_conn()
+    pipeline = {
+        'source': 'q1',
+        'components': [
+            {'id': 'q1', 'provider': 'store_qdrant', 'config': {'mode': 'local', 'local': {'port': 70000}, 'bogus': 1}},
+            {'id': 'ok', 'provider': 'store_qdrant', 'config': {'mode': 'local', 'name': 'My store'}},
+        ],
+    }
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    errors = result['body']['errors']
+    assert errors[0] == {'id': 'x', 'ccode': 1, 'message': 'engine'}, "the engine's own errors come first, untouched"
+    assert [e['id'] for e in errors[1:]] == ['q1'], 'the editor-owned name on the second component is tolerated'
+    assert 'unknown config key "bogus"' in errors[1]['message']
+    assert '"local.port"' in errors[1]['message'], 'every problem of a component is in its one entry'
+    assert errors[1]['message'].startswith('store_qdrant: ')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('single', [False, True])
+async def test_on_rrext_validate_config_errors_follow_the_template_contract(monkeypatch, single):
+    """A resolver message quotes the resolved value; under substitution it is replaced
+    by the fixed template message and carries the submitted component id, like the
+    engine's own diagnostics, so the expanded value never reaches the reply.
+    """
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: copy.deepcopy(payload))
+    env = {'ROCKETRIDE_PORT': '70000'}
+    conn = _validate_conn(monkeypatch, env=env, schemas=True)
+    component = {
+        'id': 'q1',
+        'provider': 'store_qdrant',
+        'config': {'mode': 'local', 'local': {'port': '${ROCKETRIDE_PORT}'}},
+    }
+    pipeline = {'version': 1, 'component': component} if single else {'source': 'q1', 'components': [component]}
+
+    reply = await _reply(conn, pipeline)
+
+    assert reply['errors'] == [{'message': _template_message(env, 'error'), 'id': 'q1'}]
+    assert '70000' not in json.dumps(reply)
+    echoed = reply['component'] if single else reply['pipeline']['components'][0]
+    assert echoed['config']['local']['port'] == '${ROCKETRIDE_PORT}'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_config_error_with_a_non_string_id_carries_no_id(monkeypatch):
+    """A component id that is not a string (here a list, which the engine reports on
+    its own) cannot key the submitted-id map: under substitution its config error
+    keeps the template message and simply omits the id instead of failing the reply.
+    """
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: copy.deepcopy(payload))
+    env = {'ROCKETRIDE_PORT': '70000'}
+    conn = _validate_conn(monkeypatch, env=env, schemas=True)
+    component = {
+        'id': ['q1'],
+        'provider': 'store_qdrant',
+        'config': {'mode': 'local', 'local': {'port': '${ROCKETRIDE_PORT}'}},
+    }
+
+    reply = await _reply(conn, {'source': 'q1', 'components': [component]})
+
+    assert reply['errors'] == [{'message': _template_message(env, 'error')}]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_rejects_a_config_that_is_not_an_object(monkeypatch):
+    """A falsy non-dict config ([]) is malformed, not empty: reported, never validated as {}."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {})
+
+    conn = _make_conn()
+    pipeline = {'source': 'q1', 'components': [{'id': 'q1', 'provider': 'store_qdrant', 'config': []}]}
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    assert result['body']['errors'] == [{'id': 'q1', 'message': 'store_qdrant: config must be an object'}]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_adds_no_errors_key_when_every_config_fits(monkeypatch):
+    """A clean pipeline comes back exactly as the engine answered it."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+
+    conn = _make_conn()
+    pipeline = {'source': 'q1', 'components': [{'id': 'q1', 'provider': 'store_qdrant', 'config': {'mode': 'local'}}]}
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    assert result['body'] == {'ok': True}
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_leaves_an_unknown_provider_to_the_engine(monkeypatch):
+    """A provider the engine does not know is the engine's structural error, not repeated here."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+
+    conn = _make_conn()
+    pipeline = {'source': 'n1', 'components': [{'id': 'n1', 'provider': 'nope', 'config': {'bogus': 1}}]}
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    assert result['body'] == {'ok': True}
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_checks_the_single_component_form(monkeypatch):
+    """The node config panel validates one component at a time; its config is checked the same way."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {})
+
+    conn = _make_conn()
+    component = {'id': 'q1', 'provider': 'store_qdrant', 'config': {'mode': 'local', 'score': 7}}
+    result = await MiscCommands.on_rrext_validate(
+        conn, {'arguments': {'pipeline': {'version': 1, 'component': component}}}
+    )
+
+    errors = result['body']['errors']
+    assert len(errors) == 1 and errors[0]['id'] == 'q1'
+    assert '"score"' in errors[0]['message']

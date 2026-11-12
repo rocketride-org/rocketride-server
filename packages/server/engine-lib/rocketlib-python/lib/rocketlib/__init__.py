@@ -32,6 +32,7 @@ from .engine import error
 from .engine import expand
 from .engine import getServiceDefinition
 from .engine import getServiceDefinitions
+from .engine import getServiceSchema
 from .engine import getTask
 from .engine import isCancelled
 from .engine import getVersion
@@ -56,9 +57,15 @@ from .engine import validatePipeline
 from .engine import warning
 from .error import APERR
 from .error import Ec
+from .config import ConfigError
+from .config import ConfigView
+from .config import resolveConfig
+from .config import TenancyViolation
+from .filters import BindingLogger
 from .filters import IEndpointBase
 from .filters import IGlobalBase
 from .filters import IInstanceBase
+from .filters import IValidatorBase
 from .filters import IServiceEndpoint
 from .filters import IServiceFilterPipe
 from .filters import ILoader
@@ -96,6 +103,8 @@ __all__ = [
     'APERR',
     'args',
     'AVI_ACTION',
+    'ConfigError',
+    'ConfigView',
     'configureLogger',
     'debug',
     'DEFAULT_MAX_COMPONENT',
@@ -111,9 +120,11 @@ __all__ = [
     'getObject',
     'getServiceDefinition',
     'getServiceDefinitions',
+    'getServiceSchema',
     'getTask',
     'isCancelled',
     'getVersion',
+    'BindingLogger',
     'IControl',
     'IDict',
     'IEndpointBase',
@@ -131,6 +142,7 @@ __all__ = [
     'IInvokeMemory',
     'IJson',
     'ILoader',
+    'IValidatorBase',
     'isAppMonitor',
     'isLevelEnabled',
     'Lvl',
@@ -148,6 +160,7 @@ __all__ = [
     'outputField',
     'processArguments',
     'readLine',
+    'resolveConfig',
     'resolveSecureParameters',
     'PROTOCOL_CAPS',
     'SERVICE_MODE',
@@ -155,6 +168,7 @@ __all__ = [
     'shorten_path_components',
     'TAG',
     'TAG_ID',
+    'TenancyViolation',
     'tool_function',
     'ToolDescriptor',
     'validatePipeline',

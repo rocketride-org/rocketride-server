@@ -146,6 +146,7 @@ class _FakeUnderlyingClient:
         self.disconnect_calls = 0
         self.request_calls = 0
         self.get_services_calls = 0
+        self.get_services_definitions = []
         self.get_service_calls = []
         self.validate_calls = []
         self.use_calls = []
@@ -195,8 +196,9 @@ class _FakeUnderlyingClient:
         )
         return {'ok': True}
 
-    async def get_services(self) -> dict:
+    async def get_services(self, *, definitions: bool = False) -> dict:
         self.get_services_calls += 1
+        self.get_services_definitions.append(definitions)
         return {'services': {'ocr': {}}, 'version': 'x'}
 
     async def get_service(self, service: str) -> dict:
@@ -322,7 +324,16 @@ async def test_get_services_calls_sdk():
     result = await client.get_services()
 
     assert fake.get_services_calls == 1
+    assert fake.get_services_definitions == [False]
     assert result == {'services': {'ocr': {}}, 'version': 'x'}
+
+
+async def test_get_services_forwards_definitions():
+    client, fake = _make_client_with_fake()
+
+    await client.get_services(definitions=True)
+
+    assert fake.get_services_definitions == [True]
 
 
 async def test_get_environment_keys_calls_sdk():
@@ -841,7 +852,7 @@ async def test_transport_drop_unlatches_connected_so_next_call_reconnects():
     await client.get_services()
     assert client._connected is True
 
-    async def _raise_dropped():
+    async def _raise_dropped(**_kwargs):
         raise RuntimeError('Server is not connected')
 
     fake.get_services = _raise_dropped
@@ -850,11 +861,11 @@ async def test_transport_drop_unlatches_connected_so_next_call_reconnects():
     assert client._connected is False  # unlatched -> next call reconnects
 
     # restore, reconnect, then an unrelated RuntimeError keeps the flag set
-    fake.get_services = lambda: _async_value({'services': {}})
+    fake.get_services = lambda **_kwargs: _async_value({'services': {}})
     await client.get_services()
     assert client._connected is True and fake.connect_calls == 2
 
-    async def _raise_unrelated():
+    async def _raise_unrelated(**_kwargs):
         raise RuntimeError('bad argument')
 
     fake.get_services = _raise_unrelated

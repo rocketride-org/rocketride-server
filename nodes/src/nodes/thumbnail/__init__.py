@@ -20,10 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-from .IGlobal import IGlobal
-from .IInstance import IInstance
-
-# Explicitly define the public API of this module.
-# This helps tools and users know which names are intended for import.
-__all__ = ['IGlobal', 'IInstance']

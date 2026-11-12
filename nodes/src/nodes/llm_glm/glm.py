@@ -27,8 +27,9 @@ Zhipu AI GLM binding for the ChatLLM.
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
 from langchain_openai import ChatOpenAI
+
+from .glm_endpoint import is_glm_cloud_api
 
 
 class Chat(ChatBase):
@@ -55,21 +56,20 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
 
         # Get the nodes configuration
-        config = Config.getNodeConfig(provider, connConfig)
+        config = self._config
 
-        # Get the serverbase url; fall back to the Z.ai API default so runtime
-        # accepts the same "no explicit serverbase" config that validateConfig does
-        serverbase = config.get('serverbase') or 'https://api.z.ai/api/paas/v4'
+        # The serverbase url: the schema defaults it to the Z.ai API
+        serverbase = config['serverbase']
 
         # API key is only required when calling the Z.ai / Zhipu cloud API.
         # Matches both api.z.ai (international) and open.bigmodel.cn (mainland
-        # China) by substring. Zhipu keys use an 'id.secret' shape but other
+        # China) by host name. Zhipu keys use an 'id.secret' shape but other
         # formats exist, so only presence is enforced (the llm_baidu_qianfan
         # lesson: don't over-validate key format).
         apikey = config.get('apikey')
         if isinstance(apikey, str):
             apikey = apikey.strip()
-        if ('api.z.ai' in serverbase or 'bigmodel.cn' in serverbase) and not apikey:
+        if is_glm_cloud_api(serverbase) and not apikey:
             raise ValueError('GLM API key is required for cloud profiles.')
 
         # Self-hosted / custom OpenAI-compatible endpoints accept any token,

@@ -26,13 +26,61 @@
 namespace engine::store::pythonBase {
 //-------------------------------------------------------------------------
 /// @details
+///		Imports <path>.<name> from the node package. The file is optional:
+///		an absent file returns an empty handle, while a file that fails
+///		to import is an error.
+///	@param[in]	path
+///		The node package, e.g. nodes.store_qdrant
+///	@param[in]	name
+///		The submodule file name without extension, e.g. IGlobal
+//-------------------------------------------------------------------------
+static ErrorOr<py::object> loadOptionalSubmodule(const Text &path,
+                                                 const char *name) noexcept {
+    py::object pyModule;
+
+    const auto python = localfcn()->Error {
+        const Text moduleName = _ts(path, ".", name);
+
+        // find_spec imports the parent package only, so an absent file costs
+        // nothing more than the (empty) package __init__
+        auto pyUtil = py::module_::import("importlib.util");
+        if (pyUtil.attr("find_spec")(moduleName).is_none()) return {};
+
+        pyModule = py::module_::import(moduleName);
+        return {};
+    };
+
+    if (auto ccode = callPython(python)) return ccode;
+
+    return pyModule;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Constructor - creates underlying python objects and binds them
-///		to the handles.
+///		to the handles. The node package contract is file-per-class:
+///		<path>.IGlobal is imported when the pipe runs (falling back to
+///		rocketlib.IGlobalBase, so an instance's settings resolve for a
+///		node that ships only IInstance.py), and in CONFIG /
+///		PIPELINE_CONFIG mode only <path>.IValidator (falling back to
+///		rocketlib.IValidatorBase) - IGlobal.py is never imported there.
 //-------------------------------------------------------------------------
 IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
     : Parent(args) {
     // Define this so we can set a breakpoint if we need to
     auto python = localfcn()->Error {
+        // Get our service definition
+        auto service = IServices::getServiceDefinition(pipeType.logicalType);
+        if (!service) return service.ccode();
+        const auto &serviceDef = **service;
+
+        // Determine the package to import from serviceDef.nodePath, if
+        // specified, or from pipeType.logicalType - otherwise
+        auto servicePath = serviceDef.nodePath
+                               ? _cast<TextView>(serviceDef.nodePath)
+                               : _cast<TextView>(pipeType.logicalType);
+        m_modulePath = _ts(servicePath);
+
         // Are we supporting our endpoint?
         if (endpoint->pipeType.logicalType == pipeType.logicalType &&
             endpoint->pipeType.physicalType == pipeType.physicalType) {
@@ -41,29 +89,9 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
             auto &pythonEndpoint =
                 static_cast<IPythonEndpointBase &>(*endpoint);
 
-            // Yes we are, so use the endpoints loaded module
-            m_pyModule = pythonEndpoint.m_pyModule;
+            // Yes we are, so use the endpoints python IEndpoint
             m_pyEndpoint = pythonEndpoint.m_pyEndpoint;
         } else {
-            // Get our service definition
-            auto service =
-                IServices::getServiceDefinition(pipeType.logicalType);
-            if (!service) return service.ccode();
-            const auto &serviceDef = **service;
-
-            // Determine the module to load from serviceDef.nodePath, if
-            // specified, or from pipeType.logicalType - otherwise
-            auto servicePath = serviceDef.nodePath
-                                   ? _cast<TextView>(serviceDef.nodePath)
-                                   : _cast<TextView>(pipeType.logicalType);
-
-            // Load the module
-            auto pyModule = engine::python::loadModule(servicePath, true);
-            if (!pyModule) return pyModule.ccode();
-
-            // Save the module
-            m_pyModule = *pyModule;
-
             // Load our util module so we can setup a dummy IEndpoint
             Text utilName = "rocketlib";
             auto pyUtil = engine::python::loadModule(utilName);
@@ -85,12 +113,45 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
                 py::cast(static_cast<IServiceEndpoint *>(endpoint.get()));
         }
 
-        // If we have an IGlobal class, it is optional, create
-        // the python global data instance
-        if (py::hasattr(m_pyModule, "IGlobal")) {
-            // Create an instance of the IGlobal class
-            m_pyGlobal = m_pyModule.attr("IGlobal")();
+        // Config mode validates: import the validator, never the global
+        const bool configMode = m_openMode == OPEN_MODE::CONFIG ||
+                                m_openMode == OPEN_MODE::PIPELINE_CONFIG;
+        const char *className = configMode ? "IValidator" : "IGlobal";
 
+        // Import <path>.IGlobal / <path>.IValidator - both are optional
+        auto pyModule = loadOptionalSubmodule(m_modulePath, className);
+        if (!pyModule) return pyModule.ccode();
+        m_pyModule = *pyModule;
+
+        if (m_pyModule) {
+            // The file is present, so the class is not optional
+            if (!py::hasattr(m_pyModule, className))
+                return APERR(Ec::InvalidModule, "Class", className,
+                             "is missing from", _ts(m_modulePath, ".",
+                                                    className));
+
+            // Create an instance of the IGlobal / IValidator class
+            m_pyGlobal = m_pyModule.attr(className)();
+        } else {
+            // No IValidator.py / IGlobal.py: the framework default. The
+            // validator checks the configuration against the schema; the
+            // global resolves it, so an instance's settings work for a
+            // node that ships only IInstance.py
+            const char *baseName =
+                configMode ? "IValidatorBase" : "IGlobalBase";
+            Text utilName = "rocketlib";
+            auto pyUtil = engine::python::loadModule(utilName);
+            if (!pyUtil) return pyUtil.ccode();
+
+            if (!py::hasattr(*pyUtil, baseName))
+                return APERR(Ec::InvalidModule, "The", baseName,
+                             "template is missing");
+
+            m_pyGlobal = pyUtil->attr(baseName)();
+        }
+
+        // If we have a global data instance, bind it to this host service
+        if (m_pyGlobal) {
             // Initialize the python endpoint with this host service
             m_pyGlobal.attr("IEndpoint") = m_pyEndpoint;
 

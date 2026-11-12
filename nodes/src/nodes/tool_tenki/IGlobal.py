@@ -27,15 +27,22 @@
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
 import urllib.parse
 import uuid
 
-from ai.common.config import Config
-from ai.common.utils import config_int
-from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
+from rocketlib import IGlobalBase, debug, warning
+
+from depends import depends
+
+# tenki is imported at module scope, so the requirements are installed before
+# that happens. This module is only imported on the run path (config mode
+# imports the validator alone), so the install never runs while a user is merely
+# opening the node's settings panel.
+depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from tenki import (
     Client,
@@ -65,8 +72,6 @@ _WARM_UP_TIMEOUT_SECS = 10
 _WARM_UP_WAIT_SECS = 40
 # How long endGlobal waits for a call holding the session lock before it closes the session anyway.
 _END_LOCK_WAIT_SECS = 10
-# Given an empty endpoint the SDK reads TENKI_API_ENDPOINT / TENKI_API_URL, so the default is passed explicitly.
-_DEFAULT_BASE_URL = 'https://api.tenki.cloud'
 # USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
@@ -114,16 +119,12 @@ def _may_be_paused(error: Exception) -> bool:
 
 
 def _names(raw, field: str) -> list[str]:
-    """The distinct, non-empty entries of a list setting given as a list or a comma-separated string."""
+    """The distinct, non-empty entries of a list setting (the schema types it as an array of strings)."""
     # Any other shape is refused: an allowlist misread as empty would leave the sandbox's network open.
     if raw is None:
         return []
-    if isinstance(raw, str):
-        raw = raw.split(',')
     if not isinstance(raw, (list, tuple)):
-        raise ValueError(
-            f'tenki.{field} must be a list of names, or one comma-separated string, not a {type(raw).__name__}'
-        )
+        raise ValueError(f'tenki.{field} must be a list of names, not a {type(raw).__name__}')
     names = []
     for position, entry in enumerate(raw, 1):
         if not isinstance(entry, str):
@@ -299,33 +300,27 @@ def _label(cfg) -> str:
     return label
 
 
-def _tool_groups(raw) -> tuple[frozenset, list[str]]:
-    """The tool groups to publish (all when none is named) and the named ones this node does not have."""
+def _tool_groups(raw) -> frozenset:
+    """The tool groups to publish: all when none is named or "all" is, else the named ones.
+
+    The schema pins every entry to the groups this node implements (or "all"), so
+    an unknown name never reaches here.
+    """
     names = {name.lower() for name in _names(raw, 'toolGroups')}
-    unknown = sorted(names - TOOL_GROUPS - {'all', '*'})
-    if not names or names & {'all', '*'}:
-        return TOOL_GROUPS, unknown
-    if not names & TOOL_GROUPS:
-        # Not every group: a typo must not publish more than the operator asked for.
-        raise ValueError(
-            f'tenki.toolGroups matched no known tool group: {", ".join(sorted(names))}. Valid groups: '
-            f'{", ".join(sorted(TOOL_GROUPS))}, or "all". Leave the field empty for every group.'
-        )
-    return frozenset(names & TOOL_GROUPS), unknown
+    if not names or 'all' in names:
+        return TOOL_GROUPS
+    return frozenset(names & TOOL_GROUPS)
 
 
-def _size(cfg, key: str, lo: int, hi: int) -> int:
-    """A sizing field clamped to the SDK's range, or 0 when unset, which leaves it to Tenki or the image."""
-    value = config_int(cfg, key, 0)
-    return min(max(value, lo), hi) if value else 0
+def _size(value: int, key: str, lo: int, hi: int) -> int:
+    """A sizing field: 0 leaves it to Tenki or the image, anything else must be in the SDK's range.
 
-
-def _exec_limits(cfg) -> tuple[int, int]:
-    """``exec_timeout_secs`` and ``max_duration_minutes``, clamped."""
-    return (
-        config_int(cfg, 'exec_timeout_secs', 120, min_value=1, max_value=1200),
-        config_int(cfg, 'max_duration_minutes', 60, min_value=1, max_value=1440),
-    )
+    The schema caps the value at ``hi`` and admits 0; the floor between is
+    what the SDK refuses before sending, so it is checked here.
+    """
+    if value and value < lo:
+        raise ValueError(f'tenki.{key} must be 0 (leave it to Tenki) or between {lo} and {hi}; it is {value}')
+    return value
 
 
 class IGlobal(IGlobalBase):
@@ -372,70 +367,47 @@ class IGlobal(IGlobalBase):
     tool_groups: frozenset = TOOL_GROUPS
 
     def beginGlobal(self) -> None:
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
         self._session_lock = threading.Lock()
         self.path_locks = {}
         self._ending = self._create_attempted = False
         self._warm_id = None
         self._run_tag = f'run-{uuid.uuid4().hex[:12]}'
 
-        cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        apikey = str(cfg.get('apikey') or '').strip()
+        # The resolved config: every integer typed and ranged by the schema, the key a required secret
+        # (a ${ROCKETRIDE_TENKI_KEY} reference resolved per call). What the schema cannot express (the
+        # allowlist grammar, the secret wiring, the label, the sizing floors) is checked below.
+        cfg = self.config
+        apikey = str(cfg.apikey or '').strip()
         # Given an empty key the SDK falls back to TENKI_AUTH_TOKEN / TENKI_API_KEY, letting the engine host's
         # environment decide which workspace is billed.
         if not apikey:
             raise Exception('tool_tenki: apikey is required')
-        self.tool_groups, unknown = _tool_groups(cfg.get('toolGroups'))
-        if unknown:
-            warning(
-                f'tool_tenki: ignoring unknown tool group(s): {", ".join(unknown)}. '
-                f'Publishing: {", ".join(sorted(self.tool_groups))}'
-            )
-        self.image = str(cfg.get('image') or '').strip()
+        if not apikey.startswith('tk_'):
+            warning('tool_tenki: apikey must be a Tenki workspace API key, which starts with tk_')
+        self.tool_groups = _tool_groups(cfg.toolGroups)
+        self.image = str(cfg.image or '').strip()
         self.label = _label(cfg)
         self.secret_policies, self.allow_domains = _secret_settings(cfg)
         self.git_auth_url, self.git_auth_secret = _git_auth_settings(cfg, self.secret_policies, self.allow_domains)
-        self.cpu_cores = _size(cfg, 'cpu_cores', 1, 16)
-        memory_mb = _size(cfg, 'memory_mb', 512, 65536)
+        self.cpu_cores = _size(cfg.cpu_cores, 'cpu_cores', 1, 16)
+        memory_mb = _size(cfg.memory_mb, 'memory_mb', 512, 65536)
         self.memory_mb = memory_mb - memory_mb % 2  # Tenki requires an even size; both bounds are even
-        self.disk_size_gb = _size(cfg, 'disk_size_gb', 5, 100)
-        self.exec_timeout_secs, self.max_duration_minutes = _exec_limits(cfg)
+        self.disk_size_gb = _size(cfg.disk_size_gb, 'disk_size_gb', 5, 100)
+        self.exec_timeout_secs = cfg.exec_timeout_secs
+        self.max_duration_minutes = cfg.max_duration_minutes
         # Tenki refuses 0 and accepted a minute to a year (measured 2026-10-09); its own default is seven days.
-        self.pause_retention_hours = config_int(cfg, 'pause_retention_hours', 24, min_value=1, max_value=8760)
-        self.max_output_chars = config_int(cfg, 'max_output_chars', 50000, min_value=1000, max_value=1000000)
+        self.pause_retention_hours = cfg.pause_retention_hours
+        self.max_output_chars = cfg.max_output_chars
         outlives = _outlives_the_session(self.exec_timeout_secs, self.max_duration_minutes)
         if outlives:
             warning(outlives)
         self.rpc_timeout_secs = max(self.exec_timeout_secs, _MIN_RPC_TIMEOUT_SECS)
-        base_url = str(cfg.get('base_url') or '').strip() or _DEFAULT_BASE_URL
+        # The schema's minLength counts whitespace, so a blank value passes it; given an empty endpoint the SDK
+        # reads TENKI_API_ENDPOINT / TENKI_API_URL, letting the engine host's environment pick the endpoint.
+        base_url = cfg.base_url.strip()
+        if not base_url:
+            raise Exception('tool_tenki: base_url is required')
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
-
-    def validateConfig(self) -> None:
-        try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            apikey = str(cfg.get('apikey') or '').strip()
-            if not apikey:
-                warning('apikey is required')
-            elif not apikey.startswith('tk_'):
-                warning('apikey must be a Tenki workspace API key, which starts with tk_')
-            outlives = _outlives_the_session(*_exec_limits(cfg))
-            if outlives:
-                warning(outlives)
-            try:
-                unknown = _tool_groups(cfg.get('toolGroups'))[1]
-            except ValueError as e:
-                warning(f'The pipeline will fail to start: {e}')
-            else:
-                if unknown:
-                    warning(f'unknown tool group(s): {", ".join(unknown)}')
-            for check in (lambda: _label(cfg), lambda: _git_auth_settings(cfg, *_secret_settings(cfg))):
-                try:
-                    check()
-                except ValueError as e:
-                    warning(f'The pipeline will fail to start: {e}')
-        except Exception as e:
-            warning(str(e))
 
     def path_lock(self, path: str) -> threading.Lock:
         """The lock for one normalized path (dict.setdefault is atomic, so concurrent callers get the same one)."""

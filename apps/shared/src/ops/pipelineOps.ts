@@ -26,6 +26,7 @@ import type { ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
  * their own topics — this is only what is PER-DOCUMENT.
  *
  * `doc` kinds: a document URI for the editor, or `task:<projectId>.<sourceId>`
+ * (split on the LAST dot; the source is one dot-free component id)
  * for the readonly live-task viewer (the StatusProvider replacement) — the
  * host fetches that pipeline off the running task.
  */

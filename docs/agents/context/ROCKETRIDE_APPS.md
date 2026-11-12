@@ -1115,13 +1115,12 @@ value alone; see below.)
 To run two instances of one pipeline for the same user at once (a second
 tab, say), give each `use()` its own `token`: the server then keys the task
 on that token instead of the hash. Use an unguessable value that keeps the
-`tk_` prefix (`tk_` plus a UUID, for example; a `tk_` token with fewer than 32
-letters, digits, `-` or `_` after the prefix is refused): the value is the run's private
+`tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
 token (full control for anyone who presents it), tokens share one namespace
 across every user of the server, and a token without the prefix cannot serve
-as a private token on webhook or dropper endpoints. A token that matches
-another owner's task is refused; with `useExisting`, one that matches your
-own running task attaches to it. Keep the tokens you chose: both
+as a private token on webhook or dropper endpoints. With `useExisting`, a
+token that matches a running task attaches to it, whoever started it: one
+more reason the value must be unguessable. Keep the tokens you chose: both
 instances get the same `pk_` public authorization key, and a webhook call or
 dropper upload that uses it always reaches the instance that started first
 (to send data to one specific instance, use its `tk_` token); `getTaskToken()`

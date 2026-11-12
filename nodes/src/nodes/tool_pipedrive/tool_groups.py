@@ -87,7 +87,7 @@ RAW_REQUEST_TOOL = 'request'
 #: Publishing more tools than this makes an LLM's tool choice unreliable, and some
 #: providers reject a larger list outright (OpenAI caps a request at 128 functions).
 #: Crossing it is a warning, never an error, and ``all`` is exempt — see
-#: ``IGlobal.validateConfig``.
+#: ``IGlobal._oversized_warning``.
 RECOMMENDED_TOOL_LIMIT = 120
 
 
@@ -129,9 +129,10 @@ def published_tool_count(groups) -> int:
 def normalize_groups(raw) -> frozenset:
     """Turn the configured ``toolGroups`` value into a set of known group names.
 
-    Accepts a list or a comma-separated string, ignores unknown names (they are
-    surfaced as a warning by ``IGlobal.validateConfig``), and treats ``all`` as
-    every implemented group. An empty or missing value falls back to the defaults.
+    Accepts a list or a comma-separated string, ignores unknown names (the schema
+    pins ``toolGroups`` to the implemented groups, so a configured value never
+    carries one), and treats ``all`` as every implemented group. An empty or
+    missing value falls back to the defaults.
     """
     if isinstance(raw, str):
         raw = raw.split(',')

@@ -112,12 +112,68 @@ export interface ServiceSummary {
 }
 
 /**
+ * One resolved configuration property of a service, as the engine emits
+ * it in the full definition's `properties`. Besides the authored members
+ * (`type`, `title`, `enum`, a group's `properties`, ...) every leaf
+ * carries its `path`.
+ */
+export interface ServiceProperty {
+	/** The property's (short) name. */
+	name: string;
+	/**
+	 * The dotted key the leaf's value is stored under in a node's config
+	 * (e.g. `access`, `service.customerId`). A property referenced by the
+	 * identical specifier in every branch of a selector is hoisted to the
+	 * parent path; otherwise a branch property is at `parent.branch.leaf`.
+	 * Absent on a grouped subsection, whose children carry the dotted path.
+	 */
+	path?: string;
+	/** The remaining authored members, passed through by the engine. */
+	[member: string]: unknown;
+}
+
+/**
+ * The value space of a pipeline parameter. `param` is legal only on
+ * plain-field and enum-selector scalars, so a parameter value is always
+ * one of these.
+ */
+export type ServiceParamValue = string | number | boolean;
+
+/**
+ * The self-contained descriptor of one pipeline parameter: a property the
+ * node flagged `"param": true`. Copied from the resolved leaf, so a value
+ * is validated from the descriptor alone.
+ */
+export interface ServiceParamDescriptor {
+	/** The target leaf's `path` (the `configKey` of a `parameters` map entry). */
+	field: string;
+	/** The leaf's type (`string`, `integer`, `number`, `boolean`, ...). */
+	type: string | null;
+	/** Display title. */
+	title: string | null;
+	/** Description. */
+	description: string | null;
+	/** The leaf's default; `null` when the node declares none. */
+	default: ServiceParamValue | null;
+	/** Allowed values, when the leaf is an enum. */
+	enum?: ServiceParamValue[];
+	/** Lower bound, when the leaf declares one. */
+	minimum?: number;
+	/** Upper bound, when the leaf declares one. */
+	maximum?: number;
+}
+
+/**
  * A FULL service definition, returned by the single-service
  * `rrext_services` call (`getService()`). Extends the summary with the
- * dynamic configuration section keys (e.g. "Pipe", "Source", "Global")
- * that each hold a {@link ServiceSection} with `schema` and `ui`.
+ * resolved configuration schema: the `properties` tree and the `params`
+ * descriptors.
  */
 export interface ServiceDefinition extends ServiceSummary {
+	/** The resolved configuration properties, every leaf with its `path`. */
+	properties?: ServiceProperty[];
+	/** Descriptors of the `param`-flagged properties, in schema order. */
+	params?: ServiceParamDescriptor[];
 	/** Dynamic configuration sections (e.g. "Pipe", "Source", "Global"). */
 	[section: string]: unknown;
 }
@@ -136,6 +192,19 @@ export interface ServicesResponse {
 	 * DOM.
 	 */
 	icons?: Record<string, string>;
+	/** Engine services version. */
+	version?: number;
+}
+
+/**
+ * Response from `getServices({ definitions: true })`: every service's FULL
+ * definition (configuration properties and `params` descriptors included).
+ * There is no icon table in this form; each definition carries its own
+ * `icon`.
+ */
+export interface ServiceDefinitionsResponse {
+	/** Map of logical type name to its full definition. */
+	services: Record<string, ServiceDefinition>;
 	/** Engine services version. */
 	version?: number;
 }
@@ -243,4 +312,7 @@ export enum PROTOCOL_CAPS {
 
 	/** Driver is experimental */
 	EXPERIMENTAL = 1 << 16,
+
+	/** Node is certified reentrant-safe for cross-user sharing */
+	MULTITENANT = 1 << 17,
 }

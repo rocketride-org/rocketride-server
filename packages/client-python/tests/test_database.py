@@ -59,7 +59,7 @@ class FakeClient:
 # HELPERS
 # =========================================================================
 
-TOKEN = 'tk_test_token'
+TOKEN = 'acme.docBrain.parsePDF'
 SESSION_ID = 'sess_abc123'
 
 

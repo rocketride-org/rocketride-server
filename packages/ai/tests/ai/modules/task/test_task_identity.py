@@ -25,11 +25,11 @@
 A task is uniquely ``{owner}.{projectId}.{source}`` — the owner of a dev
 run is its user, the owner of a deploy run is its team. These tests pin:
 
-- the token DIGEST matrix (dev vs deploy owner fields, actor-independence
-  of deploy digests, tk_ vs pk_ kind discriminator), which is what makes
-  the "Pipeline is already running" collision guard scope correctly; and
-- ``get_task_control_by_project``'s owner-scoped resolution (team scope,
-  caller-dev scope, and the legacy unscoped fallback's refuse-to-guess).
+- the registry KEY ``runKind.ownerId.address`` (dev vs deploy owner, the
+  @me run_kind segment), which is what makes the "Pipeline is already
+  running" collision guard scope correctly; and
+- ``get_task_control_by_project``'s owner-scoped resolution (team scope and
+  caller-dev scope; there is no account-less scan).
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ai.account.base import AccountBase
+from ai.modules.task.address import build_address
 from ai.modules.task.task_server import TaskServer, TASK_CONTROL
 from ai.modules.task.commands.cmd_monitor import owner_key
 
@@ -46,24 +46,6 @@ from ai.modules.task.commands.cmd_monitor import owner_key
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _digest(*, kind: str, owner_field: str, owner_id: str, project_id='proj-1', source='src-1') -> str:
-    """Build a token digest exactly the way start_task does.
-
-    The owner rides under its FIELD NAME (userId for dev, teamId for
-    deploy) — the field name itself disambiguates the id spaces.
-    """
-    return AccountBase.generate_token(
-        None,
-        content={
-            'kind': kind,
-            owner_field: owner_id,
-            'project_id': project_id,
-            'source': source,
-        },
-        prefix='',
-    )
 
 
 def _control(*, run_kind='dev', user_id='user-1', team_id='team-1', project_id='proj-1', source='src-1'):
@@ -74,7 +56,10 @@ def _control(*, run_kind='dev', user_id='user-1', team_id='team-1', project_id='
     control.teamId = team_id
     control.project_id = project_id
     control.source = source
-    control.token = f'tk_{run_kind}_{user_id}_{team_id}'
+    control.developer_id = 'acme'
+    control.address = build_address('acme', project_id, source)
+    control.id = control.address
+    control.key = f'{run_kind}.{control.owner_id}.{control.address}'
     return control
 
 
@@ -93,86 +78,42 @@ def _account(*, user_id='user-1', team_id='team-1', permissions=('task.monitor',
 def _server(*controls) -> TaskServer:
     """A TaskServer shell holding only the task-control registry."""
     server = TaskServer.__new__(TaskServer)
-    server._task_control = {c.token: c for c in controls}
+    server._task_control = {c.key: c for c in controls}
     return server
 
 
 # ---------------------------------------------------------------------------
-# Digest matrix — what may collide and what must not
+# Registry key matrix — what may collide and what must not
 # ---------------------------------------------------------------------------
 
 
-def test_dev_digests_differ_across_users():
-    """Two users' dev runs of the same pipeline never share a digest."""
-    a = _digest(kind='task', owner_field='userId', owner_id='user-1')
-    b = _digest(kind='task', owner_field='userId', owner_id='user-2')
-    assert a != b
+def test_dev_keys_differ_across_users():
+    """Two users' dev runs of the same pipeline never share a key."""
+    assert _control(user_id='user-1').key != _control(user_id='user-2').key
 
 
-def test_deploy_digests_differ_across_teams():
-    """Two teams' deploys of the same pipeline never share a digest."""
-    a = _digest(kind='task', owner_field='teamId', owner_id='team-1')
-    b = _digest(kind='task', owner_field='teamId', owner_id='team-2')
-    assert a != b
-
-
-def test_dev_and_deploy_digests_differ_even_for_colliding_ids():
-    """The owner FIELD NAME disambiguates: identical id values in the user
-    and team spaces still produce distinct digests.
-    """
-    dev = _digest(kind='task', owner_field='userId', owner_id='same-id')
-    deploy = _digest(kind='task', owner_field='teamId', owner_id='same-id')
-    assert dev != deploy
+def test_deploy_keys_differ_across_teams():
+    """Two teams' deploys of the same pipeline never share a key."""
+    assert _control(run_kind='deploy', team_id='team-1').key != _control(run_kind='deploy', team_id='team-2').key
 
 
 def test_same_owner_triple_collides_deterministically():
-    """The SAME owner triple regenerates the SAME digest — this determinism
+    """The SAME owner triple regenerates the SAME key — this determinism
     is the 'already running' collision guard and the useExisting reconnect.
     """
-    a = _digest(kind='task', owner_field='userId', owner_id='user-1')
-    b = _digest(kind='task', owner_field='userId', owner_id='user-1')
-    assert a == b
+    assert _control().key == _control().key
 
 
-def test_me_deploy_digest_differs_from_dev_for_the_same_user():
-    """A user-owned deploy (@me) shares the owner FIELD with the same user's
-    dev run, so it alone adds run_kind to the digest — the same pipeline can
-    run as dev AND as a personal deploy concurrently without colliding in the
-    token registry.
+def test_me_deploy_key_differs_from_dev_for_the_same_user():
+    """A user-owned deploy (@me) shares the owner with the same user's dev
+    run; the run_kind segment keeps the two apart, so the same pipeline can
+    run as dev AND as a personal deploy concurrently.
     """
-    dev = _digest(kind='task', owner_field='userId', owner_id='user-1')
-    me_deploy = AccountBase.generate_token(
-        None,
-        content={
-            'kind': 'task',
-            'userId': 'user-1',
-            'run_kind': 'deploy',
-            'project_id': 'proj-1',
-            'source': 'src-1',
-        },
-        prefix='',
-    )
-    assert dev != me_deploy
-
-
-def test_dev_and_team_deploy_digests_are_unchanged_by_the_me_extension():
-    """Dev and @team digests contain NO run_kind key — byte-identical to every
-    token ever minted, so persisted pk_ share links keep resolving.
-    """
-    # These reproduce the exact historical content shapes.
-    dev = _digest(kind='public', owner_field='userId', owner_id='user-1')
-    team = _digest(kind='public', owner_field='teamId', owner_id='team-1')
-    assert dev == _digest(kind='public', owner_field='userId', owner_id='user-1')
-    assert team == _digest(kind='public', owner_field='teamId', owner_id='team-1')
-
-
-def test_task_and_public_digests_differ():
-    """tk_ and pk_ must differ in DIGEST, not just prefix — the 'kind'
-    discriminator inside the hashed content guarantees it.
-    """
-    task = _digest(kind='task', owner_field='userId', owner_id='user-1')
-    public = _digest(kind='public', owner_field='userId', owner_id='user-1')
-    assert task != public
+    me_deploy = _control(run_kind='deploy')
+    me_deploy.owner_kind = 'user'
+    me_deploy.key = f'deploy.{me_deploy.owner_id}.{me_deploy.address}'
+    assert me_deploy.key != _control().key
+    assert me_deploy.address == _control().address
 
 
 # ---------------------------------------------------------------------------
@@ -246,22 +187,6 @@ def test_team_scope_requires_an_identity():
     server = _server(_control(run_kind='deploy'))
     with pytest.raises(PermissionError, match='Not authenticated'):
         TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', None, team_id='team-1')
-
-
-def test_legacy_unscoped_scan_returns_a_unique_match():
-    """Without identity (OSS/HTTP fallback) a single match still resolves."""
-    only = _control(run_kind='dev')
-    server = _server(only)
-    assert TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', None) is only
-
-
-def test_legacy_unscoped_scan_refuses_to_guess_between_runs():
-    """With several matching runs the legacy scan errors instead of silently
-    returning an arbitrary one (the old first-match bug).
-    """
-    server = _server(_control(run_kind='dev'), _control(run_kind='deploy'))
-    with pytest.raises(RuntimeError, match='specify a scope'):
-        TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', None)
 
 
 # ---------------------------------------------------------------------------

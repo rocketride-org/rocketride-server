@@ -51,19 +51,19 @@ Default: **Your own ChromaDB server** (`local`).
 
 ## Configuration
 
-Start with the local or cloud profile, then provide the host, port, collection, similarity, retrieval score, and—when using cloud—the API key. Most fields can remain at their profile values after the server address is set. The collection's similarity is established when it is first created, so choose it before writing the first documents.
+Start with the local or cloud profile, then provide the host, port, collection, retrieval score, and—when using cloud—the API key, tenant, database, and TLS switch. Most fields can remain at their defaults after the server address is set. The distance metric is not a setting: new collections always use cosine.
 
 ### Connection profile and port
 
-The local profile creates a plain HTTP client; the cloud profile connects over TLS and sends the API key in the `x-chroma-token` header, which suits ChromaDB Cloud or any TLS-protected remote server. ChromaDB Cloud additionally requires `tenant` and `database`; its host is `api.trychroma.com`. Use the cloud profile only when you have the token that Chroma expects; the local profile deliberately supplies no credentials. The implementation removes an `http://` or `https://` prefix and trailing slash from the configured host before connecting, so enter the host once rather than trying to encode a path in it.
+The local profile creates a plain HTTP client. The cloud profile connects over TLS by default (**Use TLS**, `ssl`, on) and sends the API key, when one is set, in the `x-chroma-token` header, which suits ChromaDB Cloud or any TLS-protected remote server; turn **Use TLS** off for a self-hosted server reached over plain HTTP with token authentication. Chroma Cloud serves HTTPS only, so leave it on there. ChromaDB Cloud additionally requires `tenant` and `database`; its host is `api.trychroma.com`. Use the cloud profile only when you have the token that Chroma expects; the local profile deliberately supplies no credentials. The implementation removes an `http://` or `https://` prefix and trailing slash from the configured host before connecting, so enter the host once rather than trying to encode a path in it.
 
 Ports may be literal integers, numeric strings, or interpolated environment values. A whole-number value in the TCP range is used; a boolean, fractional value, unresolved placeholder, non-numeric value, or out-of-range value silently falls back to `8000`. This is useful for an environment placeholder, but it can also send a cloud connection to the wrong port: if a connection unexpectedly targets `8000`, check the resolved value first.
 
 ### Collection and similarity
 
-The collection is created on first write with the selected similarity in its `hnsw:space` metadata. `cosine` is the default; `l2` and `ip` are the only other accepted values. Keep that setting aligned with your embedding model, and do not expect changing it later to rewrite an existing collection's index. Use a separate collection if the new model needs a different vector shape or distance metric.
+The collection is created on first write with `cosine` in its `hnsw:space` metadata; the metric is not configurable. A collection created earlier with `l2` or `ip` keeps that space, and the node reads it back from the collection to convert its distances, so its scores are not on the cosine scale; recreate it under a new collection name to move it to cosine. Use a separate collection if a new embedding model needs a different vector shape.
 
-Semantic retrieval needs a question embedding and does not support a non-zero offset. Use keyword search when you need paged text matching: it uses Chroma's document-contains filter and supports offset and limit. Semantic scores are converted from Chroma distances and hits below `0.20` are always discarded. Raise the requested score when marginal chunks are harming a prompt; lower it for recall, knowing the hard floor still applies.
+Semantic retrieval needs a question embedding and does not support a non-zero offset. Use keyword search when you need paged text matching: it uses Chroma's document-contains filter and supports offset and limit. Semantic scores are converted from Chroma distances (for cosine, `1 - distance / 2`, so an identical vector scores `1.0` and an opposite one `0.0`), and hits below `0.20` are always discarded. Raise the requested score when marginal chunks are harming a prompt; lower it for recall, knowing the hard floor still applies.
 
 ### Retrieval score and document filters
 
@@ -81,7 +81,7 @@ To widen the pool for a reranker or for hard, specific questions, pick a value c
 
 Use **Your own ChromaDB server** when you control a reachable server and do not need token authentication. Use **ChromaDB Cloud Server** when that server expects the configured API key. The profile determines how the HTTP client is constructed, so switching profiles is not just a different display label for the same connection.
 
-The first document write calls Chroma's get-or-create collection operation and attaches the chosen `hnsw:space` metadata. Make the similarity decision before the first write. If you need to move an existing collection to a different distance metric, create and migrate to a new collection instead of expecting this node to alter the existing index.
+The first document write calls Chroma's get-or-create collection operation and attaches the `cosine` `hnsw:space` metadata. An existing collection keeps the space it was created with; to move one to cosine, create and migrate to a new collection instead of expecting this node to alter the existing index.
 
 ### Document lane and tool embeddings
 
@@ -113,7 +113,7 @@ The node gives each Chroma record a fresh UUID, even when an object is being re-
 
 ### Search result interpretation
 
-Chroma reports distances, which the node converts to the score carried by a returned document. The conversion differs for cosine versus `l2` or `ip`, so a numeric threshold has meaning only alongside the selected similarity. Compare retrieval-score behavior within one collection and metric; do not treat the same threshold as equivalent after changing metrics.
+Chroma reports distances, which the node converts to the score carried by a returned document, higher for a closer match. The conversion follows the collection's own `hnsw:space`: cosine maps to `[0, 1]`, while a legacy `l2` or `ip` collection takes a different conversion, so a numeric threshold has meaning only within one collection's metric.
 
 When semantic results are unexpectedly empty, verify the query embedding, the collection metric, the `isDeleted` filter, and the `0.20` hard floor in that order. When keyword results are unexpectedly empty, verify the search text and document containment rather than the vector score.
 

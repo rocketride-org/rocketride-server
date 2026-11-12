@@ -68,18 +68,19 @@ connection opens lazily on the first tool call and closes on pipe teardown.
 
 ## Configuration
 
-The **LaserData deployment** dropdown selects a connection mode (a preconfig profile, same
+The **LaserData deployment** dropdown selects a connection mode (a selector branch, same
 pattern as the Qdrant node) and switches the visible fields and defaults:
 
 **Your own Apache Iggy server** (`local`, the default):
 
 - `connection_string`: `user:password@host:port`, e.g. `iggy:iggy@localhost:8090` (Iggy's
-  default dev credentials). Secure field; falls back to the `LASER_CONNECTION_STRING`
-  environment variable. A containerized engine needs an address reachable from the container
+  default dev credentials). Secure, required field; the `ROCKETRIDE_LASERDATA_CONNECTION_STRING`
+  account variable the field references can supply it, and there is no process-environment
+  fallback. A containerized engine needs an address reachable from the container
   (e.g. `host.docker.internal`). No token exists in this mode.
 - The server must be a **VSR-enabled** Iggy build (rc20+ wheels speak only the VSR clustering
   protocol): use [laserdata/laser-stack](https://github.com/laserdata/laser-stack)
-  (`./scripts/up`, which also prints a ready `LASER_CONNECTION_STRING`). Stock pre-VSR
+  (`./scripts/up`, which also prints a ready connection string). Stock pre-VSR
   `iggyrs/iggy` images cannot talk to this SDK.
 - `folded` defaults to `true` — recall folds the memory topic in-process, which a plain Iggy
   server (no managed backend) requires.
@@ -88,7 +89,7 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 
 - `connection_string`: `user:password@<deployment-domain>:8090` — the user/password from the
   deployment's **Credentials** tab, the domain and TCP port from its **Overview** tab (secure;
-  same env fallback). TLS is automatic for `*.laserdata.cloud` hosts (the SDK ships LaserData's
+  supplied through the `ROCKETRIDE_LASERDATA_CONNECTION_STRING` account variable). TLS is automatic for `*.laserdata.cloud` hosts (the SDK ships LaserData's
   root CA — no certificate file, no extra flags). There is no separate API token — all auth
   travels in the connection string. The deployment must serve VSR: created on/after 2026-07-31;
   recreate older ones (all verified against a live Cloud deployment).
@@ -98,12 +99,12 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 Shared by both modes:
 
 - `namespace`: default memory scope for all connected agents; required here or per call.
-- `stream` (advanced): the Iggy stream the memory topics live in, pinned as the connection's
+- `stream`: the Iggy stream the memory topics live in, pinned as the connection's
   default stream at connect. Defaults to `rocketride-memory`; nodes sharing one memory must match.
-- `allow_namespace_override` (advanced): permit per-call namespaces. Defaults to `true`.
-- `folded` (advanced): overridable per the mode notes above.
-- `recall_limit` (advanced): default recall result limit, 1–200. Defaults to 10.
-- `op_timeout` (advanced): per-operation timeout (including first connect), 5–600 seconds.
+- `allow_namespace_override`: permit per-call namespaces. Defaults to `true`.
+- `folded`: overridable per the mode notes above.
+- `recall_limit`: default recall result limit, 1–200. Defaults to 10.
+- `op_timeout`: per-operation timeout (including first connect), 5–600 seconds.
   Defaults to 30.
 
 ## Notes

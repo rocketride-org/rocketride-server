@@ -1,33 +1,46 @@
 # =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 # =============================================================================
 
-"""Engine-glue tests for the schema_validate node (IGlobal + IInstance).
+"""
+Engine glue for the schema_validate node: IGlobal reads the resolved config, IInstance owns the answers lane.
 
-Mirrors the direct-instance harness used by extract_facts/test_extract_facts.py
-and guardrails/test_all.py: rocketlib and ai.common.* are stubbed, the node's
-source files are loaded via importlib.spec_from_file_location, the IGlobal is
-built with __new__ + beginGlobal(), and the engine collaborator (self.instance)
-is a SimpleNamespace that captures writeAnswers. No running server is required.
-
-Covers the pieces the pure validate.py tests cannot reach:
-  - IGlobal.beginGlobal: severity 'ok'/unhashable-value rejection, blank
-    field-name fallback, category_metric_map coercion and malformed fallback;
-  - IInstance.writeAnswers/closing: the isJson() lane gate, the getJson()
-    ValueError fallback, and preventDefault + emit-exactly-once.
+The IGlobal is built on the real resolver (the engine's schema for
+``schema_validate``) and the engine collaborator (``self.instance``) is a
+capturing stand-in. Covered:
+  - IGlobal.beginGlobal: schema errors for stale severities, the normalised
+    validation settings, the blank-field and malformed-map refusals
+  - IInstance.writeAnswers/closing: the isJson() gate, pass-through of text,
+    validation of fact records, preventDefault + exactly-once emission
 """
 
-from __future__ import annotations
-
-import importlib.util
 import json
-import os
-import sys
 import types
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'schema_validate')
+import pytest
+from rocketlib.config import ConfigError
+
+from nodes.schema_validate.IGlobal import IGlobal
+from nodes.schema_validate.IInstance import IInstance
 
 
 class FakeAnswer:
@@ -78,95 +91,16 @@ def _json_answer(value):
     return a
 
 
-def _load_classes(warnings_out=None):
-    """Stub modules, load validate/IGlobal/IInstance from source, return classes."""
-    saved = {}
-    warn = warnings_out if warnings_out is not None else []
-
-    class FakeIInstanceBase:
-        IGlobal = None
-        instance = None
-
-        def __init__(self):
-            pass
-
-        def preventDefault(self):
-            pass
-
-    class FakeIGlobalBase:
-        glb = None
-
-    class FakeEntry:
-        pass
-
-    stubs = {
-        'rocketlib': types.ModuleType('rocketlib'),
-        'ai': types.ModuleType('ai'),
-        'ai.common': types.ModuleType('ai.common'),
-        'ai.common.schema': types.ModuleType('ai.common.schema'),
-        'ai.common.config': types.ModuleType('ai.common.config'),
-    }
-    stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
-    stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
-    stubs['rocketlib'].Entry = FakeEntry
-    stubs['rocketlib'].warning = lambda *a, **kw: warn.append(' '.join(str(x) for x in a))
-    stubs['ai.common.schema'].Answer = FakeAnswer
-    # Config.getNodeConfig is monkeypatched per-test via the returned holder.
-    config_holder = {'raw': {}}
-    stubs['ai.common.config'].Config = type(
-        'FakeConfig', (), {'getNodeConfig': staticmethod(lambda lt, cc: config_holder['raw'])}
-    )
-
-    for name, stub in stubs.items():
-        saved[name] = sys.modules.get(name)
-        sys.modules[name] = stub
-
-    # Snapshot any pre-existing node-package modules so cleanup restores them
-    # instead of clobbering modules another test loaded first.
-    pkg_prefix = 'schema_validate'
-    saved_pkg = {k: v for k, v in sys.modules.items() if k == pkg_prefix or k.startswith(pkg_prefix + '.')}
-
-    try:
-        pkg_spec = importlib.util.spec_from_file_location(
-            'schema_validate', os.path.join(_NODE_DIR, '__init__.py'), submodule_search_locations=[_NODE_DIR]
-        )
-        pkg_mod = importlib.util.module_from_spec(pkg_spec)
-        sys.modules['schema_validate'] = pkg_mod
-
-        for sub in ('validate', 'IGlobal', 'IInstance'):
-            spec = importlib.util.spec_from_file_location(
-                f'schema_validate.{sub}', os.path.join(_NODE_DIR, f'{sub}.py')
-            )
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules[f'schema_validate.{sub}'] = mod
-            spec.loader.exec_module(mod)
-
-        iglobal = sys.modules['schema_validate.IGlobal'].IGlobal
-        iinstance = sys.modules['schema_validate.IInstance'].IInstance
-        return iglobal, iinstance, config_holder
-    finally:
-        for name in stubs:
-            if saved[name] is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = saved[name]
-        # Drop what this helper loaded, then restore any pre-existing entries.
-        for mod_name in [k for k in sys.modules if k == pkg_prefix or k.startswith(pkg_prefix + '.')]:
-            sys.modules.pop(mod_name, None)
-        sys.modules.update(saved_pkg)
-
-
-def _build_global(raw_config, warnings_out=None):
-    IGlobal, IInstance, holder = _load_classes(warnings_out)
-    holder['raw'] = raw_config
+def _build_global(conn_config):
+    """The node's IGlobal, begun on ``conn_config`` through the real resolver."""
     glob = IGlobal.__new__(IGlobal)
-    glob.glb = types.SimpleNamespace(logicalType='schema_validate', connConfig={})
+    glob.glb = types.SimpleNamespace(logicalType='schema_validate', connConfig=conn_config)
     glob.beginGlobal()
-    return glob, IInstance
+    return glob
 
 
-def _build_instance(raw_config=None):
-    glob, IInstance = _build_global(raw_config or {})
+def _build_instance(conn_config=None):
+    glob = _build_global(conn_config or {})
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = glob
     captured = types.SimpleNamespace(answers=[], prevented=0)
@@ -179,47 +113,44 @@ def _build_instance(raw_config=None):
 
 
 def test_beginglobal_defaults():
-    glob, _ = _build_global({})
-    assert glob.config['sign'] == 'warning'
-    assert glob.config['require_provenance'] == 'error'
-    assert glob.config['amount_field'] == 'amount'
+    glob = _build_global({})
+    assert glob.validation['sign'] == 'warning'
+    assert glob.validation['require_provenance'] == 'error'
+    assert glob.validation['amount_field'] == 'amount'
+    assert 'revenue' in glob.validation['category_metric_map']
 
 
 def test_beginglobal_rejects_ok_severity():
-    # 'ok' is not a valid severity for these fields; must fall back + warn.
-    warns = []
-    glob, _ = _build_global({'sign': 'ok', 'require_provenance': 'ok'}, warns)
-    assert glob.config['sign'] == 'warning'
-    assert glob.config['require_provenance'] == 'error'
-    assert warns, 'an invalid severity should emit a warning'
+    # 'ok' is not a severity of these fields: the schema enum refuses it, naming the key.
+    with pytest.raises(ConfigError, match='sign'):
+        _build_global({'sign': 'ok'})
+    with pytest.raises(ConfigError, match='require_provenance'):
+        _build_global({'require_provenance': 'ok'})
 
 
-def test_beginglobal_unhashable_severity_does_not_crash():
-    # A list/dict supplied via a .pipe must not raise TypeError on the membership
-    # test; it warns and falls back.
-    glob, _ = _build_global({'sign': ['x'], 'require_provenance': {'a': 1}})
-    assert glob.config['sign'] == 'warning'
-    assert glob.config['require_provenance'] == 'error'
+def test_beginglobal_rejects_a_non_string_severity():
+    # A list/dict supplied via a .pipe is a type error, not a TypeError on the membership test.
+    with pytest.raises(ConfigError, match='sign'):
+        _build_global({'sign': ['x']})
 
 
-def test_beginglobal_blank_field_name_falls_back():
-    glob, _ = _build_global({'amount_field': '   ', 'metric_field': ''})
-    assert glob.config['amount_field'] == 'amount'
-    assert glob.config['metric_field'] == 'metric'
+def test_beginglobal_strips_field_names_and_refuses_blank_ones():
+    glob = _build_global({'amount_field': ' total '})
+    assert glob.validation['amount_field'] == 'total'
+    with pytest.raises(ValueError, match='metric_field'):
+        _build_global({'metric_field': '   '})
 
 
 def test_beginglobal_coerces_map_keywords():
-    glob, _ = _build_global({'category_metric_map': {'Revenue': ['  Sales  ', 'NET SALES']}})
-    assert glob.config['category_metric_map'] == {'Revenue': ['sales', 'net sales']}
+    glob = _build_global({'category_metric_map': {'Revenue': ['  Sales  ', 'NET SALES']}})
+    assert glob.validation['category_metric_map'] == {'Revenue': ['sales', 'net sales']}
 
 
-def test_beginglobal_malformed_map_falls_back_to_default():
-    warns = []
-    glob, _ = _build_global({'category_metric_map': {'revenue': 'not-a-list'}}, warns)
-    # Falls back to the built-in default map rather than crashing.
-    assert 'revenue' in glob.config['category_metric_map']
-    assert isinstance(glob.config['category_metric_map']['revenue'], list)
-    assert warns
+def test_beginglobal_refuses_a_malformed_map():
+    with pytest.raises(ValueError, match='category_metric_map'):
+        _build_global({'category_metric_map': {'revenue': 'not-a-list'}})
+    with pytest.raises(ConfigError, match='category_metric_map'):
+        _build_global({'category_metric_map': 'not-an-object'})
 
 
 # --- IInstance.writeAnswers / closing ---------------------------------------

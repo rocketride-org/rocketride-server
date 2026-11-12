@@ -162,64 +162,70 @@ standalone catalog nodes.
 ## Adding a New Node
 
 1. Create a directory in `nodes/src/nodes/<node_name>/`.
-2. Implement the loader contract. The engine imports **one module** — the dotted
-   name in the service definition's `"path"` (`nodes.my_node`), which resolves to
-   the directory's `__init__.py` — and then reads two attributes off it:
+2. Implement the loader contract. The node package is **file-per-class**: the
+   engine takes the dotted package name from the service definition's `"path"`
+   (`nodes.my_node`) and imports each class from its own submodule, by file
+   name. It never reads a class off the package itself, so `__init__.py` carries
+   only the license header — no re-exports, no factories.
 
-   - **`IInstance` is required.** `IPythonInstanceBase` does
-     `m_pyModule.attr("IInstance")` with no guard, so a module that does not
-     export it fails to load
+   - **`<path>.IInstance` is required.** `IPythonInstanceBase` imports
+     `nodes.my_node.IInstance` and reads the `IInstance` class from it; a package
+     without `IInstance.py` fails to load
      (`packages/server/engine-lib/engLib/store/python/python-instance.cpp`).
-   - **`IGlobal` is optional.** `IPythonGlobalBase` guards it with
-     `py::hasattr(m_pyModule, "IGlobal")`. When present the engine instantiates it
-     once per pipeline, injects `IEndpoint` and `glb`, and calls `beginGlobal()` /
-     `endGlobal()` around the run (`python-global.cpp`). After a successful
-     task initialization, teardown runs even when execution fails or is
-     cancelled; an execution error takes precedence over a teardown error.
-     Long-running Python sources must return from `scanObjects` on cancellation:
-     poll `rocketlib.isCancelled()` between bounded waits when no scan callbacks
-     are being emitted. It reports the native engine's global or calling-thread
+   - **`<path>.IGlobal` is optional.** When the pipeline runs, `IPythonGlobalBase`
+     imports `nodes.my_node.IGlobal` if the file exists; an `IGlobal.py` that
+     does not define `IGlobal` is an error. Without the file the engine uses
+     `rocketlib.IGlobalBase`, which still resolves the node's configuration, so
+     `self.settings` works in a node that ships only `IInstance.py`
+     (`python-global.cpp`). The engine instantiates the global once per
+     pipeline, injects `IEndpoint` and `glb`, and calls `beginGlobal()` /
+     `endGlobal()` around the run. After a successful task initialization,
+     teardown runs even when execution fails or is cancelled; an execution
+     error takes precedence over a teardown error. Long-running Python sources
+     must return from `scanObjects` on cancellation: poll
+     `rocketlib.isCancelled()` between bounded waits when no scan callbacks are
+     being emitted. It reports the native engine's global or calling-thread
      cancellation flag. Chat, Webhook, Dropper, and Tools do this automatically.
      Cleanup is bounded by the supervisor's graceful-stop deadline, so external
-     resources should still have vendor-side timeouts for crashes or forced kills.
+     resources should still have vendor-side timeouts for crashes or forced
+     kills.
+   - **`<path>.IValidator` is optional and used only to validate.** When the
+     editor validates a configuration (CONFIG / PIPELINE_CONFIG mode) the engine
+     imports `nodes.my_node.IValidator` and nothing else from the package —
+     `IGlobal.py` and `IInstance.py` are never imported there, so they may import
+     heavy libraries at module top. Without the file the engine uses
+     `rocketlib.IValidatorBase`, which checks the stored configuration against
+     the schema. Add `IValidator.py` only for semantic checks the schema cannot
+     express (a connectivity probe, a JSON block parsed from text); keep it
+     import-light (`rocketlib`, the standard library, light clients).
+   - **`<path>.IEndpoint` is required for a node that registers as an
+     endpoint** (a source); `IPythonEndpointBase` imports it the same way
+     (`python-endpoint.cpp`). Filters do not need one.
 
-   Because the imported module is the package itself, `__init__.py` **must
-   re-export both symbols** — a class sitting in `my_node.py` that `__init__.py`
-   does not surface is invisible to the loader. There is no `process()` entry
-   point and no node class beyond these two.
+   There is no `process()` entry point and no node class beyond these.
 
    ```text
    nodes/src/nodes/my_node/
-   ├── __init__.py        # re-exports IGlobal and IInstance — this is what the engine imports
-   ├── IGlobal.py
-   ├── IInstance.py
+   ├── __init__.py        # license header only
+   ├── IGlobal.py         # optional: shared state, one per pipeline run
+   ├── IInstance.py       # required: per-object state
+   ├── IValidator.py      # optional: semantic config checks, import-light
    ├── services.json      # "path": "nodes.my_node"
    ├── my_node.svg
    └── requirements.txt
    ```
 
    ```python
-   # nodes/src/nodes/my_node/__init__.py
-   from .IGlobal import IGlobal
-   from .IInstance import IInstance
-
-   __all__ = ['IGlobal', 'IInstance']
-   ```
-
-   ```python
    # nodes/src/nodes/my_node/IGlobal.py
-   from rocketlib import IGlobalBase, OPEN_MODE
+   from rocketlib import IGlobalBase
 
 
    class IGlobal(IGlobalBase):
        """Shared state, one per pipeline run."""
 
        def beginGlobal(self) -> None:
-           # The editor opens nodes in CONFIG mode just to validate settings —
-           # never install dependencies or open connections in that mode.
-           if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-               return
-
+           # Only called when the pipeline runs; validation imports IValidator
+           # instead, so installing dependencies here is safe.
            from depends import load_depends
 
            load_depends(__file__)  # installs this node's requirements.txt
@@ -270,8 +276,8 @@ standalone catalog nodes.
 
 3. Add a `services.json` (or `services.<variant>.json`) node definition. This is
    where you declare `classType`, `capabilities`, the `lanes` block (which makes
-   the node wire-compatible with others), and the `fields` / `shape` config schema
-   the canvas renders.
+   the node wire-compatible with others), and the `propertyDefinitions` /
+   `properties` config schema the canvas renders and the engine resolves.
 4. Drop the node icon SVG next to `services.json` and reference it by filename:
 
    ```json
@@ -324,7 +330,7 @@ my-workspace/
 └── local_nodes/
     ├── __init__.py          # empty -- just marks local_nodes as a package
     └── my_node/
-        ├── __init__.py      # required -- exports IGlobal/IInstance (see "Adding a New Node")
+        ├── __init__.py      # package marker only -- no re-exports (see "Adding a New Node")
         ├── services.json    # "path": "local_nodes.my_node"
         ├── IGlobal.py
         ├── IInstance.py

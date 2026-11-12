@@ -119,14 +119,14 @@ def test_data_result_defaults():
 
 def test_get_mime_type_strips_params_and_lowercases():
     """_getMimeType drops anything after ';' and returns lowercase."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     assert proc._getMimeType('Application/JSON; charset=utf-8') == 'application/json'
     assert proc._getMimeType('text/plain') == 'text/plain'
 
 
 def test_get_mime_request_type_reads_header():
     """_getMimeRequestType pulls Content-Type from the request and normalises."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     req = MagicMock()
     req.headers = {'Content-Type': 'TEXT/CSV; charset=utf-8'}
     assert proc._getMimeRequestType(req) == 'text/csv'
@@ -134,7 +134,7 @@ def test_get_mime_request_type_reads_header():
 
 def test_get_mime_request_type_defaults_when_header_missing():
     """If the request has no Content-Type, the default is application/octet-stream."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     req = MagicMock()
     req.headers = {}
     assert proc._getMimeRequestType(req) == 'application/octet-stream'
@@ -147,7 +147,7 @@ def test_get_mime_request_type_defaults_when_header_missing():
 
 def test_process_single_result_records_exception_envelope():
     """When the per-item result is an Exception, the envelope is stored under unique_key."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     obj = SimpleNamespace(objectId='oid', size=10)
     results = DataResult()
     proc._processSingleResult(RuntimeError('boom'), obj, results, 'file-1')
@@ -158,7 +158,7 @@ def test_process_single_result_records_exception_envelope():
 
 def test_process_single_result_records_ok_dict():
     """A dict result is stored with status='OK' and objectsCompleted is bumped."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     obj = SimpleNamespace(objectId='oid', size=10)
     results = DataResult()
     proc._processSingleResult({'data': b'something'}, obj, results, 'file-1')
@@ -168,7 +168,7 @@ def test_process_single_result_records_ok_dict():
 
 def test_process_single_result_merges_result_types():
     """A result with 'result_types' key has those types merged into DataResult.resultTypes."""
-    proc = RequestProcessing(_make_client(), 'tk_x')
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
     obj = SimpleNamespace(objectId='oid', size=10)
     results = DataResult()
     proc._processSingleResult(
@@ -201,7 +201,7 @@ async def test_send_bytes_writes_content_and_returns_result(monkeypatch):
 
     pipe = _FakePipe(result={'data': b'OK'})
     client = _make_client(pipe=pipe)
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
 
     key, result, obj = await proc._send_bytes(b'hello', 'text/plain', 'a.txt', 'a')
     assert key == 'a'
@@ -222,7 +222,7 @@ async def test_send_bytes_returns_exception_on_pipe_failure(monkeypatch):
 
     pipe = _FakePipe(raise_on='write')
     client = _make_client(pipe=pipe)
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
 
     key, result, obj = await proc._send_bytes(b'hello', 'text/plain', 'b.txt', 'b')
     assert key == 'b'
@@ -246,7 +246,7 @@ async def test_send_bytes_defaults_filename_when_missing(monkeypatch):
 
     pipe = _FakePipe(result={})
     client = _make_client(pipe=pipe)
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
 
     await proc._send_bytes(b'x', 'text/plain', None, 'k')
     # The source unconditionally replaces a None filename with
@@ -265,7 +265,7 @@ async def test_send_bytes_defaults_filename_when_missing(monkeypatch):
 async def test_process_routes_multipart_to_processMultipart():
     """A multipart/form-data MIME triggers _processMultipart."""
     client = _make_client()
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
     proc._processMultipart = AsyncMock(return_value=DataResult(objectsRequested=2, objectsCompleted=2))
     proc._processSingle = AsyncMock()
 
@@ -284,7 +284,7 @@ async def test_process_routes_multipart_to_processMultipart():
 async def test_process_routes_other_mime_to_processSingle():
     """Anything other than multipart/form-data triggers _processSingle."""
     client = _make_client()
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
     proc._processSingle = AsyncMock(return_value=DataResult(objectsRequested=1, objectsCompleted=1))
     proc._processMultipart = AsyncMock()
 
@@ -300,7 +300,7 @@ async def test_process_routes_other_mime_to_processSingle():
 async def test_process_wraps_exception():
     """A raised exception inside the processing routine becomes the error envelope."""
     client = _make_client()
-    proc = RequestProcessing(client, 'tk_x')
+    proc = RequestProcessing(client, 'acme.docBrain.parsePDF')
     proc._processSingle = AsyncMock(side_effect=RuntimeError('boom'))
 
     req = MagicMock()
@@ -330,10 +330,12 @@ async def test_task_data_returns_error_on_client_connect_failure(monkeypatch):
 
     req = MagicMock()
     req.app.state.server.get_port = MagicMock(return_value=9999)
-    req.state.account = SimpleNamespace(auth='ak_x')
+    req.state.account = SimpleNamespace(auth='ak_x', endpoints=None)
+    req.path_params = {'address': 'acme.docBrain.parsePDF'}
+    req.query_params = {}
     req.headers = {'Content-Type': 'application/octet-stream'}
 
-    result = await task_Data(req, token='tk_x', authorization='Bearer ak_x')
+    result = await task_Data(req, authorization='Bearer ak_x')
     body = result.body.decode() if hasattr(result, 'body') else str(result)
     assert 'Error' in body
     # disconnect runs even when connect failed.
@@ -367,10 +369,12 @@ async def test_task_data_runs_full_request_processing(monkeypatch):
 
     req = MagicMock()
     req.app.state.server.get_port = MagicMock(return_value=9999)
-    req.state.account = SimpleNamespace(auth='ak_x')
+    req.state.account = SimpleNamespace(auth='ak_x', endpoints=None)
+    req.path_params = {'address': 'acme.docBrain.parsePDF'}
+    req.query_params = {'question': 'hi'}
     req.headers = {'Content-Type': 'application/octet-stream'}
 
-    result = await task_Data(req, token='tk_x', authorization='Bearer ak_x')
+    result = await task_Data(req, authorization='Bearer ak_x')
     assert captured['request'] is req
     fake_client.disconnect.assert_awaited_once()
     body = result.body.decode() if hasattr(result, 'body') else str(result)

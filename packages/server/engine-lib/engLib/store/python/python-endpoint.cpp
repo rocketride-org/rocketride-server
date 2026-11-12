@@ -39,15 +39,16 @@ IPythonEndpointBase::IPythonEndpointBase(const FactoryArgs &args) noexcept
     }
     const auto &serviceDef = **service;
 
-    // Determine the module to load from serviceDef.nodePath, if specified,
+    // Determine the package to import from serviceDef.nodePath, if specified,
     // or from pipeType.logicalType - otherwise
     auto servicePath = serviceDef.nodePath
                            ? _cast<TextView>(serviceDef.nodePath)
                            : _cast<TextView>(pipeType.logicalType);
 
-    // Load python module
+    // Load the <path>.IEndpoint submodule - file-per-class is the contract
     engine::python::LockPython lock;
-    auto pyModule = engine::python::loadModule(servicePath, true);
+    const Text moduleName = _ts(servicePath, ".IEndpoint");
+    auto pyModule = engine::python::loadModule(moduleName, true);
     if (!pyModule) {
         m_boundError = pyModule.ccode();
         return;

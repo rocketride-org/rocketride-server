@@ -52,12 +52,6 @@ _mod = _load_iglobal_module()
 IGlobal = _mod.IGlobal
 
 
-class _Config:
-    @staticmethod
-    def getNodeConfig(*_a: object, **_kw: object) -> dict:
-        return {}
-
-
 class _StubWhisper:
     """Stand-in for ``ai.common.models.Whisper``; ``on_transcribe`` runs inside every call."""
 
@@ -73,12 +67,11 @@ class _StubWhisper:
 
 @pytest.fixture
 def make_global(monkeypatch):
-    """Build an ``IGlobal`` through the real ``beginGlobal``, in the given run mode."""
+    """Build an ``IGlobal`` through the real ``beginGlobal`` (and the real resolver), in the given run mode."""
 
     def _make(model_server: bool) -> IGlobal:
         argv = ['node.py'] + (['--modelserver=5590'] if model_server else [])
         monkeypatch.setattr(sys, 'argv', argv)
-        monkeypatch.setattr(_mod, 'Config', _Config)
         monkeypatch.setattr(_mod, 'Whisper', _StubWhisper)
 
         glb = IGlobal.__new__(IGlobal)

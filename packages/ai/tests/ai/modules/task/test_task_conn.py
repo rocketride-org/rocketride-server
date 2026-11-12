@@ -13,8 +13,8 @@ Focus areas:
 - ``on_auth`` — info-only probe, attempt cap, auth success / failure flow
 - ``has_permission`` / ``verify_permission`` — permission gating
 - ``verify_plans`` — pipeline plan validation
-- ``get_task_token`` — tk_/pk_/api-key token resolution
-- ``get_task`` — cross-tenant ownership check
+- ``get_task_address`` — the address from the token slot
+- ``get_task`` — resolution under the caller's account
 - ``send`` — message-counter bookkeeping
 - ``on_rrext_ping`` — sanity ping
 - ``get_connection_id`` — accessor
@@ -22,6 +22,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -48,8 +49,9 @@ def _make_conn(
 
     Attributes consumed by the methods under test are set explicitly:
     ``_server``, ``_transport``, ``_account_info``, ``_authenticated``,
-    ``_connection_id``, ``_client_ip``, ``_auth_attempts``, counters,
-    ``_messages_in/out``, ``_last_activity``.
+    ``_connection_id``, ``_client_ip``, ``_auth_attempts``, the session
+    epoch and lock, counters,
+    ``_messages_in/out``, ``_last_activity``, ``_monitors`` (empty).
 
     Real DAPConn helpers (``build_response``, ``build_error``,
     ``build_event``, ``debug_message``) are stubbed with MagicMocks that
@@ -71,11 +73,15 @@ def _make_conn(
     conn._authenticated = authenticated
     conn._account_info = account_info
     conn._auth_attempts = 0
+    conn._session_epoch = 0
+    conn._session_lock = asyncio.Lock()
+    conn._session_transition = False
     conn._messages_in = 0
     conn._messages_out = 0
     conn._last_activity = 0.0
     conn._connected_at = 0.0
     conn._client_info = {}
+    conn._monitors = {}
     conn._server = server or MagicMock()
 
     transport = MagicMock()
@@ -101,8 +107,7 @@ def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', 
     no authorization meaning).
 
     Args:
-        auth: credential string. Tests use ``pk_``, ``tk_``, ``ak_`` prefixes
-            to exercise the different code paths in ``get_task_token``.
+        auth: credential string (an ``ak_``-prefixed API key in these tests).
         user_id: opaque user identifier.
         dev_team: the dev team id (billing/env only — never permissions).
         teams: membership team dicts; defaults to one entry for ``dev_team``.
@@ -482,60 +487,35 @@ def test_verify_plans_raises_when_validation_fails(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# get_task_token
+# get_task_address
 # ---------------------------------------------------------------------------
 
 
-def test_get_task_token_unauthenticated_raises():
-    """get_task_token without auth raises PermissionError."""
+def test_get_task_address_unauthenticated_raises():
+    """get_task_address without auth raises PermissionError."""
     conn = _make_conn(account_info=None)
     with pytest.raises(PermissionError, match='Not authenticated'):
-        conn.get_task_token({})
+        conn.get_task_address({})
 
 
-def test_get_task_token_with_pk_auth_locks_to_owning_task():
-    """A ``pk_`` credential resolves the task token via the server lookup."""
-    server = MagicMock()
-    fake_control = SimpleNamespace(token='tk_locked-task')
-    server.get_task_control_by_public_key = MagicMock(return_value=fake_control)
-    conn = _make_conn(account_info=_make_account_info(auth='pk_public-1'), server=server)
-
-    assert conn.get_task_token({}) == 'tk_locked-task'
-    server.get_task_control_by_public_key.assert_called_once_with('pk_public-1')
-
-
-def test_get_task_token_with_tk_auth_returns_credential_directly():
-    """A ``tk_`` credential is itself the task token."""
-    conn = _make_conn(account_info=_make_account_info(auth='tk_my-task-token'))
-    assert conn.get_task_token({}) == 'tk_my-task-token'
-
-
-def test_get_task_token_with_apikey_reads_token_from_arguments(monkeypatch):
-    """An API key auth must pull the token from the request's arguments dict."""
-    from ai.modules.task import task_conn as tc_mod
-
-    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.control'})
+def test_get_task_address_reads_the_token_slot_of_arguments():
+    """The address rides ``arguments.token``; a root-level token is not read."""
     conn = _make_conn(account_info=_make_account_info(auth='ak_user-key'))
 
-    request = {'arguments': {'token': 'tk_from-args'}}
-    assert conn.get_task_token(request, permissions='task.control') == 'tk_from-args'
+    assert conn.get_task_address({'arguments': {'token': 'acme.pipe.src'}}) == 'acme.pipe.src'
+    assert conn.get_task_address({'token': 'acme.pipe.src', 'arguments': {}}) == ''
+    assert conn.get_task_address({}) == ''
 
 
 # ---------------------------------------------------------------------------
-# get_task — cross-team access check
+# get_task / get_control — resolution under the caller's account
 # ---------------------------------------------------------------------------
 
 
-def test_get_task_apikey_rejects_task_in_team_caller_cannot_access(monkeypatch):
-    """For API-key auth, the caller must belong to the task's team."""
-    from ai.modules.task import task_conn as tc_mod
-
-    # Caller has no team membership for this task's team → empty permission list.
-    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: [])
-
+def test_get_task_propagates_the_resolvers_refusal():
+    """The resolver's verdict is the access check: a refusal propagates unchanged."""
     server = MagicMock()
-    fake_control = SimpleNamespace(teamId='team-other', owner_id='team-other', task=SimpleNamespace(name='target'))
-    server.get_task_control = MagicMock(return_value=fake_control)
+    server.resolve_control = MagicMock(side_effect=PermissionError('Access denied: no permissions for this task'))
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
@@ -543,18 +523,17 @@ def test_get_task_apikey_rejects_task_in_team_caller_cannot_access(monkeypatch):
     )
 
     with pytest.raises(PermissionError, match='Access denied'):
-        conn.get_task({'arguments': {'token': 'tk_x'}}, permissions='task.control')
+        conn.get_task({'arguments': {'token': 'acme.pipe.src'}}, permissions='task.control')
+    server.resolve_control.assert_called_once_with('acme.pipe.src', conn._account_info, 'task.control')
 
 
-def test_get_task_apikey_returns_task_when_team_grants_access(monkeypatch):
-    """API-key auth with the requested team permission returns the underlying task."""
-    from ai.modules.task import task_conn as tc_mod
-
-    monkeypatch.setattr(tc_mod, 'resolve_run_permissions', lambda info, control: ['task.control'])
-
+def test_get_task_returns_the_resolved_controls_task():
+    """The address, the caller's account and the required permission reach the
+    resolver on every call; the resolved control's task comes back.
+    """
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.get_task_control = MagicMock(
+    server.resolve_control = MagicMock(
         return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=target_task)
     )
 
@@ -563,16 +542,11 @@ def test_get_task_apikey_returns_task_when_team_grants_access(monkeypatch):
         server=server,
     )
 
-    assert conn.get_task({'arguments': {'token': 'tk_x'}}, permissions='task.control') is target_task
-
-
-def test_get_task_tk_auth_bypasses_team_check():
-    """tk_ auth is already scoped to a single task; no team-membership check runs."""
-    target_task = SimpleNamespace(name='target')
-    server = MagicMock()
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(teamId='team-other', task=target_task))
-    conn = _make_conn(account_info=_make_account_info(auth='tk_x'), server=server)
-    assert conn.get_task({}) is target_task
+    assert conn.get_task({'arguments': {'token': 'acme.pipe.src'}}, permissions='task.control') is target_task
+    server.resolve_control.assert_called_once_with('acme.pipe.src', conn._account_info, 'task.control')
+    # No permission named: the resolver still runs with the account (reachability only).
+    conn.get_control({'arguments': {'token': 'acme.pipe.src'}})
+    assert server.resolve_control.call_args.args == ('acme.pipe.src', conn._account_info, None)
 
 
 # ---------------------------------------------------------------------------

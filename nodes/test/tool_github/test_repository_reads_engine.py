@@ -46,7 +46,10 @@ def instance(monkeypatch):
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
-        inst = module.IInstance()
+        # The package __init__ is empty (file-per-class contract): import the submodules by name.
+        instance_module = importlib.import_module(f'{name}.IInstance')
+        github_client = importlib.import_module(f'{name}.github_client')
+        inst = instance_module.IInstance()
         inst.IGlobal = SimpleNamespace(
             auth_type='pat',
             token='test-token',
@@ -57,9 +60,9 @@ def instance(monkeypatch):
             default_repo='owner/repo',
             read_only=True,
             tools=frozenset(),
-            graphql_max_bytes=module.github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
             graphql_allow_mutations=False,
-            retry_policy=module.github_client.RetryPolicy(sleep=Mock()),
+            retry_policy=github_client.RetryPolicy(sleep=Mock()),
         )
         request = Mock()
         monkeypatch.setattr(requests, 'request', request)

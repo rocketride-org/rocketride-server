@@ -39,13 +39,18 @@ def _load_modules():
     into sibling tests running under the full engine (where rocketlib/ai.common
     are real and shared across the pytest session).
     """
-    _core = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')
+    _core = ('rocketlib', 'ai', 'ai.common', 'ai.common.utils')
     _saved = {name: sys.modules.get(name) for name in _core}
 
+    # The real base: its ``config`` property resolves self.glb.connConfig against
+    # the engine's schema for tool_notion (rocketlib.filters is never stubbed).
+    from rocketlib.filters import IGlobalBase
+
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = type('IGlobalBase', (), {})
+    rocketlib.IGlobalBase = IGlobalBase
     rocketlib.IInstanceBase = type('IInstanceBase', (), {})
-    rocketlib.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
+    rocketlib.engine = importlib.import_module('rocketlib.engine')
+    rocketlib.config = importlib.import_module('rocketlib.config')
 
     def _tool_function(*args, **kwargs):
         def decorator(fn):
@@ -63,10 +68,6 @@ def _load_modules():
     sys.modules['ai'].__path__ = []
     sys.modules['ai.common'] = types.ModuleType('ai.common')
     sys.modules['ai.common'].__path__ = []
-
-    ai_cfg = types.ModuleType('ai.common.config')
-    ai_cfg.Config = type('Config', (), {'getNodeConfig': staticmethod(lambda *a, **k: {})})
-    sys.modules['ai.common.config'] = ai_cfg
 
     ai_utils = types.ModuleType('ai.common.utils')
 
@@ -1027,37 +1028,31 @@ class TestNotionAppendContent:
 
 
 class TestIGlobal:
-    def _glob(self, config, env=None, monkeypatch=None, open_mode='invoke'):
+    def _glob(self, config):
+        """An IGlobal on the stored config; ``self.config`` resolves it through the engine's schema."""
         glob = _ig.IGlobal.__new__(_ig.IGlobal)
-        glob.glb = Mock(logicalType='tool_notion://x', connConfig={})
-        glob.IEndpoint = Mock()
-        glob.IEndpoint.endpoint.openMode = open_mode
-        if monkeypatch is not None:
-            monkeypatch.setattr(_ig.Config, 'getNodeConfig', staticmethod(lambda *a, **k: config))
-            monkeypatch.delenv('NOTION_API_KEY', raising=False)
-            for key, value in (env or {}).items():
-                monkeypatch.setenv(key, value)
+        glob.glb = Mock(logicalType='tool_notion', connConfig=config)
         return glob
 
-    def test_begin_global_skips_when_open_mode_is_config(self, monkeypatch):
-        glob = self._glob({}, monkeypatch=monkeypatch, open_mode=_ig.OPEN_MODE.CONFIG)
-        glob.beginGlobal()
-        assert glob.apikey == ''
-
-    def test_begin_global_reads_apikey_from_config(self, monkeypatch):
-        glob = self._glob({'apikey': 'from-config'}, monkeypatch=monkeypatch, open_mode='invoke')
+    def test_begin_global_reads_apikey_from_config(self):
+        glob = self._glob({'apikey': 'from-config'})
         glob.beginGlobal()
         assert glob.apikey == 'from-config'
 
-    def test_begin_global_falls_back_to_env_var(self, monkeypatch):
-        glob = self._glob({}, env={'NOTION_API_KEY': 'from-env'}, monkeypatch=monkeypatch, open_mode='invoke')
-        glob.beginGlobal()
-        assert glob.apikey == 'from-env'
+    def test_begin_global_has_no_process_env_fallback(self, monkeypatch):
+        """The key arrives through the node config only (a ${ROCKETRIDE_NOTION_APIKEY} reference per call)."""
+        from rocketlib.config import ConfigError
 
-    def test_begin_global_raises_when_no_apikey_anywhere(self, monkeypatch):
-        glob = self._glob({}, monkeypatch=monkeypatch, open_mode='invoke')
-        with pytest.raises(ValueError):
-            glob.beginGlobal()
+        monkeypatch.setenv('NOTION_API_KEY', 'from-env')
+        monkeypatch.setenv('ROCKETRIDE_NOTION_APIKEY', 'from-env')
+        with pytest.raises(ConfigError, match='"apikey" is required'):
+            self._glob({}).beginGlobal()
+
+    def test_begin_global_raises_when_the_key_is_blank(self):
+        from rocketlib.config import ConfigError
+
+        with pytest.raises(ConfigError, match='"apikey" is required'):
+            self._glob({'apikey': ''}).beginGlobal()
 
     def test_end_global_clears_the_apikey(self):
         glob = _ig.IGlobal.__new__(_ig.IGlobal)

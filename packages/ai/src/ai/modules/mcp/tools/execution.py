@@ -28,7 +28,6 @@ normalizer's hard-failure set.
 
 import asyncio
 from typing import Any, Dict
-from urllib.parse import urlencode
 
 from ..apps import DROPPER_URI
 from ..errors import _bad, _timeout
@@ -170,55 +169,55 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
             )
         result_payload['result'] = result
         # One-shot run: inputs were sent and a result came back synchronously,
-        # so this token is done -- drop it rather than leak it in the
+        # so this task is done -- drop it rather than leak it in the
         # registry for the life of the process (see registry.py).
         tasks.remove(token)
+
+        # A run this call started is terminated here: its address stays
+        # occupied until it ends, so leaving it to its idle ttl would make the
+        # next run_pipeline of the same pipe fail as already running. A run
+        # attached with use_existing (reused) belongs to whoever started it.
+        if not started.get('reused'):
+            try:
+                await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
+                result_payload['terminated'] = True
+            except Exception as e:
+                result_payload['terminated'] = False
+                result_payload['terminate_error'] = f'the task {token} is still running and ends on its ttl: {e}'
 
     return result_payload
 
 
 async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
-    """Start a pipeline and return a self-contained upload URL.
+    """Start a pipeline and return its address and a credential-free upload URL.
 
     Bytes cannot ride the MCP tool call (transport payload limits), so this
-    tool returns an HTTP endpoint an out-of-band uploader POSTs files to. The
-    URL embeds only the task's public auth key (``pk_``) — ``/task/data``
-    resolves the task from it, so it needs no ``Authorization`` header and no
-    routing token. The ``tk_`` control token deliberately never appears in a
-    URL: query strings land in access logs, browser history, and ``Referer``
-    headers. Unlike ``run_pipeline`` there is no inline-send path.
+    tool returns the HTTP endpoint an out-of-band uploader POSTs files to:
+    ``/task/data/{address}``, authenticated with an ``rr_`` key in the
+    ``Authorization`` header. No credential ever rides a URL (query strings
+    land in access logs, browser history and ``Referer`` headers). The
+    caller-minted scoped upload key for the sandboxed widget is the widget
+    work package; until it lands the widget cannot upload. Unlike
+    ``run_pipeline`` there is no inline-send path.
     """
     started, err = await _start_task(client, args, 'run_dropper_pipe')
     if err:
         return err
 
-    token = started.get('token')
-    public_token = started.get('publicToken')
-    if not token:
+    address = started.get('token')
+    if not address:
         return _bad(
-            'engine did not return a task token for the dropper URL',
+            'engine did not return a task address for the dropper URL',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    if not public_token:
-        # The task is already running engine-side and the caller gets no
-        # token back to terminate with -- tear it down rather than orphan it
-        # until its ttl expires (or forever, when ttl is 0).
-        try:
-            await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
-        except Exception:  # noqa: BLE001 - best-effort cleanup on an already-failed call
-            pass
-        return _bad(
-            'engine did not return public auth for the dropper URL',
-            'the pipeline may lack a data-ingress source, or the engine response was malformed',
-        )
-    tasks.add(token, pipeline_ref='<inline>')
+    tasks.add(address, pipeline_ref='<inline>')
 
     base_url = str(client.base_url).rstrip('/')
     result_payload: Dict[str, Any] = {
         'ok': True,
-        'task_token': token,
-        'upload_url': f'{base_url}/task/data?{urlencode({"auth": public_token})}',
-        'dropper_url': f'{base_url}/dropper?{urlencode({"auth": public_token})}',
+        'task_token': address,
+        'address': address,
+        'upload_url': f'{base_url}/task/data/{address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),
     }
@@ -300,7 +299,8 @@ def register(registry: ToolRegistry) -> None:
     registry.register(
         'run_pipeline',
         'Start a RocketRide pipeline from an inline definition, returning a task_token. '
-        'Pass inputs to also send data immediately and get a result back in the same call. '
+        'Pass inputs to also send data immediately and get a result back in the same call; '
+        'that one-shot run is terminated once the result is back (unless use_existing attached to a running one). '
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_PIPELINE_SCHEMA,
         hints=ToolHints(

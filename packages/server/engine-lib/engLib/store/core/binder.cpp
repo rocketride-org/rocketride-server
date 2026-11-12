@@ -76,6 +76,32 @@ Error Binder::bind(const std::string &methodName,
 }
 
 /**
+ * @brief RAII nesting counter for Binder::callMethods on one pipe.
+ *
+ * Increments the pipe's bindDepth for the lifetime of one callMethods call
+ * and reports whether this level is past CONST_MAX_BIND_DEPTH. The caller
+ * decides what to do with that; the count is always restored on exit, so a
+ * failed level leaves the pipe ready for the next request.
+ */
+class BindDepthGuard {
+public:
+    explicit BindDepthGuard(std::atomic<int> &depth) noexcept
+        : m_depth(depth), m_level(++depth) {}
+    ~BindDepthGuard() noexcept { --m_depth; }
+
+    BindDepthGuard(const BindDepthGuard &) = delete;
+    BindDepthGuard &operator=(const BindDepthGuard &) = delete;
+
+    bool exceeded() const noexcept {
+        return m_level > filter::pipe::CONST_MAX_BIND_DEPTH;
+    }
+
+private:
+    std::atomic<int> &m_depth;
+    int m_level;
+};
+
+/**
  * @brief Invokes all bound service filter instances for the given method.
  *
  * This function checks whether the instance is in target mode and, if
@@ -100,6 +126,24 @@ Error Binder::callMethods(
         return APERR(Ec::InvalidParam,
                      "This function may only be called when in target mode");
 
+    // The pipe this call runs on - carries the binding's identity and trace
+    // level
+    auto &pipe = pThis->m_pInstance->pipe;
+
+    // Recursion guard: a node that re-enters its own pipe (a sub-pipeline
+    // calling itself) nests here once per level. Past the limit the call
+    // fails like a node error - the entry carries the code so the caller
+    // sees it in the pipe result - and the callback is never invoked.
+    BindDepthGuard depth{pipe->bindDepth};
+    if (depth.exceeded()) {
+        ccode = APERR(Ec::Recursion, "Pipeline binding depth exceeded",
+                      filter::pipe::CONST_MAX_BIND_DEPTH, methodName);
+        if (pThis->m_pInstance->currentEntry
+            && !pThis->m_pInstance->currentEntry->objectFailed())
+            pThis->m_pInstance->currentEntry->completionCode(ccode);
+        return ccode;
+    }
+
     // If pipeline mode is disabled, directly invoke the next driver
     if (!pThis->isPipeline()) return callback(pThis->m_pInstance->pDown.get());
 
@@ -108,8 +152,8 @@ Error Binder::callMethods(
     if (it == pThis->methodMap.end() || !it->second)
         return {};  // No bound instances, return success
 
-    // Get the trace level
-    auto traceLevel = pThis->m_pInstance->endpoint->config.pipelineTraceLevel;
+    // Get the trace level of this binding
+    auto traceLevel = pipe->traceLevel;
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
@@ -120,19 +164,11 @@ Error Binder::callMethods(
             serializeTrace(traceLevel, enterTrace["data"]);
         }
 
-        // Signal to the debugger we are entering a level
-        pThis->m_pInstance->pipe->debugger.debugEnter(pInstance, enterTrace);
-
-        // Break if we need to
-        pThis->m_pInstance->pipe->debugger.debugBreak(pThis->m_pInstance,
-                                                      pInstance, methodName);
+        // Trace that we are entering a level
+        pipe->emitTrace("ENTER", pInstance, enterTrace);
 
         // Call the function
         if (ccode = callback(pInstance)) {
-            // If we got an error allow the debugger to handle it
-            pThis->m_pInstance->pipe->debugger.debugError(
-                pThis->m_pInstance, pInstance, methodName, ccode);
-
             // Set the completion code on the entry so the error surfaces
             // in the object result (e.g. dropper UI, failedCount stats).
             // Skip PreventDefault — that's a "skip" signal, not an error.
@@ -157,9 +193,8 @@ Error Binder::callMethods(
                 }
             }
 
-            // Signal to the debugger we are leaving a level
-            pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
-                                                          leaveTrace);
+            // Trace that we are leaving a level
+            pipe->emitTrace("LEAVE", pInstance, leaveTrace);
 
             // Stop on the first error
             break;
@@ -172,9 +207,8 @@ Error Binder::callMethods(
                 serializeTrace(traceLevel, leaveTrace["data"]);
             }
 
-            // Signal to the debugger we are leaving a level
-            pThis->m_pInstance->pipe->debugger.debugLeave(pInstance,
-                                                          leaveTrace);
+            // Trace that we are leaving a level
+            pipe->emitTrace("LEAVE", pInstance, leaveTrace);
         }
     }
     return ccode;

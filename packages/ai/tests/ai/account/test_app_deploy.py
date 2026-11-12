@@ -49,11 +49,12 @@ from ai.account import account as account_singleton
 from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
-    _publisher_of,
     _serving_block_of,
+    developer_id_required,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
+    namespace_of,
     open_version_dirs,
     resolve_app_pins,
 )
@@ -1107,8 +1108,8 @@ class _EventConn:
 @pytest.mark.asyncio
 async def test_review_transitions_push_both_signals(registry, quiet_push, monkeypatch):
     """submit/withdraw push the org-scoped rail invalidation AND the typed
-    app:statusChanged event — delivered to the owning org and to cross-org
-    reviewers (sys.app/sys.admin), never to strangers or task sockets — and
+    app:statusChanged event — delivered to EVERY connection of the owning org
+    and to cross-org reviewers (sys.app/sys.admin), never to strangers — and
     drop the app's server-side serving verdicts (#2461).
     """
     import ai.modules.shell.shell as shell_mod
@@ -1126,10 +1127,10 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     owner = _EventConn(org_id='org1')
     reviewer = _EventConn(org_id='other-org', perms=['sys.app'])
     stranger = _EventConn(org_id='other-org')
-    task_socket = _EventConn(org_id='org1', auth='pk_task')
+    member = _EventConn(org_id='org1', auth='rr_scoped_pat')
     dev._server = SimpleNamespace(
         broadcast_server_event=broadcast_server_event,
-        _connections={'a': owner, 'b': reviewer, 'c': stranger, 'd': task_socket},
+        _connections={'a': owner, 'b': reviewer, 'c': stranger, 'd': member},
     )
 
     result = await handle_deploy_app(dev, _request('submit', version=1))
@@ -1143,12 +1144,13 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     assert owner.events == [('app:statusChanged', submit_body)]
     assert reviewer.events == [('app:statusChanged', submit_body)]
     assert stranger.events == []
-    assert task_socket.events == []
+    assert member.events == [('app:statusChanged', submit_body)]
 
     # Withdraw pushes the same pair with the returned-to-draft state.
     broadcasts.clear()
     owner.events.clear()
     reviewer.events.clear()
+    member.events.clear()
     result = await handle_deploy_app(dev, _request('withdraw', version=1))
     assert result['success'] is True
     assert broadcasts == [
@@ -1158,7 +1160,7 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     assert owner.events == [('app:statusChanged', withdraw_body)]
     assert reviewer.events == [('app:statusChanged', withdraw_body)]
     assert stranger.events == []
-    assert task_socket.events == []
+    assert member.events == [('app:statusChanged', withdraw_body)]
     assert invalidated == ['acme.brandy', 'acme.brandy']
 
 
@@ -1705,7 +1707,8 @@ async def test_resolve_internal_serves_unapproved_but_not_failed(registry):
 
 
 # =============================================================================
-# PUBLISHER: the store's DEVELOPER field is never empty (#2977)
+# PUBLISHER: the store's DEVELOPER field is never empty (#2977), and it is the
+# app id's developer namespace, never a name the manifest declares
 # =============================================================================
 
 
@@ -1727,48 +1730,16 @@ def _public_listing(registry, manifest, snapshot):
 
 
 @pytest.mark.asyncio
-async def test_resolve_publisher_covers_versions_bound_before_the_snapshot_kept_it(registry):
-    """A binding whose snapshot has no publisher (bound before #2625, or any
-    DB-edition row) still lists the version's declared appManifest.publisher.
-    """
-    _public_listing(registry, {'name': 'Brandy', 'publisher': 'mithilesh_app'}, {'name': 'Brandy'})
-
-    resolved = await resolve_app_pins('org1', 'other-user', [])
-
-    assert resolved[0]['publisher'] == 'mithilesh_app'
-
-
-@pytest.mark.asyncio
-async def test_resolve_publisher_reads_the_version_manifest_before_the_snapshot(registry):
-    """The version's stored appManifest is the listing truth and the only
-    source the DB edition has, so it decides first on both editions; the
-    snapshot copy never overrides it.
-    """
-    _public_listing(
-        registry,
-        {'name': 'Brandy', 'publisher': 'Acme Labs'},
-        {'name': 'Brandy', 'publisher': 'an older copy'},
-    )
-
-    resolved = await resolve_app_pins('org1', 'other-user', [])
-
-    assert resolved[0]['publisher'] == 'Acme Labs'
-
-
-@pytest.mark.asyncio
-async def test_resolve_publisher_falls_back_to_the_snapshot_without_a_stored_manifest(registry):
-    """A version with no stored appManifest lists the binding snapshot's publisher."""
-    _public_listing(registry, None, {'name': 'Brandy', 'publisher': 'Acme Labs'})
-
-    resolved = await resolve_app_pins('org1', 'other-user', [])
-
-    assert resolved[0]['publisher'] == 'Acme Labs'
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     'manifest, snapshot',
     [
+        # A version bound before the snapshot kept a publisher.
+        ({'name': 'Brandy', 'publisher': 'mithilesh_app'}, {'name': 'Brandy'}),
+        # A manifest and a snapshot that both declare a name.
+        ({'name': 'Brandy', 'publisher': 'Acme Labs'}, {'name': 'Brandy', 'publisher': 'an older copy'}),
+        # No stored manifest, a snapshot that declares one.
+        (None, {'name': 'Brandy', 'publisher': 'Acme Labs'}),
+        # Nothing declared anywhere.
         ({'name': 'Brandy'}, {'name': 'Brandy'}),
         ({'name': 'Brandy', 'publisher': '   '}, {'name': 'Brandy', 'publisher': ''}),
         (None, {'name': 'Brandy'}),
@@ -1777,11 +1748,12 @@ async def test_resolve_publisher_falls_back_to_the_snapshot_without_a_stored_man
         ({'name': 'Brandy', 'publisher': 'local'}, {'name': 'Brandy', 'publisher': 'local'}),
     ],
 )
-async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry, manifest, snapshot):
-    """With no declared publisher anywhere (or only the reserved 'local'
-    placeholder), the listing names the publishing org's developer id: the
-    app id's namespace segment, which deploy and publish guarantee is that
-    org's registered developer id.
+async def test_resolve_publisher_is_the_developer_namespace(registry, manifest, snapshot):
+    """Every listing names the publishing org's developer id: the app id's
+    namespace segment, which deploy and publish guarantee is that org's
+    registered developer id. A declared ``publisher`` (free text, or the
+    reserved ``local`` placeholder) is never listed, so no manifest can claim
+    another publisher and no entry is left without one.
     """
     _public_listing(registry, manifest, snapshot)
 
@@ -1791,26 +1763,28 @@ async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry,
 
 
 @pytest.mark.parametrize(
-    'app_id, manifest, snapshot, expected',
+    'app_id, expected',
     [
-        # A seeded platform app: apps.json carries the package.json publisher.
-        ('rocketride.aparavi', {'publisher': 'Aparavi Software AG'}, {}, 'Aparavi Software AG'),
-        ('rocketride.aparavi', {}, {}, 'rocketride'),
+        # A seeded platform app.
+        ('rocketride.aparavi', 'rocketride'),
         # An app id may be the bare developer id itself.
-        ('acme', {}, {}, 'acme'),
-        ('acme.brandy', {'publisher': '  Acme Labs  '}, {}, 'Acme Labs'),
-        ('acme.brandy', {'publisher': None}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
-        # A blank manifest value defers to the snapshot.
-        ('acme.brandy', {'publisher': '   '}, {'publisher': 'Acme'}, 'Acme'),
-        # A non-string value is not a name, in the manifest or the snapshot.
-        ('acme.brandy', {'publisher': {'name': 'Acme'}}, {}, 'acme'),
-        ('acme.brandy', {}, {'publisher': 42}, 'acme'),
-        # The reserved 'local' placeholder never names a developer, in any case.
-        ('acme.brandy', {'publisher': 'local'}, {}, 'acme'),
-        ('acme.brandy', {'publisher': ' Local '}, {'publisher': 'LOCAL'}, 'acme'),
-        ('acme.brandy', {'publisher': 'local'}, {'publisher': 'Acme Labs'}, 'Acme Labs'),
+        ('acme', 'acme'),
+        ('acme.brandy', 'acme'),
+        ('acme.tools.viewer', 'acme'),
     ],
 )
-def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
-    """The publisher resolver's order and its namespace floor."""
-    assert _publisher_of(app_id, manifest, snapshot) == expected
+def test_namespace_of_never_returns_empty(app_id, expected):
+    """The publisher is the id's first segment, for every id deploy accepts."""
+    assert namespace_of(app_id) == expected
+
+
+def test_developer_id_required_names_the_ways_in():
+    """One refusal for every door that needs a developer id (#3077)."""
+    message = developer_id_required('Running a deployment')
+    assert message.startswith('Running a deployment requires a registered developer id')
+    assert 'Deploy tab' in message
+    assert 'npm CLI' in message
+    assert 'rocketride app developer register <id>' in message
+    assert 'registerDeveloper(id)' in message
+    assert 'register_developer(id)' in message
+    assert 'rrext_' not in message

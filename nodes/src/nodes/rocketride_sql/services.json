@@ -75,40 +75,24 @@
 		"questions": ["table", "text", "answers"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration options used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "default",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"default": {}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The RocketRide cloud database has one
+	//		connection, delivered by the task engine, so every property is
+	//		stored flat: no host, user or password.
 	//
-	"fields": {
-		"rocketridesql.table": {
-			"type": "string",
-			"title": "Table name",
-			"default": "table",
-			"description": "Name of the table to read from or write to in your RocketRide cloud database"
-		},
+	"propertyDefinitions": {
 		"rocketridesql.db_description": {
 			"type": "string",
 			"title": "Database description",
 			"default": "",
 			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"ui": {
-				"ui:widget": "textarea"
-			}
+			"format": "textarea"
+		},
+		"rocketridesql.table": {
+			"type": "string",
+			"title": "Table name",
+			"default": "table",
+			"description": "Name of the table to read from or write to in your RocketRide cloud database"
 		},
 		"rocketridesql.max_attempts": {
 			"type": "integer",
@@ -137,39 +121,18 @@
 			"title": "Team or user",
 			"default": "",
 			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
-		},
-		"rocketridesql.default": {
-			"object": "default",
-			"properties": ["rocketridesql.db_description", "rocketridesql.table", "rocketridesql.max_attempts", "rocketridesql.allow_execute", "rocketridesql.scope", "rocketridesql.target"]
-		},
-		"rocketridesql.profile": {
-			"hidden": true,
-			"type": "string",
-			"default": "default",
-			"enum": [["default", "Default"]],
-			"conditional": [
-				{
-					"value": "default",
-					"properties": ["rocketridesql.default"]
-				}
-			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "RocketRide SQL",
-			"properties": ["rocketridesql.profile"],
-			"ui": {
-				"ui:options": {
-					"compactDescriptions": true
-				}
-			}
-		}
+	"properties": [
+		"rocketridesql.db_description",
+		"rocketridesql.table",
+		"rocketridesql.max_attempts",
+		"rocketridesql.allow_execute",
+		"rocketridesql.scope",
+		"rocketridesql.target"
 	]
 }

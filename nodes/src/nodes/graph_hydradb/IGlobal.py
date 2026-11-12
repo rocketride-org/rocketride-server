@@ -24,17 +24,15 @@
 """
 Global (connection-level) state for the HydraDB database node.
 
-Reads config, builds the HydraDB REST client, and clears the API key on teardown.
-Building the client performs no network I/O, so it is safe in canvas config mode.
+Reads the resolved config, builds the HydraDB REST client, and clears the API
+key on teardown. Building the client performs no network I/O.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
-from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
+from rocketlib import IGlobalBase
 
 from .hydradb_client import HydraDBClient
 
@@ -52,35 +50,21 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        """Read config and build the HydraDB client (no network I/O here)."""
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        """Build the HydraDB client from the resolved config (no network I/O here).
 
-        api_key = (config.get('api_key') or os.environ.get('HYDRA_DB_API_KEY') or '').strip()
-        self.database = (config.get('database') or '').strip()
-        self.collection = (config.get('collection') or 'default').strip() or 'default'
+        The schema marks the API key and database required and bounds
+        max_results, so the resolver has refused anything this cannot run with.
+        """
+        config = self.config
 
-        try:
-            self.max_results = max(1, min(100, int(config.get('max_results', 10))))
-        except (TypeError, ValueError):
-            self.max_results = 10
+        self.database = config.database.strip()
+        self.collection = config.collection.strip()
+        self.max_results = config.max_results
 
-        self.client = HydraDBClient(api_key, self.database, collection=self.collection)
+        self.client = HydraDBClient(config.api_key.strip(), self.database, collection=self.collection)
 
     def endGlobal(self) -> None:
         """Clear the API key from memory and drop the client."""
         if self.client is not None:
             self.client.api_key = ''
         self.client = None
-
-    def validateConfig(self) -> None:
-        """Save-time validation. Must warn(), never raise (runs during canvas editing)."""
-        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        api_key = (config.get('api_key') or os.environ.get('HYDRA_DB_API_KEY') or '').strip()
-        database = (config.get('database') or '').strip()
-
-        if not api_key:
-            warning('HydraDB: an API key is required (set the API Key field or the HYDRA_DB_API_KEY env var).')
-            return
-        if not database:
-            warning('HydraDB: a database is required. Create one in the HydraDB dashboard.')
-            return

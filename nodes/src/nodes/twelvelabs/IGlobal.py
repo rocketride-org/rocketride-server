@@ -21,9 +21,17 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+TwelveLabs node - global (shared) state.
+
+Loads the API key and instructions from the resolved node config once, making
+them available to all instances.
+"""
+
+import os
 from typing import List
-from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
@@ -46,28 +54,20 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self) -> None:
         """
-        Load the API key and instructions from configuration once,
+        Load the API key and instructions from the resolved config once,
         making them available to all instances.
         """
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            return
-
         # install requirements
-        import os
         from depends import depends  # type: ignore
 
-        # Load the requirements
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
-        config = Config.getNodeConfig(
-            self.glb.logicalType,
-            self.glb.connConfig,
-        )
-
-        self.api_key = config.get('apikey') or ''
-        instructions = config.get('instructions') or []
-        self.instructions = [str(instruction) for instruction in instructions]
+        # The key reaches the node through its config (a ${ROCKETRIDE_TWELVELABS_APIKEY}
+        # reference resolved per call); the schema marks it required
+        config = self.config
+        self.api_key = str(config.apikey or '').strip()
+        self.instructions = [str(instruction) for instruction in (config.instructions or [])]
 
     def endGlobal(self) -> None:
         """

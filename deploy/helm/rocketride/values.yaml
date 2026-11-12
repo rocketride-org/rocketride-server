@@ -166,11 +166,6 @@ engine:
     # written with it cannot be read without it.
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     # RR_PARAM_TOKEN_SECRET: ""
-    # Key for each run's private task token (tk_), at least 32 characters.
-    # Unset, each pod uses its own random key and a relaunched run gets a new
-    # private token after a restart. Use the same value on every replica.
-    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
-    # RR_TASK_TOKEN_KEY: ""
 
   # -- Additional volume mounts for the engine container
   volumeMounts: []

@@ -65,100 +65,74 @@
 		"questions": ["questions"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "miniLM",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"custom": {
-				"title": "Custom model"
-			},
-			"miniLM": {
-				"title": "miniLM  - General use embeddings, good performance",
-				"model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
-			},
-			"miniAll": {
-				"title": "miniAll - Another good one",
-				"model": "sentence-transformers/all-MiniLM-L6-v2"
-			},
-			"mpnet": {
-				"title": "mpnet   - Yet another good one",
-				"model": "sentence-transformers/multi-qa-mpnet-base-cos-v1"
-			}
-		}
-	},
-	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions. The model is the selector: each
+	//		preset pins its sentence-transformers model as a constant, and
+	//		"custom" exposes the model name plus its encoding knobs instead.
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"embedding.model": {
 			"type": "string",
 			"title": "Model name",
 			"minLength": 2,
-			"maxLength": 32,
+			"maxLength": 256,
+			"required": true,
 			"description": "Hugging face model to use for embedding"
 		},
 		"embedding.truncate_dim": {
-			"type": "number",
+			"type": "integer",
 			"title": "Truncate dimensions",
-			"description": "Truncate embeddings to this dimensionality (0 = use model default)"
+			"description": "Truncate embeddings to this dimensionality (0 = use model default)",
+			"default": 0,
+			"minimum": 0
 		},
 		"embedding.document_prefix": {
 			"type": "string",
 			"title": "Document prefix",
-			"description": "Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ')"
+			"description": "Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ')",
+			"default": ""
 		},
 		"embedding.query_prefix": {
 			"type": "string",
 			"title": "Query prefix",
-			"description": "Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ')"
-		},
-		"embedding.custom": {
-			"object": "custom",
-			"title": "",
-			"properties": ["embedding.model", "embedding.truncate_dim", "embedding.document_prefix", "embedding.query_prefix"]
-		},
-		"embedding.profile": {
-			"title": "Model",
-			"description": "Embedding model",
-			"type": "string",
-			"default": "miniLM",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "custom",
-					"properties": ["embedding.custom"]
-				}
-			]
-		},
-		"embedding.preprocessor": {
-			"default": "preprocessor_langchain",
-			"providerTitle": "Preprocessor (chunking)",
-			"combo": "preprocessor"
+			"description": "Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ')",
+			"default": ""
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Sentence Transformer",
-			"properties": ["embedding.profile"]
+			"name": "profile",
+			"type": "string",
+			"title": "Model",
+			"description": "Embedding model",
+			"default": "miniLM",
+			"enum": {
+				"custom": {
+					"title": "Custom model",
+					"properties": ["embedding.model", "embedding.truncate_dim", "embedding.document_prefix", "embedding.query_prefix"]
+				},
+				"miniLM": {
+					"title": "miniLM  - General use embeddings, good performance",
+					"properties": [{ "name": "model", "type": "constant", "default": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1" }]
+				},
+				"miniAll": {
+					"title": "miniAll - Another good one",
+					"properties": [{ "name": "model", "type": "constant", "default": "sentence-transformers/all-MiniLM-L6-v2" }]
+				},
+				"mpnet": {
+					"title": "mpnet   - Yet another good one",
+					"properties": [{ "name": "model", "type": "constant", "default": "sentence-transformers/multi-qa-mpnet-base-cos-v1" }]
+				}
+			}
 		}
 	],
 	//
-	//	Test configuration for automated node testing
+	//	Test configuration for automated node testing. "profiles" lists
+	//	values of the "profile" selector.
 	//
 	"test": {
 		"profiles": ["miniLM"],

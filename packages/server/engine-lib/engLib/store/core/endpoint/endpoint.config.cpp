@@ -24,27 +24,28 @@
 
 #include <engLib/eng.h>
 
+#include <cctype>
+
 namespace engine::store {
 namespace {
 //---------------------------------------------------------------------
 /// @details
-///		Decrypts the secrets within the service parameters and
-///     populates the parameters with the hidden token values
+///		Decrypts the secrets within the service config and puts the
+///		hidden token values back at their registered paths. The service
+///		config is the root of the path-addressed stored tree: a root
+///		leaf sits directly under it, a branch leaf under its branch block,
+///		and the encrypted section lives at the root
 ///	@param[inout] service
-///		Service to decrypt
+///		Service config to decrypt
 //---------------------------------------------------------------------
 Error decryptParameters(json::Value &service) noexcept {
     // Ge the service configuration information
     auto serviceInfo = IServices::getServiceDefinitionFromService(service);
     if (!serviceInfo) return serviceInfo.ccode();
 
-    // Get the parameters section
-    if (!service.isMember("parameters")) return {};
-    auto &parameters = service["parameters"];
-
     // If it doesn't have secure parameters, we are done
-    if (!parameters.isMember("secureParameters")) return {};
-    auto &secureSection = parameters["secureParameters"];
+    if (!service.isMember("secureParameters")) return {};
+    auto &secureSection = service["secureParameters"];
 
     // Find the token
     Text token;
@@ -75,16 +76,14 @@ Error decryptParameters(json::Value &service) noexcept {
             case PARAM_TYPE::SECURE: {
                 // If this is already defined, we can skip it. This
                 // allows us to update passwords, etc
-                if (parameters.isMember(keyName)) continue;
+                if (findNested(service, keyName)) continue;
 
-                // If it not here either, skip it
+                // If it not here either, skip it. The token holds the
+                // values flat, keyed by the dotted path
                 if (!secureValues.isMember(keyName)) continue;
 
-                // Get the value
-                auto value = secureValues[keyName];
-
-                // Save it into the parameters
-                parameters[keyName] = value;
+                // Save it back at its nested position
+                setNested(service, keyName, secureValues[keyName]);
                 break;
             }
             default:
@@ -94,21 +93,22 @@ Error decryptParameters(json::Value &service) noexcept {
     }
 
     // Remove the secure section now
-    parameters.removeMember("secureParameters");
+    service.removeMember("secureParameters");
     return {};
 }
 
 //---------------------------------------------------------------------
 /// @details
-///		Encrypts the secrets within the service parameters. For secure
-///		parameters, it places the values int the secure section with the
-///		name and removes it from the parameters list. For readonly parameters
-///		it leaves the value in the parameters, but copies it into secure
-///		so we can ensure it is not overwritten
-///	@param[in]	configParam
-///		Parameter configuration info
-///	@param[inout] target
-///		Parameters set to encrypt
+///		Encrypts the secrets within the service config. For secure
+///		parameters, it places the values into the secure section under
+///		their registered path and removes them from the config tree. The
+///		service config is the root of the path-addressed stored tree, so a
+///		secret inside a selector branch block - selected or not - is
+///		lifted as well as a root one
+///	@param[in]	config
+///		Endpoint configuration, the service definition is looked up on it
+///	@param[inout] service
+///		Decrypted service config to encrypt in place
 //---------------------------------------------------------------------
 Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
     json::Value secureNames(json::arrayValue);
@@ -120,15 +120,6 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
         IServices::getServiceDefinitionFromService(config.serviceConfig);
     if (!serviceInfo) return serviceInfo.ccode();
 
-    // Make sure we have parameters
-    if (!config.serviceConfig.isMember("parameters")) return {};
-
-    // Make a copy of them to return
-    service["parameters"] = config.serviceConfig["parameters"];
-
-    // Get a references to the parameters we are going to return
-    auto &parameters = service["parameters"];
-
     // Extract each from the config
     for (auto &param : (*serviceInfo)->secureParameters) {
         // Get the key and flags from the parameter specs
@@ -136,16 +127,17 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
         const auto type = param.second;
 
         // If we do not have a value on the input, skip this
-        if (!parameters.isMember(keyName)) continue;
+        const auto *found = findNested(service, keyName);
+        if (!found) continue;
 
         // Get the value
-        auto value = parameters[keyName];
+        auto value = *found;
 
         // Based on the type
         switch (type) {
             case PARAM_TYPE::SECURE:
-                // Remove it from the parameters
-                parameters.removeMember(keyName);
+                // Remove it from the config (at its nested position)
+                removeNested(service, keyName);
 
                 // And add it to the secret names for the UI
                 secureNames.append(keyName);
@@ -156,7 +148,7 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
                 continue;
         }
 
-        // Copy it over regard
+        // Copy it over regardless - flat, keyed by the dotted path
         secretValues[keyName] = value;
     }
 
@@ -173,8 +165,8 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
     secureSection["secure"] = secureNames;
     secureSection["token"] = token;
 
-    // Save it into the parameters
-    parameters["secureParameters"] = secureSection;
+    // Save it at the root of the config tree
+    service["secureParameters"] = secureSection;
     return {};
 }
 
@@ -199,9 +191,6 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
     config.jobConfig = _jobConfig;
     config.taskConfig = _taskConfig;
     config.serviceConfig = _serviceConfig;
-
-    // Make a copy of it
-    config.originalServiceConfig = _serviceConfig;
 
     // Clear the level - this is setup by the bind
     config.level = 0;
@@ -275,18 +264,70 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
     else
         config.exportUpdateBehavior = EXPORT_UPDATE_BEHAVIOR::UNKNOWN;
 
-    // Lookup the pipeline trace level
+    // Lookup the pipeline trace level - this is the endpoint DEFAULT, the
+    // level a binding gets when getPipe() names none (C++-driven work);
+    // every Python binding passes its own
     Text traceLevelStr;
     config.taskConfig.lookupAssign("pipelineTraceLevel", traceLevelStr);
-    if (traceLevelStr == "metadata"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::METADATA;
-    else if (traceLevelStr == "summary"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::SUMMARY;
-    else if (traceLevelStr == "full"_tv)
-        config.pipelineTraceLevel = PIPELINE_TRACE_LEVEL::FULL;
+    parseTraceLevel(traceLevelStr, config.pipelineTraceLevel);
 
     // Done
     return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Parses a trace level name as it travels on the wire
+///	@param[in]	name
+///		none / metadata / summary / full (case-insensitive)
+///	@param[out]	level
+///		Set only when the name is one of the four
+///	@returns
+///		true when the name was recognized
+//-------------------------------------------------------------------------
+bool IServiceEndpoint::parseTraceLevel(TextView name,
+                                       PIPELINE_TRACE_LEVEL &level) noexcept {
+    // Case-insensitive compare against a lower-case name, without
+    // allocating: this is noexcept, so a copy of the wire name has no place
+    // here. "Full" and "SUMMARY" name the same levels as their lower case
+    auto equalsNoCase = [&](const char *lower) noexcept {
+        size_t length = 0;
+        while (lower[length]) length++;
+        if (name.length() != length) return false;
+        for (size_t i = 0; i < length; i++)
+            if (std::tolower((unsigned char)name.data()[i]) != lower[i])
+                return false;
+        return true;
+    };
+
+    if (equalsNoCase("none"))
+        level = PIPELINE_TRACE_LEVEL::NONE;
+    else if (equalsNoCase("metadata"))
+        level = PIPELINE_TRACE_LEVEL::METADATA;
+    else if (equalsNoCase("summary"))
+        level = PIPELINE_TRACE_LEVEL::SUMMARY;
+    else if (equalsNoCase("full"))
+        level = PIPELINE_TRACE_LEVEL::FULL;
+    else
+        return false;
+    return true;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The wire name of a trace level
+//-------------------------------------------------------------------------
+TextView IServiceEndpoint::traceLevelName(PIPELINE_TRACE_LEVEL level) noexcept {
+    switch (level) {
+        case PIPELINE_TRACE_LEVEL::METADATA:
+            return "metadata"_tv;
+        case PIPELINE_TRACE_LEVEL::SUMMARY:
+            return "summary"_tv;
+        case PIPELINE_TRACE_LEVEL::FULL:
+            return "full"_tv;
+        default:
+            return "none"_tv;
+    }
 }
 
 //-------------------------------------------------------------------------
@@ -311,18 +352,16 @@ Error IServiceEndpoint::getConfig(json::Value &_serviceConfig) noexcept {
     // Build the url
     Url key = builder() << protocol(config.protocol) << component(subkey);
 
-    // Get the original values
-    _serviceConfig = config.originalServiceConfig;
+    // Start from the decrypted config: the secrets are back at their
+    // registered paths in the tree, where the encrypt walk finds them
+    _serviceConfig = config.serviceConfig;
 
     // Update the settings we need
     _serviceConfig["name"] = config.name;
     _serviceConfig["type"] = config.logicalType;
     _serviceConfig["key"] = (TextView)key;
 
-    // Make a copy of the parameters
-    json::Value params = config.parameters;
-
-    // Encrypt the parameters that matter
+    // Encrypt the parameters that matter, in place
     if ((ccode = encryptParameters(config, _serviceConfig))) return ccode;
 
     return {};

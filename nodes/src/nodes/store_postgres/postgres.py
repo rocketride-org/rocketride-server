@@ -30,7 +30,7 @@ from depends import depends
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import List, Callable, Dict, Any, cast
+from typing import List, Callable, Dict, Any, Mapping, cast
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
@@ -38,8 +38,7 @@ from pgvector.psycopg2 import register_vector
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import CONTROL_OBJECT_ID
 from ai.common.store.pgvector_store import MIN_SIMILARITY_SCORE, PgVectorStoreBase
-from ai.common.config import Config
-from .IGlobal import VALID_TABLE
+from .IValidator import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
@@ -103,47 +102,34 @@ class Store(PgVectorStoreBase):
     client: Any | None = None
     similarityDict: dict = {'cosine': '<=>', 'l2': '<->', 'inner_product': '<#>'}
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
         Initialize the postgres vector store.
 
         @param provider: The name of the provider.
-        @param connConfig: The connection configuration.
+        @param config: The resolved node config (defaults applied, keys by short name).
         @param bag: A dictionary of additional parameters.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
+        super().__init__(provider, config, bag)
 
-        # Get our configuration
-        config = Config.getNodeConfig(provider, connConfig)
-
-        # Save our parameters — validate to prevent SQL injection via .format()
-        self.collection = ((config.get('table') or config.get('collection')) or '').strip()
+        # Save our parameters - validate to prevent SQL injection via .format()
+        self.collection = (config['collection'] or '').strip()
         if not self.collection or not VALID_TABLE.fullmatch(self.collection):
             raise ValueError(
                 f'Invalid collection name: {self.collection!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).'
             )
 
-        # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
-        self.host = config.get('host').strip()
-        self.port = config.get('port', DEFAULT_POSTGRES_PORT)
-        self.user = config.get('user')
-        self.password = config.get('password')
-        self.database = config.get('database', 'postgres')
+        self.host = (config['host'] or '').strip()
+        self.port = config['port']
+        self.user = config['user']
+        self.password = config['password']
+        self.database = config['database']
 
-        self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
-        self.threshold_search = config.get('score', 0.5)
+        self.threshold_search = config['score']
 
-        # check if the similarity matches milvus configuration options
-        similarity = config.get('similarity', 'cosine')
-        supported = tuple(self.similarityDict)
-        if similarity in supported:
-            self.similarity = self.similarityDict[similarity]
-        else:
-            raise Exception(
-                f'PostgreSQL (pgvector): unsupported similarity {similarity!r}. '
-                f'Set "similarity" to: {", ".join(supported)}.'
-            )
+        # The similarity metric is an enum of the schema: the operator class follows it
+        self.similarity = self.similarityDict[config['similarity']]
 
         self.client = psycopg2.connect(
             dbname=self.database, user=self.user, password=self.password, host=self.host, port=self.port
