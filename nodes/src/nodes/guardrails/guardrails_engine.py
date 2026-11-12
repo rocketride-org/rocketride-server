@@ -24,7 +24,7 @@
 """Guardrails engine for input/output safety checks on AI pipelines."""
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 class GuardrailsEngine:
@@ -211,6 +211,7 @@ class GuardrailsEngine:
         self.enable_content_safety = config.get('enable_content_safety', True)
         self.enable_pii_detection = config.get('enable_pii_detection', True)
         self.enable_hallucination_check = config.get('enable_hallucination_check', True)
+        self.require_grounding = config.get('require_grounding', False)
         self.max_input_length = config.get('max_input_length', 0)
         self.max_tokens_estimate = config.get('max_tokens_estimate', 0)
         self.blocked_topics = [t.strip().lower() for t in config.get('blocked_topics', []) if t.strip()]
@@ -362,7 +363,57 @@ class GuardrailsEngine:
     # Output guardrails
     # -------------------------------------------------------------------------
 
-    def check_hallucination(self, output: str, source_documents: Optional[List[str]] = None) -> Dict[str, Any]:
+    # Delivered in place of an answer that needs a source after a retrieval miss.
+    # Nothing retrieved can support it, so declining is the only grounded answer, and
+    # a refusal that happened to quote a figure loses nothing by this.
+    UNGROUNDED_REPLY = "I couldn't find anything in the available documents to answer that."
+
+    _NUMBER_WORDS = (
+        r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen'
+        r'|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)'
+    )
+    _UNITS = r'(?:trillion|billion|million|thousand|percent|per cent|dollars?|euros?|pounds?|usd|eur|gbp)'
+
+    # A figure is the claim checked after a miss: an amount, a percentage, or a
+    # scaled or grouped number, in digits or in words. A year or a plain count is
+    # not one, so "I do not have data for 2024" is left alone. A bare suffix needs a
+    # decimal or two digits, so "94.7B" and "10k" count while "plan 2b" does not.
+    FIGURE_PATTERN = re.compile(
+        r'[$£€]\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|thousand)\b|(?:tn|bn|b|m|k)\b)?'
+        rf'|\d[\d,.]*\s*(?:%|{_UNITS}\b|tn\b|bn\b)'
+        r'|(?:\d+\.\d+|\d{2,})(?:tn|bn|b|m|k)\b'
+        r'|\b\d{1,3}(?:,\d{3})+\b'
+        rf'|\b{_NUMBER_WORDS}(?:[\s-]+(?:{_NUMBER_WORDS}|and))*[\s-]+{_UNITS}\b',
+        re.IGNORECASE,
+    )
+
+    def _needs_source(
+        self, output: str, question_text: str, judge: Optional[Callable[[str, str], Optional[bool]]]
+    ) -> bool:
+        """Report whether an answer given after a retrieval miss states anything needing a source.
+
+        Whether a sentence asserts a claim takes reading it, so a judge decides when
+        one is wired. Without one, or when it gives no verdict, a stated figure is
+        the claim recognised without reading: it fails whether the model asserts it
+        or declines it, and the replacement makes that distinction unnecessary.
+        """
+        if not output.strip():
+            return False
+        if judge:
+            verdict = judge(question_text, output)
+            if verdict is not None:
+                return verdict
+        return bool(self.FIGURE_PATTERN.search(output))
+
+    def check_hallucination(
+        self,
+        output: str,
+        source_documents: Optional[List[str]] = None,
+        retrieval_ran: bool = True,
+        score_coverage: bool = True,
+        question_text: str = '',
+        judge: Optional[Callable[[str, str], Optional[bool]]] = None,
+    ) -> Dict[str, Any]:
         """Verify that claims in output are grounded in source documents.
 
         Performs a sentence-level grounding check. Each sentence in the output
@@ -370,18 +421,53 @@ class GuardrailsEngine:
 
         Args:
             output: The LLM output text to verify.
-            source_documents: List of source document texts. If empty/None,
-                              the check passes with a warning.
+            source_documents: List of source document texts. If empty/None, the check
+                              passes unless require_grounding is set.
+            retrieval_ran: Whether the documents lane was dispatched, so an empty
+                           source list means a miss rather than no retrieval at all.
+            score_coverage: Whether to run the sentence-level coverage scoring.
+                            False when the operator disabled the coverage check but
+                            still requires grounding.
+            question_text: The question the answer replies to, for the judge.
+            judge: Optional checker called after a retrieval miss with the question
+                   and the answer. True means the answer states something that needs
+                   a source, False that it does not, None that it has no verdict, in
+                   which case the figure rule decides.
 
         Returns:
-            A check result dict.
+            A check result dict. A failure after a retrieval miss also carries a
+            'replacement' reply for the caller to deliver instead of the answer.
         """
         if not source_documents:
-            return {
+            # Nothing retrieved is when a model is most likely to answer from memory,
+            # so skipping here stood the guard down at the one moment it was needed.
+            skipped = {
                 'rule': 'hallucination',
                 'passed': True,
                 'severity': 'low',
                 'details': 'No source documents provided; hallucination check skipped',
+            }
+            if not self.require_grounding:
+                return skipped
+            # A pipeline with no documents lane never retrieves.
+            if not retrieval_ran:
+                return skipped
+            if not self._needs_source(output, question_text, judge):
+                return skipped
+            return {
+                'rule': 'hallucination',
+                'passed': False,
+                'severity': 'high',
+                'details': 'No documents were retrieved, so the answer cannot be grounded',
+                'replacement': self.UNGROUNDED_REPLY,
+            }
+
+        if not score_coverage:
+            return {
+                'rule': 'hallucination',
+                'passed': True,
+                'severity': 'low',
+                'details': 'Coverage check disabled',
             }
 
         # Combine source documents into one text block for matching
@@ -633,9 +719,23 @@ class GuardrailsEngine:
 
         elif mode == 'output':
             # Output guardrails
-            if self.enable_hallucination_check:
+            # require_grounding has to reach the check on its own, or it reads as a
+            # silent no-op wherever the coverage check happens to be off.
+            if self.enable_hallucination_check or self.require_grounding:
                 source_docs = context.get('source_documents', [])
-                results.append(self.check_hallucination(text, source_docs))
+                # Default True so a caller that does not report the lane keeps the
+                # old behaviour for the coverage check.
+                ran = context.get('retrieval_ran', True)
+                results.append(
+                    self.check_hallucination(
+                        text,
+                        source_docs,
+                        retrieval_ran=ran,
+                        score_coverage=self.enable_hallucination_check,
+                        question_text=context.get('question_text', ''),
+                        judge=context.get('judge'),
+                    )
+                )
 
             if self.enable_content_safety:
                 results.append(self.check_content_safety(text))

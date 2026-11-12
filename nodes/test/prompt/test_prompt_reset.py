@@ -437,16 +437,17 @@ def test_each_chat_turn_reaches_the_next_node_once_with_its_instructions(build):
 
 
 @pytest.mark.parametrize(
-    'lane, payload',
+    'lane, payload, added',
     [
-        ('questions', lambda: _question('a question')),
-        ('documents', lambda: ['a document']),
-        ('text', lambda: 'some text'),
-        ('table', lambda: '| a | table |'),
+        ('questions', lambda: _question('a question'), []),
+        # A documents lane also adds the Grounding instruction after the operator's own.
+        ('documents', lambda: ['a document'], ['Grounding']),
+        ('text', lambda: 'some text', []),
+        ('table', lambda: '| a | table |', []),
     ],
     ids=['questions', 'documents', 'text', 'table'],
 )
-def test_each_collector_consumes_its_input(build, lane, payload):
+def test_each_collector_consumes_its_input(build, lane, payload, added):
     """
     Each lane the node collects from is consumed, not passed through: the node
     declares no output for documents, text or table, and its questions output
@@ -462,7 +463,8 @@ def test_each_collector_consumes_its_input(build, lane, payload):
         f'the raw {lane} input was passed through'
     )
     assert len(captured.questions) == 1, f'{len(captured.questions)} questions reached the next node, expected 1'
-    assert len(captured.questions[0].instructions) == len(_INSTRUCTIONS)
+    assert len(captured.questions[0].instructions) == len(_INSTRUCTIONS) + len(added)
+    assert [title for title, _ in captured.questions[0].instructions[len(_INSTRUCTIONS) :]] == added
 
 
 def test_a_mixed_turn_emits_one_question_holding_everything(build):
