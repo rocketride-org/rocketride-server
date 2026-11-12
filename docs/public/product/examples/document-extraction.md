@@ -82,7 +82,7 @@ Save this as `extract.pipe`:
 | `parser_1` | `parse` | Converts each file (PDF, Word, image, etc.) into clean text on the `text` lane. |
 | `extract_1` | `extract_data` | Uses an LLM to pull the four named fields out of each document and emits the result as structured JSON on the `answers` lane. |
 | `llm_1` | `llm_openai` | Answers `extract_1`'s extraction prompts over the `llm` invoke channel. |
-| `target_1` | `response_answers` | Returns the extracted JSON in the reply when a request is sent (the webhook variant below). |
+| `target_1` | `response_answers` | Returns the extracted JSON for each file that is sent to the pipeline (the dropper page below shows it). |
 
 ## Start the pipeline
 
@@ -108,8 +108,9 @@ Stop it with: rocketride stop --token <task-token>
 
 The engine scans the directory and processes each file through the pipeline.
 This pipeline sends no reply: `start` exits after it prints the token, and no
-request is made, so nothing comes back to you. To get each file's JSON back,
-use the webhook variant below, where it is returned in the reply. The extracted
+request is made, so nothing comes back to you. To see each file's JSON, use the
+`dropper` variant below: its page shows the result in the Answers and JSON tabs.
+`rocketride upload` only reports whether each file was uploaded. The extracted
 JSON for each file has this shape:
 
 ```json
@@ -121,8 +122,8 @@ JSON for each file has this shape:
 }
 ```
 
-In the reply of the webhook variant below, this object is inside the `answers`
-array of the result, as `"answers": [[ { ... } ]]`.
+In a reply, this object is inside the `answers` array of the result, as
+`"answers": [[ { ... } ]]`.
 
 ## Upload files on demand
 
