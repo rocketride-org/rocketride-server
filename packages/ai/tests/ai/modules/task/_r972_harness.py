@@ -37,6 +37,7 @@ the close, and every event it is sent lands in ``sent``.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 from unittest.mock import AsyncMock, MagicMock
 
@@ -61,6 +62,8 @@ class _FakeService:
     async def get_authentication_result(self, user_id: str, auth: str, capabilities=None) -> AccountInfo:
         """Rebuild an identity from the fake ``users`` row."""
         self.rebuilds.append(user_id)
+        if self._account.during_rebuild is not None:
+            self._account.during_rebuild()
         if self._account.fail_rebuild is not None:
             raise self._account.fail_rebuild
         row = self._account.rows.get(user_id)
@@ -80,6 +83,7 @@ class FakeAccount(AccountBase):
         self.rows: Dict[str, Tuple[bool, FrozenSet[str]]] = dict(rows or {})
         self.fail = False
         self.fail_rebuild: Optional[BaseException] = None
+        self.during_rebuild = None  # called inside the rebuild's await window
         self.reads: List[List[str]] = []
         self._service = _FakeService(self)
 
@@ -161,6 +165,11 @@ def make_conn(server: TaskServer, info: Optional[AccountInfo], *, connection_id:
     conn.debug_message = MagicMock()
     server._connections[connection_id] = conn
     return conn
+
+
+async def never_returns(message) -> None:
+    """A transport send to a client that stopped reading its socket."""
+    await asyncio.Event().wait()
 
 
 def events(conn: TaskConn, name: Optional[str] = None) -> List[dict]:

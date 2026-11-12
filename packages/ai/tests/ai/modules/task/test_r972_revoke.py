@@ -35,14 +35,27 @@ before the fix; the rest pin the new revoke contract.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 from rocketride import EVENT_TYPE
 
 from ai.account.base import AccountBase
+from ai.modules.task import task_conn as task_conn_module
+from ai.modules.task import task_server as task_server_module
 
-from ._r972_harness import IP, ORG, WILDCARD_ALL, FakeAccount, events, identity, make_conn, make_server
+from ._r972_harness import (
+    IP,
+    ORG,
+    WILDCARD_ALL,
+    FakeAccount,
+    events,
+    identity,
+    make_conn,
+    make_server,
+    never_returns,
+)
 
 ADMIN = frozenset({'sys.admin'})
 
@@ -287,3 +300,61 @@ async def test_r972_1a_revoked_write_is_refused_and_handles_close(monkeypatch):
     assert conn.sent and conn.sent[-1]['message'] == 'Not authenticated'
     await server._dapbase_on_disconnected(conn)
     server.store_stub.close_all_handles.assert_awaited_once_with(conn.get_connection_id())
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: bounded notices, no install over a deauth
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_revoke_notice_is_bounded_and_always_disconnects(monkeypatch):
+    """A client that stopped reading cannot hold revoke: the notice times out and
+    the socket is still disconnected.
+    """
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.05)
+    account = FakeAccount({'admin': (False, ADMIN)})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN))
+    conn._transport.send = never_returns
+
+    await asyncio.wait_for(server.push_account_update('admin'), 1)
+
+    conn._transport.disconnect.assert_called_once()
+    assert conn._authenticated is False
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_push_install_send_is_bounded(monkeypatch):
+    """The identity push's own notice is bounded too: one stuck client does not
+    hold the push for the next connection.
+    """
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.05)
+    monkeypatch.setattr(task_server_module, 'NOTICE_SEND_TIMEOUT', 0.05)
+    account = FakeAccount({'u': (True, frozenset({'sys.view'}))})
+    server = make_server(account, monkeypatch)
+    stuck = make_conn(server, identity('u', {'sys.view'}), connection_id=1)
+    stuck._transport.send = never_returns
+    other = make_conn(server, identity('u', {'sys.view'}), connection_id=2)
+
+    await asyncio.wait_for(server.push_account_update('u'), 1)
+
+    assert events(other, 'apaext_account')
+    stuck._transport.disconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('perms', [frozenset(), ADMIN], ids=['non-subject', 'subject'])
+async def test_r972_1a_push_never_installs_over_a_deauth(monkeypatch, perms):
+    """A socket deauthed while its rebuild was awaited keeps the bare identity."""
+    account = FakeAccount({'u': (True, perms)})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u', perms), monitors=WILDCARD_ALL)
+    account.during_rebuild = lambda: conn._drop_authority()
+
+    await server.push_account_update('u')
+
+    assert conn._authenticated is False
+    assert conn._account_info.userId == ''
+    assert conn._account_info.sysPermissions == []
+    assert events(conn, 'apaext_account') == []
