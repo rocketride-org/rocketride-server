@@ -36,13 +36,13 @@ One optional field, the API key. Leave it empty to use the keyless tier, or supp
 
 ### API Key
 
-Optional. The node reads it from this field, falling back to the `ROCKETRIDE_FXMACRODATA_KEY` environment variable. An empty value means keyless access. A value containing whitespace inside it or non-printable characters stops the node at startup without echoing the value. See `## Authentication` for what each mode can reach.
+Optional. The node reads it from this field, falling back to the `ROCKETRIDE_FXMACRODATA_APIKEY` environment variable. An empty value means keyless access. A value containing whitespace inside it or non-printable characters stops the node at startup without echoing the value. See `## Authentication` for what each mode can reach.
 
 ## Authentication
 
 Without a key, USD announcements (the most recent 90 days, each release readable 15 minutes after publication), the USD release calendar and the data catalogue for every currency are available, with a fair-use allowance of 100 requests per day. Other currencies, FX rates, real-time releases and full history need a key from <https://fxmacrodata.com/subscribe>. A keyless call to one of those returns `success: false` with an error that says a key is needed; `fx_rates` returns that error without making a request.
 
-Put the key in the **API Key** field, where it is encrypted at rest and masked in the UI, or set `ROCKETRIDE_FXMACRODATA_KEY` on the engine host; the configured field wins when both are present. The key is sent as an `X-API-Key` header, and only when one is configured.
+Put the key in the **API Key** field, where it is encrypted at rest and masked in the UI, or set `ROCKETRIDE_FXMACRODATA_APIKEY` on the engine host; the configured field wins when both are present. The key is sent as an `X-API-Key` header, and only when one is configured.
 
 ## Notes
 

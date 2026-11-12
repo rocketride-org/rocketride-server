@@ -651,6 +651,23 @@ class TestDataCatalogue:
         }
         assert get.call_args.args[0].endswith('/data_catalogue/eur')
 
+    def test_freemium_metadata_is_not_an_indicator(self):
+        body = {
+            'inflation': {'name': 'Inflation (CPI)', 'unit': '%YoY', 'frequency': 'Monthly'},
+            'freemium_window': _WINDOW,
+            'freemium_delay': _DELAY,
+        }
+        with _patch_get(_resp(json_data=body)):
+            out = _instance().data_catalogue({'currency': 'USD'})
+        assert out['success'] is True
+        assert [row['indicator'] for row in out['indicators']] == ['inflation']
+        assert out['count'] == 1
+
+    def test_metadata_only_catalogue_is_an_error(self):
+        with _patch_get(_resp(json_data={'freemium_window': _WINDOW})):
+            out = _instance().data_catalogue({'currency': 'USD'})
+        assert out['success'] is False
+
     def test_empty_catalogue_is_an_error(self):
         with _patch_get(_resp(json_data={'detail': 'nothing here'})):
             out = _instance().data_catalogue({'currency': 'EUR'})

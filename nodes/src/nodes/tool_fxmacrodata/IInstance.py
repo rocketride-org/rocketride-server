@@ -100,6 +100,9 @@ _CALENDAR_FIELDS = (
     'event_importance',
 )
 _CATALOGUE_FIELDS = ('name', 'unit', 'frequency', 'has_official_forecast')
+# Top-level catalogue keys with this prefix are response metadata
+# (freemium_window / freemium_delay), never indicator slugs.
+_CATALOGUE_METADATA_PREFIX = 'freemium_'
 _FX_FIELDS = ('date', 'val', 'open', 'high', 'low', 'close')
 
 # ---------------------------------------------------------------------------
@@ -243,11 +246,16 @@ def fetch_data_catalogue(client: FXMacroDataClient, args: Dict[str, Any]) -> Dic
     indicators = [
         {'indicator': slug, **project(entry, _CATALOGUE_FIELDS)}
         for slug, entry in body.items()
-        if isinstance(entry, dict)
+        if isinstance(entry, dict) and not slug.startswith(_CATALOGUE_METADATA_PREFIX)
     ]
     if not indicators:
         raise FXMacroDataError('unexpected FXMacroData response: the catalogue lists no indicators')
-    return {'currency': currency.upper(), 'count': len(indicators), 'indicators': indicators}
+    return {
+        'currency': currency.upper(),
+        'count': len(indicators),
+        'indicators': indicators,
+        'notices': collect_notices(body),
+    }
 
 
 def fetch_fx_rates(client: FXMacroDataClient, args: Dict[str, Any]) -> Dict[str, Any]:

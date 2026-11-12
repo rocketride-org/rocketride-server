@@ -42,7 +42,7 @@ from .fxmacrodata_client import ApiKey
 
 # Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
 # and the node-test framework maps ROCKETRIDE_<PROVIDER>_<ATTR> -> config).
-FXMACRODATA_API_KEY_ENV = 'ROCKETRIDE_FXMACRODATA_KEY'
+FXMACRODATA_API_KEY_ENV = 'ROCKETRIDE_FXMACRODATA_APIKEY'
 
 
 def resolve_api_key(cfg: dict) -> ApiKey:

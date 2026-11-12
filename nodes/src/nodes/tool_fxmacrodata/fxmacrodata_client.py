@@ -120,7 +120,9 @@ class ApiKey:
 
     def __repr__(self) -> str:
         """Show whether a key is set, never its value."""
-        return 'ApiKey(<set>)' if self._value else 'ApiKey(<empty>)'
+        if self._value:
+            return 'ApiKey(<set>)'
+        return 'ApiKey(<empty>)'
 
     __str__ = __repr__
 
@@ -275,7 +277,9 @@ def _error_detail(body: Any) -> str:
     if not isinstance(body, dict):
         return ''
     detail = body.get('detail') or body.get('message') or body.get('error') or ''
-    detail = (detail if isinstance(detail, str) else str(detail)).strip()
+    if not isinstance(detail, str):
+        detail = str(detail)
+    detail = detail.strip()
     if len(detail) > _MAX_ERROR_DETAIL:
         detail = detail[:_MAX_ERROR_DETAIL] + '... (truncated)'
     return detail
@@ -301,8 +305,12 @@ def http_error_message(resp: Any, has_key: bool) -> str:
         return _key_required_message(has_key)
     if status == 429:
         return 'FXMacroData rate limit reached (HTTP 429). Keyless access allows 100 requests per day; retry later.'
-    detail = _error_detail(_json_or_none(resp)) if resp is not None else ''
-    suffix = f': {detail}' if detail else ''
+    detail = ''
+    if resp is not None:
+        detail = _error_detail(_json_or_none(resp))
+    suffix = ''
+    if detail:
+        suffix = f': {detail}'
     if status == 404:
         return f'FXMacroData resource not found (HTTP 404){suffix}'
     if status in (400, 422):
@@ -315,11 +323,15 @@ def raise_for_error_body(body: Dict[str, Any], has_key: bool) -> None:
     error = body.get('error')
     if not error:
         return
-    code = body.get('code') if isinstance(body.get('code'), str) else error
+    code = body.get('code')
+    if not isinstance(code, str):
+        code = error
     if code in _KEY_ERROR_CODES:
         raise FXMacroDataError(_key_required_message(has_key))
     detail = _error_detail(body)
-    raise FXMacroDataError(f'FXMacroData returned an error: {detail}' if detail else 'FXMacroData returned an error')
+    if detail:
+        raise FXMacroDataError(f'FXMacroData returned an error: {detail}')
+    raise FXMacroDataError('FXMacroData returned an error')
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +415,8 @@ class FXMacroDataClient:
         current = offset
         for _ in range(max_pages):
             body = self.get_json(path, {**params, 'limit': limit, 'offset': current})
-            first = body if first is None else first
+            if first is None:
+                first = body
             rows.extend(require_rows(body))
             notices.extend(notice for notice in collect_notices(body) if notice not in notices)
             pagination = parse_pagination(body, current)
