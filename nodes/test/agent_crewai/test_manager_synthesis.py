@@ -47,8 +47,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Point at nodes/src/nodes, not nodes/src: importing through the `nodes` package
-# would execute nodes/src/nodes/__init__.py, which pulls the engine-only `depends`.
+# Point at nodes/src/nodes, so the node's modules import by their bare names.
 _NODES_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes'
 if str(_NODES_DIR) not in sys.path:
     sys.path.insert(0, str(_NODES_DIR))

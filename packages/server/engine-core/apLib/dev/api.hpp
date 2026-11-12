@@ -57,8 +57,15 @@ template <typename... DebugInfo>
                    Backtrace());
         ::fflush(stdout);
 
-        onFatality(location, _tsd<' ', Format::ERROROROK>(
-                                 std::forward<DebugInfo>(info)...));
+        // A lone Error keeps its own code, e.g. Ec::Crash
+        if constexpr (sizeof...(DebugInfo) == 1 &&
+                      (traits::IsErrorV<DebugInfo> && ...))
+            onFatality(location, info...);
+        else
+            onFatality(location,
+                       error::makeError(Ec::Fatality, location,
+                                        _tsd<' ', Format::ERROROROK>(
+                                            std::forward<DebugInfo>(info)...)));
     }
 
 #if defined(ROCKETRIDE_PLAT_WIN)
