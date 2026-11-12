@@ -7,6 +7,7 @@ from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
+from ai.common.utils import merge_metadata
 
 
 class LLMBase(IInstanceBase):
@@ -96,6 +97,9 @@ class LLMBase(IInstanceBase):
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
                 answer = Answer()
                 answer.setAnswer(err_msg)
+                # A failed call still reaches an evaluator downstream; keep the
+                # question pairing so it scores against its expected value.
+                merge_metadata(answer, getattr(question, 'metadata', None))
                 # A turn that failed after burning tokens still spent them: the adapters
                 # report from their own finally, so the scope holds what was billed —
                 # hang it on the error answer or the Trace shows nothing for exactly the
@@ -107,6 +111,7 @@ class LLMBase(IInstanceBase):
                 return
 
             _flush_reasoning(force=True)  # emit any trailing partial line
+            merge_metadata(answer, getattr(question, 'metadata', None))
             usage = read_usage()  # turn total: summed across every model call this turn
             if usage:
                 answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane

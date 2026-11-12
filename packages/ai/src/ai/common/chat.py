@@ -19,6 +19,7 @@ from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config, check_credential_resolved
 from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
+from ai.common.utils import merge_metadata
 from ai.common.validation import (
     validate_model_name,
     validate_max_tokens,
@@ -660,6 +661,7 @@ class ChatBase:
                     # Create the json answer and return it
                     answer = Answer(expectJson=True)
                     answer.setAnswer(parsed_response)
+                    merge_metadata(answer, getattr(question, 'metadata', None))
                     return answer
 
                 # Listed before the generic arm below, which would otherwise swallow it —
@@ -701,6 +703,7 @@ class ChatBase:
             # Create the answer and assign the text
             answer = Answer(expectJson=False)
             answer.setAnswer(response)
+            merge_metadata(answer, getattr(question, 'metadata', None))
 
             # And return it
             return answer
