@@ -40,8 +40,12 @@ from sqlalchemy.sql.elements import TextClause
 # Matched at a '$' while rewriting placeholders. Compiled once and matched in
 # place (re.Pattern.match accepts a start offset) so a bulk INSERT with many
 # placeholders doesn't copy the rest of the statement at every '$'.
-_PLACEHOLDER_RE = re.compile(r'\$(\d+)')
-_DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_][\w]*)?\$')
+# ASCII digits only: Python's \d also matches Arabic-Indic and other Unicode
+# digits, which would make a tag such as $١$ look like a placeholder.
+_PLACEHOLDER_RE = re.compile(r'\$([0-9]+)')
+# A dollar-quote tag follows unquoted-identifier rules: no `$`, and PostgreSQL
+# accepts any non-ASCII character, not just ASCII letters.
+_DOLLAR_TAG_RE = re.compile(r'\$([A-Za-z_\u0080-\U0010FFFF][A-Za-z0-9_\u0080-\U0010FFFF]*)?\$')
 
 _SAVEPOINT_STMT = re.compile(
     # Postgres accepts RELEASE and ROLLBACK TO without the SAVEPOINT keyword;
@@ -51,6 +55,20 @@ _SAVEPOINT_STMT = re.compile(
     r'\s+(?P<name>[A-Za-z_][\w]*)\s*;?\s*$',
     re.IGNORECASE,
 )
+
+
+def _is_ident_start(ch: str) -> bool:
+    """True when PostgreSQL starts an unquoted identifier with ``ch``.
+
+    Any non-ASCII character counts, so identifiers such as ``col$1`` or ``café``
+    stay one token and their ``$`` never starts a placeholder.
+    """
+    return ch.isalpha() or ch == '_' or ord(ch) > 127
+
+
+def _is_ident_continue(ch: str) -> bool:
+    """True when ``ch`` may continue an unquoted identifier (``$`` included)."""
+    return ch.isalnum() or ch in '_$' or ord(ch) > 127
 
 
 def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
@@ -105,6 +123,12 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
                     j += 1
             out.append(sql[i:j])
             i = j
+        elif _is_ident_start(ch):  # unquoted identifier: `col$1`, `a$$x$`, `café`
+            j = i + 1
+            while j < n and _is_ident_continue(sql[j]):
+                j += 1
+            out.append(sql[i:j])
+            i = j
         elif ch == '$':
             m = _PLACEHOLDER_RE.match(sql, i)
             if m:  # $<digits> is never a dollar-quote tag (tags cannot start with a digit)
@@ -114,6 +138,12 @@ def _rewrite_placeholders(sql: str, params: list, binds: dict) -> str:
                 key = f'b{idx}'
                 binds[key] = params[idx - 1]
                 out.append(f':{key}')
+                if m.end() < n and sql[m.end()] == ':':
+                    # `:b1::int` is not a bind to SQLAlchemy: its pattern rejects a
+                    # name followed by `:` (`(?<![:\w$]):([\w$]+)(?![\w$:])`), so the
+                    # cast silently drops the parameter. The space changes nothing for
+                    # PostgreSQL and keeps the bind visible to SQLAlchemy.
+                    out.append(' ')
                 i = m.end()
                 continue
             tag = _DOLLAR_TAG_RE.match(sql, i)
