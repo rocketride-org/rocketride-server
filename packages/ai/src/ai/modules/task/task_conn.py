@@ -84,6 +84,7 @@ from ai.account.models import (
     resolve_team_permissions,
 )
 from ai.common.account import AccountPipelineValidation
+from rocketlib import debug, warning
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -157,6 +158,34 @@ def task_credential_commands(account_info: Any) -> Optional[frozenset]:
     return TASK_TOKEN_COMMANDS if auth.startswith('tk_') else TASK_KEY_COMMANDS
 
 
+def authority_subject(account_info: Any) -> bool:
+    """Return True when an identity carries platform authority (#972).
+
+    A full-user identity (not ``pk_``/``tk_``) whose cached ``sysPermissions``
+    is non-empty. Any element counts, ``internal`` included: what the
+    connection holds is what gets re-checked, never a list of exemptions.
+    """
+    if not account_info:
+        return False
+    auth = getattr(account_info, 'auth', '') or ''
+    if isinstance(auth, str) and auth.startswith(TASK_CREDENTIAL_PREFIXES):
+        return False
+    return bool(getattr(account_info, 'sysPermissions', None))
+
+
+def authority_narrowed(cached: Any, fresh: Any) -> bool:
+    """Return True when ``fresh`` holds less platform authority than ``cached``.
+
+    Narrower means the user is now waitlisted (disabled), or any element of
+    the cached ``sysPermissions`` is missing from the fresh identity. Widening
+    is not narrowing.
+    """
+    if getattr(fresh, 'waitlisted', False):
+        return True
+    held = set(getattr(cached, 'sysPermissions', None) or [])
+    return bool(held - set(getattr(fresh, 'sysPermissions', None) or []))
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -210,6 +239,13 @@ class TaskConn(
         _server: Reference to TaskServer for task lookup and management
         transport: Communication layer for DAP message exchange
     """
+
+    # Revocation state (#972). Class-level defaults so a connection built
+    # without __init__ reads them too. ``_revoked`` is set once, by revoke(),
+    # and makes any later auth on this socket fail; ``_revoked_user_id`` keeps
+    # the revoked user for the disconnect handler's dashboard event.
+    _revoked: bool = False
+    _revoked_user_id: Optional[str] = None
 
     def __init__(
         self,
@@ -397,6 +433,12 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # A revoke that landed while authenticate_credential was awaited has
+        # already closed this socket's authority: install nothing (#972).
+        if self._revoked:
+            await self.send(self.build_error(request, 'Connection revoked'))
+            return
+
         self._account_info = result
         self._authenticated = True
         self._server.release_unauthed_slot(self._client_ip)
@@ -434,21 +476,77 @@ class TaskConn(
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
-        open — callers can re-authenticate later via ``auth``.
+        open — callers can re-authenticate later via ``auth``. Event
+        subscriptions are dropped with the identity (#972): a deauthed
+        socket receives nothing. Open write handles are left as they are.
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
             return self.build_response(request, body={})
 
-        # Re-acquire an unauthenticated slot for this IP
-        if self._client_ip:
-            self._server._unauthed_by_ip[self._client_ip] = self._server._unauthed_by_ip.get(self._client_ip, 0) + 1
-
-        # Clear authentication state
-        self._authenticated = False
-        self._account_info = None
+        self._drop_authority()
 
         return self.build_response(request, body={})
+
+    def _drop_authority(self) -> None:
+        """
+        Synchronously strip this connection's authority (deauth and revoke).
+
+        Re-acquires the unauthenticated slot the successful auth released (so
+        the disconnect handler's release balances), marks the connection
+        unauthenticated, drops every event subscription and installs the bare
+        identity ``AccountInfo(waitlisted=True)``. The bare identity has an
+        empty ``userId`` and no organization, so no user push, org push or
+        org/user-scoped server event can match or rebuild it.
+        """
+        self._server.acquire_unauthed_slot(self._client_ip)
+        self._authenticated = False
+        monitors = getattr(self, '_monitors', None)
+        if monitors is not None:
+            monitors.clear()
+        self._account_info = AccountInfo(waitlisted=True)
+
+    async def revoke(self, expected_info: AccountInfo, reason: str, pushed: Optional[AccountInfo] = None) -> None:
+        """
+        Revoke this connection's authority and close it (#972).
+
+        Does nothing unless this connection is still registered on its
+        server, still holds ``expected_info`` (a newer auth did not replace
+        it) and was not revoked already. Otherwise, with no await before the
+        effect: marks the connection revoked, records the user for the
+        disconnect handler, and drops its authority (``_drop_authority``).
+        Then tells the client its new identity (``pushed`` when the caller
+        rebuilt one, else the bare identity) and disconnects. The disconnect
+        cleanup commits open write handles and ends tasks this connection
+        launched, as for any disconnect.
+
+        Args:
+            expected_info: The identity the caller decided on.
+            reason: Why, for the log line.
+            pushed: The rebuilt (narrower) identity, if the caller has one.
+        """
+        server = self._server
+        if server._connections.get(self.get_connection_id()) is not self:
+            return
+        if self._account_info is not expected_info or self._revoked:
+            return
+
+        self._revoked = True
+        self._revoked_user_id = expected_info.userId
+        self._drop_authority()
+        revoked = server.count_authz('revoked')
+        warning(
+            f'[AUTHZ] revoked conn={self.get_connection_id()} user={expected_info.userId} '
+            f'reason={reason} revoked={revoked}'
+        )
+
+        try:
+            body = (pushed if pushed is not None else self._account_info).to_push_result()
+            await self.send_event('apaext_account', body=body)
+        except Exception as e:
+            debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e}')
+        finally:
+            self._transport.disconnect()
 
     def has_permission(self, perm: Union[list, str]) -> bool:
         """Check if the user holds the permission on ANY of their membership teams.
