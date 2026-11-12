@@ -1878,6 +1878,42 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_stop_during_the_spawn_ends_the_new_engine(monkeypatch):
+    """A stop that lands while create_subprocess_exec runs finds no process to
+    end. The start must end the engine it just spawned and fail through
+    _terminated(), so stop_task's wait for a terminal state returns.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+    process = SimpleNamespace(pid=123, terminate=MagicMock())
+
+    async def spawn_while_stopping(*_, **__):
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return process
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn_while_stopping)
+
+    with pytest.raises(RuntimeError, match='stopped while its engine was starting'):
+        await Task.start_task(t)
+    process.terminate.assert_called_once()
+    t._terminated.assert_awaited()
+    assert t._engine_process is process  # left for the teardown to reap
+
+
+@pytest.mark.asyncio
 async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
     """A stop that lands during a restart's start fails that start. The task
     is dead, so _terminated() must see _is_restarting cleared and report it

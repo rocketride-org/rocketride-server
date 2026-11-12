@@ -3019,6 +3019,17 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
+            # A stop that arrived while the engine was being spawned found no
+            # process to end, and stop_task now waits for a terminal state. End
+            # the new engine here; the teardown below reaps it, or kills it if
+            # it does not exit in time.
+            if self._stop_requested:
+                try:
+                    self._engine_process.terminate()
+                except ProcessLookupError:
+                    pass
+                raise RuntimeError('the task was stopped while its engine was starting')
+
             # From here a termination is this new run's end, not part of a
             # restart: the engine can exit during the awaits below, and its
             # stdio disconnect runs _terminated() at once. The begin/restart
