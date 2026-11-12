@@ -1368,6 +1368,14 @@ def test_filter_subprocess_env_is_an_allowlist():
     }
 
 
+def test_filter_subprocess_env_passes_the_model_server_token():
+    """Pipeline processes open their own /models connection (ModelClient), so
+    they need the model server's shared secret (rocketride-saas #974).
+    """
+    env = filter_subprocess_env({'RR_MODEL_SERVER_AUTH_TOKEN': 'ms-secret', 'RR_DB_URL': 'postgresql://platform'})
+    assert env == {'RR_MODEL_SERVER_AUTH_TOKEN': 'ms-secret'}
+
+
 def test_filter_subprocess_env_opt_in_names_and_prefixes():
     """RR_SUBPROCESS_ENV adds exact names and '*'-suffixed prefixes, separated
     by commas or spaces. The knob itself is operator-tier (RR_*) and is not
