@@ -45,7 +45,7 @@ from rocketride import EVENT_TYPE
 from ai.modules.task import deploy_events
 from ai.modules.task.task_server import TaskServer
 
-from ._r972_harness import WILDCARD_ALL, FakeAccount, events, identity, make_conn, make_server
+from ._r972_harness import WILDCARD_ALL, FakeAccount, events, identity, make_conn, make_server, never_returns
 
 try:
     from ai.modules.task import authz_recheck
@@ -88,6 +88,12 @@ def _admin(server, clock, user='admin', perms=ADMIN, *, connection_id=1, verifie
     conn._authz_verified_at = clock.now if verified else 0.0
     conn.on_launch = AsyncMock(return_value=None)
     return conn
+
+
+async def _sweep(server) -> None:
+    """One sweep, then let its revoke notices (independent tasks) finish."""
+    await server._authz.sweep_once()
+    await asyncio.gather(*list(getattr(server._authz, '_notices', ())))
 
 
 def _request(command: str, **arguments) -> dict:
@@ -163,7 +169,7 @@ async def test_r972_1b_revocation_on_one_replica_reaches_the_other(monkeypatch):
     assert await _dispatched(conn2) is False
     assert await _server_event_delivered(conn2) is False
 
-    await server2._authz.sweep_once()
+    await _sweep(server2)
     conn2._transport.disconnect.assert_called_once()
     assert conn2._authenticated is False
 
@@ -179,7 +185,7 @@ async def test_r972_1b_sweep_revokes_deleted_row(monkeypatch):
     account, server, clock = _setup(monkeypatch, {})
     conn = _admin(server, clock)
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     conn._transport.disconnect.assert_called_once()
     assert conn._revoked is True
@@ -197,7 +203,7 @@ async def test_r972_1b_sweep_revokes_disabled_or_narrowed(monkeypatch, row):
     account, server, clock = _setup(monkeypatch, {'admin': row})
     conn = _admin(server, clock, perms={'sys.admin', 'sys.view'})
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     conn._transport.disconnect.assert_called_once()
 
@@ -212,9 +218,9 @@ async def test_r972_1b_failed_read_gates_after_threshold_then_resumes(monkeypatc
     account.fail = True
 
     clock.now += 5
-    await server._authz.sweep_once()
+    await _sweep(server)
     clock.now += 5
-    await server._authz.sweep_once()
+    await _sweep(server)
     assert server._authz_counters['read_failed'] == 2
     assert await _dispatched(conn) is True  # exactly THRESHOLD: still allowed
 
@@ -227,7 +233,7 @@ async def test_r972_1b_failed_read_gates_after_threshold_then_resumes(monkeypatc
     conn._transport.disconnect.assert_not_called()
 
     account.fail = False
-    await server._authz.sweep_once()
+    await _sweep(server)
     assert await _dispatched(conn) is True
     assert await _server_event_delivered(conn) is True
     assert await _task_event_reached(conn) is True
@@ -248,7 +254,7 @@ async def test_r972_1b_push_error_defers_to_sweep_value_error_revokes(monkeypatc
     assert conn._revoked is False
     assert await _dispatched(conn) is False
 
-    await server._authz.sweep_once()
+    await _sweep(server)
     assert await _dispatched(conn) is True
     conn._transport.disconnect.assert_not_called()
 
@@ -304,12 +310,12 @@ async def test_r972_1b_internal_holder_is_a_subject(monkeypatch):
     account, server, clock = _setup(monkeypatch, {'svc': (True, frozenset({'internal'}))})
     conn = _admin(server, clock, 'svc', perms={'internal'})
 
-    await server._authz.sweep_once()
+    await _sweep(server)
     assert account.reads == [['svc']]
     conn._transport.disconnect.assert_not_called()
 
     account.rows['svc'] = (True, frozenset())
-    await server._authz.sweep_once()
+    await _sweep(server)
     conn._transport.disconnect.assert_called_once()
 
 
@@ -352,7 +358,7 @@ async def test_r972_1b_user_id_matched_exactly(monkeypatch):
     exact = _admin(server, clock, 'User-AbC', connection_id=1)
     folded = _admin(server, clock, 'user-abc', connection_id=2)
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     assert account.reads == [['User-AbC', 'user-abc']]
     exact._transport.disconnect.assert_not_called()
@@ -370,7 +376,7 @@ async def test_r972_1b_unchanged_rows_one_batched_read(monkeypatch):
     account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
     conns = [_admin(server, clock, connection_id=i, verified=False) for i in range(1, 51)]
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     assert account.reads == [['admin']]
     for conn in conns:
@@ -384,7 +390,7 @@ async def test_r972_1b_widening_is_kept(monkeypatch):
     account, server, clock = _setup(monkeypatch, {'viewer': (True, frozenset({'sys.view', 'sys.admin'}))})
     conn = _admin(server, clock, 'viewer', perms={'sys.view'}, verified=False)
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     conn._transport.disconnect.assert_not_called()
     assert conn._account_info.sysPermissions == ['sys.view']
@@ -408,7 +414,7 @@ async def test_r972_1b_non_subjects_never_read_or_gated(monkeypatch):
     in_process._authenticated = True
     in_process._account_info = identity('admin', ADMIN)
 
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     assert account.reads == []
     for conn in (task, public, plain):
@@ -438,7 +444,7 @@ async def test_r972_1b_failing_hook_one_read_per_sweep(monkeypatch):
 
     for _ in range(3):
         clock.now += 5
-        await server._authz.sweep_once()
+        await _sweep(server)
 
     assert len(account.reads) == 3
     assert all(len(batch) == 100 for batch in account.reads)
@@ -479,7 +485,77 @@ async def test_r972_1b_sweep_skips_identity_replaced_mid_read(monkeypatch):
         return await original(user_ids)
 
     account.live_authority = read_then_reauth
-    await server._authz.sweep_once()
+    await _sweep(server)
 
     conn._transport.disconnect.assert_not_called()
     assert conn._account_info is newer
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: a stuck client never stalls the sweep; debugger events; deny log
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_r972_1b_stuck_client_does_not_delay_other_stamps(monkeypatch):
+    """Revoked clients that stopped reading their sockets do not delay the sweep
+    or anyone's stamp; each is still revoked and disconnected.
+    """
+    from ai.modules.task import task_conn as task_conn_module
+
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.05)
+    account, server, clock = _setup(monkeypatch, {'ok': (True, ADMIN)})
+    stuck = [_admin(server, clock, f'gone-{i}', connection_id=i) for i in range(1, 4)]
+    for conn in stuck:
+        conn._transport.send = never_returns
+    fine = _admin(server, clock, 'ok', connection_id=9, verified=False)
+
+    await asyncio.wait_for(server._authz.sweep_once(), 0.2)
+
+    assert fine._authz_verified_at == clock.now
+    for conn in stuck:
+        assert conn._revoked is True and conn._authenticated is False
+    await asyncio.sleep(0.2)
+    for conn in stuck:
+        conn._transport.disconnect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_r972_1b_debugger_events_are_gated(monkeypatch):
+    """Debugger events to an unverified subject are not sent; after a good read they are."""
+    from ai.modules.task.task_engine import Task
+
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    debugger = _admin(server, clock, verified=False)
+    task = Task.__new__(Task)
+    task.id = 'run-1'
+    task._run_log = None
+    task._debugger = debugger
+    task.stamp_log_event = MagicMock()
+    message = {'event': 'stopped', 'body': {'project_id': 'p', 'runKind': 'dev'}}
+
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
+    assert events(debugger, 'stopped') == []
+
+    await _sweep(server)
+    await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
+    assert events(debugger, 'stopped')
+
+
+@pytest.mark.asyncio
+async def test_r972_1b_denied_warning_once_per_connection_per_minute(monkeypatch):
+    """Every refusal is counted; the warning is logged once per connection per 60 s."""
+    logged = []
+    monkeypatch.setattr(authz_recheck, 'warning', lambda line: logged.append(line))
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    first = _admin(server, clock, connection_id=1, verified=False)
+    second = _admin(server, clock, connection_id=2, verified=False)
+
+    for _ in range(3):
+        assert await _dispatched(first) is False
+    assert await _dispatched(second) is False
+    clock.now += 61
+    assert await _dispatched(first) is False
+
+    assert server._authz_counters['denied_unavailable'] == 5
+    assert [line.split()[2] for line in logged] == ['conn=1', 'conn=2', 'conn=1']
