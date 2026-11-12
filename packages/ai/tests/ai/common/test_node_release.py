@@ -3,132 +3,78 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Node packages come from dist/nodes, else the release, cached by digest."""
+"""A node's .rrnode is packed from the release's node archive in dist/nodes, and nothing is downloaded."""
 
-import hashlib
 import io
+import json
 import os
-import threading
-import urllib.error
+import socket
+import zipfile
 
 import pytest
 
-from ai.common import node_release
+from ai.common import node_packages, node_release
+
+LLM_X = {'__init__.py': b'VALUE = 1\n', 'services.json': b'{"protocol": "llm_x://"}'}
+LLM_X_BIG = {'__init__.py': b'VALUE = 2\n'}
 
 
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
-    """An engine in <tmp>/server with its cache under it, and a fake release."""
+    """An engine in <tmp>/server whose index names <tmp>/nodes/nodes.zip, holding llm_x and llm_x_big."""
     monkeypatch.setattr(node_release.sys, 'executable', str(tmp_path / 'server' / 'engine'))
-    monkeypatch.setattr(node_release, 'engine_cache_dir', lambda create=False: str(tmp_path / 'server' / 'cache'))
-    monkeypatch.setattr(node_release, 'getVersion', lambda: {'version': '1.2.3'})
-    release = {}
-    asked = []
+    os.makedirs(tmp_path / 'server' / 'nodes')
+    (tmp_path / 'server' / 'nodes' / 'index.json').write_text(json.dumps({'archive': 'nodes.zip'}))
+    os.makedirs(tmp_path / 'nodes')
+    with zipfile.ZipFile(tmp_path / 'nodes' / 'nodes.zip', 'w') as archive:
+        for name, files in (('llm_x', LLM_X), ('llm_x_big', LLM_X_BIG)):
+            for path, data in files.items():
+                archive.writestr(f'{name}/{path}', data)
 
-    def urlopen(url, timeout):
-        asked.append(url)
-        if url not in release:
-            raise urllib.error.HTTPError(url, 404, 'Not Found', {}, None)
-        return io.BytesIO(release[url])
+    def offline(*args, **kwargs):
+        raise AssertionError('a node package is never downloaded')
 
-    monkeypatch.setattr(node_release.urllib.request, 'urlopen', urlopen)
-    return tmp_path, release, asked
+    monkeypatch.setattr(socket, 'socket', offline)
+    return tmp_path
 
 
-ZIP = b'zip'
-ZIP_SHA = hashlib.sha256(ZIP).hexdigest()
+def _files(data):
+    with zipfile.ZipFile(io.BytesIO(data)) as package:
+        return {entry.filename: package.read(entry) for entry in package.infolist()}
 
 
 def test_the_index_is_the_one_the_server_was_built_with(layout):
-    tmp, _, asked = layout
-    os.makedirs(tmp / 'server' / 'nodes')
-    (tmp / 'server' / 'nodes' / 'index.json').write_bytes(b'{"built": true}')
-
-    assert node_release.read_index() == b'{"built": true}'
-    assert asked == []
+    assert json.loads(node_release.read_index()) == {'archive': 'nodes.zip'}
 
 
-def test_a_package_in_dist_nodes_is_read_and_nothing_is_downloaded(layout):
-    tmp, _, asked = layout
-    os.makedirs(tmp / 'nodes')
-    (tmp / 'nodes' / 'llm_x.rrnode').write_bytes(ZIP)
+def test_a_node_is_packed_from_the_archive_with_only_its_own_files(layout):
+    data = node_release.read_package('llm_x', node_packages.content_digest(LLM_X))
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert asked == []
+    assert _files(data) == {'llm_x/__init__.py': b'VALUE = 1\n', 'llm_x/services.json': b'{"protocol": "llm_x://"}'}
 
 
-def test_a_prerelease_package_is_found_under_its_own_tag(layout):
-    _, release, asked = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/llm_x.rrnode'] = ZIP
+def test_a_packed_node_unpacks_with_the_digest_the_index_lists(layout):
+    sha256 = node_packages.content_digest(LLM_X)
+    data = node_release.read_package('llm_x', sha256)
+    os.makedirs(layout / 'run')
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3', 'server-v1.2.3-prerelease']
+    node_dir = node_packages.unpack('llm_x', data, sha256, str(layout / 'run' / 'nodes'))
 
-
-def test_the_release_the_extension_installed_is_asked_first_and_a_containers_never(layout):
-    tmp, release, asked = layout
-    (tmp / 'version.docker.json').write_text('{"tag": "server-v9.9.9", "publishedAt": "x"}')
-    (tmp / 'version.local.json').write_text('{"tag": "server-v1.2.3-workshop", "publishedAt": "x"}')
-    release[f'{node_release.RELEASES}/server-v1.2.3-workshop/llm_x.rrnode'] = ZIP
-
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert [url.rsplit('/', 2)[1] for url in asked] == ['server-v1.2.3-workshop']
+    assert node_packages.digest_of(node_dir) == sha256
 
 
-def test_a_package_is_downloaded_once_per_digest(layout):
-    _, release, asked = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = ZIP
-
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert len(asked) == 1
+def test_a_node_the_archive_does_not_hold_is_not_found(layout):
+    with pytest.raises(FileNotFoundError, match='llm_y is not in nodes.zip'):
+        node_release.read_package('llm_y', node_packages.content_digest(LLM_X))
 
 
-def test_a_damaged_cached_package_is_downloaded_again(layout):
-    tmp, release, asked = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = ZIP
-    node_release.save(os.path.join(tmp, 'server', 'cache', 'nodes', f'{ZIP_SHA}.rrnode'), b'zi')
+def test_an_index_that_names_no_archive_says_so(layout):
+    (layout / 'server' / 'nodes' / 'index.json').write_text(json.dumps({'nodes': {}}))
 
-    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
-    assert len(asked) == 1
+    with pytest.raises(FileNotFoundError, match='The node index names no node archive'):
+        node_release.read_package('llm_x', node_packages.content_digest(LLM_X))
 
 
-def test_a_release_asset_that_does_not_match_the_index_is_not_cached(layout):
-    tmp, release, _ = layout
-    release[f'{node_release.RELEASES}/server-v1.2.3/llm_x.rrnode'] = b'other'
-
-    with pytest.raises(ValueError, match='does not match the index'):
-        node_release.read_package('llm_x', ZIP_SHA)
-    assert not os.path.exists(os.path.join(tmp, 'server', 'cache', 'nodes', f'{ZIP_SHA}.rrnode'))
-
-
-def test_threads_saving_the_same_file_each_leave_it_whole(tmp_path):
-    path = str(tmp_path / 'cache' / 'abc.rrnode')
-    errors = []
-
-    def write():
-        try:
-            node_release.save(path, b'x' * 100_000)
-        except Exception as e:
-            errors.append(e)
-
-    for _ in range(20):
-        threads = [threading.Thread(target=write) for _ in range(4)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
-
-    assert errors == [] and open(path, 'rb').read() == b'x' * 100_000
-    assert os.listdir(tmp_path / 'cache') == ['abc.rrnode']
-
-
-def test_a_failed_write_leaves_nothing_in_the_cache(tmp_path, monkeypatch):
-    def full(*args):
-        raise OSError(28, 'No space left on device')
-
-    monkeypatch.setattr(node_release.os, 'replace', full)
-
-    with pytest.raises(OSError, match='No space left'):
-        node_release.save(str(tmp_path / 'cache' / 'abc.rrnode'), b'x')
-    assert os.listdir(tmp_path / 'cache') == []
+def test_files_that_do_not_match_the_index_are_refused(layout):
+    with pytest.raises(ValueError, match='llm_x in nodes.zip does not match the index'):
+        node_release.read_package('llm_x', node_packages.content_digest(LLM_X_BIG))

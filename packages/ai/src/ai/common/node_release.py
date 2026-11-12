@@ -21,24 +21,17 @@
 # SOFTWARE.
 
 """
-Where node packages come from when nothing else serves them: dist/nodes beside
-the server in a build, else the assets of this engine's release, cached under
-the engine cache by digest.
+Where node packages come from when nothing else serves them: the release's
+node archive in dist/nodes beside the server. The archive holds every node
+under <name>/, and a node's .rrnode is packed from it on request.
 """
 
-import contextlib
-import hashlib
 import json
 import os
 import sys
-import tempfile
-import urllib.error
-import urllib.request
+import zipfile
 
-from depends import engine_cache_dir
-from rocketlib import getVersion
-
-RELEASES = 'https://github.com/rocketride-org/rocketride-server/releases/download'
+from ai.common import node_packages
 
 
 def _beside(*parts: str) -> str:
@@ -49,53 +42,6 @@ def _beside(*parts: str) -> str:
 def _local(file: str) -> str:
     """The file in dist/nodes, next to the server the engine runs from."""
     return _beside('nodes', file)
-
-
-def _cached(file: str) -> str:
-    return os.path.join(engine_cache_dir(create=True), 'nodes', file)
-
-
-def _tags() -> list:
-    """The release the VS Code extension installed this engine from, then the usual tags."""
-    installed = []
-    # The files an install of this engine writes beside it; version.docker.json is a container's
-    for name in ('version.json', 'version.local.json', 'version.service.json'):
-        with contextlib.suppress(OSError, ValueError, KeyError):
-            installed.append(json.loads(_read(_beside(name)))['tag'])
-    version = getVersion()['version']
-    return [*installed, f'server-v{version}', f'server-v{version}-prerelease']
-
-
-def _download(file: str) -> bytes:
-    """The release asset, from the first release that has it."""
-    tags = _tags()
-    for tag in tags:
-        try:
-            with urllib.request.urlopen(f'{RELEASES}/{tag}/{file}', timeout=15) as response:
-                return response.read()
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                raise
-    raise FileNotFoundError(f'{file} is not in releases {", ".join(tags)}')
-
-
-def save(path: str, data: bytes) -> bytes:
-    """Write a file whole or not at all: another process or thread may be reading or writing it."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    handle, staging = tempfile.mkstemp(dir=os.path.dirname(path))
-    try:
-        with os.fdopen(handle, 'wb') as file:
-            file.write(data)
-        try:
-            os.replace(staging, path)
-        except PermissionError:
-            # Windows refuses to replace a file a reader holds open; that reader keeps a whole copy
-            pass
-    finally:
-        # Gone after a replace; left behind by a failed write, which would fill the cache on every retry
-        with contextlib.suppress(OSError):
-            os.remove(staging)
-    return data
 
 
 def _read(path: str) -> bytes:
@@ -114,13 +60,14 @@ def read_index() -> bytes:
 
 
 def read_package(name: str, sha256: str) -> bytes:
-    """<name>.rrnode: the local one, else the cached copy of that digest, else the release's."""
-    if os.path.exists(_local(f'{name}.rrnode')):
-        return _read(_local(f'{name}.rrnode'))
-    cached = _cached(f'{sha256}.rrnode')
-    if os.path.exists(cached) and hashlib.sha256(data := _read(cached)).hexdigest() == sha256:
-        return data
-    data = _download(f'{name}.rrnode')
-    if hashlib.sha256(data).hexdigest() != sha256:
-        raise ValueError(f'The release asset {name}.rrnode does not match the index')
-    return save(cached, data)
+    """<name>.rrnode, packed from the node archive the index names; its files must match the index's digest."""
+    archive = json.loads(read_index()).get('archive')
+    if not archive:
+        raise FileNotFoundError('The node index names no node archive')
+    with zipfile.ZipFile(_local(archive)) as nodes:
+        files = node_packages.node_files(nodes, name)
+    if not files:
+        raise FileNotFoundError(f'{name} is not in {archive}')
+    if node_packages.content_digest(files) != sha256:
+        raise ValueError(f'{name} in {archive} does not match the index')
+    return node_packages.pack(name, files)

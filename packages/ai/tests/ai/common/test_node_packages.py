@@ -17,15 +17,18 @@ from ai.common import node_packages
 from ai.common.node_packages import NodePackageInvalid
 
 
+def _files(value=42):
+    return {'__init__.py': f'VALUE = {value}\n'.encode(), 'services.json': b'{"protocol": "railnode://"}'}
+
+
 def _package(name='railnode', value=42, extra=None):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as package:
-        package.writestr(f'{name}/__init__.py', f'VALUE = {value}\n')
-        package.writestr(f'{name}/services.json', '{"protocol": "railnode://"}')
+        for path, data in _files(value).items():
+            package.writestr(f'{name}/{path}', data)
         if extra:
             package.writestr(extra, '')
-    data = buffer.getvalue()
-    return data, hashlib.sha256(data).hexdigest()
+    return buffer.getvalue(), node_packages.content_digest(_files(value))
 
 
 def _read(path):
@@ -92,6 +95,41 @@ def test_a_package_that_does_not_match_its_digest_is_refused(nodes):
         node_packages.unpack('railnode', data, '0' * 64, nodes)
 
     assert not os.path.exists(os.path.join(nodes, 'railnode'))
+
+
+def test_the_digest_is_each_path_with_the_sha256_of_its_file_in_order():
+    files = {'b.py': b'b', 'a/c.json': b'c'}
+    lines = ''.join(f'{path}\0{hashlib.sha256(files[path]).hexdigest()}\n' for path in ('a/c.json', 'b.py'))
+
+    assert node_packages.content_digest(files) == hashlib.sha256(lines.encode()).hexdigest()
+
+
+def test_the_same_files_in_another_zip_match_the_digest(nodes):
+    _, sha256 = _package()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as package:
+        for path, data in reversed(list(_files().items())):
+            package.writestr(f'railnode/{path}', data)
+
+    node_dir = node_packages.unpack('railnode', buffer.getvalue(), sha256, nodes)
+
+    assert node_packages.digest_of(node_dir) == sha256
+
+
+def test_bytes_that_are_not_a_zip_are_refused(nodes):
+    with pytest.raises(NodePackageInvalid):
+        node_packages.unpack('railnode', b'not a zip', node_packages.content_digest(_files()), nodes)
+
+    assert not os.path.exists(os.path.join(nodes, 'railnode'))
+
+
+def test_a_packed_node_unpacks_into_the_same_files(nodes):
+    data = node_packages.pack('railnode', _files())
+
+    node_dir = node_packages.unpack('railnode', data, node_packages.content_digest(_files()), nodes)
+
+    assert _read(os.path.join(node_dir, '__init__.py')) == 'VALUE = 42\n'
+    assert _read(os.path.join(node_dir, 'services.json')) == '{"protocol": "railnode://"}'
 
 
 def test_a_package_with_files_outside_its_node_is_refused(nodes):

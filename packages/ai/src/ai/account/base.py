@@ -200,7 +200,7 @@ class AccountBase(ABC):
         pass
 
     def node_index(self) -> dict:
-        """The nodes this server serves: {contract, nodes: {name: {sha256, size, services, icons}}}."""
+        """The nodes this server serves: {contract, archive, nodes: {name: {sha256, size, services, icons}}}."""
         from ai.common import node_release
 
         return json.loads(node_release.read_index())

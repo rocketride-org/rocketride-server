@@ -163,7 +163,7 @@ def place(pipeline: Dict[str, Any]) -> List[str]:
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']
-            # Already unpacked: the package is not read, so a launch needs neither the cache nor the release
+            # Already unpacked: the package is not read, so a launch does not open the node archive
             if node_packages.digest_of(os.path.join(node_release.nodes_dir(), name)) != sha256:
                 node_packages.unpack(name, account.node_package(name, sha256), sha256, node_release.nodes_dir())
     return names
