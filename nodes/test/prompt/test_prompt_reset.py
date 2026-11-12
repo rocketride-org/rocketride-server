@@ -60,6 +60,8 @@ class FakeQuestion:
         self.documents = []
         self.instructions = []
         self.history = []
+        self.messages = []
+        self.tools = []
 
     def addHistory(self, item):
         self.history.append(item)
@@ -98,7 +100,7 @@ class PreventDefaultRaised(Exception):
 LOGGED_ERRORS: list[str] = []
 
 
-def _load_iinstance_class():
+def _load_iinstance_class(question_cls=FakeQuestion):
     """Load the node's IInstance class from source with its imports stubbed, then restore sys.modules."""
     saved = {}
     stubs = {
@@ -137,7 +139,7 @@ def _load_iinstance_class():
     stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['rocketlib'].error = lambda message, *a, **kw: LOGGED_ERRORS.append(str(message))
     stubs['rocketlib'].OPEN_MODE = types.SimpleNamespace(CONFIG='config')
-    stubs['ai.common.schema'].Question = FakeQuestion
+    stubs['ai.common.schema'].Question = question_cls
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)
@@ -194,9 +196,9 @@ def build():
     one object the tests hold, keeping its wiring.
     """
 
-    def _build(instructions=None):
+    def _build(instructions=None, question_cls=FakeQuestion):
         """Build one IInstance with these instructions, wired to a fake engine that records each lane."""
-        IInstance = _load_iinstance_class()
+        IInstance = _load_iinstance_class(question_cls)
 
         inst = IInstance()
         # The resolved config the instance reads through IGlobal.config
@@ -325,6 +327,30 @@ def test_two_objects_on_one_binding_do_not_share_a_question(build):
     assert len(captured.questions) == 2
     assert captured.questions[1].context == ['second object']
     assert len(captured.questions[1].instructions) == len(_INSTRUCTIONS)
+
+
+def test_a_turn_mode_question_keeps_its_conversation_and_tools(build):
+    """
+    A turn-mode question has no `questions`; its conversation is `messages`. Dropping it
+    sent the LLM node a question with nothing in it. The merged question keeps the
+    conversation and tools, the instructions become its system prompt, and text written
+    to the node joins the last user message.
+    """
+    from ai.common.schema import Question
+
+    inst, captured = build(question_cls=Question)
+    turn = Question(tools=[{'name': 'search'}], messages=[{'role': 'user', 'content': 'Find the doc.'}])
+
+    inst.open(None)
+    _write(inst, 'questions', turn)
+    _write(inst, 'text', 'The page is /home.')
+    inst.closing()
+
+    (merged,) = captured.questions
+    merged.checkTurn()
+    assert (merged.messages, merged.tools) == (turn.messages, turn.tools)
+    assert _INSTRUCTIONS[0] in merged.getSystemPrompt()
+    assert 'The page is /home.' in merged.getTurnMessages()[-1].content[-1].text
 
 
 def test_a_turn_that_received_nothing_emits_nothing(build):

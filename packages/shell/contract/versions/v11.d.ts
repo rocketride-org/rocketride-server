@@ -23,14 +23,13 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV11 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-12T19:24:20.431Z
-// Source commit: f6ba34037e15711a2d53197533b1a87f8149558b
+// Generated:     2026-11-11T20:37:36.665Z
+// Source commit: 9a8588c8c4201e5890967c707eb2425e41b4c3c1
 // Generator:     dts-bundle-generator@9.5.1
-// Produced by:   ./builder shell:remint
+// Produced by:   ./builder shell:freeze
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
-import { PostHog } from 'posthog-js';
 import React$1 from 'react';
 import { CSSProperties, InputHTMLAttributes, ReactElement, ReactNode, Ref, RefObject } from 'react';
 import { Options, Sequelize } from 'sequelize';
@@ -520,6 +519,162 @@ export declare class DocGroupHelper {
     static splitByChunkRange(group: DocGroup, chunkSize: number): DocGroup[];
 }
 /**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Response structures from RocketRide pipeline data processing operations.
+ *
+ * These interfaces represent the different types of responses returned when data
+ * is sent through pipelines, depending on the processing method and MIME type handling.
+ */
+/**
+ * Pipeline response structure with optional processing information.
+ *
+ * This is returned from all pipeline operations. When data is sent without
+ * MIME type specification, only basic fields are present. When MIME type
+ * is specified and processing occurs, additional result_types and dynamic
+ * fields are included.
+ */
+export interface PIPELINE_RESULT {
+    /** Unique identifier for this processing result (UUID format) */
+    name: string;
+    /** File path context (typically empty for direct data sends) */
+    path: string;
+    /** Unique object identifier for tracking processed items (UUID format) */
+    objectId: string;
+    /**
+     * Map of field names to their data type identifiers.
+     *
+     * The key is the name of a field that exists in this response object.
+     * The value indicates what type of data that field contains.
+     *
+     * Examples:
+     * - { "text": "text" } → look for response.text containing string array
+     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
+     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
+     */
+    result_types?: Record<string, string>;
+    /**
+     * Dynamic fields containing processed data based on result_types mapping.
+     *
+     * Field names and types are determined by the result_types object:
+     * - Fields with type "text": string[] (array of text segments)
+     * - Fields with type "answers": string[] (AI-generated chat responses)
+     * - Other types: depends on pipeline configuration
+     *
+     * Common field names: "text", "output", "content", "data", "result", "answers"
+     */
+    [key: string]: any;
+}
+/**
+ * File upload result structure with processing outcome and metadata.
+ *
+ * This represents the complete result of a file upload operation, including
+ * upload statistics, processing results, and any error information.
+ */
+export interface UPLOAD_RESULT {
+    /** Upload completion status - 'complete' indicates successful upload and processing */
+    action: "open" | "write" | "close" | "complete" | "error";
+    /** Original filename as provided during upload */
+    filepath: string;
+    /** Number of bytes successfully transmitted to the server */
+    bytes_sent: number;
+    /** Total size of the uploaded file in bytes */
+    file_size: number;
+    /** Time taken for the upload operation in seconds */
+    upload_time: number;
+    /**
+     * Processing result from the pipeline after successful upload.
+     * Contains the same structure as PIPELINE_RESULT with processed content.
+     * Only present when action is 'complete' and processing succeeded.
+     */
+    result?: PIPELINE_RESULT;
+    /** Error message if upload or processing failed (when action is 'error') */
+    error?: string;
+}
+/**
+ * A tool the model may call in a turn-mode Question. `name` is yours and may contain
+ * dots; the engine maps it to a name the provider accepts and maps calls back.
+ */
+export interface Tool {
+    name: string;
+    description?: string;
+    /** JSON Schema with `type: 'object'` at the top. Defaults to an object with no properties. */
+    inputSchema?: Record<string, unknown>;
+}
+/** Plain text inside a message. */
+export interface TextBlock {
+    type: "text";
+    text: string;
+}
+/**
+ * A call the model asked for. Answer it with a ToolResultBlock carrying the same `id`.
+ * `args` is the raw string when the provider's arguments were not valid JSON.
+ */
+export interface ToolCallBlock {
+    type: "tool_call";
+    id: string;
+    name: string;
+    args: Record<string, unknown> | string;
+}
+/** The result of one tool call, sent back in the next user message. */
+export interface ToolResultBlock {
+    type: "tool_result";
+    callId: string;
+    content: string;
+    isError?: boolean;
+}
+/** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
+export interface ReasoningBlock {
+    type: "reasoning";
+    text?: string;
+    state?: unknown;
+}
+/** A user turn: text, and the results of the calls in the assistant turn before it. */
+export interface UserMessage {
+    role: "user";
+    content: string | Array<TextBlock | ToolResultBlock>;
+}
+/** A model turn: text, tool calls and reasoning. Append it to `Question.messages` as is. */
+export interface AssistantMessage {
+    role: "assistant";
+    content: string | Array<TextBlock | ToolCallBlock | ReasoningBlock>;
+}
+/** One turn of a turn-mode conversation. */
+export type Message = UserMessage | AssistantMessage;
+export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
+/**
+ * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
+ * before any provider call. `invalid_request` means two tool names become the same provider
+ * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
+ * A Question sent with a broken turn rule is refused when the engine reads it.
+ * `provider_error` gives only the exception type; the full text is in the engine log.
+ */
+export interface AnswerError {
+    code: "tools_unsupported" | "invalid_request" | "provider_error";
+    message: string;
+}
+/**
  * Defines different types of questions and queries you can ask.
  */
 export declare enum QuestionType {
@@ -571,7 +726,22 @@ export interface QuestionText {
  * Handles AI responses from RocketRide chat operations.
  */
 export declare class Answer {
+    /** Set only for a turn-mode Question: the model's turn. */
+    message?: AssistantMessage;
+    /** Why the model stopped. `tool_use` means `toolCalls` are waiting for results. */
+    stopReason?: StopReason;
+    /** Set instead of `message` when the turn failed. */
+    error?: AnswerError;
+    /** Token usage of the turn. */
+    tokens?: Record<string, unknown>;
     constructor(expectJson?: boolean);
+    /**
+     * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
+     * A text entry, which an engine that predates turn mode returns, gives a text Answer.
+     */
+    static fromResult(result: PIPELINE_RESULT, key?: string): Answer;
+    /** The calls in this turn, in the order the model made them. Empty for a text answer. */
+    get toolCalls(): ToolCallBlock[];
     /**
      * Extract Python code from AI response.
      */
@@ -581,7 +751,7 @@ export declare class Answer {
      */
     setAnswer(value: string | object | unknown[]): void;
     /**
-     * Get the response as plain text.
+     * Get the response as plain text. For a turn, the text of `message`.
      */
     getText(): string;
     /**
@@ -614,6 +784,15 @@ export declare class Question {
     goals: string[];
     documents: Doc[];
     questions: QuestionText[];
+    /**
+     * The conversation, sent as real provider turns. Non-empty switches the Question to
+     * turn mode: the system prompt is role + instructions + examples, context, documents
+     * and goals are added to the last user message, and history, questions and
+     * expectJson are not allowed.
+     */
+    messages: Message[];
+    /** Tools the model may call. Turn mode only. */
+    tools: Tool[];
     constructor(options?: {
         type?: QuestionType;
         filter?: DocFilter;
@@ -645,6 +824,21 @@ export declare class Question {
      * Add a question to ask the AI.
      */
     addQuestion(question: string): void;
+    /**
+     * Append a message to the conversation, switching the Question to turn mode.
+     * Throws, leaving the Question as it was, if the Question uses a field turn mode does not allow.
+     */
+    addMessage(message: Message): void;
+    /**
+     * Check the turn-mode rules. `fromDict` runs this; call it after editing fields by hand.
+     * Throws an Error naming the broken rule.
+     */
+    checkTurn(): void;
+    /**
+     * Add the result of a tool call to the user message that answers it, opening that
+     * message after an assistant turn. Throws if no assistant turn before it made the call.
+     */
+    addToolResult(callId: string, content: string, isError?: boolean): void;
     /**
      * Add specific documents for the AI to reference.
      */
@@ -1902,12 +2096,6 @@ export interface ConnectResult {
      * Set manually in the database, never via API.
      */
     sysPermissions?: string[];
-    /**
-     * The API key's task-address scope: patterns (`developerId.pipelineId.source`
-     * or `developerId.pipelineId.*`) the key may send to; null/absent for an
-     * unscoped key. Enforced server-side where a task address is resolved.
-     */
-    endpoints?: string[] | null;
     /** Credit wallet balance snapshot — resource→balance pairs. */
     credits?: Record<string, unknown>;
     /**
@@ -2027,22 +2215,6 @@ export interface ServerInfoResult {
      * Absent on servers without billing (OSS).
      */
     stripePublishableKey?: string;
-    /**
-     * PostHog project token (`phc_*`) configured on this server.
-     *
-     * Lets the shell initialise product telemetry with the key matching
-     * this environment instead of a build-time value; apps never carry a
-     * key at all. Absent on servers without telemetry (OSS) — telemetry is
-     * then structurally off. Always accompanied by {@link ServerInfoResult.posthogHost}.
-     */
-    posthogPublishableKey?: string;
-    /**
-     * The analytics ingestion address telemetry requests go to.
-     *
-     * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
-     * is; defaults server-side to the managed analytics proxy.
-     */
-    posthogHost?: string;
     /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
@@ -2446,100 +2618,6 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 /** Discriminated union of all dashboard activity events. */
 export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
 /**
- * MIT License
- *
- * Copyright (c) 2026 Aparavi Software AG
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-/**
- * Response structures from RocketRide pipeline data processing operations.
- *
- * These interfaces represent the different types of responses returned when data
- * is sent through pipelines, depending on the processing method and MIME type handling.
- */
-/**
- * Pipeline response structure with optional processing information.
- *
- * This is returned from all pipeline operations. When data is sent without
- * MIME type specification, only basic fields are present. When MIME type
- * is specified and processing occurs, additional result_types and dynamic
- * fields are included.
- */
-export interface PIPELINE_RESULT {
-    /** Unique identifier for this processing result (UUID format) */
-    name: string;
-    /** File path context (typically empty for direct data sends) */
-    path: string;
-    /** Unique object identifier for tracking processed items (UUID format) */
-    objectId: string;
-    /**
-     * Map of field names to their data type identifiers.
-     *
-     * The key is the name of a field that exists in this response object.
-     * The value indicates what type of data that field contains.
-     *
-     * Examples:
-     * - { "text": "text" } → look for response.text containing string array
-     * - { "my_text": "text", "my_answers": "answers" } → look for response.my_text and response.my_answers
-     * - { "answers": "answers" } → look for response.answers containing AI-generated responses
-     */
-    result_types?: Record<string, string>;
-    /**
-     * Dynamic fields containing processed data based on result_types mapping.
-     *
-     * Field names and types are determined by the result_types object:
-     * - Fields with type "text": string[] (array of text segments)
-     * - Fields with type "answers": string[] (AI-generated chat responses)
-     * - Other types: depends on pipeline configuration
-     *
-     * Common field names: "text", "output", "content", "data", "result", "answers"
-     */
-    [key: string]: any;
-}
-/**
- * File upload result structure with processing outcome and metadata.
- *
- * This represents the complete result of a file upload operation, including
- * upload statistics, processing results, and any error information.
- */
-export interface UPLOAD_RESULT {
-    /** Upload completion status - 'complete' indicates successful upload and processing */
-    action: "open" | "write" | "close" | "complete" | "error";
-    /** Original filename as provided during upload */
-    filepath: string;
-    /** Number of bytes successfully transmitted to the server */
-    bytes_sent: number;
-    /** Total size of the uploaded file in bytes */
-    file_size: number;
-    /** Time taken for the upload operation in seconds */
-    upload_time: number;
-    /**
-     * Processing result from the pipeline after successful upload.
-     * Contains the same structure as PIPELINE_RESULT with processed content.
-     * Only present when action is 'complete' and processing succeeded.
-     */
-    result?: PIPELINE_RESULT;
-    /** Error message if upload or processing failed (when action is 'error') */
-    error?: string;
-}
-/**
  * Event type enumeration for sophisticated client subscription and event routing.
  *
  * This enumeration defines event categories used for intelligent event filtering
@@ -2823,65 +2901,12 @@ export interface ServiceSummary {
     documentation?: string;
 }
 /**
- * One resolved configuration property of a service, as the engine emits
- * it in the full definition's `properties`. Besides the authored members
- * (`type`, `title`, `enum`, a group's `properties`, ...) every leaf
- * carries its `path`.
- */
-export interface ServiceProperty {
-    /** The property's (short) name. */
-    name: string;
-    /**
-     * The dotted key the leaf's value is stored under in a node's config
-     * (e.g. `access`, `service.customerId`). A property referenced by the
-     * identical specifier in every branch of a selector is hoisted to the
-     * parent path; otherwise a branch property is at `parent.branch.leaf`.
-     * Absent on a grouped subsection, whose children carry the dotted path.
-     */
-    path?: string;
-    /** The remaining authored members, passed through by the engine. */
-    [member: string]: unknown;
-}
-/**
- * The value space of a pipeline parameter. `param` is legal only on
- * plain-field and enum-selector scalars, so a parameter value is always
- * one of these.
- */
-export type ServiceParamValue = string | number | boolean;
-/**
- * The self-contained descriptor of one pipeline parameter: a property the
- * node flagged `"param": true`. Copied from the resolved leaf, so a value
- * is validated from the descriptor alone.
- */
-export interface ServiceParamDescriptor {
-    /** The target leaf's `path` (the `configKey` of a `parameters` map entry). */
-    field: string;
-    /** The leaf's type (`string`, `integer`, `number`, `boolean`, ...). */
-    type: string | null;
-    /** Display title. */
-    title: string | null;
-    /** Description. */
-    description: string | null;
-    /** The leaf's default; `null` when the node declares none. */
-    default: ServiceParamValue | null;
-    /** Allowed values, when the leaf is an enum. */
-    enum?: ServiceParamValue[];
-    /** Lower bound, when the leaf declares one. */
-    minimum?: number;
-    /** Upper bound, when the leaf declares one. */
-    maximum?: number;
-}
-/**
  * A FULL service definition, returned by the single-service
  * `rrext_services` call (`getService()`). Extends the summary with the
- * resolved configuration schema: the `properties` tree and the `params`
- * descriptors.
+ * dynamic configuration section keys (e.g. "Pipe", "Source", "Global")
+ * that each hold a {@link ServiceSection} with `schema` and `ui`.
  */
 export interface ServiceDefinition extends ServiceSummary {
-    /** The resolved configuration properties, every leaf with its `path`. */
-    properties?: ServiceProperty[];
-    /** Descriptors of the `param`-flagged properties, in schema order. */
-    params?: ServiceParamDescriptor[];
     /** Dynamic configuration sections (e.g. "Pipe", "Source", "Global"). */
     [section: string]: unknown;
 }
@@ -2899,18 +2924,6 @@ export interface ServicesResponse {
      * DOM.
      */
     icons?: Record<string, string>;
-    /** Engine services version. */
-    version?: number;
-}
-/**
- * Response from `getServices({ definitions: true })`: every service's FULL
- * definition (configuration properties and `params` descriptors included).
- * There is no icon table in this form; each definition carries its own
- * `icon`.
- */
-export interface ServiceDefinitionsResponse {
-    /** Map of logical type name to its full definition. */
-    services: Record<string, ServiceDefinition>;
     /** Engine services version. */
     version?: number;
 }
@@ -2989,9 +3002,7 @@ export declare enum PROTOCOL_CAPS {
     /** Driver is deprecated */
     DEPRECATED = 32768,
     /** Driver is experimental */
-    EXPERIMENTAL = 65536,
-    /** Node is certified reentrant-safe for cross-user sharing */
-    MULTITENANT = 131072
+    EXPERIMENTAL = 65536
 }
 /**
  * MIT License
@@ -5397,17 +5408,17 @@ export declare class RocketRideClient extends DAPClient {
      * `{ pipeline: { ... } }`.
      *
      * @param options - Pipeline execution options
-     * @param options.token - Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. The returned `token` is the full address. Not a credential: the developer id and the owner come from the account
+     * @param options.token - Custom token for the pipeline (auto-generated if not provided)
      * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
      * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
      * @param options.source - Override pipeline source
      * @param options.threads - Number of threads for execution (omit to let the server decide)
-     * @param options.useExisting - Attach to the task already running at the same address instead of failing with "Pipeline is already running"
+     * @param options.useExisting - Use existing pipeline instance
      * @param options.args - Command line arguments to pass to pipeline
      * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
      * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
      *
-     * @returns Promise resolving to an object whose `token` is the task address `developerId.pipelineId[.source]`, plus other metadata
+     * @returns Promise resolving to an object containing the task token and other metadata
      * @throws Error if neither pipeline nor filepath is provided
      *
      * @example
@@ -6227,12 +6238,6 @@ export declare class RocketRideClient extends DAPClient {
      * ```
      */
     getServices(): Promise<ServicesResponse>;
-    getServices(options: {
-        definitions: true;
-    }): Promise<ServiceDefinitionsResponse>;
-    getServices(options?: {
-        definitions?: boolean;
-    }): Promise<ServicesResponse | ServiceDefinitionsResponse>;
     /**
      * Retrieve a specific service's FULL definition from the server.
      *
@@ -7356,10 +7361,6 @@ export interface ShellApiConfig {
     RR_APIKEY?: string;
     /** Stripe publishable key — required for Stripe Elements checkout. */
     RR_STRIPE_PUBLISHABLE_KEY?: string;
-    /** PostHog project token (phc_*), served by the probe; absent = telemetry off. */
-    RR_POSTHOG_KEY?: string;
-    /** The analytics ingestion address, served by the probe alongside the key. */
-    RR_POSTHOG_HOST?: string;
     /** Zitadel instance base URL — required for PKCE OAuth login. */
     RR_ZITADEL_URL?: string;
     /** Zitadel application client ID — required for PKCE OAuth login. */
@@ -8132,24 +8133,8 @@ interface ShellConnectionEventMap {
      * it is kept in the connection manager's buffer, as are facts raised before
      * any app subscribed or whose last listener left before their dispatch, and
      * handed over by `drainTelemetry()`.
-     *
-     * @deprecated The shell owns the telemetry transport now (the reporter is
-     * handed to the app via TelemetryProvider/useReport); this event is typed
-     * for frozen-floor compatibility and is no longer emitted. Removal is a
-     * separate, signed-off contract decision.
      */
     "shell:telemetry": TelemetryFact;
-    /**
-     * The device's analytics-consent state changed: a banner or Settings
-     * decision in this tab ('local') or another tab's decision relayed through
-     * storage ('external'). Platform state — apps that gate their own
-     * experiment captures on consent (home-ui's roulette) follow this instead
-     * of owning a consent store.
-     */
-    "shell:consentChange": {
-        state: "undecided" | "accepted" | "rejected";
-        origin: "local" | "external";
-    };
     /**
      * Request the shell open a built-in overlay (e.g. from a guest app's
      * profile/account menu, which can't render the shell's overlays directly).
@@ -8491,14 +8476,6 @@ on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:t
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function — call it to remove the handler.
  */
-on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
-/**
- * Registers a handler for a typed shell event.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function — call it to remove the handler.
- */
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
@@ -8814,16 +8791,6 @@ emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry
  * @param event   - The event name from `ShellConnectionEventMap`.
  * @param payload - The payload matching the event's type.
  */
-emit(event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']): void;
-/**
- * Emits a typed shell event, dispatching to all registered handlers.
- *
- * Public so that any code (sidebar, home app, plugins) can fire UI
- * coordination events through the connection manager.
- *
- * @param event   - The event name from `ShellConnectionEventMap`.
- * @param payload - The payload matching the event's type.
- */
 emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
@@ -8992,7 +8959,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void) & ((event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']) => void) & ((event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void) & ((event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -9042,8 +9009,6 @@ on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell
 on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
-/** Subscribe to a named event. Returns an unsubscribe function. */
-on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -9267,107 +9232,6 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-/** What a visitor can choose: opt in, or decline. */
-export type ConsentChoice = "accepted" | "rejected";
-/** A choice, or 'undecided' while there is no valid record. */
-export type ConsentState = "undecided" | ConsentChoice;
-type SendOptions = {
-    transport?: "sendBeacon";
-    timestamp?: Date;
-    uuid?: string;
-};
-type Reporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => void;
-/** Where a state change came from: this page ('local') or another tab's storage write ('external'). */
-export type ConsentOrigin = "local" | "external";
-/** Props for the provider the shell wraps the app outlet in. */
-export type TelemetryProviderProps = {
-    /** The active app's bound reporter (host.ts getReporter). */
-    reporter: Reporter;
-    children?: React$1.ReactNode;
-};
-/**
- * Scopes the bound reporter to the app subtree and marks an app page active
- * for the transport (shell-owned screens are not pages: no $pageleave, no web
- * vitals attributed to them).
- */
-export declare const TelemetryProvider: React$1.FC<TelemetryProviderProps>;
-/**
- * The active app's bound `report(event, props?, options?)`. Stable identity;
- * outside a provider (a shell screen) it reports nothing.
- *
- * @returns The bound reporter.
- */
-export declare function useReport(): Reporter;
-/** What useConsent returns: the device's consent state and the way to change it. */
-export type ConsentApi = {
-    /** The device's consent record: 'undecided' | 'accepted' | 'rejected'. */
-    state: ConsentState;
-    /** Open the Settings overlay at the Privacy section (the one write surface besides the banner). */
-    openSettings(): void;
-};
-/**
- * The device's analytics-consent state, live: re-renders on decisions made in
- * the banner, the Settings toggle, or another tab. Apps that gate their own
- * experiment captures follow this instead of owning a consent store.
- *
- * @returns The state and the Settings affordance.
- */
-export declare function useConsent(): ConsentApi;
-/**
- * Ask the consent banner to open. The banner is a lazy chunk mounted once the
- * page has settled, so a request that arrives before it exists is kept until
- * the banner mounts and takes it (`takePendingOpen`).
- */
-export declare function openConsentBanner(): void;
-/**
- * The visitor's consent state (our own record).
- *
- * @returns The choice, or 'undecided' when nothing valid is stored.
- */
-export declare function getConsentState(): ConsentState;
-/**
- * Listen for consent changes, in this tab ('local') or another ('external');
- * the banner uses it to close after a decision and to reopen after another
- * tab's withdrawal, the Settings toggle to render the current state.
- *
- * @param fn Called with the new state and where the change came from.
- * @returns Unsubscribes `fn`.
- */
-export declare function subscribeConsent(fn: (state: ConsentState, origin: ConsentOrigin) => void): () => void;
-/**
- * Accepted consent expiry in milliseconds, or null when not accepted/valid.
- * Pure localStorage read — experiment gates (home-ui's roulette) use it
- * without starting any SDK.
- */
-export declare function consentExpiresAt(): number | null;
-/**
- * The slice of a PostHog instance the mode switch and its callers use; a posthog-js instance satisfies it as is.
- * capture, register and set_config are always there; the rest is optional, so a test double may leave it out.
- */
-export type SdkLike = Pick<PostHog, "capture" | "register" | "set_config"> & Partial<Pick<PostHog, "opt_out_capturing" | "opt_in_capturing" | "reset" | "stopSessionRecording" | "identify" | "register_for_session" | "get_session_id" | "onSessionId" | "webVitalsAutocapture" | "startSessionRecording" | "sessionRecordingStarted" | "get_property">>;
-/**
- * Register the before-send veto for experiment-bearing events (assignment_id):
- * the home app's roulette gate. One registrant; the default allows everything.
- */
-export declare function setAttributionGate(gate: (event: unknown) => boolean): void;
-/**
- * The explicit-consent experiment gateway: the active consented instance and
- * surface state, or null while capture is unavailable (no consent, SDK not
- * started, or the transport chunk not in yet). home-ui's roulette exposure
- * capture uses it for session-id reads and deterministic-uuid captures that
- * a plain reporter cannot express.
- */
-export declare function getConsentedCapture(): {
-    sdk: SdkLike;
-    signedOut: boolean;
-} | null;
-/**
- * After a sign-out on this page load, restart the recording once the home app
- * shows a signed-out surface (its transition screen is gone) — only the app
- * knows that moment, so it calls this; everything else about the resume is
- * transport-internal.
- */
-export declare function resumeSignedOutCapture(): void;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 /**
  * A ref whose `.current` always holds the latest render's value.
@@ -9556,12 +9420,6 @@ export declare class ConnectionManager implements IConnectionManager {
      * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
      * whose last listener left before its dispatch. Never throws.
      *
-     * @deprecated The shell owns the telemetry transport now: facts go through
-     * the shell's own reporter (telemetry/host.ts shellReporter), whose queue
-     * holds across teardown. Nothing feeds this channel any more — it drains
-     * empty. Kept because `shell:telemetry`/`drainTelemetry` are frozen v8/v9
-     * floor surface; real removal is a separate, signed-off contract decision.
-     *
      * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
      * @param props - Flat properties; the forwarding app adds its own super properties.
      */
@@ -9570,10 +9428,6 @@ export declare class ConnectionManager implements IConnectionManager {
      * Hand over every buffered telemetry fact, oldest first, and clear the buffer.
      * Call once from the app's analytics init, then subscribe to `shell:telemetry`
      * for the rest.
-     *
-     * @deprecated The shell owns the telemetry transport now; nothing feeds the
-     * channel, so this drains empty. Kept because it is frozen v8/v9 floor
-     * surface — real removal is a separate, signed-off contract decision.
      *
      * @returns The buffered facts in the order they were raised.
      */
@@ -9923,14 +9777,6 @@ emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry
  * @param event   - The event name from ShellConnectionEventMap.
  * @param payload - The payload matching the event's type.
  */
-emit(event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']): void;
-/**
- * Emit a typed shell event, dispatching to all registered handlers.
- * Also pushes to the debug log for the ALT+D panel.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param payload - The payload matching the event's type.
- */
 emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
@@ -10187,14 +10033,6 @@ on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myAp
  * @returns An unsubscribe function.
  */
 on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
-/**
- * Register a typed handler for a shell event.
- *
- * @param event   - The event name from ShellConnectionEventMap.
- * @param handler - Callback invoked when the event fires.
- * @returns An unsubscribe function.
- */
-on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
  *
@@ -15647,16 +15485,6 @@ export declare const shellApi: {
     };
     readonly useShellConnection: typeof useShellConnection;
     readonly useShellApiKey: typeof useShellApiKey;
-    readonly TelemetryProvider: import("react").FC<TelemetryProviderProps>;
-    readonly useReport: typeof useReport;
-    readonly useConsent: typeof useConsent;
-    readonly openConsentBanner: typeof openConsentBanner;
-    readonly getConsentState: typeof getConsentState;
-    readonly subscribeConsent: typeof subscribeConsent;
-    readonly consentExpiresAt: typeof consentExpiresAt;
-    readonly getConsentedCapture: typeof getConsentedCapture;
-    readonly setAttributionGate: typeof setAttributionGate;
-    readonly resumeSignedOutCapture: typeof resumeSignedOutCapture;
     readonly useAuthUser: typeof useAuthUser;
     readonly useLogout: typeof useLogout;
     readonly useWorkspace: typeof useWorkspace;
