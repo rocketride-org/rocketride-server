@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, remove, peek, no key past a tool
+// WAVE LOOP TESTS — the done rule, running calls (order, approval, timeouts, user time), stop and steering, remove, peek, summaries, no key past a tool
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -34,6 +34,7 @@ import { AgentTool, UserTime } from '../tools';
 import { runLoop, type FinishRule, type LoopOptions, type RanCall } from './loop';
 import { peek, RunMemory } from './memory';
 import type { ModelCall, PromptPrefix, QuestionSpec } from './plan';
+import { summarize } from './summary';
 
 // =============================================================================
 // FIXTURES
@@ -425,6 +426,49 @@ test('the best-effort answer shows a path peek cut by characters with its real c
 	const gathered = model.questions[2].context[0];
 	assert.match(gathered, /note = y{2000} \.\.\. \(cut at 2,000 of 32,000 characters\) \(characters 0 to 32,000 of 40,000\)$/m);
 	assert.doesNotMatch(gathered, /undefined/);
+});
+
+// =============================================================================
+// SUMMARIES — what the model sees of a stored result: a lookup table names its entries, a long list shows both ends
+// =============================================================================
+
+/** A lookup table under `names`: each entry has three shared fields, one long, and one field of its own. */
+const lookupTable = (names: string[]): Record<string, unknown> => Object.fromEntries(names.map((name, i) => [name, { title: `Service ${i}`, plans: null, description: 'd'.repeat(300), [`only_${i}`]: i }]));
+
+test('a lookup table too big to show as a record shows every name that fits, then whole entries labelled as a path writes them', () => {
+	const names = ['llm-anthropic', ...Array.from({ length: 199 }, (_, i) => `svc_${i}`)];
+	const summary = summarize(JSON.stringify({ services: lookupTable(names) }));
+	assert.match(summary, /^services:\n200 items, shared fields: \['title', 'plans', 'description'\] \(showing [1-9]\d* of 200\)\n/);
+	const sample = `\n  "llm-anthropic":\n    title: "Service 0"\n    plans: null\n    description: "${'d'.repeat(80)}..." (300 chars)\n    only_0: 0\n  svc_0:\n`;
+	assert.ok(summary.includes(`\n  names: ["llm-anthropic", ${names.slice(1).join(', ')}]${sample}`), 'every name, then the first entries whole');
+	assert.ok(summary.length <= 6000);
+
+	const many = summarize(JSON.stringify({ services: lookupTable(Array.from({ length: 1000 }, (_, i) => `service_number_${i}`)) }));
+	assert.match(many, /\n {2}names: \[service_number_0, service_number_1, .*, service_number_\d+\] and \d+ more\n\(short fields/, 'names past the room end with how many more there are');
+});
+
+test('a lookup table that fits, and a record of entries that share no field, show as records as before', () => {
+	assert.equal(summarize(JSON.stringify({ a: { id: 1, name: 'x' }, b: { id: 2, name: 'y' }, c: { id: 3, name: 'z' } })), 'a:\n  id: 1\n  name: "x"\nb:\n  id: 2\n  name: "y"\nc:\n  id: 3\n  name: "z"');
+
+	const unlike = Object.fromEntries(Array.from({ length: 300 }, (_, i) => [`k_${i}`, { [`f_${i}`]: 'v'.repeat(100) }]));
+	const summary = summarize(JSON.stringify(unlike));
+	assert.match(summary, /^k_0: {3}f_0: \(100 chars, peek the key to read it\)\n/);
+	assert.match(summary, /\n\.\.\. \(showing \d+ of 300 fields, peek the key for the rest\)$/);
+	assert.doesNotMatch(summary, /shared fields|names:/);
+});
+
+test('a list too long to show whole shows rows from its start and end, two thirds from the start, each under its real index', () => {
+	const events = Array.from({ length: 60 }, (_, i) => ({ seq: i, message: 'm'.repeat(100) }));
+	const summary = summarize(JSON.stringify({ events }));
+	const shown = [...summary.matchAll(/row\[(\d+)\]:\n {4}seq: (\d+)/g)].map(([, row, seq]) => {
+		assert.equal(row, seq, 'each row is labelled with its own index');
+		return Number(row);
+	});
+	const last = shown.filter((i) => i >= 30).length;
+	const first = shown.length - last;
+	assert.ok(last >= 1 && Math.abs(first - 2 * last) <= 1, `first ${first}, last ${last}`);
+	assert.deepEqual(shown, [...Array.from({ length: first }, (_, i) => i), ...Array.from({ length: last }, (_, i) => 60 - last + i)]);
+	assert.match(summary, new RegExp(`^events:\\n60 items, fields: \\['seq', 'message'\\] \\(showing first ${first} and last ${last} of 60\\)\\n`));
 });
 
 // =============================================================================

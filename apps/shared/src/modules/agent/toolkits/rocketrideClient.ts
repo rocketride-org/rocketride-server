@@ -72,15 +72,6 @@ const ALREADY_RUNNING = /already running/i;
 /** How to run an edited pipeline whose earlier run still holds it (the engine never applies a new pipeline to a running task). */
 const RERUN_GUIDANCE = 'Your edits are not in the running task. To run them, terminate that run (getTaskToken({ "projectId": ..., "source": ... }) gives its token) and call use again; if this conversation did not start it, ask the user first.';
 
-/** The longest a service's summary runs in a trimmed catalog, in characters. */
-const SUMMARY_MAX_CHARS = 100;
-
-/**
- * The longest the catalog runs before each service is cut to one line. It stays at the old result
- * limit: the catalog's view is decided separately from RESULT_MAX_CHARS.
- */
-const CATALOG_MAX_CHARS = 32_000;
-
 /** The guide that documents every client method. */
 const GUIDE = '.rocketride/docs/ROCKETRIDE_typescript_API.md';
 
@@ -218,44 +209,13 @@ function isPlainData(value: unknown): boolean {
 }
 
 /**
- * The first sentence of a service's description, on one line and cut short.
- *
- * @param description - The service's `description`, text or lines of text.
- * @returns The summary; empty when there is no description.
- */
-function summaryOf(description: unknown): string {
-	const joined = Array.isArray(description) ? description.join(' ') : description;
-	const text = typeof joined === 'string' ? joined.replace(/\s+/g, ' ').trim() : '';
-	const sentence = /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
-	return sentence.length > SUMMARY_MAX_CHARS ? `${sentence.slice(0, SUMMARY_MAX_CHARS - 1).trimEnd()}…` : sentence;
-}
-
-/**
- * A service cut to one line, the way the catalog lists it when trimmed.
- *
- * @param service - One entry of the catalog's `services`.
- * @returns Its `classType` tags and summary, for example `[llm] Calls OpenAI.`; empty when it has neither.
- */
-function serviceLine(service: JsonObject): string {
-	const tags = Array.isArray(service.classType) ? service.classType.filter((tag): tag is string => typeof tag === 'string') : [];
-	return [tags.length > 0 ? `[${tags.join(', ')}]` : '', summaryOf(service.description)].filter((part) => part !== '').join(' ');
-}
-
-/**
- * The engine's catalog made fit to read: the SVG icon table goes (it alone is far over
- * CATALOG_MAX_CHARS), and when the rest still does not fit, each service is cut to its category and
- * summary so no service drops off the end.
+ * The engine's catalog as the model reads it: every service whole, without the SVG icon table,
+ * which the model has no use for. The model sees the catalog's summary and peeks the services it needs.
  */
 function catalogOf(result: unknown): unknown {
 	if (!isJsonObject(result)) return result;
 	const { icons: _icons, ...catalog } = result;
-	if (JSON.stringify(catalog, null, 1).length <= CATALOG_MAX_CHARS) return catalog;
-
-	const services = Object.entries(isJsonObject(catalog.services) ? catalog.services : {})
-		.filter((entry): entry is [string, JsonObject] => isJsonObject(entry[1]))
-		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-		.map(([name, service]) => [name, serviceLine(service)]);
-	return { note: 'Each service is cut to its classType tags and a one-line summary to fit; getService(name) gives one service in full.', version: catalog.version, services: Object.fromEntries(services) };
+	return catalog;
 }
 
 /**

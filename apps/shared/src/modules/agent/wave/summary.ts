@@ -28,7 +28,14 @@
  * Every planning wave resends every earlier result's summary, so a summary shows a result's shape
  * (field names, lengths, sample values) in bounded characters, and the model peeks the key for the
  * rest. A port of Wave's `_describe` (`nodes/src/nodes/agent_rocketride/executor.py`); constants
- * and texts match it, since the prompt teaches the model to read them.
+ * and texts match it, since the prompt teaches the model to read them, except in two places:
+ * - A dict used as a lookup table that cannot show as a record without leaving entries out shows
+ *   the way a list does: its count and shared fields, then its names, then whole entries (see
+ *   renderTable). As a record it showed one notice line per entry until its room ran out, so the
+ *   node catalog named 70 of its 174 services.
+ * - A list that cannot show all its rows shows its first and last ones, the start taking two
+ *   thirds as in a cut text, and its header says how many of each. Wave shows the first rows
+ *   only, so a log read never showed its newest events, where an error usually is.
  *
  * Two passes per container: `cost` sizes its fields exactly, then `render` gives each a room. A
  * container keeps to its room by leaving out whole fields or rows, never by cutting a rendered
@@ -48,6 +55,7 @@ const SUMMARY_MAX_DEPTH = 6;
 /**
  * Longest list of dicts shown whole, so an MCP tool's one or two content blocks show their text. A
  * longer list shows as many whole rows as fit; a list inside a sampled row shows at most this many.
+ * A dict needs more entries than this to show as a table (see sharedFields).
  */
 const SUMMARY_SHORT_LIST = 2;
 
@@ -579,8 +587,9 @@ function render(value: unknown, depth: number, room: number, inRow = false, omit
 
 /**
  * A list of dicts: its field names, then its rows. Past SUMMARY_SHORT_LIST rows it is a sample:
- * whole rows, in order, while they fit, with the header counting the ones shown. A later row can be
- * a scalar; it is rendered like any value.
+ * whole rows while they fit, from the start and the end, the start taking two thirds (as cutText
+ * does), each labelled with its real index and the header counting those from each end. A list
+ * inside a sampled row shows its first rows. A later row can be a scalar; it is rendered like any value.
  */
 function renderRows(value: unknown[], depth: number, room: number, inRow: boolean, omitted: Omitted | undefined, path: Path): string {
 	const n = value.length;
@@ -589,6 +598,7 @@ function renderRows(value: unknown[], depth: number, room: number, inRow: boolea
 	const labelled = (i: number, body: string): string => `\n${pad}${INDENT}row[${i}]:\n${body}`;
 
 	const rows: string[] = [];
+	let last = 0; // of the rows shown, how many come from the end
 	if (inRow) {
 		value.slice(0, SUMMARY_SHORT_LIST).forEach((row, i) => rows.push(labelled(i, render(row, depth + 1, room, true))));
 	} else if (n <= SUMMARY_SHORT_LIST) {
@@ -600,21 +610,47 @@ function renderRows(value: unknown[], depth: number, room: number, inRow: boolea
 			else if (omitted) collectShort(row, [...path, i], depth + 1, omitted);
 		});
 	} else {
+		// Rows from each end in turn, one from the end for every two from the start; an end stops at its first row that does not fit.
+		const texts = new Map<number, string>();
+		const taken: number[] = [];
+		let first = 0;
 		let used = header.length;
-		for (let i = 0; i < n; i++) {
+		let startOpen = true;
+		let endOpen = true;
+		while (first + last < n && (startOpen || endOpen)) {
+			const fromEnd = endOpen && (!startOpen || last * 2 < first);
+			const i = fromEnd ? n - 1 - last : first;
 			const text = labelled(i, render(value[i], depth + 1, room, true));
-			if (used + text.length > room) break;
-			rows.push(text);
+			if (used + text.length > room) {
+				if (fromEnd) endOpen = false;
+				else startOpen = false;
+				continue;
+			}
+			texts.set(i, text);
+			taken.push(i);
 			used += text.length;
+			if (fromEnd) last += 1;
+			else first += 1;
 		}
-		// Some rows are left out: give up shown ones until the header's notice fits as well.
-		while (rows.length > 0 && rows.length < n && used + ` (showing ${rows.length} of ${n})`.length > room) {
-			used -= (rows.pop() as string).length;
+		// Some rows are left out: give up the last taken until the header's notice fits as well.
+		while (taken.length > 0 && taken.length < n && used + rowsShown(first, last, n).length > room) {
+			const i = taken.pop() as number;
+			used -= (texts.get(i) as string).length;
+			texts.delete(i);
+			if (i < first) first -= 1;
+			else last -= 1;
 		}
+		for (const i of [...texts.keys()].sort((a, b) => a - b)) rows.push(texts.get(i) as string);
 	}
 	// Say the sample is partial, so a lookup peeks the key instead of re-running the search.
-	if (rows.length < n) header += ` (showing ${rows.length} of ${n})`;
+	if (rows.length < n) header += rowsShown(rows.length - last, last, n);
 	return header + rows.join('');
+}
+
+/** A sampled list's notice: how many rows it shows from the start and from the end, e.g. ` (showing first 4 and last 2 of 51)`. */
+function rowsShown(first: number, last: number, n: number): string {
+	const which = !last ? `${first}` : !first ? `last ${last}` : `first ${first} and last ${last}`;
+	return ` (showing ${which} of ${n})`;
 }
 
 /**
@@ -678,7 +714,8 @@ function renderFilled(value: unknown[], depth: number, room: number, omitted: Om
  * A dict as indented `key: value` lines, every field whole when it all fits. Otherwise keys, short
  * fields and length notes are paid first and the rest is split among fields that can spend it, so a
  * command's stdout cannot crowd out its stderr or exit code. Fields that still do not fit are left
- * out whole, status-named ones last, and a final line counts them.
+ * out whole, status-named ones last, and a final line counts them. A lookup table (see
+ * sharedFields) that would leave fields out this way shows as a table instead (see renderTable).
  */
 function describeDict(d: Record<string, unknown>, depth: number, room: number, inRow: boolean, omitted: Omitted | undefined, path: Path): string {
 	const pad = INDENT.repeat(depth);
@@ -700,6 +737,9 @@ function describeDict(d: Record<string, unknown>, depth: number, room: number, i
 		const notice = fieldsNotice(depth, entries.length, entries.length) + 1; // and its newline
 		const order = range(items.length).sort((a, b) => priority(a) - priority(b) || a - b);
 		[rooms, cut] = allocate(room + 1, items, order, notice);
+		const fields = cut ? sharedFields(entries) : [];
+		const table = fields.length ? renderTable(entries, fields, depth, room, omitted, path) : null;
+		if (table !== null) return table;
 	}
 	const lines: string[] = [];
 	entries.forEach(([k, v], i) => {
@@ -709,6 +749,63 @@ function describeDict(d: Record<string, unknown>, depth: number, room: number, i
 	});
 	if (cut) lines.push(`${pad}... (showing ${rooms.size} of ${entries.length} fields, peek the key for the rest)`);
 	return lines.join('\n');
+}
+
+/**
+ * The field names every value of a dict has, when the dict reads as a lookup table: more than
+ * SUMMARY_SHORT_LIST entries, each a dict that is not empty. Empty when it is not one, or its values
+ * share no field, so a record of different things stays a record.
+ */
+function sharedFields(entries: Array<[string, unknown]>): string[] {
+	if (entries.length <= SUMMARY_SHORT_LIST || !entries.every(([, v]) => isObject(v) && Object.keys(v).length > 0)) return [];
+	let shared = Object.keys(entries[0][1] as Record<string, unknown>);
+	for (const [, v] of entries) {
+		shared = shared.filter((k) => Object.hasOwn(v as Record<string, unknown>, k));
+		if (!shared.length) break;
+	}
+	return shared;
+}
+
+/**
+ * A lookup table as a list of dicts shows: a header with its count and shared fields, then as many
+ * of its names as fit, then as many whole entries as fit, in order, each shown as in a sampled row.
+ * Names and entries are written as a path writes the key, so a peek can read any of them. Short
+ * fields of the entries not shown whole are recorded, as for a record.
+ *
+ * @returns The table within `room`, or null when its header does not fit and the dict shows as a record.
+ */
+function renderTable(entries: Array<[string, unknown]>, fields: string[], depth: number, room: number, omitted: Omitted | undefined, path: Path): string | null {
+	const n = entries.length;
+	const pad = INDENT.repeat(depth);
+	const header = `${n} items, shared fields: ${pyList(fields)}`;
+	// The header's notice is kept room for at its longest, so the names cannot take it.
+	let used = header.length + ` (showing ${n} of ${n})`.length;
+	if (used > room) return null;
+
+	const names = entries.map(([k]) => pathText([k]));
+	let namesLine = `\n${pad}names: [${names.join(', ')}]`;
+	if (used + namesLine.length > room) {
+		// Not all fit: as many as do, then how many more there are.
+		let length = `\n${pad}names: [] and ${n} more`.length;
+		let fit = 0;
+		while (fit < n && used + length + names[fit].length + (fit ? 2 : 0) <= room) {
+			length += names[fit].length + (fit ? 2 : 0);
+			fit += 1;
+		}
+		namesLine = fit ? `\n${pad}names: [${names.slice(0, fit).join(', ')}] and ${n - fit} more` : '';
+	}
+	used += namesLine.length;
+
+	const shown: string[] = [];
+	for (const [k, v] of entries) {
+		const text = `\n${pad}${pathText([k])}:\n${render(v, depth + 1, room, true)}`;
+		if (used + text.length > room) break;
+		shown.push(text);
+		used += text.length;
+	}
+	if (omitted) for (const [k, v] of entries.slice(shown.length)) collectShort(v, [...path, k], depth + 1, omitted);
+	const notice = shown.length < n ? ` (showing ${shown.length} of ${n})` : '';
+	return header + notice + namesLine + shown.join('');
 }
 
 // =============================================================================
