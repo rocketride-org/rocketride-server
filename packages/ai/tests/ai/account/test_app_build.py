@@ -925,6 +925,29 @@ async def test_zip_entries_under_node_modules_are_refused(monkeypatch, build_sto
 
 
 @pytest.mark.asyncio
+async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, build_store, toolchain):
+    """No app path may contain '!', the bundler's request separator, so a
+    resolved request cannot be forged by a file or folder name.
+    """
+    zip_bytes = _hardening_zip({'apps/brandy-ui/src/x!y/a.ts': 'export {};\n'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_typecheck_cannot_write_build_info(monkeypatch, build_store, toolchain):
+    """The typecheck turns incremental and composite off, so a tsconfig
+    tsBuildInfoFile cannot make tsc write a file anywhere.
+    """
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip())
+    argv = next(c for c in fake.calls if '--noEmit' in c['argv'])['argv']
+    assert argv[argv.index('--incremental') + 1] == 'false'
+    assert argv[argv.index('--composite') + 1] == 'false'
+
+
+@pytest.mark.asyncio
 async def test_npmrc_and_pnpmfiles_removed_and_workspace_yaml_allowlisted(monkeypatch, build_store, toolchain):
     """Developer pnpm configuration that can load code or redirect pnpm's
     directories is removed before install: every .npmrc and pnpmfile in the
@@ -1085,6 +1108,7 @@ def _guard_cases(job, env):
         ('relative/loader!' + app_ts, False),  # unresolved segment: fail closed
         ('', False),
         (f'{loader}!!{app_ts}', False),  # empty segment: fail closed
+        (f'{os.path.join(job, "ws", "evil.cjs")}!{os.path.join(job, "ws", "x")}!=!data:/a.js', False),  # forged path
     ]
 
 

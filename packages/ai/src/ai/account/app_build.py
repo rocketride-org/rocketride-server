@@ -66,7 +66,8 @@ config is neutralized, .env files keep only PUBLIC_ entries, and the
 bundler refuses any loader outside the platform toolchain and any module
 outside the job directory or the toolchain. What the type checker can still
 READ while it compiles is bounded only by the process sandbox (an infra
-concern, not this module).
+concern, not this module); the typecheck runs with incremental and
+composite off, so tsconfig cannot make it write build-info files.
 """
 
 import asyncio
@@ -913,8 +914,11 @@ def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loade
     if not isinstance(request, str) or not request:
         return False
     rest = request
-    if '!=!' in rest:
-        rest = rest.split('!=!', 1)[1]
+    # matchResource prefix, as the bundler parses it: ^([^!]+)!=! — the
+    # prefix itself never contains '!'.
+    match = re.match(r'^[^!]+!=!', rest)
+    if match:
+        rest = rest[match.end() :]
     for prefix in ('-!', '!!', '!'):
         if rest.startswith(prefix):
             rest = rest[len(prefix) :]
@@ -955,8 +959,8 @@ function rrUnder(file, roots) {
 function rrRequestAllowed(request) {
   if (typeof request !== 'string' || !request) return false;
   let rest = request;
-  const mr = rest.indexOf('!=!');
-  if (mr !== -1) rest = rest.slice(mr + 3);
+  const mr = /^[^!]+!=!/.exec(rest);
+  if (mr) rest = rest.slice(mr[0].length);
   for (const prefix of ['-!', '!!', '!']) {
     if (rest.startsWith(prefix)) { rest = rest.slice(prefix.length); break; }
   }
@@ -981,7 +985,8 @@ class RocketRideResolvedModuleGuard {
     compiler.hooks.normalModuleFactory.tap('rr-resolved-module-guard', (factory) => {
       factory.hooks.afterResolve.tap('rr-resolved-module-guard', (data) => {
         const created = (data && data.createData) || {};
-        rrCheck(String(created.request || created.resource || ''));
+        // No request means the loader chain cannot be checked: refuse.
+        rrCheck(typeof created.request === 'string' ? created.request : '');
       });
     });
     compiler.hooks.contextModuleFactory.tap('rr-resolved-module-guard', (factory) => {
@@ -1608,6 +1613,13 @@ class AppBuildWorker:
                 raise BuildFailure(
                     'materialize', f'zip entry {item.filename!r} is inside node_modules — packs must not ship packages'
                 )
+            # '!' is the bundler's request separator. No path in the tree may
+            # carry one, so a resolved request string cannot be forged by a
+            # file or folder name (the resolved-module guard relies on this).
+            if '!' in name:
+                raise BuildFailure(
+                    'materialize', f"zip entry {item.filename!r} contains '!' — not allowed in app paths"
+                )
             if item.is_dir():
                 continue
             dest = os.path.join(ws_dir, *name.split('/'))
@@ -1721,10 +1733,15 @@ class AppBuildWorker:
                 raise BuildInfraFailure('typecheck', 'baked typescript missing from the toolchain env')
             await feed.set_phase('typecheck')
             code, out = await _exec(
-                [node, tsc, '--noEmit', '-p', tsconfig], app_dir, _PHASE_TIMEOUTS['typecheck'], on_line=feed.line
+                [node, tsc, '--noEmit', '--incremental', 'false', '--composite', 'false', '-p', tsconfig],
+                app_dir,
+                _PHASE_TIMEOUTS['typecheck'],
+                on_line=feed.line,
             )
             await feed.flush()
-            log_parts.append(f'== typecheck ==\n$ node {tsc} --noEmit -p {tsconfig}\n{out}')
+            log_parts.append(
+                f'== typecheck ==\n$ node {tsc} --noEmit --incremental false --composite false -p {tsconfig}\n{out}'
+            )
             if code != 0:
                 raise BuildFailure('typecheck', f'tsc --noEmit failed (exit {code})', _tsc_errors(out))
 
