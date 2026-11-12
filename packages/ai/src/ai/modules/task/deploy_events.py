@@ -117,6 +117,14 @@ async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: s
         invalidate_app_serving(app_id)
     except Exception as e:
         error(f'[DEPLOY] {app_id}: serving-cache invalidation failed: {e}')
+    # Publish, unpublish or rung repoint: rebuild the public-page aggregate
+    # (coalesced, in the background; never delays the broadcast).
+    try:
+        from ai.modules.shell.public_pages import app_changed
+
+        app_changed(app_id)
+    except Exception as e:
+        error(f'[DEPLOY] {app_id}: public-page rebuild scheduling failed: {e}')
     await broadcast_deploy_changed(server, org_id, '', app_id, action)
 
 

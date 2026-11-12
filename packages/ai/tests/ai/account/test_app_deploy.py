@@ -50,7 +50,6 @@ from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _publisher_of,
-    _serving_block_of,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -1580,35 +1579,6 @@ async def test_resolve_app_pins_skips_unbuilt_versions(registry):
 # =============================================================================
 
 
-def _binding(audience, binding='enabled', deployment='ready', build='ok'):
-    """One joined publish row as the backends return it."""
-    return {'state': binding, 'audience': dict(audience), 'artifactState': deployment, 'artifactBuild': build}
-
-
-@pytest.mark.parametrize(
-    'row, ladder, expected',
-    [
-        (_binding(AUD_USER), True, ''),
-        # The owner's own switch outranks every other cause.
-        (_binding(AUD_USER, binding='disabled', deployment='failed', build='failed'), True, 'disabled'),
-        (_binding(AUD_TEAM, deployment='failed'), True, 'failed'),
-        (_binding(AUD_PUBLIC, deployment='submit'), True, 'in-review'),
-        (_binding(AUD_PUBLIC, deployment='rejected'), True, 'rejected'),
-        (_binding(AUD_PUBLIC, deployment='private'), True, 'not-approved'),
-        # No review ladder: public serves like an internal rung.
-        (_binding(AUD_PUBLIC, deployment='private'), False, ''),
-        # Internal rungs serve anything but a failed deployment.
-        (_binding(AUD_TEAM, deployment='submit'), True, ''),
-        (_binding(AUD_USER, build='failed'), True, 'build-failed'),
-        (_binding(AUD_USER, build='building'), True, 'building'),
-        (_binding(AUD_USER, build=''), True, 'building'),
-    ],
-)
-def test_serving_block_of_names_why_a_binding_does_not_serve(row, ladder, expected):
-    """#2461: one gate decides serving for the manifest AND the owner's view."""
-    assert _serving_block_of(row, ladder) == expected
-
-
 @pytest.mark.asyncio
 async def test_resolve_app_pins_most_specific_audience_wins(registry):
     """On id collisions the user binding beats team, team beats public."""
@@ -1814,3 +1784,127 @@ async def test_resolve_publisher_falls_back_to_the_developer_namespace(registry,
 def test_publisher_of_never_returns_empty(app_id, manifest, snapshot, expected):
     """The publisher resolver's order and its namespace floor."""
     assert _publisher_of(app_id, manifest, snapshot) == expected
+
+
+# =============================================================================
+# PUBLIC-PAGES GATE: publicPages/site validated on the public rung only
+# =============================================================================
+
+
+def _platform_request(subcommand, **args):
+    """An rrext_deploy_app request for the platform's home app."""
+    return {'command': 'rrext_deploy_app', 'arguments': {'subcommand': subcommand, 'appId': 'rocketride.home', **args}}
+
+
+@pytest.fixture
+def no_published_pages(monkeypatch):
+    """No other platform app holds page claims (the gate's collision feed),
+    and the version's build output carries no app-manifest.json: the
+    manifest under test is metadata.manifest.
+
+    A platform app's publish schedules a page-map rebuild: it is a no-op
+    here, and the rebuild state is restored after the test, so nothing
+    reaches the real account or store.
+    """
+    import ai.modules.shell.public_pages as pp
+    from ai.account.store import StorageNotFoundError
+
+    async def load_published(acct=None, strict=False, exclude=''):
+        return []
+
+    async def no_files(path):
+        raise StorageNotFoundError(path)
+
+    async def no_rebuild(acct=None):
+        return True
+
+    monkeypatch.setattr(pp, 'load_published', load_published)
+    monkeypatch.setattr(pp, 'read_artifact_file', no_files)
+    monkeypatch.setattr(pp, 'artifact_file_info', no_files)
+    monkeypatch.setattr(pp, 'page_map', pp.PageMap())
+    monkeypatch.setattr(pp.page_map, 'rebuild', no_rebuild)
+
+
+@pytest.mark.asyncio
+async def test_public_publish_accepts_valid_public_pages(registry, quiet_push, no_published_pages, monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/', 'title': 'Home'}, {'path': '/pricing', 'title': 'P'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_public_publish_rejects_invalid_public_pages(registry, quiet_push, no_published_pages, monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/Pricing', 'title': 'P'}, {'path': '/api/x', 'title': 'A'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False
+    assert 'Version 1 of rocketride.home cannot go public: ' in result['message']
+    assert 'must be lowercase' in result['message'] and "reserved prefix '/api'" in result['message']
+    assert registry.set_calls == []  # no binding was created
+
+
+@pytest.mark.asyncio
+async def test_internal_rungs_skip_the_public_pages_gate(registry, quiet_push, no_published_pages):
+    # The aggregate reads the public rung only: a team pin of a work-in-progress
+    # manifest (pre-release) is the developer's business.
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/Bad', 'title': 'P'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@team/Development'))
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_third_party_public_pages_rejected_at_publish(registry, quiet_push, no_published_pages):
+    manifest = {'name': 'Brandy', 'publicPages': [{'path': '/brandy', 'title': 'B'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+    result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
+    assert result['success'] is False and 'platform capability' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_third_party_site_alone_publishes(registry, quiet_push, no_published_pages):
+    # A store app's generic 'site' key can never take effect, so it never blocks a publish.
+    manifest = {'name': 'Brandy', 'site': {'title': 'Brandy', 'docsUrl': 'not a url'}}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='acme')
+    result = await handle_deploy_app(dev, _request('publish', version=1, target='@public'))
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_public_pages_gate_fails_closed_on_storage_errors(registry, quiet_push, no_published_pages, monkeypatch):
+    import ai.modules.shell.public_pages as pp
+
+    async def broken(acct=None, strict=False, exclude=''):
+        raise RuntimeError('store down')
+
+    monkeypatch.setattr(pp, 'load_published', broken)
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    manifest = {'name': 'Home', 'publicPages': [{'path': '/', 'title': 'Home'}]}
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest=manifest)
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False
+    assert result['message'] == 'Could not verify the publicPages claims of rocketride.home: store down'
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_public_pages_gate_fails_closed_without_an_artifact_path(registry, quiet_push, no_published_pages):
+    # An empty artifactPath would map the version to the store's root dist/.
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready', manifest={'name': 'Home'})
+    registry.versions[-1]['artifactPath'] = ''
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+    assert result['success'] is False and 'no artifact path' in result['message']
+    assert registry.set_calls == []

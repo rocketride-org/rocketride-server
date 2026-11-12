@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-11-04
 
 ### Added
+- **shell**: apps can declare public pages and site metadata (`publicPages`, `site`) in `dist/app-manifest.json`. Publishing refuses an invalid or unprivileged declaration, and the engine keeps one page map built from every published platform app.
 - **client-python**: `rocketride --version` prints the installed package version
 - **mcp**: every HTTP MCP tool now declares explicit `readOnlyHint`, `destructiveHint` and `openWorldHint` annotations, the server sends `instructions`, the four core workflow tools ask Claude Code to load them upfront (`anthropic/alwaysLoad`), and the engine serves OpenAI's plugin domain-verification token at `/.well-known/openai-apps-challenge` from `MCP_OPENAI_APPS_CHALLENGE_TOKEN` (404 while unset) (#2997)
 - **docs**: a Cloud Databases page under Deploy & Operate says what an app owner gets from the `rocketride_sql`, `rocketride_vector` and `rocketride_graph` databases: one per organization shared by its members, plus team and personal ones, and none per app; up to 6 transactions at once per database and no storage, table or query-rate quotas; uninstalling an app leaves its tables, while a member leaving or a team or organization being deleted retains a database for 30 days before a final dump and deletion; backups configured for whole-cluster point-in-time recovery over 30 days; and no export. `ROCKETRIDE_APPS.md` gives app agents the short version (rocketride-saas#788)
