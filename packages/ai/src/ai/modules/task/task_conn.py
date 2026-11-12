@@ -253,6 +253,9 @@ class TaskConn(
     # the revoked user for the disconnect handler's dashboard event.
     _revoked: bool = False
     _revoked_user_id: Optional[str] = None
+    # When this connection's platform authority was last verified, on the
+    # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
+    _authz_verified_at: float = 0.0
 
     def __init__(
         self,
@@ -378,6 +381,18 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # Platform authority not verified recently (live re-check, #972):
+        # refuse, keep the socket; the next good read resumes it.
+        authz = getattr(self._server, '_authz', None)
+        if authz is not None and not authz.gate_ok(self):
+            denied = self._server.count_authz('denied_unavailable')
+            warning(
+                f'[AUTHZ] denied conn={self.get_connection_id()} user={self._account_info.userId} '
+                f'command={cmd} denied_unavailable={denied}'
+            )
+            await self.send(self.build_error(message, 'Authorization temporarily unavailable'))
+            return
+
         # Task-capability sockets (pk_/tk_) may only send their allow-listed
         # commands. Checked on the same ``command`` string DAPConn turns into
         # ``on_<command>``, before any handler is looked up.
@@ -415,6 +430,11 @@ class TaskConn(
 
         credential = args.get('auth') or ''
 
+        # Verification stamp for the live re-check (#972), read BEFORE the
+        # await: the identity installed below is no newer than this.
+        authz = getattr(self._server, '_authz', None)
+        t0 = authz.clock() if authz is not None else 0.0
+
         result = await self._server._server.authenticate_credential(credential)
         if isinstance(result, tuple):
             error_code, error_message = result
@@ -448,6 +468,7 @@ class TaskConn(
 
         self._account_info = result
         self._authenticated = True
+        self._authz_verified_at = t0
         self._server.release_unauthed_slot(self._client_ip)
 
         # Capture optional client identification from auth arguments

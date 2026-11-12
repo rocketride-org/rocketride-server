@@ -166,9 +166,13 @@ async def broadcast_review_state(
         body['version'] = version
     if notes:
         body['notes'] = notes
+    authz = getattr(server, '_authz', None)
     for conn in list(getattr(server, '_connections', {}).values()):
         info = getattr(conn, '_account_info', None)
         if not info:
+            continue
+        # Platform authority verified recently (live re-check, #972)
+        if authz is not None and not authz.gate_ok(conn):
             continue
         # Task-scoped sockets (pk_/tk_) carry the launching user's identity
         # but never receive user-facing pushes (mirrors push_org_update).
