@@ -44,12 +44,16 @@ class _FakeQuestion:
         self.context = []
         self.documents = []
         self.instructions = []
+        self.history = []
 
     def addQuestion(self, text):
         self.questions.append(text)
 
     def addContext(self, ctx):
         self.context.append(ctx)
+
+    def addHistory(self, item):
+        self.history.append(item)
 
     def addDocuments(self, documents):
         self.documents.extend(documents or [])
@@ -164,7 +168,7 @@ def _grounding_text(inst):
 
 def _ask(inst, text='What did the filing say?'):
     """Put a question on the questions lane, as a real turn always does."""
-    inst.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=text)]))
+    inst.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=text)], history=[]))
 
 
 def test_retrieved_documents_get_a_grounding_instruction(node):

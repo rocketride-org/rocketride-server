@@ -110,7 +110,7 @@ def schema_prompt_node():
 
 def _turn(node, question, documents):
     """One retrieval turn, returning the instruction the model would be given."""
-    node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=question)]))
+    node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=question)], history=[]))
     node.writeDocuments(documents)
     node.closing()
     emitted = node.emitted[-1]
@@ -147,7 +147,7 @@ def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
 
 def _schema_turn(node, documents, context):
     """One turn through the prompt node on the real schema; returns the question it emits."""
-    node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=QUESTION)]))
+    node.writeQuestions(types.SimpleNamespace(questions=[types.SimpleNamespace(text=QUESTION)], history=[]))
     node.writeDocuments(documents)
     for text in context:
         node.writeText(text)
