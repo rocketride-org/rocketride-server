@@ -193,6 +193,8 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
      The image is amd64 only. On Apple Silicon, add `--platform linux/amd64` to both `docker pull` and `docker create`.
 
+     A local engine expects a key value. The key can be any string that starts with `rr_`, and the CLI and SDK must send the same value the engine was started with.
+
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
    - **RocketRide Cloud** - Skip the setup and ship straight to [managed hosting](https://cloud.rocketride.ai/). Same portable pipeline JSON, zero infrastructure to run, from prototype to production. [Get started](https://cloud.rocketride.ai/)
