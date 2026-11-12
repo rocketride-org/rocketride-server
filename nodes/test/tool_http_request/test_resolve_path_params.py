@@ -23,9 +23,8 @@ import pytest
 # it is not installed in this environment.
 pytest.importorskip('requests')
 
-# Add the node source directory to sys.path so we can import the module
-# without triggering the top-level nodes/__init__.py (which requires the
-# engine runtime). Mirrors test_rate_limiter.py.
+# Add the node source directory to sys.path so the module imports by its bare
+# name. Mirrors test_rate_limiter.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'))
 
 from http_client import _resolve_path_params  # noqa: E402
