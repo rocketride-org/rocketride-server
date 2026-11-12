@@ -55,6 +55,9 @@ import { CompactNavProvider, useCompactNav } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
+import { ConsentBannerHost } from '../../telemetry/ConsentBannerHost';
+import { TelemetryProvider } from '../../telemetry/TelemetryContext';
+import { getReporter } from '../../telemetry/host';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { SignedOutScreen } from './SignedOutScreen';
 import { AuthPhase } from '../../types/connection';
@@ -770,6 +773,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<CompactNavProvider value={compactNav}>
 		<div style={styles.shell}>
 			<ConnectionErrorBanner />
+			{/* The consent banner, shell-owned: renders nothing when telemetry is
+			    off (no probe key), in VS Code (the editor's telemetry setting is
+			    the one switch), or until the page settles. The footer's "Privacy
+			    settings" link reopens it on any surface, signed in too. */}
+			<ConsentBannerHost signedOut={identity === null} />
 			{/* The way to the navigation once it is a drawer. Renders nothing for
 			    an app that has no sidebar to open. */}
 			{isCompact && <CompactChromeBar open={drawerOpen} onOpen={() => setDrawerOpen(true)} />}
@@ -794,12 +802,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						{hasAppUi && activeApp ? (
 							// The framing control mounts the descriptor's `app`
 							// component raw; the app declares its layout inside.
+							// The reporter is bound to the DESCRIPTOR's id — a late
+							// event from a backgrounded app stamps its true emitter.
 							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<AppFrame
-									app={activeApp}
-									isConnected={isConnected}
-									identity={identity}
-								/>
+								<TelemetryProvider reporter={getReporter(activeAppId)}>
+									<AppFrame
+										app={activeApp}
+										isConnected={isConnected}
+										identity={identity}
+									/>
+								</TelemetryProvider>
 							</AppErrorBoundary>
 					) : devPending ? (
 							// DEV PREVIEW, registration not yet injected: the dev

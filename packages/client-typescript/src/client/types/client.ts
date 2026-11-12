@@ -589,6 +589,24 @@ export interface ServerInfoResult {
 	stripePublishableKey?: string;
 
 	/**
+	 * PostHog project token (`phc_*`) configured on this server.
+	 *
+	 * Lets the shell initialise product telemetry with the key matching
+	 * this environment instead of a build-time value; apps never carry a
+	 * key at all. Absent on servers without telemetry (OSS) — telemetry is
+	 * then structurally off. Always accompanied by {@link ServerInfoResult.posthogHost}.
+	 */
+	posthogPublishableKey?: string;
+
+	/**
+	 * The analytics ingestion address telemetry requests go to.
+	 *
+	 * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
+	 * is; defaults server-side to the managed analytics proxy.
+	 */
+	posthogHost?: string;
+
+	/**
 	 * The server's public addresses, RESOLVED to absolute URLs.
 	 *
 	 * `getServerInfo` substitutes the server's `'origin'` sentinel ("the

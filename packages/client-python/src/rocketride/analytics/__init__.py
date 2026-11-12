@@ -21,44 +21,65 @@
 # SOFTWARE.
 
 """
-rocketride.analytics — the one shared event-report function (bare bones).
+rocketride.analytics — bound per-app event reporters (bare bones).
 
-Every app calls ``report(event, props)`` with any string event + free-form props —
-event names are NOT constrained to a central list; each app owns its own taxonomy.
-The emitting app's id and the transport are injected once per app via
-``init_report(app, sink)`` (the product / VS Code side wires ``client.report()``).
-Every reported event carries ``app`` so downstream can tell which app emitted it.
+A HOST mints one reporter per app with ``create_reporter(app, sink)`` and hands
+it over; the app calls ``report(event, props, options)`` with any string event
+and free-form props — event names are NOT constrained to a central list; each
+app owns its own taxonomy. Every reported event carries ``app``, closed over at
+creation, so a late event from a backgrounded app still names its true emitter —
+there is deliberately NO module-global "current app" state to re-point. The
+TypeScript mirror lives at ``rocketride/analytics`` in the TypeScript SDK.
 Nothing else lives here.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
-ReportSink = Callable[[str, Optional[dict]], None]
+# Per-call capture options a sink may honor (transport/timestamp/uuid — see the
+# TypeScript mirror's SendOptions). Plain dict: Python sinks are server-side
+# and simply forward what they understand.
+SendOptions = dict
 
-_sink: ReportSink = lambda event, props=None: None  # noqa: E731
-_app = ''
-
-__all__ = ['ReportSink', 'init_report', 'report']
-
-
-def init_report(app: str, sink: ReportSink) -> None:
-    """Wire the emitting app id + transport once, at app init (e.g. client.report)."""
-    global _sink, _app
-    _app = app
-    _sink = sink
+ReportSink = Callable[[str, Optional[dict], Optional[SendOptions]], None]
 
 
-def report(event: str, props: dict | None = None) -> None:
-    """The shared loose event report — any non-empty string event, free-form props.
+class Reporter(Protocol):
+    """A bound reporter: ``report(event, props=None, options=None)``.
 
-    Stamps ``app`` (from ``init_report``) on every event. Never raises.
+    A Protocol rather than a Callable alias so ``report('x')`` type-checks:
+    ``props`` and ``options`` are optional.
     """
-    if not isinstance(event, str) or not event:
-        return  # string-ish enforcement, nothing stricter
-    try:
-        # Stamp last so caller props can never overwrite the emitting-app id.
-        _sink(event, {**(props or {}), 'app': _app})
-    except Exception:  # noqa: BLE001 — telemetry must never break the app
-        pass
+
+    def __call__(self, event: str, props: Optional[dict] = None, options: Optional[SendOptions] = None) -> None: ...
+
+
+__all__ = ['ReportSink', 'Reporter', 'SendOptions', 'create_reporter']
+
+
+def create_reporter(app: str, sink: ReportSink) -> Reporter:
+    """Mint the bound reporter for one app.
+
+    The returned function stamps ``app`` last (caller props can never overwrite
+    the emitting-app id), ignores non-string or empty event names, and never
+    raises — telemetry must never break the app.
+
+    Args:
+        app: The emitting app's id, fixed for the reporter's lifetime.
+        sink: The transport events go to.
+
+    Returns:
+        The app's ``report(event, props=None, options=None)``.
+    """
+
+    def report(event: str, props: dict | None = None, options: SendOptions | None = None) -> None:
+        if not isinstance(event, str) or not event:
+            return  # string-ish enforcement, nothing stricter
+        try:
+            # Stamp last so caller props can never overwrite the emitting-app id.
+            sink(event, {**(props or {}), 'app': app}, options)
+        except Exception:  # noqa: BLE001 — telemetry must never break the app
+            pass
+
+    return report
