@@ -1336,6 +1336,602 @@ def test_the_cuda_workspace_set_up_keeps_large_blocks_releasable():
         torch.cuda.empty_cache()
 
 
+def _load_weights(probe, mb):
+    """Take ``mb`` MB on the fake device: free memory goes down and allocated goes up (a negative ``mb`` frees).
+
+    Args:
+        probe: The fake device.
+        mb: The MB taken.
+    """
+    probe.free -= mb
+    probe.allocated += mb
+
+
+class _Model:
+    """A loaded model as the fake measurement sees it: the MB of its tensors per device."""
+
+    def __init__(self, sizes):
+        """Hold the sizes.
+
+        Args:
+            sizes: MB per device.
+        """
+        self.sizes = sizes
+
+
+@pytest.fixture
+def loads(monkeypatch):
+    """Model loads on fakes: no model server, no guard yet, a model's size read from it, nothing allocated."""
+    monkeypatch.setattr(budgetmod, 'is_model_server_enabled', lambda: False)
+    monkeypatch.setattr(budgetmod, '_budgets', {})
+    monkeypatch.setattr(budgetmod, '_loads', 0)
+    monkeypatch.setattr(budgetmod, '_load_base', {})
+    monkeypatch.setattr(budgetmod, '_load_warned', False)
+    monkeypatch.setattr(budgetmod, '_resident_mb', lambda model, torch=None: dict(model.sizes))
+    monkeypatch.setattr(budgetmod, '_allocated_mb', lambda torch=None: {})
+    return monkeypatch
+
+
+def _guards_on(monkeypatch, probe):
+    """Make ``device_budget`` build GPU guards on fakes, with ``probe`` as the memory of ``cuda:0``.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        probe: The fake device.
+    """
+    monkeypatch.setattr(budgetmod, '_cuda_probe', lambda device: probe)
+    monkeypatch.setattr(budgetmod, '_nvml_neighbours', lambda device: _Neighbours())
+    monkeypatch.setattr(budgetmod, '_cuda_release', lambda: _Release())
+    monkeypatch.setattr(budgetmod, '_cuda_warm', lambda device: lambda: None)
+    monkeypatch.setattr(budgetmod, '_allocated_mb', lambda torch=None: {'cuda:0': probe.allocated})
+
+
+def _registered(budget):
+    """Make a guard the process-wide guard of its device, as ``device_budget`` would.
+
+    Args:
+        budget: The guard.
+
+    Returns:
+        The same guard.
+    """
+    budgetmod._budgets[budget.device] = budget
+    return budget
+
+
+def test_weights_loaded_beside_a_call_join_the_base_and_its_memory_stays_its_own(loads):
+    """A call grows during the load; only the model's own tensors join the base (#3064, scenario S2)."""
+    probe = _Probe(free=6000)
+    budget = _registered(_gpu(probe))
+    a, c = _Call(budget, 1000), _Call(budget, 100)
+    assert a.enters() and c.enters()
+
+    def load():
+        """Load 3000 MB of weights while call A takes 800 MB of its own.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 3000)
+        _load_weights(probe, 800)
+        return _Model({'cuda:0': 3000.0})
+
+    budgetmod.loading_model(load)
+    assert budget._idle_allocated == 3000.0  # the growth over the load would give 3800
+    a.leave()
+    _load_weights(probe, -800)  # call A gives its memory back
+    b = _Call(budget, 2000)  # 3000 free, less C's 100 and the margin, leaves 2388
+    assert b.enters()
+    _leave_all([b, c])
+
+
+def test_a_call_that_leaves_during_the_load_does_not_hide_the_weights(loads):
+    """A call that frees its memory during the load does not make the weights look smaller (#3064, scenario S3)."""
+    probe = _Probe(free=6000)
+    loads.setattr(budgetmod, '_allocated_mb', lambda torch=None: {'cuda:0': probe.allocated})
+    budget = _registered(_gpu(probe))
+    a, c = _Call(budget, 1000), _Call(budget, 500)
+    assert a.enters() and c.enters()
+    _load_weights(probe, 800)  # call A's memory before the load
+
+    def load():
+        """Load 3000 MB of weights while call A leaves and frees its 800 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 3000)
+        a.leave()
+        _load_weights(probe, -800)
+        return _Model({'cuda:0': 3000.0})
+
+    budgetmod.loading_model(load)
+    # the growth over the load would give 2200; the memory at its start (A's 800) is not the base either
+    assert budget._idle_allocated == 3000.0
+    b = _Call(budget, 2200)  # 3000 free, less C's 500 and the margin, leaves 1988
+    assert b.stays_out()  # without the fix the weights count as C's progress, and B enters
+    c.leave()
+    assert b.enters()
+    b.leave()
+
+
+def test_the_base_is_not_taken_again_while_a_model_loads(loads):
+    """A call entering an idle device mid-load leaves the base without the half-loaded weights (#3064, scenario S1)."""
+    probe = _Probe(free=6000)
+    budget = _registered(_gpu(probe))
+    calls = []
+
+    def load():
+        """Load 2000 MB, let a call enter the idle device, then load the other 1000 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 2000)
+        calls.append(_Call(budget, 500))
+        assert calls[0].enters()
+        _load_weights(probe, 1000)
+        return _Model({'cuda:0': 3000.0})
+
+    budgetmod.loading_model(load)
+    assert budget._idle_allocated == 3000.0  # taken again mid-load, then the growth added, it would be 5000
+    b = _Call(budget, 400)  # 3000 free, less A's 500 and the margin, leaves 1988
+    assert b.enters()
+    _leave_all([b] + calls)
+
+
+def test_after_the_load_an_idle_device_takes_its_base_again(loads):
+    """Once no model loads, the next call on an idle device measures the base as before."""
+    probe = _Probe(free=6000)
+    budget = _registered(_gpu(probe))
+    budgetmod.loading_model(lambda: _Model({'cuda:0': 3000.0}))
+    _load_weights(probe, 3200)  # the model and 200 MB left by something else
+    first = _Call(budget, 500)
+    assert first.enters()
+    assert budget._idle_allocated == 3200.0
+    first.leave()
+
+
+def test_a_guard_made_during_the_load_takes_what_its_device_held_at_the_start(loads):
+    """The first text call makes the guard mid-load: its base is the memory before the load, then the weights."""
+    probe = _Probe(free=6000, allocated=500)  # a model loaded earlier
+    _guards_on(loads, probe)
+    made, calls = [], []
+
+    def load():
+        """Load 2000 MB, make the guard and let a call in, then load the other 1000 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 2000)
+        made.append(_watched(budgetmod.device_budget('cuda:0')))
+        calls.append(_Call(made[0], 500))
+        assert calls[0].enters()
+        _load_weights(probe, 1000)
+        return _Model({'cuda:0': 3000.0})
+
+    budgetmod.loading_model(load)
+    assert made[0]._idle_allocated == 3500.0  # measured at the first call it would be 2500
+    _leave_all(calls)
+
+
+def test_two_loads_at_once_each_add_their_own_weights(loads):
+    """Overlapping loads keep the base until each ends, and each adds its own model."""
+    probe = _Probe(free=8000)
+    _guards_on(loads, probe)
+    budget = _registered(_gpu(probe))
+
+    def inner():
+        """Load a 1000 MB model while the outer one loads.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1000)
+        return _Model({'cuda:0': 1000.0})
+
+    def outer():
+        """Load a 2000 MB model in two parts around the inner load.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1500)
+        budgetmod.loading_model(inner)
+        assert budget._idle_allocated == 1000.0
+        _load_weights(probe, 500)
+        return _Model({'cuda:0': 2000.0})
+
+    budgetmod.loading_model(outer)
+    assert budget._idle_allocated == 3000.0
+    assert budget._loads == 0 and budgetmod._loads == 0 and budgetmod._load_base == {}
+
+
+def test_a_guard_made_between_two_loads_takes_the_finished_ones_weights(loads):
+    """A guard made after the inner load ended, while the outer one loads, counts the inner model as base."""
+    probe = _Probe(free=8000)
+    _guards_on(loads, probe)
+    made = []
+
+    def inner():
+        """Load a 1000 MB model while the outer one loads.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1000)
+        return _Model({'cuda:0': 1000.0})
+
+    def outer():
+        """Load 1500 MB, run the inner load, make the guard, then load the other 500 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1500)
+        budgetmod.loading_model(inner)
+        made.append(budgetmod.device_budget('cuda:0'))
+        assert made[0]._idle_allocated == 1000.0
+        _load_weights(probe, 500)
+        return _Model({'cuda:0': 2000.0})
+
+    budgetmod.loading_model(outer)
+    assert made[0]._idle_allocated == 3000.0 and made[0]._loads == 0
+
+
+def test_a_guard_made_inside_two_loads_keeps_its_base_until_both_end(loads):
+    """A guard made while two models load counts both: a call on the idle device between their ends keeps the base."""
+    probe = _Probe(free=8000, allocated=200)
+    _guards_on(loads, probe)
+    made, calls = [], []
+
+    def inner():
+        """Load 400 MB, make the guard, then load the other 600 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 400)
+        made.append(_watched(budgetmod.device_budget('cuda:0')))
+        _load_weights(probe, 600)
+        return _Model({'cuda:0': 1000.0})
+
+    def outer():
+        """Load 1500 MB, run the inner load, let a call in, then load the other 500 MB.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1500)
+        budgetmod.loading_model(inner)
+        calls.append(_Call(made[0], 300))
+        assert calls[0].enters()  # the outer model still loads: the base stays
+        _load_weights(probe, 500)
+        return _Model({'cuda:0': 2000.0})
+
+    budgetmod.loading_model(outer)
+    assert made[0]._idle_allocated == 3200.0 and made[0]._loads == 0
+    _leave_all(calls)
+
+
+def test_a_model_on_another_gpu_leaves_this_base_alone(loads):
+    """Each guard gets the weights on its own device only."""
+    first_probe, second_probe = _Probe(free=4000), _Probe(free=4000)
+    first = _registered(_gpu(first_probe))
+    second = _registered(DeviceBudget('cuda:1', second_probe, _Neighbours(), _Release(), lambda: None))
+    budgetmod.loading_model(lambda: _Model({'cuda:1': 2500.0, 'cpu': 40.0}))
+    assert first._idle_allocated == 0.0
+    assert second._idle_allocated == 2500.0
+
+
+def test_a_load_that_fails_adds_nothing(loads):
+    """A load that raises adds nothing; once the device is idle, the next call measures the base again."""
+    probe = _Probe(free=6000)
+    budget = _registered(_gpu(probe))
+    a = _Call(budget, 500)
+    assert a.enters()
+
+    def load():
+        """Take 700 MB, then fail.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        _load_weights(probe, 700)
+        raise RuntimeError('load failed')
+
+    with pytest.raises(RuntimeError, match='load failed'):
+        budgetmod.loading_model(load)
+    assert budget._idle_allocated == 0.0
+    assert budget._loads == 0 and budgetmod._loads == 0 and budgetmod._load_base == {}
+    a.leave()
+    b = _Call(budget, 500)
+    assert b.enters()
+    assert budget._idle_allocated == 700.0
+    b.leave()
+
+
+def test_a_failed_measurement_is_logged_once_and_the_model_still_loads(loads):
+    """A measurement that raises never fails the load: it is logged once and adds nothing."""
+    warnings = []
+    loads.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+
+    def broken(model, torch=None):
+        """Fail as a broken device would.
+
+        Args:
+            model: Ignored.
+            torch: Ignored.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError('CUDA error')
+
+    loads.setattr(budgetmod, '_resident_mb', broken)
+    budget = _registered(_gpu(_Probe(free=6000)))
+    model = _Model({})
+    assert budgetmod.loading_model(lambda: model) is model
+    assert budgetmod.loading_model(lambda: model) is model
+    assert len(warnings) == 1 and 'cannot measure a model load' in warnings[0][0]
+    assert budget._idle_allocated == 0.0 and budget._loads == 0
+
+
+def test_a_failed_start_measurement_still_loads(loads):
+    """Reading the memory at the start of a load may fail too: the load still runs and its weights count."""
+    warnings = []
+    loads.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+
+    def broken(torch=None):
+        """Fail as a broken device would.
+
+        Args:
+            torch: Ignored.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError('CUDA error')
+
+    loads.setattr(budgetmod, '_allocated_mb', broken)
+    budget = _registered(_gpu(_Probe(free=6000)))
+    budgetmod.loading_model(lambda: _Model({'cuda:0': 1000.0}))
+    assert len(warnings) == 1
+    assert budget._idle_allocated == 1000.0
+
+
+def test_with_the_model_server_a_load_is_not_measured(loads):
+    """With ``--modelserver`` the model is loaded as it is: no guard, no measurement."""
+    loads.setattr(budgetmod, 'is_model_server_enabled', lambda: True)
+
+    def unexpected(*args, **kwargs):
+        """Fail the test if called.
+
+        Args:
+            *args: Ignored.
+            **kwargs: Ignored.
+
+        Raises:
+            AssertionError: Always.
+        """
+        raise AssertionError('measured with the model server')
+
+    loads.setattr(budgetmod, '_resident_mb', unexpected)
+    loads.setattr(budgetmod, '_allocated_mb', unexpected)
+    model, seen = _Model({}), []
+    assert budgetmod.loading_model(lambda: seen.append(budgetmod._loads) or model) is model
+    assert seen == [0]
+
+
+def test_loading_beside_a_cpu_guard_changes_nothing(loads):
+    """A CPU guard has no base: a load leaves it as it is."""
+    budget = _registered(DeviceBudget('cpu'))
+    budgetmod.loading_model(lambda: _Model({'cpu': 100.0}))
+    assert budget._idle_allocated == 0.0 and budget._loads == 0
+
+
+class _FakeStorage:
+    """A tensor storage: its address and size in bytes."""
+
+    def __init__(self, ptr, nbytes):
+        """Hold the address and size.
+
+        Args:
+            ptr: The address.
+            nbytes: The size in bytes.
+        """
+        self._ptr, self._nbytes = ptr, nbytes
+
+    def data_ptr(self):
+        """Return the address."""
+        return self._ptr
+
+    def nbytes(self):
+        """Return the size in bytes."""
+        return self._nbytes
+
+
+class _FakeTensor:
+    """A tensor on a device, over a storage."""
+
+    def __init__(self, device, ptr, nbytes):
+        """Place the tensor.
+
+        Args:
+            device: The device name, as ``str(tensor.device)`` gives it.
+            ptr: Its storage's address.
+            nbytes: Its storage's size in bytes.
+        """
+        self.device = device
+        self._storage = _FakeStorage(ptr, nbytes)
+
+    def untyped_storage(self):
+        """Return the storage."""
+        return self._storage
+
+
+class _FakeModule:
+    """A torch module: its parameters and buffers."""
+
+    def __init__(self, parameters, buffers=()):
+        """Hold the tensors.
+
+        Args:
+            parameters: The parameters.
+            buffers: The buffers.
+        """
+        self._parameters, self._buffers = list(parameters), list(buffers)
+
+    def parameters(self):
+        """Return an iterator over the parameters, as torch does."""
+        return iter(self._parameters)
+
+    def buffers(self):
+        """Return an iterator over the buffers, as torch does."""
+        return iter(self._buffers)
+
+
+def _fake_torch(**cuda):
+    """Build a stand-in for the torch module.
+
+    Args:
+        **cuda: The ``torch.cuda`` functions.
+
+    Returns:
+        An object with ``Tensor``, ``nn.Module`` and ``cuda``.
+    """
+    return types.SimpleNamespace(
+        Tensor=_FakeTensor, nn=types.SimpleNamespace(Module=_FakeModule), cuda=types.SimpleNamespace(**cuda)
+    )
+
+
+def test_resident_mb_counts_each_storage_once_in_allocator_blocks():
+    """Tensors are found through wrappers, dicts, lists and tuples; a shared storage counts once, in 512-byte blocks."""
+    shared = _FakeTensor('cuda:0', 1, 1000)  # 1024 with rounding
+    tied = _FakeTensor('cuda:0', 1, 1000)  # another tensor over the same storage
+    weight = _FakeTensor('cuda:0', 2, 2 << 20)
+    counter = _FakeTensor('cuda:0', 3, 1)  # 512 with rounding
+    head = _FakeTensor('cuda:1', 4, 512)
+    on_cpu = _FakeTensor('cpu', 5, 4096)
+    predictor = _FakeModule([weight, shared], [counter])
+    wrapper = types.SimpleNamespace(
+        _model={'predictor': predictor, 'device': 'cuda:0', 'tied': [tied], 'heads': (_FakeModule([head]),)},
+        again=predictor,
+        extra={on_cpu},
+    )
+    sizes = budgetmod._resident_mb(wrapper, _fake_torch())
+    assert sizes == {'cuda:0': (1024 + (2 << 20) + 512) / (1 << 20), 'cuda:1': 512 / (1 << 20), 'cpu': 4096 / (1 << 20)}
+
+
+def test_resident_mb_follows_six_levels_and_skips_classes_and_modules():
+    """The walk stops after ``_WALK_DEPTH`` levels and does not follow a class or a Python module."""
+
+    class Holder:
+        """A class whose attribute is a tensor: not part of any model."""
+
+        weight = _FakeTensor('cuda:0', 9, 512)
+
+    def chain(levels, tensor):
+        """Put ``tensor`` ``levels`` references below the returned object.
+
+        Args:
+            levels: How many objects stand above the tensor.
+            tensor: The tensor at the bottom.
+
+        Returns:
+            The top object.
+        """
+        obj = tensor
+        for _ in range(levels):
+            obj = types.SimpleNamespace(next=obj)
+        return obj
+
+    torch = _fake_torch()
+    assert budgetmod._resident_mb(chain(5, _FakeTensor('cuda:0', 1, 512)), torch) == {'cuda:0': 512 / (1 << 20)}
+    assert budgetmod._resident_mb(chain(6, _FakeTensor('cuda:0', 1, 512)), torch) == {}
+    assert budgetmod._resident_mb(types.SimpleNamespace(cls=Holder, module=sys), torch) == {}
+
+
+def test_resident_mb_visits_no_more_objects_than_the_limit(monkeypatch):
+    """A container larger than ``_WALK_LIMIT`` stops the walk inside its level, not after it."""
+    monkeypatch.setattr(budgetmod, '_WALK_LIMIT', 10)
+    tensor = _FakeTensor('cuda:0', 1, 512)
+    torch = _fake_torch()
+    assert budgetmod._resident_mb({'later': [tensor]}, torch) == {'cuda:0': 512 / (1 << 20)}
+    # the 20 numbers come first on the level of the tensor, so the tenth object is reached before it
+    assert budgetmod._resident_mb({'filler': list(range(100, 120)), 'later': [tensor]}, torch) == {}
+
+
+def test_resident_mb_without_torch_is_empty(monkeypatch):
+    """Without torch imported there is no tensor to count."""
+    monkeypatch.setitem(sys.modules, 'torch', None)
+    assert budgetmod._resident_mb(_FakeTensor('cuda:0', 1, 512)) == {}
+
+
+def test_allocated_mb_reads_each_gpu_once_cuda_has_started():
+    """Before CUDA starts nothing is allocated; then each device's allocated memory is read."""
+    allocated = [3 << 20, 5 << 20]
+    asleep = _fake_torch(is_initialized=lambda: False, device_count=lambda: 2, memory_allocated=allocated.__getitem__)
+    assert budgetmod._allocated_mb(asleep) == {}
+    awake = _fake_torch(is_initialized=lambda: True, device_count=lambda: 2, memory_allocated=allocated.__getitem__)
+    assert budgetmod._allocated_mb(awake) == {'cuda:0': 3.0, 'cuda:1': 5.0}
+
+
+def test_resident_mb_of_a_real_torch_module():
+    """A real module's parameters and buffers, tied weights counted once."""
+    torch = pytest.importorskip('torch')
+    embed = torch.nn.Embedding(10, 4)  # 160 bytes -> 512
+    head = torch.nn.Linear(4, 10, bias=False)
+    head.weight = embed.weight  # tied: one storage
+    norm = torch.nn.BatchNorm1d(3)  # weight, bias, running_mean, running_var (12 bytes each), num_batches_tracked
+    model = {'predictor': torch.nn.Sequential(embed, head), 'norm': norm}
+    assert budgetmod._resident_mb(types.SimpleNamespace(_model=model)) == {'cpu': 6 * 512 / (1 << 20)}
+
+
+def test_resident_mb_matches_what_the_cuda_allocator_hands_out():
+    """On a real GPU the count matches the growth of torch's allocated memory while the model moves there."""
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('needs a CUDA device')
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    before = torch.cuda.memory_allocated(0)
+    model = torch.nn.Sequential(torch.nn.Linear(1000, 333), torch.nn.BatchNorm1d(333)).to('cuda:0')
+    grown = torch.cuda.memory_allocated(0) - before
+    try:
+        counted = budgetmod._resident_mb({'model': model})['cuda:0'] * (1 << 20)
+        # equal, unless the 1.3 MB weight got a cached block too small to split: then up to 1 MiB more
+        assert counted <= grown < counted + (1 << 20)
+    finally:
+        del model
+        torch.cuda.empty_cache()
+
+
+def test_a_real_load_beside_a_call_adds_exactly_its_weights_to_the_base(monkeypatch):
+    """On a real GPU, with the real probe and measurements, a model loaded beside a call adds its own bytes."""
+    torch = pytest.importorskip('torch')
+    if not torch.cuda.is_available():
+        pytest.skip('needs a CUDA device')
+    monkeypatch.setattr(budgetmod, 'is_model_server_enabled', lambda: False)
+    monkeypatch.setattr(budgetmod, '_budgets', {})
+    monkeypatch.setattr(budgetmod, '_loads', 0)
+    monkeypatch.setattr(budgetmod, '_load_base', {})
+    budget = _registered(_watched(DeviceBudget('cuda:0', None, _Neighbours(), _Release(), lambda: None)))
+    a = _Call(budget, 100)
+    assert a.enters()
+    assert budgetmod._allocated_mb()['cuda:0'] == torch.cuda.memory_allocated(0) / (1 << 20)
+    base = budget._idle_allocated
+    model = budgetmod.loading_model(lambda: torch.nn.Linear(1000, 777).to('cuda:0'))
+    try:
+        # weight 3,108,000 and bias 3,108 bytes, each rounded up to 512-byte blocks
+        assert (budget._idle_allocated - base) * (1 << 20) == 3_108_352 + 3_584
+    finally:
+        a.leave()
+        del model
+        torch.cuda.empty_cache()
+
+
 def test_one_guard_per_device(monkeypatch):
     """``cuda`` and ``cuda:0`` share one guard; other devices get their own."""
     monkeypatch.setattr(budgetmod, 'is_model_server_enabled', lambda: False)
