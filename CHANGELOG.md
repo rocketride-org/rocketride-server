@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-11-04
 
 ### Added
+- **shell**: public pages can carry `image`, `published`, `modified` and `authors`, which add link-preview tags, `BlogPosting` JSON-LD and sitemap `lastmod`. `site.feeds` serves Atom feeds, and llms.txt groups pages under their parent.
 - **shell**: a public page can bind `plans`, `plans:<appId>` and `app:<appId>` into its crawler snapshot, with `Product`/`Offer` and `SoftwareApplication` JSON-LD. `Account.get_public_plans` supplies the plans, and responses with bound data expire after 300 s.
 - **shell**: apps can declare public pages and site metadata (`publicPages`, `site`) in `dist/app-manifest.json`. Publishing refuses an invalid or unprivileged declaration, and the engine keeps one page map built from every published platform app.
 - **client-python**: `rocketride --version` prints the installed package version

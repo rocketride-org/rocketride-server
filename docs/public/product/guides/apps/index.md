@@ -238,13 +238,17 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link and redirects. */
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image and feeds. */
   site?: {
     title?: string;
     blurb?: string;
     docsUrl?: string;
     /** Old URLs answered with a 301 to one of your pages, query string kept. */
     redirects?: { from: string; to: string }[];
+    /** The link-preview image of pages that declare none (same forms as a page's image). */
+    image?: string;
+    /** Atom feeds of the dated pages under a prefix: { path: '/blog/feed.xml', prefix: '/blog/', title: 'Blog' }. */
+    feeds?: { path: string; prefix: string; title: string }[];
   };
 }
 ```
@@ -273,6 +277,14 @@ interface PublicPage {
   snapshot?: string;
   /** Server data the page names: 'plans' (this app's plans), 'plans:<appId>' or 'app:<appId>'. */
   data?: string[];
+  /** The link-preview image: an https URL, a root path, or a path in the build output ('og/pricing.png'). */
+  image?: string;
+  /** When the page was first published, 'YYYY-MM-DD' or an RFC 3339 date-time: makes it an article. */
+  published?: string;
+  /** When the page last changed, in the same forms; never earlier than published. */
+  modified?: string;
+  /** At most 5 authors, each a name (at most 300 characters) and an optional https URL. */
+  authors?: { name: string; url?: string }[];
 }
 ```
 
@@ -298,6 +310,18 @@ publish fails with a message naming the field):
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version,
   at most 2 MiB.
+- `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
+  never `//`) or a relative path inside the build output, with no empty or dot
+  segment, at most 2048 characters.
+- `published` and `modified` are a real date (`2026-11-09`) or an RFC 3339
+  date-time with an offset (`2026-11-09T10:00:00Z`, at most `±23:59`) that
+  stays within years 1 to 9999 in UTC. A date alone means midnight UTC, and
+  `modified` may not be earlier than `published`.
+- `authors` holds at most 5 entries, each with a non-empty `name` and, if
+  given, an `https://` `url`.
+- No text or URL field may hold a lone surrogate (U+D800 to U+DFFF, half of a
+  UTF-16 pair, as a string cut through an emoji leaves), which UTF-8 cannot
+  carry.
 - `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
   `` ` `` percent-encoded.
 - `site.redirects` (at most 100): each `from` is one exact path in the `path`
@@ -306,6 +330,12 @@ publish fails with a message naming the field):
   may be a server route or a page any published app serves; it appears once.
   List both forms of an old URL to redirect both. Each `to` is the exact path
   of one of the manifest's own pages.
+- `site.feeds` (at most 5): each `path` is one exact path in the `path` grammar
+  ending in `.xml`; it may not be reserved, and neither it nor its slash twin
+  may be a page any published app serves, a redirect's `from` or a server
+  route; it appears once. `prefix` is a page path ending in `/` (`/blog/`, or
+  `/` for every page), and `title` a non-empty string of at most 300
+  characters.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
@@ -322,6 +352,25 @@ Crawlers (search, AI and link-preview bots, by user agent) get the page's
 same head. A page without a snapshot, or whose snapshot cannot be read or
 rendered, serves crawlers the shell's document; so does a stored snapshot over
 2 MiB, which the server never reads.
+
+Every page's head, for people and crawlers alike (link-preview fetchers do
+not always say they are bots), also carries `og:site_name` (`site.title`),
+`og:type` and a Twitter card. A page with `published` is an `article`, with
+`article:published_time` and `article:modified_time` (`modified`, else
+`published`); any other page is a `website`. `og:image` is the page's `image`,
+else `site.image`, and asks for the large card (`summary_large_image`, else
+`summary`). An `https://` image is used as declared; a root path is made
+absolute with `RR_APP_URL`; a relative path is a file of the declaring app's
+build output, served from its production version
+(`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an
+`https://` image is used.
+
+Crawlers also get a `BlogPosting` (JSON-LD) for each page with `published`:
+its `headline` (the title without a trailing ` | <site.title>`),
+`description`, `datePublished`, `dateModified`, `image`, `mainEntityOfPage`
+(the canonical URL), each author as a `Person`, and the site's organization
+as `publisher`, also the `author` of a page without authors. That
+organization is named after `site.title`, on the `RR_APP_URL` origin.
 
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
@@ -367,7 +416,25 @@ cannot be read, crawlers get the page without it.
 
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in
-either. `GET` and `HEAD` on a redirect's `from` answer `301` with
+either. Each sitemap entry's `<lastmod>` is the date of the page's `modified`,
+else `published`; a page with neither has no `<lastmod>`, since a deploy is
+not a content change. In
+`/llms.txt`, a page whose parent path (`/blog` for `/blog/x`) is a listed page
+is listed in that parent's section, headed by the parent's title without a
+trailing ` | <site.title>`, with dated pages newest first and the rest by
+path; every other page is under `## Pages`, by path.
+
+Each feed in `site.feeds` answers `GET` and `HEAD` on its `path` with an Atom
+1.0 document (`application/atom+xml`): the listed pages strictly under its
+`prefix` that declare `published`, newest first, at most 50. An entry carries
+the page's canonical URL, its title without a trailing ` | <site.title>`,
+`published`, `updated` (`modified`, else `published`; a date alone is
+midnight UTC), its description as the summary and its authors; the feed's
+own author is `site.title`. Like the sitemap, a feed answers `404` without
+`RR_APP_URL`. The prefix page and every page under it link to the feed from
+their head (`<link rel="alternate" type="application/atom+xml">`).
+
+`GET` and `HEAD` on a redirect's `from` answer `301` with
 `Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
 page (query kept). Any path that is neither a page, a redirect nor a server
 route answers `404`.

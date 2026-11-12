@@ -24,16 +24,16 @@
 Serve-time head metadata injection for public pages.
 
 Replaces (never duplicates) the document's title, meta description,
-canonical link, robots meta and Open Graph title/description/url, and
-inserts JSON-LD blocks. Every value is escaped for its context: page
-titles are manifest text entering a platform-origin document, so escaping
-is a security boundary.
+canonical link, robots meta, Open Graph and Twitter card tags and article
+times, and inserts JSON-LD blocks and pre-escaped extra tags. Every value is
+escaped for its context: page titles are manifest text entering a
+platform-origin document, so escaping is a security boundary.
 """
 
 import html
 import json
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, List, Mapping, Tuple
 
 _FLAGS = re.IGNORECASE | re.DOTALL
 
@@ -61,6 +61,12 @@ _REPLACED = (
     _tag_with('meta', 'property', 'og:title'),
     _tag_with('meta', 'property', 'og:description'),
     _tag_with('meta', 'property', 'og:url'),
+    _tag_with('meta', 'property', 'og:type'),
+    _tag_with('meta', 'property', 'og:site_name'),
+    _tag_with('meta', 'property', 'og:image'),
+    _tag_with('meta', 'name', 'twitter:card'),
+    _tag_with('meta', 'property', 'article:published_time'),
+    _tag_with('meta', 'property', 'article:modified_time'),
 )
 _HEAD_OPEN = re.compile(r'<head\b[^>]*>', re.IGNORECASE)
 _CHARSET = re.compile(r'<meta\b[^>]*?(?:\bcharset\s*=|\bhttp-equiv\s*=\s*["\']?content-type\b)[^>]*>', re.IGNORECASE)
@@ -97,6 +103,39 @@ def jsonld_script(obj: Mapping[str, Any]) -> str:
     return f'<script type="application/ld+json">{text}</script>'
 
 
+def social_tags(*, site_name: str = '', image: str = '', published: str = '', modified: str = '') -> List[str]:
+    """Link-preview tags for ``inject_head``'s ``extra``, escaped.
+
+    ``og:type`` is ``article`` for a page with a publication time (which
+    also gets ``article:published_time`` and ``article:modified_time``,
+    the latter defaulting to the former), else ``website``. An ``image``
+    (an absolute URL) asks for the large Twitter card.
+    """
+    og_type = 'website'
+    if published:
+        og_type = 'article'
+    tags = [f'<meta property="og:type" content="{og_type}">']
+    if site_name:
+        tags.append(f'<meta property="og:site_name" content="{_attr(site_name)}">')
+    if image:
+        tags.append(f'<meta property="og:image" content="{_attr(image)}">')
+    card = 'summary'
+    if image:
+        card = 'summary_large_image'
+    tags.append(f'<meta name="twitter:card" content="{card}">')
+    if published:
+        tags.append(f'<meta property="article:published_time" content="{_attr(published)}">')
+        tags.append(f'<meta property="article:modified_time" content="{_attr(modified or published)}">')
+    return tags
+
+
+def feed_links(feeds: Iterable[Tuple[str, str]]) -> List[str]:
+    """One ``<link rel="alternate">`` per Atom feed ``(title, href)``, escaped, for ``inject_head``'s ``extra``."""
+    return [
+        f'<link rel="alternate" type="application/atom+xml" title="{_attr(t)}" href="{_attr(h)}">' for t, h in feeds
+    ]
+
+
 def inject_head(
     document: str,
     *,
@@ -105,13 +144,14 @@ def inject_head(
     canonical: str = '',
     noindex: bool = False,
     jsonld: Iterable[Mapping[str, Any]] = (),
+    extra: Iterable[str] = (),
 ) -> str:
     """Return ``document`` with the page's head metadata in place.
 
     Existing tags of the same kinds are removed first; the new block goes
     right after the head's charset declaration, which must stay within the
     document's first 1024 bytes, else right after <head> (or after <html>,
-    or at the very start). Every value is HTML-escaped.
+    or at the very start). Every value is HTML-escaped, except ``extra``.
 
     Args:
         document: The HTML document (the shell's, or a page snapshot).
@@ -121,6 +161,7 @@ def inject_head(
         noindex: Whether to add ``<meta name="robots" content="noindex">``.
         jsonld: JSON-LD nodes, one ``<script type="application/ld+json">``
             each (``jsonld_script``).
+        extra: Complete, already-escaped tags, appended to the block verbatim.
 
     Returns:
         The document with the new block in its head.
@@ -153,6 +194,7 @@ def inject_head(
     if noindex:
         parts.append('<meta name="robots" content="noindex">')
     parts.extend(jsonld_script(obj) for obj in jsonld)
+    parts.extend(extra)
     block = ''.join(parts)
     at = _insertion_point(document, start, start + len(region))
     return document[:at] + block + document[at:]

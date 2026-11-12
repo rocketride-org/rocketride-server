@@ -53,6 +53,7 @@ request headers.
 """
 
 import hashlib
+import math
 import mimetypes
 import os
 import posixpath
@@ -60,7 +61,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -70,6 +71,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
+from .contract import Page, own_title, page_instant
 from .settings import app_url
 
 # Engine binary directory — all static paths are relative to this.
@@ -689,15 +691,28 @@ def sitemap_entries() -> list:
     return [(page.path, page) for page in current().pages() if page.listed]
 
 
+def _lastmod(page: Page) -> str:
+    """``<lastmod>``: the UTC date of the page's ``modified``, else ``published``; '' when it declares neither.
+
+    A deploy is not a content change. Falling back to when the app's version
+    went live would move every undated page's date on each deploy, and search
+    engines stop trusting ``lastmod`` site-wide when it is not accurate.
+    """
+    declared = page.modified or page.published
+    if not declared:
+        return ''
+    return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
+
+
 async def sitemap_xml(request: Request):
     """
     Serve ``/sitemap.xml`` — one ``<url>`` per listed public page.
 
     Pages come from the page aggregate (published manifests, or the legacy
-    list until one declares pages), sorted by path. Absolute URLs come
-    exclusively from ``RR_APP_URL``. Deployments without it (OSS,
-    self-hosted, desktop) have no public marketing site to index, so the
-    endpoint 404s.
+    list until one declares pages), sorted by path, each with its
+    ``<lastmod>`` when known. Absolute URLs come exclusively from
+    ``RR_APP_URL``. Deployments without it (OSS, self-hosted, desktop) have
+    no public marketing site to index, so the endpoint 404s.
 
     Args:
         request: Incoming HTTP request.
@@ -716,7 +731,9 @@ async def sitemap_xml(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     # escape() guards against XML metacharacters in the configured URL.
-    entries = ''.join(f'  <url><loc>{escape(base_url + path)}</loc></url>\n' for path, _ in sitemap_entries())
+    entries = ''.join(
+        f'  <url><loc>{escape(base_url + path)}</loc>{_lastmod(page)}</url>\n' for path, page in sitemap_entries()
+    )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -760,6 +777,13 @@ async def robots_txt(request: Request):
     return PlainTextResponse(content, headers={'Cache-Control': CACHE_CONTROL})
 
 
+def _newest_first(page: Page) -> float:
+    """Sort key of an llms.txt section: dated pages newest first, then the undated ones."""
+    if page.published:
+        return -page_instant(page.published).timestamp()
+    return math.inf
+
+
 async def llms_txt(request: Request):
     """
     Serve ``/llms.txt`` — an llmstxt.org index of the public pages.
@@ -767,8 +791,13 @@ async def llms_txt(request: Request):
     The header from the root owner's ``site`` block (the heading falls back
     to the origin's host: llms.txt requires one), one bullet per listed page
     (title and description from the aggregate), and a final link to
-    ``site.docsUrl``. Same gating as the sitemap: absolute URLs come
-    exclusively from ``RR_APP_URL``, and the endpoint 404s when it is unset.
+    ``site.docsUrl``. A listed page whose parent path (``/blog`` for
+    ``/blog/x``) is a listed page goes in that parent's section, headed by
+    its title without the trailing `` | <site.title>``; every other page is
+    under ``## Pages``, by path. Sections follow by parent path, each with its
+    dated pages newest first, then the rest by path. Same gating as the
+    sitemap: absolute URLs come exclusively from ``RR_APP_URL``, and the
+    endpoint 404s when it is unset.
 
     Args:
         request: Incoming HTTP request.
@@ -790,13 +819,25 @@ async def llms_txt(request: Request):
     lines = [f'# {_md(site.get("title", "")) or urlsplit(base_url).netloc}', '']
     if site.get('blurb'):
         lines += [f'> {_md(site["blurb"])}', '']
-    lines += ['## Pages', '']
-    for path, page in sitemap_entries():
-        bullet = f'- [{_md(page.title)}]({base_url}{path})'
-        description = _md(page.description)
-        if description:
-            bullet = f'{bullet}: {description}'
-        lines.append(bullet)
+    listed = dict(sitemap_entries())
+    sections: Dict[str, List[Page]] = {'': []}
+    for path, page in listed.items():
+        parent = path.rpartition('/')[0]
+        sections.setdefault(parent if parent in listed else '', []).append(page)
+    for parent in sorted(sections):
+        pages = sections[parent]
+        if parent:
+            lines += ['', f'## {_md(own_title(listed[parent].title, site.get("title", "")))}', '']
+            # The stable sort keeps path order among pages with the same key.
+            pages.sort(key=_newest_first)
+        else:
+            lines += ['## Pages', '']
+        for page in pages:
+            bullet = f'- [{_md(page.title)}]({base_url}{page.path})'
+            description = _md(page.description)
+            if description:
+                bullet = f'{bullet}: {description}'
+            lines.append(bullet)
     if site.get('docsUrl'):
         lines += ['', '## Documentation', '', f'- [Docs]({_md(site["docsUrl"])})']
     return PlainTextResponse(

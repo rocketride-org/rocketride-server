@@ -29,6 +29,8 @@ actionable message; storage failures fail closed.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 import ai.modules.shell.public_pages as pp
@@ -110,6 +112,40 @@ async def test_missing_snapshot_rejected_present_snapshot_allowed():
     errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
     assert len(errors) == 1 and "snapshot 'pages/fresh.html' is not in the built version" in errors[0]
     FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_page_at_a_feed_path_the_root_owner_declares_is_refused():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['feeds'] = [{'path': '/blog/feed.xml', 'title': 'Blog', 'prefix': '/blog/'}]
+    acct = hostile_account(home)
+    manifest = {'publicPages': [{'path': '/blog/feed.xml', 'title': 'F'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert len(errors) == 1
+    assert "publicPages path '/blog/feed.xml' is a feed of the published app rocketride.home" in errors[0]
+
+
+async def test_a_relative_image_must_exist_in_the_build_output():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'H', 'image': 'og/home.png'}],
+        'site': {'title': 'R', 'image': 'og/site.png'},
+    }
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert len(errors) == 2
+    assert "publicPages path '/': image 'og/home.png' is not in the built version" in errors[0]
+    assert "site.image 'og/site.png' is not in the built version" in errors[1]
+    FILES[f'{DIST}/og/home.png'] = b'png'
+    FILES[f'{DIST}/og/site.png'] = b'png'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_https_and_root_path_images_are_not_checked_against_the_build():
+    manifest = {
+        'publicPages': [
+            {'path': '/a', 'title': 'A', 'image': 'https://cdn.example.com/a.png'},
+            {'path': '/b', 'title': 'B', 'image': '/static/b.png'},
+        ]
+    }
     assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
 
 
@@ -291,4 +327,18 @@ async def test_a_redirect_source_whose_slash_twin_is_another_apps_page_is_reject
     assert errors == [
         "site.redirects from '/store/': its slash twin '/store' is a page of the published app rocketride.home; "
         'a URL is a page or a redirect, not both: drop the entry'
+    ]
+
+
+async def test_feed_paths_claimed_by_another_published_app_are_rejected():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['publicPages'].append({'path': '/news.xml', 'title': 'News'})
+    feed = {'prefix': '/', 'title': 'All'}
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}],
+        'site': {'feeds': [{'path': '/news.xml', **feed}, {'path': '/feed.xml', **feed}]},
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home=home))
+    assert [e for e in errors if 'feeds' in e] == [
+        "site.feeds path '/news.xml' is a page of the published app rocketride.home; choose another path"
     ]

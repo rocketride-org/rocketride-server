@@ -303,6 +303,30 @@ def test_sitemap_ignores_forwarded_headers(app_url):
     assert f'<loc>{BASE}/pricing</loc>' in resp.text
 
 
+def test_lastmod_is_the_page_date_and_absent_without_one(app_url):
+    bound = 1_700_000_100.0  # 2023-11-14T22:15:00Z
+    _use(
+        Page('/', 'rocketride.home', 'Home', published_at=bound),
+        Page('/blog/a', 'rocketride.home', 'A', published='2026-11-09', modified='2026-11-09T23:30:00-05:00'),
+        Page('/blog/b', 'rocketride.home', 'B', published='2026-10-01T23:30:00-05:00', published_at=bound),
+        Page('/blog/c', 'rocketride.home', 'C', modified='2026-09-30', published_at=bound),
+        Page('/unbound', 'rocketride.home', 'U'),
+    )
+    text = _client().get('/sitemap.xml').text
+    # The page's own date (its UTC date). A page without one has no lastmod:
+    # when its app's version went live is a deploy, not a content change.
+    assert f'<url><loc>{BASE}/</loc></url>' in text
+    assert f'<url><loc>{BASE}/blog/a</loc><lastmod>2026-11-10</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/b</loc><lastmod>2026-10-02</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/c</loc><lastmod>2026-09-30</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/unbound</loc></url>' in text
+
+
+def test_legacy_pages_have_no_lastmod(app_url):
+    assert pp.current().legacy
+    assert '<lastmod>' not in _client().get('/sitemap.xml').text
+
+
 def test_sitemap_sets_cache_control(app_url):
     resp = _client().get('/sitemap.xml')
     assert resp.headers['cache-control'] == 'public, max-age=3600'
@@ -400,6 +424,63 @@ def test_llms_docs_link_is_neutralised_like_every_manifest_string(app_url):
     text = _client().get('/llms.txt').text
     assert not re.search(r'(?<!\\)\]\(https://evil', text)
     assert text.endswith('- [Docs](https://docs.example/x\\](https://evil))\n')
+
+
+def test_llms_groups_children_under_parent(app_url):
+    home = 'rocketride.home'
+    _use(
+        Page('/', home, 'RocketRide', 'Home.'),
+        Page('/pricing', home, 'Pricing | RocketRide', 'Plans.'),
+        Page('/blog', home, 'Blog | RocketRide', 'News.'),
+        Page('/blog/b', home, 'B post', 'Bee.', published='2026-10-01'),
+        Page('/blog/a', home, 'A post', 'Ay.', published='2026-11-09T10:00:00+05:00'),
+        Page('/blog/c', home, 'C post', published='2026-11-09T06:00:00Z'),
+        Page('/blog/z', home, 'Z undated'),
+        Page('/blog/m', home, 'M undated'),
+        Page('/blog/hidden', home, 'Hidden', published='2026-12-01', listed=False),
+        Page('/docs', home, 'Guides | Other', 'Docs.'),
+        Page('/docs/x', home, 'X', 'Ex.'),
+        Page('/docs/x/y', home, 'Y'),
+        Page('/drafts', home, 'Drafts', listed=False),
+        Page('/drafts/one', home, 'One', published='2026-11-01'),
+        Page('/news/orphan', home, 'Orphan', published='2026-11-01'),
+        site={'title': 'RocketRide'},
+    )
+    assert _client().get('/llms.txt').text == (
+        '# RocketRide\n\n## Pages\n\n'
+        f'- [RocketRide]({BASE}/): Home.\n'
+        f'- [Blog | RocketRide]({BASE}/blog): News.\n'
+        f'- [Guides | Other]({BASE}/docs): Docs.\n'
+        f'- [One]({BASE}/drafts/one)\n'
+        f'- [Orphan]({BASE}/news/orphan)\n'
+        f'- [Pricing | RocketRide]({BASE}/pricing): Plans.\n'
+        '\n## Blog\n\n'
+        f'- [C post]({BASE}/blog/c)\n'
+        f'- [A post]({BASE}/blog/a): Ay.\n'
+        f'- [B post]({BASE}/blog/b): Bee.\n'
+        f'- [M undated]({BASE}/blog/m)\n'
+        f'- [Z undated]({BASE}/blog/z)\n'
+        '\n## Guides | Other\n\n'
+        f'- [X]({BASE}/docs/x): Ex.\n'
+        '\n## X\n\n'
+        f'- [Y]({BASE}/docs/x/y)\n'
+    )
+
+
+def test_llms_group_headings_are_neutralised_like_every_manifest_string(app_url):
+    _use(
+        Page('/', 'rocketride.home', 'R'),
+        Page('/a', 'rocketride.home', 'A\n## [x](https://evil) | R'),
+        Page('/a/b', 'rocketride.home', 'B'),
+        Page('/c', 'rocketride.home', ' | R'),
+        Page('/c/d', 'rocketride.home', 'D'),
+        site={'title': 'R', 'docsUrl': 'https://docs.example/llms.txt'},
+    )
+    text = _client().get('/llms.txt').text
+    assert '\n## A ## \\[x\\](https://evil)\n\n- [B]' in text
+    # A title that is only the suffix stays whole.
+    assert '\n## | R\n\n- [D]' in text
+    assert text.endswith('\n\n## Documentation\n\n- [Docs](https://docs.example/llms.txt)\n')
 
 
 def test_llms_sets_cache_control(app_url):

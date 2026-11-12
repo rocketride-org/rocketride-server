@@ -255,7 +255,7 @@ def test_unknown_page_and_site_keys_are_ignored():
     manifest = {
         'publicPages': [
             _page('/', futureField={'a': 1}, image='/og.png'),
-            _page('/x', published='2026-11-09'),
+            _page('/x', published='2026-11-09', futureDate='soon'),
         ],
         'site': {'title': 'R', 'futureSite': [1]},
         'futureSection': True,
@@ -265,10 +265,140 @@ def test_unknown_page_and_site_keys_are_ignored():
     assert [p.path for p in pages] == ['/', '/x']
     assert site == {'title': 'R'}
     # A page keeps its unknown keys, read-only, for the layers that serve them.
-    assert dict(pages[0].extra) == {'futureField': {'a': 1}, 'image': '/og.png'}
-    assert dict(pages[1].extra) == {'published': '2026-11-09'}
+    assert dict(pages[0].extra) == {'futureField': {'a': 1}}
+    assert dict(pages[1].extra) == {'futureDate': 'soon'}
     with pytest.raises(TypeError):
-        pages[0].extra['image'] = '/other.png'
+        pages[0].extra['futureField'] = 2
+
+
+# ---------------------------------------------------------------------------
+# Article metadata: image, published, modified, authors, site.image
+# ---------------------------------------------------------------------------
+
+
+def test_article_fields_validate_onto_the_page():
+    pages, site, errors = check_manifest(
+        ROOT_APP,
+        {
+            'publicPages': [
+                _page('/', image='https://cdn.example/og.png'),
+                _page(
+                    '/blog/launch',
+                    image='blog/launch.png',
+                    published='2026-11-09',
+                    modified='2026-11-10T09:00:00.123-08:00',
+                    authors=[{'name': 'Ansh', 'url': 'https://rocketride.ai/team/ansh', 'role': 'x'}, {'name': 'Rod'}],
+                ),
+                _page('/blog/hello', image='/apps/rocketride.home/seo-assets/og.png', modified='2026-11-01T00:00:00Z'),
+            ],
+            'site': {'title': 'R', 'image': 'og/site.png'},
+        },
+    )
+    assert errors == []
+    home, launch, hello = pages
+    assert (home.image, home.published, home.modified, home.authors) == ('https://cdn.example/og.png', '', '', ())
+    assert launch.image == 'blog/launch.png'
+    assert (launch.published, launch.modified) == ('2026-11-09', '2026-11-10T09:00:00.123-08:00')
+    # Unknown author keys are ignored, like any unknown key.
+    assert launch.authors == (('Ansh', 'https://rocketride.ai/team/ansh'), ('Rod', ''))
+    assert (hello.image, hello.modified) == ('/apps/rocketride.home/seo-assets/og.png', '2026-11-01T00:00:00Z')
+    assert site == {'title': 'R', 'image': 'og/site.png'}
+    assert all(dict(p.extra) == {} for p in pages)
+
+
+@pytest.mark.parametrize(
+    'field,value,needle',
+    [
+        ('image', 'http://cdn.example/og.png', 'publicPages[0].image'),
+        ('image', 'https://', 'publicPages[0].image'),
+        ('image', 'https://cdn.example/a b.png', 'publicPages[0].image'),
+        ('image', 'https:///og.png', 'publicPages[0].image'),
+        ('image', 'javascript:alert(1)', 'publicPages[0].image'),
+        ('image', '//evil.example/og.png', 'publicPages[0].image'),
+        ('image', '/a/../og.png', 'publicPages[0].image'),
+        ('image', '../og.png', 'publicPages[0].image'),
+        ('image', 'og/./x.png', 'publicPages[0].image'),
+        ('image', 'og//x.png', 'publicPages[0].image'),
+        ('image', 'og x.png', 'publicPages[0].image'),
+        ('image', '/og.png\n', 'publicPages[0].image'),
+        ('image', 'https://cdn.example/' + 'x' * 2048, 'publicPages[0].image'),
+        ('image', 5, 'publicPages[0].image'),
+        ('image', None, 'publicPages[0].image'),
+        ('published', '2026-11-9', 'publicPages[0].published'),
+        ('published', '2026-13-01', 'publicPages[0].published'),
+        ('published', '2026-02-30', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00', 'publicPages[0].published'),
+        ('published', '2026-11-09 10:00:00Z', 'publicPages[0].published'),
+        ('published', '2026-11-09T24:00:00Z', 'publicPages[0].published'),
+        ('published', '09/11/2026', 'publicPages[0].published'),
+        ('published', '2026-11-09\n', 'publicPages[0].published'),
+        ('published', 20261109, 'publicPages[0].published'),
+        # Offsets that push the instant out of the representable range.
+        ('published', '0001-01-01T00:00:00+01:00', 'publicPages[0].published'),
+        ('modified', '9999-12-31T23:59:59-01:00', 'publicPages[0].modified'),
+        ('published', '2026-11-09T10:00:00+14:60', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00+24:00', 'publicPages[0].published'),
+        ('published', '2026-11-09T10:00:00-07:5', 'publicPages[0].published'),
+        ('published', '\uff12\uff10\uff12\uff16-11-09', 'publicPages[0].published'),
+        ('modified', 'yesterday', 'publicPages[0].modified'),
+        ('authors', 'Ansh', 'publicPages[0].authors'),
+        ('authors', [{'name': str(i)} for i in range(6)], 'publicPages[0].authors'),
+        ('authors', ['Ansh'], 'publicPages[0].authors[0]'),
+        ('authors', [{'name': 'A'}, {'url': 'https://x.example/'}], 'publicPages[0].authors[1].name'),
+        ('authors', [{'name': ' '}], 'publicPages[0].authors[0].name'),
+        ('authors', [{'name': 'x' * 301}], 'publicPages[0].authors[0].name'),
+        ('authors', [{'name': 'A', 'url': 'http://x.example/'}], 'publicPages[0].authors[0].url'),
+        ('authors', [{'name': 'A', 'url': 5}], 'publicPages[0].authors[0].url'),
+        ('authors', [{'name': 'Ansh \ud83d'}], 'publicPages[0].authors[0].name: contains a lone surrogate'),
+        ('authors', [{'name': 'A', 'url': 'https://x.example/\ud83d'}], 'publicPages[0].authors[0].url: contains'),
+        ('image', 'https://cdn.example/\ud83d.png', 'publicPages[0].image'),
+    ],
+)
+def test_bad_article_fields_fail_with_the_field_named(field, value, needle):
+    pages, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/x', **{field: value})]})
+    assert pages == []
+    assert len(errors) == 1 and errors[0].startswith(needle), errors
+
+
+def test_a_bad_https_image_names_what_is_wrong_with_the_url():
+    for image, why in (
+        ('https://cdn.example/a b.png', 'must be an absolute https:// URL'),
+        ('https://cdn.example/\ud83d.png', 'contains a lone surrogate'),
+    ):
+        _, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/x', image=image)]})
+        assert len(errors) == 1 and errors[0].startswith(f'publicPages[0].image {image!r}: {why}'), errors
+
+
+def test_modified_before_published_rejected():
+    pages, _, errors = check_manifest(
+        ROOT_APP, {'publicPages': [_page('/x', published='2026-11-10', modified='2026-11-09')]}
+    )
+    assert pages == []
+    assert errors == [
+        "publicPages[0].modified '2026-11-09': must not be earlier than published '2026-11-10'; fix either date"
+    ]
+    # A date-only value is midnight UTC, and offsets compare as instants.
+    for published, modified, ok in (
+        ('2026-11-09', '2026-11-09', True),
+        ('2026-11-09T10:00:00Z', '2026-11-09', False),
+        ('2026-11-10T01:00:00+02:00', '2026-11-09T23:30:00Z', True),
+        ('2026-11-10T01:00:00+02:00', '2026-11-09T22:59:59Z', False),
+        # The extremes of the range, and the widest real offsets.
+        ('0001-01-01T00:00:00Z', '9999-12-31T23:59:59Z', True),
+        ('2026-11-09T10:00:00+14:00', '2026-11-09T10:00:00-12:00', True),
+    ):
+        pages, _, errors = check_manifest(
+            ROOT_APP, {'publicPages': [_page('/x', published=published, modified=modified)]}
+        )
+        assert (errors == []) is ok, (published, modified, errors)
+
+
+@pytest.mark.parametrize(
+    'image', ['http://x.example/og.png', '//x.example/og.png', '../og.png', 7, 'https://x.example/\ud83d.png']
+)
+def test_bad_site_image_fails_with_the_field_named(image):
+    _, site, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': {'title': 'R', 'image': image}})
+    assert site is None and len(errors) == 1 and errors[0].startswith('site.image')
 
 
 def test_publicpages_must_be_a_list():
@@ -476,6 +606,80 @@ def test_a_redirect_source_whose_slash_twin_is_a_live_route_or_a_page_is_rejecte
 def test_both_slash_forms_of_one_old_url_may_redirect():
     _, site, errors = _redirects({'from': '/terms', 'to': '/legal/terms'}, {'from': '/terms/', 'to': '/legal/terms'})
     assert errors == [] and site['redirects'] == {'/terms': '/legal/terms', '/terms/': '/legal/terms'}
+
+
+# ---------------------------------------------------------------------------
+# site.feeds
+# ---------------------------------------------------------------------------
+
+BLOG_PAGES = [_page('/'), _page('/blog'), _page('/blog/launch', published='2026-11-09')]
+FEED = {'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}
+
+
+def _feeds(*entries, redirects=(), live_conflict=None):
+    site = {'title': 'R', 'feeds': list(entries), 'redirects': [{'from': f, 'to': '/blog'} for f in redirects]}
+    return check_manifest(ROOT_APP, {'publicPages': BLOG_PAGES, 'site': site}, live_conflict=live_conflict)
+
+
+def test_feeds_validate_into_the_site_map():
+    everything = {'path': '/feed.xml', 'prefix': '/', 'title': 'All', 'futureKey': 1}
+    _, site, errors = _feeds(FEED, everything)
+    assert errors == []
+    assert site['feeds'] == {'/blog/feed.xml': FEED, '/feed.xml': {'path': '/feed.xml', 'prefix': '/', 'title': 'All'}}
+
+
+@pytest.mark.parametrize(
+    'entry,needle',
+    [
+        ('feed', 'site.feeds[0]: must be an object'),
+        ({**FEED, 'path': 'blog/feed.xml'}, "site.feeds[0].path 'blog/feed.xml'"),
+        ({**FEED, 'path': '/blog/feed'}, "site.feeds[0].path '/blog/feed': must end in .xml"),
+        ({**FEED, 'path': '/blog/Feed.xml'}, "site.feeds[0].path '/blog/Feed.xml'"),
+        ({**FEED, 'path': '/blog/feed.xml/'}, "site.feeds[0].path '/blog/feed.xml/'"),
+        ({**FEED, 'path': '/blog/*.xml'}, "site.feeds[0].path '/blog/*.xml': wildcard pages are not supported"),
+        ({**FEED, 'path': '/sitemap.xml'}, "site.feeds[0].path '/sitemap.xml': is under the reserved prefix"),
+        ({**FEED, 'path': '/apps/feed.xml'}, "site.feeds[0].path '/apps/feed.xml': is under the reserved prefix"),
+        ({**FEED, 'path': 5}, 'site.feeds[0].path 5'),
+        ({**FEED, 'prefix': '/blog'}, "site.feeds[0].prefix '/blog'"),
+        ({**FEED, 'prefix': 'blog/'}, "site.feeds[0].prefix 'blog/'"),
+        ({**FEED, 'prefix': '//'}, "site.feeds[0].prefix '//'"),
+        ({**FEED, 'prefix': '/a//'}, "site.feeds[0].prefix '/a//'"),
+        ({**FEED, 'prefix': '/Blog/'}, "site.feeds[0].prefix '/Blog/'"),
+        ({**FEED, 'prefix': None}, 'site.feeds[0].prefix None'),
+        ({**FEED, 'title': ''}, 'site.feeds[0].title'),
+        ({**FEED, 'title': 'x' * 301}, 'site.feeds[0].title'),
+        ({'path': '/blog/feed.xml', 'prefix': '/blog/'}, 'site.feeds[0].title'),
+        ({**FEED, 'title': 'Blog \ud83d'}, 'site.feeds[0].title: contains a lone surrogate'),
+    ],
+)
+def test_bad_feeds_fail_with_the_field_named(entry, needle):
+    _, site, errors = _feeds(entry)
+    assert len(errors) == 1 and errors[0].startswith(needle), errors
+    assert site['feeds'] == {}
+
+
+def test_feeds_are_a_bounded_list():
+    for raw in ('x', [FEED] * 6):
+        _, site, errors = check_manifest(ROOT_APP, {'publicPages': BLOG_PAGES, 'site': {'title': 'R', 'feeds': raw}})
+        assert site['feeds'] == {} and errors == [
+            'site.feeds: must be a list of at most 5 {"path", "prefix", "title"} objects'
+        ]
+
+
+def test_a_feed_path_collides_with_no_page_redirect_live_route_or_their_twins():
+    _, site, errors = _feeds({**FEED, 'path': '/blog/launch.xml'}, FEED, FEED)
+    assert errors == ["site.feeds[2].path '/blog/feed.xml': duplicate feed path in this manifest; choose another path"]
+    pages = BLOG_PAGES + [_page('/news.xml')]
+    _, _, errors = check_manifest(ROOT_APP, {'publicPages': pages, 'site': {'feeds': [{**FEED, 'path': '/news.xml'}]}})
+    assert errors == ["site.feeds[0].path '/news.xml': is a publicPages path; choose another path"]
+    for source, which in (('/old.xml', ''), ('/old.xml/', "its slash twin '/old.xml/' ")):
+        _, _, errors = _feeds({**FEED, 'path': '/old.xml'}, redirects=[source])
+        assert errors == [f"site.feeds[0].path '/old.xml': {which}is a site.redirects source; choose another path"]
+    for route in ('/live.xml', '/live.xml/'):
+        _, _, errors = _feeds(
+            {**FEED, 'path': '/live.xml'}, live_conflict=lambda p, r=route: 'GET /x' if p == r else None
+        )
+        assert len(errors) == 1 and 'collides with the live server route GET /x' in errors[0], route
 
 
 def test_errors_carry_no_em_dashes():

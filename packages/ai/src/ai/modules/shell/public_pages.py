@@ -80,8 +80,12 @@ class Published:
 class Aggregate:
     """The immutable page map, keyed by exact path. A rebuild swaps a whole new one (never edited).
 
-    ``redirects`` maps an old path to the page path it 301s to (the root
-    owner's ``site.redirects``).
+    ``redirects`` maps an old path to the page path it 301s to, and
+    ``feeds`` a feed path to its ``{path, prefix, title}`` (the root
+    owner's ``site.redirects`` and ``site.feeds``). ``built_at`` is the
+    wall-clock time it was built; it never makes two aggregates differ, so
+    an unchanged rebuild is not swapped in and the time stays that of the
+    content.
 
     ``published`` maps each app owning a page to the manifest it was read
     from: what a rebuild keeps when that app cannot be read. Comparisons
@@ -93,6 +97,8 @@ class Aggregate:
     published: Mapping[str, Published] = field(default_factory=dict, compare=False, repr=False)
     legacy: bool = False
     redirects: Mapping[str, str] = field(default_factory=dict)
+    feeds: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    built_at: float = field(default_factory=time.time, compare=False)
 
     def pages(self) -> List[Page]:
         """Every claimed page, sorted by path (deterministic output order)."""
@@ -141,8 +147,9 @@ def build_aggregate(
     pages are kept; a page colliding with an earlier claim is dropped (first
     claim wins). ``site`` and its redirects come only from the app owning
     ``/``; a redirect whose source (or its slash twin) another app's page
-    serves is dropped. When no page survives, the aggregate is the legacy page
-    list (a broken manifest falls back instead of removing every page).
+    serves is dropped, and so is a feed at another app's page. When no page
+    survives, the aggregate is the legacy page list (a broken manifest falls
+    back instead of removing every page).
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
@@ -157,12 +164,19 @@ def build_aggregate(
             debug(f'[public_pages] redirect {source} -> {target} collides with a page (redirect skipped)')
             continue
         redirects[source] = target
+    feeds = {}
+    for path, feed in site.pop('feeds', {}).items():
+        if path in exact:
+            debug(f'[public_pages] feed {path} collides with a page (feed skipped)')
+            continue
+        feeds[path] = feed
     owners = {page.app_id for page in exact.values()}
     return Aggregate(
         exact=exact,
         site=site,
         published={pub.app_id: pub for pub in published if pub.app_id in owners},
         redirects=redirects,
+        feeds=feeds,
     )
 
 
@@ -393,9 +407,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     live route table, data entries, redirects, cross-app collisions (of page
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
-    manifests, so unpublishing releases it, with no table), and snapshot
-    files missing from the built version or over ``MAX_SNAPSHOT_BYTES``
-    (sized by a stat, never read).
+    manifests, so unpublishing releases it, with no table) and of feed
+    paths against their pages, and snapshot files missing from the built
+    version or over ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -439,8 +453,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         return errors
     # The publishing app's own current version is being replaced: never read it.
     others = await load_published(acct, strict=True, exclude=app_id)
-    exact, _ = _claims(others, page_map.live_conflict)
+    exact, sites = _claims(others, page_map.live_conflict)
+    root = exact.get('/')
+    root_feeds = {}
+    if root is not None:
+        root_feeds = sites.get(root.app_id, {}).get('feeds', {})
     for page in pages:
+        for candidate in with_slash_twin(page.path):
+            if candidate in root_feeds:
+                errors.append(
+                    f'publicPages path {page.path!r} is a feed of the published app {root.app_id}; choose another path'
+                )
+                break
         owner = exact.get(page.path)
         if owner is not None:
             errors.append(
@@ -457,6 +481,12 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                     'a URL is a page or a redirect, not both: drop the entry'
                 )
                 break
+    for path in (site or {}).get('feeds', {}):
+        owner = exact.get(path)
+        if owner is not None:
+            errors.append(
+                f'site.feeds path {path!r} is a page of the published app {owner.app_id}; choose another path'
+            )
     for page in pages:
         if not page.snapshot:
             continue
@@ -473,6 +503,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
                 f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
                 'reference them through {{assets}}'
+            )
+    images = [(f'publicPages path {page.path!r}: image', page.image) for page in pages]
+    if site is not None:
+        images.append(('site.image', site.get('image', '')))
+    for label, image in images:
+        if not image or image.startswith(('https://', '/')):
+            continue
+        try:
+            await artifact_file_info(f'{dist_dir}/{image}')
+        except StorageNotFoundError:
+            errors.append(
+                f'{label} {image!r} is not in the built version; emit it into the build output or drop the field'
             )
     return errors
 

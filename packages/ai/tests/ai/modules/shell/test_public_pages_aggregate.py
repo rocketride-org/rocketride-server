@@ -226,14 +226,14 @@ def test_live_route_conflicts_are_dropped_at_build():
 def test_pages_carry_their_version_and_binding_time():
     pub = Published(
         'rocketride.home',
-        {'publicPages': [{'path': '/', 'title': 'H', 'image': '/og.png'}]},
+        {'publicPages': [{'path': '/', 'title': 'H', 'image': '/og.png', 'futureField': 1}]},
         dist_dir='orgs/p/dist',
         published_at=5.0,
         version=7,
     )
     page = build_aggregate([pub]).exact['/']
     assert (page.app_id, page.dist_dir, page.version, page.published_at) == ('rocketride.home', 'orgs/p/dist', 7, 5.0)
-    assert dict(page.extra) == {'image': '/og.png'}
+    assert page.image == '/og.png' and dict(page.extra) == {'futureField': 1}
 
 
 # ---------------------------------------------------------------------------
