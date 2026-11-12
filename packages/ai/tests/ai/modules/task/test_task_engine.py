@@ -1918,6 +1918,360 @@ async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_restart_teardown_keeps_the_restart_meaning_it_started_with():
+    """restart_task moves on once the old run's state turns terminal, so a new
+    start can clear _is_restarting while the old teardown still broadcasts.
+    That teardown must stay a restart: no terminated/end events, and the run
+    log gets a restart note, not an end.
+    """
+    t = _task()
+    t._terminated_called = False
+    t._is_restarting = True
+    t._stop_requested = True
+    t._stop_reason = 'user'
+    t._final_events_sent = False
+    t._status = SimpleNamespace(
+        status='', state=0, completed=False, endTime=None, exitCode=0, exitMessage='', name='n', debuggerAttached=False
+    )
+    for name in (
+        '_debug_stdio',
+        '_data_client',
+        '_task_metrics',
+        '_tmpfile',
+        '_data_port',
+        '_status_update_task',
+        '_debugger',
+    ):
+        setattr(t, name, None)
+    t._send_status_update = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=0)
+    t._apply_process_exit_code = lambda code: None
+    t.debug_message = lambda *a, **k: None
+    t.debug_task_message = lambda *a, **k: None
+    t.build_event = lambda event, *, id=None, body=None, **k: {'event': event, 'body': body or {}}
+    t._server = MagicMock()
+    t._run_log = MagicMock(end_run=AsyncMock())
+    sent = []
+
+    async def forward(kind, event):
+        sent.append(event['event'])
+        t._is_restarting = False  # the new start cleared it mid-teardown
+
+    t._forward_task_event = forward
+
+    await Task._terminated(t)
+
+    assert sent == ['exited']
+    t._run_log.note_restart.assert_called_once()
+    t._run_log.end_run.assert_not_awaited()
+    assert t._status.status == 'Restarting'
+    assert t._end_deferred is True  # restart_task ends the run if a stop wins
+
+
+@pytest.mark.asyncio
+async def test_a_teardown_outside_a_restart_clears_a_stale_end_deferred():
+    """A teardown that is not part of a restart sends the run's end itself. It
+    must clear an _end_deferred left by an earlier restart, or a stop during
+    the next restart's wait would end the run a second time.
+    """
+    t = _task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._end_deferred = True  # left by an earlier restart's teardown
+    t._status = SimpleNamespace(status='', state=0)
+    t._send_status_update = AsyncMock(side_effect=RuntimeError('stop here'))
+
+    with pytest.raises(RuntimeError, match='stop here'):
+        await Task._terminated(t)
+    assert t._end_deferred is False
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_exits_during_a_restarts_start_ends_the_new_run(monkeypatch):
+    """Once the new engine is spawned, a termination is the new run's end: an
+    engine that exits while start_task still awaits (its stdio disconnect runs
+    _terminated) must find _is_restarting cleared. start_task then leaves the
+    dead task alone: no INITIALIZING, no status loop, no restart event.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    t._restart_env = {'ROCKETRIDE_KEY': 'v'}
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = True
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._status_update_task = None
+    seen = []
+
+    class EngineExitsOnConnect:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            seen.append(t._is_restarting)  # what the disconnect's _terminated() reads
+            t._terminated_called = True  # the engine exited and _terminated() ran,
+            t._status.state = engine.TASK_STATE.CANCELLED.value  # leaving a final state
+
+    monkeypatch.setattr(engine.Task, 'TaskDbgStdio', EngineExitsOnConnect)
+    monkeypatch.setattr(engine, 'TaskMetrics', MagicMock())
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=123)))
+
+    await Task.start_task(t)
+
+    assert seen == [False]
+    assert t._status.state == engine.TASK_STATE.CANCELLED.value  # not put back to INITIALIZING
+    assert t._status_update_task is None
+    t._forward_task_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_restart_waits_for_the_old_teardown_to_finish():
+    """The old run's state turns terminal before its teardown ends the run log.
+    A restart that started the new run in that gap would have the new run's log
+    ended by the old teardown, so restart_task waits for the teardown itself.
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={'components': []},
+        env_source=AsyncMock(return_value={}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True  # the old run is already terminal
+    task._reset_status = lambda: None
+    task.stop_task = AsyncMock()
+    task._teardown_running = True  # but its teardown still has broadcasts to make
+    order = []
+
+    async def start():
+        order.append('start')
+
+    task.start_task = start
+    restart = asyncio.ensure_future(task.restart_task({'components': []}, 'p-1', 's-1', 'tools'))
+    await asyncio.sleep(0.25)
+    assert order == []
+
+    order.append('teardown done')
+    task._teardown_running = False
+    await restart
+    assert order == ['teardown done', 'start']
+
+
+@pytest.mark.asyncio
+async def test_terminated_marks_its_teardown_running_until_it_returns():
+    """_teardown_running is set for the whole teardown and cleared even when it raises."""
+    t = _task()
+    t._terminated_called = False
+    t._teardown_running = False
+    seen = []
+
+    async def tear_down():
+        seen.append(t._teardown_running)
+        raise RuntimeError('boom')
+
+    t._tear_down = tear_down
+    with pytest.raises(RuntimeError, match='boom'):
+        await Task._terminated(t)
+    assert seen == [True]
+    assert t._teardown_running is False
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_exits_during_connect_gets_no_run_log_or_metrics(monkeypatch):
+    """_terminated() runs during the stdio connect, before the run log and the
+    metrics exist, so it can't close them. start_task must not create them.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
+    t._is_restarting = False
+    t._status = SimpleNamespace(
+        name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False, startTime=None
+    )
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._status_update_task = None
+
+    class EngineExitsOnConnect:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            t._terminated_called = True  # the engine exited and _terminated() ran
+            t._status.state = engine.TASK_STATE.CANCELLED.value
+
+    run_log, metrics = MagicMock(), MagicMock()
+    monkeypatch.setattr(engine.Task, 'TaskDbgStdio', EngineExitsOnConnect)
+    monkeypatch.setattr(engine, 'RunLogWriter', run_log)
+    monkeypatch.setattr(engine, 'TaskMetrics', metrics)
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=123)))
+
+    await Task.start_task(t)
+
+    run_log.assert_not_called()
+    metrics.assert_not_called()
+    assert t._status_update_task is None
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_exits_while_the_run_log_opens_gets_no_metrics(monkeypatch):
+    """_terminated() runs while RunLogWriter.open() awaits, after it looked for
+    metrics. start_task must not create them, or they keep sampling a dead
+    engine with nothing to stop them.
+    """
+    import ai.account
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
+    t._is_restarting = False
+    t._status = SimpleNamespace(
+        name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False, startTime=None
+    )
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._status_update_task = None
+
+    class QuietConnect:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            pass
+
+    async def engine_exits_while_opening(**kwargs):
+        t._terminated_called = True  # the engine exited and _terminated() ran
+        t._status.state = engine.TASK_STATE.CANCELLED.value
+
+    t._run_trigger = 'test'
+    t._pipelineTraceLevel = None
+    run_log = MagicMock()
+    run_log.return_value.open = AsyncMock(side_effect=engine_exits_while_opening)
+    metrics = MagicMock()
+    monkeypatch.setattr(ai.account, 'Store', MagicMock())
+    monkeypatch.setattr(engine.Task, 'TaskDbgStdio', QuietConnect)
+    monkeypatch.setattr(engine, 'RunLogWriter', run_log)
+    monkeypatch.setattr(engine, 'TaskMetrics', metrics)
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=123)))
+
+    await Task.start_task(t)
+
+    run_log.return_value.open.assert_awaited_once()  # the run log did open: the check after it is what ran
+    metrics.assert_not_called()
+    assert t._status_update_task is None
+
+
+@pytest.mark.asyncio
+async def test_a_stop_while_a_restart_waits_ends_the_run_and_starts_nothing():
+    """A stop that lands while restart_task waits for the old teardown finds
+    no engine to end. The restart must not start a new run, and since the
+    teardown recorded a restart, the run still gets its end events and its
+    run-log end.
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={'components': []},
+        env_source=AsyncMock(return_value={}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    task.stop_task = AsyncMock()
+    task._teardown_running = True
+    task.start_task = AsyncMock()
+    log = task._run_log = MagicMock(end_run=AsyncMock())
+    task._stop_reason = 'user'
+    task._end_deferred = True  # the teardown recorded a restart, not an end
+    sent = []
+
+    async def forward(kind, event):
+        sent.append(event['body'].get('action') if event['event'] == 'apaevt_task' else event['event'])
+
+    task._forward_task_event = forward
+    restart = asyncio.ensure_future(task.restart_task({'components': []}, 'p-1', 's-1', 'tools'))
+    await asyncio.sleep(0.15)
+    task._stop_count += 1  # stop_task arrives during the wait
+    task._teardown_running = False
+
+    with pytest.raises(RuntimeError, match='stopped while the restart waited'):
+        await restart
+    task.start_task.assert_not_awaited()
+    assert sent == ['apaevt_status_update', 'terminated', 'end']
+    log.end_run.assert_awaited_once()
+    assert log.end_run.await_args.args[0] == 'cancelled'
+    assert task._run_log is None
+    assert task._status.status == 'Stopped'
+    assert task._status.completed is True
+
+
+@pytest.mark.asyncio
+async def test_a_stop_while_a_restart_waits_does_not_end_a_run_twice():
+    """If the engine exited on its own before the restart began, the teardown
+    already sent the run's end. A stop during the wait still refuses the
+    restart, but sends nothing more.
+    """
+    task = Task(
+        server=MagicMock(),
+        id='t-1',
+        project_id='p-1',
+        source='s-1',
+        token='tk',
+        public_auth='pk',
+        pipeline={'components': []},
+        env_source=AsyncMock(return_value={}),
+    )
+    task.has_attached_debugger = lambda: False
+    task.is_task_complete = lambda: True
+    task._reset_status = lambda: None
+    task.stop_task = AsyncMock()
+    task._teardown_running = True
+    task.start_task = AsyncMock()
+    task._end_deferred = False  # the teardown began before the restart and ended the run
+    task._forward_task_event = AsyncMock()
+    restart = asyncio.ensure_future(task.restart_task({'components': []}, 'p-1', 's-1', 'tools'))
+    await asyncio.sleep(0.15)
+    task._stop_count += 1
+    task._teardown_running = False
+
+    with pytest.raises(RuntimeError, match='stopped while the restart waited'):
+        await restart
+    task.start_task.assert_not_awaited()
+    task._forward_task_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_second_restart_while_one_runs_is_refused():
     """Two restarts of one task would share _restart_env: the second is refused
     before it loads anything, the first starts with its own values, and a later
