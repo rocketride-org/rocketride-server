@@ -33,10 +33,15 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, NamedTuple, Optional
+from typing import TYPE_CHECKING, Dict, FrozenSet, NamedTuple, Optional, Sequence, Tuple
 
 if TYPE_CHECKING:
     from .models import AccountInfo
+
+# Version of the live-authority contract below (#972): ``supports_live_authority``,
+# ``live_authority`` and ``rebuild_account_info``. An edition that relies on the
+# engine re-checking platform authority requires at least this version.
+LIVE_AUTHORITY_API = 1
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -105,6 +110,12 @@ class AccountBase(ABC):
     # the safe, gated behavior.
     review_ladder: bool = True
 
+    # Whether ``live_authority`` reads the account store (#972). When True the
+    # task server re-checks every connection holding ``sysPermissions`` against
+    # it (``AuthzRecheck``) and refuses requests and events on a connection it
+    # could not verify recently. False (OSS): no re-check, no gate.
+    supports_live_authority: bool = False
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================
@@ -126,6 +137,22 @@ class AccountBase(ABC):
     # =========================================================================
     # CONCRETE SHARED — both editions use these; override if needed
     # =========================================================================
+
+    async def live_authority(self, user_ids: Sequence[str]) -> Optional[Dict[str, Tuple[bool, FrozenSet[str]]]]:
+        """
+        Read the current platform authority of users, in one batch (#972).
+
+        Only called when ``supports_live_authority`` is True.
+
+        Args:
+            user_ids: Exact stored user ids (case-sensitive).
+
+        Returns:
+            ``{user_id: (enabled, frozenset(sys_permissions))}`` for the users
+            whose row exists; an id missing from the result has no row. None
+            (or an exception) means the read failed: nothing is decided on it.
+        """
+        return None
 
     async def rebuild_account_info(self, info: 'AccountInfo') -> 'Optional[AccountInfo]':
         """
