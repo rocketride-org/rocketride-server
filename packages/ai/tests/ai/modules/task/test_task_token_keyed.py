@@ -502,6 +502,31 @@ def test_no_opt_in_forwards_the_key_to_a_task_subprocess(opt_in):
         assert env.get('RR_OTHER') == 'x'  # the opt-in itself still works
 
 
+@pytest.mark.parametrize(
+    'opt_in', ['', 'RR_*', '*', 'ROCKETRIDE_*', 'RR_DATACORE_GRANT_KEY,RR_DB_BROKER_TOKEN,ROCKETRIDE_DB_BROKER_TOKEN']
+)
+def test_no_opt_in_forwards_a_datacore_credential(opt_in):
+    """The datacore grant key mints a grant for ANY tenant and the broker
+    token is the provisioner's bearer (rocketride-saas #975). Like the task
+    token key, no operator opt-in hands either to pipeline code.
+    """
+    secrets = {'RR_DATACORE_GRANT_KEY', 'RR_DB_BROKER_TOKEN', 'ROCKETRIDE_DB_BROKER_TOKEN'}
+    env = filter_subprocess_env(
+        {
+            'RR_DATACORE_GRANT_KEY': KEY_A,
+            'RR_DB_BROKER_TOKEN': KEY_B,
+            'ROCKETRIDE_DB_BROKER_TOKEN': KEY_B,
+            'rocketride_db_broker_token': KEY_B,
+            'ROCKETRIDE_X': '1',
+            'RR_OTHER': 'x',
+            'RR_SUBPROCESS_ENV': opt_in,
+        }
+    )
+    assert not {name.upper() for name in env} & secrets
+    # The ROCKETRIDE_* namespace still reaches the child, minus the token.
+    assert env.get('ROCKETRIDE_X') == '1'
+
+
 def test_a_short_key_stops_the_engine_at_startup(monkeypatch):
     monkeypatch.setenv('RR_TASK_TOKEN_KEY', 'too-short')
 
