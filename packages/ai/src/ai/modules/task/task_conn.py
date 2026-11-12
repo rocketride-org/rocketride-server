@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -156,6 +157,12 @@ def task_credential_commands(account_info: Any) -> Optional[frozenset]:
     if not isinstance(auth, str) or not auth.startswith(TASK_CREDENTIAL_PREFIXES):
         return None
     return TASK_TOKEN_COMMANDS if auth.startswith('tk_') else TASK_KEY_COMMANDS
+
+
+# Bound on one identity notice (``apaext_account``) sent by revoke or by an
+# identity push (#972). A client that stops reading its socket can otherwise
+# hold the sender (a push, or the authority sweep) indefinitely.
+NOTICE_SEND_TIMEOUT = 1.0
 
 
 def authority_subject(account_info: Any) -> bool:
@@ -525,11 +532,24 @@ class TaskConn(
             reason: Why, for the log line.
             pushed: The rebuilt (narrower) identity, if the caller has one.
         """
+        if self.revoke_authority(expected_info, reason):
+            await self.send_revoke_notice(pushed)
+
+    def revoke_authority(self, expected_info: AccountInfo, reason: str) -> bool:
+        """
+        The synchronous part of ``revoke``: guard, mark, drop authority, log.
+
+        Callers that must not wait on a client (the authority sweep) run this
+        at the decision and send the notice separately (``send_revoke_notice``).
+
+        Returns:
+            bool: True when this call revoked the connection (send the notice).
+        """
         server = self._server
         if server._connections.get(self.get_connection_id()) is not self:
-            return
+            return False
         if self._account_info is not expected_info or self._revoked:
-            return
+            return False
 
         self._revoked = True
         self._revoked_user_id = expected_info.userId
@@ -539,12 +559,20 @@ class TaskConn(
             f'[AUTHZ] revoked conn={self.get_connection_id()} user={expected_info.userId} '
             f'reason={reason} revoked={revoked}'
         )
+        return True
 
+    async def send_revoke_notice(self, pushed: Optional[AccountInfo] = None) -> None:
+        """
+        Tell a revoked client its new identity, then disconnect it.
+
+        The send is bounded by NOTICE_SEND_TIMEOUT so a client that stopped
+        reading cannot hold the caller; the disconnect always happens.
+        """
         try:
             body = (pushed if pushed is not None else self._account_info).to_push_result()
-            await self.send_event('apaext_account', body=body)
+            await asyncio.wait_for(self.send_event('apaext_account', body=body), NOTICE_SEND_TIMEOUT)
         except Exception as e:
-            debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e}')
+            debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e!r}')
         finally:
             self._transport.disconnect()
 

@@ -96,7 +96,7 @@ from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
-from .task_conn import TaskConn, authority_narrowed, authority_subject
+from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
@@ -1174,9 +1174,11 @@ class TaskServer(DAPBase):
         never keeps the old identity: a narrower result (waitlisted, or a
         cached ``sysPermissions`` element missing) or ``ValueError`` (user not
         found) revokes the connection, and any other exception revokes it
-        too. A good result replaces the identity only if the connection
-        still holds ``info``. Other connections keep today's behaviour: log
-        on error, replace on success.
+        too. For every connection, a good result replaces the identity only
+        if the connection is still authenticated and still holds ``info`` (a
+        deauth or newer auth during the rebuild wins). Other connections keep
+        today's behaviour otherwise: log on error, replace on success. The
+        notice send is bounded by NOTICE_SEND_TIMEOUT.
 
         Returns:
             bool: True when a fresh identity was installed and pushed.
@@ -1201,16 +1203,16 @@ class TaskServer(DAPBase):
         if fresh is None:
             return False
 
-        if subject:
-            if authority_narrowed(info, fresh):
-                await conn.revoke(info, f'{label}: authority narrowed', pushed=fresh)
-                return False
-            if conn._account_info is not info:
-                return False
+        if subject and authority_narrowed(info, fresh):
+            await conn.revoke(info, f'{label}: authority narrowed', pushed=fresh)
+            return False
+        # Never install over a deauth or a newer auth that landed during the rebuild
+        if conn._account_info is not info or not getattr(conn, '_authenticated', False):
+            return False
 
         try:
             conn._account_info = fresh
-            await conn.send_event('apaext_account', body=fresh.to_push_result())
+            await asyncio.wait_for(conn.send_event('apaext_account', body=fresh.to_push_result()), NOTICE_SEND_TIMEOUT)
         except Exception as e:
             self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
             return False
