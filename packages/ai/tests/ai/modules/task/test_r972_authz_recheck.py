@@ -562,3 +562,47 @@ async def test_r972_1b_denied_warning_once_per_connection_per_minute(monkeypatch
 
     assert server._authz_counters['denied_unavailable'] == 5
     assert [line.split()[2] for line in logged] == ['conn=1', 'conn=2', 'conn=1']
+
+
+@pytest.mark.asyncio
+async def test_r972_1b_stop_ends_pending_notices(monkeypatch):
+    """Shutdown leaves no orphaned revoke-notice task; each socket is still disconnected."""
+    from ai.modules.task import task_conn as task_conn_module
+
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 60.0)
+    account, server, clock = _setup(monkeypatch, {})
+    stuck = _admin(server, clock, 'gone')
+    stuck._transport.send = never_returns
+
+    await server._authz.sweep_once()
+    notices = list(server._authz._notices)
+    assert len(notices) == 1 and not notices[0].done()
+
+    await asyncio.wait_for(server._authz.stop(), 1)
+
+    assert all(notice.done() for notice in notices)
+    assert not server._authz._notices
+    stuck._transport.disconnect.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypatch):
+    """A deauthed debugger connection receives no debugger events, with or without the re-check."""
+    from ai.modules.task.task_engine import Task
+
+    for authz in (True, False):
+        account, server, clock = _setup(monkeypatch, {'u': (True, frozenset())})
+        if not authz:
+            server._authz = None
+        debugger = make_conn(server, identity('u'))
+        task = Task.__new__(Task)
+        task.id = 'run-1'
+        task._run_log = None
+        task._debugger = debugger
+        task.stamp_log_event = MagicMock()
+        message = {'event': 'stopped', 'body': {'project_id': 'p', 'runKind': 'dev'}}
+
+        await debugger.on_deauth(_request('deauth'))
+        await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
+
+        assert events(debugger, 'stopped') == []
