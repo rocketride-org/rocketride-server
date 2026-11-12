@@ -303,6 +303,21 @@ class TestRunBridge:
         assert client.monitor_calls == []
         assert 'unable to connect' in capsys.readouterr().err
 
+    async def test_startup_connect_failure_logs_the_hint(self, capsys):
+        class HintedError(Exception):
+            hint = 'set ROCKETRIDE_APIKEY'
+
+        class HintedClient(FakeClient):
+            async def connect(self):
+                self.connect_calls += 1
+                raise HintedError('No authorization provided')
+
+        exit_code = await run_bridge(
+            HintedClient(connected=False), OtelConfig(), lambda: FakeMapper(), lambda: FakeMetrics()
+        )
+        assert exit_code == 2
+        assert 'hint: set ROCKETRIDE_APIKEY' in capsys.readouterr().err
+
     async def test_subscription_failure_returns_2(self, capsys):
         class FailingMonitorClient(FakeClient):
             async def add_monitor(self, key, types):
