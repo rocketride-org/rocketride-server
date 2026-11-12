@@ -11,7 +11,7 @@
 const path = require('path');
 const { exists, readFile, writeFileEnsure } = require('../../../../scripts/lib');
 const { sections, sectionFor } = require('./spine');
-const { cleanTwin } = require('./twin');
+const { cleanTwin, INDEX_LINE_PREFIX } = require('./twin');
 
 const SITE_TITLE = 'RocketRide Documentation';
 const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide toolchain.';
@@ -251,7 +251,7 @@ async function buildIndex({ contentDir, staticDir, task }) {
 		const twin = path.join(staticDir, e.mdSibling);
 		if (!(await exists(twin))) continue;
 		const raw = await readFile(twin);
-		if (raw.startsWith('> Documentation index for agents')) continue; // already rewritten
+		if (raw.startsWith(INDEX_LINE_PREFIX)) continue; // already rewritten
 		const mdx = /\.mdx$/i.test(e.source || '');
 		await writeFileEnsure(twin, cleanTwin(raw, { mdx, indexUrl: `${SITE_URL}/llms.txt` }));
 	}

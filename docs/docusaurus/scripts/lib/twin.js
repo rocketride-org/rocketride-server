@@ -346,7 +346,10 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 	// A `# comment` inside a code fence is not a title.
 	const hasTitle = segments.some((s, i) => !s.fence && /^# /m.test(parts[i]));
 	if (addTitle && title && !hasTitle) body = `# ${title.replace(/^['"]|['"]$/g, '')}\n\n${body}`;
-	return `${indexUrl ? `> Documentation index for agents: ${indexUrl}\n\n` : ''}${body}\n`;
+	return `${indexUrl ? `${INDEX_LINE_PREFIX}: ${indexUrl}\n\n` : ''}${body}\n`;
 }
 
-module.exports = { cleanTwin, splitFences };
+// First line of every published .md twin; llms.js uses it to spot an already-rewritten file.
+const INDEX_LINE_PREFIX = '> Documentation index for agents';
+
+module.exports = { cleanTwin, splitFences, INDEX_LINE_PREFIX };
