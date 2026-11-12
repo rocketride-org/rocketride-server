@@ -227,5 +227,5 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	discardPath?(path: string): Promise<void>;
 }
 
-/** The view a StagedFileSystem decorates: the contract without the path versions. CachedVfs satisfies it. */
-export type IWorkspaceBaseView = Omit<IWorkspaceFileSystem, 'version' | 'readVersioned' | 'lastWriter'>;
+/** The view a StagedFileSystem decorates: the contract without the path versions, with the conditional write it saves through. CachedVfs satisfies it. */
+export type IWorkspaceBaseView = Omit<IWorkspaceFileSystem, 'version' | 'readVersioned' | 'lastWriter'> & Required<Pick<IWorkspaceFileSystem, 'writeIfUnchanged'>>;

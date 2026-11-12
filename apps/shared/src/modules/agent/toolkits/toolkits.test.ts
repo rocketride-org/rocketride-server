@@ -115,6 +115,13 @@ class MemoryWorkspace implements IWorkspaceFileSystem {
 		this.log.push(`write ${path}`);
 	}
 
+	/** The store's conditional write, for a test that puts this workspace under a CachedVfs. */
+	async writeIfUnchanged(path: string, content: unknown, baseHash: string | null, origin?: string): Promise<void> {
+		const stored = this.files.get(path);
+		if ((stored === undefined ? null : await sha256Hex(stored)) !== baseHash) throw new StaleWriteError(path);
+		await this.write(path, content, origin);
+	}
+
 	async delete(path: string, origin?: string, anchor?: string): Promise<void> {
 		this.assertWritable?.(path);
 		if (!this.files.has(path)) throw new Error(`No such file: ${path}`);

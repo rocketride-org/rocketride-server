@@ -95,6 +95,14 @@ class MockBase implements IWorkspaceBaseView {
 		save?.();
 	}
 
+	/** The store's conditional write: refused unless the stored copy still hashes to baseHash (null: no file). */
+	async writeIfUnchanged(path: string, content: unknown, baseHash: string | null): Promise<void> {
+		this.landOtherSave();
+		const stored = this.files.get(path);
+		if ((stored === undefined ? null : await sha256Hex(stored)) !== baseHash) throw new StaleWriteError(path);
+		await this.write(path, content);
+	}
+
 	async rename(oldPath: string, newPath: string): Promise<void> {
 		const content = this.files.get(oldPath);
 		if (content === undefined) throw new Error(`No such file: ${oldPath}`);

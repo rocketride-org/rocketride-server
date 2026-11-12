@@ -53,7 +53,7 @@
 import { CachedVfs, getClient } from 'shell';
 import type { IVirtualFileSystem, RocketRideClient } from 'shell';
 import { emitFsChange } from 'shared/utils/fsNotify';
-import { StagedFileSystem } from 'shared/modules/vfs/stagedFileSystem';
+import { StagedFileSystem, StaleWriteError } from 'shared/modules/vfs/stagedFileSystem';
 import { StagingStore } from 'shared/modules/vfs/staging';
 import { CommitPolicy } from 'shared/modules/vfs/commitPolicy';
 import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
@@ -438,6 +438,14 @@ function createWorkspaceBackend(scope: WorkspaceScope): IVirtualFileSystem {
 			if (!wp.rest) throw new Error(`Cannot write to the ${wp.root}/ root.`);
 			const storePath = toStorePath(wp, scope);
 			await requireClient().fsWriteString(storePath, String(content));
+			emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);
+		},
+		/** Writes one file as UTF-8 text only while the store still holds the copy that hashes to baseHash. */
+		async writeIfUnchanged(path: string, content: unknown, baseHash: string | null, origin?: string): Promise<void> {
+			const wp = writablePath(path);
+			if (!wp.rest) throw new Error(`Cannot write to the ${wp.root}/ root.`);
+			const storePath = toStorePath(wp, scope);
+			if (!(await requireClient().fsWriteStringIfUnchanged(storePath, String(content), baseHash))) throw new StaleWriteError(path);
 			emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);
 		},
 		/** Renames within one root and announces both ends. */

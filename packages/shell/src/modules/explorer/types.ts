@@ -73,6 +73,20 @@ export interface IVirtualFileSystem {
 	write(path: string, content: unknown, origin?: string): Promise<void>;
 
 	/**
+	 * OPTIONAL conditional write: like write(), but only while the stored file
+	 * is still the copy the writer read. The backend compares and writes in
+	 * one step, so a save from another connection cannot land in between.
+	 *
+	 * @param path     - Relative file path.
+	 * @param content  - The content to write.
+	 * @param baseHash - SHA-256 (hex) of the text the writer read, or null when
+	 *                   the writer saw no file.
+	 * @param origin   - The writer's identity (see write()).
+	 * @throws StaleWriteError when the file changed (or now exists); nothing is written.
+	 */
+	writeIfUnchanged?(path: string, content: unknown, baseHash: string | null, origin?: string): Promise<void>;
+
+	/**
 	 * Renames a file or directory.
 	 *
 	 * @param oldPath - Current relative path.

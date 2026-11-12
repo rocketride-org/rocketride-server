@@ -36,7 +36,8 @@ import type { ChatTurn } from 'shell/src/components/chat/types';
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 
-import { StagedFileSystem } from '../vfs/stagedFileSystem';
+import { sha256Hex } from '../vfs/hash';
+import { StagedFileSystem, StaleWriteError } from '../vfs/stagedFileSystem';
 import { AgentSession } from './agent';
 import { setAgentHost, type AgentHost, type AgentLimits, type ApprovalSettings } from './host';
 import { DEFAULT_MODEL, ModelFailure, PROVIDER_IDS } from './model';
@@ -151,6 +152,12 @@ function memoryBackend(seed: Record<string, string>): IVirtualFileSystem & { fil
 			return files.get(path);
 		},
 		write: async (path, content) => {
+			log.push(`write ${path}`);
+			files.set(path, String(content));
+		},
+		writeIfUnchanged: async (path, content, baseHash) => {
+			const stored = files.get(path);
+			if ((stored === undefined ? null : await sha256Hex(stored)) !== baseHash) throw new StaleWriteError(path);
 			log.push(`write ${path}`);
 			files.set(path, String(content));
 		},
