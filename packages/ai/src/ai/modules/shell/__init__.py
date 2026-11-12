@@ -50,7 +50,8 @@ Routes registered:
                                       smoke-test / ops probe)
         anything else               — the static assets tree
     GET  /sitemap.xml               — listed public pages (404 unless RR_APP_URL is set)
-    GET  /robots.txt                — robots policy (Disallow-all unless RR_APP_URL is set)
+    GET  /robots.txt                — robots policy (allow all with RR_APP_URL; without it
+                                      Disallow-all, unless public pages are published)
     GET  /llms.txt                  — llmstxt.org index (404 unless RR_APP_URL is set)
                                       (the three crawler files answer HEAD like GET)
     GET  /<RR_INDEXNOW_KEY>.txt     — the IndexNow key file (only with a valid key and an https
@@ -185,7 +186,9 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # handlers gate on RR_APP_URL at request time (see shell.py): only the
     # hosted SaaS — where RR_APP_URL pins the public origin — serves
     # sitemap/llms content; OSS, self-hosted, and desktop engines get 404s
-    # and a Disallow-all robots policy instead of marketing SEO endpoints.
+    # and a robots policy that keeps crawlers out instead of marketing SEO
+    # endpoints (one serving published pages, like staging, lets them read
+    # its noindex).
     #
     # HEAD answers like GET (crawlers and link checkers send it). One route
     # per method keeps each OpenAPI operation id unique.
@@ -195,7 +198,8 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # ── Engines without RR_APP_URL: noindex everywhere ──────────────────
     # Disallow-all alone does not keep a linked host (a staging deployment)
-    # out of search indexes: every response says noindex, nofollow. Added
+    # out of search indexes: every response says noindex, nofollow, and
+    # robots.txt lets crawlers fetch its published pages to read it. Added
     # last, so it wraps the auth middleware and covers its refusals too.
     # Only an engine ungated at init registers it: production runs no extra
     # middleware. A production engine that lost RR_APP_URL deindexes its
