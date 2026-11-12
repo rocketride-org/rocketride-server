@@ -76,7 +76,7 @@ What the fourth pass established:
   `services.json`, README schema, lifecycle/emit/error APIs, testing under
   `./builder` — is absent (those live in `docs/development/nodes/`, not in
   the agent bundle). Thirteen items score 0. The two store-app traps
-  (`scaffold_node`/`local_nodes` wrong for store apps, custom nodes can't
+  (`scaffold_node` wrong for store apps, custom nodes can't
   ship in store pipelines) are the one authoring-adjacent area explicitly
   covered [8–9].
 - **Z. Advanced pipelines (7.1)** — lifecycle, TTL, CI validation, DVR,
@@ -171,7 +171,7 @@ where an operator will see it; streaming large payloads and carrying binary;
 secrets; dependency declaration; testing under `./builder` and against a live
 pipeline; the deploy-server environment checklist; config versioning; and
 promoting a local node into the catalog. Carry over verbatim the two traps that
-already score 8–9 (`scaffold_node`/`local_nodes` are wrong for a store app;
+already score 8–9 (`scaffold_node` is wrong for a store app;
 a custom node cannot ship inside a store app's pipeline).
 
 **2. AC's holes are all wire-level** and belong in one new section of
@@ -700,7 +700,7 @@ plausible-but-wrong answer.
 | 0 | Validate a node's config at load time and fail with a message a user can act on. |
 | 0 | Version my node's config so an old pipeline keeps working. |
 | 4 | My node works locally but not on the deploy server — the environment checklist. |
-| 8 | When is `scaffold_node`/`local_nodes` the wrong choice? **(trap)** |
+| 8 | When is `scaffold_node` the wrong choice? **(trap)** |
 | 9 | Why can a store app's bundled pipeline not use my custom node? **(trap)** |
 | 2 | Contribute my node to the catalog — what changes versus a local node? |
 | 9 | Find out which catalog node already does what I am about to write. |
