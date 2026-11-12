@@ -448,7 +448,9 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
         return None, True
     try:
         raw = await _snapshot_bytes(path)
-        return render(raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)}), True
+        # A 2 MiB snapshot takes tens of milliseconds to render: off the event loop.
+        html = await asyncio.to_thread(render, raw.decode('utf-8', errors='replace'), {'assets': assets_base(page)})
+        return html, True
     except (_SnapshotTooLarge, TemplateError) as exc:
         _unusable_snapshots.put(path, True, 1)
         _warn_fallback(page, exc)
