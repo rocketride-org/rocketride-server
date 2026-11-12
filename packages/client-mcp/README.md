@@ -233,21 +233,13 @@ result = await session.get_prompt(
 
 These are the install and config commands for the deprecated `rocketride-mcp` package. New setups should use the built-in server above.
 
-### Quick Start
-
-```bash
-pip install rocketride-mcp
-```
-
-Configure your MCP client to use the server (see the client examples below), then ask your AI assistant to process files through your running RocketRide pipelines.
-
 ### Installation
 
 ```bash
 pip install rocketride-mcp
 ```
 
-Requires Python 3.10+ and `rocketride` >= 1.0.4.
+Requires Python 3.10+ and `rocketride` >= 1.0.4. Then configure your MCP client (see the client examples below) and ask your AI assistant to process files through your running RocketRide pipelines.
 
 ### Configuration
 
@@ -397,7 +389,7 @@ export MCP_API_KEY=your-secret-token
 rocketride-mcp-sse --host 0.0.0.0 --port 8080
 ```
 
-SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment variable — optional when binding localhost, but mandatory for non-loopback binds (the server refuses to start on hosts like `0.0.0.0` without it). The `/health` endpoint is always accessible for monitoring.
+SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment variable. It is optional when binding localhost, but mandatory for non-loopback binds (the server refuses to start on hosts like `0.0.0.0` without it). The server speaks plain HTTP only, so the token is not encrypted on the way. For clients on another machine, put it behind a TLS proxy and connect with `https://`. The `/health` endpoint is always accessible for monitoring.
 
 ## Links
 
