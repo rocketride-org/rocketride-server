@@ -85,15 +85,15 @@ from ai.modules.task.trace_owner import TraceOwners
 # =============================================================================
 
 #: Resolved-config defaults per provider: what the resolver applies to a
-#: stored config. ``local_tool`` is not a catalog node (its path is not under
-#: ``nodes.``): it shares by shape like any other node (plan 4.4).
+#: stored config. ``local_tool`` is not a catalog node (a custom node in the
+#: engine's ``nodes/`` folder): it shares by shape like any other node (plan 4.4).
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     'webhook': {'type': 'webhook', 'mode': 'Source', 'hideForm': True},
     'prompt': {'instructions': ['Answer the question.'], 'maxTokens': 1024, 'stream': False, 'label': ''},
     'local_tool': {'depth': 1},
     'rocketride_sql': {'scope': 'org'},
 }
-PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'local_nodes.local_tool'}
+PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'nodes.local_tool'}
 #: The catalog's ``classType`` words: the webhook is a DOOR source; a prompt
 #: or a tool as the entry source drives itself (a listener's shape).
 CLASSES = {
