@@ -18,7 +18,7 @@ pipeline components this document does not mention. Always confirm a provider na
 and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
-On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
+On RocketRide Cloud there are no custom nodes (it runs only the catalog's),
 and a pipeline bundled in a store app may use catalog nodes only: see 'Catalog nodes only'
 in `ROCKETRIDE_APPS.md`.
 
@@ -586,7 +586,8 @@ chat →  → agent_b →  → response_answers   (ONE node, one `input` entry p
 ```text
                 → [preprocessor_langchain → embedding_transformer → qdrant (content)]
 webhook → parse →
-                → [summarization [controlled: llm] → embedding_transformer → qdrant (summaries)]
+                → [summarization → embedding_transformer → qdrant (summaries)]
+    [controlled by summarization: llm]
 ```
 
 Two-tier retrieval indexing. `summarization` requires an `llm` control connection.
@@ -996,7 +997,8 @@ response/store node for the machine-readable result. For video, put `frame_grabb
 ### Pattern 27: Structured extraction with validation
 
 ```text
-webhook → parse → extract_data [controlled: llm] → schema_validate → response_answers
+webhook → parse → extract_data → schema_validate → response_answers
+    [controlled by extract_data: llm]
 ```
 
 `extract_data` (requires an `llm` control connection) pulls a configured column set out of

@@ -633,13 +633,15 @@ tags → parse → text → anonymize_text → text → response_text
 **Document summarization (requires LLM via invoke):**
 
 ```text
-tags → parse → text → summarization [control: llm] → text → response_text
+tags → parse → text → summarization → text → response_text
+    [controlled by summarization: llm]
 ```
 
 **Structured data extraction (requires LLM via invoke):**
 
 ```text
-tags → parse → text → extract_data [control: llm] → answers → response_answers
+tags → parse → text → extract_data → answers → response_answers
+    [controlled by extract_data: llm]
 ```
 
 ### Agent + Control-Plane Chains
