@@ -175,18 +175,37 @@ _NEUTRALIZED_CONFIGS = (
     'postcss.config.mts',
     'babel.config.js',
     'babel.config.cjs',
+    'babel.config.mjs',
+    'babel.config.json',
+    'babel.config.ts',
+    'babel.config.cts',
+    'babel.config.mts',
     '.babelrc',
     '.babelrc.js',
     '.babelrc.cjs',
+    '.babelrc.mjs',
+    '.babelrc.json',
 )
 
-# package.json keys the same loaders read as config (plugins by name).
-_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel')
+# package.json keys REMOVED from every manifest: the loaders read postcss/
+# babel as config (plugins by name); `pnpm` carries pnpm settings (hooks,
+# patches, overrides, ...) that are developer configuration; `browserslist`
+# steers the transpiler's target resolution (the platform sets its own).
+_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist')
 
-# Developer pnpm configuration REMOVED from the tree before install: .npmrc
+# Dependency tables whose specs are checked for link:/file: escapes.
+_DEPENDENCY_TABLES = ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides')
+
+# The browser targets of the generated rsbuild config; any developer
+# browserslist (file or package.json key) is removed.
+_BROWSERSLIST_DEFAULT = ('chrome >= 107', 'edge >= 107', 'firefox >= 104', 'safari >= 16')
+
+# Developer configuration files REMOVED from the tree before install: .npmrc
 # can redirect pnpm's modules/store dirs (into the shared toolchain env) and
 # name a pnpmfile; pnpmfiles are code. --ignore-pnpmfile is the second lock.
-_REMOVED_CONFIG_FILES = ('.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs')
+# .swcrc configures the SWC transpiler (plugins load by path) and the
+# browserslist files steer target resolution.
+_REMOVED_CONFIG_FILES = ('.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs', '.swcrc', '.browserslistrc', 'browserslist')
 
 # The pnpm-workspace.yaml keys that survive into the scratch workspace —
 # workspace layout and resolution only. Everything else (pnpm 10 accepts
@@ -208,14 +227,13 @@ _WORKSPACE_YAML_KEYS = (
     'injectWorkspacePackages',
     'ignoredOptionalDependencies',
     'supportedArchitectures',
-    'onlyBuiltDependencies',
     'neverBuiltDependencies',
     'ignoredBuiltDependencies',
 )
 
 # rsbuild copies the app dir's .env files into its OWN process env; only
 # PUBLIC_ entries are meant for the bundle, so only those survive.
-_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*\s*=')
+_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*\s*=(.*)$')
 
 
 def _scratch_root() -> str:
@@ -611,10 +629,11 @@ def _patched_workspace_yaml(
     overrides (synthesis only where the user had no workspace truth).
 
     Raises:
-        BuildFailure: The yaml is unparseable, or it aliases the
-            ``typescript`` package name (the alias guard — the typecheck
-            gate executes the real typescript at the user's version, never
-            an arbitrary package wearing the name).
+        BuildFailure: The yaml is unparseable, ``packages`` is not a list of
+            safe strings, a dependency spec escapes the tree, or it aliases
+            the ``typescript`` package name (the alias guard — the typecheck
+            gate always runs the platform's baked typescript, never an
+            arbitrary package wearing the name).
     """
     import yaml
 
@@ -628,12 +647,22 @@ def _patched_workspace_yaml(
             data.pop(key)
             if dropped is not None:
                 dropped.append(str(key))
-        for entry in data.get('packages') or []:
-            glob_path = str(entry).lstrip('!').replace('\\', '/')
-            if glob_path.startswith('/') or ':' in glob_path or '..' in glob_path.split('/'):
-                raise BuildFailure(
-                    'materialize', f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree'
-                )
+        if 'packages' in data:
+            packages = data['packages']
+            if not isinstance(packages, list) or not all(isinstance(entry, str) for entry in packages):
+                raise BuildFailure('materialize', 'pnpm-workspace.yaml packages must be a list of strings')
+            for entry in packages:
+                glob_path = entry.lstrip('!').replace('\\', '/')
+                if glob_path.startswith('/') or ':' in glob_path or '{' in glob_path or '..' in glob_path.split('/'):
+                    raise BuildFailure(
+                        'materialize',
+                        f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
+                    )
+        for table in ('overrides', 'catalog'):
+            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}')
+        catalogs = data.get('catalogs')
+        for named in catalogs.values() if isinstance(catalogs, dict) else ():
+            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs')
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -649,13 +678,46 @@ def _patched_workspace_yaml(
             raise BuildFailure(
                 'materialize',
                 f'pnpm-workspace.yaml override {selector!r} targets the "typescript" package — the '
-                'typecheck gate runs the real typescript at your locked version; aliasing the name '
+                'typecheck gate always runs the platform typescript; aliasing the name '
                 'is not supported',
             )
     overrides['shell'] = f'file:{_SHELL_REL}'
     overrides['rocketride'] = f'file:{_ROCKETRIDE_REL}'
     data['overrides'] = overrides
     return yaml.safe_dump(data, sort_keys=False)
+
+
+def _unsafe_spec(spec: Any) -> bool:
+    """True when a dependency spec reaches outside the source tree.
+
+    ``link:`` (any target), an absolute ``file:`` path, and a ``file:`` path
+    with a ``..`` segment would pull developer-chosen directories (the
+    toolchain env, other jobs' scratch) into the install.
+    """
+    text = str(spec).strip().lower()
+    if text.startswith('link:'):
+        return True
+    if not text.startswith('file:'):
+        return False
+    target = text[len('file:') :].strip().replace('\\', '/')
+    return target.startswith(('/', '~')) or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
+
+
+def _refuse_unsafe_specs(table: Any, where: str) -> None:
+    """Raise BuildFailure when a dependency table holds an unsafe spec.
+
+    Nested tables (npm-style nested overrides) are walked.
+    """
+    if not isinstance(table, dict):
+        return
+    for name, spec in table.items():
+        if isinstance(spec, dict):
+            _refuse_unsafe_specs(spec, where)
+        elif _unsafe_spec(spec):
+            raise BuildFailure(
+                'materialize',
+                f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link: and out-of-tree file: specs are not supported',
+            )
 
 
 def _override_target(selector: str) -> str:
@@ -725,7 +787,13 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
     forms and the package.json ``postcss`` key load plugins by name — all
     developer code. The WHOLE source tree is walked (``app_dir`` lies inside
     ``ws_dir``): existing config files get inert content and the config keys
-    are stripped from every package.json. Absent files are not created.
+    (postcss, babel, pnpm, browserslist) are stripped from every package.json,
+    whose dependency specs must not use ``link:`` or out-of-tree ``file:``.
+    Absent files are not created.
+
+    Raises:
+        BuildFailure: A package.json is not UTF-8 JSON, or a dependency spec
+            escapes the source tree.
     """
     names = set(_NEUTRALIZED_CONFIGS)
     for dirpath, _dirs, files in os.walk(ws_dir):
@@ -735,12 +803,18 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
                 with open(path, 'w', encoding='utf-8') as handle:
                     handle.write(_inert_config(name))
             elif name == 'package.json':
+                rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
                 try:
                     with open(path, 'r', encoding='utf-8') as handle:
                         manifest = json.load(handle)
-                except Exception:
-                    continue  # unparseable: no loader can read config from it either
-                if isinstance(manifest, dict) and any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
+                except (UnicodeDecodeError, ValueError) as exc:
+                    # Another reader (pnpm) may parse what this one skips.
+                    raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
+                if not isinstance(manifest, dict):
+                    continue
+                for table in _DEPENDENCY_TABLES:
+                    _refuse_unsafe_specs(manifest.get(table), rel)
+                if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
                         manifest.pop(key, None)
                     with open(path, 'w', encoding='utf-8') as handle:
@@ -748,7 +822,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
 
 
 def _remove_pnpm_configs(ws_dir: str) -> List[str]:
-    """Delete every developer .npmrc / pnpmfile in the tree.
+    """Delete every developer .npmrc / pnpmfile / .swcrc / browserslist file in the tree.
 
     Returns the removed workspace-relative paths (for the build log).
     """
@@ -767,7 +841,8 @@ def _filter_env_files(app_dir: str) -> None:
 
     rsbuild loads ``.env*`` from the app root into its own process env (non
     PUBLIC_ keys such as NODE_OPTIONS or RSPACK_* would steer the build
-    process itself); only PUBLIC_ entries are meant for the bundle.
+    process itself); only PUBLIC_ entries are meant for the bundle, and a
+    value containing command substitution (``$(`` or a backtick) is dropped.
     Multi-line values are not supported in server builds.
     """
     try:
@@ -779,7 +854,11 @@ def _filter_env_files(app_dir: str) -> None:
         if not name.startswith('.env') or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
-            kept = [line.rstrip('\r\n') for line in handle if _ENV_PUBLIC_LINE.match(line)]
+            kept = []
+            for line in handle:
+                match = _ENV_PUBLIC_LINE.match(line.rstrip('\r\n'))
+                if match and '$(' not in match.group(1) and '`' not in match.group(1):
+                    kept.append(line.rstrip('\r\n'))
         with open(path, 'w', encoding='utf-8') as handle:
             handle.write('\n'.join(kept) + '\n' if kept else '')
 
@@ -871,6 +950,7 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
     lines += [
         '  },',
         '  output: {',
+        f'    overrideBrowserslist: {json.dumps(list(_BROWSERSLIST_DEFAULT))},',
         "    assetPrefix: 'auto',",
         '    cleanDistPath: true,',
         f'    distPath: {{ root: {json.dumps(out_dir)} }},',

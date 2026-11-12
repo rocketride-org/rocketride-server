@@ -1098,3 +1098,119 @@ def test_emitted_config_carries_the_inline_loader_guard(tmp_path):
     # The whole emitted config must still parse (syntax only, nothing runs).
     check = subprocess.run([node, '--check', config_path], capture_output=True, text=True, timeout=60)
     assert check.returncode == 0, check.stderr
+
+
+# =============================================================================
+# MANIFEST / WORKSPACE / ENV SANITIZING (#1021, round 2) — inert fixtures
+# =============================================================================
+
+
+def _write(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding='utf-8')
+
+
+def test_package_json_pnpm_and_browserslist_keys_are_removed(tmp_path):
+    """The `pnpm` and `browserslist` keys go from every package.json."""
+    ws = tmp_path / 'ws'
+    manifest = {'name': 'x', 'pnpm': {'patchedDependencies': {'a': 'p.patch'}}, 'browserslist': ['> 1%'], 'a': 1}
+    _write(ws / 'package.json', json.dumps(manifest))
+    _write(ws / 'apps' / 'x' / 'package.json', json.dumps(manifest))
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    for rel in ('package.json', 'apps/x/package.json'):
+        data = json.loads((ws / rel).read_text(encoding='utf-8'))
+        assert 'pnpm' not in data and 'browserslist' not in data
+        assert data['a'] == 1
+
+
+@pytest.mark.parametrize('spec', ['link:../x', 'link:./local', 'file:/etc', 'file:../x', 'file:a/../../x', 'FILE:///x'])
+@pytest.mark.parametrize(
+    'table', ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides']
+)
+def test_package_json_refuses_escaping_dependency_specs(tmp_path, table, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'name': 'x', table: {'dep': spec}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_package_json_allows_in_tree_file_specs(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'dependencies': {'a': 'file:.rocketride/shell/shell.tgz', 'b': '^1.0.0'}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_workspace_yaml_refuses_escaping_override_specs():
+    for spec in ('link:../x', 'file:/abs', 'file:../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "apps/*"\noverrides:\n  dep: "{spec}"\n', 'apps/x', [])
+
+
+def test_undecodable_or_invalid_package_json_is_a_build_failure(tmp_path):
+    ws = tmp_path / 'ws'
+    ws.mkdir()
+    (ws / 'package.json').write_bytes(b'\xff\xfe{"name": 1}')
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    (ws / 'package.json').write_text('{not json', encoding='utf-8')
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_workspace_yaml_drops_only_built_dependencies():
+    dropped: List[str] = []
+    out = _patched_workspace_yaml(
+        'packages:\n  - "apps/*"\nonlyBuiltDependencies:\n  - esbuild\n', 'apps/x', [], dropped
+    )
+    assert 'onlyBuiltDependencies' not in out
+    assert 'onlyBuiltDependencies' in dropped
+    assert 'onlyBuiltDependencies' not in app_build._WORKSPACE_YAML_KEYS
+
+
+def test_workspace_yaml_packages_must_be_a_list_of_safe_strings():
+    for text in ('packages: "apps/*"\n', 'packages:\n  - 3\n', 'packages:\n  - {a: b}\n'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(text, 'apps/x', [])
+    for entry in ('apps/{a,../b}', '{../x,y}', '../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "{entry}"\n', 'apps/x', [])
+    _patched_workspace_yaml('packages:\n  - "apps/*"\n  - "!apps/old"\n', 'apps/x', [])
+
+
+def test_browserslist_and_swcrc_files_are_removed_anywhere(tmp_path):
+    ws = tmp_path / 'ws'
+    names = ('.browserslistrc', 'browserslist', '.swcrc')
+    for directory in ('', 'apps', 'apps/x/src'):
+        for name in names:
+            _write(ws / directory / name, 'x\n')
+    _write(ws / 'keep.txt', 'k')
+    removed = app_build._remove_pnpm_configs(str(ws))
+    assert len(removed) == 9
+    left = [f for _d, _s, files in os.walk(ws) for f in files]
+    assert left == ['keep.txt']
+
+
+def test_emitted_config_pins_the_platform_browserslist(tmp_path):
+    app = tmp_path / 'job' / 'ws' / 'apps' / 'x'
+    app.mkdir(parents=True)
+    config_path = app_build._emit_config(str(tmp_path / 'job' / '.build'), str(app), str(tmp_path / 'out'), 'm')
+    text = open(config_path, encoding='utf-8').read()
+    assert 'overrideBrowserslist: ["chrome >= 107", "edge >= 107", "firefox >= 104", "safari >= 16"]' in text
+
+
+def test_every_babel_config_name_is_made_inert(tmp_path):
+    ws = tmp_path / 'ws'
+    names = [f'babel.config.{e}' for e in ('js', 'cjs', 'mjs', 'json', 'ts', 'cts', 'mts')]
+    names += ['.babelrc'] + [f'.babelrc.{e}' for e in ('js', 'cjs', 'mjs', 'json')]
+    for name in names:
+        _write(ws / 'apps' / 'x' / name, 'MARKER-plugin\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    for name in names:
+        assert 'MARKER' not in (ws / 'apps' / 'x' / name).read_text(encoding='utf-8'), name
+
+
+def test_env_files_drop_public_lines_with_command_substitution(tmp_path):
+    app = tmp_path / 'app'
+    _write(app / '.env', 'PUBLIC_A=ok\nPUBLIC_B=$(id)\nPUBLIC_C=`id`\nexport PUBLIC_D=x$(y)\nPUBLIC_E=$VAR\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok', 'PUBLIC_E=$VAR']
