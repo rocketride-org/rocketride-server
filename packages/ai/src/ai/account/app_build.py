@@ -692,16 +692,27 @@ def _patched_workspace_yaml(
 def _unsafe_spec(spec: Any) -> bool:
     """True when a dependency spec reaches outside the source tree.
 
-    ``link:`` (any target), an absolute ``file:`` path, and a ``file:`` path
-    with a ``..`` segment would pull developer-chosen directories (the
-    toolchain env, other jobs' scratch) into the install.
+    ``link:`` (any target) is refused. A local path spec — ``file:``,
+    ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
+    that starts with ``.``, ``/``, ``~`` or a drive letter, or ends in
+    ``.tgz``/``.tar``/``.tar.gz``, as a local path) — is refused when it is
+    absolute or has a ``..`` segment, since it would pull developer-chosen
+    directories (the toolchain env, other jobs' scratch, pod files) into
+    the install.
     """
     text = str(spec).strip().lower()
-    if text.startswith('link:'):
+    if text.startswith(('link:', 'git+file:')):
         return True
-    if not text.startswith('file:'):
-        return False
-    target = text[len('file:') :].strip().replace('\\', '/')
+    for prefix in ('file:', 'workspace:'):
+        if text.startswith(prefix):
+            target = text[len(prefix) :].strip()
+            break
+    else:
+        bare = text.startswith(('.', '/', '~')) or re.match(r'^[a-z]:', text) is not None
+        if not (bare or text.endswith(('.tgz', '.tar', '.tar.gz'))):
+            return False
+        target = text
+    target = target.replace('\\', '/')
     return target.startswith(('/', '~')) or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
 
 
@@ -718,7 +729,7 @@ def _refuse_unsafe_specs(table: Any, where: str) -> None:
         elif _unsafe_spec(spec):
             raise BuildFailure(
                 'materialize',
-                f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link: and out-of-tree file: specs are not supported',
+                f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link:, git+file: and out-of-tree path specs are not supported',
             )
 
 
@@ -901,6 +912,20 @@ def _under(path: str, roots: Tuple[str, ...]) -> bool:
     return any(real == root or real.startswith(root + os.sep) for root in roots)
 
 
+def _loader_options_allowed(loader: str) -> bool:
+    """A loader may carry no inline options, only a ``??ident`` reference.
+
+    The bundler writes options from the platform config as ``??<ident>``
+    (a reference to a rule). Inline ``?{...}`` / ``?key=value`` options in a
+    request come from an import string, and some loaders load files named
+    in their options, so they are refused.
+    """
+    index = loader.find('?')
+    if index == -1:
+        return True
+    return loader[index:].startswith('??') and '#' not in loader[index:]
+
+
 def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loader_roots: Tuple[str, ...]) -> bool:
     """Decide whether a RESOLVED bundler request may be built.
 
@@ -930,6 +955,8 @@ def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loade
         return False
     *loaders, resource = segments
     for loader in loaders:
+        if not _loader_options_allowed(loader):
+            return False
         if loader.startswith('builtin:'):
             continue
         if not _under(_strip_query(loader), loader_roots):
@@ -969,6 +996,8 @@ function rrRequestAllowed(request) {
   if (segments.some((segment) => !segment)) return false;
   const resource = segments.pop();
   for (const loader of segments) {
+    const q = loader.indexOf('?');
+    if (q !== -1 && !(loader.startsWith('??', q) && loader.indexOf('#', q) === -1)) return false;
     if (loader.startsWith('builtin:')) continue;
     if (!rrUnder(rrStripQuery(loader), RR_LOADER_ROOTS)) return false;
   }
@@ -1615,7 +1644,8 @@ class AppBuildWorker:
                 )
             # '!' is the bundler's request separator. No path in the tree may
             # carry one, so a resolved request string cannot be forged by a
-            # file or folder name (the resolved-module guard relies on this).
+            # file or folder name. (pnpm-made paths are not covered by this ban; a '!'
+            # there makes the guard read a loader segment it then refuses.)
             if '!' in name:
                 raise BuildFailure(
                     'materialize', f"zip entry {item.filename!r} contains '!' — not allowed in app paths"
@@ -1773,6 +1803,10 @@ class AppBuildWorker:
             if not rel:
                 continue
             src = os.path.join(app_dir, *rel.split('/'))
+            # The asset must really live in the app tree: a symlink (for
+            # example a pnpm link under node_modules) is not followed out.
+            if not _under(src, (os.path.realpath(app_dir),)):
+                raise BuildFailure('harvest', f'manifest {key} {rel!r} resolves outside the app')
             if os.path.isfile(src) and not os.path.isfile(os.path.join(out_dir, *rel.split('/'))):
                 dest = os.path.join(out_dir, *rel.split('/'))
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -1782,9 +1816,12 @@ class AppBuildWorker:
         # (the raw write path enforces no quota).
         total_bytes = 0
         total_files = 0
+        out_root = os.path.realpath(out_dir)
         for dirpath, _dirs, files in os.walk(out_dir):
             for filename in files:
                 total_files += 1
+                if not _under(os.path.join(dirpath, filename), (out_root,)):
+                    raise BuildFailure('harvest', 'a build output file links outside the output directory')
                 try:
                     size = os.path.getsize(os.path.join(dirpath, filename))
                 except OSError:

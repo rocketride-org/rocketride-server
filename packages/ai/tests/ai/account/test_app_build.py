@@ -1108,6 +1108,9 @@ def _guard_cases(job, env):
         ('relative/loader!' + app_ts, False),  # unresolved segment: fail closed
         ('', False),
         (f'{loader}!!{app_ts}', False),  # empty segment: fail closed
+        (f'{loader}?{{"x":1}}!{app_css}', False),  # inline loader options from an import
+        (f'{loader}?x=1!{app_css}', False),
+        (f'builtin:swc-loader?{{"x":1}}!{app_ts}', False),  # builtin with inline options
         (f'{os.path.join(job, "ws", "evil.cjs")}!{os.path.join(job, "ws", "x")}!=!data:/a.js', False),  # forged path
     ]
 
@@ -1318,3 +1321,40 @@ def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
     assert 'apps/x/.postcssrc.json' in out
     assert 'apps/x/package.json:postcss' in out
     assert 'postcss' not in json.loads((app / 'package.json').read_text(encoding='utf-8'))
+
+
+@pytest.mark.parametrize(
+    'spec,unsafe',
+    [
+        ('../../elsewhere', True),
+        ('/var/elsewhere', True),
+        ('~/elsewhere', True),
+        ('C:/elsewhere', True),
+        ('../x.tgz', True),
+        ('workspace:../../x', True),
+        ('git+file:/x', True),
+        ('link:../x', True),
+        ('file:./pkgs/a', False),
+        ('./pkgs/a', False),
+        ('pkgs/a.tgz', False),
+        ('workspace:*', False),
+        ('^1.2.3', False),
+        ('npm:react@18', False),
+    ],
+)
+def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
+    """Every way pnpm reads a dependency spec as a local path is checked."""
+    assert app_build._unsafe_spec(spec) is unsafe
+
+
+def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
+    """Harvest containment: a file inside a root that links elsewhere is out."""
+    root = tmp_path / 'out'
+    root.mkdir()
+    outside = tmp_path / 'outside.txt'
+    outside.write_text('x', encoding='utf-8')
+    (root / 'a.txt').write_text('a', encoding='utf-8')
+    os.symlink(str(outside), str(root / 'b.txt'))
+    roots = (os.path.realpath(str(root)),)
+    assert app_build._under(str(root / 'a.txt'), roots) is True
+    assert app_build._under(str(root / 'b.txt'), roots) is False
