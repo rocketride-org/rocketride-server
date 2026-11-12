@@ -1340,6 +1340,11 @@ def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
         ('workspace:*', False),
         ('^1.2.3', False),
         ('npm:react@18', False),
+        ('~4.17.21', False),
+        ('~', True),
+        ('workspace:~', False),
+        ('workspace:~1.0.0', False),
+        ('workspace:^', False),
     ],
 )
 def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
@@ -1358,3 +1363,42 @@ def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
     roots = (os.path.realpath(str(root)),)
     assert app_build._under(str(root / 'a.txt'), roots) is True
     assert app_build._under(str(root / 'b.txt'), roots) is False
+
+
+def test_resolutions_table_is_checked_like_overrides(tmp_path):
+    """A root package.json ``resolutions`` table (honoured by pnpm like
+    ``overrides``) is checked, so an out-of-tree path there is refused.
+    """
+    ws = tmp_path / 'ws'
+    app = ws / 'apps' / 'x'
+    app.mkdir(parents=True)
+    (ws / 'package.json').write_text(
+        json.dumps({'name': 'r', 'resolutions': {'x': 'file:/elsewhere'}}), encoding='utf-8'
+    )
+    with pytest.raises(app_build.BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(app))
+
+
+@pytest.mark.parametrize(
+    'lock,refused',
+    [
+        ('packages:\n  x@1.0.0:\n    resolution: {directory: /elsewhere, type: directory}\n', True),
+        ('packages:\n  x@1.0.0:\n    resolution: {tarball: file:../../x.tgz}\n', True),
+        (
+            'importers:\n  .:\n    dependencies:\n      x:\n        specifier: link:../..\n        version: link:../..\n',
+            True,
+        ),
+        (
+            'importers:\n  .:\n    dependencies:\n      x:\n        specifier: file:./pkgs/x\n        version: file:pkgs/x\n',
+            False,
+        ),
+        ('packages:\n  react@18.2.0:\n    resolution: {integrity: sha512-AAAA}\n', False),
+    ],
+)
+def test_lockfile_path_resolutions_outside_the_tree_are_refused(lock, refused):
+    """The install keeps lockfile resolutions, so path entries there are checked."""
+    if refused:
+        with pytest.raises(app_build.BuildFailure):
+            app_build._refuse_lockfile_paths(lock)
+    else:
+        app_build._refuse_lockfile_paths(lock)

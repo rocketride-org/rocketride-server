@@ -196,7 +196,14 @@ _NEUTRALIZED_CONFIGS = (
 _NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist')
 
 # Dependency tables whose specs are checked for link:/file: escapes.
-_DEPENDENCY_TABLES = ('dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides')
+_DEPENDENCY_TABLES = (
+    'dependencies',
+    'devDependencies',
+    'optionalDependencies',
+    'peerDependencies',
+    'overrides',
+    'resolutions',
+)
 
 # The browser targets of the generated rsbuild config; any developer
 # browserslist (file or package.json key) is removed.
@@ -706,14 +713,28 @@ def _unsafe_spec(spec: Any) -> bool:
     for prefix in ('file:', 'workspace:'):
         if text.startswith(prefix):
             target = text[len(prefix) :].strip()
+            # workspace:^ / workspace:~ / workspace:* / workspace:1.2.3 are
+            # version ranges; only a path-shaped target is a local path.
+            if prefix == 'workspace:' and not (
+                target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None
+            ):
+                return False
             break
     else:
-        bare = text.startswith(('.', '/', '~')) or re.match(r'^[a-z]:', text) is not None
+        # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
+        bare = (
+            text.startswith(('.', '/'))
+            or text in ('~',)
+            or text.startswith('~/')
+            or re.match(r'^[a-z]:', text) is not None
+        )
         if not (bare or text.endswith(('.tgz', '.tar', '.tar.gz'))):
             return False
         target = text
     target = target.replace('\\', '/')
-    return target.startswith(('/', '~')) or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
+    if target == '~' or target.startswith('~/'):
+        return True
+    return target.startswith('/') or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
 
 
 def _refuse_unsafe_specs(table: Any, where: str) -> None:
@@ -1170,6 +1191,23 @@ def _safe_asset_rel(rel: str) -> Optional[str]:
 # =============================================================================
 # LOCKFILE — importer pin parsing (preflight skew + post-install drift diff)
 # =============================================================================
+
+
+_LOCK_PATH_RESOLUTION = re.compile(
+    r"(?:\bdirectory:\s*|\btarball:\s*file:|\blink:|\bfile:)\s*['\"]?([^'\"\s,}]+)", re.IGNORECASE
+)
+
+
+def _refuse_lockfile_paths(lock_text: str) -> None:
+    """Raise BuildFailure when the lockfile resolves a package to a local path
+    outside the source tree (``directory:``, ``tarball: file:``, ``link:``,
+    ``file:`` entries with an absolute or ``..`` path). The install keeps
+    lockfile resolutions, so the manifest check alone does not cover them.
+    """
+    for match in _LOCK_PATH_RESOLUTION.finditer(lock_text):
+        target = match.group(1).strip().replace('\\', '/')
+        if target.startswith(('/', '~')) or re.match(r'^[a-zA-Z]:', target) is not None or '..' in target.split('/'):
+            raise BuildFailure('materialize', f'pnpm-lock.yaml resolves a package outside the source tree: {target!r}')
 
 
 def _lockfile_importer_pins(lock_text: str) -> Dict[str, Dict[str, str]]:
@@ -1703,7 +1741,9 @@ class AppBuildWorker:
         pins_before: Dict[str, Dict[str, str]] = {}
         if os.path.isfile(lock_path):
             with open(lock_path, 'r', encoding='utf-8') as handle:
-                pins_before = _lockfile_importer_pins(handle.read())
+                lock_text = handle.read()
+            _refuse_lockfile_paths(lock_text)
+            pins_before = _lockfile_importer_pins(lock_text)
             app_pins = pins_before.get(app_root or '.', {})
             react_pin = str(app_pins.get('react') or '')
             if react_pin and not react_pin.split('(', 1)[0].startswith('18.'):
