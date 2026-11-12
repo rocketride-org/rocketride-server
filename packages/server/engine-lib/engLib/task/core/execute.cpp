@@ -82,9 +82,24 @@ Error executeTask(const file::Path &path, json::Value &value) noexcept {
 
     if (auto id = value.lookup<Text>("nodeId")) config::nodeId(false) = _mv(id);
 
-    // In case we crash, add the node and task ids to the dump prefix
-    if (auto taskId = value.lookup<Text>("taskId"))
-        dev::crashDumpPrefix() = _mv(taskId);
+    // In case we crash, add the task id to the dump prefix. The prefix is a
+    // component of a FILE NAME (the dump's, the JVM error log's), and the task
+    // id of an owner-qualified engine is `<hash>:<ownerId>`: on NTFS a ':'
+    // names an alternate data stream, so the dump would be written into a
+    // stream of an empty file. Every character outside [A-Za-z0-9._+-]
+    // becomes '_'
+    if (auto taskId = value.lookup<Text>("taskId")) {
+        Text prefix;
+        prefix = _mv(taskId);
+        for (auto &ch : prefix) {
+            const bool fileSafe =
+                (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' ||
+                ch == '+' || ch == '-';
+            if (!fileSafe) ch = '_';
+        }
+        dev::crashDumpPrefix() = _mv(prefix);
+    }
 
     // Register the global nodeid variable too if set
     if (config::nodeId(false)) config::vars().add("NodeId", config::nodeId());
