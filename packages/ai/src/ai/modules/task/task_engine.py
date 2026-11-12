@@ -462,7 +462,14 @@ register_channel_command('spend.check', _check_spend)
 
 
 def _authority_gate_ok(conn: Any) -> bool:
-    """False when the live re-check (#972) refuses events to this debugger connection."""
+    """False when this debugger connection may not receive events (#972).
+
+    A connection that is no longer authenticated (deauthed or revoked)
+    receives nothing; an authenticated subject the live re-check refuses
+    receives nothing either.
+    """
+    if not getattr(conn, '_authenticated', False):
+        return False
     authz = getattr(getattr(conn, '_server', None), '_authz', None)
     return authz is None or authz.gate_ok(conn)
 

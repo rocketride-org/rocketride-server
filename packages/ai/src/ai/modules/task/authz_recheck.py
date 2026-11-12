@@ -194,6 +194,10 @@ class AuthzRecheck:
             next_start = started + T * (1 + JITTER * (2 * self._rng() - 1))
 
     async def stop(self) -> None:
-        """Stop the sweep loop (it exits at its next wake-up)."""
+        """Stop the sweep loop (it exits at its next wake-up) and end pending revoke notices."""
         self._stopping = True
         self._wake.set()
+        notices = list(self._notices)
+        for notice in notices:
+            notice.cancel()
+        await asyncio.gather(*notices, return_exceptions=True)
