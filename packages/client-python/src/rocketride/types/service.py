@@ -141,7 +141,7 @@ class VALIDATION_RESULT(TypedDict, total=False):
     lanes. The result contains any errors and warnings found.
     """
 
-    errors: List[VALIDATION_ERROR]  # Validation errors — pipeline will not execute with these
+    errors: List[VALIDATION_ERROR]  # Validation errors — a run can start despite a wiring error
     warnings: List[VALIDATION_ERROR]  # Validation warnings — pipeline may still execute
 
 

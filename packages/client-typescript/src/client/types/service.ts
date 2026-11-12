@@ -162,7 +162,7 @@ export interface ValidationError {
  * lanes. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
-	/** Validation errors — pipeline will not execute with these. */
+	/** Validation errors — a run can start despite a wiring error. */
 	errors: ValidationError[];
 	/** Validation warnings — pipeline may still execute. */
 	warnings: ValidationError[];
