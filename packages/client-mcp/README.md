@@ -38,7 +38,8 @@
 
 The RocketRide engine has a built-in MCP server, so there is nothing to
 install. The hosted server is at `https://api.rocketride.ai/mcp`. A
-self-hosted engine serves it on its own port at `http://<host>:5565/mcp`; see
+self-hosted engine serves it on its own port: use `http://localhost:5565/mcp` on
+the same machine, or `https://<host>/mcp` behind a TLS proxy for any other host. See
 [MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
 
 The quickest example, with Claude Code:
