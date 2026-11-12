@@ -6,7 +6,7 @@ import path from 'node:path';
 import llms from '../../scripts/lib/llms.js';
 import spine from '../../scripts/lib/spine.js';
 
-const { buildIndex, AGENT_START_ID } = llms;
+const { buildIndex } = llms;
 const { allDocIds } = spine;
 
 describe('buildIndex', () => {
@@ -95,7 +95,10 @@ describe('buildIndex Start here section', () => {
 		assert.ok(!index.includes('## Start here'));
 	});
 
-	it('uses an AGENT_START_ID that is a spine doc id', () => {
-		assert.ok(allDocIds().includes(AGENT_START_ID), `${AGENT_START_ID} not in spine`);
+	it('finds the agent start page among the spine doc ids', async () => {
+		// Built from the real spine: if the start id in llms.js and the spine id drift apart, the section disappears.
+		const manifest = allDocIds().map((id) => ({ id, route: `/${id}`, title: id, mdSibling: `/${id}.md` }));
+		const index = await indexFor(manifest);
+		assert.ok(index.includes('## Start here'), 'no spine id matches the start id in llms.js');
 	});
 });
