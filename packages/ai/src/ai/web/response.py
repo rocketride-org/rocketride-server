@@ -77,7 +77,7 @@ def error_dap(response: Dict[str, Any], *, httpStatus: int = 400) -> Result:
     Create a standardized error response from a dap response packet.
 
     Args:
-        error (str): Error message.
+        response (Dict[str, Any]): The DAP response packet to build the error from.
         httpStatus (int, optional): HTTP status code (default: 400).
 
     Returns:
@@ -102,7 +102,7 @@ def error(message: str, *, httpStatus: int = 400, file: str = None, lineno: int 
     Create a standardized error response.
 
     Args:
-        error (str): Error message.
+        message (str): Error message.
         httpStatus (int, optional): HTTP status code (default: 400).
 
     Returns:

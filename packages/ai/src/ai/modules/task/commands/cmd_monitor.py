@@ -203,8 +203,7 @@ class MonitorCommands(DAPConn):
         the event type matches their subscription level.
 
         Args:
-            type (EVENT_TYPE): The type/category of the event being forwarded
-            id (str): Unique identifier for the specific task instance
+            event_type (EVENT_TYPE): The type/category of the event being forwarded
             token (str): Unique task identifier associated with the event
             event (Dict[str, Any]): The event payload containing:
                 - event: String identifier for the event type

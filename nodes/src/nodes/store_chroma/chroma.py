@@ -613,7 +613,7 @@ class Store(DocumentStoreBase):
 
         Args:
             chunks: A list of Doc objects containing the chunks to add.
-            check_collection: Whether to check if the collection exists. (In ChromaDB, creation is handled in init)
+            checkCollection: Whether to check if the collection exists. (In ChromaDB, creation is handled in init)
         """
         if not chunks:
             return

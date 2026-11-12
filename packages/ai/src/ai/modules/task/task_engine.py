@@ -2059,7 +2059,7 @@ class Task(DAPBase):
         Forward events to appropriate monitoring clients.
 
         Args:
-            event_type: Event category for routing
+            type: Event category for routing
             message: Event payload
         """
         # Safety net: every broadcast event carries the continuum headers.

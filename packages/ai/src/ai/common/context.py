@@ -38,10 +38,10 @@ class Context:
 
         Args:
             query (str): The user's query to be used for highlighting.
-            documents (List[Document]): List of relevant chunks wraped as Haystack Document objects
+            h_documents (List[Document]): List of relevant chunks wraped as Haystack Document objects
 
         Returns:
-            None: returns a python dict with best context highlighting information
+            Dict[Any, Any]: The highest-confidence answer span per document id.
         """
         # Get the highlighted text spans for all the chunks
         highlights = self.reader.run(query=query, documents=h_documents, top_k=50, max_seq_length=512, no_answer=False)
