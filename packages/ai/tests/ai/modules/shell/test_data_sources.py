@@ -34,6 +34,7 @@ expires after the sources' TTL.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -416,6 +417,31 @@ def test_failed_binding_is_served_but_not_cached(acct, shell_root, warned, entry
     resp = _crawl(client)
     assert ('Builder' in resp.text or 'Brandy' in resp.text) and _jsonld(resp.text)
     assert resp.headers['cache-control'] == 'public, max-age=300' and len(pages._render_cache) == 1
+
+
+def test_a_binding_that_does_not_answer_in_time_is_served_without_data(acct, shell_root, warned, monkeypatch):
+    # A stalled plan database must not hold crawler requests: past _DATA_SECONDS
+    # the page is served without its data, uncached, and the next request retries.
+    from ai.account import account as singleton
+
+    acct.plans['rocketride.home'] = PLANS
+    _seed()
+    _serve(_page('/pricing', ['plans']))
+
+    async def stalled(app_id):
+        await asyncio.sleep(60)
+
+    answering = singleton.get_public_plans
+    monkeypatch.setattr(singleton, 'get_public_plans', stalled)
+    monkeypatch.setattr(pages, '_DATA_SECONDS', 0.05)
+    client = _client()
+    resp = _crawl(client)
+    assert resp.status_code == 200 and '<h1>Pricing</h1>' in resp.text and _jsonld(resp.text) == []
+    assert resp.headers['cache-control'] == 'private, no-cache' and len(pages._render_cache) == 0
+    assert any('/pricing' in line and 'no answer within 0.05 s' in line for line in warned)
+    # The database answers again: the next crawl gets the plans.
+    monkeypatch.setattr(singleton, 'get_public_plans', answering)
+    assert _jsonld(_crawl(client).text)
 
 
 def test_invalidate_plans_drops_named_renders(acct, shell_root):

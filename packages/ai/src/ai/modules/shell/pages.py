@@ -365,6 +365,11 @@ _storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
 # worker thread; past this the crawler gets the shell document, uncached.
 _SNAPSHOT_READ_SECONDS = 5.0
 
+# How long a crawler request waits for a page's bound data sources. The plan
+# database or the store can stall for minutes (S3 retries a failing read that
+# long); past this the page is served without its data, uncached.
+_DATA_SECONDS = 5.0
+
 
 class _SnapshotTooLarge(Exception):
     """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
@@ -443,13 +448,17 @@ async def _stored_snapshot(path: str) -> bytes:
 async def _page_data(page: Page, canonical: str) -> Tuple[Dict[str, Any], bool]:
     """The page's bound data sources: ``(context, complete)``.
 
-    A source that cannot be read is logged as a warning and leaves the page
-    without any of its data, uncached, so the next request tries again.
+    A source that cannot be read within ``_DATA_SECONDS`` is logged as a
+    warning and leaves the page without any of its data, uncached, so the
+    next request tries again.
     """
     try:
-        return await data_sources.bind(page, canonical), True
+        return await asyncio.wait_for(data_sources.bind(page, canonical), _DATA_SECONDS), True
+    except asyncio.TimeoutError:
+        reason = f'no answer within {_DATA_SECONDS:g} s'
     except Exception as exc:
-        warning(f'[public_pages] {page.path}: data {list(page.data)} unavailable, serving without it: {exc}')
+        reason = str(exc)
+    warning(f'[public_pages] {page.path}: data {list(page.data)} unavailable, serving without it: {reason}')
     return {}, False
 
 
