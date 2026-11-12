@@ -13,8 +13,9 @@ synchronous ``TestClient``:
     all absolute URLs exclusively from it (never from request headers);
   - served-vs-advertised is driven by each page's ``listed`` flag;
   - /robots.txt allows crawlers (one named group per rostered crawler) and
-    points at the sitemap on the hosted SaaS (RR_APP_URL set), and
-    disallows all crawling otherwise;
+    points at the sitemap on the hosted SaaS (RR_APP_URL set); otherwise
+    it allows crawling on an engine that serves published pages (so the
+    noindex on them is read) and disallows all crawling on any other;
   - the catch-all registers last, real routes win, it never makes a private
     route public, and it keeps the router's own answers for unclaimed paths;
   - WebServer.add_route rejects duplicate (method, path) registrations.
@@ -342,6 +343,26 @@ def test_robots_disallows_all_without_app_url(no_app_url):
     assert resp.status_code == 200
     assert resp.headers['content-type'].startswith('text/plain')
     assert resp.text == 'User-agent: *\nDisallow: /\n'
+
+
+@pytest.mark.parametrize(
+    'aggregate, allowed',
+    [
+        (Aggregate(exact={'/': Page('/', 'rocketride.home', title='Home')}), True),
+        (Aggregate(exact={}), False),
+        (legacy_aggregate(), False),
+    ],
+    ids=['published-pages', 'empty-map', 'legacy-list'],
+)
+def test_robots_without_app_url_allows_crawling_only_where_pages_are_published(no_app_url, aggregate, allowed):
+    # Staging serves published pages and is linked from elsewhere: crawlers must
+    # fetch them to read their noindex, or the host stays indexed by URL.
+    pp.swap(aggregate)
+    text = _client().get('/robots.txt').text
+    if allowed:
+        assert text == 'User-agent: *\nDisallow:\n'
+    else:
+        assert text == 'User-agent: *\nDisallow: /\n'
 
 
 def test_robots_allows_all_and_points_at_sitemap(app_url):
@@ -1309,3 +1330,88 @@ def test_any_query_string_gets_the_app_not_the_capture(web_server, shell_root, m
     client = _start_engine(web_server, monkeypatch)
     assert SHELL_BODY in client.get('/pricing?token=abc').text
     assert 'captured pricing' in client.get('/pricing').text
+
+
+# ---------------------------------------------------------------------------
+# An engine without RR_APP_URL is not the public site: noindex on every response
+# ---------------------------------------------------------------------------
+
+UNGATED_PROBES = (
+    ('GET', '/'),
+    ('GET', '/pricing'),
+    ('GET', '/store'),
+    ('GET', '/robots.txt'),
+    ('GET', '/sitemap.xml'),
+    ('GET', '/no-such-page'),
+    ('GET', '/shell/static/js/missing.abc.js'),
+    ('GET', '/private'),
+    ('GET', '/pricing/'),
+    ('GET', '/terms'),
+    ('POST', '/pricing'),
+)
+
+
+def test_an_ungated_engine_sends_noindex_nofollow_on_every_response(web_server, shell_root, no_app_url, monkeypatch):
+    client = _start_engine(web_server, monkeypatch, before_fallback=[('/private', _real_route, ['GET'], {})])
+    statuses = set()
+    for method, path in UNGATED_PROBES:
+        resp = client.request(method, path)
+        statuses.add(resp.status_code)
+        assert resp.headers.get('x-robots-tag') == 'noindex, nofollow', (method, path, resp.status_code)
+    # Pages, redirects, 404s, a wrong method and an auth refusal alike.
+    assert statuses == {200, 301, 401, 404, 405}
+    # With no published pages robots.txt stays Disallow-all; with some, crawlers
+    # may fetch them, and every response, robots.txt included, says noindex.
+    assert client.get('/robots.txt').text == 'User-agent: *\nDisallow: /\n'
+    pp.swap(pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')}))
+    robots = client.get('/robots.txt')
+    assert robots.text == 'User-agent: *\nDisallow:\n'
+    assert robots.headers.get('x-robots-tag') == 'noindex, nofollow'
+
+
+def test_a_gated_engine_sends_no_blanket_noindex(web_server, shell_root, app_url, monkeypatch):
+    client = _start_engine(web_server, monkeypatch, before_fallback=[('/private', _real_route, ['GET'], {})])
+    for method, path in UNGATED_PROBES:
+        if path != '/store':
+            assert 'x-robots-tag' not in client.request(method, path).headers, (method, path)
+    # An unlisted page keeps its own page-level noindex.
+    assert client.get('/store').headers['x-robots-tag'] == 'noindex'
+
+
+@pytest.mark.parametrize('fixture,registered', [('no_app_url', True), ('app_url', False)])
+def test_only_an_ungated_engine_registers_the_noindex_middleware(
+    web_server, shell_root, monkeypatch, request, fixture, registered
+):
+    # Decided at init, so a gated engine (production) runs no extra middleware.
+    import ai.modules.shell as shell_pkg
+
+    request.getfixturevalue(fixture)
+    lines = []
+    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
+    _start_engine(web_server, monkeypatch)
+    dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
+    assert (shell_mod.ungated_noindex in dispatches) is registered
+    # Startup stays quiet: OSS and desktop engines have nothing published to deindex.
+    assert [line for line in lines if 'RR_APP_URL is not set' in line] == []
+
+
+@pytest.mark.parametrize('fixture,warns', [('no_app_url', True), ('app_url', False)])
+def test_a_published_page_without_rr_app_url_warns_once_at_the_swap(
+    web_server, shell_root, monkeypatch, request, fixture, warns
+):
+    # A production pod without RR_APP_URL deindexes its published pages: say so, once, when it has some.
+    import ai.modules.shell as shell_pkg
+
+    request.getfixturevalue(fixture)
+    lines = []
+    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
+    monkeypatch.setattr(shell_pkg, '_warned_noindex', False)
+    _start_engine(web_server, monkeypatch)
+    published = pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')})
+    pp.swap(pp.Aggregate(exact={}))
+    pp.swap(pp.legacy_aggregate())
+    assert lines == []
+    pp.swap(published)
+    pp.swap(pp.Aggregate(exact={'/a': pp.Page('/a', 'rocketride.home', title='A')}))
+    matching = [line for line in lines if 'RR_APP_URL is not set' in line and 'noindex, nofollow' in line]
+    assert len(matching) == (1 if warns else 0), lines

@@ -32,7 +32,9 @@ HEAD (405 otherwise); a feed is Atom with absolute URLs on ``RR_APP_URL``,
 source (``site.redirects``) and a page's trailing-slash twin answer GET and
 HEAD with a 301 to the page; any other path the aggregate does not claim
 answers what the router answered before the catch-all existed: 405, 307 or
-404.
+404. With ``site.notFound`` declared, that 404 is the site's own page on GET
+and HEAD (``_not_found_page``), except under the reserved prefixes
+(``/.well-known`` among them).
 
 Auth: the catch-all is not a public route, which would open every path,
 private API routes included, to anonymous callers. The web server consults
@@ -52,10 +54,12 @@ page's head metadata (title, description, canonical URL, robots, and the
 link-preview tags: ``og:type``, ``og:site_name``, ``og:image``, the Twitter
 card, article times, and a link to each feed whose prefix it is or is under)
 is injected, plus, for crawlers, the JSON-LD of its data sources and, for a
-page with ``published``, its BlogPosting (``articles.py``). A source that
-cannot be read leaves the page without its data, uncached. Only a rendered
-snapshot may sit in shared caches; the shell document names the current
-build's bundles, so it is ``private, no-cache`` for everyone.
+page with ``published``, its BlogPosting (``articles.py``). The root owner's
+``site.organization`` adds its Organization node on ``/`` (with a WebSite
+node) and on every dated page, whose BlogPosting references it by ``@id``. A
+source that cannot be read leaves the page without its data, uncached. Only a
+rendered snapshot may sit in shared caches; the shell document names the
+current build's bundles, so it is ``private, no-cache`` for everyone.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
@@ -64,7 +68,8 @@ also dropped when that source is invalidated, and expires after
 what is left of that time, so the TTL bounds staleness end to end. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
-A feed's document is built once per page map.
+A feed's document is built once per page map, and the ``site.notFound``
+response once per page map and UA class.
 """
 
 import asyncio
@@ -85,9 +90,9 @@ from ai.web.middleware import route_path
 
 from rocketlib import warning
 
-from . import data_sources, public_pages
+from . import articles, data_sources, public_pages
 from .articles import blogposting
-from .contract import MAX_SNAPSHOT_BYTES, Page, snapshot_error, with_slash_twin
+from .contract import MAX_SNAPSHOT_BYTES, Page, reserved_error, snapshot_error, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .feeds import atom
 from .head import feed_links, inject_head, social_tags
@@ -200,6 +205,31 @@ def canonical_url(path: str) -> str:
     if not base:
         return ''
     return f'{base}{path}'
+
+
+def site_jsonld(site: Mapping[str, Any], *, website: bool) -> List[Dict[str, Any]]:
+    """The Organization node of ``site.organization``, plus the WebSite node when ``website``; [] when undeclared.
+
+    The Organization's ``@id`` is the one a BlogPosting's publisher
+    references (``articles.publisher``). The WebSite node names the
+    ``RR_APP_URL`` origin, published by the Organization; without
+    ``RR_APP_URL`` there is no origin to name.
+    """
+    organization = site.get('organization')
+    if not organization:
+        return []
+    org_id = articles.publisher(site)['@id']
+    out: List[Dict[str, Any]] = [
+        {'@context': 'https://schema.org', '@type': 'Organization', '@id': org_id, **organization}
+    ]
+    base = app_url()
+    if website and base:
+        node = {'@context': 'https://schema.org', '@type': 'WebSite', '@id': f'{base}/#website', 'url': f'{base}/'}
+        if site.get('title'):
+            node['name'] = site['title']
+        node['publisher'] = {'@id': org_id}
+        out.append(node)
+    return out
 
 
 def _relative_location(request: Request, path: str) -> str:
@@ -315,8 +345,9 @@ class _Rendered(NamedTuple):
 
 
 # Rendered page responses: (path, UA class, shell document, its mtime and size,
-# RR_APP_URL) -> _Rendered. Cleared on every aggregate swap; an entry bound to
-# a data source is dropped when that source is invalidated.
+# RR_APP_URL) -> _Rendered, plus the site.notFound response (_NOT_FOUND_KEY).
+# Cleared on every aggregate swap; an entry bound to a data source is dropped
+# when that source is invalidated.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
@@ -332,6 +363,12 @@ _documents: Dict[Tuple[str, bool], Tuple[Path, int, int]] = {}
 # Atom documents: (feed path, RR_APP_URL) -> the document. A feed reads only
 # the page map, so it is built once per page map; cleared on every swap.
 _atom_cache: Dict[Tuple[str, str], str] = {}
+
+# The render cache key of the site.notFound response, which no path changes:
+# one entry per UA class and shell document. Page keys start with a path ('/').
+_NOT_FOUND_KEY = 'site.notFound'
+# How long a site.notFound response that fell back on a storage error is kept.
+_NOT_FOUND_RETRY_SECONDS = 60.0
 
 # Bumped by every swap and data-source invalidation: a render that started
 # before one is served, not cached.
@@ -495,15 +532,19 @@ async def _page_data(page: Page, canonical: str) -> Tuple[Dict[str, Any], bool]:
     return {}, False
 
 
-def _warn_fallback(page: Page, reason: Any) -> None:
-    """Log that crawlers get the shell document in place of the page's snapshot."""
-    warning(f'[public_pages] {page.path}: snapshot {page.snapshot!r} unavailable, serving the shell document: {reason}')
+def _warn_fallback(page: Page, reason: Any, where: str = '') -> None:
+    """Log that crawlers get the shell document in place of the page's snapshot, naming ``where`` (default the page's path)."""
+    warning(
+        f'[public_pages] {where or page.path}: snapshot {page.snapshot!r} unavailable, '
+        f'serving the shell document: {reason}'
+    )
 
 
-async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Optional[str], bool]:
+async def _crawler_snapshot(page: Page, context: Dict[str, Any], *, where: str = '') -> Tuple[Optional[str], bool]:
     """The page's snapshot rendered with ``context``, or None for the shell document: ``(html, cacheable)``.
 
-    A fallback is cacheable when it is final for the page's version: no
+    Every fallback warning names ``where`` (default the page's path) and the
+    snapshot. A fallback is cacheable when it is final for the page's version: no
     snapshot, a malformed snapshot path or no production version, a snapshot
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
@@ -515,6 +556,7 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
     Args:
         page: A page of the aggregate.
         context: The page's bound data sources (``_page_data``).
+        where: What the warnings name instead of the page's path.
 
     Returns:
         ``(html, cacheable)``: the rendered snapshot, or None when crawlers
@@ -525,7 +567,7 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
     try:
         path = snapshot_path(page)
     except ValueError as exc:
-        _warn_fallback(page, exc)
+        _warn_fallback(page, exc, where)
         return None, True
     if path in _unusable_snapshots:
         return None, True
@@ -538,11 +580,11 @@ async def _crawler_snapshot(page: Page, context: Dict[str, Any]) -> Tuple[Option
         return html, True
     except (_SnapshotTooLarge, TemplateError) as exc:
         _unusable_snapshots.put(path, True, 1)
-        _warn_fallback(page, exc)
+        _warn_fallback(page, exc, where)
         return None, True
     except StorageError as exc:
         if _storage_warning_due(path):
-            _warn_fallback(page, exc)
+            _warn_fallback(page, exc, where)
         return None, False
 
 
@@ -562,6 +604,72 @@ def _storage_warning_due(path: str) -> bool:
         return False
     _storage_warned.put(path, now, 1)
     return True
+
+
+async def _not_found_page(request: Request, aggregate: Any) -> Optional[Response]:
+    """The 404 page of ``site.notFound`` for a path nothing serves, or None.
+
+    None when the site declares no ``notFound``, or the path is under a
+    reserved prefix (``/.well-known`` among them), where API callers and
+    discovery probes (OAuth, MCP) expect the plain 404. The body does not
+    depend on the path, and scanners probing random paths make this the
+    busiest 404, so it comes from the render cache: one entry per UA class
+    and shell ``index.html`` (its mtime and size), under ``_NOT_FOUND_KEY``,
+    dropped on every swap (``_render_not_found`` builds it).
+
+    Raises:
+        HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
+    """
+    path = route_path(request.scope) or '/'
+    snapshot = aggregate.site.get('notFound')
+    root = aggregate.exact.get('/')
+    if not snapshot or root is None or reserved_error(path):
+        return None
+    crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
+    index = shell_document_path(request, capture=False)
+    stat = index.stat()
+    key = (_NOT_FOUND_KEY, crawler, index, stat.st_mtime_ns, stat.st_size)
+    now = time.monotonic()
+    cached = _render_cache.get(key)
+    if cached is None or cached.expires <= now:
+        generation = _generation
+        cached = await _render_not_found(aggregate.site, root, snapshot, crawler, index, now)
+        if generation == _generation:
+            _render_cache.put(key, cached, len(cached.body))
+    return HTMLResponse(cached.body, status_code=404, headers=cached.headers)
+
+
+async def _render_not_found(
+    site: Mapping[str, Any], root: Page, snapshot: str, crawler: bool, index: Path, now: float
+) -> _Rendered:
+    """The ``site.notFound`` response, as the render cache holds it.
+
+    Crawlers get ``snapshot`` from the production version of ``root`` (the
+    page ``/``), rendered like a page's (``assets`` resolves; no data), or
+    ``index`` when it cannot be used; people get ``index`` (never a capture),
+    so the app renders its own 404. Either way under a head titled ``Page not
+    found | <site.title>``, with noindex and no canonical URL. A fallback the
+    next request would retry (a storage error) expires after
+    ``_NOT_FOUND_RETRY_SECONDS`` instead of with the page map, so the store
+    is retried, and its failure warned about, at most that often.
+    """
+    expires = math.inf
+    rendered = None
+    if crawler:
+        owner = Page('/', root.app_id, '', snapshot=snapshot, dist_dir=root.dist_dir, version=root.version)
+        rendered, final = await _crawler_snapshot(owner, {}, where='site.notFound')
+        if not final:
+            expires = now + _NOT_FOUND_RETRY_SECONDS
+    body = rendered
+    if body is None:
+        body = await asyncio.to_thread(index.read_text, encoding='utf-8')
+    title = 'Page not found'
+    site_title = site.get('title', '')
+    if site_title:
+        title = f'{title} | {site_title}'
+    body = inject_head(body, title=title, noindex=True)
+    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
+    return _Rendered((), expires, body.encode('utf-8'), headers)
 
 
 def _feed(aggregate: public_pages.Aggregate, feed: Mapping[str, str]) -> Response:
@@ -620,12 +728,14 @@ async def public_page(request: Request) -> Response:
 
     Returns:
         The page, a feed, a 301 to a page, the shell on an unclaimed ``/``,
-        or the router's 307 to a served trailing-slash twin.
+        the router's 307 to a served trailing-slash twin, or the
+        ``site.notFound`` page (status 404) for a path nothing serves.
 
     Raises:
-        HTTPException: 404 for a path nothing serves; 405, with ``Allow``, for
-            a method the page, feed, redirect or real route does not take; 503
-            (from ``shell_document_path``) when the shell is not built.
+        HTTPException: 404 for a path nothing serves (without
+            ``site.notFound``); 405, with ``Allow``, for a method the page,
+            feed, redirect or real route does not take; 503 (from
+            ``shell_document_path``) when the shell is not built.
     """
     path = route_path(request.scope) or '/'
     aggregate = public_pages.current()
@@ -642,7 +752,7 @@ async def public_page(request: Request) -> Response:
         return _feed(aggregate, feed)
     page = aggregate.exact.get(path)
     if page is None:
-        return await _unclaimed(request, path)
+        return await _unclaimed(request, path, aggregate)
     return await _render_page(request, path, page, aggregate)
 
 
@@ -677,18 +787,22 @@ def _redirect(request: Request, path: str, aggregate: public_pages.Aggregate) ->
     return None
 
 
-async def _unclaimed(request: Request, path: str) -> Response:
+async def _unclaimed(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
     """A GET or HEAD on a path no page claims: the shell on ``/``, else what the router answered before the catch-all.
 
+    A path nothing serves gets the site's own 404 page when it declares one
+    (``_not_found_page``).
+
     Returns:
-        The shell on ``/``, or the router's 307 to a served trailing-slash twin.
+        The shell on ``/``, the router's 307 to a served trailing-slash twin,
+        or the ``site.notFound`` page with status 404.
 
     Raises:
         HTTPException: the router's 405 on a real route's path, else 404.
     """
     if path == '/':
         return await shell_static(request)
-    miss = _router_miss(request)
+    miss = _router_miss(request) or await _not_found_page(request, aggregate)
     if miss is None:
         raise HTTPException(status_code=404, detail='Not Found')
     return miss
@@ -770,11 +884,11 @@ async def _render(
     with its bound data sources (``_crawler_snapshot``), or the shell document
     when there is none to serve. Either way the page's head metadata,
     link-preview tags and feed links are injected, plus, for crawlers, the
-    sources' JSON-LD and a dated page's BlogPosting; reading the shell
-    document and rewriting the head run off the event loop.
-    A render bound to a source expires ``data_sources.TTL_SECONDS`` after
-    ``now``. ``cacheable`` is False for a fallback the next request should
-    retry.
+    sources' JSON-LD, a dated page's BlogPosting, and the site's Organization
+    on ``/`` and on dated pages; reading the shell document and rewriting the
+    head run off the event loop. A render bound to a source expires
+    ``data_sources.TTL_SECONDS`` after ``now``. ``cacheable`` is False for a
+    fallback the next request should retry.
     """
     canonical = canonical_url(path)
     # Only crawlers bind data: people get the shell document, which the
@@ -804,6 +918,9 @@ async def _render(
     jsonld = data_sources.jsonld(context, canonical)
     if crawler and page.published:
         jsonld.append(blogposting(page, site, canonical=canonical, image=image))
+    if crawler and (path == '/' or page.published):
+        # A BlogPosting references the Organization by @id: the node goes on the same page.
+        jsonld += site_jsonld(site, website=path == '/')
     body = await asyncio.to_thread(
         inject_head,
         body,

@@ -104,6 +104,10 @@ class Aggregate:
         """Every claimed page, sorted by path (deterministic output order)."""
         return sorted(self.exact.values(), key=lambda p: p.path)
 
+    def serves_published_pages(self) -> bool:
+        """Whether platform apps publish pages here; the legacy list and an empty map publish none."""
+        return not self.legacy and bool(self.exact)
+
 
 def _claim_key(pub: Published) -> Tuple[float, str]:
     """Sort key of one claim: its production binding time, then its app id. An unknown time sorts last."""
@@ -408,8 +412,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
     manifests, so unpublishing releases it, with no table) and of feed
-    paths against their pages, and snapshot files missing from the built
-    version or over ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
+    paths against their pages, and snapshot files (each page's and
+    ``site.notFound``) missing from the built version or over
+    ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -490,20 +495,14 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     for page in pages:
         if not page.snapshot:
             continue
-        try:
-            info = await artifact_file_info(f'{dist_dir}/{page.snapshot}')
-        except StorageNotFoundError:
-            errors.append(
-                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '
-                'emit it into the build output or drop the field'
-            )
-            continue
-        if info['size'] > MAX_SNAPSHOT_BYTES:
-            errors.append(
-                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is {info["size"]} bytes, over the '
-                f'{MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts into the build output and '
-                'reference them through {{assets}}'
-            )
+        err = await _stored_snapshot_error(f'{dist_dir}/{page.snapshot}')
+        if err:
+            errors.append(f'publicPages path {page.path!r}: snapshot {page.snapshot!r} {err}')
+    not_found = (site or {}).get('notFound')
+    if not_found:
+        err = await _stored_snapshot_error(f'{dist_dir}/{not_found}')
+        if err:
+            errors.append(f'site.notFound {not_found!r} {err}')
     images = [(f'publicPages path {page.path!r}: image', page.image) for page in pages]
     if site is not None:
         images.append(('site.image', site.get('image', '')))
@@ -517,6 +516,36 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'{label} {image!r} is not in the built version; emit it into the build output or drop the field'
             )
     return errors
+
+
+async def _stored_snapshot_error(path: str) -> Optional[str]:
+    """Why the snapshot at store ``path`` cannot be published, or None.
+
+    Sized by a stat, never read: a missing file, or one over
+    ``MAX_SNAPSHOT_BYTES``, which the server would never serve.
+
+    Args:
+        path: The snapshot's store path in the version's build output.
+
+    Returns:
+        The reason, ready to follow the snapshot's name, or None.
+
+    Raises:
+        StorageError: any storage failure but a missing file; the caller
+            refuses the publish (fail closed).
+    """
+    from ai.account.store import StorageNotFoundError
+
+    try:
+        info = await artifact_file_info(path)
+    except StorageNotFoundError:
+        return 'is not in the built version; emit it into the build output or drop the field'
+    if info['size'] > MAX_SNAPSHOT_BYTES:
+        return (
+            f'is {info["size"]} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts '
+            'into the build output and reference them through {{assets}}'
+        )
+    return None
 
 
 # =============================================================================

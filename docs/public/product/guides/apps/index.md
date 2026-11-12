@@ -238,17 +238,21 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image and feeds. */
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image, feeds and organization. */
   site?: {
     title?: string;
     blurb?: string;
     docsUrl?: string;
+    /** The snapshot, in the build output, served with a 404 on paths nothing serves: 'pages/404.html'. */
+    notFound?: string;
     /** Old URLs answered with a 301 to one of your pages, query string kept. */
     redirects?: { from: string; to: string }[];
     /** The link-preview image of pages that declare none (same forms as a page's image). */
     image?: string;
     /** Atom feeds of the dated pages under a prefix: { path: '/blog/feed.xml', prefix: '/blog/', title: 'Blog' }. */
     feeds?: { path: string; prefix: string; title: string }[];
+    /** The organization the site belongs to: its Organization JSON-LD, with the @id `${url}#organization`. */
+    organization?: { name: string; url: string; logo?: string; description?: string; sameAs?: string[] };
   };
 }
 ```
@@ -308,8 +312,8 @@ publish fails with a message naming the field):
   releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
-- `snapshot` must be a relative `.html` path that exists in the built version,
-  at most 2 MiB.
+- `snapshot` and `site.notFound` must be a relative `.html` path that exists
+  in the built version, at most 2 MiB.
 - `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
   never `//`) or a relative path inside the build output, with no empty or dot
   segment, at most 2048 characters.
@@ -336,12 +340,21 @@ publish fails with a message naming the field):
   route; it appears once. `prefix` is a page path ending in `/` (`/blog/`, or
   `/` for every page), and `title` a non-empty string of at most 300
   characters.
+- `site.organization` needs a non-empty `name` (at most 300 characters) and an
+  `https://` `url`; `logo` is an `https://` URL, `description` at most 1000
+  characters, and `sameAs` a list of at most 20 `https://` URLs.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
 be read keeps the pages of its last readable build while the server runs;
 after a restart it has none until its storage can be read again. Kept pages
 still compete with other apps' claims under the same first-claim rule.
+
+A server without `RR_APP_URL` is not the public site: every response carries
+`X-Robots-Tag: noindex, nofollow`, so a host found through links stays out of
+search indexes. Its `/robots.txt` disallows all crawling, unless it serves
+published pages (a staging deployment): then it allows crawling, so crawlers
+fetch the pages and read the noindex.
 
 The server answers `GET` and `HEAD` on each page with the shell's document
 (the route's prerendered capture when the shell build carries one, else
@@ -370,7 +383,13 @@ its `headline` (the title without a trailing ` | <site.title>`),
 `description`, `datePublished`, `dateModified`, `image`, `mainEntityOfPage`
 (the canonical URL), each author as a `Person`, and the site's organization
 as `publisher`, also the `author` of a page without authors. That
-organization is named after `site.title`, on the `RR_APP_URL` origin.
+organization is a reference to the `site.organization` node by its `@id`
+when one is declared, else an organization named after `site.title`, on the
+`RR_APP_URL` origin. Crawlers get the `site.organization` node (an
+`Organization` with the declared fields and the `@id`
+`<url>#organization`) on `/` and on every page with `published`, so the
+reference resolves on the page itself; `/` also carries a `WebSite` node for
+the `RR_APP_URL` origin, published by that organization.
 
 A snapshot is a template with exactly three kinds of tag, each on one line:
 `{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
@@ -424,6 +443,18 @@ is listed in that parent's section, headed by the parent's title without a
 trailing ` | <site.title>`, with dated pages newest first and the rest by
 path; every other page is under `## Pages`, by path.
 
+A server with `RR_INDEXNOW_KEY` (8 to 128 letters, digits and `-`) and an
+`https://` `RR_APP_URL` serves the key at `/<key>.txt` and, whenever the page
+map changes, submits to IndexNow, which shares them with Bing and the other
+participating search engines, the listed pages that are new or whose content
+changed (a field of the page, or its snapshot's bytes; a new version alone
+is no change) and the pages that were listed and are now gone or unlisted.
+Without both settings it serves no key file and submits nothing. The pages
+of an app missing from the page map altogether (unpublished, made
+non-public, or skipped for a moment because its storage could not be read)
+are not submitted as removed: a transient storage error must not look like
+a removal.
+
 Each feed in `site.feeds` answers `GET` and `HEAD` on its `path` with an Atom
 1.0 document (`application/atom+xml`): the listed pages strictly under its
 `prefix` that declare `published`, newest first, at most 50. An entry carries
@@ -437,7 +468,13 @@ their head (`<link rel="alternate" type="application/atom+xml">`).
 `GET` and `HEAD` on a redirect's `from` answer `301` with
 `Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
 page (query kept). Any path that is neither a page, a redirect nor a server
-route answers `404`.
+route answers `404`. With `site.notFound` declared, a `GET` or `HEAD` on such
+a path (outside `/api`, `/task`, `/mcp` and `/.well-known`, which keep the
+plain `404`) answers `404` with a page titled `Page not found | <site.title>`,
+`noindex`, no canonical URL and `Cache-Control: private, no-cache`: crawlers
+get the `site.notFound` snapshot, rendered like a page's (`{{assets}}`
+included), and people get the shell's `index.html`, so your app renders its
+own not-found view.
 
 ### Settings
 

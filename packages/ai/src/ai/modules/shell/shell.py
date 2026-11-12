@@ -47,9 +47,12 @@ manifests (``public_pages``), never from constants here.
 
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404 and
-/robots.txt disallows all crawling; absolute URLs are never derived from
-request headers.
+self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404,
+every response carries ``X-Robots-Tag: noindex, nofollow``
+(``ungated_noindex``), and /robots.txt disallows all crawling, unless the
+engine serves published pages (a staging deployment): then it allows
+crawling, so crawlers read that noindex. Absolute URLs are never derived
+from request headers.
 """
 
 import hashlib
@@ -137,12 +140,12 @@ def _capture_for(request: Request) -> Optional[Path]:
     return None
 
 
-def shell_document_path(request: Request) -> Path:
+def shell_document_path(request: Request, *, capture: bool = True) -> Path:
     """The HTML document a browser navigating to this path boots from.
 
     The route's prerendered capture when the shell build carries one (see
-    ``_capture_for``), else the SPA ``index.html``: what ``shell_static``
-    serves for the same navigation.
+    ``_capture_for``) and ``capture`` allows it, else the SPA ``index.html``:
+    what ``shell_static`` serves for the same navigation.
 
     Raises:
         HTTPException: 503 when the shell has not been built.
@@ -150,7 +153,11 @@ def shell_document_path(request: Request) -> Path:
     index_path = Path(_shell_root) / 'index.html'
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
-    return _capture_for(request) or index_path
+    if capture:
+        capture_path = _capture_for(request)
+        if capture_path:
+            return capture_path
+    return index_path
 
 
 async def shell_static(request: Request):
@@ -671,6 +678,26 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
+async def ungated_noindex(request: Request, call_next):
+    """HTTP middleware: ``X-Robots-Tag: noindex, nofollow`` on every response of an engine without ``RR_APP_URL``.
+
+    Only registered when ``RR_APP_URL`` is empty at init (see
+    ``initModule``), so it does not check again per response.
+
+    Such an engine (OSS, self-hosted, desktop, a staging deployment) is not
+    the public site. robots.txt ``Disallow: /`` stops crawling, not
+    indexing: a disallowed URL found through links is still indexed by URL,
+    and the disallow keeps crawlers from ever reading a noindex in the page.
+    So an engine that serves published pages (staging, the linked one)
+    allows crawling in robots.txt (``robots_txt``). The header covers every
+    response (pages, shell assets, 404s, auth refusals); only auth or an IP
+    allowlist in front keeps a non-public host out entirely.
+    """
+    response = await call_next(request)
+    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    return response
+
+
 def _md(text: str) -> str:
     """One line of llms.txt markdown: whitespace collapsed, link syntax escaped.
 
@@ -755,9 +782,13 @@ async def robots_txt(request: Request):
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
     sitemap, with one named group per rostered crawler (the roster that
     also classifies requesters) plus ``*``; every group carries the same
-    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise (OSS,
-    self-hosted, desktop): a customer engine is not a marketing site —
-    tell crawlers to stay out entirely.
+    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise every
+    response is ``noindex, nofollow`` (``ungated_noindex``). An engine that
+    serves published pages (staging, or production without its
+    ``RR_APP_URL``) is linked from elsewhere and indexed, so crawlers may
+    fetch its pages and read that noindex. Any other engine (OSS,
+    self-hosted, desktop) is not a marketing site: crawlers stay out
+    entirely.
 
     Args:
         request: Incoming HTTP request.
@@ -766,11 +797,14 @@ async def robots_txt(request: Request):
         PlainTextResponse with the robots policy.
     """
     from .crawlers import robots_groups
+    from .public_pages import current
 
     base_url = app_url()
 
     if base_url:
         content = f'{robots_groups("Allow: /")}Sitemap: {base_url}/sitemap.xml\n'
+    elif current().serves_published_pages():
+        content = 'User-agent: *\nDisallow:\n'
     else:
         content = 'User-agent: *\nDisallow: /\n'
 

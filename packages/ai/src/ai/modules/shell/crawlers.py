@@ -33,7 +33,7 @@ docs/docusaurus/static/robots.txt; its named groups follow the same intent.
 
 from typing import Set, Tuple
 
-from rocketlib import debug
+from rocketlib import warning
 
 # User-agent tokens, grouped by kind. Matching is a case-insensitive substring
 # test: real UAs embed the token (Bing sends 'bingbot/2.0', lowercase).
@@ -44,16 +44,31 @@ CRAWLERS: Tuple[str, ...] = (
     'Googlebot',
     'Bingbot',
     'DuckDuckBot',
+    'GoogleOther',
+    # Search Console's URL Inspection and live test: without it the inspector
+    # renders the human path and never shows what Googlebot is served.
+    'Google-InspectionTool',
+    'Amazonbot',
     # AI
     'GPTBot',
     'OAI-SearchBot',
     'ChatGPT-User',
     'ClaudeBot',
     'Claude-User',
+    'Claude-SearchBot',
     'PerplexityBot',
     'Perplexity-User',
     'CCBot',
     'Google-Extended',
+    'Google-CloudVertexBot',
+    'DuckAssistBot',
+    'Meta-ExternalAgent',
+    'meta-externalfetcher',
+    # Meta AI's search crawler: it reads pages to cite them in Meta AI answers.
+    'meta-webindexer',
+    'MistralAI-User',
+    # Robots-only token (Apple's AI-training opt-out); never in a UA.
+    'Applebot-Extended',
     # Unfurlers
     'facebookexternalhit',
     'Twitterbot',
@@ -106,7 +121,8 @@ def _note_unrostered(ua: str) -> None:
     if key in _seen_unknown or len(_seen_unknown) >= _MAX_SEEN:
         return
     _seen_unknown.add(key)
-    debug(f'[public_pages] unrostered non-browser user agent (served the human document): {key!r}')
+    # warning, not debug: production runs without debug tracing, and this log is how the roster grows.
+    warning(f'[public_pages] unrostered non-browser user agent (served the human document): {key!r}')
 
 
 def robots_groups(rule: str) -> str:
