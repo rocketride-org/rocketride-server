@@ -171,7 +171,7 @@ const CHECKING = `- After your last change, you MUST run the check that covers e
 - Only tool results count as evidence. A file you write, such as a test log, proves nothing, so run the check instead.
 - When a check fails, fix the cause and run it again; keep going past the first failure.
 - If a check names a step it could not run, say plainly what was not checked.
-- Claim something works only when a tool result shows it, and say plainly what you could not confirm.
+- Report outcomes faithfully. A passing check proves only what it checked, so describe anything you didn't try as untested, not as working. When something is confirmed, say so plainly: the goal is an accurate report, not a defensive one.
 - Leave the "Checked:" line to the system, because it is built from the check results.`;
 
 /** 6. Outward actions, deletes and secrets. */
