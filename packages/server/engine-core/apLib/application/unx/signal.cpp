@@ -73,9 +73,11 @@ void disableHandler() noexcept {
 // Signal handler for Linux.
 void processSignal(int signal) noexcept {
     // Log the signal details
-    LOG(Always, "Application received system signal: {}: {} ({})",
-        plat::renderSignal(signal), plat::renderSignalDescription(signal),
-        signal);
+    const Text errorStr =
+        _fmt("Application received system signal: {}: {} ({})",
+             plat::renderSignal(signal), plat::renderSignalDescription(signal),
+             signal);
+    LOG(Always, errorStr);
 
     // Handle non-terminal signals
     switch (signal) {
@@ -92,7 +94,7 @@ void processSignal(int signal) noexcept {
     }
 
     // Finally, exit
-    dev::fatality(_location, "Received terminal system signal");
+    dev::fatality(_location, APERR(Ec::Crash, errorStr));
 }
 
 // A thread which watches for a signal to be set, and calls the
