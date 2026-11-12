@@ -118,8 +118,6 @@ function(rocketride_set_common_target_options target)
 
     target_compile_definitions(${target} PRIVATE -DBUILD_${PRIVATE_DEF})
 
-    set_target_properties(${target} PROPERTIES CXX_STANDARD 20)
-
 endfunction()
 
 #

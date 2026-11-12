@@ -110,9 +110,9 @@ project(RocketRideEngine
 
 # -----------------------------------------------------------------------------
 # C++ standard configuration
-# We require C++17 for modern language features
+# Set once here for every server target; cmake/rocketride-node.cmake mirrors it for node builds
 # -----------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
