@@ -53,7 +53,7 @@ _APP = 'acme.brandy'
 _DIST = f'{_APP}/v3/dist'
 
 
-def _client(monkeypatch, files):
+def _client(monkeypatch, files, methods=('GET',)):
     """A TestClient over apps_static with one servable version (v3).
 
     Args:
@@ -81,7 +81,7 @@ def _client(monkeypatch, files):
     )
 
     app = FastAPI()
-    app.add_api_route('/apps/{file_path:path}', shell_mod.apps_static, methods=['GET'])
+    app.add_api_route('/apps/{file_path:path}', shell_mod.apps_static, methods=list(methods))
     return TestClient(app)
 
 
@@ -190,3 +190,47 @@ def test_unservable_version_is_still_a_plain_404(monkeypatch):
 
     assert client.get(f'/apps/{_APP}/v9/index.html').status_code == 404
     assert client.get(f'/apps/{_APP}/v3/missing.html').status_code == 404
+
+
+# =============================================================================
+# SERVICE WORKERS: never registered from a dist file (fail on develop)
+# =============================================================================
+
+
+def test_service_worker_script_fetch_is_refused(monkeypatch):
+    """Browsers send ``Service-Worker: script`` when fetching a script to
+    register as a service worker. A dist script registered that way would
+    sit on the main origin and intercept the app's later requests even after
+    the app is revoked, so the route answers that fetch with its plain 404.
+    """
+    client = _client(monkeypatch, {'sw.js': b'payload'})
+
+    resp = client.get(f'/apps/{_APP}/v3/sw.js', headers={'Service-Worker': 'script'})
+
+    assert resp.status_code == 404
+    assert resp.content != b'payload'
+
+
+def test_ordinary_script_fetch_still_serves(monkeypatch):
+    """Control: the same file without the header loads as a normal script."""
+    client = _client(monkeypatch, {'sw.js': b'payload'})
+
+    resp = client.get(f'/apps/{_APP}/v3/sw.js')
+
+    assert resp.status_code == 200
+    assert resp.content == b'payload'
+
+
+def test_head_gets_the_same_policy_as_get(monkeypatch):
+    """If HEAD is ever routed here, it answers with GET's headers (sandboxed
+    download for a page type) and refuses a service-worker fetch the same way.
+    """
+    client = _client(monkeypatch, {'index.html': b'<p>x</p>', 'sw.js': b'payload'}, methods=('GET', 'HEAD'))
+
+    page = client.head(f'/apps/{_APP}/v3/index.html')
+    worker = client.head(f'/apps/{_APP}/v3/sw.js', headers={'Service-Worker': 'script'})
+
+    assert page.status_code == 200
+    assert _is_sandboxed_download(page), dict(page.headers)
+    assert page.content == b''
+    assert worker.status_code == 404

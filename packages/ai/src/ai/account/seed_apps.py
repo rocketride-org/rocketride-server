@@ -184,11 +184,13 @@ def seed_artifact_of(entry: Dict[str, Any]) -> Dict[str, Any]:
     desktop card's version line — falling back to SEED_VERSION only when the
     manifest carries none.
     """
+    from ai.account.app_deploy import module_id_of
+
     app_id = str(entry['id'])
     return {
         'kind': 'app',
         'appId': app_id,
-        'moduleId': str(entry.get('moduleId') or app_id.replace('.', '_')),
+        'moduleId': str(entry.get('moduleId') or module_id_of(app_id)),
         'name': str(entry.get('name') or app_id),
         'appVersion': str(entry.get('version') or SEED_VERSION),
     }

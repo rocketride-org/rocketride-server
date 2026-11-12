@@ -1960,3 +1960,131 @@ async def test_resolve_keeps_distinct_and_legacy_moduleids(registry, monkeypatch
         ('acme.brandy', 'acme_brandy'),
         ('acme.legacy', 'acmeLegacyRemote'),
     ]
+
+
+# ── Receipt: a new app may not derive an existing app's container name ──────
+
+
+def _existing_apps(monkeypatch, app_ids, fail=False):
+    """publish_list answers one public, enabled row per existing app id."""
+
+    async def publish_list(org_id, kind, audiences):
+        if fail:
+            raise RuntimeError('registry down')
+        return [
+            {'orgId': 'org-other', 'appId': app_id, 'audience': dict(AUD_PUBLIC), 'version': 1, 'state': 'enabled'}
+            for app_id in app_ids
+        ]
+
+    monkeypatch.setattr(account_singleton, 'publish_list', publish_list, raising=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'existing, developer_id, new_app_id',
+    [
+        # Bare slug: developer 'acme_foo' ships app id 'acme_foo' -> 'acme_foo'.
+        ('acme.foo', 'acme_foo', 'acme_foo'),
+        # Underscore: 'acme_foo.bar' and 'acme.foo_bar' both derive 'acme_foo_bar'.
+        ('acme.foo_bar', 'acme_foo', 'acme_foo.bar'),
+        # Hyphen: 'acme.foo-bar' derives the same name as 'acme.foo_bar'.
+        ('acme.foo-bar', 'acme', 'acme.foo_bar'),
+    ],
+)
+async def test_add_refuses_a_name_another_app_already_derives(
+    registry, content_store, monkeypatch, existing, developer_id, new_app_id
+):
+    """A newcomer whose app id derives an existing app's container name is
+    refused at receipt, so it can never make the resolve-time backstop hide
+    the existing app.
+    """
+    _existing_apps(monkeypatch, [existing])
+    conn = _FakeConn(developer_id=developer_id)
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip(manifest={'id': new_app_id, 'name': 'New'})))
+
+    assert result['success'] is False
+    assert existing in result['message']
+    assert registry.publish_calls == []
+    assert _written(content_store) == {}
+
+
+@pytest.mark.asyncio
+async def test_add_allows_redeploying_the_same_app_id(registry, content_store, monkeypatch):
+    """Control: the app's own existing rows are not a collision."""
+    _existing_apps(monkeypatch, ['acme.brandy', 'acme.other'])
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is True
+
+
+@pytest.mark.asyncio
+async def test_add_fails_closed_when_the_collision_check_cannot_run(registry, content_store, monkeypatch):
+    """A registry error refuses the deploy rather than skipping the check."""
+    _existing_apps(monkeypatch, [], fail=True)
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert registry.publish_calls == []
+
+
+# ── Resolve: reserved names never reach the shell ──────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'app_id, module_id',
+    [
+        # The shell host's own Module Federation name.
+        ('xyz.host', 'rocketride_shell'),
+        # The shell's shared-module keys, as a stored (non-derived) name.
+        ('xyz.a', 'shell'),
+        ('xyz.b', 'rocketride'),
+        # A first-party-looking name on a non-platform app, stored ...
+        ('xyz.c', 'rocketride_store'),
+        # ... or derived from a lookalike developer id.
+        ('rocketride_home', 'rocketride_home'),
+    ],
+)
+async def test_resolve_withholds_reserved_names_even_when_unclaimed(registry, monkeypatch, app_id, module_id):
+    """A reserved name is withheld even when nothing else claims it, so a
+    lone impostor cannot shadow the host or a first-party app that the
+    caller has not loaded yet.
+    """
+    _install_pins(monkeypatch, [(app_id, module_id, 'org-xyz'), ('acme.brandy', 'acme_brandy', 'org-acme')])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_keeps_first_party_rocketride_names(registry, monkeypatch):
+    """Control: platform apps keep their names, derived or legacy."""
+    _install_pins(
+        monkeypatch,
+        [
+            ('rocketride.home', 'rocketride_home', 'org-platform'),
+            ('rocketride.legacy', 'rocketride_oldName', 'org-platform'),
+        ],
+    )
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert sorted(e['id'] for e in resolved) == ['rocketride.home', 'rocketride.legacy']
+
+
+@pytest.mark.asyncio
+async def test_resolve_fallback_name_uses_the_derivation(registry, monkeypatch):
+    """An artifact with no stored moduleId gets the derived name (the same
+    rule the build used), so '-' maps to '_' like everywhere else.
+    """
+    _install_pins(monkeypatch, [('acme.my-app', None, 'org-acme')])
+
+    resolved = await resolve_app_pins('org1', 'u1', [])
+
+    assert [e['moduleId'] for e in resolved] == ['acme_my_app']

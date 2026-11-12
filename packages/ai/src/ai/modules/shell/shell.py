@@ -707,6 +707,12 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     # Path discipline: these segments become STORE paths.
     if not _APP_ID_SEG.match(app_id):
         raise HTTPException(status_code=404, detail='Not found')
+    # Never a service worker: the browser marks a registration fetch with
+    # `Service-Worker: script`. A dist script registered as one would sit on
+    # the MAIN origin and intercept the app's later requests even after the
+    # app is pulled or revoked (#1022). Same oracle-free 404 as a miss.
+    if 'service-worker' in request.headers:
+        raise HTTPException(status_code=404, detail='Not found')
     for seg in rest:
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')

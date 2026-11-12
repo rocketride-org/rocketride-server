@@ -319,6 +319,50 @@ def module_id_of(app_id: str) -> str:
     return _NON_IDENTIFIER.sub('_', app_id)
 
 
+# Container names no third-party app may load under, even unclaimed: the
+# shell host's own Module Federation name, and the shell's shared-module keys.
+_HOST_CONTAINER = 'rocketride_shell'
+_SHARED_KEYS = frozenset({'shell', 'rocketride'})
+# The platform's namespace; every first-party app id is 'rocketride' or
+# 'rocketride.<name>', which no other developer can hold.
+_PLATFORM_NAMESPACE = 'rocketride'
+
+
+def _is_first_party(app_id: str) -> bool:
+    """True for an app id in the platform's developer namespace."""
+    return app_id == _PLATFORM_NAMESPACE or app_id.startswith(f'{_PLATFORM_NAMESPACE}.')
+
+
+def _reserved_container(app_id: str, module_id: str) -> bool:
+    """True when ``module_id`` may never serve for ``app_id`` (see above).
+
+    ``rocketride_shell`` never serves; the shared keys never serve as a
+    stored (non-derived) name; and any ``rocketride_`` name serves only for a
+    first-party app — a lookalike developer id ('rocketride_home') would
+    otherwise derive a first-party app's name.
+    """
+    if module_id == _HOST_CONTAINER:
+        return True
+    if module_id in _SHARED_KEYS and module_id != module_id_of(app_id):
+        return True
+    return module_id.startswith(f'{_PLATFORM_NAMESPACE}_') and not _is_first_party(app_id)
+
+
+async def _container_taken_by(account: Any, org_id: str, conn: Any, app_id: str, module_id: str) -> str:
+    """Another visible app id that derives ``module_id``, or ''.
+
+    Reads every caller-visible publish row (public rows from every org, plus
+    the caller's team and user rows). Raises on a registry error, so the
+    caller can refuse the deploy rather than skip the check.
+    """
+    rows = await account.publish_list(org_id, 'app', _audiences_of(conn))
+    for row in rows or []:
+        other = str(row.get('appId') or '')
+        if other and other != app_id and module_id_of(other) == module_id:
+            return other
+    return ''
+
+
 # =============================================================================
 # DAP HANDLER
 # =============================================================================
@@ -442,6 +486,20 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
             f'appManifest.moduleId {str(declared)!r} is not allowed: the moduleId is derived from the '
             f'app id ({module_id!r} for {app_id!r}). Remove moduleId from package.json, or set it to '
             f'{module_id!r}.',
+        )
+    # A name another app already derives (acme.foo vs the bare acme_foo, or
+    # acme.foo_bar vs acme_foo.bar) would make resolve withhold BOTH apps, so
+    # a newcomer could hide an existing one: refuse it here, fail closed.
+    try:
+        taken_by = await _container_taken_by(account, org_id, conn, app_id, module_id)
+    except Exception as exc:
+        debug(f'[app_deploy] container-name check failed: {exc}')
+        return conn.build_error(request, 'could not check the app id against existing apps; try again')
+    if taken_by:
+        return conn.build_error(
+            request,
+            f'App id {app_id!r} derives the container name {module_id!r}, which the existing app '
+            f'{taken_by!r} already uses. Choose a different app id.',
         )
 
     # ── Registry row first: version allocation names the content paths ────
@@ -1476,7 +1534,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             app_status = 'deployed'
         entry = {
             'id': app_id,
-            'moduleId': artifact.get('moduleId') or app_id.replace('.', '_'),
+            'moduleId': artifact.get('moduleId') or module_id_of(app_id),
             'name': snapshot.get('name') or artifact.get('name') or app_id,
             'publisher': _publisher_of(app_id, artifact_manifest, snapshot),
             'description': snapshot.get('description') or '',
@@ -1520,8 +1578,13 @@ def _unique_containers(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     it; if no app, or more than one, derives it, nobody can be told apart
     from an impostor and every claimant is dropped (fail closed). A name
     claimed once is kept even when it is not derived, so a legacy build
-    with its own name still loads.
+    with its own name still loads — unless it is reserved
+    (_reserved_container), which is withheld first, claimed or not.
     """
+    reserved = [e for e in entries if _reserved_container(str(e.get('id') or ''), str(e.get('moduleId') or ''))]
+    for entry in reserved:
+        debug(f'[app_deploy] app {entry.get("id")!r} withheld: moduleId {entry.get("moduleId")!r} is reserved')
+    entries = [e for e in entries if not any(e is r for r in reserved)]
     claimants: Dict[str, List[Dict[str, Any]]] = {}
     for entry in entries:
         claimants.setdefault(str(entry.get('moduleId') or ''), []).append(entry)
