@@ -60,7 +60,8 @@ from ai.account.store import Store
 
 def test_workspace_yaml_forces_platform_overrides_over_tgz_style():
     """A dev workspace's tgz-style shell override is re-pointed to the
-    server's placed tgzs; every other key survives.
+    server's placed tgzs; allowlisted keys survive, unknown keys are dropped
+    (#1021: pnpm 10 reads any setting from this file).
     """
     source = 'packages:\n  - apps/*\noverrides:\n  shell: file:.rocketride/shell/old.tgz\nsomeKey: kept\n'
     out = _patched_workspace_yaml(source, 'apps/foo-ui', [])
@@ -70,7 +71,7 @@ def test_workspace_yaml_forces_platform_overrides_over_tgz_style():
     assert data['overrides']['shell'] == 'file:.rocketride/shell/shell.tgz'
     assert data['overrides']['rocketride'] == 'file:.rocketride/client/rocketride.tgz'
     assert data['packages'] == ['apps/*']
-    assert data['someKey'] == 'kept'
+    assert 'someKey' not in data
 
 
 def test_workspace_yaml_replaces_workspace_protocol_override():
@@ -837,3 +838,263 @@ async def test_exec_streams_lines_live():
     assert code == 0
     assert seen == ['alpha', 'beta']
     assert 'alpha' in out and 'beta' in out
+
+
+# =============================================================================
+# #1021 — NO DEVELOPER-CONTROLLED CODE RUNS DURING THE BUILD
+# =============================================================================
+#
+# Every fixture below is inert text: the tests assert on the hardening logic
+# (argv, resolver choice, tree sanitation, emitted config) and never run a
+# real toolchain or any developer-supplied script.
+
+
+def _hardening_zip(extra: Dict[str, str]) -> bytes:
+    """The standard app pack plus extra inert text entries."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(_app_source_zip(with_lock=False)), 'r') as base:
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for item in base.infolist():
+                archive.writestr(item, base.read(item))
+            for name, text in extra.items():
+                archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+async def _run_capturing(monkeypatch, zip_bytes: bytes, inspect=None, manifest_extra=None):
+    """Run one job with the fake exec; ``inspect(ws_dir)`` runs at install."""
+    rail = _FakeRail(zip_bytes, {'status': 'queued', 'attempt': 0})
+    if manifest_extra:
+        rail.entry['metadata']['manifest'].update(manifest_extra)
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    fake.install_hook = inspect
+    monkeypatch.setattr(app_build, '_exec', fake)
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    return rail, fake
+
+
+@pytest.mark.asyncio
+async def test_install_ignores_pnpmfile_and_package_manager_switching(monkeypatch, build_store, toolchain):
+    """The install never loads a developer pnpmfile, and never downloads and
+    re-execs another pnpm named by the developer's ``packageManager`` field.
+    """
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip())
+    install = next(c for c in fake.calls if 'install' in c['argv'])
+    assert '--ignore-pnpmfile' in install['argv']
+    assert '--config.manage-package-manager-versions=false' in install['argv']
+    assert '--ignore-scripts' in install['argv']
+
+
+@pytest.mark.asyncio
+async def test_typecheck_never_runs_a_tsc_from_the_developer_tree(monkeypatch, build_store, toolchain):
+    """Whatever pnpm installed as ``typescript`` in the developer's tree (an
+    ``npm:``/``file:`` alias, a lockfile tarball) is never the tsc that runs:
+    the typecheck always executes the platform's baked tsc.
+    """
+
+    def plant_user_typescript(ws_dir):
+        # Simulates pnpm materializing a developer-chosen "typescript".
+        pkg = os.path.join(ws_dir, 'apps', 'brandy-ui', 'node_modules', 'typescript')
+        os.makedirs(os.path.join(pkg, 'bin'), exist_ok=True)
+        with open(os.path.join(pkg, 'package.json'), 'w', encoding='utf-8') as handle:
+            json.dump({'name': 'typescript', 'version': '5.9.9', 'bin': {'tsc': 'bin/tsc'}}, handle)
+        with open(os.path.join(pkg, 'bin', 'tsc'), 'w', encoding='utf-8') as handle:
+            handle.write('// inert placeholder')
+
+    _rail, fake = await _run_capturing(monkeypatch, _app_source_zip(), inspect=plant_user_typescript)
+    typecheck = next(c for c in fake.calls if '--noEmit' in c['argv'])
+    tsc = os.path.realpath(typecheck['argv'][1])
+    assert tsc.startswith(os.path.realpath(str(toolchain['env'])) + os.sep)
+    assert os.sep + 'ws' + os.sep not in tsc
+
+
+@pytest.mark.asyncio
+async def test_zip_entries_under_node_modules_are_refused(monkeypatch, build_store, toolchain):
+    """A pack carrying ``node_modules/`` (never produced by the client packer)
+    fails at materialize — a shipped package tree must never reach a resolver.
+    """
+    zip_bytes = _hardening_zip({'node_modules/typescript/bin/tsc': '// inert placeholder'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+    home = build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12'
+    assert 'node_modules' in (home / 'build.log').read_text(encoding='utf-8')
+
+
+@pytest.mark.asyncio
+async def test_npmrc_and_pnpmfiles_removed_and_workspace_yaml_allowlisted(monkeypatch, build_store, toolchain):
+    """Developer pnpm configuration that can load code or redirect pnpm's
+    directories is removed before install: every .npmrc and pnpmfile in the
+    tree, and every pnpm-workspace.yaml key outside the allowlist.
+    """
+    zip_bytes = _hardening_zip(
+        {
+            '.npmrc': 'modules-dir=../../elsewhere\n',
+            'apps/brandy-ui/.npmrc': 'registry=https://example.invalid/\n',
+            '.pnpmfile.cjs': '// inert placeholder',
+            '.pnpmfile.mjs': '// inert placeholder',
+            'pnpm-workspace.yaml': (
+                'packages:\n  - apps/*\n'
+                'catalog:\n  react: ^18.2.0\n'
+                'pnpmfile: other.cjs\n'
+                'configDependencies:\n  pnpm-plugin-x: 1.0.0+sha512-AAAA\n'
+                'modulesDir: ../../elsewhere\n'
+                'storeDir: /elsewhere\n'
+            ),
+            'package.json': json.dumps({'name': 'ws-root', 'private': True}),
+        }
+    )
+    seen: Dict[str, Any] = {}
+
+    def inspect(ws_dir):
+        import yaml
+
+        seen['files'] = sorted(
+            os.path.relpath(os.path.join(d, f), ws_dir).replace(os.sep, '/')
+            for d, _dirs, files in os.walk(ws_dir)
+            for f in files
+        )
+        seen['yaml'] = yaml.safe_load(open(os.path.join(ws_dir, 'pnpm-workspace.yaml'), encoding='utf-8'))
+
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    for gone in ('.npmrc', 'apps/brandy-ui/.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs'):
+        assert gone not in seen['files']
+    assert set(seen['yaml']) <= set(app_build._WORKSPACE_YAML_KEYS)
+    assert seen['yaml']['packages'] == ['apps/*']
+    assert seen['yaml']['catalog'] == {'react': '^18.2.0'}
+    for dropped in ('pnpmfile', 'configDependencies', 'modulesDir', 'storeDir'):
+        assert dropped not in seen['yaml']
+
+
+def test_workspace_yaml_refuses_packages_outside_the_tree():
+    """A workspace ``packages`` entry may not reach outside the source tree
+    (another job's scratch dir, the toolchain env).
+    """
+    for entry in ('../other', '/opt/rocketride/cache', 'apps/../../x'):
+        with pytest.raises(BuildFailure):
+            _patched_workspace_yaml(f'packages:\n  - "{entry}"\n', 'apps/foo-ui', [])
+
+
+_POSTCSS_NAMES = (
+    '.postcssrc',
+    '.postcssrc.json',
+    '.postcssrc.yaml',
+    '.postcssrc.yml',
+    '.postcssrc.js',
+    '.postcssrc.cjs',
+    '.postcssrc.mjs',
+    '.postcssrc.ts',
+    '.postcssrc.cts',
+    '.postcssrc.mts',
+    'postcss.config.js',
+    'postcss.config.cjs',
+    'postcss.config.mjs',
+    'postcss.config.ts',
+    'postcss.config.cts',
+    'postcss.config.mts',
+)
+
+
+@pytest.mark.asyncio
+async def test_every_postcss_config_and_package_json_key_is_neutralized(monkeypatch, build_store, toolchain):
+    """postcss-load-config searches every name below (JSON/YAML forms load
+    plugins by name too) upward from the app root, plus the package.json
+    ``postcss`` key — all of them are inert before the bundler starts,
+    wherever they sit in the tree.
+    """
+    marker = 'MARKER-plugin-name'
+    extra = {}
+    for directory in ('', 'apps/', 'apps/brandy-ui/', 'apps/brandy-ui/src/'):
+        for name in _POSTCSS_NAMES:
+            extra[f'{directory}{name}'] = f'{{"plugins": {{"{marker}": {{}}}}}}\n'
+    extra['package.json'] = json.dumps({'name': 'ws-root', 'private': True, 'postcss': {'plugins': {marker: {}}}})
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        for d, _dirs, files in os.walk(ws_dir):
+            for f in files:
+                if f in _POSTCSS_NAMES or f == 'package.json':
+                    seen[os.path.relpath(os.path.join(d, f), ws_dir)] = open(
+                        os.path.join(d, f), encoding='utf-8'
+                    ).read()
+
+    zip_bytes = _hardening_zip(extra)
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert len([k for k in seen if os.path.basename(k) in _POSTCSS_NAMES]) == len(extra) - 1
+    leaked = [path for path, text in seen.items() if marker in text]
+    assert leaked == []
+    assert 'postcss' not in json.loads(seen['package.json'])
+
+
+@pytest.mark.asyncio
+async def test_env_files_keep_only_public_lines(monkeypatch, build_store, toolchain):
+    """The bundler copies the app dir's .env files into its own process env —
+    only PUBLIC_ entries (the ones that reach the bundle) survive.
+    """
+    env_text = 'PUBLIC_API=https://api.example\nNODE_OPTIONS=--inspect\nexport PUBLIC_B=two\nSECRET=x\n# note\n'
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        app = os.path.join(ws_dir, 'apps', 'brandy-ui')
+        for name in ('.env', '.env.local', '.env.production'):
+            seen[name] = open(os.path.join(app, name), encoding='utf-8').read()
+
+    zip_bytes = _hardening_zip(
+        {
+            'apps/brandy-ui/.env': env_text,
+            'apps/brandy-ui/.env.local': 'RSPACK_PROFILE=ALL\n',
+            'apps/brandy-ui/.env.production': 'PUBLIC_X=1\n',
+        }
+    )
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert seen['.env'].splitlines() == ['PUBLIC_API=https://api.example', 'export PUBLIC_B=two']
+    assert seen['.env.local'].strip() == ''
+    assert seen['.env.production'].splitlines() == ['PUBLIC_X=1']
+
+
+def test_emitted_config_carries_the_inline_loader_guard(tmp_path):
+    """The canonical rsbuild config installs a beforeResolve guard that
+    rejects inline-loader requests ('!' syntax) issued from the developer
+    tree. The guard function is extracted from the emitted text and called
+    with fake resolve-data objects under node — no build runs.
+    """
+    import shutil
+    import subprocess
+
+    ws = tmp_path / 'job' / 'ws'
+    app = ws / 'apps' / 'x'
+    app.mkdir(parents=True)
+    config_path = app_build._emit_config(str(tmp_path / 'job' / '.build'), str(app), str(tmp_path / 'out'), 'm')
+    text = open(config_path, encoding='utf-8').read()
+    start, end = '// <rr-inline-loader-guard>', '// </rr-inline-loader-guard>'
+    assert start in text and end in text
+    assert 'new RocketRideInlineLoaderGuard()' in text
+    guard = text[text.index(start) : text.index(end)]
+
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node not available to evaluate the emitted guard')
+    probe = tmp_path / 'probe.mjs'
+    probe.write_text(
+        "import path from 'node:path';\n"
+        + guard
+        + '\nconst out = [];\n'
+        + 'for (const [context, request] of '
+        + json.dumps([[str(app / 'src'), '!!./a.cjs!./b.txt'], [str(app), '-!x!./y'], [str(app / 'src'), './ok']])
+        + ') { try { rrRejectInlineLoaders({ context, request }); out.push("allowed"); }'
+        + ' catch (e) { out.push("rejected"); } }\n'
+        + 'console.log(JSON.stringify(out));\n',
+        encoding='utf-8',
+    )
+    result = subprocess.run([node, str(probe)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ['rejected', 'rejected', 'allowed']
+    # The whole emitted config must still parse (syntax only, nothing runs).
+    check = subprocess.run([node, '--check', config_path], capture_output=True, text=True, timeout=60)
+    assert check.returncode == 0, check.stderr
