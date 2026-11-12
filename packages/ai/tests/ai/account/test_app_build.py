@@ -1058,43 +1058,105 @@ async def test_env_files_keep_only_public_lines(monkeypatch, build_store, toolch
     assert seen['.env.production'].splitlines() == ['PUBLIC_X=1']
 
 
-def test_emitted_config_carries_the_inline_loader_guard(tmp_path):
-    """The canonical rsbuild config installs a beforeResolve guard that
-    rejects inline-loader requests ('!' syntax) issued from the developer
-    tree. The guard function is extracted from the emitted text and called
-    with fake resolve-data objects under node — no build runs.
+def _guard_cases(job, env):
+    """(request, allowed) pairs shared by the Python helper and the JS twin.
+
+    Strings only: nothing is resolved, loaded or built.
+    """
+    loader = os.path.join(env, 'node_modules', 'css-loader', 'dist', 'cjs.js')
+    app_css = os.path.join(job, 'ws', 'apps', 'x', 'src', 'b.css')
+    app_ts = os.path.join(job, 'ws', 'apps', 'x', 'src', 'index.ts')
+    tree_loader = os.path.join(job, 'ws', 'apps', 'x', 'x.cjs')
+    app_dep_loader = os.path.join(job, 'ws', 'node_modules', 'some-loader', 'index.js')
+    outside = os.path.join(os.path.dirname(job), 'elsewhere', 'file.txt')
+    return [
+        (app_ts, True),  # a plain module in the job tree
+        (f'{loader}??ruleSet[1].rules[0]!{app_css}', True),  # platform loader chain
+        (f'-!{loader}!{app_css}?module', True),  # css-loader @import shape
+        (f'{app_css}.webpack[javascript/auto]!=!{loader}!{app_css}', True),  # matchResource shape
+        ('builtin:swc-loader??x!' + app_ts, True),  # builtin loader
+        ('data:text/javascript,export default 1', True),
+        (f'!!{tree_loader}!{app_ts}', False),  # a loader file from the developer tree
+        (f'{app_dep_loader}!{app_ts}', False),  # a loader the app installed itself
+        (outside, False),  # a module outside the job and toolchain
+        (f'{loader}!{outside}', False),
+        ('relative/loader!' + app_ts, False),  # unresolved segment: fail closed
+        ('', False),
+        (f'{loader}!!{app_ts}', False),  # empty segment: fail closed
+    ]
+
+
+def _guard_roots(tmp_path):
+    job = tmp_path / 'job'
+    env = tmp_path / 'env'
+    (job / 'ws' / 'apps' / 'x' / 'src').mkdir(parents=True)
+    (env / 'node_modules').mkdir(parents=True)
+    return os.path.realpath(job), os.path.realpath(env)
+
+
+def test_resolved_request_guard_allows_only_toolchain_loaders_and_in_tree_modules(tmp_path):
+    """The resolved-module guard: loaders must live in the toolchain env (or
+    be builtins) and modules in the job tree or the toolchain env.
+    """
+    job, env = _guard_roots(tmp_path)
+    module_roots = (job, env)
+    loader_roots = (env,)
+    for request, allowed in _guard_cases(job, env):
+        assert app_build._resolved_request_allowed(request, module_roots, loader_roots) is allowed, request
+
+
+def test_resolved_request_guard_follows_symlinks_out_of_the_tree(tmp_path):
+    """A path inside the tree that is a symlink to a file elsewhere is judged
+    by where it really points.
+    """
+    job, env = _guard_roots(tmp_path)
+    target = tmp_path / 'secret.txt'
+    target.write_text('x', encoding='utf-8')
+    link = os.path.join(job, 'ws', 'apps', 'x', 'src', 'link.txt')
+    os.symlink(str(target), link)
+    assert app_build._resolved_request_allowed(link, (job, env), (env,)) is False
+
+
+def test_emitted_config_carries_the_resolved_module_guard(tmp_path):
+    """The canonical rsbuild config installs the resolved-module guard with
+    the job and toolchain roots, and its JS twin decides the same cases as
+    the Python helper. The guard function is extracted from the emitted text
+    and called on plain strings under node; no build runs.
     """
     import shutil
     import subprocess
 
-    ws = tmp_path / 'job' / 'ws'
-    app = ws / 'apps' / 'x'
-    app.mkdir(parents=True)
-    config_path = app_build._emit_config(str(tmp_path / 'job' / '.build'), str(app), str(tmp_path / 'out'), 'm')
+    job, env = _guard_roots(tmp_path)
+    app = os.path.join(job, 'ws', 'apps', 'x')
+    config_path = app_build._emit_config(os.path.join(job, '.build'), app, os.path.join(job, '.out'), 'm', env)
     text = open(config_path, encoding='utf-8').read()
-    start, end = '// <rr-inline-loader-guard>', '// </rr-inline-loader-guard>'
+    start, end = '// <rr-resolved-module-guard>', '// </rr-resolved-module-guard>'
     assert start in text and end in text
-    assert 'new RocketRideInlineLoaderGuard()' in text
+    assert 'new RocketRideResolvedModuleGuard()' in text
+    assert 'afterResolve' in text and 'contextModuleFactory' in text
+    assert json.dumps([job, env]) in text and json.dumps([env]) in text
     guard = text[text.index(start) : text.index(end)]
 
     node = shutil.which('node')
     if not node:
+        if os.environ.get('CI'):
+            pytest.fail('node is required in CI to evaluate the emitted guard')
         pytest.skip('node not available to evaluate the emitted guard')
+    cases = _guard_cases(job, env)
     probe = tmp_path / 'probe.mjs'
     probe.write_text(
-        "import path from 'node:path';\n"
+        "import path from 'node:path';\nimport fs from 'node:fs';\n"
         + guard
         + '\nconst out = [];\n'
-        + 'for (const [context, request] of '
-        + json.dumps([[str(app / 'src'), '!!./a.cjs!./b.txt'], [str(app), '-!x!./y'], [str(app / 'src'), './ok']])
-        + ') { try { rrRejectInlineLoaders({ context, request }); out.push("allowed"); }'
-        + ' catch (e) { out.push("rejected"); } }\n'
+        + 'for (const request of '
+        + json.dumps([request for request, _ in cases])
+        + ') { out.push(rrRequestAllowed(request)); }\n'
         + 'console.log(JSON.stringify(out));\n',
         encoding='utf-8',
     )
     result = subprocess.run([node, str(probe)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == ['rejected', 'rejected', 'allowed']
+    assert json.loads(result.stdout) == [allowed for _, allowed in cases]
     # The whole emitted config must still parse (syntax only, nothing runs).
     check = subprocess.run([node, '--check', config_path], capture_output=True, text=True, timeout=60)
     assert check.returncode == 0, check.stderr

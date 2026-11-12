@@ -62,10 +62,11 @@ The build executes NO developer-controlled code (#1021): lifecycle scripts
 and pnpmfiles are ignored, .npmrc files are removed and pnpm-workspace.yaml
 is reduced to an allowlist, a shipped node_modules is refused, the rsbuild
 config and the tsc are the platform's, every auto-loaded postcss/babel
-config is neutralized, .env files keep only PUBLIC_ entries, and inline
-loader requests from the developer tree are rejected by the bundler. What
-the developer's code can still READ while it is compiled is bounded only by
-the process sandbox (an infra concern, not this module).
+config is neutralized, .env files keep only PUBLIC_ entries, and the
+bundler refuses any loader outside the platform toolchain and any module
+outside the job directory or the toolchain. What the type checker can still
+READ while it compiles is bounded only by the process sandbox (an infra
+concern, not this module).
 """
 
 import asyncio
@@ -863,34 +864,130 @@ def _filter_env_files(app_dir: str) -> None:
             handle.write('\n'.join(kept) + '\n' if kept else '')
 
 
-# The inline-loader guard emitted into the canonical rsbuild config. Webpack
-# style inline loaders ('!!./x.cjs!./y', '-!', '!=!') name a loader module
-# in the import string itself — the bundler would RUN it. Requests issued
-# from the developer tree (the ws root) are rejected; platform-internal
-# requests (issued from the toolchain env) are untouched.
-_INLINE_LOADER_GUARD_JS = """// <rr-inline-loader-guard>
-const RR_GUARD_ROOT = __ROOT__;
-function rrRejectInlineLoaders(data) {
-  const context = String((data && data.context) || '');
-  const request = String((data && data.request) || '');
-  const inTree = context === RR_GUARD_ROOT || context.startsWith(RR_GUARD_ROOT + path.sep);
-  if (inTree && request.includes('!')) {
-    throw new Error('inline loader syntax is not supported in server app builds: ' + JSON.stringify(request));
+# The resolved-module guard emitted into the canonical rsbuild config. After
+# the bundler resolves a module, every loader in its chain must be a builtin
+# or live in the platform toolchain env, and the module itself must live in
+# the job directory or the toolchain env. A loader file from the developer
+# tree (named inline in an import string, or installed by the app) is never
+# run, and a file elsewhere on the pod is never pulled into the bundle.
+# `_resolved_request_allowed` is the Python twin of `rrRequestAllowed`; the
+# two are kept in lockstep and tested on the same strings.
+_BUILTIN_PREFIXES = ('builtin:', 'data:', 'node:')
+
+
+def _strip_query(segment: str) -> str:
+    """Drop a ``?query`` / ``#fragment`` suffix from one request segment."""
+    for mark in ('?', '#'):
+        index = segment.find(mark)
+        if index != -1:
+            segment = segment[:index]
+    return segment
+
+
+def _under(path: str, roots: Tuple[str, ...]) -> bool:
+    """True when ``path`` (an absolute filesystem path) is inside a root."""
+    if not os.path.isabs(path):
+        return False
+    real = os.path.realpath(path)
+    return any(real == root or real.startswith(root + os.sep) for root in roots)
+
+
+def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loader_roots: Tuple[str, ...]) -> bool:
+    """Decide whether a RESOLVED bundler request may be built.
+
+    ``request`` is the bundler's resolved request: optional matchResource
+    prefix (``<x>!=!``), optional ``-!`` / ``!!`` / ``!`` prefix, then
+    ``loader!loader!...!resource``, each segment absolute after resolution.
+    Every loader must be a builtin or sit under ``loader_roots``; the
+    resource must be a builtin/data/node: URI or sit under ``module_roots``.
+    Anything unparseable is refused (fail closed). Roots must be realpaths.
+    """
+    if not isinstance(request, str) or not request:
+        return False
+    rest = request
+    if '!=!' in rest:
+        rest = rest.split('!=!', 1)[1]
+    for prefix in ('-!', '!!', '!'):
+        if rest.startswith(prefix):
+            rest = rest[len(prefix) :]
+            break
+    segments = rest.split('!')
+    if any(not segment for segment in segments):
+        return False
+    *loaders, resource = segments
+    for loader in loaders:
+        if loader.startswith('builtin:'):
+            continue
+        if not _under(_strip_query(loader), loader_roots):
+            return False
+    if resource.startswith(_BUILTIN_PREFIXES):
+        return True
+    return _under(_strip_query(resource), module_roots)
+
+
+_RESOLVED_GUARD_JS = """// <rr-resolved-module-guard>
+const RR_MODULE_ROOTS = __MODULE_ROOTS__;
+const RR_LOADER_ROOTS = __LOADER_ROOTS__;
+const RR_BUILTIN_PREFIXES = ['builtin:', 'data:', 'node:'];
+function rrStripQuery(segment) {
+  for (const mark of ['?', '#']) {
+    const index = segment.indexOf(mark);
+    if (index !== -1) segment = segment.slice(0, index);
+  }
+  return segment;
+}
+function rrUnder(file, roots) {
+  if (!path.isAbsolute(file)) return false;
+  let real;
+  try { real = fs.realpathSync(file); } catch (e) { real = path.resolve(file); }
+  return roots.some((root) => real === root || real.startsWith(root + path.sep));
+}
+function rrRequestAllowed(request) {
+  if (typeof request !== 'string' || !request) return false;
+  let rest = request;
+  const mr = rest.indexOf('!=!');
+  if (mr !== -1) rest = rest.slice(mr + 3);
+  for (const prefix of ['-!', '!!', '!']) {
+    if (rest.startsWith(prefix)) { rest = rest.slice(prefix.length); break; }
+  }
+  const segments = rest.split('!');
+  if (segments.some((segment) => !segment)) return false;
+  const resource = segments.pop();
+  for (const loader of segments) {
+    if (loader.startsWith('builtin:')) continue;
+    if (!rrUnder(rrStripQuery(loader), RR_LOADER_ROOTS)) return false;
+  }
+  if (RR_BUILTIN_PREFIXES.some((prefix) => resource.startsWith(prefix))) return true;
+  return rrUnder(rrStripQuery(resource), RR_MODULE_ROOTS);
+}
+function rrCheck(request) {
+  if (!rrRequestAllowed(request)) {
+    throw new Error('module or loader outside the app build tree is not allowed in server app builds');
   }
 }
-class RocketRideInlineLoaderGuard {
+class RocketRideResolvedModuleGuard {
   apply(compiler) {
-    compiler.hooks.normalModuleFactory.tap('rr-inline-loader-guard', (factory) => {
-      factory.hooks.beforeResolve.tap('rr-inline-loader-guard', (data) => {
-        rrRejectInlineLoaders(data);
+    compiler.hooks.normalModuleFactory.tap('rr-resolved-module-guard', (factory) => {
+      factory.hooks.afterResolve.tap('rr-resolved-module-guard', (data) => {
+        const created = (data && data.createData) || {};
+        rrCheck(String(created.request || created.resource || ''));
+      });
+    });
+    compiler.hooks.contextModuleFactory.tap('rr-resolved-module-guard', (factory) => {
+      factory.hooks.afterResolve.tap('rr-resolved-module-guard', (data) => {
+        const resource = String((data && (data.resource || data.context)) || '');
+        rrCheck(resource);
+        return data;
       });
     });
   }
 }
-// </rr-inline-loader-guard>"""
+// </rr-resolved-module-guard>"""
 
 
-def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> str:
+def _emit_config(
+    build_dir: str, app_dir: str, out_dir: str, module_id: str, toolchain_dir: Optional[str] = None
+) -> str:
     """Write the server-canonical rsbuild config; returns its path.
 
     Kept in LOCKSTEP with the app scaffold's rsbuild template
@@ -900,13 +997,16 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
     resolution for include-root imports, and NO dev-server block. It lives
     OUTSIDE the app dir (`<jobdir>/.build/`), so its imports resolve to the
     baked toolchain layer and can never be captured by installed user
-    devDep toolchains. It also installs the inline-loader guard, scoped to
-    the job's source tree (``<jobdir>/ws``, the sibling of ``build_dir``).
+    devDep toolchains. It also installs the resolved-module guard: modules
+    must resolve inside the job directory (the parent of ``build_dir``) or
+    the toolchain env, and loaders only inside the toolchain env.
     """
     os.makedirs(build_dir, exist_ok=True)
     config_path = os.path.join(build_dir, 'rsbuild.config.mjs')
     tsconfig = os.path.join(app_dir, 'tsconfig.json')
-    guard_root = os.path.join(os.path.dirname(os.path.abspath(build_dir)), 'ws')
+    job_root = os.path.realpath(os.path.dirname(os.path.abspath(build_dir)))
+    loader_roots = [os.path.realpath(toolchain_dir or _env_dir())]
+    module_roots = [job_root] + loader_roots
     lines = [
         '// Server-canonical app build config — generated per build by app_build.py.',
         '// Keep the MF shape in lockstep with apps/shared/src/modules/appdev/templates.ts.',
@@ -914,8 +1014,11 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
         "import { pluginReact } from '@rsbuild/plugin-react';",
         "import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';",
         "import path from 'node:path';",
+        "import fs from 'node:fs';",
         '',
-        _INLINE_LOADER_GUARD_JS.replace('__ROOT__', json.dumps(guard_root)),
+        _RESOLVED_GUARD_JS.replace('__MODULE_ROOTS__', json.dumps(module_roots)).replace(
+            '__LOADER_ROOTS__', json.dumps(loader_roots)
+        ),
         '',
         'export default defineConfig({',
         f'  root: {json.dumps(app_dir)},',
@@ -939,7 +1042,7 @@ def _emit_config(build_dir: str, app_dir: str, out_dir: str, module_id: str) -> 
         '  tools: {',
         '    rspack: {',
         "      module: { rules: [{ test: /\\.pipe$/, type: 'json' }] },",
-        '      plugins: [new RocketRideInlineLoaderGuard()],',
+        '      plugins: [new RocketRideResolvedModuleGuard()],',
         '    },',
         '  },',
         '  source: {',
@@ -1532,7 +1635,7 @@ class AppBuildWorker:
         _filter_env_files(app_dir)
         _link_toolchain(job_dir, env_dir)
         out_dir = os.path.join(job_dir, '.out')
-        config_path = _emit_config(os.path.join(job_dir, '.build'), app_dir, out_dir, module_id)
+        config_path = _emit_config(os.path.join(job_dir, '.build'), app_dir, out_dir, module_id, env_dir)
 
         # The packed lockfile (when present): pre-install pins for the skew
         # check + drift diff. Absent = the developer didn't pin; fresh
