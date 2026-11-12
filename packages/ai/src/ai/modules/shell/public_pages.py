@@ -413,11 +413,16 @@ async def read_artifact_file(path: str) -> bytes:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure.
+        StorageError: any other storage failure, a transport failure the
+            store stopped retrying included.
     """
-    from ai.account.store import Store
+    from ai.account.store import StorageError, Store
+    from ai.account.store_providers.s3.s3 import TRANSIENT_ERRORS
 
-    return await Store.instance().raw_store().read_bytes(path)
+    try:
+        return await Store.instance().raw_store().read_bytes(path)
+    except TRANSIENT_ERRORS as exc:
+        raise StorageError(f'Failed to read {path}: {exc}') from exc
 
 
 async def artifact_file_info(path: str) -> Dict[str, Any]:
@@ -434,11 +439,16 @@ async def artifact_file_info(path: str) -> Dict[str, Any]:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure.
+        StorageError: any other storage failure, a transport failure the
+            store stopped retrying included.
     """
-    from ai.account.store import Store
+    from ai.account.store import StorageError, Store
+    from ai.account.store_providers.s3.s3 import TRANSIENT_ERRORS
 
-    return await Store.instance().raw_store().get_file_info(path)
+    try:
+        return await Store.instance().raw_store().get_file_info(path)
+    except TRANSIENT_ERRORS as exc:
+        raise StorageError(f'Failed to stat {path}: {exc}') from exc
 
 
 # =============================================================================
