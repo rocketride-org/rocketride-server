@@ -104,14 +104,20 @@ unencrypted. Three rules apply:
    same machine as the client, use `ROCKETRIDE_URI=ws://127.0.0.1:5565`. For an engine
    reached from other machines, put it behind a TLS proxy and use
    `ROCKETRIDE_URI=wss://<public host>`. The MCP server refuses to start if
-   `ROCKETRIDE_URI` is an unencrypted address (`ws://` or `http://`) for any host other
-   than the engine's own machine. If neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER`
+   `ROCKETRIDE_URI` is an unencrypted address (`ws://` or `http://`) for any host that is
+   not a loopback address (`localhost`, `127.0.0.1`, `::1`). A LAN address of the
+   engine's own machine is refused too. If neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER`
    is set, engine image 3.6.0 and earlier connect MCP tool calls to RocketRide Cloud, where
    they fail with `Invalid or revoked API key`.
 3. `ROCKETRIDE_URI` and `MCP_RESOURCE_IDENTIFIER` are not interchangeable.
    `MCP_RESOURCE_IDENTIFIER` is the public URL of your `/mcp` endpoint. For OAuth sign-in on
    a self-hosted engine it must equal that URL exactly. `MCP_EXPECTED_AUDIENCE` is also
    needed, but only when the engine is not bound to localhost. API key sign-in needs neither.
+
+A reverse proxy in front of an engine bound to localhost makes remote callers look local:
+`send_files`, which uploads files from the engine host's own disk, is then offered to anyone
+with a valid key. Behind a proxy, run the engine on a bind that is not localhost, so
+`send_files` is not offered.
 
 More: https://docs.rocketride.org/connect/mcp/http/ and
 https://docs.rocketride.org/connect/mcp/http/self-hosting/.
