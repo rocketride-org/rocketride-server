@@ -37,6 +37,7 @@ import type { ChatAskAnswer, ChatAskCard, ChatAsking } from 'shell/src/component
 
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 
+import { Question } from '../../../../../../packages/client-typescript/src/client/schema/Question';
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
 import { sha256Hex } from '../../vfs/hash';
 import { isReferencePath } from '../../vfs/referenceTree';
@@ -482,6 +483,26 @@ test('rocketride_client refuses every blocked method without reaching the client
 	const { client, calls } = scriptedClient(Object.fromEntries(blocked.map((method) => [method, 'rr_fake_session'])));
 	for (const method of blocked) await assert.rejects(clientTool(client).execute({ method }), /is blocked/, method);
 	assert.deepEqual(calls, []);
+});
+
+test('rocketride_client chat takes the question as JSON: an object, string entries in questions, or a plain string', async () => {
+	// the test runner stubs 'rocketride' (scripts/stub-shell.cjs), so hand it the client's real Question
+	(createRequire(__filename)('rocketride') as Record<string, unknown>).Question = Question;
+	const text = 'Which plan includes SSO?';
+	const { client, calls } = scriptedClient({ chat: { answers: ['Enterprise'] } });
+	const tool = clientTool(client);
+	for (const question of [{ questions: [{ text }] }, { questions: [text] }, text]) {
+		assert.match(await tool.execute({ method: 'chat', params: [{ token: 'tk_run_0001', question }] }), /Enterprise/, JSON.stringify(question));
+	}
+	assert.equal(calls.length, 3);
+	for (const [, [options]] of calls) {
+		const { token, question } = options as { token: string; question: Question };
+		assert.equal(token, 'tk_run_0001');
+		assert.deepEqual(question.toDict().questions, [{ text }]);
+	}
+
+	await assert.rejects(tool.execute({ method: 'chat', params: [{ token: 'tk_run_0001', question: 42 }] }), /\{"questions":\[\{"text":"\.\.\."\}\]\}/);
+	assert.equal(calls.length, 3, 'a question with no usable shape never reached the client');
 });
 
 test('rocketride_client results hide secrets but keep the run token', async () => {
