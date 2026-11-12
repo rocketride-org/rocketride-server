@@ -323,6 +323,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	fsWriteString: never(FILES),
 	fsReadJson: never(FILES),
 	fsWriteJson: never(FILES),
+	fsWriteStringIfUnchanged: never(FILES),
 
 	// Apps: versions, review, publishing
 	listDeployments: FREE,

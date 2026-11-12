@@ -247,6 +247,7 @@ class TestPutTextIfUnchanged:
 
         assert written == len(b'line 1\r\nline 3\r\n')
         assert await fs.read('app/notes.md') == b'line 1\r\nline 3\r\n'
+        assert [entry['name'] for entry in (await fs.list_dir('app'))['entries']] == ['notes.md']
 
     @pytest.mark.asyncio
     async def test_no_base_hash_means_the_file_must_be_absent(self, fs):

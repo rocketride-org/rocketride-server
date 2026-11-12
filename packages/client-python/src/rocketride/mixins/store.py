@@ -354,6 +354,27 @@ class StoreMixin(DAPClient):
         self._validate_store_path(path)
         await self.call('rrext_store', subcommand='fs_put_json', path=path, value=obj)
 
+    async def fs_write_string_if_unchanged(self, path: str, text: str, base_hash: Optional[str]) -> bool:
+        """
+        Write a string only while the file is still the copy the caller read, in ONE round trip.
+
+        The server compares and writes in one step, so a save from another
+        connection cannot land between a check and the write.
+
+        Args:
+            path: Relative path within the account store.
+            text: The new content.
+            base_hash: SHA-256 (hex) of the text the caller read, or None when it saw no file.
+
+        Returns:
+            False when the file changed (or now exists); nothing was written.
+        """
+        self._validate_store_path(path)
+        body = await self.call(
+            'rrext_store', subcommand='fs_put_if_unchanged', path=path, text=text, base_hash=base_hash
+        )
+        return body.get('written') is True
+
     # =========================================================================
     # Domain Convenience - Projects
     # =========================================================================

@@ -981,6 +981,9 @@ def test_store_commands_init_builds_subcommand_dispatch_table():
         # zero-byte global.json fix); see cmd_store.fs_put_json.
         'fs_get_json',
         'fs_put_json',
+        # A text write that lands only while the file is unchanged; see
+        # cmd_store.fs_put_if_unchanged.
+        'fs_put_if_unchanged',
         'fs_geturl',
     }
 
