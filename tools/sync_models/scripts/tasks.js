@@ -29,6 +29,7 @@ const SERVICES_JSON_PATHS = {
 	llm_glm: 'nodes/src/nodes/llm_glm/services.json',
 	llm_gmi_cloud: 'nodes/src/nodes/llm_gmi_cloud/services.json',
 	llm_nebius: 'nodes/src/nodes/llm_openai_api/services.nebius.json',
+	llm_atlascloud: 'nodes/src/nodes/llm_openai_api/services.atlascloud.json',
 	llm_vision_openai: 'nodes/src/nodes/llm_vision_openai/services.json',
 	llm_vision_gemini: 'nodes/src/nodes/llm_vision_gemini/services.json',
 	llm_vision_mistral: 'nodes/src/nodes/llm_vision_mistral/services.json',

@@ -455,6 +455,25 @@ class TestModelHosts:
             {'id': 'org/flag'},
         ]
 
+    def test_atlas_cloud_passes_on_the_completion_limit_it_reports(self):
+        """Atlas Cloud's ``max_output_length`` becomes ``max_output_tokens``; other hosts' lists are unchanged."""
+        from providers.atlascloud import AtlasCloudProvider
+        from providers.gmi_cloud import GmiCloudProvider
+
+        data = [
+            types.SimpleNamespace(id='deepseek-ai/deepseek-v4-flash', context_length=1048576, max_output_length=393216),
+            types.SimpleNamespace(id='org/no-limit', context_length=8192, max_output_length=None),
+        ]
+
+        assert AtlasCloudProvider({}).fetch_models(_client(data)) == [
+            {'id': 'deepseek-ai/deepseek-v4-flash', 'context_window': 1048576, 'max_output_tokens': 393216},
+            {'id': 'org/no-limit', 'context_window': 8192},
+        ]
+        assert GmiCloudProvider({}).fetch_models(_client(data)) == [
+            {'id': 'deepseek-ai/deepseek-v4-flash', 'context_window': 1048576},
+            {'id': 'org/no-limit', 'context_window': 8192},
+        ]
+
     @pytest.mark.parametrize(
         'model_id, looked_up',
         [
