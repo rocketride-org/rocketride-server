@@ -21,7 +21,8 @@ import asyncio
 
 import pytest
 
-from ai.modules.data.data_conn import DataConn
+from ai.modules.data import data_conn
+from ai.modules.data.data_conn import DataConn, DataConnPipe
 
 
 # ---------------------------------------------------------------------------
@@ -39,6 +40,9 @@ def _make_conn():
     conn._server = MagicMock()
     conn._server._target = MagicMock()
     conn.debug_message = MagicMock()
+    # The tables __init__ makes: the request-id index of open pipes, and the bindings whose close is in flight
+    conn._open_by_correlation = {}
+    conn._closing = {}
     return conn
 
 
@@ -109,6 +113,54 @@ def test_determine_lane_json_tolerates_charset_parameter():
     conn = _make_conn()
     pipe = _make_pipe_with_listeners(['json'])
     assert conn._determine_lane('application/json; charset=utf-8', pipe) == 'json'
+
+
+@pytest.mark.parametrize(
+    'mime',
+    [
+        'application/json',
+        'application/json; charset=utf-8',
+        'Application/JSON',
+        'application/vnd.github+json',
+        'application/xml',
+        'application/atom+xml',
+        'application/x-ndjson',
+        'application/yaml',
+    ],
+)
+def test_determine_lane_structured_text_goes_to_text_when_only_text_is_read(mime):
+    """JSON, XML and similar bodies reach a text reader instead of falling to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane(mime, pipe) == 'text'
+
+
+def test_determine_lane_json_prefers_json_lane_over_text():
+    """With both readers present, JSON keeps going to the json lane."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json', 'text'])
+    assert conn._determine_lane('application/json', pipe) == 'json'
+
+
+def test_determine_lane_question_without_questions_listener_does_not_become_text():
+    """A question body never turns into plain text, even when text is read."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
+
+
+def test_determine_lane_structured_text_keeps_raw_when_tags_is_read():
+    """A tags reader (e.g. parse) keeps getting JSON on raw, even when text is read too."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text', 'tags'])
+    assert conn._determine_lane('application/json', pipe) == 'raw'
+
+
+def test_determine_lane_structured_text_without_text_listener_falls_back_to_raw():
+    """Without a text reader, XML still falls back to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['image'])
+    assert conn._determine_lane('application/xml', pipe) == 'raw'
 
 
 @pytest.mark.parametrize(
@@ -252,7 +304,9 @@ def test_warn_on_unconsumed_lane_is_symmetric_for_text_on_a_json_pipeline(monkey
 def _make_pipe_conn(lane, mime_type='text/plain'):
     """Build a DataConnPipe stand-in with the bare attributes _begin/_end use."""
     pipe = MagicMock()
-    return SimpleNamespace(pipe=pipe, lane=lane, mime_type=mime_type)
+    return SimpleNamespace(
+        pipe=pipe, lane=lane, mime_type=mime_type, text_decoder=None, text_parts=None, has_failed=False, cancelled=False
+    )
 
 
 def test_begin_audio_calls_writeAudio_with_begin_action():
@@ -324,6 +378,125 @@ def test_end_raw_writes_tag_end_stream_and_object():
     conn._end(pipe_conn)
     pipe_conn.pipe.writeTagEndStream.assert_called_once_with()
     pipe_conn.pipe.writeTagEndObject.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# _write_text — UTF-8 across chunks
+# ---------------------------------------------------------------------------
+
+
+def test_write_text_keeps_a_character_split_between_chunks():
+    """A multi-byte character cut by the chunk boundary arrives whole."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False, cancelled=False)
+    body = '{"name": "Zoë"}'.encode('utf-8')
+    cut = body.index('ë'.encode('utf-8')) + 1  # inside the two-byte ë
+    conn._write_text(pipe_conn, body[:cut])
+    conn._write_text(pipe_conn, body[cut:])
+    conn._flush_text(pipe_conn)
+    pipe_conn.pipe.writeText.assert_called_once_with('{"name": "Zoë"}')
+
+
+def test_a_chunked_text_body_is_written_once_when_complete():
+    """Two chunks make one writeText, so a `question` node asks one question, not two halves."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False, cancelled=False)
+    conn._write_text(pipe_conn, b'{"action": "opened", ')
+    conn._write_text(pipe_conn, b'"number": 7}')
+    pipe_conn.pipe.writeText.assert_not_called()
+    conn._flush_text(pipe_conn)
+    conn._flush_text(pipe_conn)  # idempotent: _end flushes again on other paths
+    pipe_conn.pipe.writeText.assert_called_once_with('{"action": "opened", "number": 7}')
+
+
+def test_a_text_body_over_the_hold_limit_streams_instead_of_growing(monkeypatch):
+    """Past the limit the held text is written and later chunks go straight through, as before buffering."""
+    monkeypatch.setattr(data_conn, 'TEXT_LANE_HOLD_BYTES', 4)
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None, has_failed=False, cancelled=False)
+    conn._write_text(pipe_conn, b'ab')
+    conn._write_text(pipe_conn, b'cd')
+    pipe_conn.pipe.writeText.assert_not_called()  # at the limit, still one text
+
+    conn._write_text(pipe_conn, b'ef')
+    conn._write_text(pipe_conn, b'gh')
+    conn._flush_text(pipe_conn)
+
+    assert [c.args[0] for c in pipe_conn.pipe.writeText.call_args_list] == ['abcdef', 'gh']
+
+
+def test_end_text_flushes_and_rejects_a_truncated_character():
+    """A body that ends inside a character is invalid UTF-8 and raises at the end."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(
+        pipe=MagicMock(),
+        lane='text',
+        mime_type='text/plain',
+        text_decoder=None,
+        text_parts=None,
+        has_failed=False,
+        cancelled=False,
+    )
+    conn._write_text(pipe_conn, 'ë'.encode('utf-8')[:1])
+    with pytest.raises(ValueError, match='ends inside a character'):
+        conn._end(pipe_conn)
+    pipe_conn.pipe.writeText.assert_not_called()
+
+
+def _text_pipe_on_conn(conn):
+    conn_pipe = DataConnPipe(
+        pipe_id=1, pipe=MagicMock(), mime_type='application/json', lane='text', is_open=True, entry=MagicMock()
+    )
+    conn._pipe_map = {1: conn_pipe}
+    conn._reset_pipe_activity = MagicMock()
+    conn._cleanup_pipe = MagicMock()
+    conn.build_response = MagicMock(return_value={'success': True})
+    return conn_pipe
+
+
+@pytest.mark.asyncio
+async def test_close_reports_a_text_body_that_ends_inside_a_character():
+    """The truncated body reaches the client as an error; it is not swallowed by close's catch-all."""
+    conn = _make_conn()
+    conn_pipe = _text_pipe_on_conn(conn)
+    conn._write_text(conn_pipe, '{"name": "Zoë"'.encode('utf-8')[:-2])
+
+    with pytest.raises(ValueError, match='ends inside a character'):
+        await conn._close({'command': 'rrext_process'}, {'pipeId': 1})
+
+    assert conn_pipe.has_failed is True
+    conn_pipe.pipe.writeText.assert_not_called()
+    conn_pipe.pipe.close.assert_not_called()
+    conn._cleanup_pipe.assert_called_once_with(conn_pipe)
+
+
+@pytest.mark.asyncio
+async def test_close_writes_the_whole_text_body_once_before_closing_the_pipe():
+    conn = _make_conn()
+    conn_pipe = _text_pipe_on_conn(conn)
+    calls = []
+    conn_pipe.pipe.writeText.side_effect = lambda text: calls.append(('writeText', text))
+    conn_pipe.pipe.close.side_effect = lambda: calls.append(('close',))
+    conn._write_text(conn_pipe, b'{"a": ')
+    conn._write_text(conn_pipe, b'1}')
+
+    assert await conn._close({'command': 'rrext_process'}, {'pipeId': 1}) == {'success': True}
+
+    assert calls == [('writeText', '{"a": 1}'), ('close',)]
+
+
+def test_determine_lane_text_check_ignores_mime_case():
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners({'text'})
+    assert conn._determine_lane('Text/Plain; charset=utf-8', pipe) == 'text'
+
+
+def test_end_text_without_writes_is_noop():
+    """A text pipe that never wrote has no decoder and nothing to flush."""
+    conn = _make_conn()
+    pipe_conn = _make_pipe_conn('text')
+    conn._end(pipe_conn)
+    pipe_conn.pipe.writeText.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +672,7 @@ async def test_write_text_joins_a_character_split_across_two_writes(monkeypatch)
     # 'П' is two bytes; the first write ends after its first byte
     await conn._write({}, {'pipeId': 1, 'data': data[:1]})
     await conn._write({}, {'pipeId': 1, 'data': data[1:]})
+    await conn._close({}, {'pipeId': 1})
 
     assert _written_text(conn_pipe) == 'Привет, мир'
     assert not conn_pipe.has_failed
@@ -511,6 +685,7 @@ async def test_write_text_one_byte_at_a_time_sends_no_empty_text(monkeypatch):
 
     for byte in 'あいう'.encode('utf-8'):
         await conn._write({}, {'pipeId': 1, 'data': bytes([byte])})
+    await conn._close({}, {'pipeId': 1})
 
     assert _written_text(conn_pipe) == 'あいう'
     assert all(call.args[0] for call in conn_pipe.pipe.writeText.call_args_list)
@@ -545,6 +720,8 @@ async def test_a_frame_for_another_request_never_reaches_a_reused_slot(monkeypat
     await conn._write({}, {'pipeId': 1, 'data': b'ok', '_caller': {'correlationId': 'req-b'}})
     conn_pipe.correlation_id = None
     await conn._write({}, {'pipeId': 1, 'data': b'ok', '_caller': {'correlationId': 'req-a'}})
+    # A text body reaches the pipeline as one text when its pipe closes
+    await conn._close({}, {'pipeId': 1, '_caller': {'correlationId': 'req-a'}})
     assert _written_text(conn_pipe) == 'okok'
 
 
@@ -790,12 +967,13 @@ async def test_a_write_the_binder_refused_as_cancelled_answers_with_the_cancelle
     from ai.modules.data.data_conn import RequestCancelled
 
     conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'json'
     refused = Exception('Cancelled: Pipeline request cancelled')
     refused.code = int(Ec.Cancelled)
-    conn_pipe.pipe.writeText.side_effect = refused
+    conn_pipe.pipe.writeJson.side_effect = refused
 
     with pytest.raises(RequestCancelled) as err:
-        await conn._write({}, {'pipeId': 1, 'data': b'more'})
+        await conn._write({}, {'pipeId': 1, 'data': b'{"k": 1}'})
     assert err.value.code == CONST_TASK_CANCELLED_CODE
     assert conn_pipe.has_failed
     # The binding stays for the close
@@ -806,10 +984,142 @@ async def test_a_write_the_binder_refused_as_cancelled_answers_with_the_cancelle
 async def test_any_other_write_error_passes_through_unchanged(monkeypatch):
     """Only the binder's Cancelled is re-coded; a node's own error keeps its type."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    conn_pipe.pipe.writeText.side_effect = RuntimeError('node blew up')
+    conn_pipe.lane = 'json'
+    conn_pipe.pipe.writeJson.side_effect = RuntimeError('node blew up')
 
     with pytest.raises(RuntimeError, match='node blew up'):
-        await conn._write({}, {'pipeId': 1, 'data': b'x'})
+        await conn._write({}, {'pipeId': 1, 'data': b'{"k": 1}'})
+
+
+# ---------------------------------------------------------------------------
+# A text body is written as one text when its pipe closes, so a text request's
+# pipeline work runs inside the close frame: the close is what a cancel ends
+# and what the request tree's metrics are booked from
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_text_request_refused_as_cancelled_answers_with_the_cancelled_code_at_its_close(monkeypatch):
+    """The binder refuses the held text at the close: that frame answers TASK_CANCELLED and the slot is released."""
+    from rocketlib import Ec
+
+    from ai.constants import CONST_TASK_CANCELLED_CODE
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeText.side_effect = refused
+
+    await conn._write({}, {'pipeId': 1, 'data': b'more'})
+    conn_pipe.pipe.writeText.assert_not_called()  # held until the close
+
+    with pytest.raises(RequestCancelled) as err:
+        await conn._close({}, {'pipeId': 1})
+    assert err.value.code == CONST_TASK_CANCELLED_CODE
+    assert conn_pipe.has_failed
+    assert 1 not in conn._pipe_map and 1 not in conn._closing
+    conn._cleanup_pipe.assert_called_once_with(conn_pipe)
+
+
+@pytest.mark.asyncio
+async def test_a_node_error_on_a_text_body_passes_through_its_close_unchanged(monkeypatch):
+    """Only the binder's Cancelled is re-coded at the close; a node's own error keeps its type."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+    conn_pipe.pipe.writeText.side_effect = RuntimeError('node blew up')
+
+    await conn._write({}, {'pipeId': 1, 'data': b'x'})
+    with pytest.raises(RuntimeError, match='node blew up'):
+        await conn._close({}, {'pipeId': 1})
+    assert 1 not in conn._closing
+
+
+@pytest.mark.asyncio
+async def test_cancel_reaches_a_text_request_while_its_close_runs(monkeypatch):
+    """The close took the binding out of the pipe map, and cancel still finds it: the work in flight ends as cancelled."""
+    import threading
+
+    from rocketlib import Ec
+
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+    conn_pipe.correlation_id = 'req-a'
+    working, flagged = threading.Event(), threading.Event()
+
+    def write_text(_text):
+        # The pipeline is working on the body; the binder refuses it at the next node once cancel flagged the pipe
+        working.set()
+        assert flagged.wait(10), 'cancel never reached the closing binding'
+        refused = Exception('Cancelled: Pipeline request cancelled')
+        refused.code = int(Ec.Cancelled)
+        raise refused
+
+    conn_pipe.pipe.writeText.side_effect = write_text
+    conn_pipe.pipe.cancel.side_effect = flagged.set
+
+    await conn._write({}, {'pipeId': 1, 'data': b'summarise this'})
+    closing = asyncio.ensure_future(conn._close({}, {'pipeId': 1, '_caller': {'correlationId': 'req-a'}}))
+    assert await asyncio.to_thread(working.wait, 10)
+
+    # Only cancel reaches a closing binding, and only for its own request
+    with pytest.raises(ValueError, match='not found'):
+        await conn._write({}, {'pipeId': 1, 'data': b'late'})
+    with pytest.raises(ValueError, match='another request'):
+        await conn._cancel({}, {'pipeId': 1, '_caller': {'correlationId': 'req-b'}})
+    body = await conn._cancel({}, {'pipeId': 1, '_caller': {'correlationId': 'req-a'}})
+    assert body == {'pipeId': 1, 'cancelled': True}
+
+    with pytest.raises(RequestCancelled):
+        await closing
+    assert 1 not in conn._closing
+    with pytest.raises(ValueError, match='not found'):
+        await conn._cancel({}, {'pipeId': 1})
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_before_the_close_drops_the_held_text(monkeypatch):
+    """A request cancelled while its body was still held never reaches the pipeline; the close releases the slot as usual."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+
+    await conn._write({}, {'pipeId': 1, 'data': b'never mind'})
+    await conn._cancel({}, {'pipeId': 1})
+    body = await conn._close({}, {'pipeId': 1})
+
+    conn_pipe.pipe.writeText.assert_not_called()
+    conn_pipe.pipe.close.assert_called_once_with()
+    assert body['objectId'] == 'obj-1'
+
+
+@pytest.mark.asyncio
+async def test_a_text_body_is_written_bound_to_its_request_tree(monkeypatch):
+    """The held text runs the pipeline at the close: its metrics land in the request tree's bucket (plan 8.1)."""
+    from ai.modules.data import data_conn as data_conn_mod
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn._cleanup_pipe = MagicMock()
+    conn_pipe.trace_id = 7
+    bound = [None]
+    fake_metrics = MagicMock()
+
+    def set_current_trace(trace_id):
+        previous, bound[0] = bound[0], trace_id
+        return previous
+
+    fake_metrics.set_current_trace = set_current_trace
+    monkeypatch.setattr(data_conn_mod, 'metrics', fake_metrics)
+    seen = []
+    conn_pipe.pipe.writeText.side_effect = lambda _text: seen.append(bound[0])
+
+    await conn._write({}, {'pipeId': 1, 'data': b'count me'})
+    await conn._close({}, {'pipeId': 1})
+
+    assert seen == [7], 'the text was written while the thread was bound to tree 7'
+    assert bound[0] is None, 'the previous binding is restored'
 
 
 @pytest.mark.asyncio
