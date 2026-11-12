@@ -255,4 +255,4 @@ async function buildIndex({ contentDir, staticDir, task }) {
 	if (task) task.output = `Indexed ${withCatalog.length} pages (${nodes.length} nodes)`;
 }
 
-module.exports = { buildIndex };
+module.exports = { buildIndex, AGENT_START_ID };
