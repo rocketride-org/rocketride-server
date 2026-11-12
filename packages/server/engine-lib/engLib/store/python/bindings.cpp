@@ -294,7 +294,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(processArguments, [](py::object &argv) {
         // Call the working function
-        engine::python::executePythonArguments(argv);
+        auto ccode = engine::python::executePythonArguments(argv);
+        if (engine::config::monitor()) {
+            MONCCODE(exit, ccode);
+        }
     });
 
     //-------------------------------------------------------------
