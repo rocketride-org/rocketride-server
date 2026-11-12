@@ -243,3 +243,39 @@ async def test_third_party_build_output_is_never_read(monkeypatch):
 
     monkeypatch.setattr(pp, 'read_artifact_file', boom)
     assert await gate_errors('acme.brandy', {'name': 'B'}, DIST, hostile_account()) == []
+
+
+async def test_redirect_sources_claimed_by_another_published_app_are_rejected():
+    # home (published) serves /store and /marketplace.
+    manifest = {
+        # '/' (taken by home too) because only the app owning '/' may declare site.
+        'publicPages': [{'path': '/', 'title': 'R'}, {'path': '/fresh', 'title': 'F'}],
+        'site': {
+            'redirects': [
+                {'from': '/store', 'to': '/fresh'},
+                {'from': '/marketplace', 'to': '/fresh'},
+                {'from': '/free', 'to': '/fresh'},
+            ]
+        },
+    }
+    errors = [e for e in await gate_errors('rocketride.other', manifest, DIST, hostile_account()) if 'redirect' in e]
+    assert len(errors) == 2
+    assert all('rocketride.home' in e for e in errors)
+    assert "'/store'" in errors[0] and "'/marketplace'" in errors[1]
+
+
+async def test_a_redirect_source_whose_slash_twin_is_another_apps_page_is_rejected():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}, {'path': '/fresh', 'title': 'F'}],
+        'site': {
+            'redirects': [
+                {'from': '/store/', 'to': '/fresh'},
+                {'from': '/free/', 'to': '/fresh'},
+            ]
+        },
+    }
+    errors = [e for e in await gate_errors('rocketride.other', manifest, DIST, hostile_account()) if 'redirect' in e]
+    assert errors == [
+        "site.redirects from '/store/': its slash twin '/store' is a page of the published app rocketride.home; "
+        'a URL is a page or a redirect, not both: drop the entry'
+    ]

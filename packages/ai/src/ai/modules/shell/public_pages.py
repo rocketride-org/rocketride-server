@@ -25,11 +25,13 @@ Public pages: the page map of the app origin and the gate that guards it.
 
 The aggregate is one immutable map of the public pages that published platform
 apps declare in their manifests (the contract is ``contract.py``): what the
-pages are lives in the owning app's manifest, not in the engine. It is built
-at startup, rebuilt in the background on every platform app's publish,
-unpublish or rung repoint, and kept as it was when the store cannot be read.
-Until a published manifest contributes a valid page, it holds the legacy page
-list (``legacy_manifest.py``).
+pages are lives in the owning app's manifest, not in the engine. The public
+pages, ``/sitemap.xml`` and ``/llms.txt`` are served from it (``pages.py``,
+``shell.py``). It is built at startup, rebuilt in the background on every
+platform app's publish, unpublish or rung repoint (and at least every
+``REFRESH_SECONDS`` on traffic), and kept as it was when the store cannot be
+read. Until a published manifest contributes a valid page, it holds the legacy
+page list (``legacy_manifest.py``).
 
 The publish gate (``gate_errors``) refuses a public publish whose page claims
 are invalid. The aggregate re-checks every manifest anyway: seeded platform
@@ -38,6 +40,7 @@ rows never pass the gate.
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
@@ -51,7 +54,15 @@ from ai.account.app_rows import (
     serving_block_of,
 )
 
-from .contract import Page, check_manifest, is_privileged, may_claim_root
+from .contract import (
+    Page,
+    check_manifest,
+    check_redirects,
+    is_privileged,
+    may_claim_root,
+    slash_twin_label,
+    with_slash_twin,
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +79,9 @@ class Published:
 class Aggregate:
     """The immutable page map, keyed by exact path. A rebuild swaps a whole new one (never edited).
 
+    ``redirects`` maps an old path to the page path it 301s to (the root
+    owner's ``site.redirects``).
+
     ``published`` maps each app owning a page to the manifest it was read
     from: what a rebuild keeps when that app cannot be read. Comparisons
     ignore it.
@@ -77,6 +91,7 @@ class Aggregate:
     site: Mapping[str, Any] = field(default_factory=dict)
     published: Mapping[str, Published] = field(default_factory=dict, compare=False, repr=False)
     legacy: bool = False
+    redirects: Mapping[str, str] = field(default_factory=dict)
 
     def pages(self) -> List[Page]:
         """Every claimed page, sorted by path (deterministic output order)."""
@@ -123,9 +138,10 @@ def build_aggregate(
 
     Every manifest is re-validated (``check_manifest``) and only its valid
     pages are kept; a page colliding with an earlier claim is dropped (first
-    claim wins). ``site`` comes only from the app owning ``/``. When no page
-    survives, the aggregate is the legacy page list (a broken manifest falls
-    back instead of removing every page).
+    claim wins). ``site`` and its redirects come only from the app owning
+    ``/``; a redirect whose source (or its slash twin) another app's page
+    serves is dropped. When no page survives, the aggregate is the legacy page
+    list (a broken manifest falls back instead of removing every page).
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
@@ -134,16 +150,23 @@ def build_aggregate(
     root = exact.get('/')
     if root is not None:
         site = dict(sites.get(root.app_id, {}))
+    redirects = {}
+    for source, target in site.pop('redirects', {}).items():
+        if any(c in exact for c in with_slash_twin(source)):
+            debug(f'[public_pages] redirect {source} -> {target} collides with a page (redirect skipped)')
+            continue
+        redirects[source] = target
     owners = {page.app_id for page in exact.values()}
     return Aggregate(
         exact=exact,
         site=site,
         published={pub.app_id: pub for pub in published if pub.app_id in owners},
+        redirects=redirects,
     )
 
 
 def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = None) -> Aggregate:
-    """The aggregate of the legacy page list: trusted engine constants.
+    """The aggregate of the legacy page list and its redirects: trusted engine constants.
 
     Filtered through ``live_conflict`` like any claim, when one is given.
     """
@@ -167,7 +190,11 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
             listed=raw['listed'],
             head_title=legacy_head_title(raw['path'], raw['title']),
         )
-    return Aggregate(exact=exact, site=dict(manifest['site']), legacy=True)
+    site = dict(manifest['site'])
+    redirects, errors = check_redirects(site.pop('redirects'), list(exact.values()), live_conflict)
+    for err in errors:
+        debug(f'[public_pages] legacy {err} (redirect skipped)')
+    return Aggregate(exact=exact, site=site, legacy=True, redirects=redirects)
 
 
 def _skip_unreadable(
@@ -341,8 +368,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
 
     Runs at ``rrext_deploy_app publish`` for the public audience only, the
     one rung the aggregate reads. Checks, each with an actionable message:
-    privilege and may-claim-root, path grammar, reserved prefixes, data
-    entries, cross-app collisions against every OTHER published platform
+    privilege and may-claim-root, path grammar, reserved prefixes and the
+    live route table, data entries, redirects, cross-app collisions (of page
+    paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
     manifests, so unpublishing releases it, with no table), and snapshot
     files missing from the built version.
@@ -382,7 +410,7 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
             return [f'{exc}; emit {{"publicPages": [...], "site": {{...}}}} or drop the file']
     if 'publicPages' not in manifest and 'site' not in manifest:
         return []
-    pages, _, errors = check_manifest(app_id, manifest, page_map.live_conflict)
+    pages, site, errors = check_manifest(app_id, manifest, page_map.live_conflict)
     if not pages:
         # Nothing to collide or snapshot (a third party, or every page invalid):
         # never read, or echo a failure of, the other platform apps' storage.
@@ -397,6 +425,16 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                 f'publicPages path {page.path!r} is already claimed by the published app {owner.app_id} '
                 '(first claim wins; the claim is released when that app unpublishes); choose another path'
             )
+    for source in (site or {}).get('redirects', {}):
+        for candidate in with_slash_twin(source):
+            owner = exact.get(candidate)
+            if owner is not None:
+                which = slash_twin_label(source, candidate)
+                errors.append(
+                    f'site.redirects from {source!r}: {which}is a page of the published app {owner.app_id}; '
+                    'a URL is a page or a redirect, not both: drop the entry'
+                )
+                break
     for page in pages:
         if not page.snapshot:
             continue
@@ -424,8 +462,12 @@ STARTUP_BUILD_SECONDS = 10.0
 # One build (the store listing and every read) may take at most this long. A
 # slow store needs a few seconds; a hung read must not hold the rebuild lock and
 # freeze the map. On timeout the previous aggregate stays, the lock is released,
-# and the next platform app deploy event retries.
+# and the next platform app deploy event (or the backstop) retries.
 BUILD_SECONDS = 60.0
+
+# Convergence backstop: deploy events are in-process only, so a pod that did
+# not handle a publish learns of it from the first request after this age.
+REFRESH_SECONDS = 300.0
 
 
 class PageMap:
@@ -441,6 +483,8 @@ class PageMap:
         self.live_conflict: Optional[Callable[[str], Optional[str]]] = None
         self.listeners: List[Callable[[Aggregate, Aggregate], None]] = []
         self._current: Optional[Aggregate] = None
+        # time.monotonic() of the last swap or backstop rebuild.
+        self._built_at = 0.0
         # One per instance: a lock binds to the event loop that first waits on it.
         self._rebuild_lock = asyncio.Lock()
         self._rebuild_task: Optional[asyncio.Task] = None
@@ -461,6 +505,21 @@ class PageMap:
                 'starting on the legacy page list'
             )
         return bool(done)
+
+    def maybe_refresh(self) -> None:
+        """Schedule a background rebuild when the last one is older than ``REFRESH_SECONDS``.
+
+        Called on every public page and crawler file request; never waits for the
+        build (the swap lands on a later request). The clock restarts when the
+        rebuild is scheduled, not when it swaps: an unchanged map is not swapped,
+        and a failing store must not be retried on every request. Deploy events
+        are in-process only, so this is how a pod learns of a publish another
+        pod handled. Takes and returns nothing; a failed rebuild keeps the
+        current aggregate (``rebuild``).
+        """
+        if time.monotonic() - self._built_at > REFRESH_SECONDS:
+            self._built_at = time.monotonic()
+            self.schedule_rebuild()
 
     def schedule_rebuild(self) -> None:
         """Coalesced background rebuild: the publish/unpublish/rung-repoint hook.
@@ -530,6 +589,7 @@ class PageMap:
         """
         old = self.current()
         self._current = aggregate
+        self._built_at = time.monotonic()
         for callback in list(self.listeners):
             try:
                 callback(old, aggregate)
@@ -622,6 +682,11 @@ async def build_at_startup() -> bool:
         the legacy page list and the build carries on in the background.
     """
     return await page_map.build_at_startup()
+
+
+def maybe_refresh() -> None:
+    """Schedule a background rebuild when the last one is older than ``REFRESH_SECONDS`` (``PageMap.maybe_refresh``)."""
+    page_map.maybe_refresh()
 
 
 def app_changed(app_id: str) -> None:

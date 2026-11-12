@@ -145,12 +145,12 @@ def test_legacy_fallback_when_every_declared_page_is_invalid():
     assert agg.legacy
 
 
-def test_the_legacy_aggregate_is_the_shell_route_list_with_its_unlisted_pages():
-    import ai.modules.shell.shell as shell_mod
+def test_the_legacy_aggregate_is_the_legacy_page_list_with_its_unlisted_pages():
+    from ai.modules.shell.legacy_manifest import _LEGACY_ROUTES
 
     agg = legacy_aggregate()
-    assert [(p.path, p.title, p.description) for p in agg.exact.values()] == shell_mod.PUBLIC_ROUTE_MANIFEST
-    assert {p.path for p in agg.pages() if not p.listed} == shell_mod.UNLISTED_ROUTES
+    assert [(p.path, p.title, p.description) for p in agg.exact.values()] == _LEGACY_ROUTES
+    assert len(agg.exact) == 25
     assert {p.path for p in agg.pages() if not p.listed} == {
         '/oss',
         '/mcp-server',
@@ -359,7 +359,9 @@ async def test_an_unreadable_app_keeps_its_current_pages_until_it_reads_again(mo
     before = pp.current()
     assert before.exact['/pricing'].dist_dir == dist_of('00000000-platform', 'rocketride.home')
     # The public rung moves to v2 while the store cannot be read.
-    v2 = dict(HOME_MANIFEST, publicPages=[{'path': '/', 'title': 'R'}, {'path': '/about', 'title': 'A'}])
+    # Valid on its own: no redirect points at a page v2 no longer has.
+    v2_site = {k: v for k, v in HOME_MANIFEST['site'].items() if k != 'redirects'}
+    v2 = dict(HOME_MANIFEST, publicPages=[{'path': '/', 'title': 'R'}, {'path': '/about', 'title': 'A'}], site=v2_site)
     acct.add('00000000-platform', 'rocketride.home', v2, version=2, published_at=1_700_000_200.0, emit=True)
     acct.rows = [r for r in acct.rows if not (r['appId'] == 'rocketride.home' and r['version'] == 1)]
     read = _store_timeout(monkeypatch)
@@ -545,6 +547,36 @@ async def test_a_hung_store_read_times_out_and_a_later_rebuild_lands(monkeypatch
     assert pp.current().exact['/'].title == 'Fixed'
 
 
+async def test_rebuild_drops_pages_on_the_installed_live_routes():
+    pp.set_live_conflict(lambda p: 'GET /pricing' if p == '/pricing' else None)
+    assert await pp.rebuild(hostile_account())
+    assert '/pricing' not in pp.current().exact and '/marketplace' in pp.current().exact
+    assert pp.live_conflict()('/pricing') == 'GET /pricing'
+
+
+async def test_maybe_refresh_schedules_at_most_one_rebuild_per_period(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(pp.page_map, 'schedule_rebuild', lambda: scheduled.append(1))
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic())
+    pp.maybe_refresh()
+    assert scheduled == []
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic() - pp.REFRESH_SECONDS - 1)
+    pp.maybe_refresh()
+    # The clock restarted when it scheduled: an unchanged map is never swapped,
+    # and a failing store must not be retried on every request.
+    pp.maybe_refresh()
+    assert scheduled == [1]
+
+
+async def test_a_swap_restarts_the_refresh_clock(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(pp.page_map, 'schedule_rebuild', lambda: scheduled.append(1))
+    monkeypatch.setattr(pp.page_map, '_built_at', pp.time.monotonic() - pp.REFRESH_SECONDS - 1)
+    pp.swap(pp.legacy_aggregate())
+    pp.maybe_refresh()
+    assert scheduled == []
+
+
 async def test_a_failing_build_keeps_the_previous_aggregate(monkeypatch):
     before = pp.current()
 
@@ -554,6 +586,87 @@ async def test_a_failing_build_keeps_the_previous_aggregate(monkeypatch):
     monkeypatch.setattr(pp, 'build_aggregate', boom)
     assert await pp.rebuild(hostile_account()) is False
     assert pp.current() is before
+
+
+# ---------------------------------------------------------------------------
+# site.redirects
+# ---------------------------------------------------------------------------
+
+
+def _root(app_id, pages, redirects, at):
+    manifest = {
+        'publicPages': [{'path': p, 'title': 'T'} for p in pages],
+        'site': {'title': app_id, 'redirects': [{'from': f, 'to': t} for f, t in redirects]},
+    }
+    return Published(app_id, manifest, published_at=at)
+
+
+def test_the_aggregate_carries_the_root_owners_redirects_outside_site():
+    agg = build_aggregate([_root('rocketride.home', ['/', '/legal/terms'], [('/terms', '/legal/terms')], 1)])
+    assert agg.redirects == {'/terms': '/legal/terms'}
+    assert agg.site == {'title': 'rocketride.home'}
+
+
+def test_redirects_lose_to_other_apps_pages():
+    home = _root('rocketride.home', ['/', '/x', '/kept'], [('/y', '/kept'), ('/fine', '/kept'), ('/moved', '/x')], 1)
+    # Published earlier: it owns /x and /y, so home's source /y is its page.
+    other = _root('rocketride.secret', ['/x', '/y'], [], 0)
+    agg = build_aggregate([home, other])
+    assert agg.exact['/x'].app_id == 'rocketride.secret'
+    # /x is still a page in the aggregate (another app's), so /moved stands.
+    assert agg.redirects == {'/fine': '/kept', '/moved': '/x'}
+
+
+def test_redirects_whose_slash_twin_another_app_took_are_dropped():
+    home = _root('rocketride.home', ['/', '/kept'], [('/y/', '/kept'), ('/fine/', '/kept')], 1)
+    other = _root('rocketride.secret', ['/y'], [], 0)
+    assert build_aggregate([home, other]).redirects == {'/fine/': '/kept'}
+
+
+def test_only_the_root_owners_redirects_apply():
+    home = _root('rocketride.home', ['/', '/a'], [('/old', '/a')], 1)
+    loser = _root('rocketride.secret', ['/', '/b'], [('/other', '/b')], 2)
+    assert build_aggregate([loser, home]).redirects == {'/old': '/a'}
+
+
+def test_a_manifest_without_redirects_has_none():
+    assert build_aggregate([Published('rocketride.home', HOME_MANIFEST)]).redirects == {'/plans': '/pricing'}
+    assert build_aggregate([_root('rocketride.home', ['/'], [], 1)]).redirects == {}
+
+
+# home-ui's src/redirects.ts (rocketride-saas), entry for entry: the legacy map
+# answers these URLs until home-ui's manifest carries its own.
+LEGACY_REDIRECTS = {
+    '/terms': '/legal/terms',
+    '/terms/': '/legal/terms',
+    '/privacy-policy': '/legal/privacy-policy',
+    '/privacy-policy/': '/legal/privacy-policy',
+    '/privacy': '/legal/privacy-policy',
+    '/privacy/': '/legal/privacy-policy',
+}
+
+
+def test_the_legacy_redirect_map_is_home_uis():
+    from ai.modules.shell.legacy_manifest import legacy_page_manifest
+
+    redirects = legacy_page_manifest()['site']['redirects']
+    assert [(r['from'], r['to']) for r in redirects] == list(LEGACY_REDIRECTS.items())
+
+
+def test_the_legacy_aggregate_carries_the_legacy_redirect_map():
+    agg = legacy_aggregate()
+    assert agg.redirects == LEGACY_REDIRECTS
+    assert 'redirects' not in agg.site
+    assert build_aggregate([]).redirects == LEGACY_REDIRECTS
+
+
+def test_legacy_redirects_are_filtered_against_live_routes():
+    live = {'/terms': 'GET /terms', '/legal/privacy-policy': 'GET /legal/privacy-policy'}
+    agg = build_aggregate([], live_conflict=live.get)
+    # /terms is a live route (so /terms/, its slash twin, goes too); the
+    # privacy-policy target page is gone with its claim.
+    dropped = {'/terms', '/terms/', '/privacy-policy', '/privacy-policy/', '/privacy', '/privacy/'}
+    assert set(agg.redirects) == set(LEGACY_REDIRECTS) - dropped
 
 
 # ---------------------------------------------------------------------------
@@ -568,12 +681,20 @@ def _boot(monkeypatch, load):
 
     events = []
 
+    class Routes(list):
+        def append(self, route):
+            events.append(('route', route.path))
+            super().append(route)
+
     class Server:
         def __init__(self, config, standardEndpoints):
-            pass
+            self.app = SimpleNamespace(router=SimpleNamespace(routes=Routes()))
 
         def use(self, module):
             events.append('module')
+
+        def add_catch_all(self, route):
+            self.app.router.routes.append(route)
 
         async def serve(self):
             events.append(('serve', pp.current()))
@@ -600,7 +721,8 @@ def test_the_engine_builds_the_page_map_before_it_serves(monkeypatch):
 
     events = _boot(monkeypatch, home)
     modules = events.count('module')
-    assert modules and events[:-1] == ['module'] * modules + ['account', 'build']
+    catch_all = ('route', '/{public_page_path:path}')
+    assert modules and events[:-1] == ['module'] * modules + ['account', catch_all, 'build']
     serve, served = events[-1]
     assert serve == 'serve' and not served.legacy and served.exact['/'].title == 'Home'
 

@@ -29,7 +29,8 @@ from the app owning ``/``, the site facts the SEO files carry:
     "publicPages": [{"path": "/pricing", "title": "...", "description": "...",
                      "listed": true, "snapshot": "pages/pricing.html",
                      "data": ["plans"]}],
-    "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt"}
+    "site": {"title": "...", "blurb": "...", "docsUrl": "https://.../llms.txt",
+             "redirects": [{"from": "/terms", "to": "/legal/terms"}]}
 
 ``check_manifest`` is the single validator: the publish gate refuses on any
 error it reports, and the aggregate builder re-runs it on every published
@@ -110,6 +111,7 @@ _SNAPSHOT = re.compile(r'[A-Za-z0-9_\-.]+(?:/[A-Za-z0-9_\-.]+)*\.html')
 _HTTPS_URL = re.compile(r'https://[^\s/?#<>"\'`]+[^\s<>"\'`]*')
 _MAX_TITLE = 300
 _MAX_DESCRIPTION = 1000
+_MAX_REDIRECTS = 100
 
 # The page keys this engine validates; every other key lands in ``Page.extra``.
 _PAGE_KEYS = frozenset({'path', 'title', 'description', 'listed', 'snapshot', 'data'})
@@ -329,6 +331,119 @@ def _check_site(raw: Any) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     return out, None
 
 
+def with_slash_twin(path: str) -> Tuple[str, ...]:
+    """``path`` and its trailing-slash twin (``/x`` and ``/x/``); ``/`` has none.
+
+    A redirect source decides both forms' fate: the twin of a page already
+    301s to the page, and the twin of a real route is the router's 307.
+
+    Args:
+        path: A path, with or without a trailing slash.
+
+    Returns:
+        ``(path, twin)``, or ``('/',)`` for the root.
+    """
+    if path == '/':
+        return (path,)
+    if path.endswith('/'):
+        return path, path[:-1]
+    return path, path + '/'
+
+
+def slash_twin_label(source: str, candidate: str) -> str:
+    """How an error about ``source`` names ``candidate``, one of ``with_slash_twin(source)``.
+
+    Args:
+        source: The path the error is about (its message already names it).
+        candidate: ``source`` itself or its trailing-slash twin.
+
+    Returns:
+        '' for ``source`` itself, else ``"its slash twin '<twin>' "``, ready
+        to prefix the reason.
+    """
+    if candidate == source:
+        return ''
+    return f'its slash twin {candidate!r} '
+
+
+def _redirect_source_error(
+    source: Any, pages: List[Page], live_conflict: Optional[Callable[[str], Optional[str]]]
+) -> Optional[str]:
+    """Why ``source`` cannot be a redirect's ``from``, or None.
+
+    One exact path in the page grammar, except that a trailing slash is
+    allowed (old URLs carry them); not reserved, and neither it nor its slash
+    twin is a live route or a page of this manifest.
+    """
+    if not isinstance(source, str):
+        return 'must be a string'
+    if '//' in source:
+        return 'must not contain an empty segment ("//")'
+    bare = source
+    if len(source) > 1 and source.endswith('/'):
+        bare = source[:-1]
+    err = path_error(bare)
+    if err:
+        return err
+    err = _reserved_error(source)
+    if err:
+        return err
+    paths = {p.path for p in pages}
+    for candidate in with_slash_twin(source):
+        which = slash_twin_label(source, candidate)
+        if candidate in paths:
+            return f'{which}is a publicPages path (a URL is a page or a redirect, not both)'
+        if live_conflict is not None:
+            conflict = live_conflict(candidate)
+            if conflict:
+                return f'{which}collides with the live server route {conflict}'
+    return None
+
+
+def check_redirects(
+    raw: Any, pages: List[Page], live_conflict: Optional[Callable[[str], Optional[str]]]
+) -> Tuple[Dict[str, str], List[str]]:
+    """Validate ``site.redirects``; a bad entry drops only itself.
+
+    ``to`` must be the exact path of one of this manifest's own pages, so a
+    redirect never points at a URL that may 404. A ``from`` follows the page
+    grammar (a trailing slash allowed), is not reserved, appears once, and
+    neither it nor its slash twin is a page of this manifest or a live route.
+
+    Args:
+        raw: The declared ``site.redirects``: a list of ``{"from", "to"}`` objects.
+        pages: This manifest's valid pages.
+        live_conflict: Optional ``path -> description`` of a live server
+            route the path would collide with (None = no collision).
+
+    Returns:
+        ``({from: to}, errors)``: the valid redirects, and one actionable
+        message per refused entry (or one for a malformed list).
+    """
+    if not isinstance(raw, list) or len(raw) > _MAX_REDIRECTS:
+        return {}, [f'site.redirects: must be a list of at most {_MAX_REDIRECTS} {{"from", "to"}} objects']
+    targets = {p.path for p in pages}
+    out: Dict[str, str] = {}
+    errors: List[str] = []
+    for i, entry in enumerate(raw):
+        where = f'site.redirects[{i}]'
+        if not isinstance(entry, dict):
+            errors.append(f'{where}: must be an object {{"from": "/old", "to": "/new"}}')
+            continue
+        source, target = entry.get('from'), entry.get('to')
+        err = _redirect_source_error(source, pages, live_conflict)
+        if err is None and source in out:
+            err = 'duplicate redirect source in this manifest'
+        if err:
+            errors.append(f'{where}.from {source!r}: {err}; choose another path or drop the entry')
+            continue
+        if not isinstance(target, str) or target not in targets:
+            errors.append(f"{where}.to {target!r}: must be the exact path of one of this manifest's publicPages")
+            continue
+        out[source] = target
+    return out, errors
+
+
 def check_manifest(
     app_id: str,
     manifest: Mapping[str, Any],
@@ -345,10 +460,11 @@ def check_manifest(
 
     Returns:
         ``(pages, site, errors)``: the valid pages (stamped with ``app_id``),
-        the validated site block (None when absent or invalid), and one
-        actionable message per problem. A manifest without either section
-        returns ``([], None, [])``, and so does a non-platform app's manifest
-        without ``publicPages``: its ``site`` is ignored.
+        the validated site block (None when absent or invalid; its
+        ``redirects``, when declared, maps each valid ``from`` to its ``to``),
+        and one actionable message per problem. A manifest without either
+        section returns ``([], None, [])``, and so does a non-platform app's
+        manifest without ``publicPages``: its ``site`` is ignored.
     """
     raw_pages = manifest.get('publicPages')
     raw_site = manifest.get('site')
@@ -393,4 +509,9 @@ def check_manifest(
             site, err = _check_site(raw_site)
             if err:
                 errors.append(err)
+            if isinstance(raw_site, dict) and 'redirects' in raw_site:
+                redirects, redirect_errors = check_redirects(raw_site['redirects'], pages, live_conflict)
+                errors.extend(redirect_errors)
+                if site is not None:
+                    site['redirects'] = redirects
     return pages, site, errors

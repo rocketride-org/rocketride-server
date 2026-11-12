@@ -238,8 +238,14 @@ interface AppManifest {
   onDesktop?: boolean;
   /** Platform apps only: public pages on the app origin (see Public pages). */
   publicPages?: PublicPage[];
-  /** Platform apps only, honored from the app owning '/': the site's title, blurb and docs link. */
-  site?: { title?: string; blurb?: string; docsUrl?: string };
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link and redirects. */
+  site?: {
+    title?: string;
+    blurb?: string;
+    docsUrl?: string;
+    /** Old URLs answered with a 301 to one of your pages, query string kept. */
+    redirects?: { from: string; to: string }[];
+  };
 }
 ```
 
@@ -251,8 +257,7 @@ both sections in `app-manifest.json` at the root of its output, next to the
 page snapshots; the server reads that file in preference to the registered
 manifest. Both sections are optional and append-only: fields are never
 repurposed or removed, and the server ignores keys it does not know, so an
-older server accepts a newer manifest. This release checks the sections at
-publish and builds the map; it does not serve the map's pages yet.
+older server accepts a newer manifest.
 
 ```typescript
 interface PublicPage {
@@ -286,19 +291,37 @@ publish fails with a message naming the field):
 - Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
   `/mcp`, `/shell`, `/status`, `/task`, `/.well-known` and the rest of the
   engine's routes) or the three crawler files (`/sitemap.xml`, `/robots.txt`,
-  `/llms.txt`) are rejected, as is a path another published platform app
-  already claims (first claim wins; unpublishing releases it).
+  `/llms.txt`) are rejected, as is a path a server route already serves, or one
+  another published platform app already claims (first claim wins; unpublishing
+  releases it).
 - Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
   names each source (`plans`, `app`) at most once.
 - `snapshot` must be a relative `.html` path that exists in the built version.
 - `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
   `` ` `` percent-encoded.
+- `site.redirects` (at most 100): each `from` is one exact path in the `path`
+  grammar, except that a trailing slash is allowed (`/master-saas-agreement/`);
+  it may not be reserved, and neither it nor its slash twin (`/x` and `/x/`)
+  may be a server route or a page any published app serves; it appears once.
+  List both forms of an old URL to redirect both. Each `to` is the exact path
+  of one of the manifest's own pages.
 
 Until a published platform app contributes a valid page, the page map holds
 the server's built-in page list instead. A published app whose storage cannot
 be read keeps the pages of its last readable build while the server runs;
 after a restart it has none until its storage can be read again. Kept pages
 still compete with other apps' claims under the same first-claim rule.
+
+The server answers `GET` and `HEAD` on each page with the shell's document
+(the route's prerendered capture when the shell build carries one, else
+`index.html`), its head carrying the page's `title`, `description`, a
+canonical URL on `RR_APP_URL`, and `noindex` for an unlisted page.
+`/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
+its heading, blurb and docs link from `site`; redirects never appear in
+either. `GET` and `HEAD` on a redirect's `from` answer `301` with
+`Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
+page (query kept). Any path that is neither a page, a redirect nor a server
+route answers `404`.
 
 ### Settings
 

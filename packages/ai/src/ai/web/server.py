@@ -65,8 +65,8 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.routing import compile_path
-from rocketlib import debug
+from starlette.routing import BaseRoute, compile_path
+from rocketlib import debug, warning
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
@@ -243,6 +243,10 @@ class WebServer:
         self._public_paths = ['/redoc', '/openapi.json']
         self._compiled_public_paths = None
         self._compiled_private_paths = None
+        # Dynamic public-path predicates (data-driven routes, e.g. the shell's
+        # public pages), consulted after the static patterns.
+        self._public_predicates: List[Callable[[str], bool]] = []
+        self._catch_all: Optional[BaseRoute] = None
 
         # Add our metrics middleware to the app
         self.app.add_middleware(AuthMiddleware)
@@ -911,8 +915,32 @@ class WebServer:
             if regex.match(path):
                 return True
 
+        # Data-driven public paths (e.g. the shell's public pages). A predicate
+        # that raises fails closed: the path stays private.
+        for predicate in self._public_predicates:
+            try:
+                if predicate(path):
+                    return True
+            except Exception as exc:
+                warning(f'public-path predicate failed for {path!r}: {exc}')
+
         # Path did not match any public pattern — treat as private by default
         return False
+
+    def add_public_predicate(self, predicate: Callable[[str], bool]) -> None:
+        """
+        Register a dynamic ``path -> bool`` public-route predicate.
+
+        For routes whose public paths are data, not registrations (one
+        catch-all serving a changing set of paths): registering the
+        catch-all ``public=True`` would make every path public, private API
+        routes included. A predicate marks only the paths it claims.
+        Private routes still override it.
+
+        Args:
+            predicate: Called with the request path; True means no auth required.
+        """
+        self._public_predicates.append(predicate)
 
     def add_authenticator(
         self,
@@ -987,6 +1015,17 @@ class WebServer:
 
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
+        if self._catch_all is not None:
+            # Keep the catch-all last, or a route added after it (a module
+            # loaded through /use, in a worker thread) would never match. One
+            # slice assignment, so no request sees a table without it.
+            # Known gap (tracked in rocketride-org/rocketride-server#3166):
+            # a request already judged public on the old table (an unrouted path)
+            # is routed on the new one, so for that instant a new private route
+            # can answer it unauthenticated. /use is admin-only; guard private
+            # routes if modules are loaded at runtime in production.
+            routes = self.app.router.routes
+            routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
 
         # Record the pairs only once the router has accepted them, so a
         # rejected registration stays retryable.
@@ -1006,6 +1045,18 @@ class WebServer:
             self._private_paths.append(path)
             # Invalidate the compiled cache so it is rebuilt on the next is_public_route() call
             self._compiled_private_paths = None
+
+    def add_catch_all(self, route: BaseRoute) -> None:
+        """Register ``route`` to match after every other route, including routes ``add_route`` adds later.
+
+        A route appended to ``app.router.routes`` directly is not moved ahead of it.
+
+        Args:
+            route: The catch-all route (the public-page handler), registered
+                once at the end of startup.
+        """
+        self._catch_all = route
+        self.app.router.routes.append(route)
 
     def add_socket(
         self,
