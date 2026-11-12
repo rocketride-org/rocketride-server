@@ -68,6 +68,55 @@ def digest_of(node_dir: str) -> Optional[str]:
         return None
 
 
+def _combine(file_digests: dict) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(file_digests):
+        digest.update(f'{path}\0{file_digests[path]}\n'.encode('utf-8'))
+    return digest.hexdigest()
+
+
+def content_digest(files: dict) -> str:
+    """The digest of a node's files ({path inside the node: bytes}), the same whichever zip carries them.
+
+    The sha256 of '<path>\\0<sha256 hex of the file>\\n' for each file in path order, paths
+    with '/'; the build that writes the index computes it the same way.
+    """
+    return _combine({path: hashlib.sha256(data).hexdigest() for path, data in files.items()})
+
+
+def _zip_digest(package: zipfile.ZipFile, name: str) -> str:
+    """content_digest of <name>/ in a zip, read a chunk at a time."""
+    prefix = f'{name}/'
+    file_digests = {}
+    for entry in package.infolist():
+        if entry.filename.startswith(prefix) and not entry.is_dir():
+            digest = hashlib.sha256()
+            with package.open(entry) as file:
+                for chunk in iter(lambda: file.read(1 << 20), b''):
+                    digest.update(chunk)
+            file_digests[entry.filename[len(prefix) :]] = digest.hexdigest()
+    return _combine(file_digests)
+
+
+def node_files(archive: zipfile.ZipFile, name: str) -> dict:
+    """The files of <name>/ in a zip, keyed by their path inside the node."""
+    prefix = f'{name}/'
+    return {
+        entry.filename[len(prefix) :]: archive.read(entry)
+        for entry in archive.infolist()
+        if entry.filename.startswith(prefix) and not entry.is_dir()
+    }
+
+
+def pack(name: str, files: dict) -> bytes:
+    """The <name>.rrnode of a node's files: a zip rooted at <name>/."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as package:
+        for path in sorted(files):
+            package.writestr(f'{name}/{path}', files[path])
+    return buffer.getvalue()
+
+
 def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     """Unpack a package into nodes_dir/<name>, replacing another digest's copy, and return the node's folder."""
     node_dir = os.path.join(nodes_dir, name)
@@ -76,7 +125,15 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     if os.path.isdir(node_dir) and digest_of(node_dir) is None:
         # A node the server carries is never replaced by a package
         return node_dir
-    if hashlib.sha256(data).hexdigest() != sha256:
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as package:
+            if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
+                raise NodePackageInvalid(f'The package of {name} holds files outside {name}/')
+            # The digest names the node's files, so a package rebuilt from the release archive still matches
+            matches = _zip_digest(package, name) == sha256
+    except zipfile.BadZipFile:
+        matches = False
+    if not matches:
         raise NodePackageInvalid(f'The package of {name} does not match its digest')
 
     # Staged beside nodes/, not in it: the start-up scan must never see a half-written node
@@ -85,8 +142,6 @@ def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
     staging = tempfile.mkdtemp(prefix=_STAGING, dir=parent)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as package:
-            if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
-                raise NodePackageInvalid(f'The package of {name} holds files outside {name}/')
             package.extractall(staging)
         with open(os.path.join(staging, name, DIGEST_FILE), 'w', encoding='utf-8') as file:
             file.write(sha256)
