@@ -73,6 +73,9 @@ if TYPE_CHECKING:
 # Root keys where the validator writes its own diagnostics
 _DIAGNOSTICS = ('errors', 'warnings')
 
+# Added when no source resolves, the case where start refuses the pipeline
+_NO_SOURCE_WARNING = 'Pipeline has no source component: add "source": "<component id>" at the top level, or pass a source when starting; without one it will not start.'
+
 
 def _submitted_ids(resolved: Any, submitted: Any) -> Dict[str, Any]:
     """Map validated component ids to the ids the caller sent.
@@ -434,6 +437,7 @@ class MiscCommands(DAPConn):
                 source = args.get('source', None) or pipeline.get('source', None)
                 if not source:
                     source = resolve_implied_source(pipeline)
+                no_source = not source
 
                 # Build the C++ payload with resolved source and default version.
                 # The engine's config loader requires the FILE-form root
@@ -461,6 +465,12 @@ class MiscCommands(DAPConn):
                     echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
                     ids = _submitted_ids(components, submitted_components)
                     data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
+
+                # Start refuses a pipeline with no resolvable source. This is a
+                # warning, not an error: validate also runs on partial pipelines
+                # while editing, and a source can still be passed when starting.
+                if no_source:
+                    data['warnings'] = [*(data.get('warnings') or []), {'message': _NO_SOURCE_WARNING}]
 
             # Config values are validated by the resolver the node itself runs at
             # start, so what fails here is exactly what would fail the run: hard
