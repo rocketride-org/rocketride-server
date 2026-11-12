@@ -2920,12 +2920,12 @@ class Task(DAPBase):
                 if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # The engine's own options: --dumps always, trace and node path unless the caller set one
+            # The engine's own options: --dumps always, trace unless the caller set one
             for arg in startup_args():
                 option = arg.split('=', 1)[0] + '='
                 if option == '--dumps=':
                     child_args.append(arg)
-                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                elif option == '--trace=' and not any(a.startswith(option) for a in child_args):
                     child_args.append(arg)
 
             await self._send_status_update()
