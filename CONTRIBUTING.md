@@ -184,9 +184,9 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 Pipelines bundled in an app published to the RocketRide store may use only
 catalog nodes: the nodes that ship with the engine, kept under
 `nodes/src/nodes/` in this repository and listed in the node catalog on the
-docs site. A custom node under `local_nodes` loads only on an engine started
-with `--node_path`. RocketRide Cloud loads none (its engine starts without
-`--node_path`) and also refuses the few catalog nodes marked `nosaas`, so
+docs site. A custom node written into an engine's `nodes/` directory loads
+only on that engine. RocketRide Cloud loads none and also refuses the few
+catalog nodes marked `nosaas`, so
 being in the catalog is necessary, not sufficient. Store reviewers reject a
 submission whose pipelines reference a node outside the catalog, and nothing
 before review checks this: the Package and Store preflights do not read

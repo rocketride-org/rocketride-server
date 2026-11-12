@@ -23,6 +23,7 @@ Binary Transfer:
 import io
 import logging
 import os
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -78,6 +79,10 @@ class DocTRLoader(BaseLoader):
         # Import opencv BEFORE doctr - this ensures opencv-contrib-python-headless
         # is installed and any conflicting opencv packages are removed
         from ai.common.opencv import cv2  # noqa: F401
+
+        # docTR's optional drawing helpers import matplotlib.pyplot and matplotlib.figure,
+        # which abort the Linux engine (#3067). OCR never draws; docTR loads without them.
+        sys.modules.setdefault('doctr.utils.visualization', None)
 
         from doctr.models import ocr_predictor
         from ai.common.torch import torch
