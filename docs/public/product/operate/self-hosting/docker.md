@@ -75,7 +75,9 @@ The engine reads configuration from its environment — pass variables with
 
 The image binds all container interfaces, so the engine treats itself as a
 public bind. For the built-in MCP server at `http://localhost:5565/mcp` to work,
-start the container with an `rr_` key and with `ROCKETRIDE_URI`. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
+start the container with an `rr_` key. Engine image 3.6.0 and earlier also need
+`ROCKETRIDE_URI` (see below); the command sets it because it is safe on any
+version. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
 
 ```bash
 docker run -d --name rocketride-engine --platform linux/amd64 \
