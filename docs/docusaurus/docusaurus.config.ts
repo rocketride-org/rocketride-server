@@ -54,7 +54,7 @@ const config: Config = {
 			},
 		},
 		// Site-wide structured data: the WebSite is this docs site, the
-		// Organization is RocketRide (product site and open source site as sameAs).
+		// Organization is RocketRide (marketing site as url; cloud app, GitHub and open source site as sameAs).
 		{
 			tagName: 'script',
 			attributes: { type: 'application/ld+json' },
@@ -65,8 +65,8 @@ const config: Config = {
 					{
 						'@type': 'Organization',
 						name: 'RocketRide',
-						url: 'https://cloud.rocketride.ai/',
-						sameAs: ['https://github.com/rocketride-org', 'https://rocketride.org/'],
+						url: 'https://rocketride.ai/',
+						sameAs: ['https://cloud.rocketride.ai/', 'https://github.com/rocketride-org', 'https://rocketride.org/'],
 					},
 				],
 			}),
