@@ -461,6 +461,19 @@ async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[b
 register_channel_command('spend.check', _check_spend)
 
 
+def _authority_gate_ok(conn: Any) -> bool:
+    """False when this debugger connection may not receive events (#972).
+
+    A connection that is no longer authenticated (deauthed or revoked)
+    receives nothing; an authenticated subject the live re-check refuses
+    receives nothing either.
+    """
+    if not getattr(conn, '_authenticated', False):
+        return False
+    authz = getattr(getattr(conn, '_server', None), '_authz', None)
+    return authz is None or authz.gate_ok(conn)
+
+
 class Task(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
@@ -1741,7 +1754,8 @@ class Task(DAPBase):
         try:
             # Clean up attached debugger
             if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
+                if _authority_gate_ok(self._debugger):
+                    await self._debugger.send_event('terminated', id=self.id)
                 await self._debugger._transport.disconnect()
 
                 self._debugger = None
@@ -2100,7 +2114,7 @@ class Task(DAPBase):
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
-            if self._debugger is not None:
+            if self._debugger is not None and _authority_gate_ok(self._debugger):
                 try:
                     event = message.get('event', '')
                     body = message.get('body', {})

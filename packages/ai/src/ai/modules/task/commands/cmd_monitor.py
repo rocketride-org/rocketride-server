@@ -169,6 +169,10 @@ class MonitorCommands(DAPConn):
             user_id: Optional user scope -- only deliver to this user.
             org_id: Optional org scope -- only deliver to connections in this org.
         """
+        # Step 0: platform authority verified recently (live re-check, #972)
+        authz = getattr(self._server, '_authz', None)
+        if authz is not None and not authz.gate_ok(self):
+            return
         # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
@@ -241,6 +245,11 @@ class MonitorCommands(DAPConn):
             # stamps the run log recorded, and the DAP envelope stays pure
             # protocol (each connection mints its own header seq).
             await self.send_event(evt_name, id=control.id, body=body)
+
+        # Platform authority verified recently (live re-check, #972)
+        authz = getattr(self._server, '_authz', None)
+        if authz is not None and not authz.gate_ok(self):
+            return
 
         # Get the task by token
         control = self._server.get_task_control(token)

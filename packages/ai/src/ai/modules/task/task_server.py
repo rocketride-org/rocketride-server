@@ -97,6 +97,7 @@ from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
+from .authz_recheck import AuthzRecheck
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
@@ -292,6 +293,10 @@ class TaskServer(DAPBase):
         _server: Reference to parent web server for statistics
     """
 
+    # Live re-check of platform authority (#972); None when the account edition
+    # cannot read it (set in __init__; class default for servers built without it).
+    _authz: Optional[AuthzRecheck] = None
+
     def __init__(self, server: WebServer, **kwargs) -> None:
         """
         Initialize the TaskServer with connection management and cleanup systems.
@@ -346,6 +351,14 @@ class TaskServer(DAPBase):
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
         ]
+
+        # Live re-check of platform authority (#972), only when the account
+        # edition can read it; otherwise every authority gate is off.
+        from ai.account import account
+
+        self._authz = AuthzRecheck(self, account) if getattr(account, 'supports_live_authority', False) else None
+        if self._authz is not None:
+            self._bg_tasks.append(asyncio.create_task(self._authz.run()))
 
         # Store reference to parent server for statistics integration
         self._server = server
@@ -494,6 +507,8 @@ class TaskServer(DAPBase):
 
     async def shutdown(self) -> None:
         """Cancel all background tasks."""
+        if self._authz is not None:
+            await self._authz.stop()
         bg_tasks = getattr(self, '_bg_tasks', [])
         for task in bg_tasks:
             if not task.done():
@@ -1173,17 +1188,22 @@ class TaskServer(DAPBase):
         holding platform authority (``authority_subject``) a failed rebuild
         never keeps the old identity: a narrower result (waitlisted, or a
         cached ``sysPermissions`` element missing) or ``ValueError`` (user not
-        found) revokes the connection, and any other exception revokes it
-        too. For every connection, a good result replaces the identity only
-        if the connection is still authenticated and still holds ``info`` (a
-        deauth or newer auth during the rebuild wins). Other connections keep
-        today's behaviour otherwise: log on error, replace on success. The
-        notice send is bounded by NOTICE_SEND_TIMEOUT.
+        found) revokes the connection. Any other exception revokes it when
+        there is no live re-check; with one (``_authz``) the connection is
+        marked unverified, so the gate refuses it at once, and the next sweep
+        decides. For every connection, a good result replaces the identity
+        only if the connection is still authenticated and still holds
+        ``info`` (a deauth or newer auth during the rebuild wins), and stamps
+        it verified as of the clock read before the rebuild. Other
+        connections keep today's behaviour otherwise: log on error, replace
+        on success. The notice send is bounded by NOTICE_SEND_TIMEOUT.
 
         Returns:
             bool: True when a fresh identity was installed and pushed.
         """
         subject = authority_subject(info)
+        authz = self._authz
+        t0 = authz.clock() if authz is not None else None
         try:
             fresh = await account.rebuild_account_info(info)
         except ValueError as e:
@@ -1193,7 +1213,14 @@ class TaskServer(DAPBase):
                 self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
             return False
         except Exception as e:
-            if subject:
+            if subject and authz is not None:
+                conn._authz_verified_at = 0.0
+                failed = self.count_authz('read_failed')
+                warning(
+                    f'[AUTHZ] {label} rebuild failed conn={conn.get_connection_id()} user={info.userId} '
+                    f'error={e!r} read_failed={failed}; unverified until the next sweep'
+                )
+            elif subject:
                 await conn.revoke(info, f'{label}: rebuild failed ({e})')
             else:
                 self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
@@ -1212,6 +1239,8 @@ class TaskServer(DAPBase):
 
         try:
             conn._account_info = fresh
+            if authz is not None:
+                conn._authz_verified_at = t0
             await asyncio.wait_for(conn.send_event('apaext_account', body=fresh.to_push_result()), NOTICE_SEND_TIMEOUT)
         except Exception as e:
             self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
