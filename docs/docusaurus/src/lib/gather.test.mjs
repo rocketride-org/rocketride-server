@@ -9,6 +9,12 @@ const require = createRequire(import.meta.url);
 const { pageDescription, stampLastUpdate, gather, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS } = require('../../scripts/lib/gather.js');
 
 describe('pageDescription', () => {
+	it('uses the same paragraph finder as the meta description', () => {
+		assert.equal(pageDescription('# T\n\n![Logo](/logo.png)\n\nProse here.\n'), 'Prose here.');
+		assert.equal(pageDescription('# T\n\n````md\n```\ncode\n```\n````\n\nProse here.\n'), 'Prose here.');
+		assert.equal(pageDescription('# T\n\nUse `<!--` to open a comment.\n'), 'Use <!-- to open a comment.');
+	});
+
 	it('prefers a front-matter description when the page declares one', () => {
 		const md = '---\ntitle: Hi\ndescription: Declared up front.\n---\n\n# Hi\n\nProse instead.\n';
 		assert.equal(pageDescription(md), 'Declared up front.');

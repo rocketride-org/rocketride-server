@@ -52,12 +52,18 @@ function splitFences(text) {
 	return segments;
 }
 
-/** Index of the quote that closes the string opened at `j`, or -1. A backslash skips the character after it. */
+/**
+ * Index of the quote that closes the string opened at `j`, or -1. A backslash
+ * skips the character after it. A `'` or `"` string cannot hold a line break, so
+ * meeting one means the quote was plain text (`Don't`): only a template literal
+ * spans lines.
+ */
 function stringEnd(src, j) {
 	const q = src[j];
 	for (let k = j + 1; k < src.length; k++) {
 		if (src[k] === '\\') k++;
 		else if (src[k] === q) return k;
+		else if (src[k] === '\n' && q !== '`') return -1;
 	}
 	return -1;
 }

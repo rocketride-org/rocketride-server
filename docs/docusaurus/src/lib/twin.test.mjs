@@ -153,6 +153,24 @@ describe('cleanTwin: code fences, escapes and brace links', () => {
 		assert.equal(mdx("import x from 'a\\'b';\n\nText\n"), 'Text\n');
 	});
 
+	it('does not run a stray apostrophe in an export line into the next paragraphs', () => {
+		const src = "export const Note = () => <p>Don't do this</p>;\n\nFirst paragraph.\n\nIt's the second paragraph.\n";
+		const out = mdx(src);
+		assert.ok(out.startsWith('export const Note = () =>'));
+		assert.ok(out.endsWith("\n\nFirst paragraph.\n\nIt's the second paragraph.\n"));
+	});
+
+	it('does not let a stray apostrophe in a brace expression close at a later quote', () => {
+		const src = "<Widget label={Don't}>\nIt's kept }\n</Widget>\n";
+		const out = mdx(src);
+		assert.ok(out.includes("Don't"));
+		assert.ok(out.includes("It's kept }"));
+	});
+
+	it('still lets a template literal span lines in an export', () => {
+		assert.equal(mdx('export const x = `a\nb`;\n\nText\n'), 'Text\n');
+	});
+
 	it('reads a brace-wrapped string literal as the link target', () => {
 		assert.equal(mdx("<a href={'/quickstart'}>Start</a>\n"), '[Start](/quickstart)\n');
 		assert.equal(mdx('<a href={"/quickstart"}>Start</a>\n'), '[Start](/quickstart)\n');

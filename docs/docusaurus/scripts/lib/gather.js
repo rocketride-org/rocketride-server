@@ -17,7 +17,7 @@ const path = require('path');
 const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
-const { describeText } = require('./description');
+const { describeText, firstParagraph } = require('./description');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -330,10 +330,9 @@ function frontMatterTitle(content) {
  * description tag. Otherwise the first prose paragraph is used, skipping HTML
  * comments, MDX imports, JSX, headings, code fences, tables and admonitions, and
  * it is shortened by describeText in description.js, the same function the meta
- * description uses. The paragraph itself is found by this function's own loop,
- * not by firstParagraph in description.js, so the two can differ on unusual
- * pages. Node pages get their description from services*.json instead (see
- * extractDescription).
+ * description uses. The paragraph itself is found by firstParagraph in
+ * description.js too, so both outputs agree on every page. Node pages get their
+ * description from services*.json instead (see extractDescription).
  * @param {string} content - raw page content (md/mdx).
  * @return {string} description, or '' when the page has no leading prose.
  */
@@ -360,122 +359,8 @@ function pageDescription(content) {
 			}
 		}
 	}
-	let body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-	body = stripComments(body);
-	const para = [];
-	let inFence = false;
-	for (const line of body.split(/\r?\n/)) {
-		const t = line.trim();
-		// Skip fenced blocks wholesale — the fence delimiters AND their contents.
-		if (/^(```|~~~)/.test(t)) {
-			if (para.length) break;
-			inFence = !inFence;
-			continue;
-		}
-		if (inFence) continue;
-		if (!t) {
-			if (para.length) break;
-			continue;
-		}
-		// Lists and callouts are not descriptions: "1. Install" would end at "1.",
-		// bullets would run together, and "> Deprecated." says nothing about the page.
-		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,}|[-*+]\s|\d+[.)]\s|>)/.test(t)) {
-			if (para.length) break;
-			continue;
-		}
-		para.push(t);
-	}
-	return describeText(para.join(' '));
-}
-
-/**
- * Remove HTML comments from page text, but not from fenced code blocks or inline
- * code, where `<!--` is literal text and must not swallow what follows it.
- *
- * One pass, so the three constructs cannot confuse each other: a fence marker
- * inside a comment does not open a fence, a comment opener inside code is kept,
- * and an escaped backtick does not open a code span.
- */
-function stripComments(text) {
-	const fenceOpen = /^ {0,3}(`{3,}|~{3,})([^\n]*)/;
-	let out = '';
-	let i = 0;
-	let lineStart = true;
-	while (i < text.length) {
-		if (lineStart) {
-			const end = text.indexOf('\n', i);
-			const line = text.slice(i, end < 0 ? text.length : end);
-			const open = fenceOpen.exec(line);
-			if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
-				// Copy the whole fenced block, up to its closing line or the end of the text.
-				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*\\r?$`);
-				let stop = end < 0 ? text.length : end + 1;
-				while (stop < text.length) {
-					const next = text.indexOf('\n', stop);
-					const nextLine = text.slice(stop, next < 0 ? text.length : next);
-					stop = next < 0 ? text.length : next + 1;
-					if (close.test(nextLine)) break;
-				}
-				out += text.slice(i, stop);
-				i = stop;
-				continue;
-			}
-		}
-		const ch = text[i];
-		if (ch === '\\' && i + 1 < text.length) {
-			out += text.slice(i, i + 2);
-			i += 2;
-			lineStart = false;
-			continue;
-		}
-		if (text.startsWith('<!--', i)) {
-			const end = text.indexOf('-->', i + 4);
-			if (end >= 0) {
-				i = end + 3;
-				lineStart = false;
-				continue;
-			}
-		}
-		if (ch === '`') {
-			let run = 1;
-			while (text[i + run] === '`') run++;
-			// A code span ends at the next run of exactly the same number of backticks,
-			// and cannot cross a block boundary: a blank line ends the search, and so
-			// does the end of an ATX heading line.
-			let from = i + run;
-			let limit = text.length;
-			const blank = /\n[ \t\r]*(?:\n|$)/g;
-			blank.lastIndex = from;
-			const gap = blank.exec(text);
-			if (gap) limit = gap.index;
-			const lineBegin = text.lastIndexOf('\n', i - 1) + 1;
-			if (/^ {0,3}#{1,6}[ \t]/.test(text.slice(lineBegin, i))) {
-				const eol = text.indexOf('\n', from);
-				if (eol >= 0 && eol < limit) limit = eol;
-			}
-			let close = -1;
-			while (from < limit) {
-				const at = text.indexOf('`', from);
-				if (at < 0 || at >= limit) break;
-				let len = 1;
-				while (text[at + len] === '`') len++;
-				if (len === run) {
-					close = at;
-					break;
-				}
-				from = at + len;
-			}
-			const stop = close < 0 ? i + run : close + run;
-			out += text.slice(i, stop);
-			i = stop;
-			lineStart = false;
-			continue;
-		}
-		out += ch;
-		lineStart = ch === '\n';
-		i++;
-	}
-	return out;
+	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+	return describeText(firstParagraph(body));
 }
 
 /** First markdown heading, as a title fallback. */

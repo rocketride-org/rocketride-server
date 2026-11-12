@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import description from '../../scripts/lib/description.js';
 
-const { describePage } = description;
+const { describePage, firstParagraph } = description;
 
 describe('describePage', () => {
 	it('joins a hard-wrapped paragraph', () => {
@@ -80,5 +80,21 @@ describe('describePage', () => {
 	it('stays inside a four-backtick block that holds a three-backtick line', () => {
 		const body = '# T\n\n````md\n```js\ncode();\n```\nmore code\n````\n\nReal prose.\n';
 		assert.equal(describePage(body), 'Real prose.');
+	});
+});
+
+describe('firstParagraph', () => {
+	it('skips a line that starts with an image', () => {
+		assert.equal(firstParagraph('![Logo](/logo.png)\n\nThe real text.\n'), 'The real text.');
+	});
+
+	it('closes a fence only on the same character with at least the same length', () => {
+		const body = '````md\n```\ninner\n```\n````\n\nAfter the fence.\n';
+		assert.equal(firstParagraph(body), 'After the fence.');
+	});
+
+	it('keeps a comment opener inside code and strips a real comment', () => {
+		assert.equal(firstParagraph('Use `<!--` to open.\n'), 'Use `<!--` to open.');
+		assert.equal(firstParagraph('<!-- note -->\nVisible text.\n'), 'Visible text.');
 	});
 });

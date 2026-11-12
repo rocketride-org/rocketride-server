@@ -15,9 +15,99 @@ const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
 const SENTENCE_END = /(?<!\b(?:[Ee]\.g|[Ii]\.e|etc|vs|cf)\.)(?<=[.!?])\s+(?=[A-Z0-9"([])/;
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
 
+/**
+ * Remove HTML comments from page text, but not from fenced code blocks or inline
+ * code, where `<!--` is literal text and must not swallow what follows it.
+ *
+ * One pass, so the three constructs cannot confuse each other: a fence marker
+ * inside a comment does not open a fence, a comment opener inside code is kept,
+ * and an escaped backtick does not open a code span.
+ */
+function stripComments(text) {
+	const fenceOpen = /^ {0,3}(`{3,}|~{3,})([^\n]*)/;
+	let out = '';
+	let i = 0;
+	let lineStart = true;
+	while (i < text.length) {
+		if (lineStart) {
+			const end = text.indexOf('\n', i);
+			const line = text.slice(i, end < 0 ? text.length : end);
+			const open = fenceOpen.exec(line);
+			if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+				// Copy the whole fenced block, up to its closing line or the end of the text.
+				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*\\r?$`);
+				let stop = end < 0 ? text.length : end + 1;
+				while (stop < text.length) {
+					const next = text.indexOf('\n', stop);
+					const nextLine = text.slice(stop, next < 0 ? text.length : next);
+					stop = next < 0 ? text.length : next + 1;
+					if (close.test(nextLine)) break;
+				}
+				out += text.slice(i, stop);
+				i = stop;
+				continue;
+			}
+		}
+		const ch = text[i];
+		if (ch === '\\' && i + 1 < text.length) {
+			out += text.slice(i, i + 2);
+			i += 2;
+			lineStart = false;
+			continue;
+		}
+		if (text.startsWith('<!--', i)) {
+			const end = text.indexOf('-->', i + 4);
+			if (end >= 0) {
+				i = end + 3;
+				lineStart = false;
+				continue;
+			}
+		}
+		if (ch === '`') {
+			let run = 1;
+			while (text[i + run] === '`') run++;
+			// A code span ends at the next run of exactly the same number of backticks,
+			// and cannot cross a block boundary: a blank line ends the search, and so
+			// does the end of an ATX heading line.
+			let from = i + run;
+			let limit = text.length;
+			const blank = /\n[ \t\r]*(?:\n|$)/g;
+			blank.lastIndex = from;
+			const gap = blank.exec(text);
+			if (gap) limit = gap.index;
+			const lineBegin = text.lastIndexOf('\n', i - 1) + 1;
+			if (/^ {0,3}#{1,6}[ \t]/.test(text.slice(lineBegin, i))) {
+				const eol = text.indexOf('\n', from);
+				if (eol >= 0 && eol < limit) limit = eol;
+			}
+			let close = -1;
+			while (from < limit) {
+				const at = text.indexOf('`', from);
+				if (at < 0 || at >= limit) break;
+				let len = 1;
+				while (text[at + len] === '`') len++;
+				if (len === run) {
+					close = at;
+					break;
+				}
+				from = at + len;
+			}
+			const stop = close < 0 ? i + run : close + run;
+			out += text.slice(i, stop);
+			i = stop;
+			lineStart = false;
+			continue;
+		}
+		out += ch;
+		lineStart = ch === '\n';
+		i++;
+	}
+	return out;
+}
+
 /** The first prose paragraph of a page body, as raw lines joined by spaces ('' if none). */
 function firstParagraph(body) {
-	const text = body.replace(/<!--[\s\S]*?-->/g, '').replace(/<head>[\s\S]*?<\/head>/gi, '');
+	const text = stripComments(body).replace(/<head>[\s\S]*?<\/head>/gi, '');
 	const para = [];
 	let fence = null; // the open code fence: it closes on the same character, at least as long
 	for (const line of text.split(/\r?\n/)) {
@@ -90,4 +180,4 @@ function describePage(body) {
 	return describeText(firstParagraph(body));
 }
 
-module.exports = { describePage, describeText };
+module.exports = { describePage, describeText, firstParagraph };
