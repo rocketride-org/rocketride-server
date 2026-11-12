@@ -39,7 +39,7 @@ import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, RocketRideClientConfig } from '../client/types';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 import { Output, JsonOption } from './output';
-import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_TARGET_MESSAGE } from './env';
+import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE } from './env';
 
 /** Options every connected command accepts. */
 export interface ConnectionOptions {
@@ -108,9 +108,6 @@ export async function connectClient(options: ConnectionOptions, onEvent?: (messa
 	await client.connect();
 	return client;
 }
-
-/** Hard-stop message for a deploy target URI with no deploy API key. */
-export const NO_DEPLOY_APIKEY_MESSAGE = 'No deployment API key configured. Set ROCKETRIDE_DEPLOY_APIKEY (or pass --apikey) - the development key is never a deploy fallback.';
 
 /**
  * Connect to the DEPLOYMENT target, enforcing the hard stop: lifecycle

@@ -72,7 +72,8 @@ connection is encrypted.
 The `deploy` commands, and every `app` command except `create`, `dev`, and
 `verify`, connect to the deployment target instead: `ROCKETRIDE_DEPLOY_URI` and
 `ROCKETRIDE_DEPLOY_APIKEY`, which `init` and `login` write to `.env`. They
-refuse to run when no deployment target is set.
+refuse to run when no deployment target is set, and when no deployment API key
+is set: set `ROCKETRIDE_DEPLOY_APIKEY` or pass `--apikey`.
 
 ## Commands
 

@@ -165,13 +165,14 @@ class _FakeOut:
 @pytest.mark.parametrize('apikey', ['', '   ', None])
 def test_connect_deploy_stops_early_on_a_blank_key(apikey):
     from rocketride.cli.commands import deploy
+    from rocketride.cli.utils.env import NO_DEPLOY_APIKEY_MESSAGE
 
     out = _FakeOut()
     args = SimpleNamespace(uri='https://deploy.test', apikey=apikey)
     with mock.patch.object(deploy, 'connect_client', new=mock.AsyncMock()) as connect:
         assert asyncio.run(deploy._connect_deploy(args, out)) is None
     connect.assert_not_called()
-    assert out.failures == [deploy.NO_DEPLOY_APIKEY_MESSAGE]
+    assert out.failures == [NO_DEPLOY_APIKEY_MESSAGE]
     assert 'ROCKETRIDE_DEPLOY_APIKEY' in out.failures[0] and '--apikey' in out.failures[0]
 
 
@@ -187,11 +188,12 @@ def test_connect_deploy_passes_a_set_key_through():
 
 
 @pytest.mark.parametrize('apikey', ['', '  '])
-def test_app_deploy_stops_early_on_a_blank_key(apikey):
-    from rocketride.cli.commands import app, deploy
+def test_app_deploy_stops_early_on_a_blank_key(apikey, capsys):
+    from rocketride.cli.commands import app
+    from rocketride.cli.utils.env import NO_DEPLOY_APIKEY_MESSAGE
 
     args = SimpleNamespace(app_subcommand='deploy', uri='https://deploy.test', apikey=apikey, json=None)
     with mock.patch.object(app, 'connect_client', new=mock.AsyncMock()) as connect:
         assert asyncio.run(app.run_app(args)) == 1
     connect.assert_not_called()
-    assert deploy.NO_DEPLOY_APIKEY_MESSAGE
+    assert NO_DEPLOY_APIKEY_MESSAGE in capsys.readouterr().err

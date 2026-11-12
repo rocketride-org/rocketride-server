@@ -35,9 +35,8 @@ import os
 from rocketride_common.provision import to_http_base
 
 from ..utils.common import connect_client, disconnect_all, run_cli_command
-from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
+from ..utils.env import NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
-from .deploy import NO_DEPLOY_APIKEY_MESSAGE
 
 
 DEFAULT_DEVELOPER_ID = 'local'
