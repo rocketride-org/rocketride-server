@@ -97,7 +97,7 @@ rocketride validate code.pipe
 rocketride start --pipeline ./code.pipe
 ```
 
-`start` prints a task token and exits; the pipeline keeps running on the engine. Stop it before the next step with `rocketride stop --token <token>`. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails even though `validate` passes. The error is `Pipeline has no source. Select a source component or add a node configured as a source.` (on engine 3.6.0 and earlier: `Pipeline does not have a source component defined`).
+`start` prints a task token and exits; the pipeline keeps running on the engine. Stop it before the next step with `rocketride stop --token <token>`. It does not print an address. The token is what you pass to `rocketride stop --token <token>`, `rocketride upload --token <token>`, and `client.send(token, ...)` in the SDK. Keep `"source": "in"`: this example's webhook has an empty config, so the engine cannot work out the source by itself. Without it, `start` fails even though `validate` passes. The error is `Pipeline has no source. Select a source component or add a node configured as a source.` (on engine 3.6.0 and earlier: `Pipeline does not have a source component defined`). Engines newer than 3.6.0 also warn at `validate`: `Pipeline has no source component: ...`.
 
 ### Send code and read the reply
 
