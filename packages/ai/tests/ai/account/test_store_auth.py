@@ -793,7 +793,7 @@ class TestFetchSigningKeyStaysInTheEngine:
         response = await handle_fetch(self._request(await fs.get_url('reports/q1.csv')))
 
         assert response.status_code == 200
-        assert response.path.endswith('users/user-1/files/reports/q1.csv')
+        assert str(response.path).replace('\\', '/').endswith('users/user-1/files/reports/q1.csv')
 
     @pytest.mark.asyncio
     async def test_a_task_process_asks_the_engine_to_sign(self, monkeypatch, store):
