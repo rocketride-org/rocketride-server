@@ -2333,6 +2333,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2426,6 +2428,52 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+    # The server's own kill is not a crash
+    Task._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# A crash the engine reported with >EXIT*Crash
+# ---------------------------------------------------------------------------
+
+_SEGV = {'exitCode': 1, 'message': 'Application received system signal: SIGSEGV', 'crash': True}
+
+
+def _ending_task(process_exit_code):
+    """A task whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'stop_requested, status, outcome',
+    [
+        (False, 'Stopped unexpectedly', 'error'),
+        # A crash during a requested stop is part of the stop
+        (True, 'Stopped', 'cancelled'),
+    ],
+)
+async def test_a_reported_crash_ends_the_task(stop_requested, status, outcome):
+    t = _ending_task(-6)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await Task._terminated(t)
+    assert t._status.status == status
+    assert run_log.end_run.await_args.args[0] == outcome
 
 
 # ---------------------------------------------------------------------------
