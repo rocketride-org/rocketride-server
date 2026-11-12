@@ -37,13 +37,13 @@ template <typename... DebugInfo>
 [[noreturn]] void fatality(Location location, DebugInfo&&... info) noexcept;
 
 using FatalityHandler =
-    Function<void(Location location, std::string_view reason)>;
+    Function<void(Location location, const Error& ccode)>;
 
 [[nodiscard]] size_t registerFatalityHandler(
     FatalityHandler&& handler) noexcept;
 void deRegisterFatalityHandler(size_t slot) noexcept;
 
-ROCKETRIDE_CORE_API void onFatality(Location location, std::string_view reason) noexcept;
+ROCKETRIDE_CORE_API void onFatality(Location location, const Error& ccode) noexcept;
 ROCKETRIDE_CORE_API bool& bugCheck() noexcept;
 ROCKETRIDE_CORE_API bool& fatalityExecuting() noexcept;
 
