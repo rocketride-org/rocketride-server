@@ -1076,6 +1076,8 @@ def _guard_cases(job, env):
         (f'{app_css}.webpack[javascript/auto]!=!{loader}!{app_css}', True),  # matchResource shape
         ('builtin:swc-loader??x!' + app_ts, True),  # builtin loader
         ('data:text/javascript,export default 1', True),
+        ('data:text/javascript,if(!a){b()}', True),  # an inline runtime module whose body has '!'
+        (os.path.join(job, 'node_modules', 'x-loader', 'i.js') + '!' + app_ts, True),  # toolchain copy fallback
         (f'!!{tree_loader}!{app_ts}', False),  # a loader file from the developer tree
         (f'{app_dep_loader}!{app_ts}', False),  # a loader the app installed itself
         (outside, False),  # a module outside the job and toolchain
@@ -1100,7 +1102,7 @@ def test_resolved_request_guard_allows_only_toolchain_loaders_and_in_tree_module
     """
     job, env = _guard_roots(tmp_path)
     module_roots = (job, env)
-    loader_roots = (env,)
+    loader_roots = (env, os.path.join(job, 'node_modules'))
     for request, allowed in _guard_cases(job, env):
         assert app_build._resolved_request_allowed(request, module_roots, loader_roots) is allowed, request
 
@@ -1134,7 +1136,8 @@ def test_emitted_config_carries_the_resolved_module_guard(tmp_path):
     assert start in text and end in text
     assert 'new RocketRideResolvedModuleGuard()' in text
     assert 'afterResolve' in text and 'contextModuleFactory' in text
-    assert json.dumps([job, env]) in text and json.dumps([env]) in text
+    assert json.dumps([job, env]) in text
+    assert json.dumps(sorted({env, os.path.join(job, 'node_modules')})) in text
     guard = text[text.index(start) : text.index(end)]
 
     node = shutil.which('node')
@@ -1276,3 +1279,18 @@ def test_env_files_drop_public_lines_with_command_substitution(tmp_path):
     _write(app / '.env', 'PUBLIC_A=ok\nPUBLIC_B=$(id)\nPUBLIC_C=`id`\nexport PUBLIC_D=x$(y)\nPUBLIC_E=$VAR\n')
     app_build._filter_env_files(str(app))
     assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok', 'PUBLIC_E=$VAR']
+
+
+def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
+    """Neutralized configs and stripped package.json keys are returned for the
+    build log, and a manifest with a UTF-8 BOM (which pnpm accepts) is read.
+    """
+    ws = tmp_path / 'ws'
+    app = ws / 'apps' / 'x'
+    app.mkdir(parents=True)
+    (app / '.postcssrc.json').write_text('{"plugins": {}}', encoding='utf-8')
+    (app / 'package.json').write_bytes(b'\xef\xbb\xbf' + json.dumps({'name': 'x', 'postcss': {}}).encode())
+    out = app_build._neutralize_tool_configs(str(ws), str(app))
+    assert 'apps/x/.postcssrc.json' in out
+    assert 'apps/x/package.json:postcss' in out
+    assert 'postcss' not in json.loads((app / 'package.json').read_text(encoding='utf-8'))

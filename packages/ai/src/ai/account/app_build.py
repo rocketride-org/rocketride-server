@@ -781,7 +781,7 @@ def _inert_config(name: str) -> str:
     return '{}\n'  # JSON / YAML / extensionless rc
 
 
-def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
+def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     """Make every auto-loaded postcss/babel config in the tree inert.
 
     postcss-load-config searches upward from the app root, and its JSON/YAML
@@ -792,21 +792,27 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
     whose dependency specs must not use ``link:`` or out-of-tree ``file:``.
     Absent files are not created.
 
+    Returns:
+        The neutralized items, workspace-relative (config files, and
+        ``<package.json>:<key>`` for stripped keys), for the build log.
+
     Raises:
         BuildFailure: A package.json is not UTF-8 JSON, or a dependency spec
             escapes the source tree.
     """
     names = set(_NEUTRALIZED_CONFIGS)
+    neutralized: List[str] = []
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
             path = os.path.join(dirpath, name)
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
                     handle.write(_inert_config(name))
+                neutralized.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
             elif name == 'package.json':
                 rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
                 try:
-                    with open(path, 'r', encoding='utf-8') as handle:
+                    with open(path, 'r', encoding='utf-8-sig') as handle:
                         manifest = json.load(handle)
                 except (UnicodeDecodeError, ValueError) as exc:
                     # Another reader (pnpm) may parse what this one skips.
@@ -817,9 +823,11 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> None:
                     _refuse_unsafe_specs(manifest.get(table), rel)
                 if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
-                        manifest.pop(key, None)
+                        if manifest.pop(key, None) is not None:
+                            neutralized.append(f'{rel}:{key}')
                     with open(path, 'w', encoding='utf-8') as handle:
                         json.dump(manifest, handle, indent=2)
+    return neutralized
 
 
 def _remove_pnpm_configs(ws_dir: str) -> List[str]:
@@ -911,6 +919,8 @@ def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loade
         if rest.startswith(prefix):
             rest = rest[len(prefix) :]
             break
+    if rest.startswith('data:'):
+        return True  # an inline data: module (its body may contain '!')
     segments = rest.split('!')
     if any(not segment for segment in segments):
         return False
@@ -950,6 +960,7 @@ function rrRequestAllowed(request) {
   for (const prefix of ['-!', '!!', '!']) {
     if (rest.startsWith(prefix)) { rest = rest.slice(prefix.length); break; }
   }
+  if (rest.startsWith('data:')) return true;
   const segments = rest.split('!');
   if (segments.some((segment) => !segment)) return false;
   const resource = segments.pop();
@@ -1005,8 +1016,10 @@ def _emit_config(
     config_path = os.path.join(build_dir, 'rsbuild.config.mjs')
     tsconfig = os.path.join(app_dir, 'tsconfig.json')
     job_root = os.path.realpath(os.path.dirname(os.path.abspath(build_dir)))
-    loader_roots = [os.path.realpath(toolchain_dir or _env_dir())]
-    module_roots = [job_root] + loader_roots
+    # The job's node_modules IS the toolchain (a link, or a copy where links
+    # are unavailable), so loaders resolved through it are platform loaders.
+    loader_roots = sorted({os.path.realpath(toolchain_dir or _env_dir()), os.path.join(job_root, 'node_modules')})
+    module_roots = [job_root, os.path.realpath(toolchain_dir or _env_dir())]
     lines = [
         '// Server-canonical app build config — generated per build by app_build.py.',
         '// Keep the MF shape in lockstep with apps/shared/src/modules/appdev/templates.ts.',
@@ -1631,7 +1644,11 @@ class AppBuildWorker:
                 json.dump({'name': 'rocketride-app-build-ws', 'private': True}, handle, indent=1)
 
         _place_platform_tgzs(ws_dir)
-        _neutralize_tool_configs(ws_dir, app_dir)
+        neutralized = _neutralize_tool_configs(ws_dir, app_dir)
+        if neutralized:
+            log_parts.append(
+                '== materialize ==\nneutralized by the server build (not applied): ' + ', '.join(neutralized)
+            )
         _filter_env_files(app_dir)
         _link_toolchain(job_dir, env_dir)
         out_dir = os.path.join(job_dir, '.out')
