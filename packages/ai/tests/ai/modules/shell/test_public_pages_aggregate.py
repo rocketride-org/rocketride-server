@@ -62,7 +62,7 @@ def warnings(monkeypatch):
 
 
 def _store_timeout(monkeypatch, app_id='rocketride.home'):
-    """Fail every store read of ``app_id``'s versions, as a transient store error does; return the real reader."""
+    """Fail every store read of ``app_id``'s versions, with a ``StorageError``, as a transient store error does; return the real reader."""
     read = pp.read_artifact_file
 
     async def flaky(path):
@@ -435,10 +435,14 @@ async def test_a_programming_error_reading_a_row_reaches_the_rebuild_boundary(mo
     assert 'rebuild failed' in warnings[-1]
 
 
-async def test_a_malformed_emitted_manifest_skips_only_that_app():
+async def test_a_malformed_emitted_manifest_skips_only_that_app(monkeypatch):
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home,rocketride.other')
     acct = hostile_account()
+    acct.add('00000000-platform', 'rocketride.other', {'publicPages': [{'path': '/other', 'title': 'O'}]}, emit=True)
     FILES[f'{dist_of("00000000-platform", "rocketride.home")}/app-manifest.json'] = b'not json'
-    assert await load_published(acct) == []
+    assert [p.app_id for p in await load_published(acct)] == ['rocketride.other']
+    assert await pp.rebuild(acct)
+    assert _paths(pp.current()) == ['/other']
 
 
 async def test_the_gate_loader_is_strict_for_root_claimants_and_names_the_app(monkeypatch):

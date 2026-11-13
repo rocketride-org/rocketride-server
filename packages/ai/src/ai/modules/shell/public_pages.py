@@ -237,9 +237,12 @@ async def load_published(
         The published platform manifests that declare pages or a site block.
 
     Raises:
-        Exception: a publish_list failure (the rebuild keeps the previous
-            aggregate). Any error other than a storage or parse failure on
-            one app's row also propagates, as a bug to see.
+        Exception: a publish_list failure, or any error other than a
+            ``StorageError`` or ``ValueError`` while reading one app (for
+            example a database error from the saas backend's artifact(),
+            which does not wrap its driver's errors). It propagates:
+            ``PageMap.rebuild`` keeps the previous aggregate and the publish
+            gate refuses (fails closed).
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
@@ -322,8 +325,8 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
 
     Raises:
         ValueError: the emitted file exists but is not a JSON object.
-        Exception: a storage failure other than not-found (the caller
-            aborts: no partial aggregate, no unverified publish).
+        StorageError: a storage failure other than not-found. The loader
+            skips that app (aggregate) or refuses (publish gate).
     """
     from ai.account.store import StorageNotFoundError
 
@@ -416,6 +419,9 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         dist_dir: The version's store ``dist/`` tree; empty when the version
             has no artifact path.
         acct: The account layer (the singleton when None).
+
+    Returns:
+        The refusal messages; an empty list when the publish is allowed.
 
     Raises:
         Exception: the build output of a platform app cannot be located, or a
