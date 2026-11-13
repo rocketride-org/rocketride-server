@@ -18,6 +18,7 @@ const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
 const { describeText, firstParagraph } = require('./description');
+const { frontMatterTitle } = require('./twin');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -314,14 +315,6 @@ function stageNodeMarkdown(content, { slug, title, nodeRel }) {
  */
 function toPosix(p) {
 	return p.split(path.sep).join('/');
-}
-
-/** Extract a `title:` from a leading YAML front-matter block, if present. */
-function frontMatterTitle(content) {
-	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-	if (!m) return null;
-	const t = /(^|\n)title:\s*(.+?)\s*(\n|$)/.exec(m[1]);
-	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
 }
 
 /**

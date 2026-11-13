@@ -8,12 +8,48 @@
  * Text inside inline code is kept as written, so `<your-api-key>` survives.
  */
 
+const { fenceOpener, fenceCloses, codeSpanEnd } = require('./twin');
+
 const MAX = 160;
 const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|import\s|export\s|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
 const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
 // A period after these does not end a sentence, even when a capital letter follows.
 const SENTENCE_END = /(?<!\b(?:[Ee]\.g|[Ii]\.e|etc|vs|cf)\.)(?<=[.!?])\s+(?=[A-Z0-9"([])/;
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
+
+/**
+ * End index of the fenced block that opens on the line at `i`, copied up to its
+ * closing line (or the end of the text); -1 when no fence opens there.
+ */
+function fenceBlockEnd(text, i) {
+	const nl = text.indexOf('\n', i);
+	const open = fenceOpener(text.slice(i, nl < 0 ? text.length : nl));
+	if (!open) return -1;
+	let stop = nl < 0 ? text.length : nl + 1;
+	while (stop < text.length) {
+		const next = text.indexOf('\n', stop);
+		const line = text.slice(stop, next < 0 ? text.length : next);
+		stop = next < 0 ? text.length : next + 1;
+		if (fenceCloses(line, open)) break;
+	}
+	return stop;
+}
+
+/** End index of the HTML comment that starts at `i`, or -1 when there is none or it never closes. */
+function commentEnd(text, i) {
+	if (!text.startsWith('<!--', i)) return -1;
+	const end = text.indexOf('-->', i + 4);
+	return end < 0 ? -1 : end + 3;
+}
+
+/** End index of the code span at `i`; an unclosed backtick run is just the run itself. */
+function codeSpanStop(text, i) {
+	const end = codeSpanEnd(text, i);
+	if (end >= 0) return end;
+	let run = i;
+	while (text[run] === '`') run++;
+	return run;
+}
 
 /**
  * Remove HTML comments from page text, but not from fenced code blocks or inline
@@ -24,78 +60,27 @@ const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;
  * and an escaped backtick does not open a code span.
  */
 function stripComments(text) {
-	const fenceOpen = /^ {0,3}(`{3,}|~{3,})([^\n]*)/;
 	let out = '';
 	let i = 0;
 	let lineStart = true;
 	while (i < text.length) {
-		if (lineStart) {
-			const end = text.indexOf('\n', i);
-			const line = text.slice(i, end < 0 ? text.length : end);
-			const open = fenceOpen.exec(line);
-			if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
-				// Copy the whole fenced block, up to its closing line or the end of the text.
-				const close = new RegExp(`^ {0,3}${open[1][0]}{${open[1].length},}[ \\t]*\\r?$`);
-				let stop = end < 0 ? text.length : end + 1;
-				while (stop < text.length) {
-					const next = text.indexOf('\n', stop);
-					const nextLine = text.slice(stop, next < 0 ? text.length : next);
-					stop = next < 0 ? text.length : next + 1;
-					if (close.test(nextLine)) break;
-				}
-				out += text.slice(i, stop);
-				i = stop;
-				continue;
-			}
-		}
-		const ch = text[i];
-		if (ch === '\\' && i + 1 < text.length) {
-			out += text.slice(i, i + 2);
-			i += 2;
-			lineStart = false;
+		const fenceEnd = lineStart ? fenceBlockEnd(text, i) : -1;
+		if (fenceEnd >= 0) {
+			out += text.slice(i, fenceEnd);
+			i = fenceEnd;
 			continue;
 		}
-		if (text.startsWith('<!--', i)) {
-			const end = text.indexOf('-->', i + 4);
-			if (end >= 0) {
-				i = end + 3;
-				lineStart = false;
-				continue;
-			}
-		}
-		if (ch === '`') {
-			let run = 1;
-			while (text[i + run] === '`') run++;
-			// A code span ends at the next run of exactly the same number of backticks,
-			// and cannot cross a block boundary: a blank line ends the search, and so
-			// does the end of an ATX heading line.
-			let from = i + run;
-			let limit = text.length;
-			const blank = /\n[ \t\r]*(?:\n|$)/g;
-			blank.lastIndex = from;
-			const gap = blank.exec(text);
-			if (gap) limit = gap.index;
-			const lineBegin = text.lastIndexOf('\n', i - 1) + 1;
-			if (/^ {0,3}#{1,6}[ \t]/.test(text.slice(lineBegin, i))) {
-				const eol = text.indexOf('\n', from);
-				if (eol >= 0 && eol < limit) limit = eol;
-			}
-			let close = -1;
-			while (from < limit) {
-				const at = text.indexOf('`', from);
-				if (at < 0 || at >= limit) break;
-				let len = 1;
-				while (text[at + len] === '`') len++;
-				if (len === run) {
-					close = at;
-					break;
-				}
-				from = at + len;
-			}
-			const stop = close < 0 ? i + run : close + run;
+		const ch = text[i];
+		lineStart = false;
+		const stop = ch === '\\' ? Math.min(i + 2, text.length) : ch === '`' ? codeSpanStop(text, i) : -1;
+		if (stop >= 0) {
 			out += text.slice(i, stop);
 			i = stop;
-			lineStart = false;
+			continue;
+		}
+		const skipTo = commentEnd(text, i);
+		if (skipTo >= 0) {
+			i = skipTo;
 			continue;
 		}
 		out += ch;
@@ -109,21 +94,23 @@ function stripComments(text) {
 function firstParagraph(body) {
 	const text = stripComments(body).replace(/<head>[\s\S]*?<\/head>/gi, '');
 	const para = [];
-	let fence = null; // the open code fence: it closes on the same character, at least as long
+	let fence = null; // the open code fence
+	let inStatement = false; // an MDX import/export runs to the next blank line, as in Docusaurus createExcerpt
 	for (const line of text.split(/\r?\n/)) {
 		const t = line.trim();
 		if (fence) {
-			const close = /^(`{3,}|~{3,})$/.exec(t);
-			if (close && close[1][0] === fence.ch && close[1].length >= fence.len) fence = null;
+			if (fenceCloses(line, fence)) fence = null;
 			continue;
 		}
-		const open = /^(`{3,}|~{3,})/.exec(t);
+		const open = fenceOpener(line);
 		if (open) {
 			if (para.length) break;
-			fence = { ch: open[1][0], len: open[1].length };
+			fence = open;
 			continue;
 		}
-		if (!t || SKIP_LINE.test(t)) {
+		if (!t) inStatement = false;
+		else if (/^(import|export)\s/.test(t)) inStatement = true;
+		if (!t || inStatement || SKIP_LINE.test(t)) {
 			if (para.length) break;
 			continue;
 		}

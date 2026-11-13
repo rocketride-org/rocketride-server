@@ -5,6 +5,11 @@ import description from '../../scripts/lib/description.js';
 const { describePage, firstParagraph } = description;
 
 describe('describePage', () => {
+	it('skips a multi-line import or export up to the next blank line', () => {
+		assert.equal(describePage("import {\n\tA,\n\tB,\n} from 'x';\n\nReal prose.\n"), 'Real prose.');
+		assert.equal(describePage('export const x = {\n\ta: 1,\n\tb: 2,\n};\n\nReal prose.\n'), 'Real prose.');
+	});
+
 	it('joins a hard-wrapped paragraph', () => {
 		assert.equal(describePage('# T\n\nFirst line of the\nparagraph ends here.\n\nSecond.'), 'First line of the paragraph ends here.');
 	});

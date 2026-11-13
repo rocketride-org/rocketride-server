@@ -16,6 +16,10 @@ describe('cleanTwin', () => {
 		assert.match(cleanTwin(src), /^# Analytics\n\nText/);
 	});
 
+	it('ends a code span at the end of a heading line, so a stray backtick does not hide the next line', () => {
+		assert.equal(mdx('## Use ` here\n<b>bold</b> and `x`\n'), '## Use ` here\nbold and `x`\n');
+	});
+
 	it('leaves .md sources alone apart from front matter', () => {
 		assert.equal(cleanTwin('Use <name> here\nimport x from "y"\n'), 'Use <name> here\nimport x from "y"\n');
 	});
