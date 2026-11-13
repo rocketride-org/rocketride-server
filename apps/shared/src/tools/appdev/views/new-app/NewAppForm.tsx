@@ -46,6 +46,7 @@ import { Button, Card, InputField } from 'shell';
 import type { FrameOptions } from '../../templates';
 import type { NewAppIdentity } from '../../types';
 import { useDeveloperRegistration } from '../useDeveloperRegistration';
+import { isValidDeveloperId } from '../../namespaceAdoption';
 
 // =============================================================================
 // TYPES
@@ -87,10 +88,6 @@ export interface INewAppFormProps {
  * lowercase letter, then any mix of letters, digits, underscores, and hyphens
  * (the server accepts digits — e.g. `acme.s3-explorer`, `acme.app2`). */
 const APP_NAME_RE = /^[a-z][a-zA-Z0-9_-]*$/;
-
-/** Developer id (publisher slug) shape: lowercase letters and underscores,
- * starting with a letter (the server re-validates and has the final word). */
-const DEVELOPER_ID_RE = /^[a-z][a-z_]*$/;
 
 /** Wireframe geometry — the 320x200 preview canvas and its chrome regions. */
 const WF = {
@@ -347,15 +344,8 @@ export function footerNote(state: IFooterNoteState): string {
 	return 'Developer ID is read from the organization account profile.';
 }
 
-/**
- * Client-side developer id shape check (the server has the final word).
- *
- * @param slug - The trimmed id.
- * @returns True for lowercase letters and underscores, starting with a letter.
- */
-export function isValidDeveloperId(slug: string): boolean {
-	return DEVELOPER_ID_RE.test(slug);
-}
+// The developer-id shape check is shared with namespace adoption (one grammar).
+export { isValidDeveloperId } from '../../namespaceAdoption';
 
 /** How the Developer ID row renders: an editable field, the id chip, or "not confirmed". */
 export type DeveloperIdRow = 'field' | 'chip' | 'unconfirmed';
@@ -454,7 +444,10 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	// step: compute the identity summary values
 	const developerId = identity.developerId || 'local';
 	const shownName = nameValid ? appName : '<name>';
-	const linkageName = row === 'unconfirmed' ? `<developerId>.${shownName}` : `${developerId}.${shownName}`;
+	let linkageName = `${developerId}.${shownName}`;
+	if (row === 'unconfirmed') {
+		linkageName = `<developerId>.${shownName}`;
+	}
 	let chipText = developerId;
 	let chipSource = identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)';
 	if (row === 'unconfirmed') {

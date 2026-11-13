@@ -52,7 +52,7 @@ test('pageOf: a key with no dash is its own page', () => {
 	assert.equal(pageOf('plain'), 'plain');
 });
 
-test("(a) new page's watch before view:ready: the new watcher survives, the old page's is dropped", () => {
+test("new page's watch before view:ready: the new watcher survives, the old page's is dropped", () => {
 	const { registry, disposed, watch } = harness();
 	watch('fs-old-1');
 	watch('fs-new-1'); // the reloaded page's tool effect runs first
@@ -61,10 +61,11 @@ test("(a) new page's watch before view:ready: the new watcher survives, the old 
 	assert.deepEqual(disposed, ['fs-old-1']);
 });
 
-test('(b) view:ready before any new watch: the new page\'s first watch retires the old page', () => {
+test('view:ready before any new watch: the new page\'s first watch retires the old page', () => {
 	const { registry, disposed, watch } = harness();
 	watch('fs-old-1');
-	registry.resetForPageBoot(); // the new page has not watched yet
+	registry.resetForPageBoot(); // the old page's own view:ready
+	registry.resetForPageBoot(); // the new page's view:ready, before it has watched
 	assert.deepEqual(registry.keys(), ['fs-old-1'], 'nothing newer to keep yet');
 	watch('fs-new-1'); // its first watch retires the old page at once
 	assert.deepEqual(registry.keys(), ['fs-new-1']);
@@ -109,7 +110,35 @@ test('re-adding a key replaces it and disposes the previous subscription', () =>
 	assert.deepEqual(disposed, ['fs-p-1']);
 });
 
-test('(c) dispose drops every watcher', () => {
+test('after the usual order, a later unseen page does not drop the live page', () => {
+	const { registry, disposed, watch } = harness();
+	watch('fs-old-1');
+	watch('fs-new-1'); // the new page's watch first...
+	registry.resetForPageBoot(); // ...then its view:ready: nothing left to retire
+	watch('fs-other-1'); // an unseen prefix (e.g. a second realm) must not retire the live page
+	assert.deepEqual(registry.keys(), ['fs-new-1', 'fs-other-1']);
+	assert.deepEqual(disposed, ['fs-old-1']);
+});
+
+test('when both pages boot view:ready first, the new page still retires the old one', () => {
+	const { registry, disposed, watch } = harness();
+	registry.resetForPageBoot(); // the old page's view:ready...
+	watch('fs-old-1'); // ...then its first watch completes that boot
+	registry.resetForPageBoot(); // the new page's view:ready, before it has watched
+	watch('fs-new-1');
+	assert.deepEqual(registry.keys(), ['fs-new-1']);
+	assert.deepEqual(disposed, ['fs-old-1']);
+});
+
+test('the first boot leaves nothing to drop', () => {
+	const { registry, disposed, watch } = harness();
+	registry.resetForPageBoot(); // view:ready before any watch at all
+	watch('fs-first-1');
+	assert.deepEqual(registry.keys(), ['fs-first-1']);
+	assert.deepEqual(disposed, []);
+});
+
+test('dispose drops every watcher', () => {
 	const { registry, disposed, watch } = harness();
 	watch('fs-old-1');
 	watch('fs-new-1');
