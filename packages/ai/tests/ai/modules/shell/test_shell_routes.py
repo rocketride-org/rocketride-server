@@ -1506,12 +1506,10 @@ def test_a_published_page_without_rr_app_url_warns_once_at_the_swap(
     web_server, shell_root, monkeypatch, request, fixture, warns
 ):
     # A production pod without RR_APP_URL deindexes its published pages: say so, once, when it has some.
-    import ai.modules.shell as shell_pkg
-
     request.getfixturevalue(fixture)
     lines = []
-    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
-    monkeypatch.setattr(shell_pkg, '_warned_noindex', False)
+    monkeypatch.setattr(shell_mod, 'warning', lines.append)
+    monkeypatch.setattr(shell_mod, '_warned_noindex', False)
     _start_engine(web_server, monkeypatch)
     published = pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')})
     pp.swap(pp.Aggregate(exact={}))

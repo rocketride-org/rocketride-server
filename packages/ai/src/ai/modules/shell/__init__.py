@@ -68,28 +68,17 @@ from rocketlib import warning
 
 from . import indexnow, pages, public_pages
 from .pages import public_page, register_public_pages
-from .shell import app_url, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt, ungated_noindex
-
-_warned_noindex = False
-
-
-def _warn_noindex_with_published_pages(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
-    """Swap listener: warn once that published pages are served with ``noindex`` for lack of ``RR_APP_URL``.
-
-    Args:
-        old: The aggregate swapped out (unused).
-        new: The aggregate swapped in; the legacy list and an empty map publish nothing.
-    """
-    global _warned_noindex
-    if _warned_noindex or not new.serves_published_pages():
-        return
-    _warned_noindex = True
-    warning(
-        '[shell] RR_APP_URL is not set but public pages are published: every response carries '
-        'X-Robots-Tag: noindex, nofollow, and robots.txt lets crawlers fetch pages to read it; '
-        'set RR_APP_URL on an engine that serves the public site'
-    )
-
+from .shell import (
+    app_url,
+    shell_static,
+    apps_static,
+    apps_session,
+    sitemap_xml,
+    robots_txt,
+    llms_txt,
+    ungated_noindex,
+    warn_noindex_with_published_pages,
+)
 
 __all__ = ['initModule', 'register_public_pages']
 
@@ -206,5 +195,5 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # published pages, so it warns at the first swap that has some (OSS and
     # desktop engines publish none and stay quiet).
     if not app_url():
-        public_pages.on_swap(_warn_noindex_with_published_pages)
+        public_pages.on_swap(warn_noindex_with_published_pages)
         server.app.middleware('http')(ungated_noindex)
