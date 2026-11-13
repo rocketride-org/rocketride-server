@@ -7,8 +7,10 @@ title: Run from the CLI
 The `rocketride` command-line tool runs pipelines from a terminal — the same
 operations the SDKs expose, no code required. It ships with both
 [clients](/clients): `pip install rocketride` or `npm install rocketride`.
-With a global npm install `rocketride` is on your PATH; with a local
-install use `npx rocketride`.
+With a global npm install `rocketride` is on your PATH; with a local install
+it is not — in that case every `rocketride` command on this page should be
+run as `npx rocketride` (for example `npx rocketride start ...`), not as a
+bare `rocketride`.
 
 The five steps below take you from a fresh install to a running pipeline. The
 full command and flag reference is on the [CLI page](/connect/cli).

@@ -114,27 +114,41 @@ Save this as `rag.pipe`:
 | `llm_1` | `llm_openai` | Receives the question + retrieved context and generates an answer using GPT-4o. |
 | `target_1` | `response_answers` | Returns the answer to the caller. |
 
+## Set the API key
+
+The example pipeline references `${ROCKETRIDE_OPENAI_API_KEY}` — the engine
+resolves only `ROCKETRIDE_`-prefixed variables:
+
+```bash
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
+```
+
 ## Start the pipeline
 
 ```bash
 rocketride start --pipeline ./rag.pipe
 ```
 
-The engine prints the webhook URL and public auth key:
+The CLI prints only the task token; it does not print the endpoint address.
+When the webhook source starts, the engine publishes the interface URL and
+the credentials to the run's **Project Log** (the IDE task monitor) — see
+[Webhook Pipeline](/examples/webhook-pipeline#start-the-pipeline) for the
+details. Copy from there:
 
-```text
-Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/webhook/rag-example/source_1
-  Auth: abc123...
-```
+- the **Webhook interface URL** — `{host}/webhook/{project_id}/{source}`
+- the **Public Authorization Key** (`pk_...`)
+
+The `localhost:5567` URLs in the curl examples below illustrate that shape —
+use your own URL and key from the Project Log.
 
 ## Ingest documents
 
-POST a document to the webhook URL. The pipeline embeds and stores it:
+POST a document to the webhook URL and public authorization key from the
+Project Log. The pipeline embeds and stores it:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
+curl -X POST "http://localhost:5567/webhook/rag-example/source_1" \
+  -H "Authorization: Bearer pk_..." \
   -F "file=@./my-document.pdf"
 ```
 
@@ -143,8 +157,8 @@ curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
 Send a plain-text question to the same endpoint:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
+curl -X POST "http://localhost:5567/webhook/rag-example/source_1" \
+  -H "Authorization: Bearer pk_..." \
   -H "Content-Type: text/plain" \
   -d "What does the document say about refund policy?"
 ```

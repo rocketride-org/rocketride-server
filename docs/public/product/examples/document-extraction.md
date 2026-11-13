@@ -87,7 +87,7 @@ Save this as `extract.pipe`:
 Put some PDF invoices in `/data/invoices`, then:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./extract.pipe
 ```

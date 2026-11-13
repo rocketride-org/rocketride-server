@@ -50,28 +50,47 @@ result.
 
 ## Start the pipeline
 
+The example pipeline references `${ROCKETRIDE_OPENAI_API_KEY}` — the engine
+resolves only `ROCKETRIDE_`-prefixed variables:
+
 ```bash
-export OPENAI_API_KEY=sk-...
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./chat.pipe
 ```
 
-Output:
+The CLI prints only the task token and the stop command; the pipeline keeps
+running on the engine:
 
 ```text
-Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/webhook/webhook-example/source_1
-  Auth: <public-auth-key>
-  Token: <private-token>
+Pipeline started.
+Token: eyJ...
+Stop it with: rocketride stop --token eyJ...
 ```
+
+It does **not** print the endpoint address. When the webhook source starts,
+the engine generates the credentials and writes them — along with the
+endpoint's interface URL — to the run's **Project Log** (the IDE task
+monitor). Open the Project Log for the run and copy:
+
+- the **Webhook interface URL** — `{host}/webhook/{project_id}/{source}`
+  for example `http://localhost:5567/webhook/webhook-example/source_1`
+- the **Public Authorization Key** (`pk_...`) — sent by callers as a Bearer key
+- the **Private Token** (`tk_...`) — keep secret, like the task token above
+
+The CLI does not stream these events; the Project Log is where the URL and
+keys are found. (It is local to whoever started the pipeline.)
 
 Keep the terminal open — the pipeline runs until you stop it.
 
 ## Send a question
 
+Use the URL and public authorization key from the Project Log (see
+[Start the pipeline](#start-the-pipeline)):
+
 ```bash
 curl -X POST "http://localhost:5567/webhook/webhook-example/source_1" \
-  -H "Authorization: Bearer <public-auth-key>" \
+  -H "Authorization: Bearer pk_YOUR-PUBLIC-AUTH-KEY" \
   -H "Content-Type: text/plain" \
   -d "What is the capital of France?"
 ```
@@ -79,7 +98,7 @@ curl -X POST "http://localhost:5567/webhook/webhook-example/source_1" \
 Response:
 
 ```json
-{ "answer": "The capital of France is Paris." }
+{ "answers": ["The capital of France is Paris."] }
 ```
 
 ## Use the Chat UI variant
@@ -91,17 +110,13 @@ HTTP endpoint, no `curl` required:
 { "id": "source_1", "provider": "chat" }
 ```
 
-Restart the pipeline. The engine prints a chat URL:
-
-```text
-Chat ready - system is ready to accept questions
-  URL: http://localhost:5567/chat/webhook-example/source_1?auth=<public-auth-key>
-```
-
+Restart the pipeline. When the chat source starts, the engine publishes — in
+the run's Project Log — the Chat interface URL, for example
+`http://localhost:5567/chat/webhook-example/source_1?auth=pk_...`.
 Open that URL in a browser and start typing. The `?auth=` query parameter is a
 convenience for supplying the credential to the browser; the Chat UI stores it
 in session storage for subsequent page loads. Webhook requests use the same key
-in an `Authorization: Bearer <public-auth-key>` header.
+in an `Authorization: Bearer pk_...` header.
 
 Each displayed URL includes the project and source identifiers, so it remains
 specific to this pipeline. The legacy `/webhook`, `/task/data`, `/chat`, and

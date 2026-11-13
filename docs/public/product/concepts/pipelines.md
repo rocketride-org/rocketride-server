@@ -12,8 +12,8 @@ executed by the engine.
 ## Components and providers
 
 Each node in the graph is a **component** with a unique `id` and a `provider`
-that determines its behaviour (for example `webhook`, `response`, or an LLM
-provider). Provider-specific settings live in the component's `config`.
+that determines its behaviour (for example `webhook`, `response_questions`, or
+an LLM provider). Provider-specific settings live in the component's `config`.
 
 See the [Nodes](/nodes) catalog for every available provider.
 
