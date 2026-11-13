@@ -40,7 +40,6 @@ import math
 import re
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -577,7 +576,7 @@ async def test_one_bind_reads_a_named_app_once(acct, monkeypatch):
 
 def test_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, shell_root, monkeypatch):
     clock = [1000.0]
-    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
     _seed()
     _serve(_page('/pricing', ['plans:acme.brandy']), _page('/about', []))
     client = _client()
@@ -596,7 +595,7 @@ def test_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, she
 def test_a_fresh_bound_response_never_advertises_more_than_the_ttl(acct, shell_root, monkeypatch):
     # At this clock, (now + 300) - now is 300.0000000000582 in floating point,
     # which ceil turned into max-age=301 (seen on a CI runner).
-    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: 524202.9789498676))
+    monkeypatch.setattr(pages, 'monotonic', lambda: 524202.9789498676)
     _seed()
     _serve(_page('/pricing', ['plans:acme.brandy']))
     assert _crawl(_client()).headers['cache-control'] == 'public, max-age=300'

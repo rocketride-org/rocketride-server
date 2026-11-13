@@ -85,7 +85,6 @@ and the ``site.notFound`` response once per page map and UA class.
 import asyncio
 import math
 import sys
-import time
 from functools import partial
 from pathlib import Path
 from time import monotonic
@@ -799,7 +798,7 @@ async def _not_found_page(request: Request, aggregate: public_pages.Aggregate) -
     index = shell_document_path(request, capture=False)
     stat = index.stat()
     key = (_NOT_FOUND_KEY, crawler, index, stat.st_mtime_ns, stat.st_size)
-    now = time.monotonic()
+    now = monotonic()
     cached = _render_cache.get(key)
     if cached is None or cached.expires <= now:
         generation = _generation
@@ -1043,7 +1042,7 @@ async def _render_page(request: Request, path: str, page: Page, aggregate: publi
     crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document, mtime_ns, size = _shell_document(request, path)
     key = (path, crawler, document, mtime_ns, size, app_url())
-    now = time.monotonic()
+    now = monotonic()
     cached = _render_cache.get(key)
     if cached is None or cached.expires <= now:
         generation = _generation

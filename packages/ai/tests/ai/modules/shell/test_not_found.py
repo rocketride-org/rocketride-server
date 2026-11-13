@@ -39,7 +39,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -128,7 +127,7 @@ def _counted(monkeypatch, owner, name):
 def clock(monkeypatch):
     """The monotonic clock ``pages`` reads, moved by hand."""
     now = [1000.0]
-    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(pages, 'monotonic', lambda: now[0])
     return now
 
 
