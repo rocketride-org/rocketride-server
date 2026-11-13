@@ -21,6 +21,8 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
+import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
 interface IAppDevOpsDeps {
@@ -40,36 +42,32 @@ interface IAppDevOpsDeps {
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
-	/**
-	 * Resolves the developer id from the connected server's account info, for
-	 * the wizard's registry-name preview only: the files carry the slug, and
-	 * the deploy door attaches whatever id the organization holds then.
-	 */
-	const resolveDeveloperId = (): { developerId: string; source: 'organization' | 'default' } => {
-		const client = connectionManager.getClient();
-		if (!client || !connectionManager.isConnected()) {
-			return { developerId: '', source: 'default' };
-		}
-		const accountInfo = client.getAccountInfo() as { organization?: { developerId?: string } } | null;
-		const developerId = accountInfo?.organization?.developerId;
-		return developerId ? { developerId, source: 'organization' } : { developerId: '', source: 'default' };
+	/** Logs an appdev failure to the RocketRide output channel. */
+	const logError = (message: string): void => {
+		getLogger().error(`[appdev] ${message}`);
 	};
+	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
+	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, logError);
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
-		const { developerId, source } = resolveDeveloperId();
-		return {
-			developerId,
-			source,
+		// For the wizard's registry-name preview and its Register field only:
+		// the files carry the slug, and the deploy door attaches whatever id
+		// the organization holds then.
+		return toWizardIdentity(await developer.resolve(), {
 			workspaceOpen: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
 			existingFolders: await listAppFolders(),
-		};
+		});
 	};
 
+	/** Stamps each identity with a revision and pushes only the newest. */
+	const feed = new IdentityFeed(buildIdentity, broadcast);
+
 	const impls: OpImplTable<AppDevOpMap> = {
-		'host.appdev.identity': () => buildIdentity(),
+		'host.appdev.identity': () => feed.refresh(false),
 		'host.appdev.scaffold': async (p) => {
 			// The files carry the SLUG only; scaffoldApp re-validates it and
-			// the folder and opens the App Builder itself.
+			// the folder and opens the App Builder itself. The developer id is
+			// not needed here: the deploy door attaches it.
 			await scaffoldApp({
 				appId: p.appName,
 				appName: p.displayName,
@@ -78,6 +76,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 			// The real builder is open — retire the untitled document.
 			closeWizard();
 		},
+		'host.appdev.registerDeveloper': makeRegisterDeveloperHandler({ identity: developer, feed, log: logError }),
 		'host.appdev.closeWizard': async () => closeWizard(),
 	};
 	registerOpHandlers<AppDevOpMap>(bus, impls);
@@ -85,10 +84,9 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	// A login/logout while the modeless wizard sits open changes the linkage
 	// name — push the fresh identity to every realm.
 	const push = (): void => {
-		void buildIdentity().then(
-			(identity) => broadcast('host.appdev.identityChanged', identity),
-			() => { /* best effort — the page can re-pull */ }
-		);
+		feed.refresh(true).catch((err: unknown) => {
+			logError(`identity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+		});
 	};
 	for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
 		connectionManager.on(event, push);

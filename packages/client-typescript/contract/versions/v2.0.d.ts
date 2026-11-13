@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 9a6ccc311ffcb00901f01a33fe53008df5908be5
+// Source commit: 564d87b496ec5c3c36e76ab28f51935071348d0f
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -6825,10 +6825,15 @@ export declare class RocketRideClient extends DAPClient {
      * every app id it owns. Readable on both editions (OSS answers the
      * fixed namespace its sessions carry; there is no Stripe Connect there).
      *
+     * @param options - Optional request settings.
+     * @param options.timeout - Per-request timeout in ms; on expiry the request
+     *   rejects and is dropped from the pending table, so a late reply is ignored.
      * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
      *   `developerId` is null until an org admin registers one
      */
-    developerStatus(): Promise<{
+    developerStatus(options?: {
+        timeout?: number;
+    }): Promise<{
         developerId: string | null;
         stripeAccountId: string | null;
         stripeAccountStatus: string;
@@ -6839,9 +6844,15 @@ export declare class RocketRideClient extends DAPClient {
      * publish beyond the workspace.
      *
      * @param developerId - The slug to claim (lowercase letters/underscores)
+     * @param options - Optional request settings.
+     * @param options.timeout - Per-request timeout in ms; on expiry the request
+     *   rejects and is dropped from the pending table (the claim may still land
+     *   on the server, so callers should re-check developerStatus()).
      * @returns The server's registration record
      */
-    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
+    registerDeveloper(developerId: string, options?: {
+        timeout?: number;
+    }): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
