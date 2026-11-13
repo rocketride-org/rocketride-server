@@ -433,7 +433,7 @@ def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
     """
     key = (path, bool(request.url.query))
     hit = _documents.get(key)
-    if hit is not None and _unchanged(*hit):
+    if hit is not None and _file_version(hit[0]) == hit[1:]:
         return hit
     document = shell_document_path(request)
     stat = document.stat()
@@ -441,13 +441,13 @@ def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
     return _documents[key]
 
 
-def _unchanged(document: Path, mtime_ns: int, size: int) -> bool:
-    """Whether ``document`` still has this mtime and size; False once it is gone."""
+def _file_version(document: Path) -> Optional[Tuple[int, int]]:
+    """``document``'s ``(mtime_ns, size)``, or None once it is gone."""
     try:
         stat = document.stat()
     except OSError:
-        return False
-    return stat.st_mtime_ns == mtime_ns and stat.st_size == size
+        return None
+    return stat.st_mtime_ns, stat.st_size
 
 
 def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
