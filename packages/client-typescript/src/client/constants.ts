@@ -66,6 +66,20 @@ export const CONST_DEFAULT_SERVICE = CONST_DEFAULT_WEB_CLOUD;
 export const CONST_SOCKET_TIMEOUT = 180;
 
 /**
+ * process() data up to this many bytes travels inline in ONE request; larger
+ * payloads (and every call with onSSE) stream through pipe open/write/close.
+ * One shared constant with the server and the Python SDK (1 MiB).
+ */
+/**
+ * Seconds the TRANSPORT deadline of a process() request outlives the caller's
+ * `timeout` (which the server enforces, pipe open to close): the server's own
+ * timeout error, never the transport's, is what the caller sees.
+ */
+export const PROCESS_TRANSPORT_MARGIN = 60;
+
+export const PROCESS_INLINE_MAX = 1024 * 1024;
+
+/**
  * WebSocket ping interval in seconds.
  * Ping frames are sent at this interval to detect dead connections.
  */

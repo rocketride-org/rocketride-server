@@ -23,13 +23,15 @@ from __future__ import annotations
 import errno
 import socket
 import sys
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from ai.modules.task import task_server as task_server_module
-from ai.modules.task.task_server import TaskServer
+from ai.modules.task.task_control import TaskControl
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 
 # A registry key in the ``runKind.ownerId.address`` layout start_task builds.
@@ -52,12 +54,21 @@ def _make_server(*, config=None, web_server=None):
         TaskServer: a test-ready instance.
     """
     ts = TaskServer.__new__(TaskServer)
-    ts._task_control = {}
+    ts._task_control = ControlRegistry()
+    ts._engines = EngineRegistry()
+    ts._engine_unavailable = {}
+    ts._deployment_revoked = {}
+    ts._control_starts = {}
+    ts._engine_restarts = {}
+    ts._restart_tasks = set()
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
     ts._allocated_ports = []
     ts._reserved_ports = set()
+    ts._control_expiry = []
+    ts._engine_expiry = []
+    ts._expiry_gen = 0
     ts._store_instance = None
     ts._config = config if config is not None else {}
     ts._server = web_server or MagicMock()
@@ -65,16 +76,17 @@ def _make_server(*, config=None, web_server=None):
     return ts
 
 
-def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None):
+def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None, ttl=900):
     """
-    Build a TASK_CONTROL-shaped stand-in carrying the attributes the registry
+    Build a TaskControl-shaped stand-in carrying the attributes the registry
     lookups, the broadcast path and the cleanup loops read.
 
     Args:
         key: registry key (``runKind.ownerId.address``; lookup key in ``_task_control``).
         user_id: owner user id (used by run-scoped checks).
         team_id: owning team id (used by permission resolution).
-        task: the underlying Task stand-in (defaults to a MagicMock).
+        task: the underlying engine stand-in (defaults to a MagicMock).
+        ttl: the control's idle ttl in seconds (0 = no idle limit).
 
     Returns:
         SimpleNamespace: control structure stand-in.
@@ -91,6 +103,9 @@ def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None):
         owner_id=user_id,
         project_id='proj-1',
         source='src-1',
+        ttl=ttl,
+        dormant=False,
+        origin=None,
         task=task or MagicMock(),
     )
 
@@ -475,7 +490,7 @@ def test_probe_port_never_reports_a_failed_bind_as_free(monkeypatch):
 
 
 def test_control_by_key_returns_registered_control():
-    """A registered key returns the matching TASK_CONTROL structure."""
+    """A registered key returns the matching TaskControl structure."""
     ts = _make_server()
     control = _make_control()
     ts._task_control[KEY] = control
@@ -770,9 +785,34 @@ async def test_cleanup_tasks_skips_running_task(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _ttl_control(ts, key, *, ttl, idle, run_kind='dev', pipeline_event=0.0):
+    """
+    Register a real TaskControl idle for ``idle`` seconds and schedule its expiry.
+
+    Args:
+        ts: The server under test.
+        key: The control's registry key.
+        ttl: The control's idle ttl (0 = no idle limit).
+        idle: Seconds since the control's last activity.
+        run_kind: ``'dev'`` counts the engine's pipeline events as activity.
+        pipeline_event: The engine's last dev pipeline event (monotonic).
+
+    Returns:
+        TaskControl: the registered control.
+    """
+    task = MagicMock()
+    task.is_task_complete = MagicMock(return_value=False)
+    task.last_pipeline_event = pipeline_event
+    control = TaskControl(id=key, key=key, run_kind=run_kind, ttl=ttl, task=task)
+    control.last_activity = time.monotonic() - idle
+    ts._task_control[key] = control
+    ts._schedule_control(control)
+    return control
+
+
 @pytest.mark.asyncio
 async def test_monitor_ttl_terminates_idle_task(monkeypatch):
-    """A task whose idle_time crosses ``_ttl`` is terminated by the TTL monitor."""
+    """A control whose OWN idle time reached its ttl is released by the TTL monitor."""
     from ai.modules.task import task_server as ts_mod
 
     counter = {'n': 0}
@@ -788,12 +828,7 @@ async def test_monitor_ttl_terminates_idle_task(monkeypatch):
 
     ts = _make_server()
     ts.stop_task = AsyncMock()
-
-    task = MagicMock()
-    task.is_task_complete = MagicMock(return_value=False)
-    task._ttl = 100
-    task._idle_time = 50  # 50 + 60 (check interval) > 100 -> terminate
-    ts._task_control['dev.user-1.acme.proj-1.idle'] = _make_control(key='dev.user-1.acme.proj-1.idle', task=task)
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.idle', ttl=100, idle=100)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
@@ -805,7 +840,7 @@ async def test_monitor_ttl_terminates_idle_task(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
-    """A task with ``_ttl == 0`` has no timeout and is never terminated."""
+    """A control with ttl 0 has no timeout: it is never scheduled, never terminated."""
     from ai.modules.task import task_server as ts_mod
 
     counter = {'n': 0}
@@ -820,18 +855,12 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
 
     ts = _make_server()
     ts.stop_task = AsyncMock()
-
-    task = MagicMock()
-    task.is_task_complete = MagicMock(return_value=False)
-    task._ttl = 0
-    task._idle_time = 999_999
-    ts._task_control['dev.user-1.acme.proj-1.immortal'] = _make_control(
-        key='dev.user-1.acme.proj-1.immortal', task=task
-    )
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.immortal', ttl=0, idle=999_999)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
 
+    assert ts._control_expiry == []
     ts.stop_task.assert_not_awaited()
 
 
@@ -861,9 +890,13 @@ async def test_remove_task_calls_stop_and_broadcasts():
 
     task = MagicMock()
     task.stop_task = AsyncMock()
+    task.is_task_complete.return_value = False
+    task._stop_requested = False
     control = SimpleNamespace(
         id='acme.proj-1.src-1',
         key='dev.user-1.acme.proj-1.rm',
+        address='acme.proj-1.src-1',
+        developer_id='acme',
         userId='u1',
         teamId='t1',
         run_kind='dev',
@@ -1068,17 +1101,8 @@ async def test_push_org_update_notifies_every_connection_on_the_org(monkeypatch)
 
 
 # ---------------------------------------------------------------------------
-# _monitor_ttl: the counter itself, and the two halves of the trade
+# _monitor_ttl: the control's own clock, and the two halves of the trade
 # ---------------------------------------------------------------------------
-
-
-def _ttl_task(*, ttl, idle):
-    """A task stand-in whose ``_idle_time`` is a real int, not a MagicMock attribute."""
-    task = MagicMock()
-    task.is_task_complete = MagicMock(return_value=False)
-    task._ttl = ttl
-    task._idle_time = idle
-    return task
 
 
 async def _one_ttl_cycle(monkeypatch, ts, *, check=60):
@@ -1101,27 +1125,50 @@ async def _one_ttl_cycle(monkeypatch, ts, *, check=60):
 
 @pytest.mark.asyncio
 async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
-    """A task nothing has touched still ages, so the reaper is not disabled."""
+    """A control nothing has touched still ages, so the reaper is not disabled."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    task = _ttl_task(ttl=900, idle=0)
-    ts._task_control['dev.user-1.acme.proj-1.quiet'] = _make_control(key='dev.user-1.acme.proj-1.quiet', task=task)
+    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.quiet', ttl=900, idle=0)
 
+    # Not due yet: the pass pops nothing
     await _one_ttl_cycle(monkeypatch, ts)
-
-    assert task._idle_time == 60, 'a silent task must accumulate idle time'
     ts.stop_task.assert_not_awaited()
+
+    # Its own clock runs on: at its ttl it is released
+    assert await ts._ttl_cycle(control.last_activity + 900) == 1
+    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.quiet', reason='ttl')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_holds_a_control_with_a_request_in_flight():
+    """A call longer than the ttl is never expired mid-flight; the clock restarts when it ends."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.slow', ttl=900, idle=0)
+
+    # The request starts; its ttl comes and goes while it runs: re-armed, not released
+    control.begin_request()
+    started = control.last_activity
+    assert await ts._ttl_cycle(started + 900) == 1
+    ts.stop_task.assert_not_awaited()
+    assert control.inflight == 1
+
+    # It ends: the entry was re-armed one ttl after that pass; nothing is due before then, and at
+    # that pass the control's own idle time (since the request ended) decides, as always
+    control.end_request()
+    assert control.inflight == 0
+    assert await ts._ttl_cycle(started + 1799) == 0
+    ts.stop_task.assert_not_awaited()
+    assert await ts._ttl_cycle(started + 1800) == 1
+    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.slow', reason='ttl')
 
 
 @pytest.mark.asyncio
 async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
-    """The other half of the trade: an abandoned task is still collected."""
+    """The other half of the trade: an abandoned control is still collected."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    task = _ttl_task(ttl=900, idle=860)
-    ts._task_control['dev.user-1.acme.proj-1.abandoned'] = _make_control(
-        key='dev.user-1.acme.proj-1.abandoned', task=task
-    )
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.abandoned', ttl=900, idle=900)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
@@ -1129,34 +1176,47 @@ async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitor_ttl_spares_a_task_whose_timer_was_reset(monkeypatch):
-    """Work resets the counter, so a busy task survives a cycle it would have died in."""
+async def test_monitor_ttl_spares_a_task_whose_clock_was_reset(monkeypatch):
+    """Activity after scheduling re-schedules: a busy control survives its stale deadline."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    task = _ttl_task(ttl=900, idle=860)
-    task._idle_time = 0  # what on_event does when the pipeline reports work
-    ts._task_control['dev.user-1.acme.proj-1.busy'] = _make_control(key='dev.user-1.acme.proj-1.busy', task=task)
+    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.busy', ttl=900, idle=900)
+    control.touch()  # a request through the control
 
     await _one_ttl_cycle(monkeypatch, ts)
 
-    assert task._idle_time == 60
     ts.stop_task.assert_not_awaited()
+    ((deadline, gen, key),) = ts._control_expiry
+    assert key == control.key and gen == control.expiry_gen
+    assert deadline == pytest.approx(control.last_activity + 900, abs=1.0)
 
 
 @pytest.mark.asyncio
-async def test_monitor_ttl_leaves_a_zero_ttl_counter_alone(monkeypatch):
-    """``ttl: 0`` skips before the increment, so its idle counter never moves."""
+async def test_monitor_ttl_counts_pipeline_events_for_a_dev_control_only(monkeypatch):
+    """A dev run's pipeline events are its activity; a deployment run's ttl is a run window."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    task = _ttl_task(ttl=0, idle=0)
-    ts._task_control['dev.user-1.acme.proj-1.immortal'] = _make_control(
-        key='dev.user-1.acme.proj-1.immortal', task=task
-    )
+    busy = time.monotonic()
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.dev', ttl=900, idle=900, pipeline_event=busy)
+    _ttl_control(ts, 'team.team-1.acme.proj-1.dep', ttl=900, idle=900, run_kind='deploy', pipeline_event=busy)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
-    assert task._idle_time == 0
+    ts.stop_task.assert_awaited_once_with('team.team-1.acme.proj-1.dep', reason='ttl')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_drops_the_stale_entry_of_a_replaced_control(monkeypatch):
+    """A control replaced under its key is not released at its predecessor's deadline."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.run', ttl=60, idle=60)
+    _ttl_control(ts, 'dev.user-1.acme.proj-1.run', ttl=600, idle=0)
+
+    await _one_ttl_cycle(monkeypatch, ts)
+
     ts.stop_task.assert_not_awaited()
+    assert len(ts._control_expiry) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1192,7 +1252,16 @@ def _seed_running_task(ts):
     task = MagicMock()
     task.is_task_complete.return_value = False
     control = SimpleNamespace(
-        id=LAUNCH_ADDRESS, key=LAUNCH_KEY, address=LAUNCH_ADDRESS, pipeline=_launch_pipeline(), task=task
+        id=LAUNCH_ADDRESS,
+        key=LAUNCH_KEY,
+        address=LAUNCH_ADDRESS,
+        developer_id='acme',
+        project_id='project-1',
+        source='src',
+        owner_id='user-1',
+        pipeline=_launch_pipeline(),
+        origin=None,
+        task=task,
     )
     ts._task_control[LAUNCH_KEY] = control
     return control

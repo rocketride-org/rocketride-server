@@ -361,6 +361,25 @@ Restart a running pipeline with a new configuration: the server looks up the exi
 await client.restart({ projectId: 'proj-123', source: 'webhook_1', pipeline });
 ```
 
+### `process(options): Promise<PROCESS_RESULT>`
+
+One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Options: exactly one of `name`, `pipeline` or `filepath` (Node only), plus `source?`, `params?`, `data?`, `objinfo?`, `mimetype?`, `onSSE?`, `threads?`, `args?`, `ttl?`, `env?`, `pipelineTraceLevel?`, `onChange?` (`'error'` | `'keep'` | `'auto'`), `timeout?` (seconds), `team?`.
+
+- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@dev` run (attach only; a name never starts a dev run), your `@me` deployment, the first team in your team order that publishes it (`team` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
+- **`pipeline` / `filepath`** address your own `@dev` run for that spec. When it already runs other content, `onChange` decides: `'error'` (default, fails with both hashes), `'keep'` (deliver to the running engine; `specMatch` is `false`), `'auto'` (move your run to the new spec; nothing is stopped for anyone else).
+- Data up to `PROCESS_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `onSSE`, streams through a pipe. Same result either way.
+- `timeout` (seconds) covers the request only, pipe open to close. The pipeline stays up afterwards and expires on its idle ttl.
+
+Returns the pipe close body plus the stamps `token` (the address that answered), `resolved` (`'@dev'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@dev`), `engineKey`, `specMatch`, `converged` (`'none'`, `'started'`, `'repointed'`), `ignored`, and `warnings` (`address_collision`, `repoint_storm`) when any.
+
+```typescript
+const result = await client.process({ name: 'acme.docBrain', data: 'What is in this file?' });
+console.log(result.resolved, result.answers);
+
+// The zero-publish loop: your own dev run of a local spec
+await client.process({ filepath: './docBrain.pipe', data: '...', onChange: 'auto' });
+```
+
 ### `terminate(token: string): Promise<void>`
 
 Terminate a running pipeline.
@@ -418,7 +437,7 @@ const ocr = await client.getService('ocr');
 
 ## 4. Sending Data
 
-### `send(token, data, objinfo?, mimetype?, onSSE?): Promise<PIPELINE_RESULT | undefined>`
+### `send(token, data, objinfo?, mimetype?, onSSE?, team?): Promise<PIPELINE_RESULT | undefined>`
 
 Send data directly to a pipeline in one shot (internally: open pipe → write → close).
 
@@ -453,7 +472,7 @@ const results = await client.sendFiles(
 );
 ```
 
-### `pipe(token, objinfo?, mimeType?, provider?, onSSE?): Promise<DataPipe>`
+### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?): Promise<DataPipe>`
 
 Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`.
 

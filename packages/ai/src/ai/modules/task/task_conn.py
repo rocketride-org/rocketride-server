@@ -67,6 +67,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
+from .commands.cmd_process import ProcessCommands
 from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_cprofile import CProfileCommands
@@ -87,8 +88,9 @@ from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
-    from .task_engine import Task
-    from .task_server import TaskServer, TASK_CONTROL
+    from .task_control import TaskControl
+    from .task_engine import TaskEngine
+    from .task_server import TaskServer
 
 """
 Permissions Management
@@ -136,6 +138,7 @@ SCOPED_KEY_COMMANDS = frozenset(
         'rrext_ping',
         'rrext_identify',
         'rrext_process',
+        'process',
         'rrext_monitor',
         'rrext_get_task_status',
         'rrext_get_pipeline',
@@ -163,6 +166,7 @@ def scoped_key_commands(account_info: Any) -> Optional[frozenset]:
 class TaskConn(
     TaskCommands,
     DataCommands,
+    ProcessCommands,
     MonitorCommands,
     MiscCommands,
     CProfileCommands,
@@ -195,6 +199,7 @@ class TaskConn(
     - DAP standard commands (initialize, terminate, etc.) → specialized handlers
     - Task commands (launch, execute, attach) → TaskCommands mixin
     - Data commands (ext_process) → DataCommands mixin
+    - process (resolve + one request) → ProcessCommands mixin
     - Monitor commands (ext_monitor) → MonitorCommands mixin
     - Generic task commands → delegated to task instances
 
@@ -730,7 +735,7 @@ class TaskConn(
         args = request.get('arguments') or {}
         return args.get('token') or ''
 
-    def get_control(self, request: Dict[str, Any], permissions: str = '') -> 'TASK_CONTROL':
+    def get_control(self, request: Dict[str, Any], permissions: str = '') -> 'TaskControl':
         """
         Resolve the control a command request addresses, under this connection's account.
 
@@ -745,7 +750,7 @@ class TaskConn(
             permissions (str): The permission the command needs.
 
         Returns:
-            TASK_CONTROL: The resolved control.
+            TaskControl: The resolved control.
 
         Raises:
             TaskError: Bad address grammar, or no rung answered.
@@ -753,9 +758,17 @@ class TaskConn(
                 key's endpoints scope.
         """
         address = self.get_task_address(request)
+        # A data request may name the team it must resolve through: process()
+        # passes on the team that answered it, so a streamed payload lands on
+        # the control the stamps describe, never on another team's run that
+        # comes first in the caller's team order
+        arguments = request.get('arguments')
+        team = arguments.get('team') if isinstance(arguments, dict) else None
+        if team:
+            return self._server.resolve_control(address, self._account_info, permissions or None, team=str(team))
         return self._server.resolve_control(address, self._account_info, permissions or None)
 
-    def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
+    def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'TaskEngine':
         """
         Retrieve the task instance a command request addresses.
 
@@ -764,7 +777,7 @@ class TaskConn(
             permissions (str): The permission the command needs.
 
         Returns:
-            Task: The task behind the resolved control.
+            TaskEngine: The engine the resolved control holds.
 
         Raises:
             TaskError: Bad address grammar, or no rung answered.

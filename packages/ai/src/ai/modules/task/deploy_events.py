@@ -59,6 +59,8 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib import error
 
+from .task_control import DeploymentRef
+
 
 async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, project_id: str, action: str) -> None:
     """Push the org-scoped ``apaevt_deploy`` invalidation event.
@@ -91,6 +93,35 @@ async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, proje
         )
     except Exception as e:
         error(f'[DEPLOY] {team_id}/{project_id}: deploy-change broadcast failed: {e}')
+
+
+#: Deployment states that end every run resolved through the deployment.
+CONST_RELEASING_STATES = frozenset({'disabled', 'removed'})
+
+
+async def release_deployment_holds(server: Any, org_id: str, team_id: str, project_id: str, action: str) -> None:
+    """Release the holds of every run resolved through a disabled or removed deployment.
+
+    The publisher's kill switch (plan 7.2): each control that resolved
+    through the deployment drops its hold, and an engine stops once nobody
+    holds it. A hold of a control that did not resolve through it (the
+    owner's own @dev run of identical content) keeps its engine. Any other
+    action releases nothing. A failure is logged and never fails the state
+    change that triggered it, like every deploy event.
+
+    Args:
+        server: The DAP server (``release_deployment_holds`` provider).
+        org_id: The deployment's org.
+        team_id: The deployment's team slot (``user~{uid}`` for a personal one).
+        project_id: The deployed pipeline.
+        action: The state change ('disabled', 'removed', ...).
+    """
+    if action not in CONST_RELEASING_STATES:
+        return
+    try:
+        await server.release_deployment_holds(DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id))
+    except Exception as e:
+        error(f'[DEPLOY] {team_id}/{project_id}: releasing the holds of the deployment failed: {e}')
 
 
 async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: str) -> None:

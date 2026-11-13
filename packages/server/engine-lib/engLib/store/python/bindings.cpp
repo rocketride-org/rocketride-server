@@ -893,9 +893,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_FUNCTION(
             getPipe,
             [](IServiceEndpoint &self, std::optional<std::string> traceLevel,
-               uint64_t parentBindingId) -> IServiceFilterInstance & {
+               uint64_t traceId) -> IServiceFilterInstance & {
                 // The binding's level: the wire name given, or the endpoint
-                // default when none
+                // default when none (a joined tree keeps its own level)
                 auto level = self.config.pipelineTraceLevel;
                 if (traceLevel
                     && !IServiceEndpoint::parseTraceLevel(*traceLevel, level))
@@ -911,7 +911,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Retrieve the pipe, letting others run meanwhile
                 auto result = [&] {
                     engine::python::UnlockPython unlock;
-                    return self.getPipe(level, parentBindingId);
+                    return self.getPipe(level, traceId);
                 }();
                 pipeRefusal = nullptr;
                 if (refusal) throw *refusal;
@@ -923,7 +923,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Return a reference to it
                 return *pipe;
             },
-            py::arg("traceLevel") = py::none(), py::arg("parentBindingId") = 0,
+            py::arg("traceLevel") = py::none(), py::arg("traceId") = 0,
             py::return_value_policy::reference)
 
         .PYBIND_FUNCTION(
@@ -985,12 +985,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     py::class_<IServiceFilterInstance>(engLib, "IServiceFilterInstance")
         .PYBIND_PROP_READONLY(IServiceFilterInstance, uint32_t, pipeId, pipeId)
 
-        // The binding this instance is serving - every instance of one
-        // getPipe() shares the pipe object, so they all report the same ids
-        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint64_t, bindingId,
-                              pipe->bindingId)
-        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint64_t, rootBindingId,
-                              pipe->rootBindingId)
+        // The request tree this instance is serving - every instance of one
+        // getPipe() shares the pipe object, so they all report the same id
+        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint64_t, traceId,
+                              pipe->traceId)
         .PYBIND_PROP_READONLY_CUSTOM(
             traceLevel,
             [](IServiceFilterInstance &self) -> std::string {

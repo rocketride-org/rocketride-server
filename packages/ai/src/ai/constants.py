@@ -64,6 +64,15 @@ CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/s
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_STATUS_HISTORY_LIMIT = 1000  # max error/warning messages retained per task in memory (was 50; see #1414)
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
+CONST_ENGINE_IDLE_TTL = 15 * 60  # seconds an engine runs with no activity before it stops (policy default, 15 minutes)
+CONST_ENGINE_RESTART_BACKOFF = 5.0  # seconds before a crashed listener engine restarts; doubles per attempt
+CONST_ENGINE_RESTART_MAX_PER_HOUR = 5  # listener restarts per engine key per rolling hour, then it stays stopped
+CONST_PROCESS_CLOSE_SECONDS = (
+    5.0  # bound on closing a process() pipe after a failed write; the failure is what the caller sees
+)
+CONST_REPOINT_STORM_MAX = 10  # repoints of one address by one owner per window before a repoint_storm warning
+CONST_REPOINT_STORM_WINDOW = 60  # seconds: the repoint-storm window (plan 7.3)
+CONST_PROCESS_INLINE_MAX = 1024 * 1024  # bytes: process() data delivered inline in one request (plan 3.1)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================

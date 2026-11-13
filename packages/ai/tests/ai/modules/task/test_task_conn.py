@@ -2,7 +2,7 @@
 Unit tests for ai.modules.task.task_conn.TaskConn.
 
 TaskConn is the per-WebSocket DAP dispatcher that combines seven command
-mixins (Task, Data, Monitor, Debug, Misc, Account, App) on top of DAPConn.
+mixins (TaskEngine, Data, Monitor, Debug, Misc, Account, App) on top of DAPConn.
 Constructing a real instance pulls in every mixin's __init__ and wires the
 full server stack, so tests bypass __init__ via ``__new__`` and bind real
 methods to a minimal namespace of attributes.

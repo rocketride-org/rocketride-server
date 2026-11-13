@@ -226,9 +226,15 @@ class TASK_METRICS(BaseModel):
     )
 
     # Average values
-    avg_cpu_percent: float = Field(default=0.0, description='Average CPU utilization percentage over task lifetime')
+    avg_cpu_percent: float = Field(
+        default=0.0,
+        description='Not computed by the server (always 0): status bodies carry counts and bytes only, '
+        'never server-side averages or rates; derive from samples client-side',
+    )
     avg_cpu_memory_mb: float = Field(
-        default=0.0, description='Average CPU memory usage in megabytes over task lifetime'
+        default=0.0,
+        description='Not computed by the server (always 0): status bodies carry counts and bytes only, '
+        'never server-side averages or rates; derive from samples client-side',
     )
     avg_gpu_memory_mb: float = Field(
         default=0.0, description='Average GPU memory usage in megabytes over task lifetime'

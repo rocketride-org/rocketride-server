@@ -1028,8 +1028,6 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     own_task = SimpleNamespace(
         get_status=lambda: own_status,
         get_connection_count=lambda: 1,
-        _idle_time=0,
-        _ttl=600,
     )
     own_control = SimpleNamespace(
         id='acme.proj-1.reader',
@@ -1043,6 +1041,9 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         # Real controls always expose owner_id (dev run -> the user).
         owner_id='user-1',
         provider='node-x',
+        ttl=600,
+        idle_seconds=lambda: 0.0,
+        engine_state='running',
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
@@ -1073,6 +1074,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     assert body['overview']['activeTasks'] == 1
     assert len(body['tasks']) == 1
     assert body['tasks'][0]['id'] == 'acme.proj-1.reader'
+    assert body['tasks'][0]['engineState'] == 'running'
 
 
 @pytest.mark.asyncio
@@ -1149,11 +1151,12 @@ def _list_control(
         # A dev run is owned by its user; a legacy control carries no owner
         owner_id='' if legacy else user_id,
         provider=provider,
+        ttl=600,
+        idle_seconds=lambda: 0.0,
+        engine_state='running',
         task=SimpleNamespace(
             get_status=lambda: status,
             get_connection_count=lambda: 0,
-            _idle_time=0,
-            _ttl=600,
         ),
         launch_type=SimpleNamespace(value='LAUNCH'),
     )

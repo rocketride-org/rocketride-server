@@ -49,7 +49,7 @@ from ai.account.file_store import StorageError
 from ai.account.models import AccountInfo
 from ai.account.store import Store
 from ai.modules.task.task_conn import SCOPED_KEY_COMMANDS, TaskConn
-from ai.modules.task.task_server import TaskServer
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 
 from .test_task_conn import _make_account_info, _make_conn
 
@@ -67,6 +67,7 @@ ALLOWED = [
     'rrext_ping',
     'rrext_identify',
     'rrext_process',
+    'process',
     'rrext_monitor',
     'rrext_get_task_status',
     'rrext_get_pipeline',
@@ -386,7 +387,7 @@ def _team_run(address, task_id):
     )
     return SimpleNamespace(
         id=task_id,
-        key=f'deploy.team-1.{address}',
+        key=f'team.team-1.{address}',
         address=address,
         developer_id=developer_id,
         project_id=project_id,
@@ -397,6 +398,9 @@ def _team_run(address, task_id):
         userId='',
         teamId='team-1',
         orgId='org-1',
+        deployment=None,
+        registered_at=0.0,
+        live=True,
         task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False),
     )
 
@@ -405,7 +409,16 @@ async def _monitor_conn(identity):
     """A real TaskConn on a real TaskServer holding an in-scope and an out-of-scope run."""
     server = TaskServer.__new__(TaskServer)
     runs = [_team_run(ADDRESS, 'task-in'), _team_run(OTHER_ADDRESS, 'task-out')]
-    server._task_control = {run.key: run for run in runs}
+    server._task_control = ControlRegistry({run.key: run for run in runs})
+    server._engines = EngineRegistry()
+    server._engine_unavailable = {}
+    server._deployment_revoked = {}
+    server._control_starts = {}
+    server._engine_restarts = {}
+    server._restart_tasks = set()
+    server._control_expiry = []
+    server._engine_expiry = []
+    server._expiry_gen = 0
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=identity, server=server)
     conn._monitors = {}
@@ -491,8 +504,8 @@ async def test_scoped_wildcard_subscription_still_receives_task_events_in_scope(
     conn = await _wildcard_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
     status = {'event': 'apaevt_status_update', 'body': {'state': TASK_STATE.RUNNING.value}}
 
-    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'deploy.team-1.{ADDRESS}', status)
-    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'deploy.team-1.{OTHER_ADDRESS}', status)
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.{ADDRESS}', status)
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.{OTHER_ADDRESS}', status)
 
     assert [m['event'] for m in _sent(conn) if m['type'] == 'event'] == ['apaevt_status_update']
     assert [call.kwargs['id'] for call in conn.build_event.call_args_list] == ['task-in']
@@ -543,7 +556,16 @@ async def test_wildcard_subscription_ends_with_the_session():
 def _session_conn(identity):
     """An authenticated TaskConn on a TaskServer with no runs, ready to deauth."""
     server = TaskServer.__new__(TaskServer)
-    server._task_control = {}
+    server._task_control = ControlRegistry()
+    server._engines = EngineRegistry()
+    server._engine_unavailable = {}
+    server._deployment_revoked = {}
+    server._control_starts = {}
+    server._engine_restarts = {}
+    server._restart_tasks = set()
+    server._control_expiry = []
+    server._engine_expiry = []
+    server._expiry_gen = 0
     server._unauthed_by_ip = {}
     server.broadcast_server_event = AsyncMock()
     return _make_conn(account_info=identity, server=server)
@@ -602,7 +624,7 @@ async def test_deauth_detaches_the_debugger_from_its_tasks():
     conn = _session_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
     run = _team_run(ADDRESS, 'task-in')
     run.task.detach_task = AsyncMock()
-    conn._server._task_control = {run.key: run}
+    conn._server._task_control = ControlRegistry({run.key: run})
 
     await _dispatch(conn, 'deauth')
 
@@ -638,7 +660,7 @@ async def test_reauth_as_another_user_ends_the_first_session(store_backend):
     conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
     run = _team_run(ADDRESS, 'task-in')
     run.task.detach_task = AsyncMock()
-    conn._server._task_control = {run.key: run}
+    conn._server._task_control = ControlRegistry({run.key: run})
     conn._monitors = {'*': object()}
     opened = await conn._store_fs_open({}, {'path': 'notes.txt'})
     handle = opened['body']['handle']
@@ -712,7 +734,7 @@ async def test_an_open_racing_the_cleanup_never_leaves_a_handle(store_backend):
         await release.wait()
 
     run.task.detach_task = slow_detach
-    conn._server._task_control = {run.key: run}
+    conn._server._task_control = ControlRegistry({run.key: run})
 
     # An open already awaiting the backend when the deauth begins
     backend_entered = asyncio.Event()
@@ -770,7 +792,7 @@ async def test_a_request_during_a_replacing_auth_is_told_to_retry_and_creates_no
         await release.wait()
 
     run.task.detach_task = slow_detach
-    conn._server._task_control = {run.key: run}
+    conn._server._task_control = ControlRegistry({run.key: run})
 
     auth = asyncio.create_task(_auth(conn, 'rr_other', seq=3))
     await in_cleanup.wait()
@@ -810,7 +832,7 @@ async def test_an_auth_during_cleanup_waits_and_starts_on_a_clean_session(store_
         order.append('detached')
 
     run.task.detach_task = slow_detach
-    conn._server._task_control = {run.key: run}
+    conn._server._task_control = ControlRegistry({run.key: run})
 
     authenticate = conn._server._server.authenticate_credential
 

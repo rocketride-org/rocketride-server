@@ -31,6 +31,7 @@ const { pathToFileURL } = require('url');
 const { glob } = require('glob');
 const {
 	execCommand,
+	execLocalBin,
 	removeDirs,
 	removeDirAndParents,
 	removeMatching,
@@ -160,7 +161,7 @@ function makeBuildWebviewAction() {
 			// types, so without this gate webview/protocol drift is invisible
 			// to the build. The hash gate above covers exactly this project's
 			// inputs (vscode src + shared), so cached skips stay skips.
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
+			await execLocalBin('tsc', ['-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
 
@@ -191,7 +192,7 @@ function makeCompileTypescriptAction() {
 			}
 
 			const outDir = path.join(BUILD_DIR, 'out');
-			await execCommand('npx', ['tsc', '-p', './', '--outDir', outDir], { task, cwd: APP_ROOT });
+			await execLocalBin('tsc', ['-p', './', '--outDir', outDir], { task, cwd: APP_ROOT });
 
 			// Save hash after successful compile
 			await saveSourceHash(SRC_HASH_KEY, hash);
@@ -376,7 +377,11 @@ function makePackageVsixAction() {
 
 			await mkdir(VSCODE_DIST_DIR);
 			const vsceOut = path.relative(BUILD_DIR, VSCODE_DIST_DIR);
-			await execCommand('npx', ['vsce', 'package', '--no-dependencies', '-o', vsceOut], { task, cwd: BUILD_DIR });
+			await execLocalBin('vsce', ['package', '--no-dependencies', '-o', vsceOut], {
+				task,
+				cwd: BUILD_DIR,
+				resolveFrom: APP_ROOT,
+			});
 
 			// Stage the vsix where GET /client/vscode serves from.
 			const stats = await syncDir(VSCODE_DIST_DIR, SERVER_STATIC_DIR, { pattern: '*.vsix', package: true });
@@ -404,7 +409,7 @@ function makeTestAction() {
 			// action runs the same gate, but behind its change-detection hash —
 			// so `./builder test` alone never caught webview/protocol drift
 			// (e.g. a shell type consumed by webview code changing underneath it).
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
+			await execLocalBin('tsc', ['-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true })).sort();
 

@@ -146,23 +146,18 @@ public:
 
     //-----------------------------------------------------------------
     // Binding identity - set by IServiceEndpoint::getPipe() each time
-    // this pipe is handed out. The slot `pipeId` is reused; the binding
+    // this pipe is handed out. The slot `pipeId` is reused; the trace
     // id never is.
     //-----------------------------------------------------------------
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Monotonic id of the current binding of this pipe; 0 when the
-    ///		pipe has never been handed out
+    ///		The request tree this pipe currently serves: minted from the
+    ///		process-wide counter when the pipe starts a tree, or the id of
+    ///		the live tree it joined. Every pipe of one tree carries the
+    ///		same id; 0 when the pipe has never been handed out
     //-----------------------------------------------------------------
-    uint64_t bindingId = 0;
-
-    //-----------------------------------------------------------------
-    /// @details
-    ///		The root of the binding tree: this binding's own id, or the
-    ///		root of the parent binding it was opened from
-    //-----------------------------------------------------------------
-    uint64_t rootBindingId = 0;
+    uint64_t traceId = 0;
 
     //-----------------------------------------------------------------
     /// @details
@@ -182,8 +177,8 @@ public:
     /// @details
     ///		Emit one `>DBG` trace line for this binding, gated on
     ///		traceLevel >= METADATA. Fields, '*'-separated:
-    ///		kind, pipeId, totalPipes, componentId, bindingId,
-    ///		rootBindingId, trace json
+    ///		kind, pipeId, componentId, traceId, trace json. No engine-wide
+    ///		pipe count: a holder of a shared engine must not learn it
     ///	@param[in]	kind
     ///		BEGIN / END / ENTER / LEAVE
     ///	@param[in]	componentId

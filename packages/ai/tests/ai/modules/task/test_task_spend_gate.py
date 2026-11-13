@@ -23,18 +23,18 @@ from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_BILLING_UNAVAILABLE
 from ai.modules.task import task_channel
 from ai.modules.task.task_channel import ChannelRefused
-from ai.modules.task.task_engine import Task, _check_spend
+from ai.modules.task.task_engine import TaskEngine, _check_spend
 
 REFUSAL = 'Out of credits: add capacity on the Billing page to keep running pipelines'
 
 
 def _task(org_id='org-1'):
-    return Task(
+    return TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline={},
         org_id=org_id,

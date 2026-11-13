@@ -135,9 +135,9 @@ def _control(
     run_kind='dev',
     owner_kind='',
 ):
-    """Build a TASK_CONTROL stub for send_task_event tests.
+    """Build a TaskControl stub for send_task_event tests.
 
-    Mirrors TASK_CONTROL's owner model: the owner of a dev run (and of a
+    Mirrors TaskControl's owner model: the owner of a dev run (and of a
     user-owned @me deploy) is its user, the owner of a team deploy is its
     team — monitor keys scope by owner.
     """

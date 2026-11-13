@@ -50,7 +50,7 @@ void IFilterInstance::emitTrace(TextView kind, TextView componentId,
     // '*' is the field delimiter and only the FINAL field (the payload)
     // tolerates it: the parser splits with a maxsplit. The component field
     // (an entry name for BEGIN/END) cannot carry it or every field after
-    // it - the binding ids included - shifts, so strip it, as the Python
+    // it - the trace id included - shifts, so strip it, as the Python
     // tool-trace emitter does
     std::string component(componentId.data(), componentId.length());
     component.erase(std::remove(component.begin(), component.end(), '*'),
@@ -58,9 +58,8 @@ void IFilterInstance::emitTrace(TextView kind, TextView componentId,
 
     // Format it - ints render as hex, fields are '*'-separated
     StackText msg;
-    _tsbo(msg, {Format::HEX, {}, '*'}, kind, this->pipeId,
-          this->endpoint->getPipeCount(), component, this->bindingId,
-          this->rootBindingId, payload);
+    _tsbo(msg, {Format::HEX, {}, '*'}, kind, this->pipeId, component,
+          this->traceId, payload);
 
     ::engine::config::monitor()->other("DBG", msg);
 }

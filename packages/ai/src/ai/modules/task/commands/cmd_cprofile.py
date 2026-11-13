@@ -53,11 +53,25 @@ Architecture:
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
+from .engine_access import engine_for
 from ai.common.cprofile_manager import profiler
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
+    from ..task_control import TaskControl
     from ..task_server import TaskServer
+
+
+# =============================================================================
+# THE PROFILER GATE
+# =============================================================================
+
+#: What a refused profile request needed (plan 7.5): the ``required`` field
+#: of the ``permission_denied`` error body.
+PROFILE_REQUIRED = 'private engine or sys.admin'
+
+#: The rungs whose controls may profile their own private engine.
+_PROFILE_RUNGS = ('dev', 'me')
 
 
 # =============================================================================
@@ -106,14 +120,48 @@ class CProfileCommands(DAPConn):
         """Build the owner identifier for this connection."""
         return f'task:{self._connection_id}'
 
+    def _check_profile_access(self, control: 'TaskControl') -> None:
+        """
+        Refuse to profile an engine whose profile would expose other holders' work.
+
+        An engine profile is engine-level signal (plan 7.5): ``sys.admin`` and
+        ``internal`` may profile any control on any engine. Anyone else may
+        profile only a ``@dev`` or ``@me`` control whose engine is private to
+        that control's owner (key ``hash:owner``, not shared).
+
+        Args:
+            control: The resolved control.
+
+        Raises:
+            PermissionError: The engine is shared or the rung is ``@team`` /
+                ``@public``; ``required`` names what was needed.
+        """
+        # Step 1: operators may profile any engine
+        sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
+        if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+            return
+
+        # Step 2: anyone else, only their own private engine on @dev / @me
+        engine = control.task
+        if control.rung in _PROFILE_RUNGS and engine is not None and not engine.shared:
+            _, qualified, owner = engine.engine_key.rpartition(':')
+            if qualified and owner and owner == control.owner_id:
+                return
+
+        # Step 3: refused, with what it needed (the permission_denied body)
+        error = PermissionError('Profiling requires a private engine or sys.admin')
+        error.required = PROFILE_REQUIRED
+        raise error
+
     async def _proxy_to_task(self, request: Dict[str, Any], target: str) -> Dict[str, Any]:
         """
         Forward a cProfile command to a pipeline's engine subprocess.
 
-        Looks up the task by its token, waits for it to be running, then
-        sends the request via Task._send_data().  The subprocess response
-        body is re-wrapped with the original inbound request's seq so the
-        client can correlate it.
+        Looks up the task by its token, checks the profiler gate (a private
+        engine or sys.admin), starts the engine again if it stopped on its
+        inactivity timer, waits for it to be running, then sends the request
+        via Task._send_data().  The subprocess response body is re-wrapped
+        with the original inbound request's seq so the client can correlate it.
 
         Args:
             request: The original inbound DAP request from the client.
@@ -127,14 +175,27 @@ class CProfileCommands(DAPConn):
         # task.control holder could drive the profiler inside another team's
         # engine subprocess.
         control = self._server.resolve_control(target, self._account_info, 'task.control')
-        task = control.task
 
-        # Wait for the task to reach running state
-        await task.wait_for_running()
+        # A profile is engine-level signal: a private engine or sys.admin only
+        self._check_profile_access(control)
 
-        # Forward the command — _send_data builds a fresh DAP envelope
-        # with its own seq for the eaas→subprocess hop
-        subprocess_response = await task._send_data(request)
+        # The engine to profile: one that stopped on its inactivity timer
+        # starts again under the same key (plan 7.2), after the caller's team
+        # access is re-checked for the restart
+        task = await engine_for(self, control, 'task.control')
+
+        # A request into the engine is activity of this control only, and in
+        # flight through it until the answer comes back
+        control.begin_request()
+        try:
+            # Wait for the task to reach running state
+            await task.wait_for_running()
+
+            # Forward the command — _send_data builds a fresh DAP envelope
+            # with its own seq for the eaas→subprocess hop
+            subprocess_response = await task._send_data(request)
+        finally:
+            control.end_request()
 
         # Re-wrap with the original client request seq
         return self.build_response(

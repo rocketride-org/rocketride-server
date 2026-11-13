@@ -24,9 +24,9 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
         to call _write_task_file directly.
         """
         # Import the actual method so we test real code, not a mock
-        from ai.modules.task.task_engine import Task
+        from ai.modules.task.task_engine import TaskEngine
 
-        mock = MagicMock(spec=Task)
+        mock = MagicMock(spec=TaskEngine)
         mock.id = 'test-task-1234'
         mock._build_task = MagicMock(
             return_value={
@@ -36,7 +36,7 @@ class TestWriteTaskFileSecurity(unittest.TestCase):
             }
         )
         # Bind the real method to our mock
-        mock._write_task_file = Task._write_task_file.__get__(mock, Task)
+        mock._write_task_file = TaskEngine._write_task_file.__get__(mock, TaskEngine)
         return mock
 
     @unittest.skipIf(os.name == 'nt', 'POSIX file permissions not available on Windows')

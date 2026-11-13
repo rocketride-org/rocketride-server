@@ -30,7 +30,7 @@ from ai.constants import CONST_CHANNEL_CHUNK, CONST_CHANNEL_HANDLER_TIMEOUT, CON
 if TYPE_CHECKING:
     from ai.common.dap import DAPBase
 
-    from .task_engine import Task
+    from .task_engine import TaskEngine
 
 PHASE_STARTUP = 'startup'
 PHASE_RUN = 'run'
@@ -58,7 +58,7 @@ class ChannelReply:
     data: Source = None
 
 
-Handler = Callable[['Task', Dict[str, Any], Optional[bytes]], Awaitable[ChannelReply]]
+Handler = Callable[['TaskEngine', Dict[str, Any], Optional[bytes]], Awaitable[ChannelReply]]
 
 
 @dataclass
@@ -205,7 +205,7 @@ def _size_of(source: Source) -> Optional[int]:
 
 
 async def handle(
-    task: 'Task', client: 'DAPBase', streams: ChannelStreams, message: Dict[str, Any], *, startup_open: bool
+    task: 'TaskEngine', client: 'DAPBase', streams: ChannelStreams, message: Dict[str, Any], *, startup_open: bool
 ) -> Dict[str, Any]:
     """Answer one request from a task.
 

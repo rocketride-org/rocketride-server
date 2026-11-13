@@ -43,8 +43,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import Task
-from ai.modules.task.task_server import TASK_CONTROL, TaskServer
+from ai.modules.task.task_engine import TaskEngine
+from ai.modules.task.task_control import TaskControl
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 
 ADDRESS = 'acme.proj-tk.src'
@@ -68,13 +69,22 @@ def no_launch(monkeypatch):
     async def _start(self, *args, **kwargs):
         return None
 
-    monkeypatch.setattr(Task, 'start_task', _start)
+    monkeypatch.setattr(TaskEngine, 'start_task', _start)
 
 
 def _server():
     """A TaskServer with ``__init__`` bypassed and no real account service."""
     ts = TaskServer.__new__(TaskServer)
-    ts._task_control = {}
+    ts._task_control = ControlRegistry()
+    ts._engines = EngineRegistry()
+    ts._engine_unavailable = {}
+    ts._deployment_revoked = {}
+    ts._control_starts = {}
+    ts._engine_restarts = {}
+    ts._restart_tasks = set()
+    ts._control_expiry = []
+    ts._engine_expiry = []
+    ts._expiry_gen = 0
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -108,7 +118,7 @@ async def _start(ts, user_id='user-1', run_kind='dev', owner_kind='', **argument
 
 def _live_run(user_id='user-1', complete=False):
     """A registered dev run of ADDRESS owned by ``user_id``."""
-    control = TASK_CONTROL()
+    control = TaskControl()
     control.client_id = user_id
     control.userId = user_id
     control.teamId = 'team-1'
@@ -125,6 +135,8 @@ def _live_run(user_id='user-1', complete=False):
     control.key = f'dev.{user_id}.{ADDRESS}'
     control.task = SimpleNamespace(
         is_task_complete=lambda: complete,
+        dormant_reason=None,
+        engine_key='hash-1:user-a',
         wait_for_running=AsyncMock(),
         stop_task=AsyncMock(),
     )
@@ -175,7 +187,7 @@ async def test_another_user_cannot_take_over_a_finished_run(no_launch):
 
 @pytest.mark.asyncio
 async def test_a_personal_deploy_does_not_reuse_the_same_users_dev_run(no_launch):
-    """Same user and address, different run_kind: a different control."""
+    """Same user and address, different rung: a different control (@me, not @dev)."""
     ts = _server()
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
@@ -183,7 +195,7 @@ async def test_a_personal_deploy_does_not_reuse_the_same_users_dev_run(no_launch
     result = await _start(ts, user_id='user-1', run_kind='deploy', owner_kind='user', useExisting=True)
     assert result['reused'] is False
     assert ts._task_control[control.key] is control
-    assert f'deploy.user-1.{ADDRESS}' in ts._task_control
+    assert f'me.user-1.{ADDRESS}' in ts._task_control
     control.task.wait_for_running.assert_not_awaited()
 
 

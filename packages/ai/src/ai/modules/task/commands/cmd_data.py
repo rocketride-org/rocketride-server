@@ -34,6 +34,7 @@ This module works in conjunction with TaskServer to:
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
+from .engine_access import engine_for
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -132,16 +133,37 @@ class DataCommands(DAPConn):
         - Response format is determined by the individual task's processing logic
         """
         try:
-            # Locate the target task instance using authentication and token
-            task = self.get_task(request, 'task.data')
+            # The correlationId is server-minted (it makes `open` idempotent,
+            # ALB seam 7): a client-sent one must never name another
+            # request's binding
+            arguments = request.get('arguments')
+            if isinstance(arguments, dict):
+                arguments.pop('correlationId', None)
 
-            # Ensure the task is ready to process data (blocks until running)
-            # This is critical as tasks may be in startup, initialization, or other states
-            await task.wait_for_running()
+            # Locate the caller's control using authentication and token
+            control = self.get_control(request, 'task.data')
 
-            # Forward the data processing request to the task instance and get
-            # the raw response from the subprocess.
-            subprocess_response = await task._send_data(request)
+            # The engine this request runs on: one that stopped on its
+            # inactivity timer starts again under the same key (plan 7.2),
+            # after the caller's team access is re-checked for the restart
+            task = await engine_for(self, control, 'task.data')
+
+            # A data request (pipe open/write/close, tool, ...) is activity
+            # of THIS control only, and in flight through it until the answer
+            # comes back: its idle clock is held meanwhile, so a request
+            # longer than the ttl is never expired mid-flight; another holder
+            # of the engine keeps aging
+            control.begin_request()
+            try:
+                # Ensure the task is ready to process data (blocks until running)
+                # This is critical as tasks may be in startup, initialization, or other states
+                await task.wait_for_running()
+
+                # Forward the data processing request to the task instance and
+                # get the raw response from the subprocess
+                subprocess_response = await task._send_data(request)
+            finally:
+                control.end_request()
 
             # Rebuild the response envelope keyed off the INBOUND request so the
             # inbound DAPConn can correlate it back to the originating chat client.

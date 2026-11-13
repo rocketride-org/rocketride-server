@@ -33,7 +33,7 @@ The transport recognizes and parses various message types:
 - MET: Metrics data in JSON ('>MET*json_data')
 - SVC: Service status ('>SVC*1_or_0')
 - JOB: Job status ('>JOB*status_message')
-- DBG: Pipeline trace ('>DBG*operation*pipeId*totalPipes*componentId*bindingId*rootBindingId*trace')
+- DBG: Pipeline trace ('>DBG*operation*pipeId*componentId*traceId*trace')
 - EXIT: Process exit ('>EXIT*exit_code_hex*exit_message')
 
 Usage Patterns:
@@ -563,10 +563,10 @@ class TransportStdio(TransportBase):
         - '>MET*json_data' - Metrics data in JSON
         - '>SVC*1_or_0' - Service status
         - '>JOB*status_message' - Job status
-        - '>DBG*operation*pipeId*totalPipes*componentId*bindingId*rootBindingId*trace' - Pipeline trace
+        - '>DBG*operation*pipeId*componentId*traceId*trace' - Pipeline trace
         - '>DL*json_data' - pip install info
         - '>USR**json' - User data for prompting
-        - '>SSE*json' - Real-time node-to-UI message (pipe_id + bindingId + rootBindingId + type + optional data)
+        - '>SSE*json' - Real-time node-to-UI message (pipe_id + traceId + type + optional data)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
         if message is None:
@@ -854,15 +854,14 @@ class TransportStdio(TransportBase):
                 )
 
         # Parse pipeline trace messages:
-        # '>DBG*operation*pipeId*totalPipes*componentId*bindingId*rootBindingId*trace'
-        # (ints hex). pipeId is the reusable pipe SLOT; bindingId identifies the
-        # binding that produced the line and rootBindingId the binding tree it
-        # belongs to (= bindingId for a root binding).
+        # '>DBG*operation*pipeId*componentId*traceId*trace'
+        # (ints hex). pipeId is the reusable pipe SLOT; traceId identifies the
+        # request tree that produced the line (every pipe of one tree shares it).
+        # No engine-wide pipe count rides the line: a holder of a shared engine
+        # must not learn it.
         elif message.startswith('>DBG*'):
             try:
-                _, op, pipe_id, total_pipes, component_id, binding_id, root_binding_id, trace_str = message.split(
-                    '*', 7
-                )
+                _, op, pipe_id, component_id, trace_id, trace_str = message.split('*', 5)
 
                 # Attempt to get the data trace
                 trace = {}
@@ -879,10 +878,8 @@ class TransportStdio(TransportBase):
                         'body': {
                             'op': op.lower(),
                             'pipeId': int(pipe_id, 16),
-                            'totalPipes': int(total_pipes, 16),
                             'componentId': component_id,
-                            'bindingId': int(binding_id, 16),
-                            'rootBindingId': int(root_binding_id, 16),
+                            'traceId': int(trace_id, 16),
                             'trace': trace,
                         },
                     }
@@ -961,7 +958,7 @@ class TransportStdio(TransportBase):
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
 
-        # Parse SSE messages: '>SSE*{"pipe_id": N, "bindingId": N, "rootBindingId": N, "type": "...", "data": {...}}'
+        # Parse SSE messages: '>SSE*{"pipe_id": N, "traceId": N, "type": "...", "data": {...}}'
         elif message.startswith('>SSE*'):
             try:
                 parts = message.split('*', 1)

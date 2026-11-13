@@ -30,7 +30,7 @@ const path = require('path');
 const { existsSync } = require('node:fs');
 const { readdir } = require('node:fs/promises');
 const { createAppModule } = require('../../../scripts/lib/appModule');
-const { execCommand } = require('../../../scripts/lib');
+const { execCommand, execLocalBin } = require('../../../scripts/lib');
 
 const APP_ROOT = path.join(__dirname, '..');
 const TESTS_DIR = path.join(APP_ROOT, 'tests');
@@ -89,7 +89,7 @@ mod.actions.push({
 			// the "has no exported member" storms are (scripts/lib/appModule.js).
 			// CI is ordered for this — _build.yaml runs `builder build` at :152
 			// before `builder test` at :298 — but locally, build before testing.
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.test.json', '--noEmit'], { task, cwd: APP_ROOT });
+			await execLocalBin('tsc', ['-p', 'tsconfig.test.json', '--noEmit'], { task, cwd: APP_ROOT });
 			// './' prefix required: a bare relative path in --require resolves as
 			// a package name, not a file.
 			await execCommand(

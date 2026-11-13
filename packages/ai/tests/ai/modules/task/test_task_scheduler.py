@@ -42,6 +42,7 @@ import pytest
 
 import ai.modules.task.task_scheduler as sched_mod
 from ai.modules.task.task_scheduler import TaskScheduler
+from ai.modules.task.task_server import ControlRegistry
 
 
 # ============================================================================
@@ -73,7 +74,7 @@ def _dep(
 def scheduler():
     """A TaskScheduler over a stub server (no loop started)."""
     server = MagicMock()
-    server._task_control = {}
+    server._task_control = ControlRegistry()
     # broadcast_server_event is AWAITED by the deploy-change notifier; a
     # plain MagicMock attribute returns a non-awaitable, the await raises,
     # and the notifier's best-effort catch swallows it — the apaevt_deploy

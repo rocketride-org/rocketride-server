@@ -28,7 +28,7 @@
  */
 const path = require('path');
 const {
-	execCommand,
+	execLocalBin,
 	syncDir,
 	formatSyncStats,
 	removeDir,
@@ -76,7 +76,7 @@ function makeBundleAction() {
 
 			// Clean build output before rebuilding to prevent stale chunks
 			await removeDir(BUILD_DIR);
-			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
+			await execLocalBin('rsbuild', ['build'], { task, cwd: APP_ROOT });
 
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
@@ -122,7 +122,7 @@ module.exports = {
 				description: 'Starting chat-ui (dev)',
 				run: async (ctx, task) => {
 					task.output = 'Starting development server on http://localhost:3000';
-					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
+					await execLocalBin('rsbuild', ['dev'], { task, cwd: APP_ROOT });
 				},
 			}),
 		},

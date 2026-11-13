@@ -1,10 +1,10 @@
 """
 Unit tests for ai.modules.task.task_engine.Task — pure-logic methods.
 
-``Task.__init__`` is heavy (sockets, TASK_STATUS construction, DAP base,
+``TaskEngine.__init__`` is heavy (sockets, TASK_STATUS construction, DAP base,
 asyncio locks, ...), so tests bypass it via ``__new__`` and seed only the
 attributes the method under test consults. Real method objects are then
-invoked through ``Task.<method>(stub, ...)`` so coverage tracks them.
+invoked through ``TaskEngine.<method>(stub, ...)`` so coverage tracks them.
 
 Focus areas:
 
@@ -14,7 +14,8 @@ Focus areas:
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
   ``get_connection_count`` / ``get_status`` — accessors
-- ``reset_idle_timer`` / ``send_scheduled_updates`` — state setters
+- ``note_activity`` / ``idle_since`` / ``idle_seconds`` / ``ages`` — the engine's own inactivity timer
+- ``send_scheduled_updates`` — state setter
 
 Two methods are already exercised by separate, security-focused tests:
 
@@ -40,7 +41,7 @@ from ai.modules.task.task_engine import (
     CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
-    Task,
+    TaskEngine,
     cap_trace_payload,
     filter_subprocess_env,
     resolve_parameter_tokens,
@@ -59,7 +60,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
 
     Tests seed only the attributes consumed by the method under test:
     ``id``, ``source``, ``_task_name``, ``_pipeline``, ``_status``,
-    ``_threads``, ``_pipelineTraceLevel``, ``key``, ``address``.
+    ``_threads``, ``_pipelineTraceLevel``, ``engine_key``, ``shared``,
+    ``_holds``, ``address``.
 
     Args:
         source: id of the source component to look up in ``_check_pipeline``.
@@ -71,9 +73,14 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     Returns:
         Task: bare instance ready for method calls.
     """
-    t = Task.__new__(Task)
+    t = TaskEngine.__new__(TaskEngine)
     t.id = 'task-test'
-    t.key = 'dev.user-1.acme.proj-test.src-id'
+    t.engine_key = 'enginehash:user-1'
+    t.shared = False
+    # One hold: the control that started it
+    t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
+    t.dormant_reason = None
+    t.reached_running = False
     t.address = 'acme.proj-test.src-id'
     t._data_token = 'dt_test'
     t.client_id = 'user-1'
@@ -91,18 +98,19 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._owner_kind = 'user'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
-    t._idle_time = 5
+    t._last_activity = 0.0
+    t._last_pipeline_event = 0.0
     t._status_updated = False
     t.info = {}
     # Run-log continuum state consulted by _forward_task_event's stamping
-    # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
+    # safety net (see TaskEngine.stamp_log_event): fresh-stream counter + no writer.
     t._log_seq_next = 1
     t._run_log = None
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
     # Channel state __init__ would have set
-    Task._reset_channel_state(t)
+    TaskEngine._reset_channel_state(t)
     return t
 
 
@@ -116,7 +124,7 @@ def test_check_pipeline_raises_when_source_missing():
     t = _task(source='not-there')
     pipeline = {'components': [{'id': 'other', 'config': {}}]}
     with pytest.raises(ValueError, match='source component "not-there"'):
-        Task._check_pipeline(t, pipeline)
+        TaskEngine._check_pipeline(t, pipeline)
 
 
 def test_check_pipeline_creates_config_dict_if_missing():
@@ -124,7 +132,7 @@ def test_check_pipeline_creates_config_dict_if_missing():
     t = _task(source='src')
     component = {'id': 'src'}
     pipeline = {'components': [component]}
-    Task._check_pipeline(t, pipeline)
+    TaskEngine._check_pipeline(t, pipeline)
     assert component['config'] == {'mode': 'Source', 'type': 'Unknown'}
 
 
@@ -132,7 +140,7 @@ def test_check_pipeline_fills_mode_and_type_defaults():
     """Missing mode defaults to 'Source'; missing type defaults to the component's provider."""
     t = _task(source='src')
     component = {'id': 'src', 'provider': 'kafka', 'config': {}}
-    Task._check_pipeline(t, {'components': [component]})
+    TaskEngine._check_pipeline(t, {'components': [component]})
     assert component['config']['mode'] == 'Source'
     assert component['config']['type'] == 'kafka'
 
@@ -145,7 +153,7 @@ def test_check_pipeline_preserves_existing_mode_and_type():
         'provider': 'kafka',
         'config': {'mode': 'Custom', 'type': 'overridden'},
     }
-    Task._check_pipeline(t, {'components': [component]})
+    TaskEngine._check_pipeline(t, {'components': [component]})
     assert component['config']['mode'] == 'Custom'
     assert component['config']['type'] == 'overridden'
 
@@ -154,14 +162,14 @@ def test_check_pipeline_composes_status_name_from_task_name():
     """status.name = f'{task_name}.{component_name | source_id}'."""
     t = _task(source='src', task_name='daily-ingest')
     component = {'id': 'src', 'name': 'reader'}
-    Task._check_pipeline(t, {'components': [component]})
+    TaskEngine._check_pipeline(t, {'components': [component]})
     assert t._status.name == 'daily-ingest.reader'
 
 
 def test_check_pipeline_falls_back_to_task_id_and_source_id():
     """When neither task_name nor component.name are set, ids are used."""
     t = _task(source='src')
-    Task._check_pipeline(t, {'components': [{'id': 'src'}]})
+    TaskEngine._check_pipeline(t, {'components': [{'id': 'src'}]})
     assert t._status.name == 'task-test.src'
 
 
@@ -169,7 +177,7 @@ def test_check_pipeline_uses_config_name_when_component_name_missing():
     """If the component has no top-level name, fall back to config.name."""
     t = _task(source='src')
     component = {'id': 'src', 'config': {'name': 'from-config'}}
-    Task._check_pipeline(t, {'components': [component]})
+    TaskEngine._check_pipeline(t, {'components': [component]})
     assert t._status.name == 'task-test.from-config'
 
 
@@ -194,10 +202,11 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     }
     t = _task(pipeline=pipeline)
 
-    config = Task._build_task(t, pipeline)
+    config = TaskEngine._build_task(t, pipeline)
 
     assert config['type'] == 'pipeline'
-    assert config['taskId'] == 'dev.user-1.acme.proj-test.src-id'
+    # The task file names the ENGINE, never a control (plan 7.2)
+    assert config['taskId'] == 'enginehash:user-1'
     assert config['config']['threadCount'] == 4
     assert config['config']['pipelineTraceLevel'] is None
     assert config['config']['pipeline'] == {
@@ -207,6 +216,7 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
         'name': 'my-pipeline',
         'description': 'desc',
         'components': [{'id': 'src'}],
+        'parameters': {},
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
     # Trusted identity travels IN THE TASK FILE (never the environment).
@@ -228,7 +238,7 @@ def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
     t = _task(pipeline=pipeline)
     t._run_kind = 'deploy'
     t._owner_kind = 'team'
-    config = Task._build_task(t, pipeline)
+    config = TaskEngine._build_task(t, pipeline)
     assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
 
 
@@ -242,7 +252,7 @@ def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
     t._owner_kind = 'team'
     t.team_id = ''
     with pytest.raises(ValueError, match='team_id'):
-        Task._build_task(t, {'components': []})
+        TaskEngine._build_task(t, {'components': []})
 
 
 def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
@@ -258,7 +268,7 @@ def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
     pipeline = {'source': 'src', 'components': []}
     t = _task(pipeline=pipeline)
     t.client_id = ''
-    config = Task._build_task(t, pipeline)
+    config = TaskEngine._build_task(t, pipeline)
     assert config['storage'] == {'root': ''}
 
 
@@ -269,7 +279,7 @@ def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
 
     pipeline = {'source': 'src', 'components': []}
     t = _task(pipeline=pipeline)
-    config = Task._build_task(t, pipeline)
+    config = TaskEngine._build_task(t, pipeline)
     assert config['config']['pipeline']['version'] == 1
 
 
@@ -285,7 +295,7 @@ def test_file_checksum_matches_sha256_of_file_contents(tmp_path):
     p.write_bytes(body)
 
     t = _task()
-    result = Task._file_checksum(t, str(p))
+    result = TaskEngine._file_checksum(t, str(p))
     assert result == hashlib.sha256(body).hexdigest()
 
 
@@ -295,7 +305,7 @@ def test_file_checksum_empty_file_yields_empty_sha256(tmp_path):
     p.write_bytes(b'')
 
     t = _task()
-    assert Task._file_checksum(t, str(p)) == hashlib.sha256(b'').hexdigest()
+    assert TaskEngine._file_checksum(t, str(p)) == hashlib.sha256(b'').hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -307,34 +317,34 @@ def test_is_debugging_false_when_pydevd_absent(monkeypatch):
     """Without `pydevd` loaded, _is_debugging returns False."""
     monkeypatch.delitem(sys.modules, 'pydevd', raising=False)
     monkeypatch.delitem(sys.modules, 'debugpy', raising=False)
-    assert Task._is_debugging(_task()) is False
+    assert TaskEngine._is_debugging(_task()) is False
 
 
 def test_is_debugging_false_when_only_pydevd_loaded(monkeypatch):
     """Loading pydevd alone is not enough — debugpy must also be present."""
     monkeypatch.setitem(sys.modules, 'pydevd', MagicMock())
     monkeypatch.delitem(sys.modules, 'debugpy', raising=False)
-    assert Task._is_debugging(_task()) is False
+    assert TaskEngine._is_debugging(_task()) is False
 
 
 def test_is_debugging_true_when_both_present(monkeypatch):
     """When both modules are loaded, _is_debugging returns True."""
     monkeypatch.setitem(sys.modules, 'pydevd', MagicMock())
     monkeypatch.setitem(sys.modules, 'debugpy', MagicMock())
-    assert Task._is_debugging(_task()) is True
+    assert TaskEngine._is_debugging(_task()) is True
 
 
 def test_get_attach_subprocesses_false_when_not_debugging(monkeypatch):
     """If not running under a debugger, subprocess-attach is always False."""
     monkeypatch.delitem(sys.modules, 'pydevd', raising=False)
-    assert Task._get_attach_subprocesses(_task()) is False
+    assert TaskEngine._get_attach_subprocesses(_task()) is False
 
 
 def test_get_attach_subprocesses_false_when_setup_missing(monkeypatch):
     """A pydevd module without SetupHolder.setup falls through to False."""
     monkeypatch.setitem(sys.modules, 'pydevd', MagicMock(spec=[]))
     monkeypatch.setitem(sys.modules, 'debugpy', MagicMock())
-    assert Task._get_attach_subprocesses(_task()) is False
+    assert TaskEngine._get_attach_subprocesses(_task()) is False
 
 
 def test_get_attach_subprocesses_reads_multiprocess_flag(monkeypatch):
@@ -343,7 +353,7 @@ def test_get_attach_subprocesses_reads_multiprocess_flag(monkeypatch):
     pydevd.SetupHolder = SimpleNamespace(setup={'multiprocess': True})
     monkeypatch.setitem(sys.modules, 'pydevd', pydevd)
     monkeypatch.setitem(sys.modules, 'debugpy', MagicMock())
-    assert Task._get_attach_subprocesses(_task()) is True
+    assert TaskEngine._get_attach_subprocesses(_task()) is True
 
 
 def test_get_attach_subprocesses_swallows_unexpected_errors(monkeypatch):
@@ -353,7 +363,7 @@ def test_get_attach_subprocesses_swallows_unexpected_errors(monkeypatch):
     type(pydevd).SetupHolder = property(lambda self: (_ for _ in ()).throw(RuntimeError('oops')))
     monkeypatch.setitem(sys.modules, 'pydevd', pydevd)
     monkeypatch.setitem(sys.modules, 'debugpy', MagicMock())
-    assert Task._get_attach_subprocesses(_task()) is False
+    assert TaskEngine._get_attach_subprocesses(_task()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +387,7 @@ def test_is_task_complete(state, expected):
     """Only COMPLETED (5) and CANCELLED (6) are treated as terminal states."""
     status = SimpleNamespace(state=state, name='', exitMessage='')
     t = _task(status=status)
-    assert Task.is_task_complete(t) is expected
+    assert TaskEngine.is_task_complete(t) is expected
 
 
 def test_is_attached_returns_true_for_matching_connection():
@@ -385,58 +395,82 @@ def test_is_attached_returns_true_for_matching_connection():
     t = _task()
     conn = MagicMock()
     t._debugger = conn
-    assert Task.is_attached(t, conn) is True
+    assert TaskEngine.is_attached(t, conn) is True
 
 
 def test_is_attached_returns_false_when_no_debugger():
     """When no debugger is attached, is_attached returns False."""
     t = _task()
-    assert Task.is_attached(t, MagicMock()) is False
+    assert TaskEngine.is_attached(t, MagicMock()) is False
 
 
 def test_is_attached_returns_false_for_other_connection():
     """A different connection than the attached debugger returns False."""
     t = _task()
     t._debugger = MagicMock(name='primary')
-    assert Task.is_attached(t, MagicMock(name='other')) is False
+    assert TaskEngine.is_attached(t, MagicMock(name='other')) is False
 
 
 def test_has_attached_debugger_reflects_debugger_field():
     """has_attached_debugger is True iff ``_debugger`` is not None."""
     t = _task()
-    assert Task.has_attached_debugger(t) is False
+    assert TaskEngine.has_attached_debugger(t) is False
     t._debugger = MagicMock()
-    assert Task.has_attached_debugger(t) is True
+    assert TaskEngine.has_attached_debugger(t) is True
 
 
 def test_get_connection_count_is_zero_or_one():
     """get_connection_count returns 1 with a debugger, 0 without."""
     t = _task()
-    assert Task.get_connection_count(t) == 0
+    assert TaskEngine.get_connection_count(t) == 0
     t._debugger = MagicMock()
-    assert Task.get_connection_count(t) == 1
+    assert TaskEngine.get_connection_count(t) == 1
 
 
 def test_get_status_returns_the_status_object():
     """get_status returns the same TASK_STATUS instance that was attached."""
     status = SimpleNamespace(state=3)
     t = _task(status=status)
-    assert Task.get_status(t) is status
+    assert TaskEngine.get_status(t) is status
 
 
-def test_reset_idle_timer_zeroes_the_field():
-    """reset_idle_timer sets ``_idle_time`` back to zero."""
+def test_note_activity_only_moves_the_clock_forward():
+    """Activity through a hold dates the engine's idle time; an older stamp never rewinds it."""
     t = _task()
-    t._idle_time = 999
-    Task.reset_idle_timer(t)
-    assert t._idle_time == 0
+    TaskEngine.note_activity(t, 100.0)
+    TaskEngine.note_activity(t, 40.0)
+    assert t._last_activity == 100.0
+
+
+def test_a_held_engine_ages_on_its_own_timer():
+    """A hold does not keep the engine running: it ages from its last activity like any engine."""
+    t = _task()
+    t._last_activity = 10.0
+    assert TaskEngine.idle_seconds(t, 10_000.0) == 9990.0
+
+
+def test_a_ttl_zero_holder_keeps_the_engine_from_aging():
+    """An engine ages only while every holder has an idle ttl; a ttl-0 holder (a listener) pins it."""
+    t = _task()
+    assert TaskEngine.ages.fget(t) is True
+    t._holds = {'dev.user-1.acme.proj-test.src-id': 900, 'dev.user-2.acme.proj-test.src-id': 0}
+    assert TaskEngine.ages.fget(t) is False
+
+
+def test_an_unheld_engine_ages_from_its_last_activity_or_pipeline_event():
+    """The engine is idle since the later of its last activity and last dev pipeline event."""
+    t = _task()
+    t._holds = {}
+    t._last_activity = 100.0
+    t._last_pipeline_event = 160.0
+    assert TaskEngine.idle_seconds(t, 400.0) == 240.0
 
 
 def test_send_scheduled_updates_flips_the_flag():
     """send_scheduled_updates marks status as needing a broadcast."""
     t = _task()
     assert t._status_updated is False
-    Task.send_scheduled_updates(t)
+    TaskEngine.send_scheduled_updates(t)
     assert t._status_updated is True
 
 
@@ -444,7 +478,7 @@ def test_on_metrics_updated_flips_status_updated_flag():
     """_on_metrics_updated flips ``_status_updated`` to True."""
     t = _task()
     assert t._status_updated is False
-    Task._on_metrics_updated(t)
+    TaskEngine._on_metrics_updated(t)
     assert t._status_updated is True
 
 
@@ -482,7 +516,7 @@ def _make_status_for_update():
 def test_update_status_object_event_sets_current_object_and_size():
     """An ``apaevt_status_object`` event sets ``currentObject`` and ``currentSize``."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_object',
@@ -496,7 +530,7 @@ def test_update_status_object_event_sets_current_object_and_size():
 def test_update_status_counts_event_populates_every_counter():
     """An ``apaevt_status_counts`` event writes every counter field on the status."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_counts',
@@ -522,14 +556,15 @@ def test_update_status_counts_event_populates_every_counter():
     assert t._status.failedCount == 6
     assert t._status.wordsSize == 7
     assert t._status.wordsCount == 8
-    assert t._status.rateSize == 9
-    assert t._status.rateCount == 10
+    # Rates are never copied: the status body is counts and bytes only (plan 7.5)
+    assert t._status.rateSize == 0
+    assert t._status.rateCount == 0
 
 
 def test_update_status_error_event_appends_to_errors():
     """An ``apaevt_status_error`` event appends to ``status.errors``."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_error',
@@ -543,7 +578,7 @@ def test_update_status_errors_buffer_trims_to_limit():
     """Error buffer keeps only the most recent CONST_STATUS_HISTORY_LIMIT entries."""
     t = _task(status=_make_status_for_update())
     t._status.errors = [f'err-{i}' for i in range(CONST_STATUS_HISTORY_LIMIT)]
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_error',
@@ -558,7 +593,7 @@ def test_update_status_errors_buffer_trims_to_limit():
 def test_update_status_warning_event_appends_to_warnings():
     """An ``apaevt_status_warning`` event appends to ``status.warnings``."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_warning',
@@ -572,7 +607,7 @@ def test_update_status_warnings_buffer_trims_to_limit():
     """Warning buffer keeps only the most recent CONST_STATUS_HISTORY_LIMIT entries."""
     t = _task(status=_make_status_for_update())
     t._status.warnings = [f'warn-{i}' for i in range(CONST_STATUS_HISTORY_LIMIT)]
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_warning',
@@ -587,7 +622,7 @@ def test_update_status_warnings_buffer_trims_to_limit():
 def test_update_status_download_event_sets_status_string():
     """An ``apaevt_status_download`` event sets a human-readable status string."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_download',
@@ -601,7 +636,7 @@ def test_update_status_download_event_sets_status_string():
 def test_update_status_message_event_sets_status_field():
     """An ``apaevt_status_message`` event copies the message into ``status.status``."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_message',
@@ -615,7 +650,7 @@ def test_update_status_user_event_with_empty_notes_clears_notes():
     """An ``apaevt_status_user`` event with empty notes resets ``status.notes``."""
     t = _task(status=_make_status_for_update())
     t._status.notes = ['old note']
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_user',
@@ -629,7 +664,7 @@ def test_update_status_user_event_replaces_token_placeholders_in_strings():
     """String notes have the {token} placeholder (the token SLOT) substituted with the address."""
     t = _task(status=_make_status_for_update())
     t.address = 'acme.proj-x.src-x'
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_user',
@@ -643,7 +678,7 @@ def test_update_status_user_event_replaces_placeholders_in_dict_values():
     """Dict notes have placeholders replaced in every string value, keeping other types."""
     t = _task(status=_make_status_for_update())
     t.address = 'acme.proj-x.src-x'
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_user',
@@ -656,7 +691,7 @@ def test_update_status_user_event_replaces_placeholders_in_dict_values():
 def test_update_status_user_event_keeps_unknown_note_types_as_is():
     """A non-string, non-dict note (e.g. int) is appended without modification."""
     t = _task(status=_make_status_for_update())
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_user',
@@ -670,7 +705,7 @@ def test_update_status_info_event_merges_into_info_dict():
     """An ``apaevt_status_info`` event merges the body into ``self.info``."""
     t = _task(status=_make_status_for_update())
     t.info = {'existing': 'value'}
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_info',
@@ -684,7 +719,7 @@ def test_update_status_unknown_event_is_silently_ignored():
     """An event not in the dispatch table leaves status untouched."""
     t = _task(status=_make_status_for_update())
     original_status = t._status.status
-    Task._update_status(
+    TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_unknown_event',
@@ -710,7 +745,7 @@ async def test_forward_task_event_debugger_routes_to_debugger_send_event():
     t._debugger.send_event = AsyncMock()
     t.id = 'task-1'
 
-    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output', 'body': {'x': 1}})
+    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output', 'body': {'x': 1}})
     t._debugger.send_event.assert_awaited_once()
 
 
@@ -722,7 +757,7 @@ async def test_forward_task_event_debugger_skipped_when_no_debugger_attached():
     t = _task()
     t._debugger = None
     # Should not raise.
-    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
 
 
 @pytest.mark.asyncio
@@ -736,15 +771,20 @@ async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
     server = MagicMock()
     server.broadcast_task_event = AsyncMock()
     t._server = server
-    t.key = 'dev.user-1.acme.proj-x.src-x'
+    t._holds = {'dev.user-1.acme.proj-x.src-x': 900}
 
     payload = {'event': 'summary', 'body': {}}
-    await Task._forward_task_event(t, EVENT_TYPE.SUMMARY, payload)
+    await TaskEngine._forward_task_event(t, EVENT_TYPE.SUMMARY, payload)
 
     server.broadcast_task_event.assert_awaited_once()
     args = server.broadcast_task_event.await_args
     assert args.kwargs['key'] == 'dev.user-1.acme.proj-x.src-x'
-    assert args.kwargs['event'] == payload
+    # The holder's copy carries its controlId and the engine's key (ALB seam 3)
+    sent = args.kwargs['event']
+    assert sent['event'] == 'summary'
+    assert sent['body']['controlId'] == 'dev.user-1.acme.proj-x.src-x'
+    assert sent['body']['engineKey'] == t.engine_key
+    assert 'controlId' not in payload['body']
 
 
 @pytest.mark.asyncio
@@ -758,7 +798,7 @@ async def test_forward_task_event_debugger_swallows_send_failure():
     t._debugger.send_event = AsyncMock(side_effect=RuntimeError('socket broken'))
 
     # Should not raise.
-    await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
 
 
 # ---------------------------------------------------------------------------
@@ -772,19 +812,19 @@ def test_db_access_detects_each_provider():
     """
     for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
         pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]}
-        assert Task._db_access(_task(), pipeline) == ([('org', '')], True), provider
+        assert TaskEngine._db_access(_task(), pipeline) == ([('org', '')], True), provider
 
 
 def test_db_access_empty_without_db_nodes():
     """Ordinary pipelines never trigger provisioning."""
     pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]}
-    assert Task._db_access(_task(), pipeline) == ([], True)
+    assert TaskEngine._db_access(_task(), pipeline) == ([], True)
 
 
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
-    assert Task._db_access(_task(), {}) == ([], False)
-    assert Task._db_access(_task(), {'components': ['not-a-dict', {'no-provider': True}]}) == ([], False)
+    assert TaskEngine._db_access(_task(), {}) == ([], False)
+    assert TaskEngine._db_access(_task(), {'components': ['not-a-dict', {'no-provider': True}]}) == ([], False)
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +842,7 @@ def _env_task(pipeline=None):
 
 async def _build_env(t):
     """Build the env the way start_task does: from _db_access of the pipeline."""
-    return await Task._build_subprocess_env(t, Task._db_access(t, t._pipeline))
+    return await TaskEngine._build_subprocess_env(t, TaskEngine._db_access(t, t._pipeline))
 
 
 def _patch_resolve(monkeypatch, fake):
@@ -927,7 +967,7 @@ async def test_subprocess_env_unconfigured_account_reports_missing_cloud_db(monk
     t = _env_task(pipeline=_DB_PIPELINE)
     env = await _build_env(t)
     assert 'ROCKETRIDE_DB_DSN' not in env
-    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == Task._NO_CLOUD_DB_REASON
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == TaskEngine._NO_CLOUD_DB_REASON
     assert 'this server has no RocketRide cloud database' in env['ROCKETRIDE_DB_RESOLVE_ERROR']
     assert 'ROCKETRIDE_CLIENT_ID' not in env['ROCKETRIDE_DB_RESOLVE_ERROR']
     # Missing broker config is normal on a local engine: debug only.
@@ -956,7 +996,7 @@ async def test_subprocess_env_hosted_missing_broker_warns_and_directs_to_operato
     t = _env_task(pipeline=_DB_PIPELINE)
     env = await _build_env(t)
     reason = env['ROCKETRIDE_DB_RESOLVE_ERROR']
-    assert reason == Task._CLOUD_DB_CONFIG_ERROR_REASON
+    assert reason == TaskEngine._CLOUD_DB_CONFIG_ERROR_REASON
     assert 'Contact the server operator' in reason
     assert 'db_postgres' not in reason
     for name in ('ROCKETRIDE_DB_DSN', 'ROCKETRIDE_DB_BROKER_URL', 'ROCKETRIDE_DB_BROKER_TOKEN'):
@@ -1239,7 +1279,7 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
 
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(side_effect=Launched))
     with pytest.raises(Launched):
-        await Task.start_task(t)
+        await TaskEngine.start_task(t)
 
     assert [request for _, request in calls['authorize']] == [target]
     assert calls['authorize'][0][0]['public_endpoint'] is public
@@ -1300,7 +1340,7 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     spawn = AsyncMock(side_effect=Launched)
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
     with pytest.raises(Launched):
-        await Task.start_task(t)
+        await TaskEngine.start_task(t)
 
     # Lower-cased: the engine matches options without regard to case, so the test must too
     options = [
@@ -1515,10 +1555,10 @@ def test_analytics_interleaved_pipes_correlate_by_pipe():
     t = _analytics_task()
     t0 = 1_000.0
 
-    Task._accumulate_analytics(t, 'begin', 0, 'parse', ['a.txt'], {'eventTime': t0, 'logSeq': 100})
-    Task._accumulate_analytics(t, 'begin', 32, 'parse', ['b.txt'], {'eventTime': t0 + 0.5, 'logSeq': 101})
-    Task._accumulate_analytics(t, 'end', 0, 'parse', ['a.txt'], {'eventTime': t0 + 1.0})
-    Task._accumulate_analytics(t, 'end', 32, 'parse', ['b.txt'], {'eventTime': t0 + 3.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'parse', ['a.txt'], {'eventTime': t0, 'logSeq': 100})
+    TaskEngine._accumulate_analytics(t, 'begin', 32, 'parse', ['b.txt'], {'eventTime': t0 + 0.5, 'logSeq': 101})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'parse', ['a.txt'], {'eventTime': t0 + 1.0})
+    TaskEngine._accumulate_analytics(t, 'end', 32, 'parse', ['b.txt'], {'eventTime': t0 + 3.0})
 
     docs = t._status.slowestDocs
     assert [(d.name, d.elapsed, d.beginSeq) for d in docs] == [('b.txt', 2.5, 101), ('a.txt', 1.0, 100)]
@@ -1533,10 +1573,10 @@ def test_analytics_component_stats_key_by_pipe_and_reenter():
     t0 = 2_000.0
 
     # Interleaved across pipes: each leave must pair with ITS pipe's enter.
-    Task._accumulate_analytics(t, 'enter', 0, 'parse', [], {'eventTime': t0})
-    Task._accumulate_analytics(t, 'enter', 32, 'parse', [], {'eventTime': t0 + 1.0})
-    Task._accumulate_analytics(t, 'leave', 0, 'parse', [], {'eventTime': t0 + 2.0})
-    Task._accumulate_analytics(t, 'leave', 32, 'parse', [], {'eventTime': t0 + 2.5})
+    TaskEngine._accumulate_analytics(t, 'enter', 0, 'parse', [], {'eventTime': t0})
+    TaskEngine._accumulate_analytics(t, 'enter', 32, 'parse', [], {'eventTime': t0 + 1.0})
+    TaskEngine._accumulate_analytics(t, 'leave', 0, 'parse', [], {'eventTime': t0 + 2.0})
+    TaskEngine._accumulate_analytics(t, 'leave', 32, 'parse', [], {'eventTime': t0 + 2.5})
 
     stat = t._status.componentStats['parse']
     assert stat.calls == 2
@@ -1544,10 +1584,10 @@ def test_analytics_component_stats_key_by_pipe_and_reenter():
     assert stat.maxSeconds == 2.0
 
     # Reentrancy within ONE pipe: LIFO within the (pipe, component) stack.
-    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0})
-    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0 + 1.0})
-    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 1.5})
-    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 4.0})
+    TaskEngine._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0})
+    TaskEngine._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0 + 1.0})
+    TaskEngine._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 1.5})
+    TaskEngine._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 4.0})
     llm = t._status.componentStats['llm']
     assert llm.calls == 2
     assert llm.totalSeconds == 4.5  # inner 0.5 + outer 4.0
@@ -1560,8 +1600,8 @@ def test_analytics_slowest_list_bounded_and_sorted():
 
     t = _analytics_task()
     for i in range(CONST_ANALYTICS_SLOWEST_DOCS + 5):
-        Task._accumulate_analytics(t, 'begin', i, 'p', [f'doc-{i}'], {'eventTime': 100.0, 'logSeq': i})
-        Task._accumulate_analytics(t, 'end', i, 'p', [], {'eventTime': 100.0 + float(i + 1)})
+        TaskEngine._accumulate_analytics(t, 'begin', i, 'p', [f'doc-{i}'], {'eventTime': 100.0, 'logSeq': i})
+        TaskEngine._accumulate_analytics(t, 'end', i, 'p', [], {'eventTime': 100.0 + float(i + 1)})
 
     docs = t._status.slowestDocs
     assert len(docs) == CONST_ANALYTICS_SLOWEST_DOCS
@@ -1576,13 +1616,13 @@ def test_analytics_reset_clears_state():
     t = _analytics_task()
     t._status_trace = []
     t.info = {}
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['x'], {'eventTime': 1.0, 'logSeq': 1})
-    Task._accumulate_analytics(t, 'enter', 0, 'p', [], {'eventTime': 1.0})
-    Task._accumulate_analytics(t, 'leave', 0, 'p', [], {'eventTime': 2.0})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 3.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['x'], {'eventTime': 1.0, 'logSeq': 1})
+    TaskEngine._accumulate_analytics(t, 'enter', 0, 'p', [], {'eventTime': 1.0})
+    TaskEngine._accumulate_analytics(t, 'leave', 0, 'p', [], {'eventTime': 2.0})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 3.0})
     assert t._status.componentStats and t._status.slowestDocs
 
-    Task._reset_status(t)
+    TaskEngine._reset_status(t)
     assert t._status.componentStats == {}
     assert t._status.slowestDocs == []
     assert t._status.completionSeconds == 0.0
@@ -1599,28 +1639,28 @@ def test_analytics_idle_between_completions():
     t0 = 3_000.0
 
     # First completion — nothing before it counts (never went quiet).
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
     assert t._an_idle_since == t0 + 1.0
     assert t._status.idleSeconds == 0.0
 
     # 4s quiet closes at the next begin; the marker clears while busy. The
     # longest stretch remembers WHEN it began.
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 5.0, 'logSeq': 2})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 5.0, 'logSeq': 2})
     assert t._status.idleSeconds == 4.0
     assert t._status.idleLongestSeconds == 4.0
     assert t._status.idleLongestAt == t0 + 1.0
     assert t._an_idle_since == 0.0
 
     # Overlap: pipe 1 begins before pipe 0 ends — no quiet in between.
-    Task._accumulate_analytics(t, 'begin', 1, 'p', ['c'], {'eventTime': t0 + 6.0, 'logSeq': 3})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 7.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 1, 'p', ['c'], {'eventTime': t0 + 6.0, 'logSeq': 3})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 7.0})
     assert t._an_idle_since == 0.0  # pipe 1 still busy
-    Task._accumulate_analytics(t, 'end', 1, 'p', [], {'eventTime': t0 + 8.0})
+    TaskEngine._accumulate_analytics(t, 'end', 1, 'p', [], {'eventTime': t0 + 8.0})
     assert t._an_idle_since == t0 + 8.0
 
     # A shorter 1s gap grows the total but not the longest (or its stamp).
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['d'], {'eventTime': t0 + 9.0, 'logSeq': 4})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['d'], {'eventTime': t0 + 9.0, 'logSeq': 4})
     assert t._status.idleSeconds == 5.0
     assert t._status.idleLongestSeconds == 4.0
     assert t._status.idleLongestAt == t0 + 1.0
@@ -1638,32 +1678,32 @@ def test_analytics_idle_refresh_extends_open_stretch():
     t0 = 4_000.0
 
     # One closed 2s gap, then quiet from t0+5.
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 3.0, 'logSeq': 2})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 5.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 3.0, 'logSeq': 2})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 5.0})
 
     # 1s into the silence: total extends, closed 2s gap is still longest.
-    Task._refresh_idle_status(t, t0 + 6.0)
+    TaskEngine._refresh_idle_status(t, t0 + 6.0)
     assert t._status.idleSeconds == 3.0
     assert t._status.idleLongestSeconds == 2.0
     assert t._status.idleLongestAt == t0 + 1.0
 
     # 10s in: the open stretch is now the longest, stamped at ITS start.
-    Task._refresh_idle_status(t, t0 + 15.0)
+    TaskEngine._refresh_idle_status(t, t0 + 15.0)
     assert t._status.idleSeconds == 12.0
     assert t._status.idleLongestSeconds == 10.0
     assert t._status.idleLongestAt == t0 + 5.0
 
     # The provisional publishes never double-count: closing the gap at the
     # next begin lands on the same numbers a fresh reader would compute.
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['c'], {'eventTime': t0 + 20.0, 'logSeq': 3})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['c'], {'eventTime': t0 + 20.0, 'logSeq': 3})
     assert t._status.idleSeconds == 17.0
     assert t._status.idleLongestSeconds == 15.0
     assert t._status.idleLongestAt == t0 + 5.0
 
     # While busy, refresh republishes the closed totals unchanged.
-    Task._refresh_idle_status(t, t0 + 60.0)
+    TaskEngine._refresh_idle_status(t, t0 + 60.0)
     assert t._status.idleSeconds == 17.0
 
 
@@ -1672,13 +1712,13 @@ def test_analytics_idle_reset():
     t = _analytics_task()
     t._status_trace = []
     t.info = {}
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': 1.0, 'logSeq': 1})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 2.0})
-    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': 5.0, 'logSeq': 2})
-    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 6.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': 1.0, 'logSeq': 1})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 2.0})
+    TaskEngine._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': 5.0, 'logSeq': 2})
+    TaskEngine._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 6.0})
     assert t._status.idleSeconds == 3.0 and t._an_idle_since == 6.0
 
-    Task._reset_status(t)
+    TaskEngine._reset_status(t)
     assert t._status.idleSeconds == 0.0
     assert t._status.idleLongestSeconds == 0.0
     assert t._status.idleLongestAt == 0.0
@@ -1704,14 +1744,14 @@ def test_task_rejects_unknown_run_classifications():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline={},
     )
     with pytest.raises(ValueError, match='run_kind'):
-        Task(**common, run_kind='prod')
+        TaskEngine(**common, run_kind='prod')
     with pytest.raises(ValueError, match='trigger'):
-        Task(**common, trigger='cron')
+        TaskEngine(**common, trigger='cron')
 
 
 @pytest.mark.asyncio
@@ -1720,12 +1760,12 @@ async def test_task_loads_nothing_for_a_pipeline_without_placeholders():
     from unittest.mock import MagicMock
 
     source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
-    task = Task(
+    task = TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline={},
         env_source=source,
@@ -1748,12 +1788,12 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
 
     old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
     new = {'components': [], 'config': '${ROCKETRIDE_KEY}!'}
-    task = Task(
+    task = TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline=old,
         env_source=AsyncMock(side_effect=RuntimeError('db down')),
@@ -1791,12 +1831,12 @@ async def test_a_stop_during_the_restart_load_wins():
     is refused, nothing is stopped again or started, and the pipeline is unchanged.
     """
     old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
-    task = Task(
+    task = TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline=old,
     )
@@ -1823,12 +1863,12 @@ async def test_a_stop_during_the_restart_load_wins_on_an_already_stopped_task():
     """A task whose last run was stopped still has _stop_requested set; a new
     stop during the restart's load is still seen (counted, not just flagged).
     """
-    task = Task(
+    task = TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline={},
     )
@@ -1878,7 +1918,7 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
 
     with pytest.raises(RuntimeError, match='stopped before it started'):
-        await Task.start_task(t)
+        await TaskEngine.start_task(t)
     spawn.assert_not_awaited()
     t._terminated.assert_awaited()
 
@@ -1918,7 +1958,7 @@ async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
 
     with pytest.raises(RuntimeError, match='stopped before it started'):
-        await Task.start_task(t)
+        await TaskEngine.start_task(t)
     spawn.assert_not_awaited()
     assert seen == [False]
 
@@ -1930,12 +1970,12 @@ async def test_a_second_restart_while_one_runs_is_refused():
     restart works again.
     """
     pipeline = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
-    task = Task(
+    task = TaskEngine(
         server=MagicMock(),
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline=pipeline,
         env_source=AsyncMock(return_value={'ROCKETRIDE_KEY': 'first'}),
@@ -1987,12 +2027,12 @@ async def test_task_loads_placeholder_values_at_each_resolve():
         id='t-1',
         project_id='p-1',
         source='s-1',
-        key='dev.u-1.acme.p-1.s-1',
+        engine_key='enginehash:u-1',
         address='acme.p-1.s-1',
         pipeline={},
     )
     source = AsyncMock(side_effect=[{'ROCKETRIDE_KEY': 'v1'}, {'ROCKETRIDE_KEY': 'v2'}])
-    task = Task(**common, env_source=source)
+    task = TaskEngine(**common, env_source=source)
     pipeline = {'config': '${ROCKETRIDE_KEY}'}
 
     assert (await task._resolve_pipeline(pipeline))['config'] == 'v1'
@@ -2000,7 +2040,7 @@ async def test_task_loads_placeholder_values_at_each_resolve():
     assert source.await_count == 2
     assert not hasattr(task, '_env')
 
-    fixed = Task(**common, env={'ROCKETRIDE_KEY': 'fixed'})
+    fixed = TaskEngine(**common, env={'ROCKETRIDE_KEY': 'fixed'})
     assert (await fixed._resolve_pipeline(pipeline))['config'] == 'fixed'
 
 
@@ -2055,7 +2095,7 @@ def test_cap_trace_payload_leaves_unserializable_payloads_alone():
 
 
 # ---------------------------------------------------------------------------
-# on_event: idle-timer reset
+# on_event: pipeline activity
 # ---------------------------------------------------------------------------
 
 
@@ -2065,7 +2105,7 @@ def _event_task(run_kind='dev'):
 
     t = _task()
     t._run_kind = run_kind
-    t._idle_time = 600
+    t._last_pipeline_event = 0.0
     t._status_trace = []
     # The trace branch walks the per-pipe execution stack before anything else.
     t._status.pipeflow = SimpleNamespace(byPipe={})
@@ -2087,44 +2127,44 @@ def _event_task(run_kind='dev'):
         'apaevt_trace',
     ],
 )
-async def test_on_event_engine_event_resets_idle_timer_for_a_dev_task(event_type):
-    """Pipeline work is activity: a dev task mid-turn is not idle."""
+async def test_on_event_engine_event_records_pipeline_activity_for_a_dev_task(event_type):
+    """Pipeline work is activity: a dev task mid-turn is not idle (its controls read the stamp)."""
     t = _event_task()
 
-    await Task.on_event(t, {'event': event_type, 'body': {}})
+    await TaskEngine.on_event(t, {'event': event_type, 'body': {}})
 
-    assert t._idle_time == 0
+    assert t._last_pipeline_event > 0.0
 
 
 @pytest.mark.asyncio
-async def test_on_event_stdout_does_not_reset_idle_timer():
+async def test_on_event_stdout_does_not_count_as_activity():
     """Raw node output must not count as idle-timer activity."""
     t = _event_task()
 
-    await Task.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
+    await TaskEngine.on_event(t, {'event': 'output', 'body': {'output': 'still here'}})
 
-    assert t._idle_time == 600
+    assert t._last_pipeline_event == 0.0
 
 
 @pytest.mark.asyncio
-async def test_on_event_debugger_passthrough_does_not_reset_idle_timer():
+async def test_on_event_debugger_passthrough_does_not_count_as_activity():
     """Debugger traffic is not pipeline work and its cadence is not ours to reason about."""
     t = _event_task()
 
-    await Task.on_event(t, {'event': 'stopped', 'body': {}})
+    await TaskEngine.on_event(t, {'event': 'stopped', 'body': {}})
 
-    assert t._idle_time == 600
+    assert t._last_pipeline_event == 0.0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('event_type', ['apaevt_status_counts', 'apaevt_sse', 'apaevt_trace'])
-async def test_on_event_never_resets_idle_timer_for_a_deploy_run(event_type):
+async def test_on_event_never_counts_as_activity_for_a_deploy_run(event_type):
     """A deploy run's ttl is a wall-clock window, not an idle timeout."""
     t = _event_task(run_kind='deploy')
 
-    await Task.on_event(t, {'event': event_type, 'body': {}})
+    await TaskEngine.on_event(t, {'event': event_type, 'body': {}})
 
-    assert t._idle_time == 600
+    assert t._last_pipeline_event == 0.0
 
 
 @pytest.mark.asyncio
@@ -2138,7 +2178,7 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
-    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': 'COMPLETED'}})
+    await TaskEngine.on_event(t, {'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': 'COMPLETED'}})
 
     assert t._status.exitCode == 0
     assert t._status.exitMessage == 'COMPLETED'
@@ -2155,7 +2195,7 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
-    await Task.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
+    await TaskEngine.on_event(t, {'event': 'apaevt_exit', 'body': {'message': 'Malformed exit message'}})
 
     assert t._status.exitCode == 1
 
@@ -2192,9 +2232,7 @@ _TRACE_MESSAGE = {
         'op': 'enter',
         'pipeId': 0,
         'componentId': 'parse',
-        'totalPipes': 1,
-        'bindingId': 7,
-        'rootBindingId': 7,
+        'traceId': 7,
         'trace': {'text': 'hello'},
         'eventTime': 1_000.0,
     },
@@ -2207,7 +2245,7 @@ async def test_a_real_trace_level_still_derives_a_flow_event(level):
     """The levels that ask for tracing keep every part of the fan-out."""
     t = _trace_task(level)
 
-    await Task.on_event(t, dict(_TRACE_MESSAGE))
+    await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
 
     t._forward_task_event.assert_awaited_once()
     t._accumulate_analytics.assert_called_once()
@@ -2229,14 +2267,28 @@ async def test_the_none_level_emits_no_flow_at_all():
     """
     t = _trace_task('none')
 
-    await Task.on_event(t, dict(_TRACE_MESSAGE))
+    await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
 
     t._forward_task_event.assert_not_awaited()
     t._accumulate_analytics.assert_not_called()
     t.build_event.assert_not_called()
     # The parts that are NOT gated on the trace level.
     assert t._status_updated is True
-    assert t._status.pipeflow.totalPipes == 1
+    assert t._status.pipeflow.byPipe == {0: ['parse']}
+
+
+@pytest.mark.asyncio
+async def test_a_trace_never_sets_the_engine_wide_pipe_count():
+    """
+    The engine does not report its pipe count: a holder of a shared engine
+    must not learn it (a holder count in disguise). pipeflow.totalPipes stays
+    on the contract at its default 0, even if a body still carried the field.
+    """
+    t = _trace_task('full')
+
+    await TaskEngine.on_event(t, {**_TRACE_MESSAGE, 'body': {**_TRACE_MESSAGE['body'], 'totalPipes': 5}})
+
+    assert t._status.pipeflow.totalPipes == 0
 
 
 @pytest.mark.asyncio
@@ -2245,7 +2297,7 @@ async def test_an_absent_trace_level_still_emits_nothing(level):
     """The original behaviour, unchanged: no level means no flow."""
     t = _trace_task(level)
 
-    await Task.on_event(t, dict(_TRACE_MESSAGE))
+    await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
 
     t._forward_task_event.assert_not_awaited()
 
@@ -2353,7 +2405,7 @@ def _exit_task(exit_event_seen=False):
 def test_process_exit_code_used_when_no_exit_event():
     """A task that exits before it can report (a refusal) is not recorded as exit 0."""
     t = _exit_task()
-    Task._apply_process_exit_code(t, 1)
+    TaskEngine._apply_process_exit_code(t, 1)
     assert t._status.exitCode == 1
     assert t._status.exitMessage == 'Stopped'
 
@@ -2361,7 +2413,7 @@ def test_process_exit_code_used_when_no_exit_event():
 def test_exit_event_wins_over_process_exit_code():
     t = _exit_task(exit_event_seen=True)
     t._status.exitMessage = 'Completed'
-    Task._apply_process_exit_code(t, 1)
+    TaskEngine._apply_process_exit_code(t, 1)
     assert (t._status.exitCode, t._status.exitMessage) == (0, 'Completed')
 
 
@@ -2369,21 +2421,21 @@ def test_requested_stop_keeps_its_exit_code():
     """The kill signal of a user stop is not a task failure (no dashboard task_error)."""
     t = _exit_task()
     t._stop_requested = True
-    Task._apply_process_exit_code(t, -9)
+    TaskEngine._apply_process_exit_code(t, -9)
     assert t._status.exitCode == 0
 
 
 def test_unknown_process_exit_code_is_not_success():
     """The process did not exit in time: that is not a completed task."""
     t = _exit_task()
-    Task._apply_process_exit_code(t, None)
+    TaskEngine._apply_process_exit_code(t, None)
     assert t._status.exitCode == 1
 
 
 @pytest.mark.asyncio
 async def test_exit_event_marks_the_run_as_reported():
     t = _exit_task()
-    await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'boom'}})
+    await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'boom'}})
     assert t._exit_event_seen is True
     assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
 
@@ -2404,14 +2456,14 @@ class _ExitingProcess:
 async def test_exit_code_is_read_after_the_process_is_reaped():
     t = _exit_task()
     t._engine_process = _ExitingProcess(1)
-    assert await Task._process_exit_code(t) == 1
+    assert await TaskEngine._process_exit_code(t) == 1
 
 
 @pytest.mark.asyncio
 async def test_no_process_counts_as_failed():
     t = _exit_task()
     t._engine_process = None
-    assert await Task._process_exit_code(t) == 1
+    assert await TaskEngine._process_exit_code(t) == 1
 
 
 class _LingeringProcess:
@@ -2438,7 +2490,7 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     monkeypatch.setattr(te, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.05)
     t = _exit_task()
     t._engine_process = _LingeringProcess()
-    assert await Task._process_exit_code(t) == -9
+    assert await TaskEngine._process_exit_code(t) == -9
     assert t._engine_process.killed
 
 
@@ -2487,7 +2539,7 @@ class _SilentTransport:
 async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
     """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
     parent = _task()
-    client = Task.TaskData(parent_task=parent, channel_id='c1', module='DATA-test', transport=_SilentTransport())
+    client = TaskEngine.TaskData(parent_task=parent, channel_id='c1', module='DATA-test', transport=_SilentTransport())
     parent._data_client = client
 
     pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
@@ -2549,19 +2601,19 @@ def _startable_task(monkeypatch):
 
 
 async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
-    """Every start gets its own token, separate from the control's key."""
+    """Every start gets its own token, separate from the engine key."""
     t, _ = _startable_task(monkeypatch)
     tokens = []
 
     for _ in range(2):
         t._status.state = TASK_STATE.NONE.value
         with pytest.raises(_LaunchStop):
-            await Task.start_task(t)
+            await TaskEngine.start_task(t)
         tokens.append(t._data_token)
 
     assert all(len(token) >= 32 for token in tokens)
     assert tokens[0] != tokens[1]
-    assert t.key not in tokens
+    assert t.engine_key not in tokens
 
 
 async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monkeypatch):
@@ -2570,7 +2622,7 @@ async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monk
     t._launch_args = {'args': [f'--data_token_sha256={"b" * 64}']}
 
     with pytest.raises(_LaunchStop):
-        await Task.start_task(t)
+        await TaskEngine.start_task(t)
 
     ((argv, env),) = launches
     expected = f'--data_token_sha256={hashlib.sha256(t._data_token.encode("utf-8")).hexdigest()}'
@@ -2596,7 +2648,7 @@ async def test_data_connection_presents_the_token(monkeypatch):
     client.did_fail = MagicMock(return_value=False)
 
     monkeypatch.setattr(task_engine, 'TransportWebSocket', fake_transport)
-    monkeypatch.setattr(Task, 'TaskData', MagicMock(return_value=client))
+    monkeypatch.setattr(TaskEngine, 'TaskData', MagicMock(return_value=client))
 
     t = _task()
     t._is_terminating = False
@@ -2607,7 +2659,7 @@ async def test_data_connection_presents_the_token(monkeypatch):
     t._engine_process = None
     t._provider = None
 
-    await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+    await TaskEngine._send_data(t, {'command': 'apaext_process', 'arguments': {}})
 
     ((uri, kwargs),) = transports
     assert uri == 'ws://127.0.0.1:20001/task/data'
@@ -2631,7 +2683,7 @@ async def test_data_request_without_a_token_fails_at_once(monkeypatch):
     t._engine_process = None
 
     with pytest.raises(RuntimeError, match='not running'):
-        await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+        await TaskEngine._send_data(t, {'command': 'apaext_process', 'arguments': {}})
 
     transport.assert_not_called()
 

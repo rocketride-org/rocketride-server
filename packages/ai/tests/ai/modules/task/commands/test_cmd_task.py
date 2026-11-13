@@ -518,13 +518,14 @@ async def test_on_terminate_denied_does_not_stop_the_task():
 @pytest.mark.asyncio
 async def test_on_restart_rechecks_the_callers_access_to_the_team():
     """A restart decrypts the team's current secrets again, so a caller who
-    passes get_task (the run's owner) but no longer holds task.control on the
-    team is refused before the task restarts and loads anything.
+    passes get_control (the run's owner) but no longer holds task.control on
+    the team is refused before the task restarts and loads anything. The team
+    is the CONTROL's: the engine may be held by controls of other teams.
     """
     server = MagicMock()
     server.restart_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task = MagicMock(return_value=MagicMock(team_id='team-9'))
+    conn.get_control = MagicMock(return_value=SimpleNamespace(teamId='team-9'))
     conn.verify_team_permission = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
 
     with pytest.raises(PermissionError, match='denied'):
@@ -557,20 +558,20 @@ async def test_on_restart_propagates_server_errors():
 
 @pytest.mark.asyncio
 async def test_on_restart_authorizes_against_the_tasks_team():
-    """on_restart routes authorization through get_task (task-team resolution)
-    and never reaches restart_task when the caller lacks task.control on the
-    TASK's team — the cross-team restart hole this closes.
+    """on_restart routes authorization through get_control (task-team
+    resolution) and never reaches restart_task when the caller lacks
+    task.control on the TASK's team — the cross-team restart hole this closes.
     """
     server = MagicMock()
     server.restart_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task = MagicMock(side_effect=PermissionError('denied for this task'))
+    conn.get_control = MagicMock(side_effect=PermissionError('denied for this task'))
 
     with pytest.raises(PermissionError, match='denied for this task'):
         await TaskCommands.on_restart(conn, {'arguments': {'token': 'acme.pipe.other_team'}})
 
-    conn.get_task.assert_called_once()
-    assert conn.get_task.call_args.args[1] == 'task.control'
+    conn.get_control.assert_called_once()
+    assert conn.get_control.call_args.args[1] == 'task.control'
     server.restart_task.assert_not_called()
 
 
@@ -581,7 +582,7 @@ async def test_on_restart_authorizes_against_the_tasks_team():
 
 @pytest.mark.asyncio
 async def test_on_rrext_get_task_status_returns_task_status_dict():
-    """Retrieves task via get_task and returns its model_dump()."""
+    """Resolves the caller's control and returns its status model_dump()."""
     status = MagicMock()
     status.model_dump = MagicMock(return_value={'name': 'task-1', 'state': 3})
 
@@ -589,11 +590,11 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
     task.get_status.return_value = status
 
     conn = _make_conn(account_info=_account_info())
-    conn.get_task = MagicMock(return_value=task)
+    conn.get_control = MagicMock(return_value=SimpleNamespace(task=task, engine_state='running'))
 
     response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'acme.pipe.x'}})
-    conn.get_task.assert_called_once()
-    assert response == {'type': 'response', 'body': {'name': 'task-1', 'state': 3}}
+    conn.get_control.assert_called_once_with({'arguments': {'token': 'acme.pipe.x'}}, 'task.monitor')
+    assert response == {'type': 'response', 'body': {'name': 'task-1', 'state': 3, 'engineState': 'running'}}
 
 
 # ---------------------------------------------------------------------------
@@ -640,17 +641,17 @@ async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
 
 @pytest.mark.asyncio
 async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
-    """The list includes only RUNNING tasks the caller has team access to."""
+    """The list includes only live tasks the caller has team access to; a finished run is not listed."""
     from rocketride import TASK_STATE
 
     running_status = SimpleNamespace(state=TASK_STATE.RUNNING.value, status='running')
     completed_status = SimpleNamespace(state=TASK_STATE.COMPLETED.value, status='completed')
 
     def _ctrl(token, team_id, status, run_kind='dev'):
-        """Build a TASK_CONTROL stub with the given team_id + status."""
+        """Build a TaskControl stub with the given team_id + status (running, or finished and not dormant)."""
         task = MagicMock()
         task.get_status = MagicMock(return_value=status)
-        # owner_kind/owner_id mirror TASK_CONTROL: the team owns a deploy
+        # owner_kind/owner_id mirror TaskControl: the team owns a deploy
         # run, the user owns a dev run.
         owner_kind = 'team' if run_kind == 'deploy' else 'user'
         owner_id = team_id if run_kind == 'deploy' else 'user-1'
@@ -664,6 +665,8 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
+            engine_state='running' if status is running_status else 'stopped',
+            dormant=False,
         )
 
     server = MagicMock()
@@ -690,6 +693,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     # Run classification rides every row — clients must not infer deploy-ness
     # from a non-empty teamId (dev runs carry an attribution team too).
     assert response['body']['tasks'][0]['runKind'] == 'dev'
+    assert response['body']['tasks'][0]['engineState'] == 'running'
 
 
 @pytest.mark.asyncio
@@ -710,6 +714,8 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         source='my-source',
         pipeline=None,
         task=task,
+        engine_state='running',
+        dormant=False,
     )
 
     server = MagicMock()

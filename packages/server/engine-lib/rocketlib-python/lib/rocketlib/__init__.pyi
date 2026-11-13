@@ -585,8 +585,8 @@ class IServiceEndpoint(Protocol):
     def setToken(
         self, serviceConfig: 'IServiceEndpoint.IServiceEndpoint_ServiceConfig', key: str, value: str
     ) -> None: ...
-    def getPipe(self, traceLevel: Optional[str] = None, parentBindingId: int = 0) -> 'IServiceFilterPipe':
-        """Take a pipe as a new binding: traceLevel none/metadata/summary/full (None = endpoint default); a parentBindingId makes it a child binding that inherits root and level."""
+    def getPipe(self, traceLevel: Optional[str] = None, traceId: int = 0) -> 'IServiceFilterPipe':
+        """Take a pipe as a new binding: traceLevel none/metadata/summary/full (None = endpoint default); traceId 0 starts a new tree, a live traceId joins it (same id, inherited level)."""
         ...
     def putPipe(self, pipe: 'IServiceFilterPipe') -> None: ...
 
@@ -603,8 +603,7 @@ class IServiceFilterPipe(Protocol):
     currentObject: Entry
     pipeType: 'IServiceFilterPipe.IServiceFilterInstance_PipeType'
     pipeId: int
-    bindingId: int
-    rootBindingId: int
+    traceId: int
     traceLevel: str
     next: Optional['IServiceFilterPipe']
     targetObjectPath: str
@@ -739,10 +738,9 @@ class BindingLogger:
     """A node's message channel captured for ONE binding (IInstanceBase.logger())."""
 
     pipeId: int
-    bindingId: int
-    rootBindingId: int
+    traceId: int
 
-    def __init__(self, pipe_id: int, binding_id: int, root_binding_id: int) -> None: ...
+    def __init__(self, pipe_id: int, trace_id: int) -> None: ...
     def debug(self, *args: Any) -> None: ...
     def warning(self, *args: Any) -> None: ...
     def error(self, *args: Any) -> None: ...
@@ -761,11 +759,9 @@ class IInstanceBase:
     @property
     def settings(self) -> ConfigView: ...
     @property
-    def bindingId(self) -> int: ...
-    @property
-    def rootBindingId(self) -> int: ...
+    def traceId(self) -> int: ...
     def getPipe(self, traceLevel: Optional[str] = None) -> IServiceFilterPipe:
-        """Open a sub-pipe as a child of this binding (same rootBindingId, inherited trace level, caller stamped)."""
+        """Open a sub-pipe in this binding's tree (same traceId, inherited trace level, caller stamped)."""
         ...
     def putPipe(self, pipe: IServiceFilterPipe) -> None: ...
     def logger(self) -> BindingLogger: ...
@@ -853,9 +849,7 @@ def monitorOther(*args: Any) -> None:
     """Emit any other monitor information."""
     ...
 
-def monitorSSE(
-    pipe_id: int, type: str, data: Optional[Dict[str, Any]] = None, binding_id: int = 0, root_binding_id: int = 0
-) -> None:
+def monitorSSE(pipe_id: int, type: str, data: Optional[Dict[str, Any]] = None, trace_id: int = 0) -> None:
     """Send a real-time SSE event to the UI, tagged with the binding that produced it."""
     ...
 

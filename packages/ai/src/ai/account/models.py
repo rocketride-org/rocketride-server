@@ -330,7 +330,7 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
 
     Args:
         account_info: The authenticated caller's session.
-        task_team_id: The ``teamId`` from the task's TASK_CONTROL.
+        task_team_id: The ``teamId`` from the task's TaskControl.
 
     Returns:
         Effective permission list, or empty list if the caller has no
@@ -355,7 +355,7 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
 
 def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str]:
     """
-    Return the caller's effective permissions for one RUN (a TASK_CONTROL).
+    Return the caller's effective permissions for one RUN (a TaskControl).
 
     CONTRACT — RETURNS ``[]`` on no access (never raises), like
     ``resolve_task_permissions``.
@@ -380,7 +380,7 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
 
     Args:
         account_info: The authenticated caller's session.
-        control: The run's TASK_CONTROL (or any object carrying
+        control: The run's TaskControl (or any object carrying
             ``owner_kind``/``owner_id``/``run_kind``/``teamId``).
 
     Returns:
@@ -450,3 +450,65 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[st
                 # Otherwise return the permissions explicitly stored on the team.
                 return list(team.get('permissions', []))
     raise PermissionError(f'No membership in team {team_id!r}')
+
+
+# =============================================================================
+# TEAM ORDER (plan 3.2, 6.2, 8.3)
+# =============================================================================
+
+
+def team_order(account_info: AccountInfo) -> list[str]:
+    """
+    The caller's TEAM ORDER: the teams ``@team`` resolution walks, first to last.
+
+    The first team in the order that holds a name answers for it; teams that
+    hold nothing are skipped; the order is total, so there is no tie rule. The
+    first entry is the caller's HOME team (``home_team``): the team context of
+    ``@dev``, ``@me`` and a cross-org ``@public`` run, and the team every
+    ledger row is attributed to.
+
+    Source of the order: the session's member teams in their membership order
+    with the development team moved first, which is how
+    ``org_members.team_order`` is seeded from ``dev_team_id`` (the stored,
+    user-editable order lands with the C.6 follow-up and replaces this
+    derivation on ``AccountInfo``).
+
+    A key with an ``endpoints`` scope resolves through its FROZEN team only
+    (plan 2.4): hydration narrows the session's teams to the key's pinned
+    team, so its order is that one team; a scoped key that is not pinned to
+    exactly one team resolves no team at all (fail closed), never through the
+    owner's order.
+
+    Args:
+        account_info: The request's account.
+
+    Returns:
+        Team ids, the home team first; empty when the caller has no team.
+    """
+    org = getattr(account_info, 'organization', None) or {}
+    teams = [str(team.get('id')) for team in org.get('teams') or [] if team.get('id')]
+
+    # A scoped key: its frozen team, or nothing
+    if getattr(account_info, 'endpoints', None) is not None:
+        return teams if len(teams) == 1 else []
+
+    # The seeded order: the development team first, then membership order
+    first = getattr(account_info, 'devTeam', '') or ''
+    if first in teams:
+        teams.remove(first)
+        teams.insert(0, first)
+    return teams
+
+
+def home_team(account_info: AccountInfo) -> str:
+    """
+    The caller's HOME team: the first team in their team order ('' when none).
+
+    Args:
+        account_info: The request's account.
+
+    Returns:
+        The home team id.
+    """
+    order = team_order(account_info)
+    return order[0] if order else ''

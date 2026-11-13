@@ -119,6 +119,8 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    trace_id: int = None  # The request tree this binding started (plan 7.4)
+    correlation_id: str = None  # The server-minted request id this pipe was opened for (ALB seam 7)
     # Text lane: holds the bytes of a character that a write cut in half
     text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
 
@@ -706,10 +708,18 @@ class DataConn(DAPConn):
         This operation:
         1. Acquires a semaphore slot to limit concurrent pipes (async, non-blocking)
         2. Validates required parameters and does sync pipe operations in thread
-        3. Returns pipe ID on success
+        3. Returns the pipe slot ID and the request tree's traceId on success
 
         The semaphore is acquired here and will be released in _close().
         The activity timer is set to current time when the pipe is created.
+
+        Idempotent on ``correlationId`` (ALB seam 7, plan 3.1): when a binding
+        is already open on this engine for the same server-minted
+        ``correlationId``, its ``{pipe_id, traceId}`` is returned and no
+        second pipe is taken. A no-op locally (the SDK never retries
+        delivery); the retry path for a forwarding front end later. Clients
+        cannot send the id: the server mints it (``cmd_data`` drops a
+        client-sent one).
         """
         # Validate arguments first
         obj = args.get('object', None)
@@ -719,6 +729,15 @@ class DataConn(DAPConn):
         mime_type = args.get('mimeType', None)
         if mime_type is None:
             raise ValueError('No mimeType specified')
+
+        # An open already served for this request: hand back the same binding
+        correlation_id = args.get('correlationId') or None
+        if correlation_id is not None:
+            for conn_pipe in list(self._pipe_map.values()):
+                if conn_pipe.correlation_id == correlation_id and conn_pipe.is_open:
+                    return self.build_response(
+                        request, body={'pipe_id': conn_pipe.pipe_id, 'traceId': conn_pipe.trace_id}
+                    )
 
         # Waits for the source to bind `state.target`, then sizes the semaphore
         # from its threadCount config; see `_ensure_pipe_sem`.
@@ -743,8 +762,9 @@ class DataConn(DAPConn):
                     pipe_instance = self._require_target().getPipe()
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
-                    # Get the id and determine the lane
+                    # Get the ids and determine the lane
                     pipe_id = pipe_instance.pipeId
+                    trace_id = pipe_instance.traceId
                     lane = self._determine_lane(mime_type, pipe_instance)
                     self._warn_on_unconsumed_lane(mime_type, lane, pipe_instance)
 
@@ -766,6 +786,8 @@ class DataConn(DAPConn):
                         semaphore_acquired=True,  # Mark as having semaphore
                         created_time=current_time,
                         last_activity_time=current_time,  # Initialize activity timer
+                        trace_id=trace_id,
+                        correlation_id=correlation_id,
                     )
 
                     # Begin the pipe
@@ -778,7 +800,7 @@ class DataConn(DAPConn):
                         f'Successfully opened pipe {pipe_id} with lane {lane}, zombie timeout: {self._pipe_timeout}s'
                     )
 
-                    return pipe_id
+                    return pipe_id, trace_id
 
                 except Exception:
                     # Clean up pipe if allocated.
@@ -791,10 +813,11 @@ class DataConn(DAPConn):
                     raise
 
             # Execute sync operations in thread
-            pipe_id = await asyncio.to_thread(open_sync)
+            pipe_id, trace_id = await asyncio.to_thread(open_sync)
 
-            # Return success response
-            return self.build_response(request, body={'pipe_id': pipe_id})
+            # Return success response: the slot (pipe_id stays until the Step 3
+            # wire rename moves the clients to pipeId) and the request tree
+            return self.build_response(request, body={'pipe_id': pipe_id, 'traceId': trace_id})
 
         except Exception as e:
             # Release semaphore on any error during open
@@ -1041,16 +1064,15 @@ class DataConn(DAPConn):
         stdio transport parses it into an ``apaevt_trace`` event and
         everything downstream follows for free: the derived ``apaevt_flow``
         events, the live Trace/Flow panes, the run-log continuum, and replay.
-        The wire is the engine's 8-field form (``op*pipeId*totalPipes*
-        componentId*bindingId*rootBindingId*trace``, ints hex); ``totalPipes``
-        is emitted as 0, which the supervisor treats as "unknown — keep the
-        current count" (getPipeCount is not exposed to Python).
+        The wire is the engine's form (``op*pipeId*componentId*traceId*
+        trace``, ints hex) with the engine's ops, so the supervisor needs no
+        way to tell a tool trace from a data-lane one.
 
         Args:
             op: Trace operation (BEGIN / ENTER / LEAVE / END).
             pipe: The REAL pipe the call runs on (the caller's open pipe or
-                the borrowed pool pipe); its slot id and binding ids ride the
-                line so the supervisor routes the trace by binding.
+                the borrowed pool pipe); its slot id and trace id ride the
+                line so the supervisor routes the trace by request tree.
             component: The component field — the target node id for
                 enter/leave, the call label for begin/end.
             trace: Trace payload (lane/result/data), JSON-serialized inline.
@@ -1070,9 +1092,7 @@ class DataConn(DAPConn):
         # ids or writing the monitor line must never abort the call, skip
         # returning a borrowed pipe, or replace the tool's result or error.
         try:
-            monitorOther(
-                'DBG', f'{op}*{pipe.pipeId:x}*0*{component}*{pipe.bindingId:x}*{pipe.rootBindingId:x}*{payload}'
-            )
+            monitorOther('DBG', f'{op}*{pipe.pipeId:x}*{component}*{pipe.traceId:x}*{payload}')
         except Exception:
             pass
 

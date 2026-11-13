@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from ai.common.dap import TransportBase
 
 from .task_conn import TaskConn
+from .task_control import DeploymentRef, TeamContext, control_key, rung_of
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -67,12 +68,18 @@ async def start_server_task_as_team(
     *,
     org_id: str,
     team_id: str,
+    deployment: DeploymentRef,
     trigger: str = 'schedule',
     ttl: Optional[int] = None,
     trace_level: Optional[str] = None,
     debug_out: bool = False,
     owner_kind: str = 'team',
     owner_user_id: str = '',
+    rung: str = '',
+    developer_id: str = '',
+    version: Optional[int] = None,
+    team_context: Optional[TeamContext] = None,
+    deployment_epoch: Optional[float] = None,
 ) -> str:
     """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential; return the control's KEY.
 
@@ -96,6 +103,17 @@ async def start_server_task_as_team(
         arguments, so remote clients cannot spoof a deploy run.
       - The org's developer id rides the synthetic organization: it is the
         address namespace, and a run cannot start without one.
+      - The deployment the run resolved through (``deployment``) rides
+        the same trusted channel: the publisher's disable/remove releases
+        the run's hold.
+      - ``rung`` stamps the published rung a ``process(name)`` start
+        answered on (``'me'``, ``'team'`` or ``'public'``); empty derives it
+        from the owner. ``developer_id`` is the address namespace when it is
+        not ``org_id``'s own: a ``@public`` run is billed to the caller's org
+        while its address stays the publisher's.
+      - ``version`` is the artifact version a ``process(name)`` start
+        resolved; ``team_context`` the team whose environment the control
+        runs with (plan 6.2; default: the deploying team ``team_id``).
 
     Returns:
         The started control's registry KEY (an in-process handle for the
@@ -110,8 +128,9 @@ async def start_server_task_as_team(
     from ai.account.app_deploy import developer_id_required
     from ai.account.models import AccountInfo
 
-    # The address namespace comes from the org, not from a session.
-    developer_id = await account.get_developer_id(org_id)
+    # The address namespace comes from the org, not from a session, unless
+    # the run's address lives in the publisher's namespace (@public)
+    developer_id = developer_id or await account.get_developer_id(org_id)
     if not developer_id:
         raise PermissionError(developer_id_required('Running a deployment'))
 
@@ -158,6 +177,11 @@ async def start_server_task_as_team(
     conn._trusted_run_kind = 'deploy'
     conn._trusted_owner_kind = owner_kind
     conn._trusted_trigger = trigger
+    conn._trusted_deployment = deployment
+    conn._trusted_rung = rung
+    conn._trusted_version = version
+    conn._trusted_deployment_epoch = deployment_epoch
+    conn._trusted_team_context = team_context or TeamContext(team_id, 'deploying')
 
     # The schedule's run window rides the execute arguments: start_task
     # reads 'ttl', and a deploy run ALWAYS sends it. 0 means no window
@@ -174,13 +198,14 @@ async def start_server_task_as_team(
     exec_response = await conn.request('execute', arguments=arguments)
 
     # The response carries the address; the in-process callers hold the key.
-    # The deploy run's key is built from its owner, never resolved through the
-    # caller rungs: for a @me deploy the synthetic account IS the owning user,
-    # so the resolver would try @dev first and hand back that user's Play'd
-    # run of the same pipeline (same address) instead of this deploy run.
+    # The deploy run's key is built from its owner and rung, never resolved
+    # through the caller rungs: for a @me deploy the synthetic account IS the
+    # owning user, so the resolver would try @dev first and hand back that
+    # user's Play'd run of the same pipeline (same address) instead of this
+    # deploy run.
     address = exec_response['body']['token']
     owner_id = owner_user_id if owner_kind == 'user' else team_id
-    return server.control_by_key(f'deploy.{owner_id}.{address}').key
+    return server.control_by_key(control_key(rung or rung_of('deploy', owner_kind), owner_id, address)).key
 
 
 # =============================================================================

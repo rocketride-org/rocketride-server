@@ -104,6 +104,9 @@ export interface PipelineConfig {
 	/** Project identifier for organization and permissions */
 	project_id?: string;
 
+	/** Per-call params: public name -> `nodeId.configKey` */
+	parameters?: Record<string, string>;
+
 	/** UI viewport settings for visual editors */
 	viewport?: { x: number; y: number; zoom: number };
 
@@ -121,4 +124,41 @@ export interface PipelineConfig {
 
 	/** Active editor mode (e.g. 'design', 'status', 'flow') */
 	editorMode?: string;
+}
+
+/**
+ * What `process()` returns: the pipe `close` body plus the resolution stamps.
+ *
+ * The close body's own fields (`result_types`, `objects` ...) ride beside these.
+ */
+export interface PROCESS_RESULT {
+	/** The address that answered: `developerId.pipelineId.source` */
+	token: string;
+
+	/** The rung that answered */
+	resolved: '@dev' | '@me' | '@team' | '@public';
+
+	/** On `@team`: the answering team */
+	team?: string;
+
+	/** The artifact version (absent on `@dev`) */
+	version?: number;
+
+	/** The engine the request ran on (content hash, owner-qualified when private) */
+	engineKey: string;
+
+	/** False when `onChange: 'keep'` delivered to an engine running another spec */
+	specMatch: boolean;
+
+	/** What resolution did to reach an engine */
+	converged: 'none' | 'started' | 'repointed';
+
+	/** Server-controlled arguments a name call passed (threads/args/env/ttl) */
+	ignored: string[];
+
+	/** `address_collision` / `repoint_storm` warnings, when any */
+	warnings?: Array<Record<string, unknown>>;
+
+	/** The close body's fields */
+	[key: string]: unknown;
 }

@@ -74,13 +74,15 @@ if (iifeEntry !== iifeEntryPreferred) {
 // `client-typescript:generate-types` first and never reaches this branch; this
 // only covers a direct `pnpm --filter rocketride-chat-widget build`.
 //
-// `shell` is required on Windows: npx resolves to npx.cmd, and Node >= 20.12.2
-// refuses to spawn a .cmd/.bat without a shell (CVE-2024-27980 hardening). The
-// argument list below is fixed and space-free, so shell quoting is not a
-// concern. This mirrors what scripts/lib/exec.js does for the builder itself.
+// tsc runs through node on the SDK's own typescript install: no npx and no
+// shell, so nothing is spawned through cmd.exe and Node 24's DEP0190 (an args
+// array with shell:true) never fires. Mirrors execLocalBin in
+// scripts/lib/exec.js, which the builder uses for the same tools.
 if (!fs.existsSync(path.join(SDK_DIR, 'dist', 'types', 'index.d.ts'))) {
 	console.log('[chat-widget] generating rocketride SDK type declarations (client-typescript/dist/types)...');
-	execFileSync('npx', ['tsc', '-p', 'tsconfig.types.json'], { cwd: SDK_DIR, stdio: 'inherit', shell: process.platform === 'win32' });
+	const tsPkg = require.resolve('typescript/package.json', { paths: [SDK_DIR] });
+	const tsc = path.join(path.dirname(tsPkg), require(tsPkg).bin.tsc);
+	execFileSync(process.execPath, [tsc, '-p', 'tsconfig.types.json'], { cwd: SDK_DIR, stdio: 'inherit' });
 }
 
 /** @type {import('esbuild').BuildOptions} */

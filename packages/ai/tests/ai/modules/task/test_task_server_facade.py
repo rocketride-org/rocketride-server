@@ -36,6 +36,7 @@ import pytest
 
 import ai.account
 import ai.modules.task.task_server_facade as facade_mod
+from ai.modules.task.task_control import DeploymentRef
 from ai.modules.task.task_server_facade import start_server_task_as_team
 
 
@@ -66,14 +67,16 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
         captured['command'] = command
         captured['arguments'] = arguments
         captured['account_info'] = self._account_info
+        captured['deployment'] = self._trusted_deployment
         # Step 2: answer like a successful execute (the address in the token slot).
         return {'success': True, 'body': {'token': 'acme.proj-1.src-1'}}
 
     # The server's live registry, by key. The facade must look its run up by
-    # the deploy key and never walk the caller rungs (resolve_control).
+    # the deploy rung's key and never walk the caller rungs (resolve_control).
     owner_id = owner_user_id if owner_kind == 'user' else 'team-1'
     if controls is None:
-        key = f'deploy.{owner_id}.acme.proj-1.src-1'
+        rung = 'me' if owner_kind == 'user' else 'team'
+        key = f'{rung}.{owner_id}.acme.proj-1.src-1'
         controls = {key: SimpleNamespace(key=key)}
     server = MagicMock()
     server.control_by_key = MagicMock(side_effect=lambda key: controls[key])
@@ -92,6 +95,7 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
             {'components': []},
             org_id='org-1',
             team_id='team-1',
+            deployment=DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1'),
             trigger='schedule',
             ttl=ttl,
             owner_kind=owner_kind,
@@ -147,10 +151,10 @@ async def test_deploy_dispatch_carries_no_human_identity():
 
 @pytest.mark.asyncio
 async def test_team_deploy_returns_the_team_deploy_key():
-    """A @team deploy hands back the key of the run it started: deploy.<team>.<address>."""
+    """A @team deploy hands back the key of the run it started: team.<team>.<address>."""
     captured = await _dispatch(None)
-    assert captured['key'] == 'deploy.team-1.acme.proj-1.src-1'
-    captured['server'].control_by_key.assert_called_once_with('deploy.team-1.acme.proj-1.src-1')
+    assert captured['key'] == 'team.team-1.acme.proj-1.src-1'
+    captured['server'].control_by_key.assert_called_once_with('team.team-1.acme.proj-1.src-1')
     captured['server'].resolve_control.assert_not_called()
 
 
@@ -161,9 +165,17 @@ async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipe
     """
     controls = {
         'dev.user-7.acme.proj-1.src-1': SimpleNamespace(key='dev.user-7.acme.proj-1.src-1'),
-        'deploy.user-7.acme.proj-1.src-1': SimpleNamespace(key='deploy.user-7.acme.proj-1.src-1'),
+        'me.user-7.acme.proj-1.src-1': SimpleNamespace(key='me.user-7.acme.proj-1.src-1'),
     }
     captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
-    assert captured['key'] == 'deploy.user-7.acme.proj-1.src-1'
+    assert captured['key'] == 'me.user-7.acme.proj-1.src-1'
     assert captured['account_info'].userId == 'user-7'
     captured['server'].resolve_control.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_deployment_rides_the_trusted_channel_not_the_wire():
+    """The run names the deployment it resolved through, out of reach of DAP arguments."""
+    captured = await _dispatch(None)
+    assert captured['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1')
+    assert 'deployment' not in captured['arguments']

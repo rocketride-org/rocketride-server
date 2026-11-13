@@ -55,9 +55,9 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
-from ai.account.models import resolve_run_permissions
-from rocketride import TASK_STATE
+from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
+from ..task_control import TeamContext
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -191,6 +191,23 @@ class TaskCommands(DAPConn):
             # @me deploy). Defaults from run_kind when the dispatch didn't set
             # it (an ordinary .use is user-owned).
             owner_kind = getattr(self, '_trusted_owner_kind', '') or ('team' if run_kind == 'deploy' else 'user')
+            # The deployment a deployment run resolved through rides the same
+            # trusted channel; nothing on the wire can name one
+            deployment = getattr(self, '_trusted_deployment', None)
+            # So does the published rung a process(name) start answered on
+            rung = getattr(self, '_trusted_rung', '') or ''
+            # ... the artifact version it started from, and the team whose
+            # environment the control runs with (plan 6.2): the trusted
+            # dispatch names it; a client's own run is its home team's (a
+            # scoped key's frozen team)
+            version = getattr(self, '_trusted_version', None)
+            # ... and when the dispatch read the deployment's state (plan 7.2:
+            # a disable/remove since then refuses the control)
+            deployment_epoch = getattr(self, '_trusted_deployment_epoch', None)
+            team_context = getattr(self, '_trusted_team_context', None) or TeamContext(
+                home_team(self._account_info) or team_id,
+                'key' if getattr(self._account_info, 'endpoints', None) is not None else 'home',
+            )
 
             # Layer org → team → user secrets on top. A TEAM-owned run skips the
             # USER layer deliberately (a @team deployment's config must not
@@ -225,6 +242,14 @@ class TaskCommands(DAPConn):
                 run_kind=run_kind,
                 owner_kind=owner_kind,
                 trigger=trigger,
+                deployment=deployment,
+                deployment_epoch=deployment_epoch,
+                rung=rung,
+                version=version,
+                team_context=team_context,
+                # A spec call's answer to a live presence running other
+                # content (plan 3.4); absent keeps the useExisting rule
+                on_change=args.get('onChange'),
             )
 
             # Confirm successful task execution startup
@@ -370,13 +395,13 @@ class TaskCommands(DAPConn):
             # task.control on that run (sys.admin bypasses). A dev-team
             # check alone let any task.control holder restart other teams'
             # tasks.
-            task = self.get_task(request, 'task.control')
+            control = self.get_control(request, 'task.control')
 
             # A restart decrypts the team's CURRENT secrets again (the task loads
             # its ${...} values at every start), so re-check access to the team as
-            # on_execute does: get_task gives a run's owner access without asking
-            # whether they are still on the team.
-            self.verify_team_permission(task.team_id, 'task.control')
+            # on_execute does: get_control gives a run's owner access without
+            # asking whether they are still on the team.
+            self.verify_team_permission(control.teamId, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
@@ -425,14 +450,21 @@ class TaskCommands(DAPConn):
             Exception: If task retrieval fails or status cannot be obtained
         """
         try:
-            # Get the task instance
-            task = self.get_task(request, 'task.monitor')
+            # Resolve the caller's control
+            control = self.get_control(request, 'task.monitor')
 
-            # Retrieve current task status
-            status = task.get_status()
+            # Its status. TODO(plan 7.5, C.9): computed from the control's own
+            # bindings; until then the engine's status, projected per control.
+            status = control.task.get_status()
 
             # Convert status to dictionary format for response
             response = status.model_dump()
+
+            # The engine behind the control: 'running', 'starting' (in the
+            # start gate or not yet confirmed running) or 'stopped' (a dormant
+            # control reads 'stopped' until its next request starts it).
+            # TODO(plan 7.5, C.9): the full availability projection
+            response['engineState'] = control.engine_state
 
             # Return successful response with status data
             return self.build_response(request, body=response)
@@ -442,6 +474,48 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to get status from task: {str(e)}')
 
             # Re-raise to let DAP error handling create proper error response
+            raise
+
+    async def on_rrext_engine_stop(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_engine_stop': stop an engine outright, whoever holds it.
+
+        The operator's stop (plan 7.2): ``sys.admin`` or ``internal`` only. The
+        engine stops regardless of holds, and every holder's control is told
+        ``TASK_ENGINE_UNAVAILABLE`` on its next request.
+
+        Args:
+            request (Dict[str, Any]): DAP request whose arguments carry
+                ``engineKey`` and an optional ``reason``.
+
+        Returns:
+            Dict[str, Any]: Acknowledgment.
+
+        Raises:
+            PermissionError: The caller is neither sys.admin nor internal.
+            ValueError: ``engineKey`` is missing.
+            TaskError: No engine has that key.
+        """
+        try:
+            # Step 1: operators only
+            if not self._account_info:
+                raise PermissionError('Not authenticated')
+            sys_perms = self._account_info.sysPermissions or []
+            if 'sys.admin' not in sys_perms and 'internal' not in sys_perms:
+                raise PermissionError('Stopping an engine requires sys.admin')
+
+            # Step 2: the engine, by key
+            args = request.get('arguments') or {}
+            engine_key = args.get('engineKey')
+            if not engine_key or not isinstance(engine_key, str):
+                raise ValueError('engineKey is required')
+
+            # Step 3: stop it; its holders learn on their next request
+            await self._server.stop_engine(engine_key, str(args.get('reason') or 'ops'))
+            return self.build_response(request)
+
+        except Exception as e:
+            self.debug_message(f'Failed to stop engine: {str(e)}')
             raise
 
     async def on_rrext_get_pipeline(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -463,11 +537,13 @@ class TaskCommands(DAPConn):
             Exception: If the task cannot be found or the caller lacks task.monitor permission
         """
         try:
-            # Step 1: locate the task — verifies task.monitor permission.
-            task = self.get_task(request, 'task.monitor')
+            # Step 1: locate the control — verifies task.monitor permission.
+            control = self.get_control(request, 'task.monitor')
 
-            # Step 2: return the unresolved pipeline (${...} placeholders intact).
-            return self.build_response(request, body={'pipeline': task._pipeline})
+            # Step 2: return the spec THIS control submitted, unresolved
+            # (${...} placeholders intact). The engine may hold a spec of
+            # another control with the same content key.
+            return self.build_response(request, body={'pipeline': control.pipeline})
 
         except Exception as e:
             self.debug_message(f'Failed to get pipeline from task: {str(e)}')
@@ -547,6 +623,9 @@ class TaskCommands(DAPConn):
                     - source: Task source
                     - token: Task token
                     - status: Task status
+                    - engineState: 'running', 'starting' or 'stopped'
+                      (a dormant control: its engine stopped on its
+                      inactivity timer or crashed after it confirmed running)
                     - pipeline: Full pipeline configuration dict
         """
         try:
@@ -584,9 +663,11 @@ class TaskCommands(DAPConn):
                 name = pipeline_name or control.source
                 description = pipeline_desc or 'RocketRide DTC MCP Tool'
 
-                # Only include tasks that are actively running — completed or
-                # queued tasks are not surfaced to the caller.
-                if status.state == TASK_STATE.RUNNING.value:
+                # Include controls whose engine runs or is starting, and
+                # dormant controls (their next request starts the engine
+                # again). A finished or stopping run is not surfaced.
+                engine_state = control.engine_state
+                if engine_state != 'stopped' or control.dormant:
                     tasks.append(
                         {
                             'name': name,
@@ -594,6 +675,8 @@ class TaskCommands(DAPConn):
                             'source': control.source,
                             'token': control.address,
                             'status': status.status,
+                            # The engine's availability (plan 7.5)
+                            'engineState': engine_state,
                             # Owning team — lets clients attribute a task to a
                             # TEAM deployment vs a dev run of the same project.
                             'teamId': control.teamId,

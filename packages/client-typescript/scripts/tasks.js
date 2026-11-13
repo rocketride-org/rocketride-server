@@ -37,6 +37,7 @@ const path = require('path');
 const { glob } = require('glob');
 const {
 	execCommand,
+	execLocalBin,
 	removeDirs,
 	removeDirAndParents,
 	PROJECT_ROOT,
@@ -128,7 +129,7 @@ function makeCompileCjsAction() {
 				task.output = 'No changes detected';
 				return;
 			}
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.cjs.json'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('tsc', ['-p', 'tsconfig.cjs.json'], { task, cwd: PACKAGE_DIR });
 		},
 	};
 }
@@ -142,7 +143,7 @@ function makeCompileEsmAction() {
 				task.output = 'No changes detected';
 				return;
 			}
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.esm.json'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('tsc', ['-p', 'tsconfig.esm.json'], { task, cwd: PACKAGE_DIR });
 		},
 	};
 }
@@ -156,7 +157,7 @@ function makeGenerateTypesAction() {
 				task.output = 'No changes detected';
 				return;
 			}
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.types.json'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('tsc', ['-p', 'tsconfig.types.json'], { task, cwd: PACKAGE_DIR });
 			// Strip private/protected members from the emitted declarations so the
 			// public .d.ts surface is structural (no nominal implementation brands
 			// leaking to consumers or into the frozen shell-api contract).
@@ -176,7 +177,7 @@ function makeCompileCliAction() {
 				task.output = 'No changes detected';
 				return;
 			}
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.cli.json'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('tsc', ['-p', 'tsconfig.cli.json'], { task, cwd: PACKAGE_DIR });
 		},
 	};
 }
@@ -333,12 +334,12 @@ function makeRunJestAction(options = {}) {
 				ROCKETRIDE_APIKEY: bracket.apikey || process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 			};
 
-			const jestArgs = ['jest', '--verbose', '--colors'];
+			const jestArgs = ['--verbose', '--colors'];
 			if (options.jest) {
 				jestArgs.push(...options.jest);
 			}
 
-			await execCommand('npx', jestArgs, {
+			await execLocalBin('jest', jestArgs, {
 				task,
 				cwd: PACKAGE_DIR,
 				env: testEnv,

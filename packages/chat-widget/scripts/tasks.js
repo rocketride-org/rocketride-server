@@ -31,7 +31,7 @@
  *   test  - Run unit tests (jsdom; no engine server required)
  */
 const path = require('path');
-const { execCommand, removeDirs } = require('../../../scripts/lib');
+const { execCommand, execLocalBin, removeDirs } = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const LOCAL_DIST = path.join(PACKAGE_DIR, 'dist');
@@ -52,7 +52,7 @@ function makeBundleAction() {
 function makeGenerateTypesAction() {
 	return {
 		run: async (ctx, task) => {
-			await execCommand('npx', ['tsc', '-p', 'tsconfig.types.json'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('tsc', ['-p', 'tsconfig.types.json'], { task, cwd: PACKAGE_DIR });
 		},
 	};
 }
@@ -60,7 +60,7 @@ function makeGenerateTypesAction() {
 function makeRunJestAction() {
 	return {
 		run: async (ctx, task) => {
-			await execCommand('npx', ['jest', '--verbose', '--colors'], { task, cwd: PACKAGE_DIR });
+			await execLocalBin('jest', ['--verbose', '--colors'], { task, cwd: PACKAGE_DIR });
 		},
 	};
 }

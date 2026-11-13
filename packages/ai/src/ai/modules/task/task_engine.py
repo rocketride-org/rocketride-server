@@ -37,6 +37,7 @@ import tempfile
 import time
 import socket
 import hashlib
+import itertools
 import secrets
 import shlex
 import shutil
@@ -45,6 +46,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, M
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
+from rocketlib.config import MULTITENANT_BIT
 from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
@@ -67,7 +69,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
-from ai.common.node_config import resolve_node_config
+from ai.common.node_config import node_schema, resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
@@ -87,6 +89,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
+from .engine_key import CONST_CATALOG_NODE_PREFIX
 from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
@@ -440,7 +443,7 @@ def _is_saas_engine() -> bool:
         return False
 
 
-async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
+async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Answer a task's credit check: no refusal, or why its org may not open a pipe."""
     from ai.account import account
 
@@ -456,7 +459,62 @@ async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[b
 register_channel_command('spend.check', _check_spend)
 
 
-class Task(DAPBase):
+# ==== Trace epochs ===========================================================
+
+#: The trace epochs this server process hands out, one per engine launch
+#: (plan 7.4): the engine seeds the high 16 bits of its traceId counter from
+#: it, so the ids of two engines one connection holds never collide.
+_trace_epochs = itertools.count(1)
+
+
+def next_trace_epoch() -> int:
+    """
+    The next launch's trace epoch: monotonic per server process, 1..65535, then wraps.
+
+    Returns:
+        A 16-bit epoch, never 0 (0 means "no epoch" to the engine).
+    """
+    return (next(_trace_epochs) - 1) % 0xFFFF + 1
+
+
+# ==== Engine identity: the catalog facts behind the content key =============
+
+
+def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """
+    What the node catalog says about one component, for the pure engine key.
+
+    The config enters the key RESOLVED (defaults applied, the active branch
+    only), so a spec that spells out a default and one that leaves it out
+    hash the same. ``${ROCKETRIDE_*}`` placeholders stay unexpanded: the key
+    never depends on whose environment would fill them. The key itself is
+    computed by ``engine_key.engine_content``; this is its one impure input
+    (plan 7.2, ALB seam 1).
+
+    Args:
+        provider: The component's provider.
+        stored: The component's stored config.
+
+    Returns:
+        The resolved config and whether the component may run on a cross-user
+        engine (certified ``multitenant`` and from the catalog).
+
+    Raises:
+        Exception: The service is unknown or the config does not fit its
+            schema; the key then holds the stored config and the engine stays
+            private (the engine itself reports the config error at start).
+    """
+    from rocketlib import getServiceDefinition
+
+    config = resolve_node_config(provider, stored).to_dict()
+    schema = node_schema(provider) or {}
+    service = getServiceDefinition(provider) or {}
+    certified = bool(int(schema.get('capabilities') or 0) & MULTITENANT_BIT)
+    catalog = str(service.get('path') or '').startswith(CONST_CATALOG_NODE_PREFIX)
+    return config, certified and catalog
+
+
+class TaskEngine(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
 
@@ -496,7 +554,7 @@ class Task(DAPBase):
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
 
-        def __init__(self, parent_task: 'Task', **kwargs):
+        def __init__(self, parent_task: 'TaskEngine', **kwargs):
             """Initialize stdio transport with parent task integration."""
             self._parent_task = parent_task
             super().__init__(**kwargs)
@@ -537,7 +595,7 @@ class Task(DAPBase):
     class TaskData(DAPClient):
         """DAP client for data communication with pipeline; also answers the task's own requests."""
 
-        def __init__(self, parent_task: 'Task', channel_id: str, **kwargs):
+        def __init__(self, parent_task: 'TaskEngine', channel_id: str, **kwargs):
             """Initialize the data client with parent task integration.
 
             Args:
@@ -602,13 +660,15 @@ class Task(DAPBase):
         id: str,
         project_id: str,
         source: str,
-        key: str,
+        engine_key: str,
         address: str,
         pipeline: Dict[str, Any],
         launch_args: Dict[str, Any] = None,
         launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH,
         provider: str = None,
-        ttl: int = 900,
+        shared: bool = False,
+        threads: int = CONST_DEFAULT_MAX_THREADS,
+        trace_level: Optional[str] = None,
         client_id: str = '',
         team_id: str = '',
         org_id: str = '',
@@ -620,17 +680,31 @@ class Task(DAPBase):
         **kwargs,
     ) -> None:
         """
-        Initialize Task with configuration and resource setup.
+        Initialize the engine with configuration and resource setup.
+
+        The identity arguments (id, address, client/team/org, run_kind,
+        owner_kind, trigger) describe the control that STARTS the engine. The
+        run-log continuum and the event identity stamps still follow it until
+        events route per binding (plan 7.5, C.9); per-control state (ttl,
+        trace level, parameters, billing) lives on the holding controls.
 
         Args:
             server: Central orchestration server
-            key: The control's registry key (``runKind.ownerId.address``)
-            address: The task's public name ``developerId.pipelineId.source``
-            pipeline: Complete pipeline configuration
-            launch_args: Launch configuration parameters
+            engine_key: The engine's content key (plan 7.2): the hash for a
+                cross-user engine, ``hash:ownerId`` for a private one. It is
+                the task file's ``taskId``.
+            address: The starting control's address ``developerId.pipelineId.source``
+            pipeline: Complete pipeline configuration (placeholders unexpanded)
+            launch_args: Launch configuration parameters (``name``, ``args``)
             launch_type: Task creation mode (launch/attach)
-            ttl: Time-to-live in seconds for idle tasks (default: 900 = 15 minutes; 0 = no timeout)
-            client_id: Account identifier for store access scoping
+            shared: True for a cross-user engine: its task-file identity names
+                no user and it gets no storage anchor (S13)
+            threads: The engine's thread count (policy outside @dev)
+            trace_level: The engine's DEFAULT trace level for work outside any
+                binding (``'none'`` on a cross-user engine, the starting
+                control's level on a private one; plan 7.4)
+            client_id: Account identifier for store access scoping (empty on a
+                cross-user engine)
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
             env: Fixed values for ${...} placeholders, used when no env_source is given
@@ -638,7 +712,7 @@ class Task(DAPBase):
                 start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
-            trigger: What fired the run ('' | 'manual' | 'schedule');
+            trigger: What fired the run ('' | 'manual' | 'schedule' | 'process');
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
@@ -648,15 +722,43 @@ class Task(DAPBase):
         self.id = id
         self.project_id = project_id
         self.source = source
-        self.key = key
+        self.engine_key = engine_key
         self.address = address
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
+        self.shared = shared
 
-        # TTL management - count-up timer approach
-        self._ttl = ttl  # Maximum idle time in seconds
-        self._idle_time = 0  # Current idle time in seconds (resets on activity)
+        # Holds: the key of every control that holds this engine, with that
+        # control's idle ttl. A hold ENTITLES its control to the engine but
+        # does not keep it running (plan 7.2): the engine stops on its own
+        # inactivity timer, or at once when the last hold drops. A ttl-0
+        # holder (a listener source) keeps the engine from aging at all.
+        self._holds: Dict[str, int] = {}
+
+        # Why the engine is unavailable to its holders (an ops stop), or None
+        self.unavailable_reason: Optional[str] = None
+
+        # Idle management. Each CONTROL ages on its own ttl (plan 7.1); the
+        # ENGINE ages on its own inactivity timer (CONST_ENGINE_IDLE_TTL,
+        # plan 7.2): activity is any binding open/close/tool through any hold
+        # and, for a dev run, its pipeline events (monotonic seconds; 0.0 = never)
+        self._last_activity = time.monotonic()
+        self._last_pipeline_event = 0.0
+
+        # The engine's entry in the server's idle-expiry heap (0 = none)
+        self._expiry_gen = 0
+
+        # Why the engine is dormant, or None: 'ttl' once it stopped on its own
+        # inactivity timer, 'crash' once it exited abnormally after it had
+        # confirmed running. Its holds stay, and the next request through any
+        # of them starts a new engine under the same key (plan 7.2)
+        self.dormant_reason: Optional[str] = None
+
+        # True once this run confirmed running: the pipeline reported its
+        # service up (apaevt_status_state with service true), the same signal
+        # wait_for_running() waits for. Only a crash after it restarts
+        self.reached_running = False
 
         # Have the final events been sent yet
         self._final_events_sent = False
@@ -687,8 +789,8 @@ class Task(DAPBase):
 
         # Execution configuration
         _args = launch_args or {}
-        self._threads = _args.get('threads', CONST_DEFAULT_MAX_THREADS)
-        self._pipelineTraceLevel = _args.get('pipelineTraceLevel', None)
+        self._threads = threads
+        self._pipelineTraceLevel = trace_level
         self._task_name: Optional[str] = _args.get('name', None)
         self._engine_process: Optional[asyncio.subprocess.Process] = None
 
@@ -723,12 +825,12 @@ class Task(DAPBase):
         self._monitors: Dict[TaskConn, EVENT_TYPE] = {}
 
         # Debug interfaces
-        self._debug_stdio: Optional[Task.TaskDbgStdio] = None
+        self._debug_stdio: Optional[TaskEngine.TaskDbgStdio] = None
 
         # Data communication
         self._data_lock: asyncio.Lock = asyncio.Lock()
         self._data_port: Optional[int] = None
-        self._data_client: Optional[Task.TaskData] = None
+        self._data_client: Optional[TaskEngine.TaskData] = None
         # Per-run credential for the child's /task/data (engine<->EaaS only)
         self._data_token: Optional[str] = None
         self._reset_channel_state()
@@ -776,10 +878,10 @@ class Task(DAPBase):
         # token ownership downstream — reject anything outside the closed
         # vocabulary HERE, the one construction choke point, so a bad value
         # can never pick a storage scope. ('' trigger = an interactive dev
-        # run: only the trusted dispatch stamps manual/schedule.)
+        # run: only the trusted dispatch stamps manual/schedule/process.)
         if run_kind not in ('dev', 'deploy'):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
-        if trigger not in ('', 'manual', 'schedule'):
+        if trigger not in ('', 'manual', 'schedule', 'process'):
             raise ValueError(f'invalid trigger: {trigger!r}')
         # owner_kind picks the storage/run-log tree exactly like run_kind picks
         # the continuum: any value outside the closed vocabulary ('Team',
@@ -1134,26 +1236,42 @@ class Task(DAPBase):
                 'name': pipeline.get('name'),
                 'description': pipeline.get('description'),
                 'components': pipeline.get('components', []),
+                # The public-name map of the pipeline's per-call params
+                # (plan 5.2). Not part of the engine key: specs differing only
+                # here run on one engine.
+                'parameters': pipeline.get('parameters') or {},
             },
             'threadCount': self._threads,
+            # The engine DEFAULT level, for work outside any binding; the
+            # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
+            # This launch's trace epoch: the engine seeds the high 16 bits of
+            # its traceId counter from it (plan 7.4, P31)
+            'traceEpoch': next_trace_epoch(),
         }
+
+        # Trusted identity for in-process tools (surfaced to nodes as
+        # IEndpoint.endpoint.jobConfig['identity']). Rides the 0600 task
+        # file — point-to-point, never the environment, so caller env can
+        # never pollute it and descendants never inherit it. It names the
+        # engine's owner only where one exists (S13): a cross-user engine has
+        # no single user, so its block is empty and nodes read the caller
+        # from the per-binding context.
+        identity = (
+            {'userId': '', 'teamId': '', 'orgId': ''}
+            if self.shared
+            else {'userId': self.client_id, 'teamId': self.team_id, 'orgId': self.org_id}
+        )
 
         return {
             'config': config,
             'paths': {'base': data_path},
             'nodeId': '9a0b9f66-f693-4b3b-a85b-bb810261c26e',
-            'taskId': self.key,
+            # The ENGINE key (plan 7.2): the address is a control property and
+            # never enters the task file
+            'taskId': self.engine_key,
             'type': 'pipeline',
-            # Trusted identity for in-process tools (surfaced to nodes as
-            # IEndpoint.endpoint.jobConfig['identity']). Rides the 0600 task
-            # file — point-to-point, never the environment, so caller env can
-            # never pollute it and descendants never inherit it.
-            'identity': {
-                'userId': self.client_id,
-                'teamId': self.team_id,
-                'orgId': self.org_id,
-            },
+            'identity': identity,
             # Storage anchor for in-process tools (chroot semantics): node
             # paths are always plain and relative, and resolve under this
             # root — dev runs get the owner's whole tree (today's behavior);
@@ -1175,6 +1293,11 @@ class Task(DAPBase):
         subprocess as tool_filesystem disabling itself mid-run.
         """
         from ai.account.file_store import validate_storage_root
+
+        # A cross-user engine has no owner whose tree it could anchor in:
+        # per-caller storage rides the binding context (C.8), never the engine
+        if self.shared:
+            return ''
 
         # A TEAM-owned run (a @team deploy) anchors in the team tree so
         # teammates can watch/replay; a USER-owned run (an interactive .use or
@@ -1371,7 +1494,7 @@ class Task(DAPBase):
 
         self._redial = loop.call_later(delay, redial)
 
-    async def _open_data_channel(self, stale: Optional['Task.TaskData']) -> None:
+    async def _open_data_channel(self, stale: Optional['TaskEngine.TaskData']) -> None:
         """Replace ``stale`` (if any) with a fresh connection to the task.
 
         Args:
@@ -1411,7 +1534,7 @@ class Task(DAPBase):
         wrapped = error.__cause__ or error.__context__
         return getattr(getattr(wrapped, 'response', None), 'status_code', None) == 403 or 'HTTP 403' in str(error)
 
-    async def _dial(self) -> 'Task.TaskData':
+    async def _dial(self) -> 'TaskEngine.TaskData':
         """Open a connection to the task's ``/task/data``, retrying a refused connect.
 
         There is a race condition: the C++ engine emits the ">SVC*1" readiness
@@ -1421,7 +1544,7 @@ class Task(DAPBase):
         give uvicorn time to start accepting connections. A 403 is not retried.
 
         Returns:
-            Task.TaskData: The connected client.
+            TaskEngine.TaskData: The connected client.
 
         Raises:
             Exception: The last connect error.
@@ -1433,7 +1556,7 @@ class Task(DAPBase):
             stop=stop_after_attempt(10),
             wait=wait_fixed(0.15),
             reraise=True,
-            retry=retry_if_exception(lambda e: not Task._dial_refused(e)),
+            retry=retry_if_exception(lambda e: not TaskEngine._dial_refused(e)),
             before_sleep=lambda retry_state: self.debug_message(
                 f'Data connection attempt {retry_state.attempt_number} failed, retrying in 0.15s: {retry_state.outcome.exception()}'
             ),
@@ -1445,13 +1568,13 @@ class Task(DAPBase):
             headers = {'Authorization': f'Bearer {self._data_token}', 'X-Channel-Id': channel_id}
             transport = TransportWebSocket(uri, headers=headers)
             name = f'DATA-{self.id}'
-            client = Task.TaskData(parent_task=self, channel_id=channel_id, module=name, transport=transport)
+            client = TaskEngine.TaskData(parent_task=self, channel_id=channel_id, module=name, transport=transport)
             await client.connect()
             return client
 
         return await _connect_data_client()
 
-    def _on_data_client_gone(self, client: 'Task.TaskData') -> None:
+    def _on_data_client_gone(self, client: 'TaskEngine.TaskData') -> None:
         """Forget ``client`` if it is still the current one; a newer one stays.
 
         Args:
@@ -1461,7 +1584,7 @@ class Task(DAPBase):
             self._data_client = None
             self._data_connected.clear()
 
-    async def _on_channel_request(self, client: 'Task.TaskData', message: Dict[str, Any]) -> None:
+    async def _on_channel_request(self, client: 'TaskEngine.TaskData', message: Dict[str, Any]) -> None:
         """Answer one request the task sent over ``client``.
 
         Args:
@@ -1503,10 +1626,8 @@ class Task(DAPBase):
         Raises:
             RuntimeError: If task is terminating or connection fails
         """
-        # Reset idle timer - task is actively processing data
-        self.reset_idle_timer()
-
-        # Prevent operations during termination
+        # Prevent operations during termination (activity is recorded on the
+        # control the request came through, by the caller)
         if self._is_terminating:
             raise RuntimeError('Task is terminating, cannot process data requests')
 
@@ -1780,6 +1901,18 @@ class Task(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_task_message(f'terminated abnormally with exit code {exit_code}')
 
+            # A crash after the run confirmed running leaves the holders
+            # dormant: the next request through any of them starts the engine
+            # again under the same key (plan 7.2). Set in the same step as the
+            # terminal state, so no request sees a finished engine that is not
+            # yet dormant. A run that never confirmed running is not retried.
+            if self.reached_running and not self._is_restarting:
+                self.dormant_reason = 'crash'
+                try:
+                    self._server.engine_crashed(self)
+                except Exception as e:
+                    self.debug_message(f'Error reporting the engine crash: {e}')
+
         # Send final status update — the stream's LAST status. For a real
         # termination the utilization gauges are explicitly zeroed: the
         # process is gone, so CPU/RAM/VRAM are zero BY DATA and charts
@@ -1857,10 +1990,7 @@ class Task(DAPBase):
 
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
-                    try:
-                        task_user_id = self._server.control_by_key(self.key).userId if self.key else None
-                    except Exception:
-                        task_user_id = None
+                    task_user_id = self.client_id or None
                     await self._server.broadcast_server_event(
                         EVENT_TYPE.DASHBOARD,
                         {
@@ -2099,6 +2229,10 @@ class Task(DAPBase):
             body['runKind'] = self._run_kind
             body['teamId'] = self.team_id
             body['userId'] = self.client_id
+        # The engine that emitted it (ALB seam 3): every event body carries
+        # its engineKey; the controlId is stamped per holder below
+        if isinstance(body, dict):
+            body['engineKey'] = self.engine_key
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -2127,12 +2261,19 @@ class Task(DAPBase):
                     self.debug_message(f'Failed to send event to debugger: {e}')
 
         else:
-            # Route through server broadcast system
-            await self._server.broadcast_task_event(
-                event_type=type,
-                key=self.key,
-                event=message,
-            )
+            # Route through server broadcast system, once per holding control.
+            # TODO(plan 7.5, C.9): route pipe-tagged events by traceId to the
+            # owning control only; until then every holder sees the engine's
+            # events (the engine status projected per control).
+            # Each holder's copy carries its own controlId (the control's key
+            # string, ALB seam 3); the body is copied, never shared across holders.
+            for key in list(self._holds):
+                event = {**message, 'body': {**body, 'controlId': key}} if isinstance(body, dict) else message
+                await self._server.broadcast_task_event(
+                    event_type=type,
+                    key=key,
+                    event=event,
+                )
 
     def _update_status(self, message: Dict[str, Any]) -> None:
         """
@@ -2159,8 +2300,9 @@ class Task(DAPBase):
             self._status.failedCount = body.get('failedCount', 0)
             self._status.wordsSize = body.get('wordsSize', 0)
             self._status.wordsCount = body.get('wordsCount', 0)
-            self._status.rateSize = body.get('rateSize', 0)
-            self._status.rateCount = body.get('rateCount', 0)
+            # rateSize/rateCount are NOT copied: the status body is summable,
+            # counts and bytes only, and clients derive rates (ALB seam 3,
+            # plan 7.5). The fields stay on the frozen contract at 0.
 
         # Handle error messages with buffer management
         elif event_type == 'apaevt_status_error':
@@ -2265,9 +2407,10 @@ class Task(DAPBase):
             self._on_channel_signal(body.get('state'), body.get('id'))
             return
 
-        # Pipeline events count as dev-task activity; deploy uses ttl as a run window.
+        # Pipeline events count as activity of a dev run's controls (read by
+        # TaskControl.idle_seconds); deploy uses ttl as a run window.
         if self._run_kind == 'dev' and event_type.startswith('apaevt_'):
-            self.reset_idle_timer()
+            self._last_pipeline_event = time.monotonic()
 
         # Handle service state changes
         if event_type == 'apaevt_status_state':
@@ -2284,7 +2427,7 @@ class Task(DAPBase):
                 self._task_metrics.set_service_up(service_up)
 
             if service_up:
-                self._status.state = TASK_STATE.RUNNING.value
+                self._confirm_running()
                 self._status.notes = self._service_up_notes
             else:
                 self._status.notes = self._service_down_notes
@@ -2318,15 +2461,13 @@ class Task(DAPBase):
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
-            total_pipes = body.get('totalPipes', 0)
             pipe_index = body.get('pipeId', '')
             component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
-            # totalPipes=0 marks a synthetic trace (tool-call events emit it
-            # as "unknown") — keep the data lane's real pipe count.
-            if total_pipes:
-                self._status.pipeflow.totalPipes = total_pipes
+            # pipeflow.totalPipes is never set: the engine does not report its
+            # pipe count (a holder of a shared engine must not learn it), so
+            # the contract field stays 0 and tool-call traces need no marker.
 
             # Update the per-pipe execution stack and get a stable snapshot chain.
             # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
@@ -2415,6 +2556,18 @@ class Task(DAPBase):
                 EVENT_TYPE.DEBUGGER,
                 message,
             )
+
+    def _confirm_running(self) -> None:
+        """
+        Mark this run as confirmed running.
+
+        Called when the pipeline reports its service up: the subprocess has
+        loaded its pipeline and is ready for data. From here an abnormal exit
+        is a crash that leaves the holders dormant (plan 7.2); before it, a
+        failed start is not retried.
+        """
+        self._status.state = TASK_STATE.RUNNING.value
+        self.reached_running = True
 
     def send_scheduled_updates(self):
         """Mark status as updated for next broadcast cycle."""
@@ -2518,14 +2671,89 @@ class Task(DAPBase):
         """
         return self._status
 
-    def reset_idle_timer(self) -> None:
-        """
-        Reset the idle timer to 0, indicating recent activity.
+    # ==== Idle tracking ===========================================================
 
-        This should be called whenever the task receives data, processes requests,
-        or performs any activity that indicates it's in active use.
+    @property
+    def last_pipeline_event(self) -> float:
+        """Monotonic time of the last pipeline event of a dev run (0.0 = none)."""
+        return self._last_pipeline_event
+
+    def note_activity(self, now: float) -> None:
         """
-        self._idle_time = 0
+        Record activity through one of this engine's holds.
+
+        O(1). It does not age or reset any holder. It restarts the engine's
+        own inactivity timer; the server's engine-expiry heap re-reads it
+        when the engine's scheduled deadline comes up.
+
+        Args:
+            now: The activity's monotonic time.
+        """
+        if now > self._last_activity:
+            self._last_activity = now
+
+    @property
+    def idle_since(self) -> float:
+        """
+        Monotonic time of the last activity the engine saw through any hold.
+
+        Pipeline events of a dev run count too. The engine's inactivity timer
+        runs from here.
+        """
+        return max(self._last_activity, self._last_pipeline_event)
+
+    def idle_seconds(self, now: Optional[float] = None) -> float:
+        """
+        Seconds since the last activity the engine saw through any hold.
+
+        Args:
+            now: Monotonic time to measure at (default: now).
+        """
+        now = time.monotonic() if now is None else now
+        return max(0.0, now - self.idle_since)
+
+    # ==== Holds ===================================================================
+
+    @property
+    def holds(self) -> frozenset:
+        """The registry keys of the controls holding this engine."""
+        return frozenset(self._holds)
+
+    @property
+    def ages(self) -> bool:
+        """
+        Whether the engine's inactivity timer runs.
+
+        A holder with ttl 0 (a listener source: discord, telegram, msservices)
+        runs forever, so an engine it holds does not age.
+        """
+        return all(ttl for ttl in self._holds.values())
+
+    def acquire(self, control_key: str, ttl: int) -> None:
+        """
+        Record a control's hold on this engine.
+
+        Args:
+            control_key: The holding control's registry key.
+            ttl: The control's idle ttl in seconds (0 = no idle limit).
+        """
+        self._holds[control_key] = int(ttl or 0)
+
+        # A new hold is activity: it restarts the engine's inactivity timer
+        self.note_activity(time.monotonic())
+
+    def release(self, control_key: str) -> int:
+        """
+        Drop a control's hold on this engine.
+
+        Args:
+            control_key: The releasing control's registry key.
+
+        Returns:
+            The number of holds that remain.
+        """
+        self._holds.pop(control_key, None)
+        return len(self._holds)
 
     def debug_task_message(self, title: str, reason: Optional[str] = None) -> None:
         """
@@ -2840,6 +3068,8 @@ class Task(DAPBase):
             self._service_down_notes = []
             self._stop_requested = False
             self._stop_reason = None
+            self.dormant_reason = None
+            self.reached_running = False
             self._is_terminating = False
             self._reset_channel_state()
 
@@ -2983,10 +3213,9 @@ class Task(DAPBase):
 
             # Initialize stdio interface
             try:
-                self._debug_stdio = Task.TaskDbgStdio(
+                self._debug_stdio = TaskEngine.TaskDbgStdio(
                     parent_task=self,
                     id=self.id,
-                    key=self.key,
                     process=self._engine_process,
                 )
                 await self._debug_stdio.connect()
@@ -3055,16 +3284,18 @@ class Task(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
-                # Resolve billing identity from task control
-                _control = self._server.control_by_key(self.key) if self.key else None
+                # Fresh metrics per engine start. The engine-level billing
+                # identity is the starting control's; the per-trace
+                # accumulators (TaskMetrics.traces) attribute each request tree
+                # to its own control once metering fills them (plan 8.2, C.13).
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
                     task_id=self.id,
                     client_id=self.client_id,
-                    user_id=getattr(_control, 'userId', '') if _control else '',
-                    team_id=getattr(_control, 'teamId', '') if _control else '',
-                    org_id=getattr(_control, 'orgId', '') if _control else '',
+                    user_id=self.client_id,
+                    team_id=self.team_id,
+                    org_id=self.org_id,
                     pipeline_name=self._task_name or '',
                     source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,

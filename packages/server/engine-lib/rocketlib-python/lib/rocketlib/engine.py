@@ -107,22 +107,21 @@ def monitorOther(*args) -> None:
 globals()['monitorOther'] = engLib.monitorOther  # noqa
 
 
-def monitorSSE(pipe_id: int, type: str, data: dict = None, binding_id: int = 0, root_binding_id: int = 0) -> None:
+def monitorSSE(pipe_id: int, type: str, data: dict = None, trace_id: int = 0) -> None:
     """
     Send a real-time SSE event to the UI for the current binding.
 
     Args:
-        pipe_id:         The current pipe's slot (self.instance.pipeId)
-        type:            Event type string (e.g. 'thinking', 'acting', 'confirm')
-        data:            Optional dict payload to include in the event (passed as-is from kwargs)
-        binding_id:      The binding that produced the event (self.instance.bindingId)
-        root_binding_id: The root of that binding's tree (self.instance.rootBindingId)
+        pipe_id:  The current pipe's slot (self.instance.pipeId)
+        type:     Event type string (e.g. 'thinking', 'acting', 'confirm')
+        data:     Optional dict payload to include in the event (passed as-is from kwargs)
+        trace_id: The request tree that produced the event (self.instance.traceId)
     """
     import json
 
     # pipe_id stays until the SSE readers (cmd_monitor, run_log) move to pipeId
     # together with the data-op bodies in the Step 3 wire rename
-    payload = {'pipe_id': pipe_id, 'bindingId': binding_id, 'rootBindingId': root_binding_id, 'type': type}
+    payload = {'pipe_id': pipe_id, 'traceId': trace_id, 'type': type}
     if data:
         payload['data'] = data
     engLib.monitorOther('SSE', json.dumps(payload, separators=(',', ':')))

@@ -3,7 +3,7 @@ The engine's side of the task channel: when it dials, and when it must not (T1a)
 
 The engine opens a task's ``/task/data`` only on the task's own signal,
 and only when it has no client or the signal names the one it has. These
-tests drive ``Task._on_channel_signal`` and friends with ``_open_data_channel``
+tests drive ``TaskEngine._on_channel_signal`` and friends with ``_open_data_channel``
 replaced, so no socket is involved; the real dial is covered end to end in
 ``tests/ai/modules/data/test_channel.py``.
 """
@@ -18,12 +18,12 @@ import pytest
 import tenacity
 
 from ai.modules.task import task_engine
-from ai.modules.task.task_engine import Task
+from ai.modules.task.task_engine import TaskEngine
 
 
 def _engine(client=None):
     """A ``Task`` with what the channel code consults, ``__init__`` bypassed."""
-    t = Task.__new__(Task)
+    t = TaskEngine.__new__(TaskEngine)
     t.id = 'task-1'
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
@@ -36,10 +36,10 @@ def _engine(client=None):
     t._service_up_notes = []
     t._status = SimpleNamespace(serviceUp=False, state=0, notes=None)
     t.debug_message = MagicMock()
-    t.reset_idle_timer = MagicMock()
+    t._last_pipeline_event = 0.0
     t._forward_task_event = AsyncMock()
     t._send_status_update = AsyncMock()
-    Task._reset_channel_state(t)
+    TaskEngine._reset_channel_state(t)
     return t
 
 
@@ -113,7 +113,7 @@ class _Clock:
 async def test_first_signal_dials_when_there_is_no_client():
     t = _engine()
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
     t._open_data_channel.assert_awaited_once_with(stale=None)
     assert t._channel_signalled is True
@@ -123,7 +123,7 @@ async def test_signal_naming_the_current_client_replaces_it():
     client = _client('c1')
     t = _engine(client)
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', 'c1')
+    TaskEngine._on_channel_signal(t, '1', 'c1')
     await _settle()
     t._open_data_channel.assert_awaited_once_with(stale=client)
 
@@ -132,7 +132,7 @@ async def test_signal_naming_the_current_client_replaces_it():
 async def test_signal_not_naming_the_live_client_is_ignored(channel_id):
     t = _engine(_client('c1'))
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', channel_id)
+    TaskEngine._on_channel_signal(t, '1', channel_id)
     await _settle()
     t._open_data_channel.assert_not_awaited()
 
@@ -140,7 +140,7 @@ async def test_signal_not_naming_the_live_client_is_ignored(channel_id):
 async def test_any_signal_dials_when_there_is_no_client():
     t = _engine()
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', 'ghost')
+    TaskEngine._on_channel_signal(t, '1', 'ghost')
     await _settle()
     t._open_data_channel.assert_awaited_once_with(stale=None)
 
@@ -149,7 +149,7 @@ async def test_no_dial_while_terminating():
     t = _engine()
     t._is_terminating = True
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
     t._open_data_channel.assert_not_awaited()
 
@@ -164,10 +164,10 @@ async def test_signals_during_a_dial_coalesce_and_are_rechecked_after_it():
         await release.wait()
 
     t._open_data_channel = open_channel
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
-    Task._on_channel_signal(t, '1', 'a')
-    Task._on_channel_signal(t, '1', 'b')
+    TaskEngine._on_channel_signal(t, '1', 'a')
+    TaskEngine._on_channel_signal(t, '1', 'b')
     assert calls == [None]
     assert t._dial_pending == ('b',)
 
@@ -185,7 +185,7 @@ async def test_dials_are_rate_limited(monkeypatch):
     t = _engine()
     t._open_data_channel = AsyncMock()
     for _ in range(4):
-        Task._on_channel_signal(t, '1', None)
+        TaskEngine._on_channel_signal(t, '1', None)
         await _settle()
     assert t._open_data_channel.await_count == 3
     assert any('WARNING' in str(call) for call in t.debug_message.call_args_list)
@@ -195,7 +195,7 @@ async def test_a_dial_that_fails_is_tried_again(monkeypatch):
     clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()  # never connects
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
 
     clock.advance(task_engine.CONST_CHANNEL_REDIAL_DELAY)
@@ -210,9 +210,9 @@ async def test_a_dial_held_back_by_the_limit_is_tried_once_the_window_passes(mon
     clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
     assert t._open_data_channel.await_count == 1
 
@@ -227,12 +227,12 @@ async def test_signals_held_back_by_the_limit_leave_one_pending_dial(monkeypatch
     clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
     t._data_client = None  # the dial never connected
 
     for _ in range(5):
-        Task._on_channel_signal(t, '1', None)
+        TaskEngine._on_channel_signal(t, '1', None)
 
     assert len(clock.pending) == 1
 
@@ -241,10 +241,10 @@ async def test_a_pending_redial_does_not_reach_the_next_run(monkeypatch):
     clock = _Clock(monkeypatch)
     t = _engine()
     t._open_data_channel = AsyncMock()  # never connects
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     await _settle()
 
-    Task._reset_channel_state(t)  # restart_task
+    TaskEngine._reset_channel_state(t)  # restart_task
     clock.advance(task_engine.CONST_CHANNEL_REDIAL_DELAY)
     await _settle()
 
@@ -262,8 +262,8 @@ def test_a_refused_handshake_is_read_off_the_status_not_the_wording():
     except ConnectionError as wrapped:
         refused = wrapped
 
-    assert Task._dial_refused(refused)
-    assert not Task._dial_refused(ConnectionError('Connection refused'))
+    assert TaskEngine._dial_refused(refused)
+    assert not TaskEngine._dial_refused(ConnectionError('Connection refused'))
 
 
 # ---------------------------------------------------------------------------
@@ -275,34 +275,34 @@ async def test_signal_two_closes_startup_and_one_does_not_reopen_it():
     t = _engine()
     t._open_data_channel = AsyncMock()
     assert t._channel_startup_open is True
-    Task._on_channel_signal(t, '2', None)
+    TaskEngine._on_channel_signal(t, '2', None)
     assert t._channel_startup_open is False
-    Task._on_channel_signal(t, '1', None)
+    TaskEngine._on_channel_signal(t, '1', None)
     assert t._channel_startup_open is False
 
 
 async def test_running_closes_startup_without_the_signal():
     t = _engine()
-    await Task.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': True}})
+    await TaskEngine.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': True}})
     assert t._channel_startup_open is False
 
 
 async def test_channel_event_is_consumed_not_forwarded_and_not_activity():
     t = _engine()
     t._open_data_channel = AsyncMock()
-    await Task.on_event(t, {'event': 'apaevt_channel', 'body': {'state': '1', 'id': None}})
+    await TaskEngine.on_event(t, {'event': 'apaevt_channel', 'body': {'state': '1', 'id': None}})
     await _settle()
     t._open_data_channel.assert_awaited_once()
     t._forward_task_event.assert_not_awaited()
-    t.reset_idle_timer.assert_not_called()
+    assert t._last_pipeline_event == 0.0
 
 
 def test_a_new_start_resets_the_channel_state():
     t = _engine(_client('c1'))
-    Task._on_channel_signal(t, '2', None)
+    TaskEngine._on_channel_signal(t, '2', None)
     t._channel_signalled = True
     t._dial_times.extend([1.0, 2.0])
-    Task._reset_channel_state(t)
+    TaskEngine._reset_channel_state(t)
     assert t._channel_startup_open is True
     assert t._channel_signalled is False
     assert not t._dial_times
@@ -321,7 +321,7 @@ async def test_open_closes_the_stale_client_then_installs_the_new_one():
     fresh = _client('new')
     t._dial = AsyncMock(return_value=fresh)
 
-    await Task._open_data_channel(t, stale=stale)
+    await TaskEngine._open_data_channel(t, stale=stale)
 
     stale.cancel_handlers.assert_called_once()
     stale.disconnect.assert_awaited_once()
@@ -332,7 +332,7 @@ async def test_open_closes_the_stale_client_then_installs_the_new_one():
 async def test_open_that_fails_leaves_no_client_and_does_not_raise():
     t = _engine()
     t._dial = AsyncMock(side_effect=ConnectionError('HTTP 403'))
-    await Task._open_data_channel(t, stale=None)
+    await TaskEngine._open_data_channel(t, stale=None)
     assert t._data_client is None
     assert not t._data_connected.is_set()
 
@@ -341,7 +341,7 @@ async def test_open_does_nothing_while_terminating():
     t = _engine()
     t._is_terminating = True
     t._dial = AsyncMock()
-    await Task._open_data_channel(t, stale=None)
+    await TaskEngine._open_data_channel(t, stale=None)
     t._dial.assert_not_awaited()
 
 
@@ -349,10 +349,10 @@ async def test_a_late_disconnect_of_an_old_client_keeps_the_new_one():
     old, new = _client('old'), _client('new')
     t = _engine(new)
     t._data_connected.set()
-    Task._on_data_client_gone(t, old)
+    TaskEngine._on_data_client_gone(t, old)
     assert t._data_client is new
     assert t._data_connected.is_set()
-    Task._on_data_client_gone(t, new)
+    TaskEngine._on_data_client_gone(t, new)
     assert t._data_client is None
     assert not t._data_connected.is_set()
 
@@ -374,14 +374,14 @@ def _failing_dial(monkeypatch, error):
             raise ConnectionError(error)
 
     monkeypatch.setattr(task_engine, 'TransportWebSocket', MagicMock())
-    monkeypatch.setattr(Task, 'TaskData', Client)
+    monkeypatch.setattr(TaskEngine, 'TaskData', Client)
     return attempts
 
 
 async def test_a_refused_handshake_is_not_retried(monkeypatch):
     attempts = _failing_dial(monkeypatch, 'server rejected WebSocket connection: HTTP 403')
     with pytest.raises(ConnectionError, match='403'):
-        await Task._dial(_engine())
+        await TaskEngine._dial(_engine())
     assert len(attempts) == 1
 
 
@@ -389,7 +389,7 @@ async def test_connection_refused_is_retried(monkeypatch):
     monkeypatch.setattr(task_engine, 'wait_fixed', lambda seconds: tenacity.wait_none())
     attempts = _failing_dial(monkeypatch, '[Errno 111] Connection refused')
     with pytest.raises(ConnectionError, match='refused'):
-        await Task._dial(_engine())
+        await TaskEngine._dial(_engine())
     assert len(attempts) == 10
     assert len(set(attempts)) == 1, 'one channel id per dial'
 
@@ -409,7 +409,7 @@ async def test_send_data_dials_itself_when_the_signalled_dial_never_connected(mo
     t._provider = None
     t._dial = AsyncMock(return_value=client)
 
-    response = await Task._send_data(t, {'command': 'x', 'arguments': {}})
+    response = await TaskEngine._send_data(t, {'command': 'x', 'arguments': {}})
 
     assert response == {'success': True}
     t._dial.assert_awaited_once()
@@ -426,7 +426,7 @@ async def test_send_data_uses_the_connection_the_signal_opened():
     t._provider = None
     t._dial = AsyncMock()
 
-    response = await Task._send_data(t, {'command': 'x', 'arguments': {}})
+    response = await TaskEngine._send_data(t, {'command': 'x', 'arguments': {}})
     assert response == {'success': True}
     t._dial.assert_not_awaited()
 
@@ -446,7 +446,7 @@ async def test_send_data_waiting_during_a_reconnect_gets_the_new_client():
             t._data_connected.set()
 
     asyncio.ensure_future(connect_later())
-    response = await Task._send_data(t, {'command': 'x', 'arguments': {}})
+    response = await TaskEngine._send_data(t, {'command': 'x', 'arguments': {}})
     assert response == {'success': True}
 
 
@@ -456,7 +456,7 @@ async def test_send_data_waiting_during_a_reconnect_gets_the_new_client():
 
 
 def _task_data(parent):
-    client = Task.TaskData(parent_task=parent, channel_id='c1', module='DATA', transport=MagicMock())
+    client = TaskEngine.TaskData(parent_task=parent, channel_id='c1', module='DATA', transport=MagicMock())
     client._transport.send = AsyncMock()
     return client
 

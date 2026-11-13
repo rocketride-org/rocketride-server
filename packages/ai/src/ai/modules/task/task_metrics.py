@@ -20,7 +20,8 @@ import asyncio
 import time
 import uuid
 import psutil
-from typing import Optional, TYPE_CHECKING, Callable
+from dataclasses import dataclass, field
+from typing import Dict, Optional, TYPE_CHECKING, Callable
 from rocketlib import debug
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
@@ -30,6 +31,27 @@ from ai.constants import (
 
 if TYPE_CHECKING:
     from rocketride import TASK_STATUS
+
+
+@dataclass
+class TraceUsage:
+    """
+    The usage accumulated under one request tree, and the control it belongs to.
+
+    One engine serves many controls; each request tree (one ``traceId``, shared
+    by every pipe the request opens) belongs to exactly one of them, so
+    per-trace usage is what attributes an engine's work to the paying controls
+    (plan 8.2). Metering fills it (C.13).
+
+    Attributes:
+        control_key: The registry key of the control that owns the trace.
+        timers: Accumulated milliseconds per resource key.
+        counters: Accumulated counts per resource key.
+    """
+
+    control_key: str
+    timers: Dict[str, float] = field(default_factory=dict)
+    counters: Dict[str, int] = field(default_factory=dict)
 
 
 class TaskMetrics:
@@ -102,6 +124,10 @@ class TaskMetrics:
         self.source_name = source_name or ''
         self.sample_interval = sample_interval if sample_interval is not None else CONST_METRICS_SAMPLE_INTERVAL
         self._on_update_callback = on_update_callback
+
+        # Per-trace accumulators: traceId -> the owning control and its
+        # usage. Fresh with every engine start, like everything here.
+        self.traces: Dict[int, TraceUsage] = {}
 
         # Process handle
         self._process = psutil.Process(pid)
@@ -392,12 +418,9 @@ class TaskMetrics:
         if self._gpu_available:
             self._gpu_memory_mb_seconds += self._status.metrics.gpu_memory_mb * interval
 
-        # Calculate averages (user-facing — billing period only)
-        if self._duration_seconds > 0:
-            self._status.metrics.avg_cpu_percent = (self._cpu_seconds / self._duration_seconds) * 100
-            self._status.metrics.avg_cpu_memory_mb = self._memory_mb_seconds / self._duration_seconds
-            if self._gpu_available:
-                self._status.metrics.avg_gpu_memory_mb = self._gpu_memory_mb_seconds / self._duration_seconds
+        # No averages are computed here: the status body is summable (ALB
+        # seam 3, plan 7.5), so avg_* stay on the frozen contract at 0 and
+        # clients derive them from the totals.
 
         # Update tokens (user-facing billing)
         self._update_tokens()
@@ -628,6 +651,31 @@ class TaskMetrics:
                 break  # Stop signal received
             except asyncio.TimeoutError:
                 continue  # Continue monitoring
+
+    def trace(self, trace_id: int, control_key: str) -> TraceUsage:
+        """
+        The accumulator of one request tree, created on first use for its control.
+
+        A ``traceId`` is never reused within an engine, so the first control
+        to name it owns it for the engine's life; a later call naming another
+        control for the same id is a routing bug and is refused.
+
+        Args:
+            trace_id: The request tree's never-reused id (plan 7.4).
+            control_key: The registry key of the control that owns it.
+
+        Returns:
+            TraceUsage: The trace's accumulator.
+
+        Raises:
+            ValueError: The trace already belongs to a different control.
+        """
+        usage = self.traces.get(trace_id)
+        if usage is None:
+            usage = self.traces[trace_id] = TraceUsage(control_key=control_key)
+        elif usage.control_key != control_key:
+            raise ValueError(f'trace {trace_id} belongs to another control')
+        return usage
 
     def start_monitoring(self) -> None:
         """

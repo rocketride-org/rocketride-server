@@ -922,8 +922,13 @@ class MiscCommands(DAPConn):
                         'endTime': end if completed else None,
                         'connections': control.task.get_connection_count(),
                         'state': getattr(task_status, 'state', 0),
-                        'idleTime': getattr(control.task, '_idle_time', 0),
-                        'ttl': getattr(control.task, '_ttl', 0),
+                        # The CONTROL's idle time: each holder ages on its own
+                        'idleTime': int(control.idle_seconds()),
+                        # Its engine: 'running', 'starting' or 'stopped' (a
+                        # dormant control reads 'stopped'; TODO(plan 7.5,
+                        # C.9): the full availability projection)
+                        'engineState': control.engine_state,
+                        'ttl': getattr(control, 'ttl', 0),
                         'metrics': metrics_dict,
                         'totalCount': getattr(task_status, 'totalCount', 0),
                         'completedCount': getattr(task_status, 'completedCount', 0),

@@ -32,6 +32,7 @@ Types Defined:
     PipelineComponent: Individual processing unit within a pipeline
     PipelineInputConnection: Data flow connection between components
     PipelineConfig: Complete pipeline configuration with components and execution parameters
+    PROCESS_RESULT: What process() returns: the pipe close body plus the resolution stamps
 
 Pipeline Architecture:
     Pipelines consist of components connected in a directed graph where data flows
@@ -84,7 +85,7 @@ Usage:
     token = await client.use(pipeline=config)
 """
 
-from typing import Any, TypedDict, Optional
+from typing import Any, List, Literal, TypedDict, Optional
 
 # Create TypedDict dynamically to avoid keyword conflict
 PipelineInputConnection = TypedDict(
@@ -135,9 +136,29 @@ class PipelineConfig(TypedDict, total=False):
     components: list[PipelineComponent]  # Array of pipeline components - REQUIRED
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
+    parameters: dict[str, str]  # Per-call params: public name -> 'nodeId.configKey'
     viewport: dict[str, Any]  # UI viewport settings for visual editors
     docRevision: int  # Editor document revision counter for change tracking
     isLocked: bool  # Whether the canvas is locked from editing
     snapToGrid: bool  # Whether node snapping to grid is enabled
     snapGridSize: list[int]  # Grid size for snapping [x, y]
     editorMode: str  # Active editor mode (e.g. 'design', 'status', 'flow')
+
+
+class PROCESS_RESULT(TypedDict, total=False):
+    """
+    What ``process()`` returns: the pipe ``close`` body plus the stamps.
+
+    The close body's own fields (``result_types``, ``objects`` ...) ride
+    beside these. Stamps:
+    """
+
+    token: str  # The address that answered: developerId.pipelineId.source
+    resolved: Literal['@dev', '@me', '@team', '@public']  # The rung that answered
+    team: str  # On '@team': the answering team
+    version: int  # The artifact version (absent on '@dev')
+    engineKey: str  # The engine the request ran on (content hash, owner-qualified when private)
+    specMatch: bool  # False when on_change='keep' delivered to an engine running another spec
+    converged: Literal['none', 'started', 'repointed']  # What resolution did to reach an engine
+    ignored: List[str]  # Server-controlled arguments a name call passed (threads/args/env/ttl)
+    warnings: List[dict]  # address_collision / repoint_storm warnings, when any

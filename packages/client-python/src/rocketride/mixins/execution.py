@@ -57,9 +57,10 @@ import asyncio
 import json
 import copy
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
-from ..types.pipeline import PipelineConfig
+from ..core.constants import PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN
+from ..types.pipeline import PROCESS_RESULT, PipelineConfig
 from ..types.task import TASK_STATUS
 
 try:
@@ -89,6 +90,189 @@ class ExecutionMixin(DAPClient):
     def __init__(self, **kwargs):
         """Initialize pipeline execution capabilities."""
         super().__init__(**kwargs)
+
+    async def _read_pipeline_file(self, filepath: str) -> Dict[str, Any]:
+        """
+        Load a ``.pipe`` / JSON / JSON5 pipeline file, unwrapping ``{"pipeline": {...}}``.
+
+        Raises:
+            FileNotFoundError: The file does not exist.
+        """
+
+        def _load_pipeline_config(path: str):
+            with open(path, 'r', encoding='utf-8') as file:
+                parsed = json5.load(file) if json5 else json.load(file)
+            return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
+
+        try:
+            if hasattr(asyncio, 'to_thread'):
+                return await asyncio.to_thread(_load_pipeline_config, filepath)
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, _load_pipeline_config, filepath)
+        except FileNotFoundError as err:
+            raise FileNotFoundError(
+                f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration."
+            ) from err
+
+    def _rocket_env(self, env: Optional[Dict[str, str]]) -> Dict[str, str]:
+        """The client's ``ROCKETRIDE_*`` values with per-call overrides on top."""
+        rocket_env: Dict[str, str] = {}
+        if hasattr(self, '_env'):
+            for k, v in self._env.items():
+                if k.startswith('ROCKETRIDE_'):
+                    rocket_env[k] = v
+        if env:
+            rocket_env.update(env)
+        return rocket_env
+
+    async def process(
+        self,
+        *,
+        name: str = None,
+        pipeline: Optional[PipelineConfig] = None,
+        filepath: str = None,
+        source: str = None,
+        params: Dict[str, Any] = None,
+        data: Union[str, bytes] = None,
+        objinfo: Dict[str, Any] = None,
+        mimetype: str = None,
+        on_sse=None,
+        threads: int = None,
+        args: List[str] = None,
+        ttl: int = None,
+        env: Dict[str, str] = None,
+        pipelineTraceLevel: str = None,
+        pipeline_trace_level: str = None,
+        on_change: str = 'error',
+        timeout: float = None,
+        team: str = None,
+    ) -> PROCESS_RESULT:
+        """
+        Run ONE request through a named or inline pipeline: ``use()`` plus one ``send()``.
+
+        Exactly one of ``name``, ``pipeline`` or ``filepath``. A ``name`` is
+        the address ``developerId.pipelineId[.source]`` and resolves through
+        the fixed rungs: your live ``@dev`` presence (attach only), your
+        ``@me`` deployment, the first team in your team order that publishes
+        it (``team`` overrides the order for this call), then ``@public``;
+        a published rung starts from its artifact when nothing is live. A
+        ``pipeline``/``filepath`` addresses your own ``@dev`` presence for that
+        spec; when it already runs other content, ``on_change`` decides:
+        ``'error'`` (default), ``'keep'`` (use the running engine) or
+        ``'auto'`` (move to the new spec; nothing is stopped for anyone else).
+
+        The pipeline stays up after the call and expires on its idle ttl.
+        ``threads``/``args``/``env``/``ttl`` apply to spec calls only; a name
+        call ignores them and lists them in ``ignored``.
+
+        Data up to ``PROCESS_INLINE_MAX`` bytes travels inline in the one
+        request; larger data, and every call with ``on_sse``, streams through
+        a pipe to the address the server answered with (same result).
+
+        Args:
+            name: The pipeline's address (XOR with pipeline/filepath).
+            pipeline: An inline flat PipelineConfig (XOR).
+            filepath: A ``.pipe``/JSON file, loaded here (XOR).
+            source: The entry component; overrides the address's third segment.
+            params: Per-call parameter values by public name.
+            data: The payload (str is sent as UTF-8).
+            objinfo: Object metadata for the payload.
+            mimetype: The payload's MIME type (default ``application/octet-stream``).
+            on_sse: async ``callback(type, data)`` for the request's SSE events.
+            threads: Engine threads (spec calls only).
+            args: Engine arguments (spec calls only).
+            ttl: Idle ttl in seconds (spec calls only).
+            env: ``ROCKETRIDE_*`` overrides (spec calls only).
+            pipelineTraceLevel: Trace level for this pipeline's requests.
+            pipeline_trace_level: Snake-case alias of ``pipelineTraceLevel``.
+            on_change: ``'error'`` | ``'keep'`` | ``'auto'`` (spec calls).
+            timeout: Seconds for the request (pipe open to close).
+            team: Answer ``@team`` from this one of your teams.
+
+        Returns:
+            PROCESS_RESULT: the pipe close body plus ``token``, ``resolved``,
+            ``team`` (on ``@team``), ``version`` (not on ``@dev``),
+            ``engineKey``, ``specMatch``, ``converged``, ``ignored`` and any
+            ``warnings``.
+
+        Raises:
+            ValueError: Not exactly one of name/pipeline/filepath, or data
+                that is neither str nor bytes.
+            RuntimeError: The server refused (not found, spec changed,
+                permission, timeout ...), or does not support ``process``.
+            TimeoutError: A streamed request outlived ``timeout``.
+
+        Example:
+            result = await client.process(name='acme.docBrain', data='What is in this file?')
+            print(result['resolved'], result['answers'])
+        """
+        # Step 1: exactly one of name / pipeline / filepath
+        if sum(value is not None for value in (name, pipeline, filepath)) != 1:
+            raise ValueError('Pass exactly one of name, pipeline or filepath')
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        elif data is not None and not isinstance(data, bytes):
+            raise ValueError('data must be either a string or bytes')
+
+        # Step 2: the request arguments
+        arguments: Dict[str, Any] = {}
+        if name is not None:
+            arguments['name'] = name
+        else:
+            spec = await self._read_pipeline_file(filepath) if filepath is not None else pipeline
+            spec = copy.deepcopy(spec.get('pipeline', spec) if isinstance(spec, dict) else spec)
+            arguments['pipeline'] = spec
+            arguments['onChange'] = on_change
+        optional = {
+            'source': source,
+            'team': team,
+            'params': params,
+            'objinfo': objinfo,
+            'mimetype': mimetype,
+            'threads': threads,
+            'args': args,
+            'ttl': ttl,
+            'pipelineTraceLevel': pipelineTraceLevel or pipeline_trace_level,
+            'timeout': timeout,
+        }
+        arguments.update({key: value for key, value in optional.items() if value is not None})
+        rocket_env = self._rocket_env(env) if name is None else (env or {})
+        if rocket_env:
+            arguments['env'] = rocket_env
+
+        # Step 3: inline in one request, unless the SDK must stream. The
+        # request is built here, not through call(): ``timeout`` is a SERVER
+        # argument (seconds, pipe open to close) that call() would take for
+        # its own transport deadline. The transport deadline is separate and
+        # outlives the server's, so the server's timeout error is the one the
+        # caller sees.
+        inline = data is not None and on_sse is None and len(data) <= PROCESS_INLINE_MAX
+        if inline:
+            arguments['data'] = data
+        message = self.build_request(command='process', arguments=arguments)
+        transport_timeout = None if timeout is None else (float(timeout) + PROCESS_TRANSPORT_MARGIN) * 1000
+        if self._on_trace:
+            self._on_trace(self.TRACE_REQUEST, message)
+        response = await self.request(message, timeout=transport_timeout)
+        if self.did_fail(response):
+            if self._on_trace:
+                self._on_trace(self.TRACE_ERROR, response)
+            reason = response.get('message', 'process failed')
+            if reason.startswith('Unsupported command: process'):
+                raise RuntimeError('This server does not support process(); upgrade the server')
+            raise RuntimeError(reason)
+        if self._on_trace:
+            self._on_trace(self.TRACE_SUCCESS, response)
+        stamps = response.get('body') or {}
+        if inline or data is None:
+            return stamps
+
+        # Step 4: stream to the address the server answered with, through
+        # the team that answered (``@team``): the data path resolves the
+        # address again and must land on the same control.
+        streamed = self.send(stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'))
+        result = await (asyncio.wait_for(streamed, timeout) if timeout is not None else streamed)
+        return {**(result or {}), **stamps}
 
     async def use(
         self,
@@ -213,22 +397,7 @@ class ExecutionMixin(DAPClient):
 
         # Load pipeline configuration from file if needed
         if not pipeline:
-
-            def _load_pipeline_config(path: str):
-                with open(path, 'r', encoding='utf-8') as file:
-                    parsed = json5.load(file) if json5 else json.load(file)
-                return parsed.get('pipeline', parsed) if isinstance(parsed, dict) else parsed
-
-            try:
-                if hasattr(asyncio, 'to_thread'):
-                    pipeline_config = await asyncio.to_thread(_load_pipeline_config, filepath)
-                else:
-                    loop = asyncio.get_running_loop()
-                    pipeline_config = await loop.run_in_executor(None, _load_pipeline_config, filepath)
-            except FileNotFoundError as err:
-                raise FileNotFoundError(
-                    f"Pipeline file not found: '{filepath}'. Please provide a valid file path or use inline pipeline configuration."
-                ) from err
+            pipeline_config = await self._read_pipeline_file(filepath)
         else:
             # Keep behavior consistent with filepath-based loading
             pipeline_config = pipeline.get('pipeline', pipeline) if isinstance(pipeline, dict) else pipeline
@@ -260,13 +429,7 @@ class ExecutionMixin(DAPClient):
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
         # Build ROCKETRIDE_* env from client's .env + caller overrides
-        rocket_env: Dict[str, str] = {}
-        if hasattr(self, '_env'):
-            for k, v in self._env.items():
-                if k.startswith('ROCKETRIDE_'):
-                    rocket_env[k] = v
-        if env:
-            rocket_env.update(env)
+        rocket_env = self._rocket_env(env)
         if rocket_env:
             arguments['env'] = rocket_env
 
