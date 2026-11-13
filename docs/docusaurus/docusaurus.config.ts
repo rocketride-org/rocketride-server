@@ -15,7 +15,6 @@ const algolia = process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_API_KEY ? { ap
 // `pnpm build` work standalone after a gather has run.
 const contentPath = process.env.ROCKETRIDE_DOCS_CONTENT || path.resolve(__dirname, 'content');
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { describePage } = require('./scripts/lib/description.js');
 
 const config: Config = {

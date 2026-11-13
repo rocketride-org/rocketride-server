@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import llms from '../../scripts/lib/llms.js';
 
-const { buildIndex } = llms;
+const { buildIndex, SITE_URL } = llms;
 
 describe('buildIndex', () => {
 	let contentDir;
@@ -85,7 +85,7 @@ describe('buildIndex', () => {
 
 		it('rewrites a raw copy to start with the index line and drop front matter', async () => {
 			const twin = await readFile(twinPath, 'utf8');
-			assert.ok(twin.startsWith('> Documentation index for agents: https://docs.rocketride.org/llms.txt\n'));
+			assert.ok(twin.startsWith(`> Documentation index for agents: ${SITE_URL}/llms.txt\n`));
 			assert.doesNotMatch(twin, /^---$/m);
 			assert.doesNotMatch(twin, /title: Guide/);
 			assert.match(twin, /Body text\./);
