@@ -26,6 +26,7 @@ import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
 import type { ShellApiV10 } from '../contract/versions/v10';
 import type { ShellApiV11 } from '../contract/versions/v11';
+import type { ShellApiV12 } from '../contract/versions/v12';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -846,6 +847,8 @@ import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v11';
 import type { ConsentApi as Current_ConsentApi } from './api';
 import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v11';
 import type { SdkLike as Current_SdkLike } from './api';
+import type { PROCESS_RESULT as Frozen_PROCESS_RESULT } from '../contract/versions/v12';
+import type { PROCESS_RESULT as Current_PROCESS_RESULT } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -872,6 +875,8 @@ const _floor_v10: ShellApiV10 = {} as ShellApiShape;
 void _floor_v10;
 const _floor_v11: ShellApiV11 = {} as ShellApiShape;
 void _floor_v11;
+const _floor_v12: ShellApiV12 = {} as ShellApiShape;
+void _floor_v12;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1696,3 +1701,5 @@ const _t_ConsentApi: Frozen_ConsentApi = {} as Current_ConsentApi;
 void _t_ConsentApi;
 const _t_SdkLike: Frozen_SdkLike = {} as Current_SdkLike;
 void _t_SdkLike;
+const _t_PROCESS_RESULT: Frozen_PROCESS_RESULT = {} as Current_PROCESS_RESULT;
+void _t_PROCESS_RESULT;
