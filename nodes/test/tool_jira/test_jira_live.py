@@ -36,6 +36,7 @@ account may delete issues (a new company-managed project doesn't grant that).
 from __future__ import annotations
 
 import os
+import time
 import warnings
 from unittest.mock import Mock
 
@@ -105,6 +106,10 @@ def test_the_six_tools_against_a_live_site(created):
     assert got['comments'][0]['body_text'] == 'A list:\n\n- alpha\n- beta\n\n```\nok\n```'
 
     jql = f'key in ({", ".join(created)}) ORDER BY created ASC'
+    # new issues can take a moment to show up in search: wait for both before paging (reads only)
+    deadline = time.monotonic() + 60
+    while len(node.jira_search({'jql': jql, 'max_results': 2}).get('issues') or []) < 2 and time.monotonic() < deadline:
+        time.sleep(2)
     first = node.jira_search({'jql': jql, 'max_results': 1})
     assert first['success'] and len(first['issues']) == 1 and first['next_page_token'], first
     second = node.jira_search({'jql': jql, 'max_results': 1, 'next_page_token': first['next_page_token']})
