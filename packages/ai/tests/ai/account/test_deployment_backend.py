@@ -579,6 +579,56 @@ class TestArtifact:
 
 
 # ============================================================================
+# Storage failures: only a missing file is absent
+# ============================================================================
+
+
+async def _store_down(*args, **kwargs):
+    """A storage failure that is not a missing file (an outage outlasting the store's retries)."""
+    raise StorageError('store down')
+
+
+class TestStorageFailure:
+    @pytest.mark.asyncio
+    async def test_a_failed_meta_read_raises_and_writes_nothing(self, backend, store, monkeypatch):
+        """A meta.json that cannot be read is not a new project: no fresh record may overwrite the registry."""
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR, 'first')
+        path = 'orgs/org-1/files/.deployments/proj-1/meta.json'
+        before = await store.read_file(path)
+        writes = []
+        real_write = store.write_file
+
+        async def recording_write(filename, data):
+            writes.append(filename)
+            await real_write(filename, data)
+
+        monkeypatch.setattr(store, 'read_file_with_metadata', _store_down)
+        monkeypatch.setattr(store, 'write_file', recording_write)
+        with pytest.raises(StorageError, match='store down'):
+            await backend.publish('org-1', 'proj-1', PIPE, ACTOR, 'second')
+        assert writes == []
+        assert await store.read_file(path) == before
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('failing', ['list_entries', 'read_file'])
+    async def test_publish_list_raises_on_a_storage_failure(self, backend, store, monkeypatch, failing):
+        """An outage is not an org with nothing published: publish_list raises instead of answering []."""
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 1, {'name': 'B'}, ACTOR)
+        monkeypatch.setattr(store, failing, _store_down)
+        with pytest.raises(StorageError, match='store down'):
+            await backend.publish_list('org-1', 'app', [AUD_PUBLIC])
+
+    @pytest.mark.asyncio
+    async def test_missing_files_still_read_as_absent(self, backend):
+        """A project or org with nothing stored yet is empty, not a failure."""
+        assert await backend.publish_list('org-1', 'app', [AUD_PUBLIC]) == []
+        assert await backend.get('org-1', 'team-1', 'proj-1') is None
+        v1 = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        assert v1['version'] == 1
+
+
+# ============================================================================
 # Scheduler feed
 # ============================================================================
 
@@ -602,6 +652,5 @@ class TestIterEnabled:
     @pytest.mark.asyncio
     async def test_fresh_store_yields_nothing(self, backend):
         # A store with no orgs/ tree yet (fresh install) must not break the
-        # scheduler feed — iter_enabled swallows the StorageError and yields
-        # nothing instead of raising.
+        # scheduler feed: a missing tree yields nothing instead of raising.
         assert [d async for d in backend.iter_enabled()] == []
