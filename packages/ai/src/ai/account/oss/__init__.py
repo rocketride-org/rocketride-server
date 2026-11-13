@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
-from ..base import ENV_MASK, ENV_NAME, AccountBase
+from ..base import ENV_MASK, AccountBase, env_changes
 
 
 def _env_line(name: str, value: str) -> str:
@@ -78,34 +78,15 @@ def _env_changes(args: Dict[str, Any]) -> Tuple[Dict[str, Optional[str]], Option
         The changes (a name to its value, None to delete) and None, or an
         empty dict and the error text when a name or value is refused.
     """
-    raw, deleted = args.get('env', {}), args.get('delete', [])
-    if not isinstance(raw, dict) or not isinstance(deleted, list):
-        return {}, '`env` must be an object and `delete` a list; nothing was saved.'
-    if not all(isinstance(name, str) for name in deleted):
-        return {}, 'Environment names and values must be strings; nothing was saved.'
-    changes = dict(raw)
-    changes.update({name: None for name in deleted})
-    if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
-        return {}, 'Environment names and values must be strings; nothing was saved.'
-    rejected = sorted(k for k in changes if not ENV_NAME.fullmatch(k))
-    if rejected:
-        # Names only: the values are secrets and must not reach the client.
-        return {}, (
-            'Unsupported environment variable name(s): '
-            + ', '.join(rejected)
-            + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL; nothing was saved."
-        )
+    try:
+        changes = env_changes(args)
+    except ValueError as e:
+        return {}, str(e)
     # A .env line ends at a line break, the environment at a NUL, and
     # load_dotenv expands '${', quoted or not
     if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
         return {}, (
             "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it); nothing was saved."
-        )
-    # A key typed after the mask in an editor's field: storing it would hide it for good
-    typed_on_mask = sorted(k for k, v in changes.items() if v is not None and v != ENV_MASK and v.startswith(ENV_MASK))
-    if typed_on_mask:
-        return {}, (
-            'The value of ' + ', '.join(typed_on_mask) + ' begins with the mask; replace it whole. Nothing was saved.'
         )
     return changes, None
 

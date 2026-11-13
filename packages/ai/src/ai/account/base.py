@@ -33,7 +33,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import Any, Dict, NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -43,6 +43,81 @@ ENV_MASK = '••••••••'
 # The environment names accepted: a .env key ends at whitespace, '=' or '#',
 # a quote is stripped from it, and the process environment ends at a NUL
 ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
+
+_NOT_STRINGS = 'Environment names and values must be strings; nothing was saved.'
+
+
+def _is_change(name: Any, value: Any) -> bool:
+    """A name with a value that sets (str), deletes (None) or keeps (ENV_MASK)."""
+    return isinstance(name, str) and (value is None or isinstance(value, str))
+
+
+def check_env_changes(changes: Dict[str, Optional[str]]) -> None:
+    """
+    Refuse a write of environment changes before anything is stored.
+
+    A value sets, None deletes, ENV_MASK keeps the stored value. Every name
+    begins with ROCKETRIDE_, and a name given a new value must also match
+    ENV_NAME; a delete or a kept mask skips that rule, so a name an older
+    server stored under the plain prefix can still be kept or deleted.
+
+    Args:
+        changes: Names to set, delete or keep.
+
+    Raises:
+        ValueError: Naming the refused names, never a value; nothing was saved.
+    """
+    if not all(_is_change(name, value) for name, value in changes.items()):
+        raise ValueError(_NOT_STRINGS)
+    rejected = sorted(
+        name
+        for name, value in changes.items()
+        if not name.startswith('ROCKETRIDE_') or (value not in (None, ENV_MASK) and not ENV_NAME.fullmatch(name))
+    )
+    if rejected:
+        # Names only: the values are secrets and must not reach a log or a client
+        raise ValueError(
+            'Unsupported environment variable name(s): '
+            + ', '.join(rejected)
+            + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL; nothing was saved."
+        )
+    # A key typed after the mask in an editor's field: storing it would hide it for good
+    typed_on_mask = sorted(
+        name for name, value in changes.items() if value not in (None, ENV_MASK) and value.startswith(ENV_MASK)
+    )
+    if typed_on_mask:
+        raise ValueError(
+            'The value of ' + ', '.join(typed_on_mask) + ' begins with the mask; replace it whole. Nothing was saved.'
+        )
+
+
+def env_changes(args: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """
+    The changes an ``update_env`` / ``set_env`` request asks for, checked.
+
+    Args:
+        args: The request arguments: ``env`` (name to value) and ``delete`` (names).
+
+    Returns:
+        A name to its value, None to delete, ENV_MASK to keep.
+
+    Raises:
+        ValueError: The request is malformed, names one variable in both
+            ``env`` and ``delete``, or ``check_env_changes`` refuses it.
+    """
+    raw = args.get('env', {})
+    deleted = args.get('delete', [])
+    if not isinstance(raw, dict) or not isinstance(deleted, list):
+        raise ValueError('`env` must be an object and `delete` a list; nothing was saved.')
+    if not all(isinstance(name, str) for name in deleted):
+        raise ValueError(_NOT_STRINGS)
+    both = sorted(name for name in deleted if name in raw)
+    if both:
+        raise ValueError('Both set and deleted: ' + ', '.join(both) + '. Send one of the two; nothing was saved.')
+    changes: Dict[str, Optional[str]] = dict(raw)
+    changes.update({name: None for name in deleted})
+    check_env_changes(changes)
+    return changes
 
 
 class DbDecision(NamedTuple):
