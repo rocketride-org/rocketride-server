@@ -22,6 +22,8 @@
 
 """Shared isolation for the shell module tests."""
 
+import asyncio
+
 import pytest
 
 
@@ -40,7 +42,7 @@ def _public_pages_state(monkeypatch):
     touch a real store. The render and snapshot caches, the
     unusable-snapshot memory, the storage-warning and storage-failure
     memories and the snapshot reads in flight start empty, with their
-    production budgets.
+    production budgets, and the store read slots start free.
     """
     import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as pp
@@ -65,6 +67,8 @@ def _public_pages_state(monkeypatch):
         pages, '_storage_failures', pages._FifoCache(pages._STORAGE_FAILURES_MAX, pages._STORAGE_FAILURES_MAX)
     )
     monkeypatch.setattr(pages, '_snapshot_reads', {})
+    # A semaphore binds to the event loop it first waits on; TestClient runs each request on a fresh one.
+    monkeypatch.setattr(pages, '_snapshot_read_slots', asyncio.Semaphore(pages._SNAPSHOT_READ_SLOTS))
     monkeypatch.setattr(pages, '_documents', {})
     pp.on_swap(pages._clear_rendered)  # as register_public_pages installs it
     FILES.clear()

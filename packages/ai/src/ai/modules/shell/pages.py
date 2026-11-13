@@ -373,6 +373,14 @@ _SNAPSHOT_READ_SECONDS = 5.0
 # failure, however it finishes and whether or not anyone still waits.
 _snapshot_reads: Dict[str, 'asyncio.Task[bytes]'] = {}
 
+# How many shared reads may be at the store at once, across all paths. Each
+# holds a default-executor thread for as long as the store takes (minutes,
+# while S3 retries a black-holed request), and that executor serves every
+# asyncio.to_thread in the engine; a read waiting for a slot holds none.
+# Requests keep their own deadline (_SNAPSHOT_READ_SECONDS) while it waits.
+_SNAPSHOT_READ_SLOTS = 4
+_snapshot_read_slots = asyncio.Semaphore(_SNAPSHOT_READ_SLOTS)
+
 
 class _SnapshotTooLarge(Exception):
     """A stored snapshot over ``MAX_SNAPSHOT_BYTES`` (never read)."""
@@ -458,7 +466,8 @@ async def _stored_snapshot(path: str) -> bytes:
     """Read the snapshot at store ``path`` into the snapshot cache; a stat first, so one over the cap is never read.
 
     The one read of ``path`` in flight (``_snapshot_reads``); its
-    done-callback, ``_read_finished``, handles a failure.
+    done-callback, ``_read_finished``, handles a failure. The stat and the
+    read hold one of the ``_SNAPSHOT_READ_SLOTS`` store slots together.
 
     Args:
         path: The snapshot's store path.
@@ -470,10 +479,11 @@ async def _stored_snapshot(path: str) -> bytes:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
         StorageError: a storage failure (``StorageNotFoundError`` included).
     """
-    size = (await public_pages.artifact_file_info(path))['size']
-    if size > MAX_SNAPSHOT_BYTES:
-        raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
-    raw = await public_pages.read_artifact_file(path)
+    async with _snapshot_read_slots:
+        size = (await public_pages.artifact_file_info(path))['size']
+        if size > MAX_SNAPSHOT_BYTES:
+            raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
+        raw = await public_pages.read_artifact_file(path)
     _snapshot_cache.put(path, raw, len(raw))
     return raw
 

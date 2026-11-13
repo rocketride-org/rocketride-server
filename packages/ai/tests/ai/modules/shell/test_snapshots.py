@@ -468,6 +468,41 @@ def test_a_shared_read_that_fails_after_its_waiters_left_is_logged_and_backs_off
     assert stats == [path, path]
 
 
+def test_reads_of_distinct_paths_hold_at_most_the_read_slots(shell_root, monkeypatch):
+    # A crawl across many snapshot pages while the store hangs holds at most
+    # _SNAPSHOT_READ_SLOTS worker threads in all, not one per page; the
+    # queued reads hold none and run once a slot frees.
+    served = _bulk(10, 64)
+    active = [0]
+    peak = [0]
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def gated_stat(path):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            await release.wait()
+            active[0] -= 1
+            return await file_info(path)
+
+        async def slots_filled():
+            while active[0] < pages._SNAPSHOT_READ_SLOTS:
+                await asyncio.sleep(0.001)
+
+        monkeypatch.setattr(pp, 'artifact_file_info', gated_stat)
+        crawls = asyncio.ensure_future(_crawl_at_once([page.path for page in served]))
+        await asyncio.wait_for(slots_filled(), 2)
+        await asyncio.sleep(0.05)  # room for any read past the bound to start
+        held = active[0]
+        release.set()
+        return held, await crawls
+
+    held, responses = asyncio.run(scenario())
+    assert held == peak[0] == pages._SNAPSHOT_READ_SLOTS == 4
+    assert all(f'<p>page {i}</p>' in resp.text for i, resp in enumerate(responses))
+
+
 def test_a_failing_path_is_not_read_again_within_the_backoff(shell_root, monkeypatch, warned):
     # While the store fails, crawlers cost one store call per path per backoff, not one per request.
     _seed()
