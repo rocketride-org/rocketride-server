@@ -75,7 +75,9 @@ The engine reads configuration from its environment — pass variables with
 
 The image binds all container interfaces, so the engine treats itself as a
 public bind. For the built-in MCP server at `http://localhost:5565/mcp` to work,
-start the container with an `rr_` key and with `ROCKETRIDE_URI`. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
+start the container with an `rr_` key. Engine image 3.6.0 and earlier also need
+`ROCKETRIDE_URI` (see below); the command sets it because it is safe on any
+version. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
 
 ```bash
 docker run -d --name rocketride-engine --platform linux/amd64 \
@@ -88,10 +90,12 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
 ```
 
 MCP clients then send `Authorization: Bearer rr_local`. The key must start with
-`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on an
-engine that is not bound to localhost, MCP tool calls connect to RocketRide Cloud
-and fail. The CLI and SDK must send the same `ROCKETRIDE_APIKEY` the engine was
-started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
+`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set, the
+engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`). Engine image 3.6.0
+and earlier instead connect them to RocketRide Cloud, where they fail with
+`Invalid or revoked API key`; on those versions set `ROCKETRIDE_URI` as in the
+command above (setting it is safe on an engine that listens on loopback or on all interfaces, which is the default and the Docker image). The CLI and SDK must send the same
+`ROCKETRIDE_APIKEY` the engine was started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
 
 ## Persistence
 
