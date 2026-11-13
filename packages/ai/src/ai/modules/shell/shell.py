@@ -841,7 +841,10 @@ async def llms_txt(request: Request):
     sections: Dict[str, List[Page]] = {'': []}
     for path, page in listed.items():
         parent = path.rpartition('/')[0]
-        sections.setdefault(parent if parent in listed else '', []).append(page)
+        section = ''
+        if parent in listed:
+            section = parent
+        sections.setdefault(section, []).append(page)
     for parent in sorted(sections):
         pages = sections[parent]
         if parent:

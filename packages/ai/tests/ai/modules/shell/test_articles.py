@@ -210,11 +210,20 @@ def test_a_lone_surrogate_is_refused_before_it_reaches_any_head(shell_root, monk
     post = home['publicPages'][2]
     url = f'https://cdn.example/{surrogate}.png'
     if field.startswith('site.'):
-        home['site'][field[5:]] = url if field == 'site.image' else f'RocketRide {surrogate}'
+        value = f'RocketRide {surrogate}'
+        if field == 'site.image':
+            value = url
+        home['site'][field[5:]] = value
     elif field.startswith('authors.'):
-        post['authors'][0][field[8:]] = url if field == 'authors.url' else f'Ansh {surrogate}'
+        value = f'Ansh {surrogate}'
+        if field == 'authors.url':
+            value = url
+        post['authors'][0][field[8:]] = value
     else:
-        post[field] = url if field == 'image' else f'Launch {surrogate}'
+        value = f'Launch {surrogate}'
+        if field == 'image':
+            value = url
+        post[field] = value
     _publish(monkeypatch, home=home)
     # A bad site field drops the site block; a bad page field drops the page.
     assert ('/blog/launch' in pp.current().exact) is field.startswith('site.')

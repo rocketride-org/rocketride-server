@@ -179,9 +179,20 @@ def own_title(title: str, site_title: str) -> str:
     feed entry or an llms.txt section heading does: search engines and
     readers then see the article's own title. The title stays whole when
     there is no site title, or when the suffix is all there is.
+
+    Args:
+        title: The page's title.
+        site_title: ``site.title``, or '' when the site has none.
+
+    Returns:
+        The title without the site suffix, or ``title`` itself when nothing would be left.
     """
-    own = title.removesuffix(f' | {site_title}') if site_title else title
-    return own if own.strip() else title
+    own = title
+    if site_title:
+        own = title.removesuffix(f' | {site_title}')
+    if not own.strip():
+        return title
+    return own
 
 
 def is_privileged(app_id: str) -> bool:
@@ -353,7 +364,9 @@ def _image_error(value: Any) -> Optional[str]:
         return _IMAGE_FORMS
     if value.startswith('https://'):
         return _https_url_error(value)
-    relative = value[1:] if value.startswith('/') else value
+    relative = value
+    if value.startswith('/'):
+        relative = value[1:]
     if not _BUILD_PATH.fullmatch(relative):
         return _IMAGE_FORMS
     if any(seg in ('.', '..') for seg in relative.split('/')):
@@ -393,6 +406,38 @@ def _date_error(value: Any) -> Optional[str]:
     return None
 
 
+def _check_authors(where: str, raw: Mapping[str, Any]) -> Tuple[Tuple[Tuple[str, str], ...], Optional[str]]:
+    """The page's ``authors`` as ``(name, url)`` pairs, or the first error.
+
+    Args:
+        where: The page's place in the manifest, as prefix for an error.
+        raw: The page object as declared.
+
+    Returns:
+        The pairs and None, or an empty tuple and the first thing wrong.
+    """
+    authors = raw.get('authors', [])
+    if not isinstance(authors, list) or len(authors) > _MAX_AUTHORS:
+        return (), f'{where}.authors: must be a list of at most {_MAX_AUTHORS} {{"name", "url"?}} objects'
+    pairs = []
+    for j, author in enumerate(authors):
+        if not isinstance(author, dict):
+            return (), f'{where}.authors[{j}]: must be an object {{"name": "...", "url": "https://..."}}'
+        name, url = author.get('name'), author.get('url', '')
+        if not isinstance(name, str) or not name.strip() or len(name) > _MAX_TITLE:
+            return (), f'{where}.authors[{j}].name: required, a non-empty string of at most {_MAX_TITLE} characters'
+        err = _surrogate_error(name)
+        if err:
+            return (), f'{where}.authors[{j}].name: {err}'
+        err = None
+        if url != '':
+            err = _https_url_error(url)
+        if err:
+            return (), f'{where}.authors[{j}].url: {err}'
+        pairs.append((name, url))
+    return tuple(pairs), None
+
+
 def _check_article(where: str, raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
     """The page's ``image``, ``published``, ``modified`` and ``authors`` as Page fields, or the first error."""
     out: Dict[str, Any] = {}
@@ -406,26 +451,10 @@ def _check_article(where: str, raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], 
     published, modified = out['published'], out['modified']
     if published and modified and page_instant(modified) < page_instant(published):
         return {}, f'{where}.modified {modified!r}: must not be earlier than published {published!r}; fix either date'
-    authors = raw.get('authors', [])
-    if not isinstance(authors, list) or len(authors) > _MAX_AUTHORS:
-        return {}, f'{where}.authors: must be a list of at most {_MAX_AUTHORS} {{"name", "url"?}} objects'
-    pairs = []
-    for j, author in enumerate(authors):
-        if not isinstance(author, dict):
-            return {}, f'{where}.authors[{j}]: must be an object {{"name": "...", "url": "https://..."}}'
-        name, url = author.get('name'), author.get('url', '')
-        if not isinstance(name, str) or not name.strip() or len(name) > _MAX_TITLE:
-            return {}, f'{where}.authors[{j}].name: required, a non-empty string of at most {_MAX_TITLE} characters'
-        err = _surrogate_error(name)
-        if err:
-            return {}, f'{where}.authors[{j}].name: {err}'
-        err = None
-        if url != '':
-            err = _https_url_error(url)
-        if err:
-            return {}, f'{where}.authors[{j}].url: {err}'
-        pairs.append((name, url))
-    out['authors'] = tuple(pairs)
+    authors, err = _check_authors(where, raw)
+    if err:
+        return {}, err
+    out['authors'] = authors
     return out, None
 
 
@@ -637,7 +666,9 @@ def _feed_path_error(
             return f'{which}is a publicPages path'
         if candidate in redirects:
             return f'{which}is a site.redirects source'
-        conflict = live_conflict(candidate) if live_conflict else None
+        conflict = None
+        if live_conflict:
+            conflict = live_conflict(candidate)
         if conflict:
             return f'{which}collides with the live server route {conflict}'
     return None

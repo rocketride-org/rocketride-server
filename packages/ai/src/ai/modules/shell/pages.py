@@ -480,6 +480,13 @@ def image_url(value: str, owner: Optional[Page]) -> str:
     An https URL is kept as declared and a root path goes on ``RR_APP_URL``.
     Any other value is a path in ``owner``'s build output, served from its
     production version (``assets_base``), so it changes with each publish.
+
+    Args:
+        value: The declared ``image`` (a page's or ``site.image``).
+        owner: The page declaring it, whose build output a relative path names; None for ``site.image``.
+
+    Returns:
+        The absolute URL, or '' for an empty value or a value that cannot be made absolute.
     """
     if value.startswith('https://'):
         return value

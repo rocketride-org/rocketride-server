@@ -36,11 +36,18 @@ from typing import Any, Dict, Mapping
 from urllib.parse import urlsplit
 
 from .contract import Page, own_title
-from .shell import app_url
+from .settings import app_url
 
 
 def publisher(site: Mapping[str, Any]) -> Dict[str, Any]:
-    """The site's organization: named after ``site.title`` (else the origin's host), on the ``RR_APP_URL`` origin."""
+    """The site's organization: named after ``site.title`` (else the origin's host), on the ``RR_APP_URL`` origin.
+
+    Args:
+        site: The root owner's ``site`` object (may be empty).
+
+    Returns:
+        The ``Organization`` node; ``name`` and ``url`` are left out when unknown.
+    """
     base = app_url()
     out: Dict[str, Any] = {'@type': 'Organization'}
     name = site.get('title') or urlsplit(base).netloc
@@ -58,6 +65,15 @@ def blogposting(page: Page, site: Mapping[str, Any], *, canonical: str, image: s
     when there is none); ``headline`` is the title without the site's
     `` | <site.title>`` suffix; ``dateModified`` is ``modified``, else
     ``published``.
+
+    Args:
+        page: A page that declares ``published``.
+        site: The root owner's ``site`` object, for the publisher.
+        canonical: The page's absolute canonical URL, or ''.
+        image: The page's absolute preview image URL, or ''.
+
+    Returns:
+        The ``BlogPosting`` node, ready for ``head.jsonld_script``.
     """
     organization = publisher(site)
     authors = []

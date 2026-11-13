@@ -62,12 +62,29 @@ def _attr(value: str) -> str:
 
 
 def rfc3339(value: str) -> str:
-    """A page date as an RFC 3339 date-time: a date alone is midnight UTC."""
-    return value if 'T' in value else f'{value}T00:00:00Z'
+    """A page date as an RFC 3339 date-time: a date alone is midnight UTC.
+
+    Args:
+        value: A validated ``published`` or ``modified`` value.
+
+    Returns:
+        ``value`` itself when it has a time, else ``value`` at 00:00:00Z.
+    """
+    if 'T' in value:
+        return value
+    return f'{value}T00:00:00Z'
 
 
 def entries(feed: Mapping[str, str], pages: List[Page]) -> List[Page]:
-    """The pages ``feed`` lists, newest first (then by path), at most ``MAX_ENTRIES``."""
+    """The pages ``feed`` lists, newest first (then by path), at most ``MAX_ENTRIES``.
+
+    Args:
+        feed: A ``site.feeds`` entry (``path``, ``prefix``, ``title``).
+        pages: Every page of the aggregate.
+
+    Returns:
+        The listed, dated pages strictly under ``feed['prefix']``.
+    """
     prefix = feed['prefix']
     dated = [p for p in pages if p.listed and p.published and p.path.startswith(prefix) and p.path != prefix]
     dated.sort(key=lambda p: (-page_instant(p.published).timestamp(), p.path))
@@ -75,7 +92,16 @@ def entries(feed: Mapping[str, str], pages: List[Page]) -> List[Page]:
 
 
 def atom(feed: Mapping[str, str], aggregate: Aggregate, base: str) -> str:
-    """The Atom document of ``feed`` over ``aggregate``'s pages, with absolute URLs on ``base`` (RR_APP_URL)."""
+    """The Atom document of ``feed`` over ``aggregate``'s pages, with absolute URLs on ``base`` (RR_APP_URL).
+
+    Args:
+        feed: A ``site.feeds`` entry (``path``, ``prefix``, ``title``).
+        aggregate: The page map the feed is built from.
+        base: The ``RR_APP_URL`` origin, without a trailing slash.
+
+    Returns:
+        The Atom 1.0 document as text.
+    """
     items = entries(feed, aggregate.pages())
     site_title = aggregate.site.get('title', '')
     newest = max((p.modified or p.published for p in items), key=page_instant, default='')

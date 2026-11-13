@@ -110,6 +110,15 @@ def social_tags(*, site_name: str = '', image: str = '', published: str = '', mo
     also gets ``article:published_time`` and ``article:modified_time``,
     the latter defaulting to the former), else ``website``. An ``image``
     (an absolute URL) asks for the large Twitter card.
+
+    Args:
+        site_name: ``site.title``; no ``og:site_name`` when empty.
+        image: The absolute preview image URL; none when empty.
+        published: The page's ``published``; makes the page an article.
+        modified: The page's ``modified``; defaults to ``published``.
+
+    Returns:
+        Complete, escaped tags for ``inject_head``'s ``extra``.
     """
     og_type = 'website'
     if published:
@@ -130,9 +139,17 @@ def social_tags(*, site_name: str = '', image: str = '', published: str = '', mo
 
 
 def feed_links(feeds: Iterable[Tuple[str, str]]) -> List[str]:
-    """One ``<link rel="alternate">`` per Atom feed ``(title, href)``, escaped, for ``inject_head``'s ``extra``."""
+    """One ``<link rel="alternate">`` per Atom feed ``(title, href)``, escaped, for ``inject_head``'s ``extra``.
+
+    Args:
+        feeds: ``(title, absolute href)`` pairs, one per feed.
+
+    Returns:
+        One escaped ``<link>`` tag per feed.
+    """
     return [
-        f'<link rel="alternate" type="application/atom+xml" title="{_attr(t)}" href="{_attr(h)}">' for t, h in feeds
+        f'<link rel="alternate" type="application/atom+xml" title="{_attr(title)}" href="{_attr(href)}">'
+        for title, href in feeds
     ]
 
 
