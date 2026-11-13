@@ -776,7 +776,7 @@ def _storage_warning_due(path: str, kind: str) -> bool:
     return True
 
 
-async def _not_found_page(request: Request, aggregate: Any) -> Optional[Response]:
+async def _not_found_page(request: Request, aggregate: public_pages.Aggregate) -> Optional[Response]:
     """The 404 page of ``site.notFound`` for a path nothing serves, or None.
 
     None when the site declares no ``notFound``, or the path is under a
@@ -995,7 +995,9 @@ async def _unclaimed(request: Request, path: str, aggregate: public_pages.Aggreg
     """
     if path == '/':
         return await shell_static(request)
-    miss = _router_miss(request) or await _not_found_page(request, aggregate)
+    miss = _router_miss(request)
+    if miss is None:
+        miss = await _not_found_page(request, aggregate)
     if miss is None:
         return _not_found(request, path)
     return miss
