@@ -449,7 +449,10 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 		linkageName = `<developerId>.${shownName}`;
 	}
 	let chipText = developerId;
-	let chipSource = identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)';
+	let chipSource = 'default (no organization developer id)';
+	if (identity.source === 'organization') {
+		chipSource = 'from organization profile';
+	}
 	if (row === 'unconfirmed') {
 		chipText = 'not confirmed';
 		chipSource = 'the server lookup failed';
