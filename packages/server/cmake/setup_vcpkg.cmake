@@ -8,8 +8,6 @@
 # -DCMAKE_TOOLCHAIN_FILE=... when invoking cmake).
 # =============================================================================
 
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
-
 message(STATUS "Setting up vcpkg (manifest mode)...")
 
 # Determine vcpkg root - prefer env var, then build/vcpkg relative to project root

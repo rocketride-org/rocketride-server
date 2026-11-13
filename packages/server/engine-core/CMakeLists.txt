@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 #
 # Do not want on new boost version library. The port does not know about
 # the latest version, but it should be okay
