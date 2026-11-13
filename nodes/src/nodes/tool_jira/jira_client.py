@@ -127,8 +127,10 @@ def _error_messages(resp) -> List[str]:
     except ValueError:
         body = None
     if isinstance(body, dict):
-        messages = [str(m) for m in body.get('errorMessages') or []]
-        messages += [f'{field}: {msg}' for field, msg in (body.get('errors') or {}).items()]
+        listed, fields = body.get('errorMessages'), body.get('errors')
+        # any other shape falls back to the response text instead of raising past the tools' error envelope
+        messages = [str(m) for m in listed] if isinstance(listed, list) else []
+        messages += [f'{field}: {msg}' for field, msg in fields.items()] if isinstance(fields, dict) else []
         if messages:
             return messages
     return [resp.text or resp.reason or 'unknown error']
@@ -233,7 +235,6 @@ def _order_by_start(jql: str) -> Optional[int]:
     an extra ``)`` could close the wrapper and escape the allowlist (``x = 1) OR (project = OTHER``).
     """
     depth, quote, i, found = 0, '', 0, None
-    lowered = jql.lower()
     while i < len(jql):
         ch = jql[i]
         if ch == '\\':  # JQL escapes the next character inside and outside quotes alike
@@ -252,7 +253,8 @@ def _order_by_start(jql: str) -> Optional[int]:
                 raise JiraAPIError(0, ['JQL has an unmatched ")"'])
         elif (
             depth == 0
-            and re.match(r'order\s+by\b', lowered[i:])
+            # matched on the original text: lower() can change its length (İ) and shift the offsets
+            and re.match(r'order\s+by\b', jql[i:], re.IGNORECASE)
             and (i == 0 or not (jql[i - 1].isalnum() or jql[i - 1] == '_'))
         ):
             found = i
