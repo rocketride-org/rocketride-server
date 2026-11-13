@@ -141,8 +141,13 @@ class ServicesMixin(DAPClient):
         """
         Validate a pipeline configuration.
 
-        Sends the pipeline to the server for structural validation, checking
-        required fields and component references.
+        Sends the pipeline to the server, which checks required fields and
+        component references, then checks the pipeline against the services
+        it names: each provider is a service on the engine, each control
+        entry sits on the node being called, and each input's lane is one
+        its upstream node produces and its node takes. A node with no lanes,
+        such as a tool, is not checked for the lanes it takes, and a ``"*"``
+        in a node's lanes matches any lane.
 
         Source resolution follows the same logic as :meth:`use`:
         1. Explicit ``source`` parameter (if provided)

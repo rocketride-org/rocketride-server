@@ -478,7 +478,7 @@ message points straight at the wiring to fix:
 | --- | --- |
 | Sub-pipeline shared with the main flow or a second start | `Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_a) that the main flow owns; a control node's sub-pipeline must not be shared with the main pipeline or another start` |
 | One sub-pipeline node reached by two control nodes | `is reachable from two control roots ( ... and ... ) - a node has exactly one lifecycle owner` |
-| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, lane validation rejects earlier: `input lane ... not found in service definition` — `tool_pipe` accepts no data input at all) |
+| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, `validate()` reports it first as `which tool_pipe does not take; it takes no lanes`, since `tool_pipe` accepts no data input at all) |
 
 **Valid:** invoking the *same* tool from two agents — one sub-pipeline, one owner. Only
 *sharing nodes between* sub-pipelines (or with the main flow) is rejected.
@@ -1204,10 +1204,19 @@ Validation errors (pipeline rejected before running):
 | `input references unknown component id:` / `control references unknown component id:` | `from` must name an existing component |
 | `'pipeline.source' references unknown component id:` | Point `source` at a real component id |
 | `Pipeline has multiple source components, please specify one explicitly` | Two+ `mode: "Source"` components — add top-level `source` (or pass `source` to `client.use()`) |
-| `input lane <lane> not found in service definition` | Data input wired into invoke-only `tool_pipe` — remove it; `tool_pipe` is invoked, never fed |
 | `...must not be shared with the main pipeline or another start` | Sub-pipeline node also reachable from a start — make the sub-pipeline self-contained (ownership rule 3) |
 | `...is reachable from two control roots...a node has exactly one lifecycle owner` | Node shared between two invoke nodes' sub-pipelines — one sub-pipeline per invoke node (rule 2) |
 | `...drives a sub-pipeline and is also data-fed...` | Remove the data input from the invoke node (rule 1) |
+
+Wiring errors. `validate()` checks the pipeline against the services it names. A run does
+not, so a pipeline with these errors can still start and then fail or lose data:
+
+| Error contains | Cause / fix |
+| --- | --- |
+| `which is not a service on this engine` | Unknown or misspelled provider; use one from the service catalog |
+| `which is not a class of <provider>` | A `control` entry on the wrong node; put it on the node being called, with `from` naming the node that calls it |
+| `which <provider> does not produce` | The upstream node never writes that lane; wire it from a node that does |
+| `which <provider> does not take` | The node never reads that lane, such as a data input into invoke-only `tool_pipe`; remove the input or use a lane the node takes |
 
 Runtime errors:
 

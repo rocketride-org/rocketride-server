@@ -117,10 +117,6 @@
         {
           "classType": "tool",
           "from": "agent_crewai_1"
-        },
-        {
-          "classType": "llm",
-          "from": "llm_openai_1"
         }
       ]
     },

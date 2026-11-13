@@ -36,6 +36,172 @@ ErrorOr<json::Value> validateComponent(json::Value root) noexcept;
             PipelineConfig::addError(root, warning, id); \
     } while (false)
 
+namespace {
+
+/// The strings in a JSON list, in order, each once
+std::vector<Text> wiringNames(const json::Value &list) noexcept {
+    std::vector<Text> names;
+    if (!list.isArray()) return names;
+    for (const auto &item : list) {
+        if (!item.isString()) continue;
+        Text name = item.asString();
+        if (!_anyOf(names, name)) names.push_back(_mv(name));
+    }
+    return names;
+}
+
+/// Whether a list of lanes holds the lane; a "*" in it matches any lane
+bool wiringMatches(const std::vector<Text> &lanes, const Text &lane) noexcept {
+    return _anyOf(
+        lanes, [&](const Text &name) { return name == "*" || name == lane; });
+}
+
+/// A list of names for a message, or the given words when it is empty
+Text wiringList(const std::vector<Text> &names, const char *none) noexcept {
+    return names.empty() ? Text{none} : string::concat(names, ", ");
+}
+
+/// A service's "lanes" map: each lane it takes, with the lanes it produces
+/// from it. Read through a const reference, so a missing map adds nothing
+const json::Value &wiringLanes(
+    const IServices::ServiceDefinition &def) noexcept {
+    return def.serviceDefinition["lanes"];
+}
+
+/// The lanes a service takes: its map's keys, less the "_source" one
+std::vector<Text> wiringTaken(const json::Value &lanes) noexcept {
+    std::vector<Text> taken;
+    if (!lanes.isObject()) return taken;
+    for (const auto &key : lanes.getMemberNames())
+        if (!key.empty() && key[0] != '_') taken.push_back(key);
+    return taken;
+}
+
+/// The lanes a service produces: every lane its map lists as an output
+std::vector<Text> wiringProduced(const json::Value &lanes) noexcept {
+    std::vector<Text> produced;
+    if (!lanes.isObject()) return produced;
+    for (const auto &outputs : lanes)
+        for (auto &lane : wiringNames(outputs))
+            if (!_anyOf(produced, lane)) produced.push_back(_mv(lane));
+    return produced;
+}
+
+/// A component's provider, and its service when it has one
+struct WiringNode {
+    Text provider;
+    IServices::ServiceDefinitionPtr def = nullptr;
+};
+
+/// Each component's node, by component id
+using WiringNodes = std::unordered_map<Text, WiringNode>;
+
+/// Rule 1: each provider is a service on this engine
+WiringNodes checkProviders(PipelineConfig &pipeline) noexcept {
+    WiringNodes nodes;
+    for (const auto &component : pipeline.components()) {
+        Text id = component["id"].asString();
+        Text provider = component["provider"].asString();
+        auto def = IServices::getServiceDefinition(provider);
+        if (!def)
+            pipeline.addError(
+                APERR(Ec::InvalidParam,
+                      _ts("Component ", id, " names provider ", provider,
+                          ", which is not a service on this engine; use a "
+                          "provider from the service catalog")),
+                id);
+        nodes[id] = {provider, def ? *def : nullptr};
+    }
+    return nodes;
+}
+
+/// Rule 2: each control entry sits on the node being called, so its
+/// classType is one of that node's classes
+void checkControls(PipelineConfig &pipeline, WiringNodes &nodes) noexcept {
+    for (const auto &component : pipeline.components()) {
+        if (!component.isMember("control")) continue;
+        Text id = component["id"].asString();
+        const auto &node = nodes[id];
+        if (!node.def) continue;
+
+        auto classes = wiringNames(node.def->classType);
+        for (const auto &control : component["control"]) {
+            Text classType = control["classType"].asString();
+            if (_anyOf(classes, classType)) continue;
+            pipeline.addError(
+                APERR(Ec::InvalidParam,
+                      _ts("Component ", id, " control from ",
+                          control["from"].asString(), " has classType ",
+                          classType, ", which is not a class of ",
+                          node.provider, " (", wiringList(classes, "none"),
+                          "); a control entry goes on the node being called, "
+                          "with from naming the node that calls it")),
+                id);
+        }
+    }
+}
+
+/// Rule 3: each input's lane is one its upstream node produces and its own
+/// node takes. A node with no lanes takes any lane, since tools connect
+/// through control. A "*" in a node's lanes matches any lane, and so will a
+/// "*" wire once the shape check accepts one
+void checkInputs(PipelineConfig &pipeline, WiringNodes &nodes) noexcept {
+    for (const auto &component : pipeline.components()) {
+        if (!component.isMember("input")) continue;
+        Text id = component["id"].asString();
+        const auto &node = nodes[id];
+
+        for (const auto &input : component["input"]) {
+            Text lane = input["lane"].asString();
+            Text from = input["from"].asString();
+            if (lane == "*") continue;
+
+            const auto &source = nodes[from];
+            if (source.def) {
+                auto produced = wiringProduced(wiringLanes(*source.def));
+                if (!wiringMatches(produced, lane))
+                    pipeline.addError(
+                        APERR(Ec::InvalidParam,
+                              _ts("Component ", id, " input from ", from,
+                                  " is on lane ", lane, ", which ",
+                                  source.provider,
+                                  " does not produce; it produces ",
+                                  wiringList(produced, "no lanes"))),
+                        id);
+            }
+
+            if (!node.def || wiringLanes(*node.def).empty()) continue;
+            auto taken = wiringTaken(wiringLanes(*node.def));
+            if (!wiringMatches(taken, lane))
+                pipeline.addError(
+                    APERR(Ec::InvalidParam,
+                          _ts("Component ", id, " input from ", from,
+                              " is on lane ", lane, ", which ", node.provider,
+                              " does not take; it takes ",
+                              wiringList(taken, "no lanes"))),
+                    id);
+        }
+    }
+}
+
+/**
+ * @brief Checks a pipeline against the services it names.
+ *
+ * @details PipelineConfig::validate checks the pipeline's shape. It also runs
+ * before every run, so it leaves these checks out. This pass runs only for
+ * validate: it adds errors and never stops a run. It reports every fault, each
+ * on the component at fault, by the canvas's own rules.
+ *
+ * @param pipeline A pipeline that passed PipelineConfig::validate.
+ */
+void validateWiring(PipelineConfig &pipeline) noexcept {
+    auto nodes = checkProviders(pipeline);
+    checkControls(pipeline, nodes);
+    checkInputs(pipeline, nodes);
+}
+
+}  // namespace
+
 /**
  * @brief Validates and encrypts a pipeline or component configuration.
  *
@@ -108,8 +274,12 @@ ErrorOr<json::Value> validatePipeline(json::Value root) noexcept {
     // Wrap the root JSON in a PipelineConfig object
     store::pipeline::PipelineConfig pipeline(_mv(root));
 
-    // Validate pipeline configuration, collect the error if any
-    if (auto ccode = pipeline.validate(false)) pipeline.addError(ccode);
+    // Validate pipeline configuration, collect the error if any. Only a
+    // pipeline of the right shape is checked against its services
+    if (auto ccode = pipeline.validate(false))
+        pipeline.addError(ccode);
+    else
+        validateWiring(pipeline);
 
     // Decrypt the pipeline configuration, collect the error if any
     if (auto ccode = pipeline.decrypt()) pipeline.addError(ccode);

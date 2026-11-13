@@ -157,11 +157,12 @@ export interface ValidationError {
 /**
  * Result of a pipeline validation via `validate()`.
  *
- * The engine validates structure — required fields and component
- * references. The result contains any errors and warnings found.
+ * The engine checks required fields and component references, then the
+ * pipeline against the services it names: providers, control entries and
+ * lanes. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
-	/** Validation errors — pipeline will not execute with these. */
+	/** Validation errors — a run can start despite a wiring error. */
 	errors: ValidationError[];
 	/** Validation warnings — pipeline may still execute. */
 	warnings: ValidationError[];
