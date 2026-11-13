@@ -25,7 +25,8 @@ docker run -d --name rocketride-engine \
 The image is `linux/amd64`; the `--platform` flag is required on Apple Silicon
 and on every arm64 host. On Apple Silicon the VS Code extension adds the
 override for you automatically, so only terminal use needs it; on Linux arm64,
-set the override yourself whether you use the extension or a terminal.
+set the override yourself in a terminal. The VS Code extension does not add it
+on Linux arm64.
 
 Point any client at it and go:
 
@@ -44,8 +45,12 @@ connections. Widen it only behind TLS and authentication (see
   builds carry a `-prerelease` suffix. Pin a version tag in production.
 - **Platform:** `linux/amd64` only. The VS Code extension adds
   `--platform linux/amd64` automatically on Apple Silicon; on a Linux arm64
-  host, set the override yourself whether you use the extension or a
-  terminal (emulation either way — fine for development).
+  host, set the override yourself in a terminal — the extension does not add
+  it on Linux arm64. Emulation on a Linux arm64 host also needs QEMU
+  registered with `binfmt_misc`; without it, the container fails to start.
+  Register the emulators once with:
+  `docker run --privileged --rm tonistiigi/binfmt --install all`
+  (fine for development; emulation either way).
 - **Runs as non-root** (user `rocketride`, uid 1000), listens on **5565**, and starts
   the engine bound to all container interfaces — the port mapping above is
   what controls actual exposure.
