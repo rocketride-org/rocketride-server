@@ -57,15 +57,28 @@ class _FakeBroker(BaseHTTPRequestHandler):
     """Stands in for the data-core provisioner."""
 
     requests: list = []
+    grants: list = []
 
     def do_POST(self):  # noqa: N802 (http.server API)
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length) or b'{}')
         type(self).requests.append({'auth': self.headers.get('Authorization'), 'body': body})
+        type(self).grants.append(self.headers.get('X-Datacore-Grant'))
 
         tenant = body.get('tenant_id', '')
         if self.headers.get('Authorization') != f'Bearer {TEST_TOKEN}':
             self.send_response(401)
+            self.end_headers()
+            return
+        if body.get('owner_id') == 'grant-refused-no-reason':
+            raw = b'403: tenant grant refused: expired'
+            self.send_response(403, '')
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        if body.get('owner_id') == 'grant-refused-team':
+            self.send_response(403, 'tenant grant refused: bad_signature')
             self.end_headers()
             return
         if body.get('owner_id') == 'retained-team':
@@ -100,6 +113,7 @@ class _FakeBroker(BaseHTTPRequestHandler):
 @pytest.fixture()
 def broker(monkeypatch):
     _FakeBroker.requests = []
+    _FakeBroker.grants = []
     server = HTTPServer(('127.0.0.1', 0), _FakeBroker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -276,3 +290,51 @@ def test_dsn_with_existing_sslmode_passes_through_unchanged(broker):
 def test_non_postgres_dsn_rejected(broker):
     with pytest.raises(RuntimeError, match='non-PostgreSQL DSN'):
         _resolve('bad-scheme-tenant')
+
+
+# =============================================================================
+# Tenant grants (rocketride-saas #975): the account signs each broker call
+# =============================================================================
+
+
+class _Signing(_Minimal):
+    """Stands in for the SaaS account, which mints a grant for the body."""
+
+    def db_broker_headers(self, body):
+        return {'X-Datacore-Grant': f'grant-for-{body.get("owner_id") or body.get("tenant_id")}'}
+
+
+def test_the_account_signs_each_broker_call_for_its_body(broker):
+    """The bearer token is shared and names no tenant; the account's grant does,
+    so the provisioner can serve only the tenant this run was authorized for.
+    """
+    asyncio.run(_Signing().resolve_db_dsn('org-1'))
+    asyncio.run(_Signing().resolve_db_dsn('org-1', scope='team', owner_id='team-7'))
+    assert broker.grants == ['grant-for-org-1', 'grant-for-team-7']
+
+
+def test_account_headers_cannot_replace_the_bearer_or_content_type(broker):
+    class _Hostile(_Minimal):
+        def db_broker_headers(self, body):
+            return {'Authorization': 'Bearer someone-else', 'Content-Type': 'text/plain'}
+
+    assert asyncio.run(_Hostile().resolve_db_dsn('tenant-1')) == TEST_DSN
+    assert broker.requests == [{'auth': f'Bearer {TEST_TOKEN}', 'body': {'tenant_id': 'tenant-1'}}]
+
+
+def test_the_default_account_sends_no_grant(broker):
+    """Editions without a control plane are unchanged: bearer only."""
+    assert _resolve('tenant-1') == TEST_DSN
+    assert broker.grants == [None]
+
+
+def test_a_refused_grant_names_its_reason(broker):
+    """The provisioner's 403 reason (a fixed code) reaches the task's error."""
+    with pytest.raises(RuntimeError, match=r'refused this database \(HTTP 403: tenant grant refused: bad_signature\)'):
+        asyncio.run(_Minimal().resolve_db_dsn('org-1', scope='team', owner_id='grant-refused-team'))
+
+
+def test_a_refused_grant_without_a_reason_phrase_reads_the_body(broker):
+    """A hop that drops the reason phrase must not hide why the grant was refused."""
+    with pytest.raises(RuntimeError, match=r'HTTP 403: 403: tenant grant refused: expired\)'):
+        asyncio.run(_Minimal().resolve_db_dsn('org-1', scope='team', owner_id='grant-refused-no-reason'))

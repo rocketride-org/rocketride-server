@@ -479,10 +479,33 @@ class AccountBase(ABC):
         else:
             raise ValueError(f'unknown database scope: {scope!r}')
         self._check_broker_url(broker_url)
+        # Tenant grant (rocketride-saas #975): the bearer token is shared and
+        # names no tenant, so the account signs what this call is for. Asked
+        # here, after the body is final, so the grant names exactly this body.
+        headers = self.db_broker_headers(body)
 
         import asyncio
 
-        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body)
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body, extra_headers=headers)
+
+    def db_broker_headers(self, body: dict) -> dict:
+        """
+        Extra headers for one broker call. Default: none.
+
+        The SaaS edition returns a short-lived tenant grant here
+        (``X-Datacore-Grant``), signed by its control plane, naming the one
+        tenant ``body`` names; the provisioner then serves that tenant and no
+        other. Called by ``resolve_db_dsn`` only after ``authorize_db_target``
+        allowed the target. They cannot replace ``Authorization`` or
+        ``Content-Type``.
+
+        Args:
+            body: The provisioner request body about to be sent.
+
+        Returns:
+            Header name -> value.
+        """
+        return {}
 
     @staticmethod
     def _check_broker_url(url: str) -> None:
@@ -510,7 +533,7 @@ class AccountBase(ABC):
         )
 
     @staticmethod
-    def _call_db_broker(url: str, token: str, body: dict) -> str:
+    def _call_db_broker(url: str, token: str, body: dict, *, extra_headers: dict | None = None) -> str:
         """Blocking POST of ``body`` to the provisioner; runs in a worker thread.
 
         Stdlib-only on purpose: the account layer has no async-HTTP dependency,
@@ -524,6 +547,7 @@ class AccountBase(ABC):
             url,
             data=json.dumps(body).encode('utf-8'),
             headers={
+                **(extra_headers or {}),
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
             },
@@ -535,6 +559,13 @@ class AccountBase(ABC):
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
             code, reason = e.code, e.reason
+            if code == 403 and not reason:
+                # HTTP/2 or a proxy can drop the reason phrase; aiohttp repeats
+                # it in the body ("403: tenant grant refused: <reason>").
+                try:
+                    reason = e.read(200).decode('utf-8', 'replace').strip()
+                except Exception:
+                    reason = ''
             e.close()
             if code == 409:
                 # The provisioner refuses a retained or dropping tenant: its
@@ -543,6 +574,12 @@ class AccountBase(ABC):
                 raise RuntimeError(
                     f'this RocketRide cloud database has been retired and cannot be used (HTTP 409: {reason})'
                 ) from e
+            if code == 403:
+                # A tenant grant the provisioner refused (rocketride-saas #975).
+                # Its reason is a fixed code (missing, bad_signature, expired,
+                # env_mismatch, ...), never the grant, and is what an operator
+                # needs to tell a key mismatch from clock skew.
+                raise RuntimeError(f'DB broker refused this database (HTTP 403: {reason})') from e
             raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
             raise RuntimeError(f'DB broker unreachable: {e}') from e
