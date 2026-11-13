@@ -12,8 +12,8 @@ executed by the engine.
 ## Components and providers
 
 Each node in the graph is a **component** with a unique `id` and a `provider`
-that determines its behaviour (for example `webhook`, `response`, or an LLM
-provider). Provider-specific settings live in the component's `config`.
+that determines its behaviour (for example `webhook`, `response_questions`, or
+an LLM provider). Provider-specific settings live in the component's `config`.
 
 See the [Nodes](/nodes) catalog for every available provider.
 
@@ -36,11 +36,12 @@ reference is generated from the schema source and published at
 
 ```json
 {
+  "source": "in",
   "components": [
     { "id": "in", "provider": "webhook", "config": { "mode": "Source" } },
     {
       "id": "out",
-      "provider": "response",
+      "provider": "response_questions",
       "config": { "lanes": [{ "laneId": "questions", "laneName": "questions" }] },
       "input": [{ "lane": "questions", "from": "in" }]
     }

@@ -15,11 +15,18 @@ ghcr.io/rocketride-org/rocketride-engine
 
 ```bash
 docker run -d --name rocketride-engine \
+  --platform linux/amd64 \
   -p 127.0.0.1:5565:5565 \
   -v rocketride-data:/opt/data \
   --restart unless-stopped \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
+
+The image is `linux/amd64`; the `--platform` flag is required on Apple Silicon
+and on every arm64 host. On Apple Silicon the VS Code extension adds the
+override for you automatically, so only terminal use needs it; on Linux arm64,
+set the override yourself in a terminal. The VS Code extension does not add it
+on Linux arm64.
 
 Point any client at it and go:
 
@@ -36,9 +43,14 @@ connections. Widen it only behind TLS and authentication (see
 
 - **Tags:** each release publishes its version tag plus `latest`; prerelease
   builds carry a `-prerelease` suffix. Pin a version tag in production.
-- **Platform:** `linux/amd64` only. On Apple Silicon add
-  `--platform linux/amd64` (Docker runs it under emulation — fine for
-  development; the VS Code extension does the same).
+- **Platform:** `linux/amd64` only. The VS Code extension adds
+  `--platform linux/amd64` automatically on Apple Silicon; on a Linux arm64
+  host, set the override yourself in a terminal — the extension does not add
+  it on Linux arm64. Emulation on a Linux arm64 host also needs QEMU
+  registered with `binfmt_misc`; without it, the container fails to start.
+  Register the emulators once with:
+  `docker run --privileged --rm tonistiigi/binfmt --install all`
+  (fine for development; emulation either way).
 - **Runs as non-root** (user `rocketride`, uid 1000), listens on **5565**, and starts
   the engine bound to all container interfaces — the port mapping above is
   what controls actual exposure.
@@ -63,6 +75,13 @@ The engine reads configuration from its environment — pass variables with
 - **MCP OAuth settings** if AI assistants will connect to `/mcp` on this
   engine: `MCP_EXPECTED_AUDIENCE` and friends — see
   [MCP self-hosting](/connect/mcp/http/self-hosting).
+- **`ROCKETRIDE_URI`** — the engine address that upload links and widget
+  connections the engine hands out point at. A local engine uses the usual
+  `ws://localhost:5565`. A remote deployment needs a client-reachable
+  `wss://` address, because the links and widget connections use this value.
+  Setting it also routes tool calls from MCP clients to this engine instead
+  of RocketRide Cloud. See
+  [MCP self-hosting](/connect/mcp/http/self-hosting) for how the lookup works.
 
 ## Persistence
 
@@ -111,6 +130,7 @@ A minimal production compose file:
 services:
   engine:
     image: ghcr.io/rocketride-org/rocketride-engine:latest
+    platform: linux/amd64
     ports:
       - '127.0.0.1:5565:5565'
     volumes:

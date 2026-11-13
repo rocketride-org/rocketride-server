@@ -6,8 +6,11 @@ title: Run from the CLI
 
 The `rocketride` command-line tool runs pipelines from a terminal — the same
 operations the SDKs expose, no code required. It ships with both
-[clients](/clients): `pip install rocketride` or `npm install rocketride` puts
-`rocketride` on your path.
+[clients](/clients): `pip install rocketride` or `npm install rocketride`.
+With a global npm install `rocketride` is on your PATH; with a local install
+it is not — in that case every `rocketride` command on this page should be
+run as `npx rocketride` (for example `npx rocketride start ...`), not as a
+bare `rocketride`.
 
 The five steps below take you from a fresh install to a running pipeline. The
 full command and flag reference is on the [CLI page](/connect/cli).
@@ -18,13 +21,20 @@ Set your connection once with environment variables so you don't have to repeat
 them on every command:
 
 ```bash
-# Local engine (no API key needed)
+# Local engine - no pre-registered key is required, but the client must send one.
+# A fresh engine accepts any non-empty value, so use any string:
 export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=local-dev
 
 # RocketRide Cloud — generate an API key from the online editor
 export ROCKETRIDE_URI=wss://api.rocketride.ai
 export ROCKETRIDE_APIKEY=your-api-key
 ```
+
+A fresh engine with no `ROCKETRIDE_APIKEY` set accepts any non-empty key, but
+a client that sends none is refused with `No authorization provided`. Pick any
+string for local use; when you set a real key on the engine you must send the
+matching one here.
 
 See [Choose How to Run RocketRide](/operate) for engine setup.
 
