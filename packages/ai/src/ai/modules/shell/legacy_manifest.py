@@ -37,7 +37,12 @@ _LEGACY_SITE_TITLE = 'RocketRide'
 
 
 def legacy_page_manifest() -> Dict[str, Any]:
-    """The shell's route list in the publicPages + site contract shape."""
+    """The shell's route list in the publicPages + site contract shape.
+
+    Returns:
+        ``{'publicPages': [...], 'site': {...}}``: one page per shell public
+        route (``listed`` false for the unlisted ones) and the legacy site block.
+    """
     from .shell import PUBLIC_ROUTE_MANIFEST, UNLISTED_ROUTES
 
     return {
@@ -57,5 +62,15 @@ def legacy_page_manifest() -> Dict[str, Any]:
 
 
 def legacy_head_title(path: str, title: str) -> str:
-    """The client's document title for a legacy page ('Pricing | RocketRide'; '/' is the site title)."""
-    return _LEGACY_SITE_TITLE if path == '/' else f'{title} | {_LEGACY_SITE_TITLE}'
+    """The client's document title for a legacy page ('Pricing | RocketRide'; '/' is the site title).
+
+    Args:
+        path: The page's URL path.
+        title: The page's bare title.
+
+    Returns:
+        The site title for ``/``, else ``'<title> | <site title>'``.
+    """
+    if path == '/':
+        return _LEGACY_SITE_TITLE
+    return f'{title} | {_LEGACY_SITE_TITLE}'
