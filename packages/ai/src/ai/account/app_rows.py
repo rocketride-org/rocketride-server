@@ -27,7 +27,7 @@ page aggregate (``ai.modules.shell.public_pages``) must load exactly the same
 apps. Both import from here, so neither imports the other.
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .deployment_backend import artifact_content_dir
 
@@ -187,3 +187,64 @@ async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
             continue
         winners[str(row.get('appId') or '')] = row
     return org, winners
+
+
+def resolve_account(acct: Any) -> Any:
+    """
+    The account layer to read: ``acct``, or the engine's own when None.
+
+    Args:
+        acct: An account layer, or None.
+
+    Returns:
+        ``acct``, or the ``ai.account.account`` singleton when it is None.
+    """
+    if acct is None:
+        from ai.account import account as acct
+    return acct
+
+
+async def public_artifact(acct: Any, org: str, app_id: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    The artifact an app's winning public row serves, when anonymous callers may see the app.
+
+    The store walk's remaining rules (``app_deploy.resolve_app_pins``) for a
+    row ``public_winners`` picked: the binding snapshot does not say
+    ``public: false``; the version, read from the row's publisher org (the
+    rung's ``org`` when the row names none), is an app artifact; and its own
+    manifest does not say ``public: false`` (the DB edition's snapshot
+    columns drop ``public``, so the manifest is re-read). The public page map
+    and the ``plans:``/``app:`` page data sources both decide visibility
+    here, so they can never disagree about which apps are shown.
+
+    Args:
+        acct: The account layer to read.
+        org: The org ``public_winners`` listed the rung under.
+        app_id: The app the row binds.
+        row: The app's winning row, from ``public_winners``.
+
+    Returns:
+        The artifact, ``metadata.manifest`` attached; None when the app is hidden.
+
+    Raises:
+        ValueError: the row of an app not hidden by its binding is malformed:
+            its version is not an int or it names no ``artifactPath`` (the
+            bound version is not in the registry).
+        StorageError: the artifact could not be read.
+    """
+    snapshot = row.get('snapshot')
+    if isinstance(snapshot, dict) and snapshot.get('public', True) is False:
+        return None
+    version = row.get('version')
+    artifact_path = row.get('artifactPath')
+    if not isinstance(version, int) or not artifact_path:
+        raise ValueError(f'malformed public row (version {version!r}, artifactPath {artifact_path!r})')
+    publisher = row.get('orgId')
+    if not publisher:
+        publisher = org
+    artifact = await acct.deployments_artifact(str(publisher), app_id, version)
+    if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
+        return None
+    if manifest_of(artifact).get('public', True) is False:
+        return None
+    return artifact

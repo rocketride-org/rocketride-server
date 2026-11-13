@@ -46,7 +46,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from rocketlib import debug, warning
 
-from ai.account.app_rows import dist_dir_of, manifest_of, public_winners
+from ai.account.app_rows import dist_dir_of, manifest_of, public_artifact, public_winners, resolve_account
 
 from . import data_sources
 from .contract import (
@@ -261,8 +261,11 @@ async def load_published(
     ``app_rows.public_winners``, which the ``plans:``/``app:`` data sources
     read too.
 
-    ``public: false`` apps never contribute. One app whose row or artifact
-    cannot be read is skipped (logged) so it cannot freeze the map, and its
+    ``public: false`` apps never contribute (``app_rows.public_artifact``,
+    the data sources' visibility check too). One app whose row is malformed
+    or whose artifact or build output cannot be read or parsed (a
+    ``StorageError`` or ``ValueError``) is skipped (logged) so it cannot
+    freeze the map, and its
     id goes into ``unreadable`` when one is given: it is still published,
     unlike an app missing from the result for any other reason. With
     ``strict`` (the publish gate) an unreadable root claimant raises instead,
@@ -293,32 +296,19 @@ async def load_published(
     """
     from ai.account.store import StorageError
 
-    if acct is None:
-        from ai.account import account as acct
+    acct = resolve_account(acct)
     org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
         if app_id == exclude or not is_privileged(app_id):
             continue
-        if (row.get('snapshot') or {}).get('public', True) is False:
-            continue
-        version = row.get('version')
-        artifact_path = str(row.get('artifactPath') or '')
-        if not isinstance(version, int) or not artifact_path:
-            _skip_unreadable(
-                app_id,
-                f'malformed public row (version {version!r}, artifactPath {artifact_path!r})',
-                strict,
-                unreadable,
-            )
-            continue
         try:
-            artifact = await acct.deployments_artifact(str(row.get('orgId') or org), app_id, version)
-            stored = manifest_of(artifact or {})
-            if stored.get('public', True) is False:
+            # A malformed row is a ValueError here, so it is skipped as unreadable.
+            artifact = await public_artifact(acct, org, app_id, row)
+            if artifact is None:
                 continue
-            dist_dir = dist_dir_of(artifact_path)
-            manifest = await page_manifest(stored, dist_dir)
+            dist_dir = dist_dir_of(str(row['artifactPath']))
+            manifest = await page_manifest(manifest_of(artifact), dist_dir)
         except (StorageError, ValueError) as exc:
             _skip_unreadable(app_id, str(exc), strict, unreadable, exc)
             continue
@@ -334,7 +324,7 @@ async def load_published(
                 manifest=manifest,
                 dist_dir=dist_dir,
                 published_at=published_at,
-                version=version,
+                version=row['version'],
             )
         )
     return out

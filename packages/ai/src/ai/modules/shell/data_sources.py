@@ -62,7 +62,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from rocketlib import warning
 
-from ai.account.app_rows import manifest_of, public_winners
+from ai.account.app_rows import public_artifact, public_winners, resolve_account
 
 from .contract import Page
 
@@ -118,13 +118,6 @@ def invalidate(name: str) -> None:
                 warning(f'[public_pages] data-source listener failed on {changed!r}: {exc}')
 
 
-def _account(acct: Any) -> Any:
-    """The account layer: ``acct``, or the ``ai.account.account`` singleton when None."""
-    if acct is None:
-        from ai.account import account as acct
-    return acct
-
-
 def _https(url: str) -> str:
     return url if url.startswith('https://') else ''
 
@@ -133,11 +126,9 @@ async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
     """``{name, description}`` of an app anonymous store callers may see, else None.
 
     The store walk's rules (``app_deploy.resolve_app_pins``) for one app on
-    the public rung: the winning serving binding (``app_rows.public_winners``,
-    as the page map reads it), no ``requiredPermissions``, and
-    ``public: false`` in neither the binding snapshot nor the artifact's own
-    manifest (the DB edition's snapshot columns drop ``public``, so the
-    manifest is re-read, as ``public_pages.load_published`` does).
+    the public rung, through the same helpers as the page map: the winning
+    serving binding (``app_rows.public_winners``) and its visibility
+    (``app_rows.public_artifact``).
 
     Args:
         app_id: The app to look up.
@@ -147,24 +138,18 @@ async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
         ``{name, description}`` when the app is visible, else None.
 
     Raises:
-        Exception: the bindings or the winning artifact could not be read (the
-            caller serves the page without its data).
+        Exception: the bindings or the winning artifact could not be read, or
+            the winning row is malformed (the caller serves the page without
+            its data).
     """
-    acct = _account(acct)
+    acct = resolve_account(acct)
     org, winners = await public_winners(acct)
     row = winners.get(app_id)
     if row is None:
         return None
     snapshot = row.get('snapshot') or {}
-    version = row.get('version')
-    if snapshot.get('public', True) is False:
-        return None
-    if not isinstance(version, int):  # the store walk skips such a row too
-        return None
-    artifact = await acct.deployments_artifact(str(row.get('orgId') or org), app_id, version)
-    if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
-        return None
-    if manifest_of(artifact).get('public', True) is False:
+    artifact = await public_artifact(acct, org, app_id, row)
+    if artifact is None:
         return None
     return {
         'name': str(snapshot.get('name') or artifact.get('name') or app_id),
@@ -234,7 +219,7 @@ async def plans(app_id: str, acct: Any = None) -> List[Dict[str, Any]]:
     Raises:
         Exception: the account layer could not list them.
     """
-    raw = await _account(acct).get_public_plans(app_id)
+    raw = await resolve_account(acct).get_public_plans(app_id)
     out: List[Dict[str, Any]] = []
     for item in raw or []:
         if not isinstance(item, Mapping):
@@ -263,7 +248,7 @@ async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
         Exception: a source could not be read (the caller serves the page
             without its data).
     """
-    acct = _account(acct)
+    acct = resolve_account(acct)
     named: Dict[str, Optional[Dict[str, str]]] = {}
 
     async def visible(app_id: str) -> Optional[Dict[str, str]]:

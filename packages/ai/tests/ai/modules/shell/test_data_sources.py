@@ -199,6 +199,16 @@ async def test_only_public_bindings_make_a_named_app_visible(acct, monkeypatch):
     assert (await ds.app('acme.brandy'))['name'] == 'Brandy'
 
 
+async def test_a_malformed_winning_row_is_a_read_failure_as_in_the_page_map(acct):
+    # app_rows.public_artifact decides for both readers: the page map skips
+    # such an app as unreadable, and a page binding it is served without its data.
+    for row in acct.rows:
+        if row['appId'] == 'acme.brandy':
+            row['version'] = '1'
+    with pytest.raises(ValueError, match='malformed public row'):
+        await ds.app('acme.brandy')
+
+
 def test_private_named_apps_reach_no_crawler_response(acct, shell_root):
     _seed()
     for app_id in HIDDEN:
