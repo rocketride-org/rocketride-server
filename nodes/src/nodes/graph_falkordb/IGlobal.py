@@ -33,14 +33,17 @@ from the base class.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
-from rocketlib import OPEN_MODE, debug, warning
+from rocketlib import OPEN_MODE, warning
 
 from ai.common.graph import GraphGlobalBase
+from ai.common.graph.age.analysis import analyze
+from ai.common.graph.age.errors import AgeTranslationError
 from ai.common.utils import config_int, parse_bool
 
 from falkordb import FalkorDB
@@ -51,9 +54,6 @@ DEFAULT_GRAPH = 'agent'
 URL_SCHEMES = ('falkor://', 'falkors://', 'redis://', 'rediss://', 'unix://')
 DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_ROW_CAP = 250
-# Statistics lines that describe how a statement ran, not what it changed.
-# FalkorDB 6 adds "Graph version" to every reply, reads included.
-RUN_STATS = ('cached execution', 'internal execution time', 'graph version')
 
 # FalkorDB has no db.schema.nodeTypeProperties(), so property names are read
 # off one live node per label.
@@ -67,6 +67,7 @@ SCHEMA_LABEL_LIMIT = 200
 class IGlobal(GraphGlobalBase):
     """FalkorDB-specific global connection state."""
 
+    # execute binds $name values; graph.query forwards them as a CYPHER header.
     supports_execute_params = True
 
     client: Optional[FalkorDB] = None
@@ -195,54 +196,98 @@ class IGlobal(GraphGlobalBase):
     def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Execute a raw statement with writes allowed (the EXECUTE path).
 
-        FalkorDB saves a statement before it returns and has no rollback, so a
-        write is already stored when the row cap is checked. A result is over
-        the cap when it passes ``max_execute_rows``, or when it reaches the
-        server's ``RESULTSET_SIZE``: the server cuts a reply there without
-        saying so. A read over the cap raises. A write over it returns the
-        rows it has, at most ``max_execute_rows``, with ``'truncated': True``:
-        an error there would make the caller retry a saved write and store it
-        twice.
+        A successful ``GRAPH.QUERY`` is already committed when it returns, so an
+        over-limit result has to fail inside that one statement. The wrapper
+        below does that; a failed query rolls the write back.
 
-        Args:
-            query (str): The raw Cypher statement.
-            params (Optional[Dict[str, Any]]): Values for ``$name`` placeholders,
-                bound through the client's ``CYPHER`` header.
-
-        Returns:
-            Dict[str, Any]: ``{'rows': [...], 'affected_rows': int}``, plus
-            ``'truncated': True`` for a write over the cap.
-
-        Raises:
-            ValueError: A read result is over the cap.
+        ``params`` binds ``$name`` values through the client's CYPHER header.
         """
         max_rows = self.max_execute_rows
-        server_cap = self._server_reply_cap()
-        result = self.select_graph().query(query, params=params or None, timeout=self.query_timeout_ms)
+        statement = self._capped_execute_statement(query, params, max_rows)
+        try:
+            result = self.select_graph().query(statement, params=params or None, timeout=self.query_timeout_ms)
+        except RedisError as e:
+            if _is_execute_cap_error(e):
+                raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}') from e
+            # The wrapper's first line is `CALL {`. A server without subqueries
+            # rejects that line; the user's statement starts on the next line.
+            if _GUARD_CALL in statement and _is_subquery_unsupported(e):
+                raise ValueError(
+                    'EXECUTE query was not run because this FalkorDB server does not support '
+                    'CALL {} subqueries. The row cap needs FalkorDB 4.0 or newer.'
+                ) from e
+            raise
 
+        # Backstop for a statement whose in-query guard was skipped. The server
+        # enforces the cap when the guard runs; this only fires when it did not.
         rows = self._rows_as_dicts(result, cap=max_rows + 1)
+        if len(rows) > max_rows:
+            raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+
         # Count writes unconditionally: unlike SQL, a Cypher write commonly also
         # returns rows (CREATE (n) RETURN n), so `rows` being non-empty does not
         # mean nothing was written. _affected_rows is 0 for a pure read anyway.
-        affected = _affected_rows(result)
-        if len(rows) > max_rows:
-            read_error = f'EXECUTE query exceeded max_execute_rows={max_rows}'
-            write_note = f'EXECUTE result cut to max_execute_rows={max_rows}; the statement is saved'
-        elif server_cap is not None and len(result.result_set or []) >= server_cap:
-            # A reply of exactly RESULTSET_SIZE rows reads the same whether it is complete or cut.
-            read_error = (
-                f'EXECUTE query reached the server RESULTSET_SIZE={server_cap}, so its result may be cut; '
-                'add LIMIT or raise RESULTSET_SIZE'
-            )
-            write_note = f'EXECUTE result reached the server RESULTSET_SIZE={server_cap}; the statement is saved'
-        else:
-            return {'rows': rows, 'affected_rows': affected}
+        return {'rows': rows, 'affected_rows': _affected_rows(result)}
 
-        if not _wrote(result):
-            raise ValueError(read_error)
+    def _capped_execute_statement(self, query: str, params: Optional[Dict[str, Any]], max_rows: int) -> str:
+        """Statement to send: unchanged for a pure write, wrapped when it returns named columns.
 
-        warning(write_note)
-        return {'rows': rows[:max_rows], 'affected_rows': affected, 'truncated': True}
+        ``RETURN *`` and a column that would hide the guard raise before ``query()``,
+        so nothing is written.
+        """
+        statement = _strip_statement(query)
+        try:
+            facts = analyze(statement)
+        except AgeTranslationError:
+            # The openCypher grammar is not a gate. EXPLAIN, which does not run
+            # the write, decides whether this FalkorDB command returns rows.
+            return self._unparsed_execute_statement(statement, params, max_rows)
+
+        if facts.returns_star:
+            raise ValueError('EXECUTE query was not run: name the returned columns')
+        if not facts.return_columns:
+            return statement
+        columns = [column.display_name for column in facts.return_columns]
+        return _guarded_statement(statement, max_rows, columns)
+
+    def _unparsed_execute_statement(self, statement: str, params: Optional[Dict[str, Any]], _max_rows: int) -> str:
+        """Statement to send when the openCypher grammar does not recognize it.
+
+        ``EXPLAIN`` does not name result columns, so a plan that returns rows
+        cannot be capped and is refused before ``query()``. A plan whose root
+        does not return rows (index creation, ``FOREACH``, ``LOAD CSV``) goes
+        out unchanged.
+        """
+        try:
+            plan = self._explain_for_execute(statement, params)
+        except ResponseError:
+            # A syntax error is the server's own reply. Running the statement
+            # would only hide that text, and it must not run uncapped.
+            raise
+        except RedisError as exc:
+            raise ValueError('EXECUTE query was not run because FalkorDB could not classify the statement') from exc
+        root = _explain_root(plan)
+        if root is None:
+            raise ValueError('EXECUTE query was not run because FalkorDB could not classify the statement')
+        if root not in _NON_RETURNING_ROOTS:
+            raise ValueError('EXECUTE query was not run: the row cap cannot be applied to this statement')
+        return statement
+
+    def _explain_for_execute(self, statement: str, params: Optional[Dict[str, Any]]):
+        """EXPLAIN ``statement``, creating the graph key first when it is missing.
+
+        FalkorDB rejects ``GRAPH.EXPLAIN`` with ``Invalid graph operation on
+        empty key`` until the graph exists. The first write creates that key,
+        and so does a read, without storing the caller's statement.
+        """
+        graph = self.select_graph()
+        try:
+            return graph.explain(statement, params=params or None)
+        except ResponseError as exc:
+            if _MISSING_GRAPH not in str(exc):
+                raise
+        graph.query('RETURN 1', timeout=self.query_timeout_ms)
+        return graph.explain(statement, params=params or None)
 
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
@@ -298,24 +343,6 @@ class IGlobal(GraphGlobalBase):
     def list_graphs(self) -> List[str]:
         """List the graph names that exist on this server."""
         return [str(g) for g in (self.client.list_graphs() or [])]
-
-    def _server_reply_cap(self) -> Optional[int]:
-        """Return the server's ``RESULTSET_SIZE``, the row count it cuts every reply to.
-
-        Read on every call rather than once at connect, because
-        ``GRAPH.CONFIG SET`` changes it while the server runs.
-
-        Returns:
-            Optional[int]: The limit, or None when the server sets none (``-1``)
-            or the value cannot be read (for example, an ACL that denies
-            ``GRAPH.CONFIG``).
-        """
-        try:
-            size = int(self.client.config_get('RESULTSET_SIZE'))
-        except (RedisError, TypeError, ValueError) as e:
-            debug(f'FalkorDB RESULTSET_SIZE is unreadable, so a reply the server cuts is not detected: {e}')
-            return None
-        return size if size > 0 else None
 
     def _sample_properties(self, graph, label: str) -> List[Tuple[str, str]]:
         """Read property names off one node of ``label``; FalkorDB has no schema catalog."""
@@ -495,44 +522,119 @@ def _header_names(header) -> List[str]:
     return names
 
 
-def _wrote(result) -> bool:
-    """Tell whether a QueryResult reports any change to the graph.
+# Names the row-cap wrapper binds. A user column with one of these names would
+# hide the guard, so execute refuses it before running the write.
+_GUARD_NAMES = frozenset({'_rr_rows', '_rr_d', '_rr_row'})
 
-    Reads every statistics line of the reply, so a write counter missing from
-    _affected_rows (for example, one a newer server adds) still counts as a
-    write. Only the RUN_STATS lines are skipped. A line it cannot read counts as
-    a change: taking a write for a read would raise, and the caller's retry
-    would store the write twice.
 
-    Args:
-        result: A falkordb QueryResult.
+def _strip_statement(query: str) -> str:
+    """Drop surrounding space and a trailing semicolon so the text can sit in CALL."""
+    statement = query.strip()
+    while statement.endswith(';'):
+        statement = statement[:-1].rstrip()
+    return statement
 
-    Returns:
-        bool: True when some line reports a non-zero change. Falls back to
-        _affected_rows when the client exposes no raw statistics lines.
+
+def _quote_name(name: str) -> str:
+    """Backtick a result column so `n.id` and odd names stay one identifier."""
+    return '`' + name.replace('`', '``') + '`'
+
+
+# FalkorDB's parse_time_string reports `Invalid time string: <input>` when the
+# argument is not a time. `_rr_execute_cap` takes that path: it has no colon
+# and is not all digits. The Python client drops errCtx, so the cap check
+# matches this substring and leaves every other server error alone.
+# https://github.com/FalkorDB/FalkorDB/blob/master/graph/src/runtime/functions/temporal.rs
+_CAP_ERROR = 'Invalid time string: _rr_execute_cap'
+# GRAPH.EXPLAIN before the graph key exists. A read creates the key.
+_MISSING_GRAPH = 'Invalid graph operation on empty key'
+# Present only in a statement this module wrapped, so a user's own CALL is not
+# mistaken for a server that lacks subqueries.
+_GUARD_CALL = 'WHERE localtime(_rr_d) IS NOT NULL'
+
+
+def _wrap_capped_query(statement: str, max_rows: int, columns: List[str]) -> str:
+    """One atomic query that errors, and therefore rolls back, when too many rows return.
+
+    ``collect([col, ...])`` keeps null cells. ``collect(col)`` would drop them and
+    under-count. Both CASE branches are plain strings, so eager evaluation cannot
+    fail them. ``localtime`` then rejects only the over-cap token, and the client
+    reports that token. The call sits in WHERE so a planner cannot drop it.
+
+    ``statement`` is copied verbatim. Indenting it, or rebuilding it with
+    ``splitlines()``, rewrites a newline that sits inside a string literal.
     """
-    lines = getattr(result, '_raw_stats', None)
-    if not isinstance(lines, (list, tuple)):
-        return _affected_rows(result) > 0
-    for line in lines:
-        text = line.decode('utf-8', 'replace') if isinstance(line, bytes) else str(line)
-        name, _, value = text.partition(':')
-        if any(stat in name.lower() for stat in RUN_STATS):
-            continue
-        try:
-            if float(value.split()[0]) != 0:
-                return True
-        except (IndexError, ValueError):
-            return True
-    return False
+    quoted = [_quote_name(name) for name in columns]
+    projected = ', '.join(f'_rr_row[{index}] AS {name}' for index, name in enumerate(quoted))
+    return (
+        'CALL {\n'
+        f'{statement}\n'
+        '}\n'
+        f'WITH * LIMIT {max_rows + 1}\n'
+        f'WITH collect([{", ".join(quoted)}]) AS _rr_rows\n'
+        f"WITH _rr_rows, CASE WHEN size(_rr_rows) > {max_rows} THEN '_rr_execute_cap' ELSE '00:00:00' END AS _rr_d\n"
+        'WHERE localtime(_rr_d) IS NOT NULL\n'
+        'UNWIND _rr_rows AS _rr_row\n'
+        f'RETURN {projected}'
+    )
+
+
+def _guarded_statement(statement: str, max_rows: int, columns: List[str]) -> str:
+    """Wrap ``statement`` so too many rows fail inside the query, or refuse a guard name."""
+    reserved = _GUARD_NAMES.intersection(columns)
+    if reserved:
+        names = ', '.join(sorted(reserved))
+        raise ValueError(f'EXECUTE query was not run because a result column uses a reserved name ({names})')
+    return _wrap_capped_query(statement, max_rows, columns)
+
+
+def _is_execute_cap_error(exc: BaseException) -> bool:
+    """True when FalkorDB failed the row-cap guard, not the user's statement.
+
+    The client surfaces ``Invalid time string: _rr_execute_cap`` and omits the
+    failing expression. A division by zero, or ``localtime`` of any other value,
+    stays a driver error.
+    """
+    return _CAP_ERROR in str(exc)
+
+
+def _is_subquery_unsupported(exc: BaseException) -> bool:
+    """True when the server rejected the wrapper's first line, not the user's text.
+
+    FalkorDB reports ``Invalid input ... (line: 1, column: ...)``. The wrapper
+    owns line 1 (``CALL {``); the user's statement starts on the next line.
+    ``line: 12`` is a syntax error deeper in the statement, not an old server.
+    """
+    text = str(exc)
+    if 'Invalid input' not in text:
+        return False
+    return re.search(r'line:? 1\b', text) is not None
+
+
+# Roots that do not produce a client result set, captured from FalkorDB
+# graph module 60002 (Redis 8.10.2). A pure write is ``Commit``. Index
+# commands are ``Create Index`` and ``Drop Index``. A ``Project`` nested
+# under ``Commit`` (``WITH`` before ``FOREACH``) is not the root.
+#
+# A returning plan on that server is rooted at ``Project``, ``Sort``,
+# ``Limit``, ``Distinct``, or ``ProcedureCall``. The C engine wraps a read
+# in ``Results`` instead (falkordb-py ``plan_helpers.ENGINE_ROOT_OPS``).
+# None of those plans name the columns, so any other root is refused
+# rather than sent without a cap.
+_NON_RETURNING_ROOTS = frozenset({'Commit', 'Create Index', 'Drop Index'})
+
+
+def _explain_root(plan: Any) -> Optional[str]:
+    """Name of the EXPLAIN tree's root operator, or None when it cannot be read."""
+    root = getattr(plan, 'structured_plan', None)
+    name = getattr(root, 'name', None)
+    if not name:
+        return None
+    return str(name)
 
 
 def _affected_rows(result) -> int:
-    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows).
-
-    This is the ``affected_rows`` number the caller sees. Whether the statement
-    wrote at all is decided by _wrote, which also counts lines this list lacks.
-    """
+    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows)."""
     total = 0
     for attr in (
         'nodes_created',
@@ -542,9 +644,7 @@ def _affected_rows(result) -> int:
         'properties_set',
         'properties_removed',
         'labels_added',
-        'labels_removed',
         'indices_created',
-        'indices_deleted',
     ):
         try:
             total += int(getattr(result, attr, 0) or 0)

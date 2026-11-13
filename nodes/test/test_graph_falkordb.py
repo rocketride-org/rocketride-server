@@ -33,8 +33,8 @@ modules stubbed, mirroring ``test_vectordb_tool_mixin.py``.
 from __future__ import annotations
 
 import datetime
-import json
 import importlib.util
+import os
 import sys
 import types
 
@@ -54,6 +54,10 @@ _NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'graph_falkordb'
 
 class _StubRedisError(Exception):
     pass
+
+
+class _StubResponseError(_StubRedisError):
+    """Server reply, matching redis.exceptions.ResponseError."""
 
 
 class _StubBase:
@@ -127,6 +131,7 @@ def _install_stubs() -> None:
 
     redis_exceptions = types.ModuleType('redis.exceptions')
     redis_exceptions.RedisError = _StubRedisError
+    redis_exceptions.ResponseError = _StubResponseError
     redis = types.ModuleType('redis')
     redis.exceptions = redis_exceptions
 
@@ -219,42 +224,29 @@ class _FakeEdge:
         self.properties = {'since': 2020}
 
 
-# The counters falkordb-py's QueryResult exposes, each with the statistics line the server sends for it.
-_STAT_LINES = {
-    'nodes_created': 'Nodes created',
-    'nodes_deleted': 'Nodes deleted',
-    'relationships_created': 'Relationships created',
-    'relationships_deleted': 'Relationships deleted',
-    'properties_set': 'Properties set',
-    'properties_removed': 'Properties removed',
-    'labels_added': 'Labels added',
-    'labels_removed': 'Labels removed',
-    'indices_created': 'Indices created',
-    'indices_deleted': 'Indices deleted',
-}
-
-
 class _FakeResult:
-    """A QueryResult whose counters are set both as attributes and as raw statistics lines.
-
-    ``raw_stats`` replaces the generated lines, to send ones the counters do not cover.
-    """
-
-    def __init__(self, result_set=None, header=None, raw_stats=None, **stats):
+    def __init__(self, result_set=None, header=None, **stats):
         self.result_set = result_set or []
         self.header = header or []
-        for attr in _STAT_LINES:
+        for attr in (
+            'nodes_created',
+            'nodes_deleted',
+            'relationships_created',
+            'relationships_deleted',
+            'properties_set',
+            'properties_removed',
+            'labels_added',
+            'indices_created',
+        ):
             setattr(self, attr, stats.get(attr, 0))
-        if raw_stats is None:
-            raw_stats = [f'{line}: {stats[attr]}' for attr, line in _STAT_LINES.items() if stats.get(attr)]
-            raw_stats += ['Cached execution: 0', 'Query internal execution time: 0.2 milliseconds']
-        self._raw_stats = raw_stats
 
 
 class _FakeGraph:
-    def __init__(self, result=None, raise_error=None):
+    def __init__(self, result=None, raise_error=None, explain_plan='plan', explain_error=None):
         self._result = result or _FakeResult()
         self._raise = raise_error
+        self.explain_plan = explain_plan
+        self._explain_error = explain_error
         self.calls = []
 
     def query(self, q, params=None, timeout=None):
@@ -269,32 +261,23 @@ class _FakeGraph:
             raise self._raise
         return self._result
 
-    def explain(self, q):
-        self.calls.append(('explain', q, None, None))
+    def explain(self, q, params=None):
+        self.calls.append(('explain', q, params, None))
+        if self._explain_error:
+            raise self._explain_error
         if self._raise:
             raise self._raise
-        return 'plan'
+        return self.explain_plan
 
 
 class _FakeClient:
     def __init__(self, graph):
         self._graph = graph
         self.selected = []
-        # The server's RESULTSET_SIZE; -1 (no limit) leaves only the node's own cap.
-        # An exception here is raised by config_get instead.
-        self.resultset_size = -1
-        self.config_reads = 0
 
     def select_graph(self, name):
         self.selected.append(name)
         return self._graph
-
-    def config_get(self, name):
-        assert name == 'RESULTSET_SIZE'
-        self.config_reads += 1
-        if isinstance(self.resultset_size, Exception):
-            raise self.resultset_size
-        return self.resultset_size
 
     def list_graphs(self):
         return ['g1', 'g2']
@@ -505,35 +488,18 @@ def test_execute_tool_treats_empty_params_as_none(params):
     assert out['affected_rows'] == 1
 
 
-def test_execute_tool_binds_params():
-    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
+def test_execute_tool_forwards_params():
+    # graph.query binds $name. The tool must pass the object through, not refuse it.
+    graph = _FakeGraph(_FakeResult(result_set=[['Ada']], header=[[1, 'name']], nodes_created=1, properties_set=1))
     glb = _FakeGlobal(graph)
     glb.allow_execute = True
-    _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
-    assert graph.calls == [('query', 'CREATE (n:Person {name: $n})', {'n': 'Ada'}, 30000)]
-
-
-def test_execute_tool_passes_multiline_and_nested_params_unchanged():
-    # The client encodes values for the CYPHER header; the node must hand them over as they are.
-    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
-    glb = _FakeGlobal(graph)
-    glb.allow_execute = True
-    params = {'rows': [{'id': 1, 'text': 'line1\nline2\r\n', 'tags': ['a\tb', 'say "hi"', 'C:\\temp']}]}
-    _instance(glb).execute(
-        {'query': 'UNWIND $rows AS row CREATE (n:Note {id: row.id, text: row.text})', 'params': params}
+    out = _instance(glb).execute(
+        {'query': 'CREATE (n:Person {name: $name}) RETURN n.name AS name', 'params': {'name': 'Ada'}}
     )
-    assert graph.calls[0][2] == params
-
-
-def test_execute_tool_refuses_params_the_driver_cannot_bind():
-    # A driver whose _run_query_raw takes no params: refuse rather than drop them.
-    graph = _FakeGraph()
-    glb = _FakeGlobal(graph)
-    glb.allow_execute = True
-    glb.supports_execute_params = False
-    with pytest.raises(ValueError, match='not supported'):
-        _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
-    assert graph.calls == []
+    assert graph.calls[0][0] == 'query'
+    assert graph.calls[0][2] == {'name': 'Ada'}
+    assert out['rows'] == [{'name': 'Ada'}]
+    assert out['affected_rows'] == 2
 
 
 @pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
@@ -570,7 +536,7 @@ def test_execute_tool_accepts_object_row_mode():
     assert out['affected_rows'] == 1
 
 
-def test_execute_schema_lists_params_only_when_supported():
+def test_execute_schema_lists_params_when_the_driver_supports_them():
     glb = _FakeGlobal(_FakeGraph())
     assert 'params' in _instance(glb)._execute_input_schema()['properties']
     glb.supports_execute_params = False
@@ -781,280 +747,336 @@ def test_affected_rows_reported_for_write_that_also_returns_rows():
     assert out['affected_rows'] == 2  # ...and the write is still counted
 
 
-def test_affected_rows_counts_label_removal_and_index_drop():
-    """A write counted as 0 would be taken for a read by the row-cap check."""
-    graph = _FakeGraph(_FakeResult(result_set=[], header=[], labels_removed=2, indices_deleted=1))
-
-    out = _FakeGlobal(graph)._run_query_raw('MATCH (n) REMOVE n:Tmp')
-
-    assert out['affected_rows'] == 3
-
-
-# ---------------------------------------------------------------------------
-# EXECUTE row cap: FalkorDB has saved the statement by the time rows are counted
-# ---------------------------------------------------------------------------
-
-
-def _result_of(count, **stats):
-    """A reply of ``count`` rows, one ``id`` column numbered from 0."""
-    return _FakeResult(result_set=[[i] for i in range(count)], header=[[1, 'id']], **stats)
-
-
-def _over_cap_result(**stats):
-    """Five rows against a cap of three."""
-    return _result_of(5, **stats)
-
-
-def test_execute_raw_read_over_the_cap_raises():
-    glb = _FakeGlobal(_FakeGraph(_over_cap_result()))
-    glb.max_execute_rows = 3
-    with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
-
-
-@pytest.mark.parametrize('counter', ['nodes_created', 'properties_set', 'labels_removed', 'indices_deleted'])
-def test_execute_raw_write_over_the_cap_returns_truncated_rows(counter):
-    # The write is stored already: an error would make the caller retry it and store it twice.
-    glb = _FakeGlobal(_FakeGraph(_over_cap_result(**{counter: 5})))
-    glb.max_execute_rows = 3
-
-    out = glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
-
-    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 5, 'truncated': True}
-
-
-def test_execute_raw_write_within_the_cap_is_not_flagged():
-    result = _FakeResult(result_set=[[0], [1], [2]], header=[[1, 'id']], nodes_created=3)
-    glb = _FakeGlobal(_FakeGraph(result))
-    glb.max_execute_rows = 3
-
-    out = glb._run_query_raw('UNWIND range(1, 3) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
-
-    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 3}
-
-
-def test_execute_tool_reports_a_truncated_write():
-    glb = _FakeGlobal(_FakeGraph(_over_cap_result(nodes_created=5)))
-    glb.allow_execute = True
-    glb.max_execute_rows = 3
-
-    out = _instance(glb).execute({'query': 'UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id'})
-
-    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 5, 'truncated': True}
-
-
-def test_execute_tool_leaves_truncated_out_of_a_complete_result():
-    graph = _FakeGraph(_FakeResult(result_set=[[0]], header=[[1, 'id']], nodes_created=1))
+def test_execute_without_return_is_not_wrapped():
+    graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
-
-    out = _instance(glb).execute({'query': 'CREATE (n:Item {id: 0}) RETURN n.id AS id'})
-
-    assert out == {'rows': [{'id': 0}], 'affected_rows': 1}
+    glb._run_query_raw('CREATE (n:Person)')
+    assert graph.calls[0][1] == 'CREATE (n:Person)'
 
 
-# The same rules at the cap a node has when its owner sets none.
-_DEFAULT_CAP = graph_base.DEFAULT_MAX_EXECUTE_ROWS
-_BULK_WRITE = 'UNWIND $rows AS row CREATE (n:Item {id: row.id}) RETURN n.id AS id'
-
-
-@pytest.mark.parametrize('stats', [{}, {'nodes_created': _DEFAULT_CAP}], ids=['read', 'write'])
-def test_execute_raw_result_of_exactly_the_default_cap_is_complete(stats):
-    glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP, **stats)))
-
-    out = glb._run_query_raw(_BULK_WRITE)
-
-    assert len(out['rows']) == _DEFAULT_CAP
-    assert 'truncated' not in out
-
-
-@pytest.mark.parametrize('over', [1, 35000])
-def test_execute_raw_read_over_the_default_cap_raises(over):
-    glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP + over)))
-    with pytest.raises(ValueError, match=f'max_execute_rows={_DEFAULT_CAP}'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
-
-
-@pytest.mark.parametrize('over', [1, 35000])
-def test_execute_raw_write_over_the_default_cap_is_cut_to_it(over):
-    total = _DEFAULT_CAP + over
-    glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
-
-    out = glb._run_query_raw(_BULK_WRITE)
-
-    # The first rows, in order; every stored write is still counted.
-    assert len(out['rows']) == _DEFAULT_CAP
-    assert out['rows'][0] == {'id': 0}
-    assert out['rows'][-1] == {'id': _DEFAULT_CAP - 1}
-    assert out['affected_rows'] == total
-    assert out['truncated'] is True
-
-
-def test_execute_tool_cuts_a_write_over_the_default_cap():
-    total = _DEFAULT_CAP + 1
-    glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
-    glb.allow_execute = True
-
-    out = _instance(glb).execute({'query': _BULK_WRITE, 'params': {'rows': [{'id': 0}]}})
-
-    assert len(out['rows']) == _DEFAULT_CAP
-    assert out['affected_rows'] == total
-    assert out['truncated'] is True
-
-
-# ---------------------------------------------------------------------------
-# Read or write: every statistics line of the reply counts, except RUN_STATS
-# ---------------------------------------------------------------------------
-
-# A read reply as a live FalkorDB 6.0.2 sends it: "Graph version" comes on reads too.
-_V6_READ_STATS = ['Cached execution: 0', 'Query internal execution time: 0.05 milliseconds', 'Graph version: 12']
-_WRITE = 'UNWIND range(1, 5) AS i MERGE (n:Item {id: i}) RETURN n.id AS id'
-
-
-def test_execute_raw_counts_a_change_line_that_has_no_counter():
-    # No counter attribute is set, so affected_rows stays 0, but the line still marks a write.
-    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=['Nodes merged: 5', *_V6_READ_STATS])))
+def test_execute_return_is_wrapped_with_null_safe_collect():
+    graph = _FakeGraph(_FakeResult(result_set=[[1, None]], header=[[1, 'id'], [1, 'name']]))
+    glb = _FakeGlobal(graph)
     glb.max_execute_rows = 3
+    glb._run_query_raw('UNWIND range(1, 2) AS i CREATE (n:Item {id: i}) RETURN n.id AS id, n.name AS name')
+    sent = graph.calls[0][1]
+    # A list keeps null cells. collect(id) would drop them and under-count.
+    assert 'collect([`id`, `name`])' in sent
+    assert 'LIMIT 4' in sent
+    # WHERE keeps the guard live. An unused column could be planned away, and
+    # the write would then commit before Python could count the rows.
+    assert 'WHERE localtime(_rr_d) IS NOT NULL' in sent
+    assert 'RETURN _rr_row[0] AS `id`, _rr_row[1] AS `name`' in sent
 
-    out = glb._run_query_raw(_WRITE)
 
-    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 0, 'truncated': True}
-
-
-def test_execute_raw_falkordb_6_read_is_not_taken_for_a_write():
-    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=_V6_READ_STATS)))
+def test_execute_cap_error_maps_guard_failure_only():
+    graph = _FakeGraph(raise_error=mod.RedisError('Invalid time string: _rr_execute_cap'))
+    glb = _FakeGlobal(graph)
     glb.max_execute_rows = 3
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+    assert 'CALL {' in graph.calls[0][1]
 
 
-@pytest.mark.parametrize('line', ['Nodes merged', 'Nodes merged: many', b'Nodes created: 5'])
-def test_execute_raw_counts_an_unreadable_or_bytes_line_as_a_write(line):
-    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=[line, *_V6_READ_STATS])))
-    glb.max_execute_rows = 3
-
-    assert glb._run_query_raw(_WRITE)['truncated'] is True
-
-
-def test_execute_raw_zero_change_lines_mean_a_read():
-    stats = ['Nodes created: 0', 'Properties set: 0', *_V6_READ_STATS]
-    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=stats)))
-    glb.max_execute_rows = 3
-    with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+def test_execute_user_division_by_zero_stays_a_driver_error():
+    graph = _FakeGraph(raise_error=mod.RedisError('Division by zero'))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(mod.RedisError, match='Division by zero'):
+        glb._run_query_raw('RETURN 10 / $z AS q')
 
 
-def test_execute_raw_without_raw_statistics_uses_the_counters():
-    write, read = _result_of(5, nodes_created=5), _result_of(5)
-    del write._raw_stats, read._raw_stats  # a client that keeps no raw lines
-    glb = _FakeGlobal(_FakeGraph(write))
-    glb.max_execute_rows = 3
-
-    assert glb._run_query_raw(_WRITE)['truncated'] is True
-    glb.client._graph._result = read
-    with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+def test_execute_user_localtime_error_stays_a_driver_error():
+    graph = _FakeGraph(raise_error=mod.RedisError('Invalid time string: noon'))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(mod.RedisError, match='Invalid time string: noon'):
+        glb._run_query_raw("RETURN localtime('noon') AS t")
 
 
-# ---------------------------------------------------------------------------
-# Server RESULTSET_SIZE: the server cuts every reply there without saying so
-# ---------------------------------------------------------------------------
-
-# What the official Docker image sets.
-_IMAGE_RESULTSET_SIZE = 10000
-
-
-def _global_with_server_cap(result, size):
-    glb = _FakeGlobal(_FakeGraph(result))
-    glb.client.resultset_size = size
-    return glb
+def test_execute_return_star_is_refused():
+    """RETURN * has no names to cap, so it never reaches the server."""
+    graph = _FakeGraph()
+    glb = _FakeGlobal(graph)
+    with pytest.raises(ValueError, match='name the returned columns'):
+        glb._run_query_raw('MATCH (n) RETURN *')
+    assert graph.calls == []
 
 
-def test_execute_raw_write_cut_by_the_image_server_limit_is_flagged():
-    # A 25,001-row write on a default container: all of it is saved, 10,000 rows come back.
-    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE, nodes_created=25001), _IMAGE_RESULTSET_SIZE)
+class _ExplainOp:
+    """One GRAPH.EXPLAIN operation: a name, optional arguments, and children."""
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    def __init__(self, name, args=None):
+        self.name = name
+        self.args = args
+        self.children = []
 
-    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
-    assert out['affected_rows'] == 25001
-    assert out['truncated'] is True
-
-
-def test_execute_raw_read_that_reaches_the_server_limit_raises():
-    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), _IMAGE_RESULTSET_SIZE)
-    with pytest.raises(ValueError, match=f'RESULTSET_SIZE={_IMAGE_RESULTSET_SIZE}'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+    def append_child(self, child):
+        self.children.append(child)
+        return self
 
 
-@pytest.mark.parametrize('size', [_IMAGE_RESULTSET_SIZE, -1, 0])
-def test_execute_raw_reply_below_the_server_limit_is_complete(size):
-    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE - 1, nodes_created=9999), size)
+class _IndentExecutionPlan:
+    """Tree built the way falkordb-py's ExecutionPlan reads a GRAPH.EXPLAIN reply.
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    The engine test run does not install the falkordb client. Four spaces are
+    one level, and the operation name is the text before the first ``|``.
+    """
 
-    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE - 1
-    assert 'truncated' not in out
+    def __init__(self, plan):
+        if isinstance(plan[0], bytes):
+            plan = [line.decode() for line in plan]
+        self.plan = plan
+        self.structured_plan = self._operation_tree()
+
+    def _operation_tree(self):
+        index = 0
+        level = 0
+        stack = []
+        current = None
+
+        def create_operation(parts):
+            name = parts[0].strip()
+            parts.pop(0)
+            if parts and 'Records produced' in parts[-1]:
+                parts.pop(-1)
+            return _ExplainOp(name, None if not parts else parts[0].strip())
+
+        while index < len(self.plan):
+            line = self.plan[index]
+            op_level = line.count('    ')
+            if op_level == level:
+                child = create_operation(line.split('|'))
+                if current:
+                    parent = stack.pop()
+                    parent.append_child(child)
+                    stack.append(parent)
+                else:
+                    stack.append(child)
+                current = child
+                index += 1
+            elif op_level == level + 1:
+                child = create_operation(line.split('|'))
+                current.append_child(child)
+                stack.append(current)
+                current = child
+                level += 1
+                index += 1
+            elif op_level < level:
+                levels_back = level - op_level + 1
+                for _ in range(levels_back):
+                    current = stack.pop()
+                level -= levels_back
+            else:
+                raise ValueError(f'corrupted plan: {line!r}')
+        return stack[0]
 
 
-def test_execute_raw_node_cap_below_the_server_limit_names_the_node_cap():
-    glb = _global_with_server_cap(_over_cap_result(), _IMAGE_RESULTSET_SIZE)
-    glb.max_execute_rows = 3
-    with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+def _falkordb_execution_plan_class():
+    """The installed client's parser, or the indent parser when it is absent.
+
+    Node unit tests stub ``falkordb`` and the engine image does not install the
+    client, so ``import falkordb`` fails in CI.
+    """
+    saved = sys.modules.get('falkordb')
+    stub = saved is not None and 'mocks' in (getattr(saved, '__file__', '') or '').replace('\\', '/')
+    if stub or (saved is not None and not getattr(saved, '__file__', None)):
+        sys.modules.pop('falkordb', None)
+        sys.modules.pop('falkordb.execution_plan', None)
+    try:
+        from falkordb.execution_plan import ExecutionPlan
+
+        source = (getattr(sys.modules.get('falkordb'), '__file__', '') or '').replace('\\', '/')
+        if 'mocks' in source:
+            return _IndentExecutionPlan
+        return ExecutionPlan
+    except ImportError:
+        return _IndentExecutionPlan
+    finally:
+        if saved is not None:
+            sys.modules['falkordb'] = saved
 
 
-@pytest.mark.parametrize('answer', [_glb_mod.RedisError('NOPERM no permissions'), None, 'unlimited'])
-def test_execute_raw_unreadable_server_limit_leaves_the_node_cap(answer):
-    # An ACL may deny GRAPH.CONFIG; the node then checks max_execute_rows alone.
-    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), answer)
-
-    out = glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
-
-    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
-    assert 'truncated' not in out
+def _execution_plan(lines):
+    """Parse GRAPH.EXPLAIN lines into the tree execute reads."""
+    return _falkordb_execution_plan_class()(lines)
 
 
-def test_execute_raw_reads_the_server_limit_on_every_call():
-    # GRAPH.CONFIG SET changes RESULTSET_SIZE while the server runs.
-    glb = _global_with_server_cap(_result_of(3), 3)
-    with pytest.raises(ValueError, match='RESULTSET_SIZE=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+# Captured from FalkorDB graph module 60002 (Redis 8.10.2, image
+# falkordb/falkordb:latest). EXPLAIN lists operators, not column names.
+_INDEX_PLAN = ['Create Index | :Person(["name"])']
+_FOREACH_PLAN = [
+    'Commit',
+    '    ForEach | x',
+    '        All Node Scan | (n)',
+    '        Update',
+    '            Argument',
+]
+_LOAD_CSV_PLAN = [
+    'Commit',
+    '    Create | (n:Item), ',
+    '        Load CSV',
+]
+# A Project under Commit is the WITH, not a result. The root is Commit.
+_WITH_FOREACH_PLAN = [
+    'Commit',
+    '    ForEach | x',
+    '        Project',
+    '            All Node Scan | (n)',
+    '        Update',
+    '            Argument',
+]
+_LABEL_SCAN_PLAN = [
+    'Project',
+    '    Node By Label Scan | (n:Person)',
+]
+# C-engine shape from falkordb-py plan_helpers: a read is wrapped in Results.
+_RESULTS_PLAN = [
+    'Results',
+    '    Project',
+    '        Node By Label Scan | (n:Person)',
+]
+_CALL_SUBQUERY_PLAN = [
+    'Project',
+    '    Apply',
+    '        Unwind',
+    '        Project',
+    '            Commit',
+    '                Create | (n:Item), ',
+    '                    Project',
+    '                        Argument',
+]
 
-    glb.client.resultset_size = -1
-    assert len(glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')['rows']) == 3
-    assert glb.client.config_reads == 2
+
+def test_indent_parser_matches_the_installed_client():
+    """The CI fallback must name the same root the falkordb client would."""
+    parser = _falkordb_execution_plan_class()
+    if parser is _IndentExecutionPlan:
+        pytest.skip('falkordb client is not installed')
+    plans = (
+        _INDEX_PLAN,
+        _FOREACH_PLAN,
+        _LOAD_CSV_PLAN,
+        _WITH_FOREACH_PLAN,
+        _LABEL_SCAN_PLAN,
+        _RESULTS_PLAN,
+        _CALL_SUBQUERY_PLAN,
+    )
+    for lines in plans:
+        assert _IndentExecutionPlan(lines).structured_plan.name == parser(lines).structured_plan.name
 
 
-# ---------------------------------------------------------------------------
-# EXECUTE lane path: a cut result is announced on the text and table lanes
-# ---------------------------------------------------------------------------
+def test_execute_grammar_miss_without_rows_is_sent_unchanged():
+    """CREATE INDEX, FOREACH, and LOAD CSV used to run, and still do."""
+    cases = [
+        ('CREATE INDEX FOR (p:Person) ON (p.name)', _INDEX_PLAN),
+        ('CREATE INDEX ON :Person(name)', _INDEX_PLAN),
+        ('MATCH (n) FOREACH (x IN [1,2] | SET n.v = x)', _FOREACH_PLAN),
+        ('LOAD CSV FROM "file:///tmp/a.csv" AS row CREATE (n:Item {id: row.id})', _LOAD_CSV_PLAN),
+        ('MATCH (n) WITH n FOREACH (x IN [1] | SET n.v = x)', _WITH_FOREACH_PLAN),
+    ]
+    for statement, lines in cases:
+        graph = _FakeGraph(explain_plan=_execution_plan(lines))
+        glb = _FakeGlobal(graph)
+        glb._run_query_raw(statement)
+        assert graph.calls[0][0] == 'explain'
+        assert graph.calls[1] == ('query', statement, None, glb.query_timeout_ms)
 
 
-def _execute_question(statement):
-    """A QuestionType.EXECUTE (3 in the schema stub) carrying one raw statement."""
-    return types.SimpleNamespace(type=3, questions=[types.SimpleNamespace(text=statement)])
+def test_execute_returning_plan_is_refused_without_column_names():
+    """EXPLAIN never names columns, so a returning plan is not sent uncapped."""
+    statement = 'MATCH (n) CALL { WITH n RETURN n.id AS i } RETURN i'
+    for lines in (_LABEL_SCAN_PLAN, _RESULTS_PLAN, _CALL_SUBQUERY_PLAN):
+        graph = _FakeGraph(explain_plan=_execution_plan(lines))
+        glb = _FakeGlobal(graph)
+        with pytest.raises(ValueError, match='row cap cannot be applied'):
+            glb._run_query_raw(statement, params={'name': 'Ada'})
+        assert graph.calls == [('explain', statement, {'name': 'Ada'}, None)]
 
 
-@pytest.mark.parametrize('count', [5, 3], ids=['cut', 'complete'])
-def test_execute_lane_announces_a_cut_result(count):
-    glb = _FakeGlobal(_FakeGraph(_result_of(count, nodes_created=count)))
-    glb.allow_execute = True
-    glb.max_execute_rows = 3
-    inst = _instance(glb)
-    cap = _CapturingInstance({'text', 'table', 'answers'})
-    inst.instance = cap
+def test_execute_unreadable_plan_is_refused():
+    graph = _FakeGraph(explain_plan='plan')
+    glb = _FakeGlobal(graph)
+    with pytest.raises(ValueError, match='could not classify'):
+        glb._run_query_raw('CREATE INDEX FOR (p:Person) ON (p.name)')
+    assert [call[0] for call in graph.calls] == ['explain']
 
-    inst.writeQuestions(_execute_question(_WRITE))
 
-    cut = count > 3
-    notice = 'The statement is saved, but its result was cut to the first 3 rows.'
-    assert (notice in cap.text[0]) is cut
-    assert (notice in cap.tables[0]) is cut
-    assert json.loads(cap.answers[0]).get('truncated', False) is cut
-    if cut:
-        # The notice holds no '|', so a markdown-table parser skips it.
-        assert '|' not in cap.tables[0].rsplit('\n\n', 1)[1]
+def test_execute_explain_syntax_error_is_the_servers_error():
+    graph = _FakeGraph(explain_error=_glb_mod.ResponseError('Invalid input at pos: 13 at char !'))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(_glb_mod.ResponseError, match='Invalid input'):
+        glb._run_query_raw('CREATE INDEX !!!')
+    assert [call[0] for call in graph.calls] == ['explain']
+
+
+def test_execute_missing_graph_is_created_before_explain():
+    """EXPLAIN needs the graph key. A read creates it, then the plan is read."""
+    graph = _FakeGraph(explain_plan=_execution_plan(_INDEX_PLAN))
+    graph._explain_error = _glb_mod.ResponseError('Invalid graph operation on empty key')
+    graph._explain_once = True
+    real_explain = graph.explain
+
+    def explain_once(q, params=None):
+        if graph._explain_once:
+            graph._explain_once = False
+            graph._explain_error = None
+            graph.calls.append(('explain', q, params, None))
+            raise _glb_mod.ResponseError('Invalid graph operation on empty key')
+        return real_explain(q, params)
+
+    graph.explain = explain_once
+    glb = _FakeGlobal(graph)
+    statement = 'CREATE INDEX FOR (p:Person) ON (p.name)'
+    glb._run_query_raw(statement)
+    assert ('query', 'RETURN 1', None, glb.query_timeout_ms) in graph.calls
+    assert graph.calls[-1] == ('query', statement, None, glb.query_timeout_ms)
+
+
+def test_execute_explain_failure_refuses_an_unclassified_statement():
+    graph = _FakeGraph(explain_error=mod.RedisError('Connection refused'))
+    glb = _FakeGlobal(graph)
+    statement = 'CREATE INDEX FOR (p:Person) ON (p.name)'
+    with pytest.raises(ValueError, match='could not classify'):
+        glb._run_query_raw(statement)
+    assert [call[0] for call in graph.calls] == ['explain']
+
+
+def test_execute_old_server_maps_a_rejected_wrapper():
+    graph = _FakeGraph(raise_error=mod.RedisError("Invalid input '{': expected a clause (line: 1, column: 6)"))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(ValueError, match='FalkorDB 4.0'):
+        glb._run_query_raw('RETURN 1 AS n')
+
+
+def test_execute_user_syntax_error_inside_the_wrapper_stays_a_driver_error():
+    graph = _FakeGraph(raise_error=mod.RedisError("Invalid input '(': expected an expression (line: 3, column: 8)"))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(mod.RedisError, match='line: 3'):
+        glb._run_query_raw('RETURN 1 AS n')
+
+
+def test_execute_syntax_error_on_line_12_is_not_an_old_server():
+    graph = _FakeGraph(raise_error=mod.RedisError("Invalid input 'x': expected y (line: 12, column: 1)"))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(mod.RedisError, match='line: 12'):
+        glb._run_query_raw('RETURN 1 AS n')
+
+
+def test_execute_wrapper_keeps_a_newline_inside_a_string_literal():
+    graph = _FakeGraph(_FakeResult(result_set=[['a\nb']], header=[[1, 't']]))
+    glb = _FakeGlobal(graph)
+    glb._run_query_raw("CREATE (n:Item {t: 'a\nb'}) RETURN n.t AS t")
+    sent = graph.calls[0][1]
+    assert "t: 'a\nb'" in sent
+    assert "t: 'a\n  b'" not in sent
+
+
+def test_execute_wrapper_keeps_crlf_inside_a_string_literal():
+    graph = _FakeGraph(_FakeResult(result_set=[['a\r\nb']], header=[[1, 't']]))
+    glb = _FakeGlobal(graph)
+    glb._run_query_raw("CREATE (n:Item {t: 'a\r\nb'}) RETURN n.t AS t")
+    sent = graph.calls[0][1]
+    assert "t: 'a\r\nb'" in sent
+    assert "t: 'a\nb'" not in sent
 
 
 # ---------------------------------------------------------------------------
@@ -1348,3 +1370,124 @@ def test_reflect_schema_failure_does_not_break_begin(monkeypatch):
     graph_base.GraphGlobalBase.beginGlobal(glb)
 
     assert glb.graph_schema == {'nodes': {}, 'relationships': []}
+
+
+# ---------------------------------------------------------------------------
+# EXECUTE row cap against a real FalkorDB. Off unless a server is named:
+# FALKORDB_TEST_URL, or FALKORDB_TEST_HOST and optional FALKORDB_TEST_PORT.
+# ---------------------------------------------------------------------------
+
+_LIVE_GRAPH = 'rr_execute_cap'
+
+
+def _item_count(db) -> int:
+    result = db.select_graph(_LIVE_GRAPH).query('MATCH (n:Item) RETURN count(n)')
+    rows = result.result_set or []
+    if not rows or not rows[0]:
+        return 0
+    return int(rows[0][0])
+
+
+@pytest.fixture
+def falkordb_execute(monkeypatch):
+    """A real server and an IGlobal pointed at a graph this fixture deletes."""
+    url = os.environ.get('FALKORDB_TEST_URL', '').strip()
+    host = os.environ.get('FALKORDB_TEST_HOST', '').strip()
+    if not url and not host:
+        pytest.skip('set FALKORDB_TEST_URL or FALKORDB_TEST_HOST to run execute against FalkorDB')
+
+    from redis.exceptions import RedisError as RealRedisError
+    from redis.exceptions import ResponseError as RealResponseError
+
+    monkeypatch.setattr(_glb_mod, 'RedisError', RealRedisError)
+    monkeypatch.setattr(_glb_mod, 'ResponseError', RealResponseError)
+    try:
+        import falkordb
+        from falkordb import FalkorDB
+    except ImportError:
+        pytest.skip('falkordb client is not installed')
+    if 'mocks' in (getattr(falkordb, '__file__', '') or '').replace('\\', '/'):
+        pytest.skip('the FalkorDB test mock is on the path; run this file without ROCKETRIDE_MOCK')
+
+    try:
+        if url:
+            db = FalkorDB.from_url(url, socket_connect_timeout=1, socket_timeout=10)
+        else:
+            port = int(os.environ.get('FALKORDB_TEST_PORT', '6379'))
+            db = FalkorDB(host=host, port=port, socket_connect_timeout=1, socket_timeout=10)
+        db.list_graphs()
+    except Exception as exc:
+        pytest.skip(f'FalkorDB is not reachable ({exc})')
+
+    try:
+        db.select_graph(_LIVE_GRAPH).delete()
+    except Exception:
+        pass
+
+    glb = _glb_mod.IGlobal()
+    glb.client = db
+    glb.graph_name = _LIVE_GRAPH
+    glb.query_timeout_ms = 30000
+    glb.max_execute_rows = 3
+    glb.max_rows = 250
+    glb.allow_writes = True
+    try:
+        yield glb, db
+    finally:
+        try:
+            db.select_graph(_LIVE_GRAPH).delete()
+        except Exception:
+            pass
+        db.close()
+
+
+def test_live_over_cap_write_rolls_back(falkordb_execute):
+    """The #2542 repro: five created nodes, cap 3, and the graph stays empty."""
+    glb, db = falkordb_execute
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+    assert _item_count(db) == 0
+
+
+def test_live_under_cap_write_commits(falkordb_execute):
+    glb, db = falkordb_execute
+    out = glb._run_query_raw('UNWIND range(1, 2) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+    assert len(out['rows']) == 2
+    assert _item_count(db) == 2
+
+
+def test_live_null_column_is_counted_and_committed(falkordb_execute):
+    glb, db = falkordb_execute
+    out = glb._run_query_raw('CREATE (n:Item {id: 1}) RETURN n.id AS id, n.name AS name')
+    assert out['rows'] == [{'id': 1, 'name': None}]
+    assert _item_count(db) == 1
+
+
+def test_live_return_star_writes_nothing(falkordb_execute):
+    glb, db = falkordb_execute
+    with pytest.raises(ValueError, match='name the returned columns'):
+        glb._run_query_raw('CREATE (n:Item {id: 1}) RETURN *')
+    assert _item_count(db) == 0
+
+
+def test_live_call_subquery_is_refused_and_writes_nothing(falkordb_execute):
+    """CALL {} fails the grammar, and EXPLAIN does not name the columns."""
+    glb, db = falkordb_execute
+    query = 'UNWIND range(1, 5) AS i CALL { WITH i CREATE (n:Item {id: i}) RETURN i AS kept } RETURN kept'
+    with pytest.raises(ValueError, match='row cap cannot be applied'):
+        glb._run_query_raw(query)
+    assert _item_count(db) == 0
+
+
+def test_live_newline_in_a_literal_is_stored_unchanged(falkordb_execute):
+    glb, db = falkordb_execute
+    out = glb._run_query_raw("CREATE (n:Item {t: 'a\nb'}) RETURN n.t AS t")
+    assert out['rows'] == [{'t': 'a\nb'}]
+    assert _item_count(db) == 1
+
+
+def test_live_index_and_foreach_reach_the_server(falkordb_execute):
+    glb, _db = falkordb_execute
+    glb._run_query_raw('CREATE INDEX FOR (p:Person) ON (p.name)')
+    glb._run_query_raw('CREATE (:Person {name: "a"})')
+    glb._run_query_raw('MATCH (n:Person) FOREACH (x IN [1, 2] | SET n.v = x)')
