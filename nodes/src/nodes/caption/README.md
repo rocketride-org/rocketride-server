@@ -30,9 +30,11 @@ With a model server configured, captioning runs there. Otherwise it runs locally
 
 ## Notes
 
-### Empty captions on failure
+### Failures and local timeouts
 
-The node runs captioning only when the `text` lane has a listener. If image decoding or caption inference raises an exception, it logs a warning and writes an empty string to that listener instead of propagating a result from the failed image.
+The node runs captioning only when the `text` lane has a listener. If the image cannot be decoded or captioning fails, including a model-server error, the node raises: the object fails with an error that names the cause, and no caption is written for that image.
+
+Without a model server, captioning runs one image at a time per node. An image whose caption takes longer than 60 seconds fails. The model call itself cannot be interrupted, so the next image waits up to another 60 seconds for it to finish before its own caption starts, and then has its own 60 seconds; after a timeout, one image can hold the device lock for up to about 120 seconds. Time an image spends waiting for the device lock behind other images is not counted in either limit. A model call that never returns makes each later image fail after that wait, until the task ends.
 
 ## Upstream docs
 
