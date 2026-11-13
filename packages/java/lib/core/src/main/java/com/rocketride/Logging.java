@@ -13,7 +13,7 @@ public final class Logging {
     public static boolean redirectStandardStreamsToNative = true;
     private static Level logLevel = null;
 
-    // From engLib/engLib/java/Logging.hpp
+    // From infra/src/java/Logging.hpp
     public enum NativeLogLevel {
 		FATAL,
 		ERROR,

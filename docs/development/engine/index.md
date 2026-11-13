@@ -91,7 +91,7 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 | `--serviceCategory CAT` | Service category filter                          |
 | `--serviceName NAME`    | Service name filter                              |
 
-`--testArgs`, `--nodeId`, and `--url.keystorenet` are options of the engine-lib
+`--testArgs`, `--nodeId`, and `--url.keystorenet` are options of the infra
 test binaries, not of the engine executable.
 
 ### Logging Options
@@ -228,13 +228,16 @@ Set with `--monitor TYPE`.
 
 ```text
 packages/server/
-├── engine/                         # Engine executable (launcher)
-│   ├── src/main.cpp                # Entry point
-│   └── src/res/                    # Resources (version info)
-├── engine-mod/                     # Shared engine module (engine.dll, libengine.so/.dylib)
-│   ├── include/engine.h            # engine_run() facade
-│   └── src/engine.cpp              # engLib behind the facade
-├── engine-lib/engLib/              # Main engine library (static)
+├── 3rdparty/                       # Vendored third-party sources
+├── cmake/                          # CMake modules, toolchain flags, vcpkg ports
+├── engine/                         # The engine
+│   ├── src/app/                    # Executable (launcher): main.cpp, version resource
+│   ├── src/shared/                 # Shared module (engine.dll, libengine.so/.dylib):
+│   │                               #   infra behind the engine_run() facade
+│   └── tests/                      # engine_tests
+├── infra/                          # Engine library (static)
+│   ├── tests/                      # infra_tests
+│   └── src/                        # Sources; infra.h is the umbrella header
 │   ├── config/                     # Configuration management
 │   ├── core/                       # Init/deinit, global config
 │   ├── headers/                    # Shared headers
@@ -251,7 +254,10 @@ packages/server/
 │   ├── sysinfo/                    # System information
 │   ├── tag/                        # Tag system
 │   └── task/                       # Task system and execution
-├── engine-core/apLib/              # Core utilities library (static)
+├── core/                           # Core utilities library (static)
+│   ├── include/rocketride/         # Public headers (node_api.h)
+│   ├── tests/                      # core_tests
+│   └── src/                        # Sources; core.h is the umbrella header
 │   ├── application/                # CmdLine parsing, options
 │   ├── async/                      # Threading primitives
 │   ├── compress/                   # FastPFor, LZ4
@@ -269,6 +275,7 @@ packages/server/
 │   ├── url/                        # URL handling
 │   ├── util/                       # General utilities
 │   └── xml/                        # XML processing
+├── python/                         # rocketlib, the engine's Python side
 └── CMakeLists.txt                  # Build orchestration
 ```
 

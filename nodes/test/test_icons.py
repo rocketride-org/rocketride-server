@@ -3,7 +3,7 @@
 Icons are resolved SERVER-SIDE, per directory. The engine reads each
 ``services*.json`` and resolves its ``"icon"`` field relative to **that file's
 own directory** -- ``(path / iconName).resolve()`` in
-``packages/server/engine-lib/engLib/store/services/services.cpp`` (:1686-1691),
+``packages/server/infra/src/store/services/services.cpp`` (:1686-1691),
 where ``path`` is the directory the service file was loaded from. A reference
 that does not resolve there logs ``Icon : **** MISSING ****`` and the node
 reaches the client with no icon content, whatever other node happens to ship a

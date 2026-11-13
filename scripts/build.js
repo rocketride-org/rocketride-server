@@ -274,7 +274,7 @@ Actions:`);
 Options:
   --arch=arm|intel    Target architecture (macOS cross-compile)
   --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
-  --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
+  --catch="args"      Pass arguments to Catch2 tests (core_tests/infra_tests/engine_tests)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message

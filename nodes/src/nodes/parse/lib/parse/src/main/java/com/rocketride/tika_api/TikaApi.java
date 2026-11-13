@@ -66,7 +66,7 @@ public final class TikaApi {
 	 * Added to the entry flags by the parse node, per document, for each media
 	 * lane it has no listener on. The node drops whatever reaches such a lane,
 	 * so that kind of media is not extracted at all. These sit above the entry
-	 * flags (apLib/entry.hpp) and match the parse node's tika.hpp.
+	 * flags (core/src/entry.hpp) and match the parse node's tika.hpp.
 	 */
 	public static final int SKIP_IMAGES = 1 << 24; // No listener on the image lane
 	public static final int SKIP_AUDIO = 1 << 25; // No listener on the audio lane
@@ -499,7 +499,7 @@ public final class TikaApi {
 	 *                    in recognizing the file
 	 * @param writer      tika will output to this SAX writer
 	 * @param metadata    Sends/receives the tika metadata
-	 * @param flags       The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
+	 * @param flags       The entry flags (core/src/entry.hpp) plus the SKIP_* media bits
 	 * @throws Exception
 	 */
 
@@ -664,7 +664,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param metadata     Sends/receives the tika metadata
-	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
+	 * @param flags        The entry flags (core/src/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	private static boolean extractTextForNative(TikaInputStream stream, String extractPath, Metadata metadata,
@@ -680,7 +680,7 @@ public final class TikaApi {
 	 * Extract text by file path (invoked from main)
 	 * 
 	 * @param extractPath  The actual pathname to extract from
-	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
+	 * @param flags        The entry flags (core/src/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	public static boolean extractTextFromPath(String extractPath, long flags, long nativeHandle) throws Exception {
@@ -701,7 +701,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param length       The overall length of the stream (if unknown, set to 0)
-	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
+	 * @param flags        The entry flags (core/src/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 * @throws Exception
 	 */

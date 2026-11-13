@@ -122,7 +122,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # -----------------------------------------------------------------------------
 list(APPEND CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_LIST_DIR}/cmake
-    ${CMAKE_CURRENT_LIST_DIR}/engine-core/cmake
 )
 
 # -----------------------------------------------------------------------------
@@ -158,21 +157,18 @@ message(STATUS "========================================")
 
 # -----------------------------------------------------------------------------
 # Add subdirectories for each component
-# Order matters - core must be built before engine-lib, which must be
-# built before the engine executable
+# Order matters - core must be built before infra, which must be built
+# before the engine
 # -----------------------------------------------------------------------------
 # Note: Java/Tika is built separately via: node scripts/build.js build:tika
 
-# Core library (apLib) - fundamental utilities and abstractions
-add_subdirectory(engine-core)
+# Core library - fundamental utilities and abstractions
+add_subdirectory(core)
 
-# Engine library (engLib) - engine-specific functionality
-add_subdirectory(engine-lib)
+# Infra library - engine-specific functionality
+add_subdirectory(infra)
 
-# Shared engine module (engineMod) - engine-lib provides its engLib target
-add_subdirectory(engine-mod)
-
-# Main engine executable
+# The engine: the shared module that carries it and the executable
 add_subdirectory(engine)
 
 # -----------------------------------------------------------------------------

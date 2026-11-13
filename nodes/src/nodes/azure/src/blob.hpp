@@ -28,7 +28,7 @@
 //-----------------------------------------------------------------------------
 #pragma once
 
-// The azure SDK, which used to come in through the engLib PCH
+// The azure SDK, which used to come in through the infra PCH
 #include <azure/storage/blobs.hpp>
 
 namespace engine::store::filter::azure {
