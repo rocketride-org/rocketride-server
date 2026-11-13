@@ -25,8 +25,7 @@ pytestmark = pytest.mark.skipif(
 async def test_agent_performs_each_requested_operation_once(client, attempt):
     """Run all seven tools, including two legitimate increments in separate requests."""
     assert PROVIDER in ('gemini', 'ollama'), 'Select gemini or ollama with ROCKETRIDE_REDIS_AGENT_PROVIDER'
-    filename = 'agent-example.pipe' if PROVIDER == 'gemini' else 'agent-ollama-example.pipe'
-    sample = Path(__file__).parents[2] / 'src/nodes/tool_redis' / filename
+    sample = Path(__file__).parents[2] / 'src/nodes/tool_redis/agent-example.pipe'
     pipeline = json.loads(sample.read_text())
     pipeline['project_id'] = 'redis_agent_test_' + uuid.uuid4().hex
     pipeline['source'] = 'tools_1'
@@ -37,12 +36,19 @@ async def test_agent_performs_each_requested_operation_once(client, attempt):
     agent = next(node for node in pipeline['components'] if node['provider'] == 'agent_llamaindex')
     agent['input'] = []
     agent['control'] = [{'classType': 'tool', 'from': 'tools_1'}]
-    llm = next(node for node in pipeline['components'] if node['provider'] == 'llm_' + PROVIDER)
-    llm['config']['model'] = MODEL
+    llm = next(node for node in pipeline['components'] if node['provider'] == 'llm_gemini')
     if PROVIDER == 'ollama':
-        llm['config']['serverbase'] = os.environ.get('ROCKETRIDE_REDIS_AGENT_URL', 'http://127.0.0.1:11434/v1')
+        llm['provider'] = 'llm_ollama'
+        llm['config'] = {
+            'profile': 'custom',
+            'serverbase': os.environ.get('ROCKETRIDE_REDIS_AGENT_URL', 'http://127.0.0.1:11434/v1'),
+            'modelTotalTokens': 16384,
+            'modelOutputTokens': 1024,
+            'temperature': 0,
+        }
     else:
         assert os.environ.get('ROCKETRIDE_GEMINI_KEY'), 'Set ROCKETRIDE_GEMINI_KEY in the engine environment'
+    llm['config']['model'] = MODEL
     parts = urlsplit(URL)
     prefix = 'rr:agent-test:' + uuid.uuid4().hex + ':'
     store = next(node for node in pipeline['components'] if node['provider'] == 'tool_redis')

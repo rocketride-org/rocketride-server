@@ -13,6 +13,7 @@ from redis.exceptions import (
     AuthorizationError,
     ConnectionError,
     DataError,
+    MaxConnectionsError,
     ResponseError,
     TimeoutError,
 )
@@ -188,6 +189,7 @@ def test_ttl_sentinels(store, client, ttl):
     [
         (AuthenticationError, 'authentication_error'),
         (AuthorizationError, 'permission_denied'),
+        (MaxConnectionsError, 'connection_error'),
         (ConnectionError, 'connection_error'),
         (TimeoutError, 'connection_error'),
         (ResponseError, 'invalid_operation'),
@@ -252,7 +254,7 @@ def test_scan_rejects_non_object_arguments(tool, client, args):
 @pytest.mark.parametrize('args', [{}, '{}', {'input': {}}, '{"input": {}}'])
 def test_scan_accepts_empty_argument_objects(tool, client, args):
     client.scan.return_value = (0, [])
-    assert tool.redis_scan(args) == {'success': True, 'cursor': '0', 'keys': [], 'done': True}
+    assert tool.redis_scan(args) == {'success': True, 'cursor': '0', 'keys': [], 'done': True, 'skipped': 0}
     client.scan.assert_called_once_with(cursor=0, match='rr:test:*', count=100)
 
 

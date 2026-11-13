@@ -444,6 +444,8 @@ class LangChainAdapter:
     """Wraps a LangChain chat model so non-reasoning providers speak the Event contract.
 
     ``done.items`` is the assistant text turn — LangChain carries no opaque reasoning state.
+    Given ``user_text=None``, ``stream``/``collect`` send ``history`` as it is (a turn-mode
+    message list) and keep the model's whole message, tool calls included, on ``message``.
     """
 
     def __init__(self, llm: Any, history: list[Any] | None = None, stream_kwargs: dict | None = None):
@@ -453,15 +455,17 @@ class LangChainAdapter:
         self.finish_reason: Optional[str] = None
         # Reasoning drained by the last collect(); kept off the visible text.
         self.reasoning: str = ''
+        self.message: Any = None
 
-    def stream(self, user_text: str) -> Iterator[Event]:
+    def stream(self, user_text: Optional[str]) -> Iterator[Event]:
         """Stream Events; retry once without ``stop`` if the provider rejects it at create time.
 
         Fallback applies only to stream creation / first chunk — never after output has
         already been yielded. On retry the model may emit past the stop sequence;
         agent-level truncation is the backstop.
         """
-        self.history.append({'role': 'user', 'content': user_text})
+        if user_text is not None:
+            self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
         # OpenAI-family models only emit streaming usage when asked. Ask whichever model
@@ -539,6 +543,8 @@ class LangChainAdapter:
                     if isinstance(det, dict):
                         cache_read = max(cache_read, int(det.get('cache_read') or 0))
                         cache_creation = max(cache_creation, _cache_creation_tokens(det))
+                if user_text is None:
+                    self.message = piece if self.message is None else self.message + piece
                 text, thinking = parse(piece.content)
                 if thinking:
                     yield Event('thinking', thinking)
@@ -570,7 +576,7 @@ class LangChainAdapter:
         self.history.append(assistant)
         yield Event('done', items=[assistant])
 
-    def collect(self, user_text: str) -> tuple[str, list[Any]]:
+    def collect(self, user_text: Optional[str]) -> tuple[str, list[Any]]:
         """Non-streaming drain: invoke() + shared normalization. A genuinely different
         mechanism from stream(), so it can still recover when streaming fails.
 
@@ -578,7 +584,8 @@ class LangChainAdapter:
         emit past the stop sequence; agent-level truncation is the backstop.
         """
         had_history = bool(self.history)
-        self.history.append({'role': 'user', 'content': user_text})
+        if user_text is not None:
+            self.history.append({'role': 'user', 'content': user_text})
         # Single-turn callers keep the historical contract: the backend is handed the
         # prompt string it was given, not a one-element message list.
         payload = self.history if had_history else user_text
@@ -596,6 +603,7 @@ class LangChainAdapter:
             else:
                 raise
         report_usage_metadata(getattr(result, 'usage_metadata', None), self.llm)
+        self.message = result
         text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}
         self.history.append(assistant)

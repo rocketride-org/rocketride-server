@@ -12,7 +12,7 @@ This tool-only node attaches to an agent through its Tool control connection, or
 
 ## As a tool
 
-Bare tool IDs below are used with `client.tool(token=token, tool=..., node_id='redis_1', input={...})`. Arguments must be an object, including an empty object for a default SCAN. JSON-encoded objects and model argument objects are normalized through the shared helper; malformed JSON, arrays, scalars and null are rejected. Every input object rejects unknown fields and null values. `key` means a nonempty logical UTF-8 key; the namespace is always prepended, and the complete key must fit in 256 UTF-8 bytes. Values are strings only. All serialized tool results are capped at 128 KiB using ASCII-escaped JSON size.
+Bare tool IDs below are used with `client.tool(token=token, tool=..., node_id='redis_1', input={...})`. Arguments must be an object, including an empty object for a default SCAN. JSON-encoded objects and model argument objects are normalized through the shared helper; malformed JSON, arrays, scalars and null are rejected. Unknown fields and null values for required fields are rejected. Optional fields set to null use the same defaults as omitted fields. `key` means a nonempty logical UTF-8 key; the namespace is always prepended, and the complete key must fit in 256 UTF-8 bytes. Values are strings only. All serialized tool results are capped at 128 KiB using ASCII-escaped JSON size.
 
 | Tool | Inputs | Success result | Redis command / access |
 |---|---|---|---|
@@ -21,10 +21,10 @@ Bare tool IDs below are used with `client.tool(token=token, tool=..., node_id='r
 | `redis_ttl` | Required `key` | `key`, `exists`, `has_expiry`, `ttl_seconds` | TTL; read |
 | `redis_expire` | Required `key`, integer `ttl_seconds` 1–2147483647 | `key`, `updated`, `requested_ttl_seconds` | EXPIRE; write |
 | `redis_incr` | Required `key`; optional `amount`, a signed 64-bit decimal string, default `"1"` | `key`, `value_decimal` (string) | INCRBY; write |
-| `redis_scan` | Optional unsigned 64-bit decimal string `cursor`, default `"0"`; integer `count` 1–500, default 100 | `cursor`, `keys` (logical names), `done` | One SCAN MATCH namespace* COUNT per call; read |
-| `redis_delete` | Required `keys`, an array of 1–100 explicit logical keys; wildcard syntax is rejected | `deleted_count` | DEL; write |
+| `redis_scan` | Optional unsigned 64-bit decimal string `cursor`, default `"0"`; integer `count` 1–500, default 100 | `cursor`, `keys` (logical names), `skipped` (count), `done` | One SCAN MATCH namespace* COUNT per call; read |
+| `redis_delete` | Required `keys`, an array of 1–100 explicit logical keys, matched literally | `deleted_count` | DEL; write |
 
-Every successful result also has `success: true`. Errors have `success: false`, `error_code`, sanitized `error`, and `outcome` (`not_applied` or `unknown`). Codes include invalid_input, invalid_encoding, value_too_large, result_too_large, invalid_operation, permission_denied, authentication_error, connection_error, invalid_host and not_initialized. Missing keys and conditional SET refusal are successful outcomes, not exceptions. Error messages never echo passwords or raw server exceptions. A connection failure on a mutation has unknown outcome: it may already have executed. No command is automatically retried; inspect state before deciding to retry, especially for INCR.
+Every successful result also has `success: true`. Errors have `success: false`, `error_code`, sanitized `error`, and `outcome` (`not_applied` or `unknown`). Codes include invalid_input, invalid_encoding, value_too_large, result_too_large, invalid_operation, permission_denied, authentication_error, connection_error, invalid_host and not_initialized. Missing keys and conditional SET refusal are successful outcomes, not exceptions. Error messages never echo passwords or raw server exceptions. Pool exhaustion is reported as `not_applied`. A connection failure after a mutation may have been sent is reported as `unknown`. No command is automatically retried; inspect state before deciding to retry, especially for INCR.
 
 GET distinguishes an empty string from a missing key. It fetches at most the value cap plus one byte and checks overflow before UTF-8 decoding. Binary, wrong-type, oversized values and oversized serialized results produce explicit errors. TTL is -2 for missing, -1 for persistent, otherwise remaining seconds. These are observations, not promises that a later call sees the same state.
 
@@ -32,7 +32,7 @@ SET defaults to a 3600-second expiry; 0 means persistent. A successful overwrite
 
 INCRBY is atomic, preserves an existing expiry and creates a persistent key if missing. It does not attach an expiry automatically; a separate EXPIRE call is not atomic with INCR. Both input amount and output value use decimal strings to preserve signed 64-bit precision across JavaScript. Wrong types, malformed integers and overflow return errors without changing the value.
 
-SCAN returns one complete server page, never a silently truncated page. COUNT is a work hint, not a hard key-count limit; pages can be empty before completion, contain duplicates, and vary during concurrent writes. Only cursor `"0"` means finished. The node validates every returned namespace and strips exactly one prefix. Foreign malformed/binary/oversized keys and results over 128 KiB return errors; retrying with a smaller count may help, but is not guaranteed. SCAN can still cause the client to receive a larger server reply before the serialized-result check. Use a dedicated namespace and Redis ACLs; a prefix is not per-user authorization.
+SCAN returns the next cursor and the valid keys from one server page. COUNT is a work hint, not a hard key-count limit; pages can be empty before completion, contain duplicates, and vary during concurrent writes. Only cursor `"0"` means finished. The node validates every returned namespace and strips exactly one prefix. It skips foreign, malformed, binary, or oversized keys and reports how many were skipped. Results over 128 KiB return an error. Retrying with a smaller count may help, but is not guaranteed. SCAN can still cause the client to receive a larger server reply before the serialized-result check. Use a dedicated namespace and Redis ACLs; a prefix is not per-user authorization.
 
 ## Configuration
 
@@ -56,11 +56,11 @@ Defaults to 3600; 0 deliberately creates persistent SET values. Eviction and ser
 
 ### Maximum value bytes
 
-Can reduce the 64 KiB UTF-8 cap; cannot increase it. Serialize structured values as JSON explicitly. A 128 KiB serialized-result cap applies independently, so heavy JSON escaping can reject a valid-size stored value on GET.
+Can reduce the 64 KiB UTF-8 cap; cannot increase it. Serialize structured values as JSON explicitly. SET also checks that GET can return the value within the 128 KiB serialized-result cap, including JSON escaping. Values written outside the node may still exceed that limit.
 
 ### Use TLS
 
-Requires certificate and hostname verification against the Python/OpenSSL trust store. No insecure bypass is exposed. For a local test CA, configure the engine process trust store before launch; do not disable verification.
+Requires certificate and hostname verification against the Python/OpenSSL trust store. No insecure bypass is exposed. For a private CA, set `SSL_CERT_FILE` to a PEM CA bundle in the engine process environment before starting it. Include any other roots the engine needs in that bundle.
 
 A single owned connection pool is reused per node/pipeline: connect timeout 3 seconds, socket timeout 5 seconds, max_connections 10. Timeouts are per socket operation, not a total wall-clock deadline. An exhausted pool fails rather than waiting indefinitely. Startup PING checks connectivity; configuration-only opens install nothing and never connect. Both client and pool are closed on shutdown or failed startup.
 
@@ -72,35 +72,14 @@ Grant PING for startup; GETRANGE, TTL, MULTI and EXEC for GET; SCAN for discover
 
 ## Notes
 
-### Development and CI
+Open `example.pipe` for direct SDK calls or `agent-example.pipe` for a read-only
+chat example from the node directory in VS Code. The chat
+example uses the `${ROCKETRIDE_GEMINI_KEY}` secret reference. Configure that
+secret in the engine environment before running it.
 
-Disable writes when checking an unverified agent/model. Zero client retries
-does not prevent an agent from selecting the same tool more than once: each
-successful `redis_incr` call increments again. A local `qwen2.5:3b` walkthrough
-reported four separate increments for one request and repeated reads until the
-reasoning limit. This remains an agent/model integration issue, not an
-exactly-once guarantee from this node. Use direct SDK calls for a controlled
-write demonstration and review the agent behavior before enabling its writes.
-
-The supplied `example.pipe` is a read-only Tools-source example with `mode: Source` for the Development panel. Enable writes explicitly for local exercises, or attach the node to an agent and provide an LLM. SDK engine tests call all seven tools without a model; agent-driven testing requires your own model credentials.
-
-For a local agent walkthrough, [agent-example.pipe](agent-example.pipe) connects
-Chat, LlamaIndex, Gemini Flash and Redis using catalog nodes. It uses
-`models/gemini-3.6-flash` with `${ROCKETRIDE_GEMINI_KEY}`, explicit one-operation
-instructions, and read-only Redis access by default. Copy
-`nodes/test/tool_redis/gemini.env.example` to `.env.gemini.local` at the repository
-root, paste your key there, then run `sh nodes/test/tool_redis/start_gemini_demo.sh`.
-See `nodes/test/tool_redis/README.md` for engine paths and acceptance testing.
-The optional [agent-ollama-example.pipe](agent-ollama-example.pipe) preserves the
-previous local Qwen setup. For disposable write tests, choose a unique prefix,
-configure the test port and enable writes explicitly.
-The agent bridge must carry the real input schemas in its Tool Args metadata.
-The earlier 3B walkthrough is not evidence that an arbitrary model is suitable
-for writes, and successful local examples do not guarantee every future plan.
-
-Unit tests extend `nodes/test/mocks/redis_fake`; there is no mock package named redis. Live tests skip unless `REDIS_TEST_URL` is set. Use disposable Valkey 8.1.11 and unique namespaced test keys. Tests remove only their own keys. Authentication/TLS tests additionally require REDIS_AUTH_TEST_URL, REDIS_TLS_TEST_URL and REDIS_TLS_CA_FILE. See `nodes/test/tool_redis/README.md` for commands and the proposed CI job.
-
-`services.json` declares configuration cases plus tool-call metadata consumed by `test_live.py`. The generic lane framework alone only smoke-tests pure-tool configuration; the dedicated engine test provides real tool-dispatch assertions. The proposed Valkey CI job needs reviewer approval. Local passing tests are not CI execution evidence.
+Keep writes disabled for unverified agents. An agent can choose to call a tool
+more than once even with client retries disabled, and each successful
+`redis_incr` call increments again.
 
 ## Upstream docs
 

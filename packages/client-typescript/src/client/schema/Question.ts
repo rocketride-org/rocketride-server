@@ -24,6 +24,79 @@
 
 import { Doc } from './Doc.js';
 import { DocFilter } from './DocFilter.js';
+import type { PIPELINE_RESULT } from '../types/data.js';
+
+/**
+ * A tool the model may call in a turn-mode Question. `name` is yours and may contain
+ * dots; the engine maps it to a name the provider accepts and maps calls back.
+ */
+export interface Tool {
+	name: string;
+	description?: string;
+	/** JSON Schema with `type: 'object'` at the top. Defaults to an object with no properties. */
+	inputSchema?: Record<string, unknown>;
+}
+
+/** Plain text inside a message. */
+export interface TextBlock {
+	type: 'text';
+	text: string;
+}
+
+/**
+ * A call the model asked for. Answer it with a ToolResultBlock carrying the same `id`.
+ * `args` is the raw string when the provider's arguments were not valid JSON.
+ */
+export interface ToolCallBlock {
+	type: 'tool_call';
+	id: string;
+	name: string;
+	args: Record<string, unknown> | string;
+}
+
+/** The result of one tool call, sent back in the next user message. */
+export interface ToolResultBlock {
+	type: 'tool_result';
+	callId: string;
+	content: string;
+	isError?: boolean;
+}
+
+/** Model reasoning the provider needs back. `text` is for display; keep `state` unchanged. */
+export interface ReasoningBlock {
+	type: 'reasoning';
+	text?: string;
+	state?: unknown;
+}
+
+/** A user turn: text, and the results of the calls in the assistant turn before it. */
+export interface UserMessage {
+	role: 'user';
+	content: string | Array<TextBlock | ToolResultBlock>;
+}
+
+/** A model turn: text, tool calls and reasoning. Append it to `Question.messages` as is. */
+export interface AssistantMessage {
+	role: 'assistant';
+	content: string | Array<TextBlock | ToolCallBlock | ReasoningBlock>;
+}
+
+/** One turn of a turn-mode conversation. */
+export type Message = UserMessage | AssistantMessage;
+
+export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal';
+
+/**
+ * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
+ * before any provider call. `invalid_request` means two tool names become the same provider
+ * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
+ * A Question sent with a broken turn rule is refused when the engine reads it.
+ * `provider_error` gives only the exception type; the full text is in the engine log.
+ */
+export interface AnswerError {
+	code: 'tools_unsupported' | 'invalid_request' | 'provider_error';
+	message: string;
+}
 
 /**
  * Defines different types of questions and queries you can ask.
@@ -84,9 +157,49 @@ export interface QuestionText {
 export class Answer {
 	private answer?: string | object | unknown[];
 	private expectJson: boolean;
+	/** Set only for a turn-mode Question: the model's turn. */
+	message?: AssistantMessage;
+	/** Why the model stopped. `tool_use` means `toolCalls` are waiting for results. */
+	stopReason?: StopReason;
+	/** Set instead of `message` when the turn failed. */
+	error?: AnswerError;
+	/** Token usage of the turn. */
+	tokens?: Record<string, unknown>;
 
 	constructor(expectJson = false) {
 		this.expectJson = expectJson;
+	}
+
+	/**
+	 * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
+	 * A text entry, which an engine that predates turn mode returns, gives a text Answer.
+	 */
+	static fromResult(result: PIPELINE_RESULT, key = 'answers'): Answer {
+		const entries = (result[key] ?? []) as unknown[];
+		const entry = entries[entries.length - 1];
+		if (entry === undefined) {
+			throw new Error(`no '${key}' entry in the result`);
+		}
+		const answer = new Answer();
+		if (typeof entry === 'string') {
+			answer.setAnswer(entry);
+			return answer;
+		}
+		const turn = entry as Pick<Answer, 'message' | 'stopReason' | 'error' | 'tokens'>;
+		answer.message = turn.message;
+		answer.stopReason = turn.stopReason;
+		answer.error = turn.error;
+		answer.tokens = turn.tokens;
+		return answer;
+	}
+
+	/** The calls in this turn, in the order the model made them. Empty for a text answer. */
+	get toolCalls(): ToolCallBlock[] {
+		const content = this.message?.content;
+		if (content === undefined || typeof content === 'string') {
+			return [];
+		}
+		return content.filter((block): block is ToolCallBlock => block.type === 'tool_call');
 	}
 
 	/**
@@ -136,9 +249,19 @@ export class Answer {
 	}
 
 	/**
-	 * Get the response as plain text.
+	 * Get the response as plain text. For a turn, the text of `message`.
 	 */
 	getText(): string {
+		if (this.message !== undefined) {
+			const content = this.message.content;
+			if (typeof content === 'string') {
+				return content;
+			}
+			return content
+				.filter((block): block is TextBlock => block.type === 'text')
+				.map((block) => block.text)
+				.join('');
+		}
 		if (this.answer === undefined || this.answer === null) {
 			return '';
 		}
@@ -194,6 +317,15 @@ export class Question {
 	goals: string[] = [];
 	documents: Doc[] = [];
 	questions: QuestionText[] = [];
+	/**
+	 * The conversation, sent as real provider turns. Non-empty switches the Question to
+	 * turn mode: the system prompt is role + instructions + examples, context, documents
+	 * and goals are added to the last user message, and history, questions and
+	 * expectJson are not allowed.
+	 */
+	messages: Message[] = [];
+	/** Tools the model may call. Turn mode only. */
+	tools: Tool[] = [];
 
 	constructor(options: {
 		type?: QuestionType;
@@ -278,6 +410,79 @@ export class Question {
 	 */
 	addQuestion(question: string): void {
 		this.questions.push({ text: question });
+	}
+
+	/**
+	 * Append a message to the conversation, switching the Question to turn mode.
+	 * Throws, leaving the Question as it was, if the Question uses a field turn mode does not allow.
+	 */
+	addMessage(message: Message): void {
+		this.messages.push(message);
+		const problem = this.turnConflict();
+		if (problem !== undefined) {
+			this.messages.pop();
+			throw new Error(problem);
+		}
+	}
+
+	/**
+	 * Check the turn-mode rules. `fromDict` runs this; call it after editing fields by hand.
+	 * Throws an Error naming the broken rule.
+	 */
+	checkTurn(): void {
+		let problem = this.turnConflict();
+		if (problem === undefined && this.messages.length > 0 && this.messages[this.messages.length - 1].role !== 'user') {
+			problem = 'the last message must be a user message';
+		}
+		if (problem !== undefined) {
+			throw new Error(problem);
+		}
+	}
+
+	private turnConflict(): string | undefined {
+		if (this.tools.length > 0 && this.messages.length === 0) {
+			return 'tools need messages: put the conversation in messages';
+		}
+		if (this.messages.length === 0) {
+			return undefined;
+		}
+		if (this.history.length > 0) {
+			return 'history cannot be used with messages';
+		}
+		if (this.questions.length > 0) {
+			return 'questions cannot be used with messages';
+		}
+		if (this.expectJson) {
+			return 'expectJson cannot be used with messages';
+		}
+		const names = this.tools.map((tool) => tool.name);
+		if (new Set(names).size !== names.length) {
+			return 'tool names must be unique';
+		}
+		const calls = this.messages.flatMap((message) => (message.role === 'assistant' && typeof message.content !== 'string' ? message.content : []));
+		if (calls.some((block) => block.type === 'tool_call' && (!block.id || !block.name))) {
+			return 'a tool call needs a non-empty id and name';
+		}
+		return undefined;
+	}
+
+	/**
+	 * Add the result of a tool call to the user message that answers it, opening that
+	 * message after an assistant turn. Throws if no assistant turn before it made the call.
+	 */
+	addToolResult(callId: string, content: string, isError = false): void {
+		const tail = this.messages[this.messages.length - 1];
+		const asked = tail?.role === 'user' ? this.messages[this.messages.length - 2] : tail;
+		const calls = asked?.role === 'assistant' && typeof asked.content !== 'string' ? asked.content : [];
+		if (!calls.some((block) => block.type === 'tool_call' && block.id === callId)) {
+			throw new Error(`no tool call '${callId}' in the last assistant message`);
+		}
+		const result: ToolResultBlock = { type: 'tool_result', callId, content, isError };
+		if (tail === asked) {
+			this.messages.push({ role: 'user', content: [result] });
+		} else if (tail.role === 'user') {
+			tail.content = typeof tail.content === 'string' ? [{ type: 'text', text: tail.content }, result] : [...tail.content, result];
+		}
 	}
 
 	/**
@@ -471,7 +676,10 @@ export class Question {
 			context: this.context,
 			goals: this.goals,
 			documents: this.documents,
-			questions: this.questions
+			questions: this.questions,
+			// Only when set, so a legacy Question's JSON stays as it was.
+			...(this.messages.length > 0 ? { messages: this.messages } : {}),
+			...(this.tools.length > 0 ? { tools: this.tools } : {}),
 		};
 	}
 
@@ -494,6 +702,9 @@ export class Question {
 		question.goals = (data.goals || []) as string[];
 		question.documents = (data.documents || []) as Doc[];
 		question.questions = (data.questions || []) as QuestionText[];
+		question.messages = (data.messages || []) as Message[];
+		question.tools = (data.tools || []) as Tool[];
+		question.checkTurn();
 
 		return question;
 	}

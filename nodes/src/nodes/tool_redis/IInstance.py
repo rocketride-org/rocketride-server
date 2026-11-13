@@ -55,15 +55,14 @@ class IInstance(IInstanceBase):
             if not isinstance(raw, dict):
                 raise RedisNodeError('invalid_input', 'Tool arguments must be an object.')
             args = normalize_tool_input(raw, tool_name=f'redis_{operation}')
-            if (
-                set(args) - set(allowed)
-                or any(name not in args for name in required)
-                or any(value is None for value in args.values())
-            ):
+            if set(args).difference(allowed) or any(args.get(name) is None for name in required):
                 raise RedisNodeError('invalid_input', 'Missing required arguments or unsupported argument names.')
-            if self.IGlobal.store is None:
+            # Some agents send JSON null for omitted optional arguments.
+            args = {name: value for name, value in args.items() if value is not None}
+            store = self.IGlobal.store
+            if store is None:
                 raise RedisNodeError('not_initialized', 'Redis node is not initialized.')
-            return bounded_result({'success': True, **getattr(self.IGlobal.store, operation)(**args)})
+            return bounded_result({'success': True, **getattr(store, operation)(**args)})
         except RedisNodeError as exc:
             return {'success': False, 'error_code': exc.code, 'error': str(exc), 'outcome': exc.outcome}
 
@@ -176,9 +175,10 @@ class IInstance(IInstanceBase):
                 'cursor': {'type': 'string'},
                 'keys': {'type': 'array', 'items': {'type': 'string'}},
                 'done': {'type': 'boolean'},
+                'skipped': {'type': 'integer', 'minimum': 0},
             }
         ),
-        description='Run one SCAN of the configured namespace. Returns logical keys and next cursor; only cursor 0 means done. COUNT is a hint, not a result limit; pages can be empty or contain duplicates. No snapshot guarantee. Oversized results return an error, never a truncated page.',
+        description='Run one SCAN of the configured namespace. Returns logical keys, the number of invalid keys skipped, and the next cursor; only cursor 0 means done. COUNT is a hint, not a result limit; pages can be empty or contain duplicates. No snapshot guarantee. Oversized results return an error, never a truncated page.',
     )
     def redis_scan(self, args):
         return self._run('scan', args, ['cursor', 'count'], [])
@@ -186,7 +186,7 @@ class IInstance(IInstanceBase):
     @tool_function(
         input_schema=_input({'keys': {'type': 'array', 'minItems': 1, 'maxItems': 100, 'items': _KEY}}, ['keys']),
         output_schema=_output({'deleted_count': {'type': 'integer'}}),
-        description='Delete 1–100 explicit namespaced keys with DEL. No wildcards or pattern expansion. Returns the number removed; missing keys do not count. Requires allow_writes. No automatic retries.',
+        description='Delete 1–100 explicit namespaced keys with DEL. Wildcard characters in key names are literal. Returns the number removed; missing keys do not count. Requires allow_writes. No automatic retries.',
     )
     def redis_delete(self, args):
         return self._run('delete', args, ['keys'], ['keys'])

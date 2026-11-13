@@ -62,38 +62,57 @@ class IInstance(IInstanceBase):
         self.has_output = False
         self._reset()
 
+    # The engine forwards a handler's raw input unless preventDefault() raises, so
+    # each collector ends with it, after the input is stored. Only the merged
+    # question from closing() goes downstream.
+
     def writeQuestions(self, question: Question):
         """
-        Collect questions for merging.
+        Collect questions for merging; the raw question is not passed downstream.
         """
         for q in question.questions:
             self.question.addQuestion(q.text)
+        # Chat clients send the conversation so far as the question's history, and
+        # the raw question no longer goes downstream, so the merged one keeps it.
+        # A turn has one conversation, so only the first history is kept.
+        if not self.question.history:
+            for item in question.history or []:
+                self.question.addHistory(item)
+        # A turn-mode question carries its conversation and tools instead, under the same
+        # rule. The configured instructions added in closing become its system prompt.
+        if question.messages and not self.question.messages:
+            self.question.messages = list(question.messages)
+            self.question.tools = list(question.tools)
+        return self.preventDefault()
 
     def writeDocuments(self, documents):
         """
-        Collect documents for merging.
+        Collect documents for merging; the raw documents are not passed downstream.
         """
         # Create a question from documents
         self.question.addDocuments(documents)
+        return self.preventDefault()
 
     def writeText(self, text: str):
         """
-        Collect text for merging.
+        Collect text for merging; the raw text is not passed downstream.
         """
         # Create a question from text
 
         self.question.addContext(text)
+        return self.preventDefault()
 
     def writeTable(self, table: str):
         """
-        Collect table data for merging.
+        Collect table data for merging; the raw table is not passed downstream.
         """
         # Create a question from table data
         self.question.addContext(table)
+        return self.preventDefault()
 
     def _received_input(self):
         """Whether anything at all was written to this node during the turn."""
-        return any(getattr(self.question, lane, None) for lane in ('context', 'questions', 'documents'))
+        return any(getattr(self.question, lane, None) for lane in ('context', 'questions', 'documents', 'messages'))
 
     def closing(self):
         """

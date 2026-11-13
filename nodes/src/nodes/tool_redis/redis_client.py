@@ -18,6 +18,7 @@ MAX_VALUE_BYTES = 64 * 1024
 MAX_RESULT_BYTES = 128 * 1024
 MAX_KEY_BYTES = 256
 MAX_TTL_SECONDS = 2**31 - 1
+_MAX_REDIS_INTEGER = 2**63 - 1
 
 
 class RedisNodeError(ValueError):
@@ -134,9 +135,10 @@ def redis_call(operation: Callable, *, mutation: bool = False):
     from redis.exceptions import (
         AuthenticationError,
         AuthorizationError,
-        NoPermissionError,
         ConnectionError,
         DataError,
+        MaxConnectionsError,
+        NoPermissionError,
         RedisError,
         ResponseError,
         TimeoutError,
@@ -148,6 +150,8 @@ def redis_call(operation: Callable, *, mutation: bool = False):
         raise RedisNodeError('authentication_error', 'Redis authentication failed.') from None
     except (AuthorizationError, NoPermissionError):
         raise RedisNodeError('permission_denied', 'Redis ACL permissions do not allow this operation.') from None
+    except MaxConnectionsError:
+        raise RedisNodeError('connection_error', 'All Redis connections in the pool are in use.') from None
     except (ConnectionError, TimeoutError):
         raise RedisNodeError(
             'connection_error',
@@ -205,7 +209,7 @@ class RedisStore:
             text = value.decode('utf-8')
         except UnicodeError:
             raise RedisNodeError('invalid_encoding', 'The stored value is not UTF-8 text.') from None
-        return {'key': key, 'found': True, 'value': text, 'ttl_seconds': ttl}
+        return _found_value(key, text, ttl)
 
     def set(self, key: Any, value: Any, ttl_seconds: Any = None, condition: Any = None) -> dict:
         """Store a UTF-8 string with atomic SET expiry and optional NX/XX."""
@@ -222,6 +226,8 @@ class RedisStore:
         )
         if condition is not None and condition not in ('NX', 'XX'):
             raise RedisNodeError('invalid_input', 'condition must be NX or XX when supplied.')
+        # Leave enough room to read the value back even if its expiry changes.
+        bounded_result({'success': True, **_found_value(key, value, _MAX_REDIS_INTEGER)})
         stored = redis_call(
             lambda: self.client.set(scoped, encoded, ex=ttl or None, nx=condition == 'NX', xx=condition == 'XX'),
             mutation=True,
@@ -251,7 +257,7 @@ class RedisStore:
         if not isinstance(amount, str) or not re.fullmatch(r'-?(0|[1-9][0-9]{0,18})', amount):
             raise RedisNodeError('invalid_input', 'amount must be a signed 64-bit decimal string.')
         delta = int(amount)
-        if not -(2**63) <= delta <= 2**63 - 1:
+        if not -_MAX_REDIS_INTEGER - 1 <= delta <= _MAX_REDIS_INTEGER:
             raise RedisNodeError('invalid_input', 'amount is outside the signed 64-bit range.')
         value = redis_call(lambda: self.client.incrby(scoped, delta), mutation=True)
         return {'key': key, 'value_decimal': str(value)}
@@ -263,33 +269,33 @@ class RedisStore:
         next_cursor, raw_keys = redis_call(
             lambda: self.client.scan(cursor=int(cursor), match=self.settings.key_prefix + '*', count=count)
         )
+        prefix = self.settings.key_prefix.encode('ascii')
         keys = []
+        skipped = 0
         for raw in raw_keys:
+            if not raw.startswith(prefix) or not len(prefix) < len(raw) <= MAX_KEY_BYTES:
+                skipped += 1
+                continue
             try:
-                full = raw.decode('utf-8')
+                key = raw[len(prefix) :].decode('utf-8')
             except UnicodeError:
-                raise RedisNodeError('invalid_encoding', 'A scanned key is not UTF-8 text.') from None
-            if not full.startswith(self.settings.key_prefix):
-                raise RedisNodeError('invalid_response', 'Redis returned a key outside the configured namespace.')
-            key = full[len(self.settings.key_prefix) :]
-            self.scope_key(key)
+                skipped += 1
+                continue
             keys.append(key)
-        return bounded_result({'cursor': str(next_cursor), 'keys': keys, 'done': next_cursor == 0})
+        return bounded_result({'cursor': str(next_cursor), 'keys': keys, 'done': next_cursor == 0, 'skipped': skipped})
 
     def delete(self, keys: Any) -> dict:
         self.require_writes()
         if not isinstance(keys, list) or not 1 <= len(keys) <= 100:
             raise RedisNodeError('invalid_input', 'keys must be an array of 1–100 explicit logical keys.')
-        # Validate every argument before sending any mutation. DEL itself takes
-        # literal keys; rejecting glob syntax avoids misleading callers.
-        scoped = []
-        for key in keys:
-            full = self.scope_key(key)
-            if any(char in key for char in '*?[]'):
-                raise RedisNodeError('invalid_input', 'delete accepts explicit keys without wildcard syntax.')
-            scoped.append(full)
+        # Validate every key before sending a single DEL with literal arguments.
+        scoped = [self.scope_key(key) for key in keys]
         deleted = redis_call(lambda: self.client.delete(*scoped), mutation=True)
         return {'deleted_count': deleted}
+
+
+def _found_value(key: str, value: str, ttl: int) -> dict:
+    return {'key': key, 'found': True, 'value': value, 'ttl_seconds': ttl}
 
 
 def bounded_result(result: dict) -> dict:

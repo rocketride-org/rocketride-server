@@ -3,18 +3,16 @@
 
 """Opt-in real Redis and RocketRide dispatch tests; unique disposable keys."""
 
-import json
 import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
 import redis
 
-from nodes.tool_redis.redis_client import RedisStore, Settings
+from nodes.tool_redis.redis_client import MAX_VALUE_BYTES, RedisStore, Settings
 
 URL = os.environ.get('REDIS_TEST_URL', '')
 pytestmark = pytest.mark.skipif(not URL, reason='Set REDIS_TEST_URL for disposable live Redis tests')
@@ -133,18 +131,17 @@ async def test_engine_tool_round_trip(client, live, allow_writes):
         assert (await call('redis_expire', key='k', ttl_seconds=60))['updated']
         assert (await call('redis_incr', key='count', amount='9007199254740993'))['value_decimal'] == '9007199254740993'
         assert (await call('redis_incr', key='count', amount='-1'))['value_decimal'] == '9007199254740992'
-        assert (await call('redis_scan', cursor='0', count=500))['success']
+        scan = await call('redis_scan', cursor='0', count=500)
+        assert scan['success'] and scan['skipped'] == 0
         assert (await call('redis_delete', keys=['k', 'count']))['deleted_count'] == 2
-        # services.json is also consumed by this direct tool-dispatch harness:
-        # the generic lane runner only validates configuration for pure tools.
-        service = Path(__file__).parents[2] / 'src/nodes/tool_redis/services.json'
-        for case in json.loads(service.read_text())['test']['cases']:
-            actual = await call(case['tool'], **case['arguments'])
-            assert actual['success'], actual
-            for field, expected in case['expect_tool'].items():
-                assert actual[field] == expected, (case['name'], actual)
         assert (await call('redis_expire', key='missing', ttl_seconds=0))['error_code'] == 'invalid_input'
-        assert (await call('redis_delete', keys=['*']))['error_code'] == 'invalid_input'
+        large = 'x' * MAX_VALUE_BYTES
+        assert (await call('redis_set', key='size', value=large))['stored']
+        assert (await call('redis_get', key='size'))['value'] == large
+        escaped = 'é' * (MAX_VALUE_BYTES // 2)
+        rejected = await call('redis_set', key='size', value=escaped)
+        assert rejected['error_code'] == 'result_too_large' and rejected['outcome'] == 'not_applied'
+        assert direct.get(prefix + 'size') == large.encode()
         direct.set(prefix + 'bad', 'not-a-number')
         assert not (await call('redis_incr', key='bad'))['success']
         direct.set(prefix + 'huge', b'x' * 65537)
@@ -177,16 +174,28 @@ def test_real_scan_full_walk(live):
     store, direct, prefix = live
     for i in range(20):
         store.set(str(i), 'value')
-    cursor, found = '0', set()
+    direct.set(prefix.encode() + b'\xff', 'invalid key')
+    direct.set(prefix + 'x' * 256, 'oversized key')
+    cursor, found, skipped = '0', set(), 0
     for _ in range(10000):
         page = store.scan(cursor, 1)
         found.update(page['keys'])
+        skipped += page['skipped']
         cursor = page['cursor']
         if page['done']:
             break
     else:
         pytest.fail('SCAN did not finish')
     assert found == {str(i) for i in range(20)}
+    assert skipped >= 2
+
+
+def test_real_delete_treats_metacharacters_as_literal(live):
+    store, _, _ = live
+    for key in ('item', '*', '?[]'):
+        store.set(key, 'value')
+    assert store.delete(['*', '?[]'])['deleted_count'] == 2
+    assert store.get('item')['value'] == 'value'
 
 
 @pytest.mark.parametrize('url_var', ['REDIS_AUTH_TEST_URL', 'REDIS_TLS_TEST_URL'])

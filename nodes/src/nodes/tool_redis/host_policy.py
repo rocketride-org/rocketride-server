@@ -7,11 +7,16 @@ import socket
 
 from .redis_client import RedisNodeError
 
+_NAT64_PREFIX = ipaddress.IPv6Network('64:ff9b::/96')
+
 
 def public_ip(address):
     ip = ipaddress.ip_address(address.split('%')[0])
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64_PREFIX:
+            ip = ipaddress.IPv4Address(ip.packed[-4:])
     return ip.is_global and not ip.is_multicast
 
 

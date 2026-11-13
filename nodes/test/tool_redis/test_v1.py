@@ -4,9 +4,11 @@
 
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 from redis.exceptions import ConnectionError
 
 from test.mocks.redis_fake import FakeRedis
@@ -46,6 +48,36 @@ def test_seven_tools_fake_round_trip(store):
     assert not store.expire('missing', 1)['updated']
 
 
+def test_agent_omitted_optional_arguments_use_defaults(store):
+    class SetInput(BaseModel):
+        key: str = 'k'
+        value: str = 'value'
+        ttl_seconds: int | None = None
+        condition: str | None = None
+
+    tool = IInstance.__new__(IInstance)
+    tool.IGlobal = SimpleNamespace(store=store)
+
+    result = tool.redis_set(SetInput().model_dump())
+    assert result['success'] and result['stored']
+    assert result['requested_ttl_seconds'] == store.settings.default_ttl_seconds
+    result = tool.redis_incr({'key': 'counter', 'amount': None})
+    assert result['success'] and result['value_decimal'] == '1'
+    result = tool.redis_scan({'input': {'cursor': '0', 'count': None}})
+    assert result['success'] and result['done']
+    assert set(result['keys']) == {'k', 'counter'}
+    assert tool.redis_scan({'cursor': None, 'count': None})['success']
+
+
+def test_null_required_and_unknown_arguments_are_still_invalid(store):
+    tool = IInstance.__new__(IInstance)
+    tool.IGlobal = SimpleNamespace(store=store)
+
+    assert tool.redis_set({'key': 'k', 'value': None})['error_code'] == 'invalid_input'
+    assert tool.redis_scan({'unexpected': None})['error_code'] == 'invalid_input'
+    assert store.client._kv == {}
+
+
 @pytest.mark.parametrize(
     'method,args', [('set', ('k', 'v')), ('expire', ('k', 1)), ('incr', ('k',)), ('delete', (['k'],))]
 )
@@ -76,7 +108,7 @@ def test_every_write_is_guarded(store, method, args):
         ('delete', ([],)),
         ('delete', (['k'] * 101,)),
         ('delete', (['k', None],)),
-        ('delete', (['k', '*'],)),
+        ('delete', (['k', ''],)),
     ],
 )
 def test_invalid_inputs_never_mutate(store, method, args):
@@ -87,7 +119,7 @@ def test_invalid_inputs_never_mutate(store, method, args):
 
 
 def test_limits_and_utf8_boundary(store):
-    value = 'é' * (MAX_VALUE_BYTES // 2)
+    value = 'x' * (MAX_VALUE_BYTES - 2) + 'é'
     store.set('k', value)
     assert store.get('k')['value'] == value
     with pytest.raises(RedisNodeError, match='limit'):
@@ -107,9 +139,12 @@ def test_ascii_escaped_result_limit(store):
     with pytest.raises(RedisNodeError) as err:
         bounded_result({'value': 'x' * MAX_RESULT_BYTES})
     assert err.value.code == 'result_too_large'
-    store.set('k', 'é' * (MAX_VALUE_BYTES // 2))
+    value = 'é' * (MAX_VALUE_BYTES // 2)
     tool = IInstance.__new__(IInstance)
     tool.IGlobal = type('Global', (), {'store': store})()
+    assert tool.redis_set({'key': 'k', 'value': value})['error_code'] == 'result_too_large'
+    assert not tool.redis_get({'key': 'k'})['found']
+    store.client.set('rr:test:k', value)
     assert tool.redis_get({'key': 'k'})['error_code'] == 'result_too_large'
 
 
@@ -126,16 +161,21 @@ def test_counter_overflow_and_wrong_type_do_not_change_value(store):
 def test_scan_one_call_empty_page_and_full_cursor(store):
     store.client = MagicMock()
     store.client.scan.return_value = (2**64 - 1, [])
-    assert store.scan('0', 1) == {'cursor': str(2**64 - 1), 'keys': [], 'done': False}
+    assert store.scan('0', 1) == {'cursor': str(2**64 - 1), 'keys': [], 'done': False, 'skipped': 0}
     store.client.scan.assert_called_once_with(cursor=0, match='rr:test:*', count=1)
-    store.client.scan.return_value = (0, [b'foreign:secret'])
-    with pytest.raises(RedisNodeError) as err:
-        store.scan()
-    assert err.value.code == 'invalid_response'
-    store.client.scan.return_value = (0, [b'rr:test:\xff'])
-    with pytest.raises(RedisNodeError) as err:
-        store.scan()
-    assert err.value.code == 'invalid_encoding'
+
+
+def test_scan_skips_invalid_keys_and_preserves_cursor(store):
+    store.client = MagicMock()
+    store.client.scan.return_value = (
+        7,
+        [b'foreign:k', b'rr:test:\xff', b'rr:test:', b'rr:test:' + b'x' * 256, b'rr:test:k'],
+    )
+    assert store.scan() == {'cursor': '7', 'keys': ['k'], 'done': False, 'skipped': 4}
+
+
+def test_scan_rejects_oversized_results(store):
+    store.client = MagicMock()
     store.client.scan.return_value = (0, [b'rr:test:' + b'x' * 200] * 1000)
     with pytest.raises(RedisNodeError) as err:
         store.scan()

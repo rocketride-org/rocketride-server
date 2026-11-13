@@ -56,7 +56,7 @@ Error decryptParameters(json::Value &service) noexcept {
     if (!decoded) return decoded.ccode();
 
     // Decrypt the token
-    auto plaintext = crypto::engineDecrypt(*decoded);
+    auto plaintext = crypto::paramTokenDecrypt(*decoded);
     if (!plaintext) return plaintext.ccode();
 
     // Parse the JSON
@@ -161,7 +161,7 @@ Error encryptParameters(IServiceConfig &config, json::Value &service) noexcept {
     }
 
     // Encrypt secrets
-    auto ciphertext = crypto::engineEncrypt(secretValues.stringify());
+    auto ciphertext = crypto::paramTokenEncrypt(secretValues.stringify());
     if (!ciphertext) return ciphertext.ccode();
 
     // Convert into a string
