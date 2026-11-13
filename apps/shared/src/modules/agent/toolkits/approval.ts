@@ -358,6 +358,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'account.leaveOrg': never(ACCOUNT),
 	'account.deleteOrg': never(ACCOUNT),
 	'account.revokeKey': never(ACCOUNT),
+	'account.invite': never(ACCOUNT),
 	'account.inviteMember': never(ACCOUNT),
 	'account.resendInvite': never(ACCOUNT),
 	'account.updateMemberRole': never(ACCOUNT),
