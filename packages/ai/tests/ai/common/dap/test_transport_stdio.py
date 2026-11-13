@@ -396,12 +396,11 @@ async def test_exit_message_non_zero_code_marks_disconnect_as_error():
 
 
 @pytest.mark.asyncio
-async def test_exit_message_cancelled_code_maps_to_zero():
-    """The literal token CANCELLED is mapped to exit code 0 in 4-field form."""
-    # 4-field form: >EXIT*code*message*trailing
-    events, disconnects = await _drive('>EXIT*CANCELLED*user stop*x')
-    assert events[0]['body']['exitCode'] == 0
-    assert disconnects[0]['has_error'] is False
+async def test_exit_message_with_an_empty_text_keeps_the_place_out_of_the_message():
+    """The engine's cancel has no text: its place is not the message, and its code name is not hex."""
+    events, disconnects = await _drive('>EXIT*Cancelled**Queue.hpp:61')
+    assert events[0]['body'] == {'exitCode': 1, 'message': '', 'crash': False}
+    assert disconnects[0]['has_error'] is True
 
 
 @pytest.mark.asyncio

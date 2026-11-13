@@ -98,6 +98,9 @@ before the monitor is up, such as a log file that cannot be opened, differs by
 platform: on Windows it exits with code 1 and reads `Stopped`; on Linux and
 macOS it ends in `abort()` and reads `Unexpected termination: SIGABRT (code 6)`.
 
+A stop by the server reads `Stopped` with exit code 0 on every platform,
+whatever the engine reports while it stops.
+
 ## Getting a dump by hand
 
 A dump left in the database is already a complete minidump: take it from there.
