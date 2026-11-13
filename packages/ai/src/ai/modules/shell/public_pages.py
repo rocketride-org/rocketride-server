@@ -79,7 +79,11 @@ class Aggregate:
     legacy: bool = False
 
     def pages(self) -> List[Page]:
-        """Every claimed page, sorted by path (deterministic output order)."""
+        """Every claimed page, sorted by path (deterministic output order).
+
+        Returns:
+            The pages, ordered by path.
+        """
         return sorted(self.exact.values(), key=lambda p: p.path)
 
 
@@ -126,6 +130,14 @@ def build_aggregate(
     claim wins). ``site`` comes only from the app owning ``/``. When no page
     survives, the aggregate is the legacy page list (a broken manifest falls
     back instead of removing every page).
+
+    Args:
+        published: The production-rung manifests, as ``load_published`` read them.
+        live_conflict: Optional ``path -> description`` of a live server route
+            the path collides with; colliding pages are dropped.
+
+    Returns:
+        The new aggregate.
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
@@ -146,6 +158,13 @@ def legacy_aggregate(live_conflict: Optional[Callable[[str], Optional[str]]] = N
     """The aggregate of the legacy page list: trusted engine constants.
 
     Filtered through ``live_conflict`` like any claim, when one is given.
+
+    Args:
+        live_conflict: Optional ``path -> description`` of a live server route
+            the path collides with; colliding pages are dropped.
+
+    Returns:
+        The legacy aggregate.
     """
     from .legacy_manifest import legacy_head_title, legacy_page_manifest
 
@@ -208,9 +227,19 @@ async def load_published(
     version is being replaced (an unreadable current version must never lock
     it out of publishing a fix).
 
+    Args:
+        acct: The account layer (the singleton when None).
+        strict: Refuse (raise) instead of skipping an unreadable root claimant.
+        exclude: An app id left out unread.
+        unreadable: When given, receives the ids of the apps skipped as unreadable.
+
+    Returns:
+        The published platform manifests that declare pages or a site block.
+
     Raises:
         Exception: a publish_list failure (the rebuild keeps the previous
-            aggregate).
+            aggregate). Any error other than a storage or parse failure on
+            one app's row also propagates, as a bug to see.
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
@@ -282,6 +311,15 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
     ``publicPages``/``site`` are authoritative; other keys are ignored), else
     the registry's ``metadata.manifest``.
 
+    Args:
+        metadata_manifest: The registry's ``metadata.manifest`` (any type;
+            a non-mapping counts as empty).
+        dist_dir: The version's store ``dist/`` tree; empty when it has none.
+
+    Returns:
+        The emitted file's ``publicPages``/``site`` sections, else the
+        metadata manifest.
+
     Raises:
         ValueError: the emitted file exists but is not a JSON object.
         Exception: a storage failure other than not-found (the caller
@@ -306,7 +344,18 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
 
 
 async def read_artifact_file(path: str) -> bytes:
-    """Read one file of a version's store tree (snapshots and the emitted manifest live under ``dist/``)."""
+    """Read one file of a version's store tree (snapshots and the emitted manifest live under ``dist/``).
+
+    Args:
+        path: The file's store path.
+
+    Returns:
+        The file's bytes.
+
+    Raises:
+        StorageNotFoundError: the file does not exist.
+        StorageError: any other storage failure.
+    """
     from ai.account.store import Store
 
     return await Store.instance().raw_store().read_bytes(path)
@@ -603,6 +652,9 @@ def app_changed(app_id: str) -> None:
 
     Only a platform app's publish, unpublish or rung repoint can change the
     page claims; any other app's is ignored.
+
+    Args:
+        app_id: The id of the app whose deployment changed.
     """
     if is_privileged(app_id):
         schedule_rebuild()

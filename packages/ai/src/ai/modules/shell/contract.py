@@ -141,12 +141,26 @@ class Page:
 
 
 def is_privileged(app_id: str) -> bool:
-    """Whether ``app_id`` is a platform app (inside the platform developer namespace)."""
+    """Whether ``app_id`` is a platform app (inside the platform developer namespace).
+
+    Args:
+        app_id: The app's id.
+
+    Returns:
+        True when the id is the platform developer id or sits under it.
+    """
     return app_id == PLATFORM_DEVELOPER_ID or app_id.startswith(PLATFORM_DEVELOPER_ID + '.')
 
 
 def may_claim_root(app_id: str) -> bool:
-    """Whether ``app_id`` may mount pages on the root origin's path space."""
+    """Whether ``app_id`` may mount pages on the root origin's path space.
+
+    Args:
+        app_id: The app's id.
+
+    Returns:
+        True when the app is a platform app named in the root-apps allowlist.
+    """
     return is_privileged(app_id) and app_id in public_root_apps()
 
 
@@ -156,6 +170,12 @@ def path_error(path: Any) -> Optional[str]:
     One exact path: absolute, lowercase, no query or fragment, no empty or dot
     segments, no trailing slash (except ``/``). Wildcard pages are not
     supported.
+
+    Args:
+        path: The candidate path, as read from a manifest (any type).
+
+    Returns:
+        The reason the path is invalid, or None when it is valid.
     """
     if not isinstance(path, str):
         return 'must be a string'

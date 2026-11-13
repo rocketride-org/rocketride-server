@@ -36,7 +36,14 @@ RUNG_RANK = {'public': 0, 'team': 1, 'user': 2}
 
 
 def metadata_of(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """An entry's ``metadata`` dict, or an empty one when it is missing or not a dict."""
+    """An entry's ``metadata`` dict, or an empty one when it is missing or not a dict.
+
+    Args:
+        entry: A registry entry or artifact dict.
+
+    Returns:
+        The ``metadata`` dict, or ``{}``.
+    """
     metadata = entry.get('metadata')
     if not isinstance(metadata, dict):
         return {}
@@ -44,7 +51,14 @@ def metadata_of(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def manifest_of(entry: Dict[str, Any]) -> Dict[str, Any]:
-    """An entry's ``metadata.manifest`` dict (the stored appManifest), or an empty one."""
+    """An entry's ``metadata.manifest`` dict (the stored appManifest), or an empty one.
+
+    Args:
+        entry: A registry entry or artifact dict.
+
+    Returns:
+        The ``metadata.manifest`` dict, or ``{}``.
+    """
     manifest = metadata_of(entry).get('manifest')
     if not isinstance(manifest, dict):
         return {}
@@ -52,7 +66,14 @@ def manifest_of(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def dist_dir_of(artifact_path: str) -> str:
-    """The servable dist tree of one registry entry (the build's output)."""
+    """The servable dist tree of one registry entry (the build's output).
+
+    Args:
+        artifact_path: The entry's stored ``artifactPath``.
+
+    Returns:
+        The store path of the version's ``dist/`` directory.
+    """
     return f'{artifact_content_dir(artifact_path)}/dist'
 
 
@@ -68,6 +89,13 @@ def serving_block_of(row: Dict[str, Any], review_ladder: bool) -> str:
     on a review-ladder server needs a 'ready' deployment; internal rungs and
     ladder-less servers do not), then 'build-failed' / 'building' (no
     servable bytes yet — a version serves only once its build is 'ok').
+
+    Args:
+        row: One publish row.
+        review_ladder: Whether the server gates public bindings on review.
+
+    Returns:
+        The reason the binding does not serve, or '' when it does.
     """
     if row.get('state') != 'enabled':
         return 'disabled'
@@ -93,6 +121,12 @@ def precedence_sorted(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     duplicate public row can never let a higher-UUID org displace a lower
     one (the seeded platform org, at the minimum UUID, always holds its
     ids). Rank ascending, org id DESCENDING within a rank, both stable.
+
+    Args:
+        rows: Publish rows, any order.
+
+    Returns:
+        A new list of the rows, the winner of each app id last.
     """
     ordered = sorted(rows, key=lambda r: str(r.get('orgId') or ''), reverse=True)
     ordered.sort(key=lambda r: RUNG_RANK.get((r.get('audience') or {}).get('type', ''), 0))
@@ -106,6 +140,13 @@ def holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     The catalog's own rule (``_catalog_entries``): a manifest declaring
     ``requiredPermissions`` serves only a caller who holds ALL of them, or
     the ``sys.admin`` platform superuser. Anonymous holds none.
+
+    Args:
+        row: One publish row.
+        sys_perms: The caller's permissions (a set; empty for anonymous).
+
+    Returns:
+        True when the caller passes the gate.
     """
     required = (row.get('snapshot') or {}).get('requiredPermissions') or []
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
