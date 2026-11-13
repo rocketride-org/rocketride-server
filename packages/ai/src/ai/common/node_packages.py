@@ -68,34 +68,21 @@ def digest_of(node_dir: str) -> Optional[str]:
         return None
 
 
-def _combine(file_digests: dict) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(file_digests):
-        digest.update(f'{path}\0{file_digests[path]}\n'.encode('utf-8'))
-    return digest.hexdigest()
-
-
 def content_digest(files: dict) -> str:
     """The digest of a node's files ({path inside the node: bytes}), the same whichever zip carries them.
 
     The sha256 of '<path>\\0<sha256 hex of the file>\\n' for each file in path order, paths
     with '/'; the build that writes the index computes it the same way.
     """
-    return _combine({path: hashlib.sha256(data).hexdigest() for path, data in files.items()})
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(f'{path}\0{hashlib.sha256(files[path]).hexdigest()}\n'.encode('utf-8'))
+    return digest.hexdigest()
 
 
 def _zip_digest(package: zipfile.ZipFile, name: str) -> str:
-    """content_digest of <name>/ in a zip, read a chunk at a time."""
-    prefix = f'{name}/'
-    file_digests = {}
-    for entry in package.infolist():
-        if entry.filename.startswith(prefix) and not entry.is_dir():
-            digest = hashlib.sha256()
-            with package.open(entry) as file:
-                for chunk in iter(lambda: file.read(1 << 20), b''):
-                    digest.update(chunk)
-            file_digests[entry.filename[len(prefix) :]] = digest.hexdigest()
-    return _combine(file_digests)
+    """content_digest of <name>/ in a zip: the same files read_package packs."""
+    return content_digest(node_files(package, name))
 
 
 def node_files(archive: zipfile.ZipFile, name: str) -> dict:

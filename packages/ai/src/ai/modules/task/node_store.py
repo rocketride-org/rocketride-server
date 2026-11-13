@@ -34,7 +34,7 @@ import json
 import os
 import tempfile
 import threading
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
 
 from rocketlib import getServiceDefinition, getServiceDefinitions, warning
 
@@ -65,25 +65,7 @@ def start() -> None:
                 f'NODE_VERSION_MISMATCH: node index contract {index.get("contract")}, engine reads {CONST_NODES_CONTRACT}'
             )
             return
-        nodes = {}
-        providers = {}
-        definitions = {}
-        for name, entry in index['nodes'].items():
-            services = {file: json.loads(text) for file, text in entry['services'].items()}
-            protocols = [service['protocol'].split(':')[0] for service in services.values() if 'protocol' in service]
-            # A node found on disk (a development tree, or the server still carries it) is the engine's own
-            if all(getServiceDefinition(provider) is not None for provider in protocols):
-                continue
-            for provider in protocols:
-                if providers.setdefault(provider.lower(), name) != name:
-                    warning(
-                        f'Node index: {provider} is in both {providers[provider.lower()]} and {name}; {name} is not served for it'
-                    )
-            nodes[name] = entry
-            for service in services.values():
-                provider = service.get('protocol', '').split(':')[0].lower()
-                if providers.get(provider) == name:
-                    definitions[provider] = _inline_icon(service, entry['icons'])
+        nodes, providers, definitions = _served(index)
         # The engine parses them now: a definition it refuses would fail every catalogue call
         getServiceDefinitions(list(definitions.values()))
     except Exception as e:
@@ -91,6 +73,7 @@ def start() -> None:
             f'NODE_REGISTRY_UNAVAILABLE: the node index could not be used ({e}); only the nodes the server carries are available'
         )
         return
+    _replace_stale(index)
     problem = _unwritable(node_release.nodes_dir()) if nodes else None
     if problem:
         # A read-only install: say so once, rather than refuse every run that names one
@@ -99,6 +82,54 @@ def start() -> None:
     _nodes.update(nodes)
     _providers.update(providers)
     _definitions.update(definitions)
+
+
+def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Any]]:
+    """The index's nodes the engine does not find on disk: name -> entry, provider -> name, provider -> definition."""
+    nodes: Dict[str, Any] = {}
+    providers: Dict[str, str] = {}
+    definitions: Dict[str, Any] = {}
+    for name, entry in index['nodes'].items():
+        services = {file: json.loads(text) for file, text in entry['services'].items()}
+        protocols = [service['protocol'].split(':')[0] for service in services.values() if 'protocol' in service]
+        # A node found on disk (a development tree, or the server still carries it) is the engine's own
+        if all(getServiceDefinition(provider) is not None for provider in protocols):
+            continue
+        for provider in protocols:
+            if providers.setdefault(provider.lower(), name) != name:
+                warning(
+                    f'Node index: {provider} is in both {providers[provider.lower()]} and {name}; {name} is not served for it'
+                )
+        nodes[name] = entry
+        for service in services.values():
+            provider = service.get('protocol', '').split(':')[0].lower()
+            if providers.get(provider) == name:
+                definitions[provider] = _inline_icon(service, entry['icons'])
+    return nodes, providers, definitions
+
+
+def _replace_stale(index: Dict[str, Any]) -> None:
+    """Replace the copies an earlier release unpacked into nodes/ with this index's, so the next run loads them.
+
+    The start-up scan loads such a folder like any other node, so it is never served and never placed again.
+    """
+    for name, entry in index['nodes'].items():
+        folder = os.path.join(node_release.nodes_dir(), name)
+        # None: the server's own folder, or nothing there
+        old = node_packages.digest_of(folder)
+        if old is None or old == entry['sha256']:
+            continue
+        try:
+            with _unpacking:
+                node_packages.unpack(
+                    name, account.node_package(name, entry['sha256']), entry['sha256'], node_release.nodes_dir()
+                )
+        except Exception as e:
+            warning(f"Node {name}: {folder} holds an earlier release's copy and could not be replaced ({e}); delete it")
+            continue
+        warning(
+            f"Node {name}: replaced the copy an earlier release unpacked; EaaS lists this release's definition after a restart"
+        )
 
 
 def _unwritable(nodes_dir: str) -> Optional[str]:
@@ -134,26 +165,27 @@ def served(provider: str) -> Optional[Dict[str, Any]]:
     return _definitions.get(provider.lower())
 
 
+def _nested_providers(value: Any) -> Iterator[str]:
+    """Every provider named inside a config value, in lower case."""
+    if isinstance(value, dict):
+        if isinstance(value.get('provider'), str):
+            yield value['provider'].lower()
+        for item in value.values():
+            yield from _nested_providers(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _nested_providers(item)
+
+
 def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
     """Every provider a pipeline names, with the filters autopipe would insert."""
     found: Set[str] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            if isinstance(value.get('provider'), str):
-                found.add(value['provider'].lower())
-            for item in value.values():
-                walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-
     for component in components:
         provider = str(component.get('provider', '')).lower()
         found.add(provider)
         if provider == 'autopipe':
             found.update(_AUTOPIPE_FILTERS)
-            walk(component.get('config', {}))
+            found.update(_nested_providers(component.get('config', {})))
     return found
 
 
