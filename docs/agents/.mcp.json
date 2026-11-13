@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rocketride": {
+      "type": "http",
+      "url": "https://api.rocketride.ai/mcp"
+    }
+  }
+}
