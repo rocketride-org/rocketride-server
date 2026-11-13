@@ -59,7 +59,7 @@ import { CLIENT_EVENT_OP } from '../ops/clientOps';
 import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
-import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
+import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, isLoopbackShell, isRelayBounceTarget, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
@@ -860,7 +860,8 @@ export class ConnectionManager implements IConnectionManager {
 			const relayCode = relayParams.get('code') ?? '';
 			if (relayCode && relayState.startsWith('rrdev:')) {
 				const target = relayState.slice('rrdev:'.length).replace(/\/+$/, '');
-				const isLoopback = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(target);
+				// One definition with devRelayOrigin(), which arms the relay only where this accepts.
+				const isLoopback = isRelayBounceTarget(target);
 				if (isLoopback && target !== window.location.origin) {
 					// replace(), not assign(): the bounce must not linger in
 					// history — Back should land before the sign-in, not here.
@@ -872,12 +873,22 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── Dev token seeding ─────────────────────────────────────────────
 		// The terminal dev host (`rocketride app dev`) hands the workspace
-		// credential in the URL FRAGMENT — never sent on the wire, stripped
-		// before anything else reads the URL, honored ONLY in a top-level
-		// dev shell (framed previews inherit their embedder's session via
-		// rrdev:auth, and production builds have no dev gate). Seeding goes
+		// credential in the URL FRAGMENT — never sent on the wire; a top-level
+		// shell strips it in this block. Seeding is honoured ONLY in a
+		// top-level dev shell served from a LOOPBACK origin (framed previews
+		// inherit their embedder's session via rrdev:auth; production builds
+		// have no dev gate; and a dev flavor served from a real origin — the
+		// production origin included — must not let a bare link sign the tab
+		// in as a chosen credential: the launcher only ever opens its own
+		// localhost dev server). Seeding goes
 		// through saveToken so the /apps cookie primes exactly like any
 		// other sign-in; the normal stored-token path below then connects.
+		// A REFUSED directive (production build, non-loopback origin) is
+		// never acted on, but a TOP-LEVEL shell still strips the fragment in
+		// every build. This block leaves a FRAMED shell's URL alone (previews
+		// inherit their embedder's session via rrdev:auth and no launcher puts
+		// the directive in a frame URL). Only the exact `#rrtoken=` prefix is
+		// a directive.
 		// The fragment is the LAUNCHER's definitive session directive (the
 		// same vocabulary as the embedded flow's rrdev:auth answer): a
 		// value signs the tab in as that credential; EMPTY (`#rrtoken=`,
@@ -889,7 +900,21 @@ export class ConnectionManager implements IConnectionManager {
 		// is reserved for an explicit logout or an abandoned sign-in. An
 		// ABSENT fragment leaves the tab's own state alone.
 		const bootHash = String(window.location.hash ?? '');
-		if (isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=')) {
+		const hasTokenDirective = bootHash.startsWith('#rrtoken=');
+		const framedBoot = isFramedShell();
+		const tokenSeedDirective = hasTokenDirective && isDevHooksEnabled() && !framedBoot;
+		if (hasTokenDirective && !framedBoot && !(tokenSeedDirective && isLoopbackShell())) {
+			if (tokenSeedDirective) {
+				console.warn('[shell] ignoring #rrtoken: dev token seeding is honoured only by a shell served from a loopback dev server');
+			}
+			// Best-effort: rewrites the CURRENT history entry so the fragment
+			// leaves the address bar and Back/Forward history. It cannot remove
+			// a visit the browser already recorded when the page loaded.
+			try {
+				window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
+			} catch { /* ignore */ }
+		}
+		if (tokenSeedDirective && isLoopbackShell()) {
 			const seeded = decodeURIComponent(bootHash.slice('#rrtoken='.length));
 			// Strip the fragment FIRST (replaceState rewrites the history
 			// entry) so the credential survives in no URL bar, history

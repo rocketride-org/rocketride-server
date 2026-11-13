@@ -70,9 +70,12 @@ async function main() {
 	}
 
 	// Install the app-dev hooks (registerLocalApp / __rrShellDev / dev share
-	// scope). No-ops entirely unless this is a dev build or the URL carries
-	// rrdev=1 — production sessions expose nothing. Fire-and-forget: the
-	// hooks signal readiness to embedders themselves via shell:devReady.
+	// scope). No-ops entirely unless this is a DEV BUILD (NODE_ENV !==
+	// 'production': `rsbuild dev` or the stitched dev flavor). `rrdev=1` and the
+	// per-tab session only SELECT that flavor in the index.html picker; they
+	// never enable hooks in a production build — production sessions expose
+	// nothing. Fire-and-forget: the hooks signal readiness to embedders
+	// themselves via shell:devReady.
 	void installDevHooks();
 
 	// Assemble the shell configuration with server capabilities

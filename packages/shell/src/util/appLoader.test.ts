@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isDevRemote, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
 import { resetDevGateForTests } from './devGate';
 import type { AppDescriptor } from '../components/workspace/types';
 
@@ -52,6 +52,9 @@ function stubLoader(load: (id: string) => unknown): void {
  * framed (an embedded App Builder preview) or the top-level window.
  */
 function stubPage(search: string, framed: boolean): void {
+	// The preview behaviour under test is a DEV-build capability: stage it
+	// explicitly instead of inheriting whatever NODE_ENV the runner has.
+	process.env.NODE_ENV = 'development';
 	const self = {};
 	const store = new Map<string, string>();
 	Reflect.set(globalThis, 'window', { self, top: framed ? {} : self, location: { search } });
@@ -70,9 +73,13 @@ function stubClock(ms: number): void {
 	mock.method(performance, 'now', () => ms);
 }
 
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
 afterEach(() => {
 	mock.restoreAll();
 	setDescriptorInvalidator(null);
+	process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+	resetDevGateForTests();
 });
 
 /** A module loader whose loads stay open until the test settles them, one handle per module id. */
@@ -214,4 +221,48 @@ test('a dev registration for the locked app is not reported as a mismatch', () =
 	const warn = mock.method(console, 'warn', () => {});
 	registerDevRemote('org.match', 'org_match', 'Match', 'http://localhost:1/remoteEntry.js');
 	assert.equal(warn.mock.callCount(), 0);
+});
+
+test('a dev registration whose entry is not a loopback dev server is refused (no remote, no local app)', () => {
+	stubPage('?appid=org.evil&rrdev=1', true);
+	// isDevPreviewPending() below is measured against the page clock: pin it,
+	// or the assertion holds only while the process is under 30 s old.
+	stubClock(1_000);
+	setDescriptorInvalidator(() => {});
+	mock.method(console, 'error', () => {});
+	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
+	for (const [i, entry] of ['https://attacker.example/remoteEntry.js', '//attacker.example/remoteEntry.js', 'javascript:alert(1)', 'http://localhost.attacker.example/remoteEntry.js', 'http://user:pw@localhost:1/remoteEntry.js', '/remoteEntry.js'].entries()) {
+		registerDevRemote('org.evil', `org_evil${i}`, 'Evil', entry);
+		assert.equal(isDevRemote(`org_evil${i}`), false, entry);
+	}
+	assert.equal(registerRemotes.mock.callCount(), 0, 'nothing was handed to Module Federation');
+	assert.equal(isDevPreviewPending('org.evil'), true, 'the locked app is still waiting for a real registration');
+});
+
+test('a dev registration with a loopback dev-server entry is registered', () => {
+	stubPage('?appid=org.good&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	registerDevRemote('org.good', 'org_good', 'Good', 'http://127.0.0.1:3001/remoteEntry.js?t=1');
+	assert.equal(isDevRemote('org_good'), true);
+});
+
+test('the registered entry is the canonical URL that was vetted, not the raw input', () => {
+	stubPage('?appid=org.canon&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
+	// Tabs and newlines are stripped by the URL parser; the loader must fetch
+	// exactly what was vetted.
+	registerDevRemote('org.canon', 'org_canon', 'Canon', 'http://loc\talhost:3001/remote\nEntry.js?t=1');
+	assert.equal(isDevRemote('org_canon'), true);
+	assert.equal(registerRemotes.mock.callCount(), 1, 'the module federation runtime was handed the remote');
+	assert.deepEqual(registerRemotes.mock.calls[0].arguments[0], [{ name: 'org_canon', entry: 'http://localhost:3001/remoteEntry.js?t=1' }]);
+});
+
+test('a production build never holds for a dev preview, whatever the URL and tab session say', () => {
+	stubPage('?appid=org.held&rrdev=1', true);
+	process.env.NODE_ENV = 'production';
+	resetDevGateForTests();
+	stubClock(1_000);
+	assert.equal(isDevPreviewPending('org.held'), false);
+	assert.equal(devPreviewHoldRemainingMs(), 0);
 });

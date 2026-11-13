@@ -33,7 +33,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tabSession, updateTabSession, devRelayOrigin, resetDevGateForTests } from './devGate';
+import { tabSession, updateTabSession, devRelayOrigin, isLoopbackShell, isRelayBounceTarget, resetDevGateForTests } from './devGate';
 
 /** A sessionStorage double over a Map. */
 function fakeSession(initial: Array<[string, string]> = []) {
@@ -49,8 +49,13 @@ function fakeSession(initial: Array<[string, string]> = []) {
 }
 
 /** Stage window/sessionStorage, reset the devGate caches, run, restore. */
-async function withBoot(search: string, session: ReturnType<typeof fakeSession>, run: () => void | Promise<void>, opts: { framed?: boolean } = {}): Promise<void> {
-	const win: Record<string, unknown> = { location: { search, pathname: '/' } };
+async function withBoot(search: string, session: ReturnType<typeof fakeSession>, run: () => void | Promise<void>, opts: { framed?: boolean; origin?: string; nodeEnv?: string } = {}): Promise<void> {
+	// The dev relay serves loopback dev servers: stage one unless a test says otherwise.
+	const win: Record<string, unknown> = { location: { search, pathname: '/', origin: opts.origin ?? 'http://localhost:5565' } };
+	const originalNodeEnv = process.env.NODE_ENV;
+	// The gate is a build-time constant: stage the dev build unless a test says otherwise
+	// (so the suite is independent of the runner's NODE_ENV).
+	process.env.NODE_ENV = opts.nodeEnv ?? 'development';
 	win.self = win;
 	win.top = opts.framed ? {} : win;
 	const originals = (['window', 'sessionStorage'] as const).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
@@ -60,6 +65,7 @@ async function withBoot(search: string, session: ReturnType<typeof fakeSession>,
 	try {
 		await run();
 	} finally {
+		process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);
@@ -140,4 +146,67 @@ test('updateTabSession merges, persists, and updates the cache', async () => {
 		updateTabSession({ appId: 'local.other' });
 		assert.equal(tabSession().appId, 'local.other');
 	});
+});
+
+// =============================================================================
+// PRODUCTION BUILD + RELAY POLICY (rocketride-saas#1020)
+// =============================================================================
+
+test('a production build is never a dev tab: neither the URL nor the persisted copy makes tabSession().dev true', async () => {
+	const persisted = [['rr:tab', JSON.stringify({ dev: true, appId: 'local.alarm', authOrigin: 'http://localhost:5565' })]] as Array<[string, string]>;
+	for (const [search, initial] of [['?rrdev=1', []], ['?appid=local.alarm&rrdev=1&rrauthorigin=http%3A%2F%2Flocalhost%3A5565', []], ['', persisted], ['?code=abc', persisted]] as Array<[string, Array<[string, string]>]>) {
+		const session = fakeSession(initial);
+		await withBoot(search, session, () => {
+			assert.equal(tabSession().dev, false, `${search || '(bare)'} ${initial.length ? 'with a persisted dev copy' : ''}`);
+			assert.equal(devRelayOrigin(), '', 'and it has no relay');
+		}, { nodeEnv: 'production' });
+	}
+	// The facts a production tab keeps are the identity ones (deep links still lock the app).
+	await withBoot('?appid=local.alarm&rrdev=1', fakeSession(), () => {
+		assert.equal(tabSession().appId, 'local.alarm');
+	}, { nodeEnv: 'production' });
+});
+
+test('the dev relay is honoured only by a top-level shell the relay bounce can return to (http://localhost, http://127.0.0.1)', async () => {
+	const url = '?appid=local.alarm&rrdev=1&rrauthorigin=https%3A%2F%2Frocketride.ai';
+	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013', 'http://localhost']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(devRelayOrigin(), 'https://rocketride.ai', origin);
+		}, { origin });
+	}
+	// A dev flavor served from a real origin (the production origin behind `?rrdev=1`) must not
+	// let a link steer its sign-in redirect; lookalikes and an opaque origin are not loopback.
+	// Wider loopback shells (https, [::1], *.localhost, 127/8) are loopback for `#rrtoken` but the
+	// bounce refuses them, so the relay stays off there instead of starting a sign-in it cannot finish.
+	for (const origin of ['https://cloud.rocketride.example', 'http://cloud.rocketride.example', 'http://localhost.evil.test:3013', 'https://127.0.0.1.evil.test', 'http://evillocalhost:3013', 'https://localhost:3000', 'http://[::1]:3013', 'http://app.localhost:3013', 'http://127.1.2.3:3013', 'null', '']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(devRelayOrigin(), '', JSON.stringify(origin));
+		}, { origin });
+	}
+});
+
+test('isLoopbackShell: loopback hosts only — a host that merely ENDS WITH "localhost" (no dot) or embeds it is not loopback', async () => {
+	for (const origin of ['http://localhost:3013', 'https://localhost', 'http://127.0.0.1:3013', 'http://127.1.2.3', 'http://[::1]:3013', 'http://app.localhost:3013']) {
+		await withBoot('', fakeSession(), () => { assert.equal(isLoopbackShell(), true, origin); }, { origin });
+	}
+	for (const origin of ['http://evillocalhost:3013', 'http://notlocalhost:3013', 'https://xlocalhost', 'http://evil-localhost', 'http://localhost.evil.test:3013', 'http://127.0.0.1.evil.test', 'https://cloud.rocketride.example', 'null', '']) {
+		await withBoot('', fakeSession(), () => { assert.equal(isLoopbackShell(), false, JSON.stringify(origin)); }, { origin });
+	}
+});
+
+test('the dev relay is ignored by a FRAMED shell, loopback-served or not (framed previews sign in via rrdev:auth)', async () => {
+	const url = '?appid=local.alarm&rrdev=1&rrauthorigin=https%3A%2F%2Frocketride.ai';
+	// the same page, top-level: the relay is armed (control)
+	await withBoot(url, fakeSession(), () => { assert.equal(devRelayOrigin(), 'https://rocketride.ai'); }, { origin: 'http://localhost:3013' });
+	for (const origin of ['http://localhost:3013', 'http://127.0.0.1:3013']) {
+		await withBoot(url, fakeSession(), () => {
+			assert.equal(tabSession().authOrigin, 'https://rocketride.ai', 'the URL fact is read...');
+			assert.equal(devRelayOrigin(), '', `...but a framed shell never relays (${origin})`);
+		}, { origin, framed: true });
+	}
+});
+
+test('isRelayBounceTarget is the bounce\'s own target set: http://localhost and http://127.0.0.1 with an optional port, nothing else', () => {
+	for (const ok of ['http://localhost', 'http://localhost:3013', 'http://127.0.0.1', 'http://127.0.0.1:65535']) assert.equal(isRelayBounceTarget(ok), true, ok);
+	for (const bad of ['https://localhost:3013', 'http://[::1]:3013', 'http://app.localhost:3013', 'http://127.1.2.3', 'http://localhost.evil.test', 'http://evillocalhost', 'http://localhost:3013/', 'http://localhost:123456', 'http://localhost@evil.test', '']) assert.equal(isRelayBounceTarget(bad), false, bad);
 });
