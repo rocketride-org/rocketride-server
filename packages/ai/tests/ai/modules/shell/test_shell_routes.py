@@ -581,6 +581,19 @@ def test_a_swap_drops_the_resolved_shell_documents(shell_root):
     assert 'captured pricing' in client.get('/pricing', headers={'User-Agent': BROWSER}).text
 
 
+def test_a_capture_added_after_the_document_resolved_serves_without_a_swap(shell_root):
+    _use(Page('/pricing', 'rocketride.home', 'Pricing'))
+    client = _client()
+    assert SHELL_BODY in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+    capture = shell_root / '_prerender' / 'pricing' / 'index.html'
+    capture.parent.mkdir(parents=True)
+    capture.write_text('<html><head><title>x</title></head><body>captured pricing</body></html>')
+    # index.html is untouched, so only the capture's own appearance can tell.
+    assert 'captured pricing' in client.get('/pricing', headers={'User-Agent': BROWSER}).text
+    # A query string never boots from a capture.
+    assert SHELL_BODY in client.get('/pricing?ref=x', headers={'User-Agent': BROWSER}).text
+
+
 def test_a_render_cache_miss_renders_off_the_event_loop(shell_root, monkeypatch):
     # Reading the shell file inside the async handler would block every other request.
     on_loop = []

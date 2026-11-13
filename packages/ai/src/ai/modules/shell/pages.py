@@ -62,7 +62,7 @@ from .contract import Page, with_slash_twin
 from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .settings import app_url
-from .shell import shell_document_path, shell_static
+from .shell import capture_candidate, shell_document_path, shell_static
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -278,12 +278,12 @@ _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
 
 # Shell documents by (page path, request has a query): (document, its mtime
-# and size). Finding the route's capture walks the disk (resolve, is_file),
-# so it runs once per page and shell build: a request re-checks only the
-# document's stat, which a new build changes. Bounded by the page map and
-# cleared on every swap.
-# shortcut: a capture added without rewriting the cached document is served from the next swap on.
-_documents: Dict[Tuple[str, bool], Tuple[Path, int, int]] = {}
+# and size, the capture that would replace it). Finding the route's capture
+# walks the disk (resolve, is_file), so it runs once per page and shell
+# build: a request re-checks the document's stat, which a new build changes,
+# and, while no capture serves, whether that capture has appeared. Bounded
+# by the page map and cleared on every swap.
+_documents: Dict[Tuple[str, bool], Tuple[Path, int, int, Optional[Path]]] = {}
 
 # Bumped by every swap: a render that started before one is served, not cached.
 _generation = 0
@@ -433,12 +433,34 @@ def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
     """
     key = (path, bool(request.url.query))
     hit = _documents.get(key)
-    if hit is not None and _file_version(hit[0]) == hit[1:]:
-        return hit
+    if hit is not None and _still_current(*hit):
+        return hit[:3]
     document = shell_document_path(request)
     stat = document.stat()
-    _documents[key] = (document, stat.st_mtime_ns, stat.st_size)
-    return _documents[key]
+    pending = capture_candidate(request)
+    if pending == document:
+        pending = None
+    _documents[key] = (document, stat.st_mtime_ns, stat.st_size, pending)
+    return document, stat.st_mtime_ns, stat.st_size
+
+
+def _still_current(document: Path, mtime_ns: int, size: int, pending: Optional[Path]) -> bool:
+    """Whether a resolved shell document still serves: unchanged, and its route's capture has not appeared.
+
+    Args:
+        document: The resolved shell document.
+        mtime_ns: Its mtime when resolved.
+        size: Its size when resolved.
+        pending: The capture that would replace it, or None when none may.
+
+    Returns:
+        False once the document changed or is gone, or once ``pending`` exists.
+    """
+    if _file_version(document) != (mtime_ns, size):
+        return False
+    if pending is None:
+        return True
+    return not pending.is_file()
 
 
 def _file_version(document: Path) -> Optional[Tuple[int, int]]:

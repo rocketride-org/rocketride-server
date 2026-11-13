@@ -112,14 +112,21 @@ def _resolve_safe(base_dir: str, requested_path: str) -> Path:
         return Path(base_dir) / 'index.html'
 
 
-def _capture_for(request: Request) -> Optional[Path]:
-    """The prerendered capture for a navigation request, or None.
+def capture_candidate(request: Request) -> Optional[Path]:
+    """Where the prerendered capture for a navigation request is, whether or not the build carries it.
 
     ``<shell>/_prerender/index.html`` for '/', ``<shell>/_prerender/<route>/index.html``
     otherwise (the layout the CDN's router used). Never for /shell/* paths,
     and never with a query string: an OAuth callback lands on '/' with
     ?code/?state/?error, and invite or verification links carry a token the
     app must read. Crawlers fetch the canonical URL, which has none.
+
+    Args:
+        request: The navigation request.
+
+    Returns:
+        The capture's path inside ``_prerender``, or None when no capture may
+        serve this request.
     """
     path = route_path(request.scope)
     if path.startswith('/shell/') or request.url.query:
@@ -130,7 +137,15 @@ def _capture_for(request: Request) -> Optional[Path]:
     if route:
         relative = f'_prerender/{route}/index.html'
     capture = _resolve_safe(_shell_root, relative)
-    if capture.is_relative_to(prerender_root) and capture.is_file():
+    if capture.is_relative_to(prerender_root):
+        return capture
+    return None
+
+
+def _capture_for(request: Request) -> Optional[Path]:
+    """The prerendered capture for a navigation request when the build carries it, else None (see ``capture_candidate``)."""
+    capture = capture_candidate(request)
+    if capture is not None and capture.is_file():
         return capture
     return None
 
