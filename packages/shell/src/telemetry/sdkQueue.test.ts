@@ -15,6 +15,14 @@ function captures(calls: Call[]): CaptureCall[] {
 	});
 }
 
+/** A call with the per-entry uuid removed from its options (a fresh v4 each time, asserted separately). */
+function withoutUuid<T extends { options?: unknown }>(call: T): T {
+	if (!call.options || typeof call.options !== 'object') return call;
+	const { uuid, ...rest } = call.options as { uuid?: string };
+	assert.match(uuid ?? '', POSTHOG_UUID, 'every replayed entry carries its mirror uuid');
+	return { ...call, options: Object.keys(rest).length ? rest : undefined };
+}
+
 /** A queue over a recording fake SDK; `initThrows` makes the init fail. */
 function harness(initThrows = false) {
 	const calls: Call[] = [];
@@ -70,7 +78,7 @@ test('a queued event carries the super properties of its own moment, and the sta
 	queue.register({ is_authed: false, rr_traffic_activated: true });
 	queue.capture('cta:click', { cta_id: 'hero' });
 	queue.start();
-	assert.deepEqual(calls, [
+	assert.deepEqual(calls.map(withoutUuid), [
 		{ kind: 'init' },
 		{ kind: 'capture', event: '$pageview', props: { app: 'home-ui', rr_traffic: 'hidden', page: 'home' }, options: undefined },
 		{ kind: 'capture', event: 'cta:click', props: { app: 'home-ui', rr_traffic: 'hidden', is_authed: false, rr_traffic_activated: true, cta_id: 'hero' }, options: undefined },
@@ -83,7 +91,7 @@ test("an event's own property wins over a super property of the same name", () =
 	queue.register({ is_authed: true });
 	queue.capture('cta:click', { is_authed: false });
 	queue.start();
-	assert.deepEqual(calls[1], { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
+	assert.deepEqual(withoutUuid(calls[1]), { kind: 'capture', event: 'cta:click', props: { is_authed: false }, options: undefined });
 });
 
 test('after the start, captures and registrations go straight to the SDK', () => {
@@ -114,7 +122,7 @@ test('a start while the page unloads replays the queue by sendBeacon, keeping ot
 	queue.capture('engagement', { secs: 3 });
 	queue.capture('cta:click', { cta_id: 'hero' }, { transport: 'sendBeacon' });
 	queue.start(true);
-	assert.deepEqual(captures(calls).map((c) => {
+	assert.deepEqual(captures(calls).map(withoutUuid).map((c) => {
 		return c.options;
 	}), [{ transport: 'sendBeacon' }, { transport: 'sendBeacon' }]);
 });
@@ -249,8 +257,26 @@ test('the next page load drains the inherited hold with original timestamps and 
 	assert.equal(options.timestamp?.getTime(), 1_000_000, 'original time, not the drain time');
 	assert.match(options.uuid ?? '', POSTHOG_UUID, 'the fact id rides as the event uuid in the shape posthog-js keeps, so a replay dedupes');
 	assert.equal(sent[1].event, '$pageview');
-	assert.equal((sent[1].options as undefined | object), undefined, 'this load\'s own replay keeps start-time semantics');
+	const own = sent[1].options as { timestamp?: Date; uuid?: string };
+	assert.equal(own.timestamp, undefined, "this load's own replay keeps start-time semantics");
+	assert.match(own.uuid ?? '', POSTHOG_UUID, 'but carries its uuid, the same one its mirror holds');
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null, 'cleared after the drain (capture first, clear after)');
+});
+
+test('a current-load delivery and the replay of its mirror share one uuid, so a page that stops between them dedupes', () => {
+	const storage = memoryStorage();
+	const first = heldHarness(storage, () => 1_000_000);
+	first.queue.capture('cta:click', { intent: 'register' });
+	const mirrored = (JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ id: string }>)[0].id;
+	first.queue.start();
+	const delivered = captures(first.calls)[0].options as { uuid?: string };
+	assert.equal(delivered.uuid, mirrored, "the delivery at the start carries the mirrored entry's uuid");
+	// Suppose the page stopped before clearMirror(): a next load replays the mirror under the SAME uuid.
+	storage.setItem(HOLD_STORAGE_KEY, JSON.stringify([{ event: 'cta:click', props: { intent: 'register' }, ts: 1_000_000, id: mirrored }]));
+	const second = heldHarness(storage, () => 1_010_000);
+	second.queue.start();
+	const replayed = captures(second.calls)[0].options as { uuid?: string };
+	assert.equal(replayed.uuid, mirrored);
 });
 
 test('an inherited entry past the TTL is discarded at drain, not replayed', () => {

@@ -74,7 +74,8 @@ export const HOLD_TTL_MS = 30 * 60 * 1000;
 /** sessionStorage key of the hold (per tab; survives the OAuth round trip). */
 export const HOLD_STORAGE_KEY = 'rr:shell:capture-hold';
 
-type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions };
+/** A capture waiting for the start; `id` is the uuid its mirrored twin (Held) carries. */
+type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions; id: string };
 /** A mirrored capture: what a next page load needs to replay it truthfully. */
 type Held = { event: string; props: Record<string, unknown>; ts: number; id: string };
 
@@ -202,10 +203,13 @@ export class SdkQueue {
 			return;
 		}
 		const stamped = { ...this.superProps, ...props };
-		this.pending.push({ event, props: stamped, options });
+		// ONE uuid for the entry and its mirror: the delivery at the start and a next load's replay of
+		// the mirror (a page that stopped between the two) are then the same event to posthog-js.
+		const id = newEventUuid();
+		this.pending.push({ event, props: stamped, options, id });
 		// Mirror AT ENQUEUE: a redirect or crash a moment later still finds the entry.
 		const ts = this.now();
-		this.held.push({ event, props: stamped, ts, id: newEventUuid() });
+		this.held.push({ event, props: stamped, ts, id });
 		this.persist();
 	}
 
@@ -262,15 +266,16 @@ export class SdkQueue {
 			}
 		}
 		for (const entry of this.pending.splice(0)) {
-			let options = entry.options;
+			// The mirrored twin's uuid rides along, so a replay of the mirror dedupes against this delivery.
+			let options: CaptureOptions = { ...entry.options, uuid: entry.id };
 			if (unloading) {
 				// One beacon per event: posthog-js has no public batched beacon, and the queue holds only what was
 				// captured before the first frame, a few small events, well under the in-flight beacon budget.
-				options = { ...entry.options, transport: 'sendBeacon' };
+				options = { ...options, transport: 'sendBeacon' };
 			}
-			// Replayed at the start time, not the original time: posthog-js keys its page-view state (which web
-			// vitals and replay read) on the $pageview's timestamp, and an earlier explicit timestamp broke both. The
-			// queue spans one frame.
+			// Replayed at the start time, not the original time (no timestamp option): posthog-js keys its
+			// page-view state (which web vitals and replay read) on the $pageview's timestamp, and an earlier
+			// explicit timestamp broke both. The queue spans one frame.
 			try {
 				target.capture(entry.event, entry.props, options);
 			} catch {
