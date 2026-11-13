@@ -339,10 +339,9 @@ class TransactionRegistry:
     def close_all(self) -> None:
         """Rollback+close every session, and retire the sweeper (for endGlobal)."""
         self._stop.set()
-        # Wait out a sweep that is already running. _drop() takes a session out of
-        # the registry BEFORE rolling it back, so a reaped session is invisible to
-        # the loop below; without the join, close_all() can return (and endGlobal
-        # dispose the engine) while the sweeper is still mid-rollback on it.
+        # Retire the sweeper before the loop below. A session it is reaping stays
+        # registered until closed (see _drop), so the loop would wait for it on
+        # held.lock anyway; the join also keeps it from starting another sweep.
         # Read under the lock _ensure_sweeper() starts it under: an assigned but
         # not-yet-started thread would make join() raise RuntimeError.
         with self._sweeper_lock:
@@ -399,15 +398,19 @@ class TransactionRegistry:
                 raise KeyError(session_id)
 
     def _drop(self, session_id: str, held: _Held, *, commit: bool) -> bool:
-        """Remove the session from the registry and finalise its transaction.
+        """Finalise the session's transaction, then remove it from the registry.
 
         Caller MUST hold ``held.lock``. Returns False if the session was already
         removed by a concurrent finalise/reap.
+
+        The session stays registered until its connection is closed, so anyone
+        who finds it there (close_all, a waiting execute) blocks on ``held.lock``
+        until the finalise is over, on whichever thread it runs. Removing it
+        first made an in-flight commit/rollback invisible to close_all().
         """
         with self._registry_lock:
             if self._sessions.get(session_id) is not held:
                 return False
-            del self._sessions[session_id]
         aborted = commit and _transaction_aborted(held.conn)
         if aborted:
             commit = False  # unwind as a rollback, then tell the caller
@@ -423,5 +426,10 @@ class TransactionRegistry:
                     'It has been rolled back and the session is closed; no changes were committed.'
                 )
         finally:
-            held.conn.close()
+            try:
+                held.conn.close()
+            finally:
+                with self._registry_lock:
+                    if self._sessions.get(session_id) is held:
+                        del self._sessions[session_id]
         return True

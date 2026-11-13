@@ -9,9 +9,9 @@
 
 # -----------------------------------------------------------------------------
 # CMake minimum version requirement
-# We require CMake 3.19+ (vcpkg manifest mode + modern CMake features)
+# We require CMake 3.22+ - set once here for the whole server build
 # -----------------------------------------------------------------------------
-cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
 # -----------------------------------------------------------------------------
 # Project directories
@@ -110,9 +110,9 @@ project(RocketRideEngine
 
 # -----------------------------------------------------------------------------
 # C++ standard configuration
-# We require C++17 for modern language features
+# Set once here for every server target; cmake/rocketride-node.cmake mirrors it for node builds
 # -----------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

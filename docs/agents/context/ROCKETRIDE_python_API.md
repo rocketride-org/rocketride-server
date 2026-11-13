@@ -975,8 +975,8 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Server-side environment layers** (`ROCKETRIDE_*` secrets stored per scope and merged org -> team -> user for pipeline resolution):
 
 - `async get_environment_keys() -> list[str]` — merged list of key NAMES across all scopes (no values).
-- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — read one scope's env dict. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
-- `async set_env(scope: str, env: dict[str, str], scope_id: str | None = None) -> None` — write one scope's FULL env dict (replaces the entire set of keys at that scope level).
+- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
+- `async set_env(scope: str, env: dict[str, str | None], scope_id: str | None = None) -> None` — merge into one scope: a value sets, `None` deletes, the mask keeps the stored value; names not sent are untouched.
 
 ```python
 new_key = await client.account.create_key(name='ci-runner')
@@ -1070,7 +1070,9 @@ await client.database.query(
 
 The package installs a `rocketride` command-line tool (`pip install
 rocketride`, then `rocketride --help`). The TypeScript client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with more `app` verbs and `deploy source-config`, but without
+`diff` and `otel`, which only this package has. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.

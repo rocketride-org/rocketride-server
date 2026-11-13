@@ -54,7 +54,7 @@
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "hash.svg",
-	"documentation": "https://docs.rocketride.org/nodes/core/hash",
+	"documentation": "https://docs.rocketride.org/nodes/hash/",
 	//
 	//
 	//	Optional:

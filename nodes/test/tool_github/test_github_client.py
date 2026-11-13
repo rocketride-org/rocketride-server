@@ -55,7 +55,8 @@ def _repos_instance(auth_type: str) -> Mock:
     inst = Mock()
     inst._token.return_value = 'token'
     inst.IGlobal = Mock()
-    inst.IGlobal.auth_type = auth_type
+    inst.IGlobal.auth_type_for.return_value = auth_type
+    inst.IGlobal.default_repo = ''
     return inst
 
 

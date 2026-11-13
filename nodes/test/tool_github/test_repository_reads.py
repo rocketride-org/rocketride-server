@@ -55,6 +55,12 @@ def node(monkeypatch):
             graphql_allow_mutations=False,
             retry_policy=github_client.RetryPolicy(),
         )
+        # Per-call credential questions answered from the attributes the tests set.
+        inst.IGlobal.auth_type_for = lambda repo=None, owner=None: inst.IGlobal.auth_type
+        inst.IGlobal.app_jwt = lambda repo=None: github_client.sign_app_jwt(
+            inst.IGlobal.app_id, inst.IGlobal.private_key_pem
+        )
+        inst.IGlobal.secrets = lambda: (inst.IGlobal.token, inst.IGlobal.private_key_pem)
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
         # Fail fast instead of sleeping for real; rate-limit tests patch sleep themselves.
@@ -356,7 +362,7 @@ def test_installation_auth_read_uses_existing_token_refresh(node):
     inst.IGlobal.get_token.return_value = 'installation-sentinel'
     request.return_value = response({'Python': 100})
     inst.repo_languages({})
-    inst.IGlobal.get_token.assert_called_once_with()
+    inst.IGlobal.get_token.assert_called_once_with('owner/repo')
     assert request.call_args.kwargs['headers']['Authorization'] == 'Bearer installation-sentinel'
 
 
@@ -377,15 +383,14 @@ def test_authentication_failure_is_safe_and_logged_for_the_operator(node):
 
 
 def test_echoed_credentials_are_redacted_in_successful_results(node, rsa_private_key_pem):
-    inst, request, client = node
+    # A successful result is redacted once, by the tool wrapper every engine call goes through.
+    inst, request, _ = node
     inst.IGlobal.private_key_pem = rsa_private_key_pem
+    tools = inst._collect_tool_methods()
     request.return_value = response([{'name': TOKEN, 'color': 'f00', 'description': f'see {rsa_private_key_pem}'}])
-    assert inst.label_list({})['data'] == [{'name': '[REDACTED]', 'color': 'f00', 'description': 'see [REDACTED]'}]
+    assert tools['label_list']({})['data'] == [{'name': '[REDACTED]', 'color': 'f00', 'description': 'see [REDACTED]'}]
     request.return_value = response({TOKEN: 1, 'Python': 2})
-    assert inst.repo_languages({})['data'] == {'[REDACTED]': 1, 'Python': 2}
-    # The client layer redacts on its own, not only through IInstance._get.
-    request.return_value = response([{'login': TOKEN}])
-    assert client.get_result(TOKEN, '/x')['data'] == [{'login': '[REDACTED]'}]
+    assert tools['repo_languages']({})['data'] == {'[REDACTED]': 1, 'Python': 2}
 
 
 def test_next_page_ignores_a_non_positive_page(node):

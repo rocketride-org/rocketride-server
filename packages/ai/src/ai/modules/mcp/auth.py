@@ -312,7 +312,11 @@ def authorize(scope: Dict[str, Any], *, bind_host: str, dev_bypass: bool = False
             ENV_EXPECTED_AUDIENCE,
             bind_host or '<unset/bind-all>',
         )
-        return f'{ENV_EXPECTED_AUDIENCE} is not configured; refusing OAuth tokens on a public bind'
+        return (
+            f'{ENV_EXPECTED_AUDIENCE} is not configured, so OAuth tokens are refused on an engine reachable from '
+            'other machines; an API key used with /mcp there must start with rr_ (on a self-hosted engine, set '
+            'ROCKETRIDE_APIKEY to a value that starts with rr_)'
+        )
 
     # Not a known API key and not a JWT: an opaque OAuth token, or something
     # unrecognised. Either way its audience cannot be established, so it must

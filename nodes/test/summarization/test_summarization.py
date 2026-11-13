@@ -15,7 +15,9 @@ Asserts:
   (c) ``closing`` formats summary, key points and entities onto the text lane,
   (d) ``closing`` emits one document per section onto the documents lane,
   (e) only the configured number of chunks is summarized, and disabled
-      sections are left out.
+      sections are left out,
+  (f) ``closing`` works with the real langchain_text_splitters package, which
+      the node's requirements.txt declares.
 """
 
 from __future__ import annotations
@@ -26,6 +28,8 @@ import sys
 import types
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'summarization')
@@ -473,3 +477,40 @@ def test_closing_writes_nothing_without_listeners(build, splitter):
 
     assert engine.text == []
     assert engine.documents == []
+
+
+# ---------------------------------------------------------------------------
+# The real text splitter
+# ---------------------------------------------------------------------------
+
+
+def test_closing_runs_through_the_real_text_splitter(build):
+    """closing() imports langchain_text_splitters and summarizes through it.
+
+    The other closing() tests install a fake splitter, so they pass without the
+    package. This test takes no ``splitter`` fixture, so it fails with
+    ModuleNotFoundError where langchain-text-splitters is not installed.
+
+    Args:
+        build: Instance factory fixture.
+    """
+    inst, engine = build(listeners=['text'], results=[_RESULT])
+    _write(inst.writeText, 'the whole document')
+
+    inst.closing()
+
+    assert type(inst.summarySplitter).__module__.startswith('langchain_text_splitters.')
+    assert engine.asked[0].context == ['the whole document']
+    assert '    A short summary.' in engine.text[0]
+
+
+def test_requirements_declare_the_text_splitter():
+    """The node's requirements.txt names the package closing() imports.
+
+    nodes/test/requirements.txt installs langchain-text-splitters for the test
+    above, so under nodes:test that test passes whatever the node declares.
+    """
+    with open(os.path.join(_NODE_DIR, 'requirements.txt'), encoding='utf-8') as f:
+        lines = [line.split('#', 1)[0].strip() for line in f]
+    names = {canonicalize_name(Requirement(line).name) for line in lines if line}
+    assert 'langchain-text-splitters' in names

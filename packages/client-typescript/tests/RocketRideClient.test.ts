@@ -353,7 +353,8 @@ describe('RocketRideClient Integration Tests', () => {
 				expect(result.text).toBeDefined();
 				expect(Array.isArray(result.text)).toBe(true);
 				expect(result.text.length).toBeGreaterThan(0);
-				expect(result.text[0]).toBe(chunks.join('\n\n') + '\n\n');
+				// The text lane delivers the whole body as one text, however many writes carried it
+				expect(result.text[0]).toBe(chunks.join('') + '\n\n');
 			},
 			TEST_CONFIG.timeout
 		);

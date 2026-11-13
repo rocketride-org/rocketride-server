@@ -35,7 +35,7 @@ import os
 from rocketride_common.provision import to_http_base
 
 from ..utils.common import connect_client, disconnect_all, run_cli_command
-from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
+from ..utils.env import NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
 
 
@@ -105,6 +105,8 @@ async def run_app(args) -> int:
         if subcommand == 'deploy':
             if not args.uri:
                 return out.fail(NO_DEPLOY_TARGET_MESSAGE)
+            if not (args.apikey or '').strip():
+                return out.fail(NO_DEPLOY_APIKEY_MESSAGE)
             client = await connect_client(args.uri, args.apikey)
             on_progress = (lambda line: out.line(f'  {line}')) if args.verbose else None
             result = await client.deploy.add_app(

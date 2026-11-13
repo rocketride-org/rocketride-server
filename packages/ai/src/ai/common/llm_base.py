@@ -4,9 +4,23 @@ import inspect
 from typing import Callable, List, Optional
 
 from rocketlib import IInstanceBase, invoke_function, warning
-from ai.common.schema import Question, Answer
+from ai.common.schema import Question, Answer, AnswerError
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
+from ai.common.llm_tools import InvalidTurn, ToolsUnsupported, is_turn
+
+
+def _turn_error(e: Exception) -> AnswerError:
+    """Type a failed turn, so a client can tell its own mistake from the provider failing.
+
+    Only our own messages go back. The provider's text can hold URLs, request ids and org
+    names, so a provider error names just the exception type; the full text is logged.
+    """
+    if isinstance(e, ToolsUnsupported):
+        return AnswerError(code='tools_unsupported', message=str(e))
+    if isinstance(e, InvalidTurn):
+        return AnswerError(code='invalid_request', message=str(e))
+    return AnswerError(code='provider_error', message=f'the model provider call failed ({type(e).__name__})')
 
 
 class LLMBase(IInstanceBase):
@@ -25,6 +39,10 @@ class LLMBase(IInstanceBase):
         stop: Optional[List[str]] = None,
     ) -> Answer:
         chat = self.IGlobal._chat
+        # Every driver passes here, including those that override chat(), so the refusal
+        # happens before any provider call and costs no tokens.
+        if is_turn(question) and not getattr(chat, 'supports_tools', False):
+            raise ToolsUnsupported(getattr(chat, '_model', None) or type(chat).__name__)
         # Publish the stop sequences on the per-call contextvar so ChatBase's model sinks
         # forward them to the provider API. A contextvar (not a chat() kwarg) leaves the
         # many chat()/_chat() provider overrides untouched. Reset in finally so a stop from
@@ -92,10 +110,13 @@ class LLMBase(IInstanceBase):
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
             except Exception as e:
-                err_msg = f'**LLM error** — {type(e).__name__}: {e}'
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
-                answer = Answer()
-                answer.setAnswer(err_msg)
+                if is_turn(question):
+                    answer = Answer(error=_turn_error(e))
+                else:
+                    err_msg = f'**LLM error** — {type(e).__name__}: {e}'
+                    answer = Answer()
+                    answer.setAnswer(err_msg)
                 # A turn that failed after burning tokens still spent them: the adapters
                 # report from their own finally, so the scope holds what was billed —
                 # hang it on the error answer or the Trace shows nothing for exactly the

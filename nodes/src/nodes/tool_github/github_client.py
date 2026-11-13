@@ -36,10 +36,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 import datetime
+import functools
 import json
 import math
+import re
 import time
 
 import jwt
@@ -76,6 +78,57 @@ class RateLimitError(Exception):
 
     def __init__(self, response: requests.Response):
         self.response = response
+
+
+class CredentialError(ValueError):
+    """No credential can serve a call: no credentialMap entry matches, or no GitHub App installation is found.
+
+    The message names the repository (or owner) and never a credential or the map, so
+    the envelope tools return it as their failure message.
+    """
+
+
+class UnsafePathError(ValueError):
+    """A request path has a ``.``, ``..`` or empty segment, which could move it to another resource."""
+
+
+# What the guard splits a decoded path on: a slash, and a backslash, which some servers read as one.
+_PATH_SEPARATORS = re.compile(r'[/\\]')
+
+
+def _decoded_path(path: str) -> str:
+    """``path`` before its first raw ``?``, percent-decoded until decoding changes nothing.
+
+    Each decoding that changes the text shortens it, so the loop ends, and what it returns
+    holds no percent escape left to decode: ``%252F`` ends as ``/``, never as ``%2F``.
+    """
+    decoded = path.split('?', 1)[0]
+    while (step := unquote(decoded)) != decoded:
+        decoded = step
+    return decoded
+
+
+def _checked_path(path: str) -> str:
+    """Refuse a path with a ``.``, ``..`` or empty segment, plain or percent-encoded; return it as given.
+
+    The check decodes the path fully first and only then splits it, on ``/`` and ``\\``, so
+    an encoded slash cannot hide a dot segment inside one raw segment
+    (``x%2F..%2F..%2Fevil`` is refused). An empty segment between two separators (``a//b``,
+    ``x%2F%2Fy``) is refused too; the empty first segment of a path that starts with ``/``
+    and a trailing slash (a directory listing) are not. requests resolves dot segments
+    before sending and GitHub reads ``%2F`` as a slash, so a tool argument such as a file
+    path or a ref could otherwise take a request out of the repository whose credential it
+    carries. Git never names a file or a ref ``.`` or ``..`` and never has an empty path
+    part, so no valid GitHub path is refused, except a file whose name decodes to one
+    (``%2e%2e``). The request is sent with the path exactly as given.
+    """
+    segments = _PATH_SEPARATORS.split(_decoded_path(path))
+    if any(segment in ('.', '..') for segment in segments) or '' in segments[1:-1]:
+        raise UnsafePathError(
+            'Refused: the request path has a "." or ".." segment or an empty one, plain or percent-encoded, '
+            'which could move the request to another repository.'
+        )
+    return path
 
 
 def _rate_limit_hint(headers) -> str:
@@ -124,6 +177,7 @@ def _raise_github_error(resp: requests.Response) -> None:
 
 
 BASE_URL = 'https://api.github.com'
+_CALL_TRANSPORT_FAILURE = 'GitHub request failed before an answer arrived. Check connectivity and retry.'
 DEFAULT_TIMEOUT = 30
 
 # GitHub caps App JWT exp at 10 minutes; use 9m30s to leave clock-skew margin.
@@ -168,7 +222,8 @@ def mint_installation_token(app_id: str, private_key_pem: str, installation_id: 
     POSTs to ``/app/installations/{installation_id}/access_tokens`` authenticated
     with a freshly-signed App JWT. Returns ``(token, expiry_epoch_seconds)``.
     """
-    headers = _auth_headers(sign_app_jwt(app_id, private_key_pem))
+    jwt_token = sign_app_jwt(app_id, private_key_pem)
+    headers = _auth_headers(jwt_token)
     try:
         resp = requests.request(
             'POST',
@@ -180,7 +235,16 @@ def mint_installation_token(app_id: str, private_key_pem: str, installation_id: 
         raise ValueError(f'GitHub App token request failed: {exc}') from exc
 
     if not resp.ok:
-        _raise_github_error(resp)
+        try:
+            _raise_github_error(resp)
+        except GitHubAPIError as exc:
+            # The JWT exists only inside this call, so only this call can keep it out of
+            # the error, which reaches the agent through the legacy tools.
+            secrets = (jwt_token,)
+            message = redact_result(exc.message, secrets)
+            raise GitHubAPIError(
+                exc.status_code, message, headers=exc.headers, body=redact_result(exc.body, secrets)
+            ) from None
 
     try:
         data = resp.json()
@@ -200,6 +264,50 @@ def mint_installation_token(app_id: str, private_key_pem: str, installation_id: 
     return token, expiry
 
 
+def find_repo_installation(app_id: str, private_key_pem: str, repo: str) -> str:
+    """Return the ID of the App's installation on ``repo`` (``GET /repos/{repo}/installation``, App JWT).
+
+    ``repo`` must already be a valid ``owner/repo``. Raises ``CredentialError`` naming the
+    repository when the App is not installed there (404), GitHub refuses the JWT, the
+    answer is not an installation, or GitHub cannot be reached. The message never holds the
+    JWT or the response text.
+    """
+    jwt_token = sign_app_jwt(app_id, private_key_pem)
+    try:
+        resp = requests.request(
+            'GET',
+            BASE_URL + _checked_path(f'/repos/{repo}/installation'),
+            headers=_auth_headers(jwt_token),
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.RequestException:
+        raise CredentialError(f'Could not reach GitHub to find the GitHub App installation for {repo}.') from None
+    if resp.status_code == 404:
+        raise CredentialError(
+            f'The GitHub App is not installed on {repo}, its installation does not include that repository, '
+            'or the repository does not exist. Install the App on the repository, or check its name.'
+        )
+    if resp.status_code == 401:
+        raise CredentialError(
+            f'GitHub rejected the GitHub App credential (HTTP 401) while finding the installation for {repo}. '
+            'Check the App ID and private key.'
+        )
+    if not resp.ok:
+        raise CredentialError(
+            f'GitHub answered HTTP {resp.status_code} while finding the GitHub App installation for {repo}.'
+        )
+    try:
+        data = resp.json()
+    except ValueError:
+        data = None
+    installation_id = data.get('id') if isinstance(data, dict) else None
+    if isinstance(installation_id, bool) or not isinstance(installation_id, int) or installation_id <= 0:
+        raise CredentialError(
+            f'GitHub returned an unexpected answer while finding the GitHub App installation for {repo}.'
+        )
+    return str(installation_id)
+
+
 def call(
     token: str,
     method: str,
@@ -214,7 +322,16 @@ def call(
     Returns an empty dict for 204 No Content responses.
     """
     resp = _exchange(token, method, path, params=params, body=body)
-    return {} if resp.status_code == 204 else resp.json()
+    if resp.status_code == 204:
+        return {}
+    try:
+        return resp.json()
+    except ValueError:
+        if method.upper() in {'GET', 'HEAD'}:
+            raise
+    # A successful HTTP status with unreadable JSON cannot establish a write's
+    # outcome. Keep response text and exception context out of the error.
+    raise ValueError(_WRITE_TRANSPORT_FAILURE)
 
 
 def _exchange(
@@ -233,7 +350,7 @@ def _exchange(
     """
     headers = _auth_headers(token)
 
-    url = BASE_URL + path
+    url = BASE_URL + _checked_path(path)
 
     def _attempt() -> requests.Response:
         try:
@@ -245,8 +362,13 @@ def _exchange(
                 json=body,
                 timeout=DEFAULT_TIMEOUT,
             )
-        except requests.RequestException as exc:
-            raise ValueError(f'GitHub request failed: {exc}') from exc
+        except requests.RequestException:
+            resp = None
+        if resp is None:
+            # Fixed text, raised outside the handler: requests' own message can quote a
+            # header value, the token included, and it must not even be chained.
+            message = _CALL_TRANSPORT_FAILURE if method.upper() in {'GET', 'HEAD'} else _WRITE_TRANSPORT_FAILURE
+            raise ValueError(message)
 
         if not resp.ok:
             is_rate_limit = resp.status_code == 429 or (
@@ -310,9 +432,10 @@ def _exchange(
 
 
 # ---------------------------------------------------------------------------
-# Result envelope for the repository-read tools: status, data, rate-limit
-# counters and the next page, with HTTP errors returned as results and
-# credentials redacted. The pre-existing tools keep returning bare bodies.
+# Result envelope for the envelope tools (the repository reads, installation_repos,
+# graphql and the envelope writes): status, data, rate-limit counters and the next
+# page, with HTTP errors returned as results and credentials redacted. The
+# pre-existing tools keep returning bare bodies.
 # ---------------------------------------------------------------------------
 
 MAX_MESSAGE_LENGTH = 2000
@@ -387,31 +510,45 @@ def _error_detail(error) -> str:
     return detail if isinstance(detail, str) else str(error)
 
 
-def redact_result(value: Any, secrets: tuple[str, ...]) -> Any:
-    """Remove configured credentials from public read results, including errors."""
-    # Longest first, so a secret that contains another is replaced whole. Sorted once: a
-    # tree result can hold 100,000 entries with several strings each.
-    ordered = tuple(sorted((s for s in secrets if s), key=len, reverse=True))
-    if not ordered:
-        return value
+@functools.lru_cache(maxsize=32)
+def _secret_pattern(secrets: frozenset[str]) -> re.Pattern[str]:
+    """One compiled alternation of every secret, built once per secret set.
 
-    def redact(item: Any) -> Any:
+    Longest first, so a secret that contains another is replaced whole. The set grows
+    over a run (every minted installation token joins it), and a new set compiles once.
+    """
+    ordered = sorted(secrets, key=lambda secret: (-len(secret), secret))
+    return re.compile('|'.join(re.escape(secret) for secret in ordered))
+
+
+def redact_result(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Remove configured credentials from public read results, including errors.
+
+    Every string, dict key and list item is scanned once by one compiled pattern, so the
+    cost per string does not grow with the number of secrets: a tree walk result holds
+    up to a million entries, and a long run holds many minted tokens.
+    """
+    present = frozenset(secret for secret in secrets if secret)
+    if not present:
+        return value
+    substitute = functools.partial(_secret_pattern(present).sub, '[REDACTED]')
+
+    def scrub(item: Any) -> Any:
         if isinstance(item, str):
-            for secret in ordered:
-                item = item.replace(secret, '[REDACTED]')
-            return item
+            return substitute(item)
         if isinstance(item, dict):
-            return {redact(k): redact(v) for k, v in item.items()}
+            return {scrub(k): scrub(v) for k, v in item.items()}
         if isinstance(item, list):
-            return [redact(v) for v in item]
+            return [scrub(v) for v in item]
         return item
 
-    return redact(value)
+    return scrub(value)
 
 
 # ---------------------------------------------------------------------------
-# Rate-limit backoff for the envelope tools (get_result and graphql_result).
-# The legacy tools keep call()'s tenacity policy and its return shapes.
+# Rate-limit backoff for the envelope tools (request_result, which get_result and the
+# writes use, and graphql_result). The legacy tools keep call()'s tenacity policy and
+# their return shapes.
 # ---------------------------------------------------------------------------
 
 # 4 MiB: the issue's review query (40 pull requests with files, reviews, threads and checks)
@@ -439,6 +576,12 @@ Credential = str | Callable[[], str]
 
 class AuthenticationFailed(Exception):
     """A credential could not be minted for a retry; the result is the fixed authentication failure."""
+
+
+_WRITE_TRANSPORT_FAILURE = (
+    'GitHub request failed or returned invalid JSON, so the write may or may not have been applied. '
+    'Check its current state before you retry.'
+)
 
 
 @dataclass(frozen=True)
@@ -533,6 +676,7 @@ def request_with_backoff(
     exceeds the cap. Transport failures raise ``ValueError`` without the exception
     text, which may include the request URL, and are never retried.
     """
+    _checked_path(path)
     policy = retry or RetryPolicy()
     sleep = policy.sleep or time.sleep
     clock = policy.clock or time.time
@@ -622,7 +766,10 @@ def _retry_after(value, now: float) -> float | None:
 
 
 def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bool) -> bool:
-    """Whether a GraphQL HTTP 200 is a rate limit GitHub answered without running anything.
+    """Whether a query's GraphQL HTTP 200 is treated as a rate limit.
+
+    Mutation documents never enter this classifier: a path-less error and exhausted
+    quota do not prove that GitHub refused the write before executing it.
 
     Only an answer without ``data`` counts: one with partial data ran part of the
     document, so it is returned, never retried. It counts when it carries
@@ -732,18 +879,42 @@ def get_result(
     secrets: tuple[str, ...] = (),
     budget: CallBudget | None = None,
 ) -> dict:
-    """GET with the result envelope: HTTP errors become results and credentials are redacted.
+    """GET with the result envelope; see ``request_result``."""
+    return request_result(credential, 'GET', path, params=params, retry=retry, secrets=secrets, budget=budget)
+
+
+def request_result(
+    credential: Credential,
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+    retry: RetryPolicy | None = None,
+    secrets: tuple[str, ...] = (),
+    budget: CallBudget | None = None,
+) -> dict:
+    """Send a REST request with the result envelope: HTTP errors become results.
 
     Every token sent and ``secrets`` (the node's other credentials) are redacted from
-    the whole result, and from an error message before it is capped. Transport and
-    JSON failures have ``status: None`` and a fixed message, so exception text never
-    reaches a client. Rate limits back off within ``retry`` and ``budget`` (see
-    ``request_with_backoff``); an exhausted budget or retry count returns the
-    rate-limit answer with ``retry_after``.
+    GitHub's error message before it is capped at ``MAX_MESSAGE_LENGTH``, so a
+    credential cut by the cap cannot leave its prefix behind. The rest of the result is
+    redacted once, by the tool wrapper (``IInstance._redacting``), which every engine
+    call goes through. Transport and JSON failures have ``status: None`` and a fixed
+    message, so exception text never reaches a client. Rate limits back off within
+    ``retry`` and ``budget`` (see ``request_with_backoff``); an exhausted budget or
+    retry count returns the rate-limit answer with ``retry_after``.
+
+    The same rule makes this safe for writes: only a rate-limit answer is retried, and
+    GitHub sends one instead of processing the request. A timeout, a dropped connection,
+    a 5xx or any other answer is returned at once, since the write may have been
+    applied; for a write the transport message says so.
     """
     handed = Handed.of(credential)
     try:
-        resp, _content = request_with_backoff(handed, 'GET', path, params=params, retry=retry, budget=budget)
+        resp, _content = request_with_backoff(
+            handed, method, path, params=params, body=body, retry=retry, budget=budget
+        )
         if resp.status_code == 204:
             result = envelope(resp.status_code, resp.headers, {})
         elif not resp.ok:
@@ -751,17 +922,22 @@ def get_result(
         else:
             result = envelope(resp.status_code, resp.headers, resp.json())
     except GitHubAPIError as exc:
-        message = _error_message(exc.status_code, exc.body, (*handed.tokens, *secrets))
-        result = failure_result(message, exc.status_code, exc.headers)
+        # Every token sent and the node's secrets leave the message before its cap, so a
+        # credential the cap cuts leaves no prefix. The rest of the result is redacted
+        # once, by the tool wrapper.
+        hidden = (*handed.tokens, *secrets)
+        result = failure_result(_error_message(exc.status_code, exc.body, hidden), exc.status_code, exc.headers)
         if isinstance(exc.body, dict) and isinstance(exc.body.get('documentation_url'), str):
-            result['documentation_url'] = exc.body['documentation_url']
+            result['documentation_url'] = redact_result(exc.body['documentation_url'], hidden)
         if isinstance(exc, RateLimitExhausted):
             _with_retry_after(result, exc)
     except AuthenticationFailed:
         result = failure_result(AUTH_FAILURE)
+    except UnsafePathError as exc:
+        result = failure_result(str(exc))
     except (ValueError, requests.RequestException):
-        result = failure_result(_TRANSPORT_FAILURE)
-    return redact_result(result, (*handed.tokens, *secrets))
+        result = failure_result(_TRANSPORT_FAILURE if method.upper() == 'GET' else _WRITE_TRANSPORT_FAILURE)
+    return result
 
 
 def graphql_result(
@@ -773,6 +949,7 @@ def graphql_result(
     retry: RetryPolicy | None = None,
     max_bytes: int = DEFAULT_GRAPHQL_MAX_BYTES,
     secrets: tuple[str, ...] = (),
+    budget: CallBudget | None = None,
 ) -> dict:
     """POST a GraphQL document and return GitHub's ``data`` and ``errors`` in the envelope.
 
@@ -793,8 +970,19 @@ def graphql_result(
         payload['operationName'] = operation_name
     handed = Handed.of(credential)
     try:
+        # A mutation can finish with null data and a path-less execution error even
+        # when the rate-limit headers are exhausted. HTTP 200 is not proof that it
+        # never ran: only queries may retry those GraphQL error bodies. Explicit
+        # HTTP 403/429 rate-limit refusals still use the shared backoff for writes.
         resp, content = request_with_backoff(
-            handed, 'POST', '/graphql', body=payload, retry=retry, max_bytes=max_bytes, graphql=True
+            handed,
+            'POST',
+            '/graphql',
+            body=payload,
+            retry=retry,
+            max_bytes=max_bytes,
+            graphql=not may_write,
+            budget=budget,
         )
     except RateLimitExhausted as exc:
         error = _graphql_error(exc.status_code, exc.headers, exc.body, (*handed.tokens, *secrets))

@@ -160,7 +160,7 @@ class _Cfg:
         self.default_repo = default_repo
         self.read_only = read_only
 
-    def get_token(self):
+    def get_token(self, repo=None, owner=None):
         return self.token
 
 

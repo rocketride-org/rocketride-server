@@ -38,6 +38,13 @@ import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
+// Exact text the server sends when it receives an empty credential.
+const NO_AUTH_MESSAGE = 'No authorization provided';
+const NO_AUTH_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. ' +
+	'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. ' +
+	'RocketRide Cloud needs a key: run `rocketride login`.';
+
 // Global counter for generating unique client IDs
 let clientId = 0;
 
@@ -850,6 +857,9 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
+					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
+				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
 			}
 
@@ -1892,6 +1902,9 @@ export class RocketRideClient extends DAPClient {
 			if (!question) {
 				throw new Error('Question cannot be empty');
 			}
+
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
 
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
