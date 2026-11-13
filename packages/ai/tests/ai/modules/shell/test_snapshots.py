@@ -417,6 +417,46 @@ def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(
     assert 'Pricing plans' in after.text
 
 
+def test_a_shared_read_that_fails_after_its_waiters_left_still_backs_off(shell_root, monkeypatch, warned):
+    # Every crawler waiting on the read went away (disconnects); the read then
+    # fails. The read records the failure itself, so the next crawl within the
+    # backoff does not start another.
+    _seed()
+    _serve(_page())
+    path = snapshot_path(_page())
+    stats = []
+    clock = [1000.0]
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def failing_stat(stat_path):
+            stats.append(stat_path)
+            await release.wait()
+            raise StorageError('store down')
+
+        monkeypatch.setattr(pp, 'artifact_file_info', failing_stat)
+        waiters = [asyncio.create_task(pages._crawler_snapshot(_page())) for _ in range(2)]
+        await asyncio.sleep(0)
+        read = pages._snapshot_reads[path]
+        for waiter in waiters:
+            waiter.cancel()
+        await asyncio.gather(*waiters, return_exceptions=True)
+        release.set()
+        with pytest.raises(StorageError):
+            await read
+        [after] = await _crawl_at_once(1)
+        return after
+
+    after = asyncio.run(scenario())
+    assert SHELL_BODY in after.text and after.headers['cache-control'] == 'private, no-cache'
+    assert stats == [path]
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS
+    _crawl(_client())
+    assert stats == [path, path]
+
+
 def test_a_failing_path_is_not_read_again_within_the_backoff(shell_root, monkeypatch, warned):
     # While the store fails, crawlers cost one store call per path per backoff, not one per request.
     _seed()

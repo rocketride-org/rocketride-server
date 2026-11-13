@@ -349,7 +349,9 @@ _storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
 # read past _SNAPSHOT_READ_SECONDS included). For _STORAGE_BACKOFF_SECONDS
 # after it, crawlers get the shell document, uncached, without the store
 # being asked for that path: a failing store costs one read per path per
-# backoff, not one per crawler request.
+# backoff, not one per crawler request. The shared read records its own
+# failure, so it counts even when every request waiting on it has gone; a
+# request whose deadline passes records that.
 _STORAGE_BACKOFF_SECONDS = 30.0
 _STORAGE_FAILURES_MAX = 1024
 _storage_failures = _FifoCache(_STORAGE_FAILURES_MAX, _STORAGE_FAILURES_MAX)
@@ -436,11 +438,16 @@ async def _snapshot_bytes(path: str) -> bytes:
     try:
         return await asyncio.wait_for(asyncio.shield(read), _SNAPSHOT_READ_SECONDS)
     except asyncio.TimeoutError as exc:
+        _storage_failures.put(path, monotonic(), 1)
         raise StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s') from exc
 
 
 async def _stored_snapshot(path: str) -> bytes:
     """Read the snapshot at store ``path`` into the snapshot cache; a stat first, so one over the cap is never read.
+
+    The one read of ``path`` in flight (``_snapshot_reads``): a storage
+    failure starts the path's backoff here, whether or not any request is
+    still waiting on the read.
 
     Args:
         path: The snapshot's store path.
@@ -452,10 +459,14 @@ async def _stored_snapshot(path: str) -> bytes:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
         StorageError: a storage failure (``StorageNotFoundError`` included).
     """
-    size = (await public_pages.artifact_file_info(path))['size']
-    if size > MAX_SNAPSHOT_BYTES:
-        raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
-    raw = await public_pages.read_artifact_file(path)
+    try:
+        size = (await public_pages.artifact_file_info(path))['size']
+        if size > MAX_SNAPSHOT_BYTES:
+            raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
+        raw = await public_pages.read_artifact_file(path)
+    except StorageError:
+        _storage_failures.put(path, monotonic(), 1)
+        raise
     _snapshot_cache.put(path, raw, len(raw))
     return raw
 
@@ -507,7 +518,6 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
         _warn_fallback(page, exc)
         return None, True
     except StorageError as exc:
-        _storage_failures.put(path, monotonic(), 1)
         if _storage_warning_due(path):
             _warn_fallback(page, exc)
         return None, False
