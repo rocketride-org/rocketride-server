@@ -122,5 +122,4 @@ def robots_groups(rule: str) -> str:
     Returns:
         The groups, each ``User-agent: <token>``, the rule and a blank line.
     """
-    tokens = list(dict.fromkeys(CRAWLERS))
-    return ''.join(f'User-agent: {token}\n{rule}\n\n' for token in tokens + ['*'])
+    return ''.join(f'User-agent: {token}\n{rule}\n\n' for token in list(CRAWLERS) + ['*'])

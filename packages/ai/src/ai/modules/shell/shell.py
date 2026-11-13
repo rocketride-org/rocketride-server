@@ -787,7 +787,10 @@ async def llms_txt(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     site = current().site or {}
-    lines = [f'# {_md(site.get("title", "")) or urlsplit(base_url).netloc}', '']
+    heading = _md(site.get('title', ''))
+    if not heading:
+        heading = urlsplit(base_url).netloc
+    lines = [f'# {heading}', '']
     if site.get('blurb'):
         lines += [f'> {_md(site["blurb"])}', '']
     lines += ['## Pages', '']
