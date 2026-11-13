@@ -121,3 +121,19 @@ def test_the_six_tools_against_a_live_site(created):
     bad = _node()
     bad.IGlobal.auth = bad.IGlobal.auth._replace(api_token='not-a-token')
     assert '401' in bad.jira_check_connection({})['error']
+
+
+def test_search_pages_past_100_issues():
+    """Needs a project holding more than 100 issues; each page carries full issues, never bare ids."""
+    node = _node()
+    jql = f'project = {os.environ["ROCKETRIDE_JIRA_PROJECT"].upper()} ORDER BY created ASC'
+    first = node.jira_search({'jql': jql, 'max_results': 100})
+    assert first['success'], first
+    if not first['next_page_token']:
+        pytest.skip('the project holds 100 issues or fewer')
+    assert len(first['issues']) == 100
+    second = node.jira_search({'jql': jql, 'max_results': 100, 'next_page_token': first['next_page_token']})
+    assert second['success'] and second['issues'], second
+    keys = [i['key'] for i in first['issues'] + second['issues']]
+    assert len(keys) == len(set(keys)) > 100
+    assert all(i['summary'] and i['status'] and i['url'] for i in first['issues'] + second['issues'])
