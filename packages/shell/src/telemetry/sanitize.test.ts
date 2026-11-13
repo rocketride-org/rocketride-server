@@ -396,8 +396,25 @@ test('reduceStoredProps: a nested object inside a stored property bag is reduced
 });
 
 test('sanitizeEvent: a URL in a free-form property is reduced whatever its key', () => {
-	const out = sanitizeEvent({ event: 'app:action', properties: { url: 'https://cloud.rocketride.ai/cb?code=secret&utm_source=s', next: '/account?code=secret', target: 'https://x.test/#token=secret', label: 'Ready?', count: 3, $referrer: 'https://g.test' } } as CaptureLike)!;
-	assert.deepEqual(out.properties, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', next: '/account', target: 'https://x.test/', label: 'Ready?', count: 3, $referrer: 'https://g.test' });
+	const out = sanitizeEvent({ event: 'app:action', properties: { url: 'https://cloud.rocketride.ai/cb?code=secret&utm_source=s', next: '/account?code=secret', back: 'account?code=secret&utm_source=s', target: 'https://x.test/#token=secret', label: 'Ready?', count: 3, $referrer: 'https://g.test' } } as CaptureLike)!;
+	assert.deepEqual(out.properties, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', next: '/account', back: 'account?utm_source=s', target: 'https://x.test/', label: 'Ready?', count: 3, $referrer: 'https://g.test' });
+});
+
+test('sanitizeEvent: a URL nested inside a free-form property object or array is reduced, and an object nested too deep is removed', () => {
+	const out = sanitizeEvent({
+		event: 'app:action',
+		properties: {
+			detail: { callback: 'https://x.test/?code=secret', next: 'account?code=secret', links: ['https://y.test/p?token=secret', 'plain'], fbclid: 'x' },
+			deep: { l1: { l2: { l3: { l4: { url: 'https://z.test/?code=four&utm_source=s', l5: { url: 'https://z.test/?code=five' } } } } } },
+		},
+	} as CaptureLike)!;
+	const text = JSON.stringify(out);
+	assert.equal(text.includes('secret'), false, 'no nested raw query leaves the browser');
+	assert.equal(text.includes('code=five'), false, 'the object past the cap is removed');
+	assert.deepEqual((out.properties as Record<string, unknown>).detail, { callback: 'https://x.test/', next: 'account', links: ['https://y.test/p', 'plain'] });
+	const deep = (out.properties as Record<string, { l1: { l2: { l3: { l4: Record<string, unknown> } } } }>).deep;
+	assert.equal(deep.l1.l2.l3.l4.url, 'https://z.test/?utm_source=s', 'within the cap a URL is reduced as at the top level');
+	assert.equal('l5' in deep.l1.l2.l3.l4, false);
 });
 
 test('maskReplayAttribute: an unrooted relative address with a parameter is reduced; plain text with a question mark is not', () => {

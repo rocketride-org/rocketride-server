@@ -350,7 +350,11 @@ export function nextPlacement(input: PlacementInput): PlacementDecision {
 function stillClear(placement: Placement, input: PlacementInput): boolean {
 	const { view, obstacles, height } = input;
 	if (placement.variant === 'phone') {
-		return !coversAny(barRect(view, placement.bottom, height), obstacles.all);
+		const bar = barRect(view, placement.bottom, height);
+		if (bar.top < 0 || bar.bottom > view.height) {
+			return false;
+		}
+		return !coversAny(bar, obstacles.all);
 	}
 	const rect = toastRect(view, placement.side, placement.width, height);
 	if (rect.left < 0 || rect.right > view.width) {

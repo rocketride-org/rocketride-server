@@ -169,7 +169,8 @@ function looksLikeRelativeAddress(value: string): boolean {
 
 /**
  * A string property value that is an address, reduced: an absolute one keeps only utm_* (sanitizeUrl), a
- * protocol-relative or rooted relative one is reduced like an element's address (reduceHref).
+ * protocol-relative, rooted relative or unrooted relative one ("account?code=...") is reduced like an
+ * element's address (reduceHref).
  *
  * @param value - The property value.
  * @returns The reduced address, or null when the value is not an address.
@@ -178,7 +179,7 @@ function reducePropertyAddress(value: string): string | null {
 	if (/^\s*https?:\/\//i.test(value)) {
 		return sanitizeUrl(value.trim());
 	}
-	if (looksLikeAddress(value)) {
+	if (looksLikeAddress(value) || looksLikeRelativeAddress(value)) {
 		return reduceHref(value);
 	}
 	return null;
@@ -315,7 +316,10 @@ function isClickIdKey(key: string): boolean {
 	return false;
 }
 
-function scrub(bag: Record<string, unknown>): void {
+/** How deep a nested object inside an event property is walked; one nested deeper is removed. */
+const NESTED_MAX_DEPTH = 4;
+
+function scrub(bag: Record<string, unknown>, depth = 0): void {
 	for (const key of Object.keys(bag)) {
 		const value = bag[key];
 		if (isClickIdKey(key)) { delete bag[key]; continue; }
@@ -325,12 +329,19 @@ function scrub(bag: Record<string, unknown>): void {
 		if (key.endsWith('_url') && typeof value === 'string') { bag[key] = sanitizeUrl(value); continue; }
 		if (key.endsWith('referrer') && typeof value === 'string') { bag[key] = referrerOrigin(value); continue; }
 		// Any other property holding an address, whatever its key: an app's reporter takes free-form properties,
-		// so `{ url: 'https://.../cb?code=...' }` must lose its query like `$current_url` does.
-		if (typeof value === 'string') {
+		// so `{ url: 'https://.../cb?code=...' }` must lose its query like `$current_url` does. The clicked
+		// element's chain is a string with its own grammar (`attr__href="/cb?code=..."nth-child="1"`), reduced
+		// value by value in scrubElementsChain, never as one address.
+		if (typeof value === 'string' && key !== '$elements_chain') {
 			const address = reducePropertyAddress(value);
 			if (address !== null) { bag[key] = address; continue; }
 		}
-		if ((key === '$set' || key === '$set_once') && value && typeof value === 'object') scrub(value as Record<string, unknown>);
+		// A nested object or array (an app's free-form `detail`, the SDK's `$set`/`$set_once`) is reduced by the
+		// same rules one level down; one nested past NESTED_MAX_DEPTH is removed, never sent unreduced.
+		if (value && typeof value === 'object') {
+			if (depth > NESTED_MAX_DEPTH) { delete bag[key]; continue; }
+			scrub(value as Record<string, unknown>, depth + 1);
+		}
 	}
 }
 
@@ -533,8 +544,6 @@ export interface CaptureLike {
 	$set_once?: Record<string, unknown>;
 }
 
-/** How deep scrubNestedUrls walks; an object nested deeper is removed, never sent unread. */
-const NESTED_MAX_DEPTH = 4;
 
 /**
  * Web vitals carry nested objects (`$web_vitals_LCP_event` and the like) whose

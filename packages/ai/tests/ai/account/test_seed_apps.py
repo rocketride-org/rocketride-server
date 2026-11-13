@@ -83,11 +83,11 @@ class _Registry:
     async def publish_get(self, org_id, kind, app_id, audience):
         return None if self.public is None else {'version': self.public, 'state': self.state}
 
-    async def publish_set(self, org_id, kind, app_id, audience, version, snapshot, actor):
-        # Like the real backend: (re)binding always writes the row 'enabled'.
-        self.bindings.append(version)
+    async def publish_set(self, org_id, kind, app_id, audience, version, snapshot, actor, state='enabled'):
+        # Like the real backend: (re)binding lands the row in `state`, 'enabled' unless told otherwise.
+        self.bindings.append((version, state))
         self.public = version
-        self.state = 'enabled'
+        self.state = state
         return {}
 
     async def publish_set_state(self, org_id, kind, app_id, audience, state, actor):
@@ -211,7 +211,7 @@ async def test_a_self_healed_seed_row_records_its_bundle_digest(static_apps, mon
     assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR) is True
     assert registry.build_stamps[-1]['status'] == 'ok'
     assert registry.build_stamps[-1]['bundleSha256'] == bundle_digest(APP_ID)
-    assert registry.bindings == [1]
+    assert registry.bindings == [(1, 'enabled')]
 
 
 # =============================================================================
@@ -328,7 +328,7 @@ async def test_a_forced_reseed_keeps_a_disabled_binding_disabled(copies_bundle):
     registry = _Registry([_seed_row('0' * 64)], public=1, state='disabled')
 
     assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, force=True) is True
-    assert registry.bindings == [2]
+    assert registry.bindings == [(2, 'disabled')]
     assert registry.public == 2
     assert registry.state == 'disabled'
 
@@ -338,7 +338,7 @@ async def test_a_changed_bundle_reseed_keeps_a_disabled_binding_disabled(copies_
     registry = _Registry([_seed_row('0' * 64)], public=1, state='disabled')
 
     assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, reseed_changed=True) is True
-    assert registry.bindings == [2]
+    assert registry.bindings == [(2, 'disabled')]
     assert registry.state == 'disabled'
 
 
@@ -347,7 +347,7 @@ async def test_a_forced_reseed_leaves_an_enabled_binding_enabled(copies_bundle):
     registry = _Registry([_seed_row('0' * 64)], public=1)
 
     assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, force=True) is True
-    assert registry.bindings == [2]
+    assert registry.bindings == [(2, 'enabled')]
     assert registry.state == 'enabled'
     assert registry.state_flips == []
 

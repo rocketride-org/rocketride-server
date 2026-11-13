@@ -576,14 +576,15 @@ async def seed_manifest_app(
         # (public AND any team/user pins) to this fresh version in one pass.
         await repoint_latest(app_id, old_latest, version, snapshot)
     else:
-        # publish_set always writes the binding 'enabled', so a reseed would
-        # silently re-enable a built-in the admin disabled. Remember the prior
-        # state and put 'disabled' back after repointing (the new version is
-        # still bound, so re-enabling later serves the current build).
+        # publish_set writes the binding 'enabled' unless told otherwise, so a
+        # reseed would silently re-enable a built-in the admin disabled. The
+        # prior state rides INTO the binding write: one row update, no window
+        # in which a disabled app serves, and nothing left to repair when the
+        # process dies between two writes (the new version is still bound, so
+        # re-enabling later serves the current build).
         prior = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE) if old_latest is not None else None
-        await account.publish_set(org_id, 'app', app_id, PUBLIC_AUDIENCE, version, snapshot, actor)
-        if prior is not None and prior.get('state') == 'disabled':
-            await account.publish_set_state(org_id, 'app', app_id, PUBLIC_AUDIENCE, 'disabled', actor)
+        state = 'disabled' if prior is not None and prior.get('state') == 'disabled' else 'enabled'
+        await account.publish_set(org_id, 'app', app_id, PUBLIC_AUDIENCE, version, snapshot, actor, state=state)
     return True
 
 

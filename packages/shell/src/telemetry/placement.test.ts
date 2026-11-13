@@ -135,6 +135,10 @@ test('nextPlacement, first placement: no clear spot waits (null); after a resize
 	const tall = r(0, 450, 390, 844);
 	const raisedBar: Placement = { variant: 'phone', bottom: 500 };
 	assert.equal(nextPlacement(input({ view: PHONE, height: 100, obstacles: { all: [tall], always: [] }, current: raisedBar, isSameView: false })), 'keep');
+	// the same raised bar in a viewport too short to show it (its rectangle is above the top edge) is hidden,
+	// never kept offscreen where its consent controls could not be reached
+	const short = { width: 390, height: 400 };
+	assert.equal(nextPlacement(input({ view: short, height: 100, obstacles: { all: [r(0, 200, 390, 400)], always: [] }, current: raisedBar, isSameView: false })), null);
 });
 
 test('nextPlacement: a desktop toast that becomes a phone viewport with no clear bar spot is hidden, never kept as a toast', () => {

@@ -40,6 +40,7 @@
 // =============================================================================
 
 import type { CaptureOptions, PostHog } from 'posthog-js';
+import { sanitizeEvent } from './sanitize';
 
 /** The posthog-js calls the queue drives; a posthog-js instance satisfies it as is. */
 export type SdkLike = Pick<PostHog, 'capture' | 'register'>;
@@ -204,7 +205,15 @@ export class SdkQueue {
 		if (this.state === 'failed' || this.pending.length >= MAX_PENDING) {
 			return;
 		}
-		const stamped = { ...this.superProps, ...props };
+		// Reduced HERE, before anything is held: the mirror below lands in storage at once, and the
+		// transport's before_send runs only when the SDK captures the event later (or never, when its
+		// chunk does not load), so a callback URL in an app's properties must not wait for it. Fails
+		// closed like before_send: an event that cannot be reduced is not held.
+		const reduced = sanitizeEvent({ event, properties: { ...this.superProps, ...props } });
+		if (!reduced || !reduced.properties) {
+			return;
+		}
+		const stamped = reduced.properties;
 		// One uuid for both representations: the replay below and a next load's drain of the mirror
 		// send the same event uuid, so PostHog dedupes a capture whose mirror was never cleared.
 		const id = newEventUuid();

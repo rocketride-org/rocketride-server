@@ -796,18 +796,23 @@ class FileDeploymentBackend:
         version: int,
         snapshot: Dict[str, Any],
         actor: Dict[str, Any],
+        state: str = 'enabled',
     ) -> Dict[str, Any]:
         """Create or repoint one audience's binding (upsert-in-place).
 
-        The binding is a pure pointer born 'enabled' — the REVIEW state lives
-        on the deployment, not here (the caller has already gated the audience
+        The binding is a pure pointer — the REVIEW state lives on the
+        deployment, not here (the caller has already gated the audience
         against the deployment's state). Repointing updates the target version
-        + manifest snapshot and re-enables the binding.
+        + manifest snapshot and lands the binding in `state`: 'enabled' by
+        default (a repoint re-enables), or 'disabled' when the caller carries a
+        prior disabled state through the bump in the same write (the reseed).
         """
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
         if kind != 'app':
             raise ValueError(f'publish_set: unsupported kind {kind!r}')
+        if state not in ('enabled', 'disabled'):
+            raise ValueError(f'publish_set: unsupported state {state!r}')
         who = _actor_record(actor)
         key = self._audience_key(audience)
 
@@ -820,7 +825,7 @@ class FileDeploymentBackend:
             now = time.time()
             row = {
                 'version': version,
-                'state': 'enabled',
+                'state': state,
                 'snapshot': dict(snapshot or {}),
                 'createdAt': existing.get('createdAt', now),
                 'createdBy': existing.get('createdBy', who),

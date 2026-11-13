@@ -246,6 +246,18 @@ test('a capture is mirrored AT ENQUEUE: a torn-down page leaves it in storage fo
 	assert.equal((JSON.parse(raw as string) as unknown[]).length, 1);
 });
 
+test('a capture held before the start is reduced before it is mirrored: no raw callback query reaches storage', () => {
+	const storage = memoryStorage();
+	const first = heldHarness(storage, () => 1_000_000);
+	first.queue.capture('app:action', { url: 'https://cloud.rocketride.ai/cb?code=secret&utm_source=s', detail: { next: 'account?code=secret' } });
+	const raw = storage.getItem(HOLD_STORAGE_KEY) as string;
+	assert.equal(raw.includes('secret'), false, 'the mirror holds the reduced properties only');
+	assert.ok(raw.includes('utm_source=s'), 'the utm parameters survive the reduction');
+	first.queue.start();
+	const replayed = captures(first.calls).find((c) => c.event === 'app:action');
+	assert.deepEqual(replayed?.props, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', detail: { next: 'account' } });
+});
+
 test('the next page load drains the inherited hold with original timestamps and the fact id as uuid, then clears it', () => {
 	const storage = memoryStorage();
 	const first = heldHarness(storage, () => 1_000_000);
