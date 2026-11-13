@@ -258,6 +258,21 @@ test('a capture held before the start is reduced before it is mirrored: no raw c
 	assert.deepEqual(replayed?.props, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', detail: { next: 'account' } });
 });
 
+test('a held capture owns its properties: the caller’s objects are not mutated and cannot change the hold afterwards', () => {
+	const storage = memoryStorage();
+	const first = heldHarness(storage, () => 1_000_000);
+	const detail: Record<string, unknown> = { next: 'account?code=first', page: new URL('https://x.test/?code=url') };
+	first.queue.capture('app:action', { detail });
+	assert.equal(detail.next, 'account?code=first', 'the reduction does not reach into the caller’s object');
+	detail.next = 'account?code=second';
+	first.queue.capture('cta:click', { intent: 'register' });
+	const raw = storage.getItem(HOLD_STORAGE_KEY) as string;
+	assert.equal(raw.includes('code='), false, 'neither the first value, the later mutation nor the URL instance reaches storage raw');
+	first.queue.start();
+	const replayed = captures(first.calls).find((c) => c.event === 'app:action');
+	assert.deepEqual(replayed?.props, { detail: { next: 'account', page: 'https://x.test/' } });
+});
+
 test('the next page load drains the inherited hold with original timestamps and the fact id as uuid, then clears it', () => {
 	const storage = memoryStorage();
 	const first = heldHarness(storage, () => 1_000_000);

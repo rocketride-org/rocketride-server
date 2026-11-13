@@ -400,6 +400,13 @@ test('sanitizeEvent: a URL in a free-form property is reduced whatever its key',
 	assert.deepEqual(out.properties, { url: 'https://cloud.rocketride.ai/cb?utm_source=s', next: '/account', back: 'account?utm_source=s', target: 'https://x.test/', label: 'Ready?', count: 3, $referrer: 'https://g.test' });
 });
 
+test('sanitizeEvent: an object with custom serialization is reduced as what it serializes to', () => {
+	// A URL instance has no enumerable address field, but JSON.stringify sends its toJSON(): the full address
+	const out = sanitizeEvent({ event: 'app:action', properties: { detail: new URL('https://x.test/cb?code=secret&utm_source=s'), when: new Date(0), nested: { page: new URL('https://y.test/?token=secret') } } } as CaptureLike)!;
+	assert.equal(JSON.stringify(out).includes('secret'), false);
+	assert.deepEqual(out.properties, { detail: 'https://x.test/cb?utm_source=s', when: '1970-01-01T00:00:00.000Z', nested: { page: 'https://y.test/' } });
+});
+
 test('sanitizeEvent: a URL nested inside a free-form property object or array is reduced, and an object nested too deep is removed', () => {
 	const out = sanitizeEvent({
 		event: 'app:action',

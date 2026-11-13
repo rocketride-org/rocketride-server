@@ -321,8 +321,14 @@ const NESTED_MAX_DEPTH = 4;
 
 function scrub(bag: Record<string, unknown>, depth = 0): void {
 	for (const key of Object.keys(bag)) {
-		const value = bag[key];
+		let value = bag[key];
 		if (isClickIdKey(key)) { delete bag[key]; continue; }
+		// An object with custom serialization (a URL instance, a Date) is sent as what its toJSON() returns,
+		// never as its enumerable fields, so that representation is what gets reduced.
+		if (value && typeof value === 'object' && typeof (value as { toJSON?: unknown }).toJSON === 'function') {
+			value = (value as { toJSON: () => unknown }).toJSON();
+			bag[key] = value;
+		}
 		// Every `*_url` property of every event, cookieless ones included, keeps only its utm_* parameters:
 		// `$current_url`, `$initial_current_url`, and the session-entry properties a persistent
 		// instance adds to every event, `$session_entry_url` and `$session_entry_referrer`.

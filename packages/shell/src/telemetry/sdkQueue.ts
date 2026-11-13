@@ -142,6 +142,23 @@ function defaultStorage(): HoldStorage | null {
 }
 
 /** Holds captures and super properties until the SDK starts, then hands everything to it. */
+/**
+ * The properties as JSON serialization would send them, owned by the queue: nested objects copied, custom
+ * serialization (a URL, a Date) applied, functions and undefined dropped. Null when they cannot be
+ * serialized (a cycle), which the caller treats as "do not hold".
+ *
+ * @param props - The caller's properties.
+ * @returns An owned copy, or null.
+ */
+function ownedSnapshot(props: Record<string, unknown>): Record<string, unknown> | null {
+try {
+	const copy: unknown = JSON.parse(JSON.stringify(props));
+	return copy && typeof copy === 'object' && !Array.isArray(copy) ? (copy as Record<string, unknown>) : null;
+} catch {
+	return null;
+}
+}
+
 export class SdkQueue {
 	private readonly deps: SdkQueueDeps;
 	private readonly pending: Pending[] = [];
@@ -205,11 +222,14 @@ export class SdkQueue {
 		if (this.state === 'failed' || this.pending.length >= MAX_PENDING) {
 			return;
 		}
-		// Reduced HERE, before anything is held: the mirror below lands in storage at once, and the
-		// transport's before_send runs only when the SDK captures the event later (or never, when its
-		// chunk does not load), so a callback URL in an app's properties must not wait for it. Fails
-		// closed like before_send: an event that cannot be reduced is not held.
-		const reduced = sanitizeEvent({ event, properties: { ...this.superProps, ...props } });
+		// An OWNED snapshot, then reduced HERE, before anything is held: the mirror below lands in
+		// storage at once, and the transport's before_send runs only when the SDK captures the event
+		// later (or never, when its chunk does not load), so a callback URL in an app's properties
+		// must not wait for it. The snapshot is what JSON serialization would send (a URL instance
+		// becomes its address, nested objects are copied), so the caller's own objects are neither
+		// mutated by the reduction nor able to change the held event afterwards. Fails closed like
+		// before_send: an event that cannot be serialized or reduced is not held.
+		const reduced = sanitizeEvent({ event, properties: ownedSnapshot({ ...this.superProps, ...props }) });
 		if (!reduced || !reduced.properties) {
 			return;
 		}
