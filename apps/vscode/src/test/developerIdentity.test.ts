@@ -278,7 +278,7 @@ test('register: a failed claim still refreshes every wizard', async () => {
 	assert.equal(pushed?.source, 'organization');
 });
 
-// ── P18: the newest identity always wins ───────────────────────────────────
+// ── The newest identity always wins ───────────────────────────────────
 
 test('identity feed: a slower older refresh never overwrites a newer one', async () => {
 	const builds: ((i: NewAppIdentity) => void)[] = [];
@@ -318,7 +318,7 @@ test('identity feed: a pull does not suppress an in-flight push', async () => {
 	assert.ok((pulled.revision ?? 0) > (pushed.revision ?? 0), 'the pulling wizard keeps its newer revision');
 });
 
-// ── P6 / P7: what the form shows is what Create does; failures stay diagnosable ─
+// ── What the form shows is what Create does; failures stay diagnosable ─
 
 /** Every lookup outcome, each with a fresh identity in that state. */
 async function outcomes(): Promise<[string, DeveloperIdentity][]> {

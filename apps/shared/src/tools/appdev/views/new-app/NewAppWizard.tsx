@@ -135,7 +135,10 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 	/** Shows `next` unless an identity at least as new is already shown. */
 	const applyIdentity = useCallback((next: NewAppIdentity) => {
 		setIdentity((current) => {
-			return isNewerIdentity(current, next) ? next : current;
+			if (isNewerIdentity(current, next)) {
+				return next;
+			}
+			return current;
 		});
 	}, []);
 

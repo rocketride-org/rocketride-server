@@ -42,11 +42,11 @@ interface IAppDevOpsDeps {
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
-	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
 	/** Logs an appdev failure to the RocketRide output channel. */
 	const logError = (message: string): void => {
 		getLogger().error(`[appdev] ${message}`);
 	};
+	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
 	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, logError);
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
