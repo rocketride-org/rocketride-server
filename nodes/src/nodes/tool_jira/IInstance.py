@@ -47,7 +47,7 @@ from .IGlobal import IGlobal
 
 _ERROR_SCHEMA = {'error': {'type': 'string'}}
 _ISSUE_KEY = re.compile(r'^[A-Z][A-Z0-9_]+-[1-9][0-9]*$')
-SEARCH_FIELDS = ['summary', 'status', 'issuetype', 'assignee', 'priority', 'updated']
+SEARCH_FIELDS = ['summary', 'status', 'issuetype', 'assignee', 'priority', 'updated', 'project']
 ISSUE_FIELDS = [
     'summary',
     'status',
@@ -217,9 +217,16 @@ class IInstance(IInstanceBase):
             if args.get('next_page_token'):
                 body['nextPageToken'] = str(args['next_page_token'])
             resp = self._request('POST', '/search/jql', json_body=body, read=True)
+            allowed = set(self.IGlobal.projects)
             issues = []
             for issue in resp.get('issues') or []:
                 f = issue.get('fields') or {}
+                # the wrapped JQL should already keep results inside the allowlist; a query that slipped past it
+                # through some JQL quirk is refused rather than returned
+                if allowed and str((f.get('project') or {}).get('key') or '').upper() not in allowed:
+                    raise jira_client.JiraAPIError(
+                        0, ['the search returned issues outside the project allowlist; rewrite the JQL']
+                    )
                 issues.append(
                     {
                         'key': issue.get('key'),
