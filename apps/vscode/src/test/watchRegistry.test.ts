@@ -30,7 +30,17 @@ import { WatchRegistry, pageOf } from '../providers/toolhost/watchRegistry';
 function harness(): { registry: WatchRegistry; disposed: string[]; watch: (sub: string) => void } {
 	const registry = new WatchRegistry();
 	const disposed: string[] = [];
-	const watch = (sub: string): void => registry.add(sub, () => [{ dispose: () => disposed.push(sub) }]);
+	const watch = (sub: string): void => {
+		registry.add(sub, () => {
+			return [
+				{
+					dispose: () => {
+						disposed.push(sub);
+					},
+				},
+			];
+		});
+	};
 	return { registry, disposed, watch };
 }
 
@@ -51,15 +61,25 @@ test("(a) new page's watch before view:ready: the new watcher survives, the old 
 	assert.deepEqual(disposed, ['fs-old-1']);
 });
 
-test('(b) view:ready before any new watch: the old page survives one boot and retires on the next', () => {
+test('(b) view:ready before any new watch: the new page\'s first watch retires the old page', () => {
 	const { registry, disposed, watch } = harness();
 	watch('fs-old-1');
 	registry.resetForPageBoot(); // the new page has not watched yet
-	assert.deepEqual(registry.keys(), ['fs-old-1']);
-	watch('fs-new-1');
-	registry.resetForPageBoot(); // the next boot retires it
+	assert.deepEqual(registry.keys(), ['fs-old-1'], 'nothing newer to keep yet');
+	watch('fs-new-1'); // its first watch retires the old page at once
 	assert.deepEqual(registry.keys(), ['fs-new-1']);
 	assert.deepEqual(disposed, ['fs-old-1']);
+});
+
+test('a page that watches again after all its watchers were removed is not a new boot', () => {
+	const { registry, disposed, watch } = harness();
+	watch('fs-old-1');
+	watch('fs-new-1');
+	registry.remove('fs-old-1'); // the old page has no live watchers left...
+	watch('fs-old-2'); // ...and then watches again: still the older page
+	registry.resetForPageBoot();
+	assert.deepEqual(registry.keys(), ['fs-new-1']);
+	assert.deepEqual(disposed.sort(), ['fs-old-1', 'fs-old-2']);
 });
 
 test("a page's later watches keep it the newest page", () => {
