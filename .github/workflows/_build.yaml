@@ -326,6 +326,9 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false && inputs.test
+        # A hung step fails here, before the job's 90-minute limit cancels the job,
+        # so the log and artifact steps below still run.
+        timeout-minutes: 45
         # Integration tests boot a local server on :5565 and connect a test
         # client. Both sides need the same shared secret to authenticate;
         # without ROCKETRIDE_APIKEY the server raises AuthenticationException
@@ -351,6 +354,10 @@ jobs:
           # test time. On Windows a hardlink over an already-loaded native .pyd
           # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.
           UV_LINK_MODE: copy
+          # On Windows every pytest process watches its current-directory handle
+          # (scripts/lib/cwdprobe.js) and writes a report here when the handle is
+          # closed. Diagnostic for #3046; uploaded below.
+          ROCKETRIDE_TEST_CWD_PROBE: ${{ github.workspace }}/dist/server/test-logs/cwd-probe
         run: ${{ matrix.builder_cmd }} ${{ inputs.test_targets }} --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
       # rocketride_graph applies different Cypher rules on AGE 1.5.0 and 1.6.0,
@@ -378,6 +385,18 @@ jobs:
             echo "::$stop::"
             echo "::endgroup::"
           done
+
+      # armed_<pid>.txt shows that the probe ran in a pytest process;
+      # cwd_probe_*.txt is a report of a closed current-directory handle (#3046).
+      # A handle can close while every test still passes, so passing runs upload too.
+      - name: Upload cwd handle probe reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cwd-probe-${{ matrix.platform }}-${{ github.run_attempt }}
+          retention-days: 3
+          path: ${{ github.workspace }}/dist/server/test-logs/cwd-probe/
+          if-no-files-found: ignore
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'

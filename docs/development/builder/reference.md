@@ -130,6 +130,8 @@ only.
 | `dist/vscode/` | VSCode extension (.vsix) |
 | `dist/examples/` | Example applications |
 
+**Current-directory handle probe (diagnostic).** With `ROCKETRIDE_TEST_CWD_PROBE=<dir>` set on Windows, every pytest run the builder starts (`scripts/lib/pytest.js`) installs `scripts/lib/rr_test_cwd_probe.py` and a `pytest11` entry point into the engine's `site-packages`, and removes them when the run has ended. Each pytest process, xdist workers included, then reads the identity of one old, stable file of its current directory twice, through its relative name and through its absolute path, with a handle that asks only for attribute access and shares read, write and delete, so it cannot block a test that deletes or renames the file. When the handle is closed, opening a file by a relative path fails with `Bad file descriptor` (issue #3046); the probe then writes one `cwd_probe_<time>_<pid>.txt` into `<dir>` with the test that was running, all thread stacks and the loaded DLLs, and stops checking in that process. It never queries or changes the handle. `armed_<pid>.txt` shows that the probe ran. CI sets `<dir>` to `dist/server/test-logs/cwd-probe` and uploads it as the artifact `cwd-probe-<platform>-<run attempt>`. With the variable unset nothing is installed.
+
 ---
 
 ## CLI Usage
