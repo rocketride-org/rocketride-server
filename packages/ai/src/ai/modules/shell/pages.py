@@ -45,8 +45,8 @@ capture when the shell build carries one, else ``index.html``) with the
 page's head metadata injected (title, description, canonical URL, robots),
 for people and crawlers alike, so the shell boots and routes as before.
 
-Rendered responses are cached per path under a byte budget and dropped on
-every aggregate swap.
+Rendered responses are cached per (path, UA class) under a byte budget and
+dropped on every aggregate swap.
 """
 
 import asyncio
@@ -64,6 +64,7 @@ from rocketlib import error
 
 from . import public_pages
 from .contract import Page, reserved_error, with_slash_twin
+from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
@@ -275,9 +276,9 @@ class _FifoCache:
             self.total -= hit[1]
 
 
-# Rendered page responses: (path, shell document, its mtime and size,
+# Rendered page responses: (path, UA class, shell document, its mtime and size,
 # RR_APP_URL) -> (body bytes, headers). Cleared on every aggregate swap, so
-# the shell file is read and rewritten once per page and build.
+# the shell file is read and rewritten once per page, UA class and build.
 _RENDER_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _RENDER_CACHE_MAX = 4096
 _render_cache = _FifoCache(_RENDER_CACHE_MAX_BYTES, _RENDER_CACHE_MAX)
@@ -444,8 +445,8 @@ def _not_found(request: Request, path: str) -> Response:
 async def _render_page(request: Request, path: str, page: Page) -> Response:
     """The page from the render cache, rendered off the event loop on a miss.
 
-    Keyed by (path, shell document, its mtime and size, ``RR_APP_URL``), so
-    a new shell build or origin renders afresh. A render
+    Keyed by (path, UA class, shell document, its mtime and size,
+    ``RR_APP_URL``), so a new shell build or origin renders afresh. A render
     that a swap overtook is served, not cached.
 
     Returns:
@@ -454,12 +455,13 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     Raises:
         HTTPException: 503 (from ``shell_document_path``) when the shell is not built.
     """
+    crawler = classify(request.headers.get('user-agent', '')) == CRAWLER
     document, mtime_ns, size = _shell_document(request, path)
-    key = (path, document, mtime_ns, size, app_url())
+    key = (path, crawler, document, mtime_ns, size, app_url())
     cached = _render_cache.get(key)
     if cached is None:
         generation = _generation
-        cached = await asyncio.to_thread(_render, path, page, document)
+        cached = await asyncio.to_thread(_render, path, page, crawler, document)
         if generation == _generation:
             _render_cache.put(key, cached, len(cached[0]))
     return HTMLResponse(cached[0], headers=dict(cached[1]))
@@ -519,7 +521,7 @@ def _file_version(document: Path) -> Optional[Tuple[int, int]]:
     return stat.st_mtime_ns, stat.st_size
 
 
-def _render(path: str, page: Page, document: Path) -> Tuple[bytes, Dict[str, str]]:
+def _render(path: str, page: Page, crawler: bool, document: Path) -> Tuple[bytes, Dict[str, str]]:
     """Render one page as the render cache holds it: ``(body, headers)``.
 
     The body is the shell document with the page's head metadata injected.
@@ -531,9 +533,9 @@ def _render(path: str, page: Page, document: Path) -> Tuple[bytes, Dict[str, str
         canonical=canonical_url(path),
         noindex=not page.listed,
     )
-    # No shared cache may keep it: the document names the current build's
-    # hashed bundles, which a deploy removes.
-    headers = {'Cache-Control': 'private, no-cache'}
+    # No shared cache may keep either class's copy: the document names the
+    # current build's hashed bundles, which a deploy removes. Caches key on the UA.
+    headers = {'Vary': 'User-Agent', 'Cache-Control': 'private, no-cache'}
     if not page.listed:
         headers['X-Robots-Tag'] = 'noindex'
     return body.encode('utf-8'), headers

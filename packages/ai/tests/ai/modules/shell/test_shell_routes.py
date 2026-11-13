@@ -491,7 +491,7 @@ def test_crawler_files_trigger_the_refresh_backstop(monkeypatch, app_url):
 
 
 # ---------------------------------------------------------------------------
-# The public-page catch-all: head metadata, misses
+# The public-page catch-all: UA classes, head metadata, misses
 # ---------------------------------------------------------------------------
 
 
@@ -503,6 +503,7 @@ def test_human_gets_the_shell_document_with_head_metadata(shell_root, app_url):
     assert '<title>Pricing | RocketRide</title>' in resp.text and '<title>shell</title>' not in resp.text
     assert '<meta name="description" content="Plans &amp; prices.">' in resp.text
     assert f'<link rel="canonical" href="{BASE}/pricing">' in resp.text
+    assert resp.headers['vary'] == 'User-Agent'
     # People's document names the current build's bundles: no shared cache may keep it.
     assert resp.headers['cache-control'] == 'private, no-cache'
     assert 'x-robots-tag' not in resp.headers and 'name="robots"' not in resp.text
@@ -517,6 +518,7 @@ def test_crawler_gets_the_same_document_with_the_same_cache_headers(shell_root, 
     # The crawler's copy names the current build's bundles too: a shared cache
     # holding it past a deploy would hand rendering crawlers missing bundles.
     assert resp.headers['cache-control'] == 'private, no-cache'
+    assert resp.headers['vary'] == 'User-Agent'
 
 
 def test_the_shell_document_is_read_once_per_page_and_build(shell_root, monkeypatch):
