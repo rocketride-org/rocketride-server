@@ -100,7 +100,7 @@ class DocMetadata(BaseModel):
         None, description='Permission level identifier that controls who can access this document.'
     )
     isDeleted: bool = Field(
-        None, description='True if the source document has been deleted but is still in search results.'
+        False, description='True if the source document has been deleted but is still in search results.'
     )
     isTable: bool = Field(
         None, description='True if this chunk contains structured table data, False for regular text content.'
