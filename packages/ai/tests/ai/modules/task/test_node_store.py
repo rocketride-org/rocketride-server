@@ -127,7 +127,7 @@ def test_a_node_already_unpacked_is_placed_without_reading_its_package(server, m
         file.write('x')
 
     def offline(name, sha256):
-        raise OSError('no cache and no release')
+        raise OSError('the node archive is not read')
 
     monkeypatch.setattr(node_store.account, 'node_package', offline)
     node_store.start()
@@ -217,6 +217,61 @@ def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch
     assert node_store.custom() == [] and node_store.place({'components': [{'provider': 'provider_x'}]}) == []
     assert len(server['warnings']) == 1
     assert 'not writable' in server['warnings'][0] and 'llm_x' in server['warnings'][0]
+
+
+def _unpacked_before(server, name, digest):
+    """A folder an earlier EaaS unpacked into nodes/, with the digest of the package it came from."""
+    os.makedirs(os.path.join(server['nodes'], name))
+    with open(os.path.join(server['nodes'], name, node_store.node_packages.DIGEST_FILE), 'w') as file:
+        file.write(digest)
+
+
+def test_a_copy_an_earlier_release_unpacked_is_replaced_at_start(server):
+    # The scan found webhook on disk: an earlier release's copy, not this index's
+    _unpacked_before(server, 'webhook', 'older')
+
+    node_store.start()
+
+    assert server['unpacked'] == [('webhook', b'webhook:w', 'w', server['nodes'])]
+    assert len(server['warnings']) == 1 and 'webhook' in server['warnings'][0] and 'replaced' in server['warnings'][0]
+
+
+def test_a_copy_with_this_releases_digest_is_left_alone(server):
+    _unpacked_before(server, 'webhook', 'w')
+
+    node_store.start()
+
+    assert server['unpacked'] == [] and server['warnings'] == []
+
+
+def test_a_node_folder_the_server_carries_is_left_alone(server):
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+
+    node_store.start()
+
+    assert server['unpacked'] == [] and server['warnings'] == []
+
+
+def test_an_earlier_copy_that_cannot_be_replaced_names_its_folder(server, monkeypatch):
+    _unpacked_before(server, 'webhook', 'older')
+
+    def refused(*args):
+        raise OSError('read-only')
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', refused)
+
+    node_store.start()
+
+    assert len(server['warnings']) == 1
+    assert os.path.join(server['nodes'], 'webhook') in server['warnings'][0] and 'delete it' in server['warnings'][0]
+    # The nodes it serves are still served
+    assert node_store.served('provider_x') is not None
+
+
+def test_nested_providers_are_named_in_lower_case_at_any_depth():
+    config = {'store': {'provider': 'Vector_X', 'inner': [{'provider': 'embed_y'}, 'text']}, 'provider': 1}
+
+    assert sorted(node_store._nested_providers(config)) == ['embed_y', 'vector_x']
 
 
 def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
