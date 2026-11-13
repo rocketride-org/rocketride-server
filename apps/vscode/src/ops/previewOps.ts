@@ -204,7 +204,10 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			const client = connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
 			const result = await adoptDeveloperId(p.app, p.developerId, {
-				developerStatus: async () => (await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.developerId ?? '',
+				developerStatus: async () => {
+					const status = await client.developerStatus({ timeout: SERVER_CHECK_TIMEOUT_MS });
+					return status?.developerId ?? '';
+				},
 				versionsOf: async (appId) => (await client.call<{ versions?: unknown[] } | undefined>('rrext_deploy_app', { subcommand: 'versions', appId }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.versions?.length ?? 0,
 				scan: () => scanWorkspaceApps(hostWorkspaceFs),
 				dirtyPaths: (paths) => {

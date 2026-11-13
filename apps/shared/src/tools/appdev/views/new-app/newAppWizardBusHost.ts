@@ -58,6 +58,9 @@ export function createBusNewAppWizardHost(options?: INewAppWizardBusHostOptions)
 		onIdentityChanged: (cb) => cm.handle('host.appdev.identityChanged', (p) => cb(p as NewAppIdentity)),
 		scaffold: (appName, displayName, frame) =>
 			cm.request('host.appdev.scaffold', { appName, displayName, frame } as never).then(() => undefined),
+		registerDeveloper: (developerId) => {
+			return cm.request('host.appdev.registerDeveloper', { developerId } as never) as Promise<NewAppIdentity>;
+		},
 		cancel: () => cm.emitOp('host.appdev.closeWizard', {}),
 		...(options?.locationPrefix !== undefined ? { locationPrefix: options.locationPrefix } : {}),
 		...(options?.noWorkspaceNote !== undefined ? { noWorkspaceNote: options.noWorkspaceNote } : {}),
