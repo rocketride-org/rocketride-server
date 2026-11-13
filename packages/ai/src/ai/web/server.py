@@ -59,7 +59,7 @@ import importlib
 import time
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager, contextmanager
-from typing import Dict, Any, Callable, Awaitable, List, Optional, Union, Tuple
+from typing import Dict, Any, Callable, Awaitable, List, Optional, Set, Union, Tuple
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from ai.web import oauth_resource
@@ -246,6 +246,8 @@ class WebServer:
         # Dynamic public-path predicates (data-driven routes, e.g. the shell's
         # public pages), consulted after the static patterns.
         self._public_predicates: List[Callable[[str], bool]] = []
+        # Predicates that have raised: each logs its first failure only.
+        self._failed_predicates: Set[Callable[[str], bool]] = set()
         self._catch_all: Optional[BaseRoute] = None
 
         # Add our metrics middleware to the app
@@ -922,7 +924,9 @@ class WebServer:
                 if predicate(path):
                     return True
             except Exception as exc:
-                warning(f'public-path predicate failed for {path!r}: {exc}')
+                if predicate not in self._failed_predicates:
+                    self._failed_predicates.add(predicate)
+                    warning(f'public-path predicate failed for {path!r}: {exc} (later failures are not logged)')
 
         # Path did not match any public pattern — treat as private by default
         return False
