@@ -51,9 +51,12 @@ def _as_bool(value: Any, default: bool) -> bool:
     """Coerce a config value to bool, tolerating string forms ('true'/'false')."""
     if isinstance(value, bool):
         return value
-    if value is None or value == '':
-        return default
-    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+    text = '' if value is None else str(value).strip().lower()
+    if text in ('1', 'true', 'yes', 'on'):
+        return True
+    if text in ('0', 'false', 'no', 'off'):
+        return False
+    return default  # empty or unrecognized: keep the default, so a typo can't turn readOnly off
 
 
 def _as_int(value: Any, default: int) -> int:
