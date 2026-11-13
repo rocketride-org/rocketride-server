@@ -87,7 +87,7 @@ jobs:
               - 'nodes/**/overrides.txt'
               - 'packages/ai/**/requirement*.txt'
               - 'packages/ai/**/overrides.txt'
-              - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+              - 'packages/server/python/src/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
       # A file counts as `outside` unless it sits in a TypeScript-only area:

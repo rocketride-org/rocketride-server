@@ -121,7 +121,7 @@ def test_top_k_is_optional():
     """`optional: true` is required or the field becomes mandatory for every user.
 
     The engine schema compiler treats an unspecified `optional` as REQUIRED
-    (packages/server/engine-lib/engLib/store/services/services.cpp:480) and
+    (packages/server/infra/src/store/services/services.cpp:480) and
     appends such fields to the JSON Schema `required` array. `vector.top_k`
     carries no `default`, so without this flag it would be a required field
     with nothing to fill it -- every Chroma node config would fail validation

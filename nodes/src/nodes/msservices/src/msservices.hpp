@@ -24,14 +24,14 @@
 //-----------------------------------------------------------------------------
 //
 //	Umbrella header for the msServices node, mirroring the include order
-//	store.hpp used while these endpoints lived in engLib
+//	store.hpp used while these endpoints lived in infra
 //
 //-----------------------------------------------------------------------------
 #pragma once
 
-#include <engLib/eng.h>
+#include <infra.h>
 
-// cpprest comes in through the engLib PCH, which has to include it before
+// cpprest comes in through the infra PCH, which has to include it before
 // anything instantiates std::char_traits<unsigned char>
 
 #include "outlook/constants.hpp"

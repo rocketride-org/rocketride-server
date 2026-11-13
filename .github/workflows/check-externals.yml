@@ -17,7 +17,7 @@ run-name: check-externals ${{ github.event_name == 'schedule' && '(nightly)' || 
 #
 # ENGINE BUILD: server:download (packages/server/scripts/tasks.js) compares
 # contentHash(packages/server/) to the release manifest. The hash covers EVERY
-# file under that tree — including Python under engine-lib/ — so a pure-Python
+# file under that tree — including Python under python/ — so a pure-Python
 # edit there forces a full vcpkg compile. The vcpkg + nuget steps below READ
 # the binary cache that _build.yaml populates; this lane does not write to it.
 #

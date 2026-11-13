@@ -138,7 +138,7 @@ the release artifact. See the compiler-toolchain section in the builder docs.
 
 `lldb`, `minidump-stackwalk`, and `minidump-2-core` are expected on your `PATH` (see
 Installing below). Use the exact binary that crashed (`dist/server/engine`,
-`build/engine-core/test/aptest`, ...); its symbols come from the shipped `symbols/`
+`build/core/tests/core_tests`, ...); its symbols come from the shipped `symbols/`
 store or the separated `.debug` next to it (via `.gnu_debuglink`).
 
 ### Installing the readers (one time)
@@ -201,26 +201,26 @@ binary's own DWARF is inline, so its frames still symbolize. On a large,
 statically-linked binary the first `target create` may still take a few seconds
 to index that DWARF; that is work, not a hang.
 
-### Worked example (`aptest`)
+### Worked example (`core_tests`)
 
-The `crashpad` test in `aptest` crashes a child started with `--dumps`, which
+The `crashpad` test in `core_tests` crashes a child started with `--dumps`, which
 moves its own dump into the crash-dump location, named by the pattern above.
 Point LLDB at the test binary and that dump:
 
 ```bash
 DEBUGINFOD_URLS= lldb --batch \
   -o "settings set symbols.enable-external-lookup false" \
-  -o "target create dist/server/aptest --core /tmp/aptest.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp" \
+  -o "target create dist/server/core_tests --core /tmp/core_tests.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp" \
   -o bt -o quit
 ```
 
 ```text
-Core file '/tmp/aptest.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp' (x86_64) was loaded.
+Core file '/tmp/core_tests.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp' (x86_64) was loaded.
 * thread #1, stop reason = signal SIGSEGV
-  * frame #0: 0x00006116339340be aptest`ap::application::TestMain() at testMain.ipp:106:16
-    frame #1: 0x000061163393364a aptest`main [inlined] ap::application::Main() at main.cpp:31:27
+  * frame #0: 0x00006116339340be core_tests`ap::application::TestMain() at testMain.ipp:106:16
+    frame #1: 0x000061163393364a core_tests`main [inlined] ap::application::Main() at main.cpp:31:27
     ...
-    frame #9: 0x00006116334b7715 aptest`_start + 37
+    frame #9: 0x00006116334b7715 core_tests`_start + 37
 ```
 
 Frame #0 lands on the deliberate null-deref the crash-child test performs, which

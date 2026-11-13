@@ -95,6 +95,6 @@ set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
 # Java raises exceptions to probe the system config, but Catch intercepts them, treats
 # them as failing the unit test in which Java is initialized, and then promptly crashes
 # because of a bug in its internal state tracking. Disable SEH and signals for Catch.  If
-# a unit test crashes, engtest will crash.
+# a unit test crashes, infra_tests will crash.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DCATCH_CONFIG_NO_WINDOWS_SEH")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DCATCH_CONFIG_NO_WINDOWS_SEH")

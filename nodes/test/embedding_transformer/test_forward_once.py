@@ -7,7 +7,7 @@
 Delivery-count regression tests for embedding_transformer's document batching (#2051).
 
 The engine forwards a lane handler's incoming argument after the handler returns,
-unless it raised Ec.PreventDefault (__checkCallParent, engLib/python/call.hpp). The
+unless it raised Ec.PreventDefault (__checkCallParent, infra/src/python/call.hpp). The
 flush path forwarded the buffer explicitly and returned normally, so every full
 batch reached downstream twice.
 

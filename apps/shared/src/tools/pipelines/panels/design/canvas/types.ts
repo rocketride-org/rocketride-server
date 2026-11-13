@@ -41,7 +41,7 @@ export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IIn
 
 export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from 'shell';
 
-/** Pipeline schema version. Must match the server's IServices::VERSION (engine-lib). */
+/** Pipeline schema version. Must match the server's IServices::VERSION (infra). */
 // Moved to the shared service-config module (multi-consumer: this canvas
 // and sql-ui's connection editor both stamp validate payloads with it) —
 // re-exported here so canvas callers keep their import path.

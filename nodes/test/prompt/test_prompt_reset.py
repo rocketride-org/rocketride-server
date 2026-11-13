@@ -13,7 +13,7 @@ each lane. No running server is required.
 
 Every write goes through `_write`, which models the engine bridge: after a lane
 handler returns, the engine also forwards the handler's input on the same lane,
-unless the handler raised PreventDefault (__checkCallParent, engLib/python/call.hpp).
+unless the handler raised PreventDefault (__checkCallParent, infra/src/python/call.hpp).
 
 WHY THESE EXIST. The node merges everything written to it and emits on close, but
 it did not start over afterwards, and the instance outlives the turn in a resident

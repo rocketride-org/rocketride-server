@@ -1,0 +1,94 @@
+if(NOT TARGET core.lib)
+    # Add the core library
+    rocketride_add_library(core LIST_ONLY "json;ipp" *.c *.cpp *.hpp *.h *.json *.ipp *.y)
+else()
+    # Do not compile any *.c *cpp if the target has a prebuilt core.lib
+    rocketride_add_library(core LIST_ONLY "json;ipp" *.hpp *.h *.json *.ipp *.y)
+    set_target_properties(core PROPERTIES LINKER_LANGUAGE CXX)
+endif()
+
+# Link to the vcpkg dependencies
+
+find_package(OpenSSL CONFIG REQUIRED)
+target_link_libraries(core PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+
+find_package(ICU REQUIRED COMPONENTS i18n)
+target_link_libraries(core PRIVATE ICU::i18n)
+
+find_package(lz4 CONFIG REQUIRED)
+target_link_libraries(core PRIVATE lz4::lz4)
+
+find_package(tinyxml2 CONFIG REQUIRED)
+target_link_libraries(core PRIVATE tinyxml2::tinyxml2)
+
+# find_package/target_link_libraries is not working for FastPFor, so we link it manually
+if(ROCKETRIDE_PLAT_WIN)
+    target_link_libraries(core PRIVATE "${VCPKG_INSTALLED_TRIPLET_DIR}/lib/FastPFor.lib")
+else() # ROCKETRIDE_PLAT_UNX
+    target_link_libraries(core PRIVATE "${VCPKG_INSTALLED_TRIPLET_DIR}/lib/libFastPFor.a")
+endif()
+target_include_directories(core PUBLIC "${VCPKG_INSTALLED_TRIPLET_DIR}/include/FastPFor/headers")
+
+if(ROCKETRIDE_FACTORY_DEBUG)
+    target_compile_definitions(core PUBLIC -DROCKETRIDE_FACTORY_DEBUG=1)
+endif()
+
+# JsonCpp's own export macro (json/jsonCpp.h) - exports Value/ValueIteratorBase
+# from engine_abi, part of the node DLL ABI
+target_compile_definitions(core PUBLIC JSON_DLL_BUILD)
+
+# ROCKETRIDE_CORE_API (ap.h) - exports the rest of the node DLL ABI from engine_abi
+target_compile_definitions(core PUBLIC ROCKETRIDE_CORE_BUILD)
+
+if(ROCKETRIDE_PLAT_WIN)
+    target_compile_definitions(core PUBLIC -DBOOST_STACKTRACE_LINK)
+    find_package(Boost CONFIG REQUIRED COMPONENTS stacktrace_windbg)
+    target_link_libraries(core PRIVATE Boost::stacktrace_windbg)
+endif()
+
+find_package(date CONFIG REQUIRED)
+if(ROCKETRIDE_PLAT_UNX)
+    target_link_libraries(core PRIVATE date::date-tz)
+endif()
+target_link_libraries(core PRIVATE date::date)
+
+if(ROCKETRIDE_PLAT_LIN)
+    # Build libbacktrace from source (the libbacktrace vcpkg doesn't work on Linux)
+    include(../../cmake/AddLibBacktrace.cmake)
+    target_link_libraries(core PUBLIC LibBacktraceTarget)
+endif()
+
+if(ROCKETRIDE_PLAT_LIN OR ROCKETRIDE_PLAT_MAC)
+    # Link the prebuilt static Crashpad from vcpkg (no Crashpad source built in-tree).
+    find_package(crashpad CONFIG REQUIRED)
+    target_link_libraries(core PRIVATE crashpad::crashpad)
+endif()
+
+if(ROCKETRIDE_PLAT_MAC)
+    target_compile_definitions(core PUBLIC -D_GNU_SOURCE)
+endif()
+
+# Link to platform libs
+if(ROCKETRIDE_PLAT_WIN)
+    target_link_libraries(core PUBLIC netapi32.lib VssApi.lib Rpcrt4.lib XmlLite.lib Crypt32.lib ws2_32.lib Dbghelp.lib Mpr.lib)
+else()
+    target_link_libraries(core PUBLIC dl c m)
+endif()
+
+# Register our own public include paths for dependencies linking to core with
+# include paths e.g. <core.h>
+target_include_directories(core PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+
+# The C ABI headers, included as <rocketride/node_api.h> by both the factory that
+# loads a node and the node itself
+target_include_directories(core PUBLIC "${CMAKE_CURRENT_LIST_DIR}/../include")
+
+if(NOT TARGET core.lib)
+    # Process its precompiled headers (only if infra is not prebuilt)
+    rocketride_pch(core
+        # Amalgamated sources that leak preprocessor macros (jsonCpp: snprintf).
+        UNITY_EXCLUDES
+            "${CMAKE_CURRENT_LIST_DIR}/compress/FastPFor.cpp"
+            "${CMAKE_CURRENT_LIST_DIR}/json/jsonCpp.cpp"
+        PCH "${CMAKE_CURRENT_LIST_DIR}/headers.h")
+endif()

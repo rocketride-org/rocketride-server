@@ -169,7 +169,7 @@ standalone catalog nodes.
    - **`IInstance` is required.** `IPythonInstanceBase` does
      `m_pyModule.attr("IInstance")` with no guard, so a module that does not
      export it fails to load
-     (`packages/server/engine-lib/engLib/store/python/python-instance.cpp`).
+     (`packages/server/infra/src/store/python/python-instance.cpp`).
    - **`IGlobal` is optional.** `IPythonGlobalBase` guards it with
      `py::hasattr(m_pyModule, "IGlobal")`. When present the engine instantiates it
      once per pipeline, injects `IEndpoint` and `glb`, and calls `beginGlobal()` /
