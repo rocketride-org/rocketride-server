@@ -33,7 +33,7 @@ Every function returns `success`, plus its own fields on success and `error` on 
 
 ### Site URL
 
-Your Jira Cloud site, such as `https://your-site.atlassian.net`. Only a bare `https` site URL is accepted, so the token is never sent anywhere else.
+Your Jira Cloud site, such as `https://your-site.atlassian.net`. Only an `https://<site>.atlassian.net` address with no port or path is accepted, so the token is never sent anywhere else.
 
 ### Account email and API token
 
@@ -45,7 +45,7 @@ On by default. While on, `jira_issue_create` and `jira_comment_add` refuse with 
 
 ### Project allowlist
 
-Comma-separated project keys, such as `PROJ,OPS`. When set, searches are limited to those projects (`project in (...) AND (<your JQL>)`, with any `ORDER BY` kept last), issues and comments are read or written only when the issue's current project is listed, and the project list shows only those projects. The check reads the issue's project rather than trusting its key, because an issue moved between projects keeps resolving under its old key. Empty means every project the account can see.
+Comma-separated project keys, such as `PROJ,OPS`. When set, searches are limited to those projects (`project in (...) AND (<your JQL>)`, with any `ORDER BY` kept last), issues and comments are read or written only when the issue's current project is listed, and the project list shows only those projects. The check reads the issue's project rather than trusting its key, because an issue moved between projects keeps resolving under its old key. A search that returns an issue from outside the list fails instead of returning it. Empty means every project the account can see.
 
 ### Results per page and label for created issues
 
@@ -67,7 +67,7 @@ The node uses Jira's current search endpoint, `POST /rest/api/3/search/jql`. It 
 
 ### Limits
 
-A description or comment over 32 KB is refused before it is sent. A JQL query with unbalanced quotes or parentheses is refused when an allowlist is set, since an extra `)` could otherwise close the allowlist clause.
+A description or comment over 32,767 bytes is refused before it is sent. A JQL query with unbalanced quotes or parentheses is refused when an allowlist is set, since an extra `)` could otherwise close the allowlist clause.
 
 ## Upstream docs
 

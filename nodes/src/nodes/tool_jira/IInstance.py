@@ -225,7 +225,10 @@ class IInstance(IInstanceBase):
                 # through some JQL quirk is refused rather than returned
                 if allowed and str((f.get('project') or {}).get('key') or '').upper() not in allowed:
                     raise jira_client.JiraAPIError(
-                        0, ['the search returned issues outside the project allowlist; rewrite the JQL']
+                        0,
+                        [
+                            'the search returned issues outside the project allowlist; rewrite the JQL, or update the allowlist if a project key was renamed'
+                        ],
                     )
                 issues.append(
                     {

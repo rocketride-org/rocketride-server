@@ -97,6 +97,9 @@ def test_site_url_is_normalized(url):
         'https://evil.example.com',
         'https://acme.atlassian.net.evil.example.com',
         'https://acme.atlassian.net:8443',
+        'https://acme.atlassian.net:abc',
+        'https://evil.example.com\\.atlassian.net',
+        'https://.atlassian.net',
     ],
 )
 def test_site_url_other_than_a_bare_https_host_is_refused(url):
@@ -424,3 +427,28 @@ def test_checklists_decisions_and_table_cells_keep_their_breaks():
         ],
     }
     assert jc.adf_to_text(doc) == '- [ ] buy milk\n- [x] call bob\n\n- ship friday\n\na\nb'
+
+
+def test_a_checklist_item_reads_as_one_line_and_a_nested_list_is_indented():
+    mention = {'type': 'mention', 'attrs': {'text': '@Bob'}}
+    doc = {
+        'type': 'taskList',
+        'content': [
+            {
+                'type': 'taskItem',
+                'attrs': {'state': 'TODO'},
+                'content': [
+                    {'type': 'text', 'text': 'Ask '},
+                    mention,
+                    {'type': 'text', 'text': ' about deploy'},
+                ],
+            },
+            {
+                'type': 'taskList',
+                'content': [
+                    {'type': 'taskItem', 'attrs': {'state': 'DONE'}, 'content': [{'type': 'text', 'text': 'sub'}]},
+                ],
+            },
+        ],
+    }
+    assert jc.adf_to_text(doc) == '- [ ] Ask @Bob about deploy\n  - [x] sub'
