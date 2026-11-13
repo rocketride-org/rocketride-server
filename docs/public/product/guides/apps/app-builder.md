@@ -26,7 +26,8 @@ the same loop runs from a terminal or CI.
   workspace root.
 - A developer id for your organization, on RocketRide Cloud. Every app id
   is `<developerId>.<name>`. Your organization claims its developer id
-  once, in the New App wizard, on the Deploy tab, or with the npm CLI's
+  once, in the New App wizard in VS Code, on the Deploy tab, or with the
+  npm CLI's
   `rocketride app developer register <id>`, which talks to the deployment
   target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
   (the pip CLI has no `app developer` verbs). The id is lowercase letters
