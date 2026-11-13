@@ -175,6 +175,18 @@ def test_social_tags_escape_their_values():
     assert '<meta property="og:image" content="https://x.example/a.png?a=1&amp;b=&quot;2&quot;">' in tags
 
 
+def test_snapshot_twitter_image_is_removed_so_x_falls_back_to_og_image():
+    doc = DOC.replace(
+        '</head>',
+        '<meta name="twitter:image" content="https://old.example/t.png">'
+        '<meta name="twitter:image:alt" content="old alt"></head>',
+    )
+    tags = social_tags(image='https://rr.example/x.png')
+    out = inject_head(doc, title='T', extra=tags)
+    assert 'twitter:image' not in out and 'old.example' not in out and 'old alt' not in out
+    assert out.count('<meta property="og:image" content="https://rr.example/x.png">') == 1
+
+
 def test_social_tags_replace_the_documents_own():
     doc = DOC.replace(
         '</head>',

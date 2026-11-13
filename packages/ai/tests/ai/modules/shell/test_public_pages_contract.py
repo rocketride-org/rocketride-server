@@ -572,9 +572,13 @@ def test_duplicate_redirect_sources_rejected():
 
 
 def test_redirect_sources_on_live_routes_rejected():
-    _, site, errors = _redirects(
-        {'from': '/health', 'to': '/'}, live_conflict=lambda p: 'GET /health' if p == '/health' else None
-    )
+
+    def live_conflict(candidate):
+        if candidate == '/health':
+            return 'GET /health'
+        return None
+
+    _, site, errors = _redirects({'from': '/health', 'to': '/'}, live_conflict=live_conflict)
     assert 'live server route GET /health' in errors[0] and site['redirects'] == {}
 
 

@@ -363,9 +363,9 @@ else `site.image`, and asks for the large card (`summary_large_image`, else
 `og:image`, `twitter:card`, `article:published_time` and
 `article:modified_time` tags are removed (as are its title, description,
 canonical, robots, `og:title`, `og:description` and `og:url`), so the page's
-`image` and `site.image` are the only source of `og:image`. X/Twitter reads that
-tag too, unless the snapshot carries its own `twitter:image`, which is not
-removed and wins there. An `https://` image is used as declared; a root path is made
+`image` and `site.image` are the only source of `og:image`. A snapshot's own
+`twitter:image` and `twitter:image:alt` are removed too, so X/Twitter falls back
+to that `og:image`. An `https://` image is used as declared; a root path is made
 absolute with `RR_APP_URL`; a relative path is a file of the declaring app's
 build output, served from its production version
 (`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an

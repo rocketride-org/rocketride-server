@@ -65,6 +65,8 @@ _REPLACED = (
     _tag_with('meta', 'property', 'og:site_name'),
     _tag_with('meta', 'property', 'og:image'),
     _tag_with('meta', 'name', 'twitter:card'),
+    _tag_with('meta', 'name', 'twitter:image'),
+    _tag_with('meta', 'name', 'twitter:image:alt'),
     _tag_with('meta', 'property', 'article:published_time'),
     _tag_with('meta', 'property', 'article:modified_time'),
 )
