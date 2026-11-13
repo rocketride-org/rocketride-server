@@ -86,7 +86,7 @@ async def test_republishing_your_own_paths_is_not_a_collision():
 
 
 async def test_the_installed_live_route_check_reaches_the_gate_and_the_rebuild():
-    pp.page_map.live_conflict = {'/health': 'GET /health'}.get
+    pp.set_live_conflict({'/health': 'GET /health'}.get)
     manifest = {'publicPages': [{'path': '/health', 'title': 'Health'}, {'path': '/fine', 'title': 'Fine'}]}
     errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account())
     assert len(errors) == 1 and 'live server route GET /health' in errors[0]
