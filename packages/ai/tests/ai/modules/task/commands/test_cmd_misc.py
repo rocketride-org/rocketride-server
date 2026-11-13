@@ -291,7 +291,9 @@ _NO_SOURCE = 'Pipeline has no source component'
 
 async def _validate_body(monkeypatch, arguments, *, validator=None):
     """The body on_rrext_validate returns, with the engine validator faked."""
-    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator or (lambda payload: {'errors': [], 'warnings': []}))
+    monkeypatch.setattr(
+        cmd_misc, 'validatePipeline', validator or (lambda payload, custom: {'errors': [], 'warnings': []})
+    )
     return (await MiscCommands.on_rrext_validate(_make_conn(), {'arguments': arguments}))['body']
 
 
@@ -316,7 +318,9 @@ async def test_on_rrext_validate_warns_when_no_source_resolves(monkeypatch):
 async def test_on_rrext_validate_keeps_engine_warnings_when_no_source(monkeypatch):
     """The no-source warning is appended to what the engine reported, not substituted for it."""
     engine = {'errors': [], 'warnings': [{'message': 'engine says hi'}]}
-    body = await _validate_body(monkeypatch, {'pipeline': {'components': []}}, validator=lambda payload: dict(engine))
+    body = await _validate_body(
+        monkeypatch, {'pipeline': {'components': []}}, validator=lambda payload, custom: dict(engine)
+    )
 
     assert body['warnings'][0] == {'message': 'engine says hi'}
     assert len(_no_source_warnings(body)) == 1
@@ -829,7 +833,7 @@ async def test_on_rrext_validate_no_source_warning_follows_templated_diagnostics
     conn = _validate_conn(monkeypatch, env=env)
     calls = 0
 
-    def validator(payload):
+    def validator(payload, custom):
         nonlocal calls
         calls += 1
         result = copy.deepcopy(payload)
