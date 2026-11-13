@@ -12,6 +12,9 @@ for in-process inference, where one torch module cannot run concurrent forward
 passes, and a no-op with ``--modelserver`` so the recognizer's chunk workers reach
 the model server's own workers instead of queueing here one request at a time.
 
+A failed forward pass must fail the document in both run modes, with its cause in
+the message and the guard free again; the unredacted text must never come back.
+
 ``glinerRecognizer.py`` is loaded by file path under a synthetic package whose
 ``__path__`` is the node's source directory, so its relative imports
 (``.Ruleparser``, ``.anonymize``) resolve to the real modules. The GLiNER model
@@ -24,6 +27,7 @@ Usage:
 
 import contextlib
 import importlib.util
+import re
 import sys
 import threading
 import time
@@ -153,8 +157,9 @@ def test_model_server_predictions_run_concurrently(make_recognizer, monkeypatch)
     """Proxy mode: the four chunk workers are inside ``predict_entities`` at the same time."""
     rec = make_recognizer(model_server=True)
     # Four parties = the four chunks of _TEXT, one per worker of the recognizer's pool.
-    # process_chunk swallows exceptions, so a BrokenBarrierError would not propagate: it
-    # would show up as a missing forward pass, hence the count and the content check.
+    # If the workers were serialized, the barrier would break and the BrokenBarrierError
+    # would fail predict() with 'Anonymization failed'. The count and the content check
+    # below are extra checks on top of that.
     barrier = threading.Barrier(4, timeout=10)
     state = {'completed': 0}
     guard = threading.Lock()
@@ -181,5 +186,47 @@ def test_model_server_recognizers_run_concurrently_across_documents(make_recogni
 
     results = _run_threads(4, lambda: rec.predict('short text', ['person']))
 
-    # A swallowed BrokenBarrierError would leave a document with no entities.
+    # A broken barrier fails that document's predict() with 'Anonymization failed', which
+    # _run_threads reports through its errors assert; the content check is an extra check.
     assert [[(e['label'], e['text']) for e in r] for r in results] == [[('person', 'shor')]] * 4
+
+
+@pytest.mark.parametrize(
+    ('model_server', 'guard_type'),
+    [(False, type(threading.Lock())), (True, contextlib.nullcontext)],
+    ids=['local', 'modelserver'],
+)
+def test_model_error_fails_the_document_in_both_run_modes(
+    make_recognizer, monkeypatch, model_server, guard_type
+) -> None:
+    """A failed forward pass fails ``process()`` with its cause, under the run mode's real guard.
+
+    The text spans several chunks, so the other chunk workers are queued or in flight
+    when the first one fails. The original text must never come back, and in-process
+    the lock must be free again afterwards.
+    """
+    rec = make_recognizer(model_server=model_server)
+    assert isinstance(rec._predict_lock, guard_type)
+    text = 'Alice Example works at Example Company. ' * 100
+    assert len(text) > 1024, 'the text must span several chunks'
+
+    def on_predict() -> None:
+        raise RuntimeError('injected inference failure')
+
+    monkeypatch.setattr(_StubGLiNER, 'on_predict', staticmethod(on_predict))
+
+    try:
+        result = rec.process(text, ['person'])
+    except RuntimeError as error:
+        message = str(error)
+    else:
+        assert result != text, 'process() returned the original, unredacted text after a model error'
+        pytest.fail('process() returned text after a model error')
+
+    assert re.fullmatch(
+        r'Anonymization failed; no redacted result is available: '
+        r'GLiNER inference failed for chunk \d+: injected inference failure',
+        message,
+    ), message
+    if not model_server:
+        assert not rec._predict_lock.locked(), 'the in-process lock must be released after a failed prediction'

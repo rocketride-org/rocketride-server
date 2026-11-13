@@ -10,12 +10,14 @@ ThreadPoolExecutor. GLiNER wraps a single torch module, which cannot take
 concurrent forward passes, so a lock is held around ``predict_entities`` only:
 chunking, offset arithmetic and the overlap filter stay concurrent.
 
-These tests pin two things:
+These tests pin three things:
 
 * the entities and offsets ``predict`` returns for a multi-chunk input, which is
-  what the overlap filter and the final dedup decide, and
+  what the overlap filter and the final dedup decide,
 * that concurrent chunks never enter ``predict_entities`` at the same time,
-  while still genuinely running in parallel.
+  while still genuinely running in parallel, and
+* the failure contract: a failed prediction fails the whole call with its cause
+  in the message, while a prediction that finds nothing is still a success.
 
 No GLiNER model or engine is required: the module is loaded by path with the
 heavy dependencies stubbed, and a recording double stands in for the model.
@@ -283,8 +285,8 @@ def test_predict_still_uses_a_thread_pool():
     assert threading.current_thread().name not in calling_threads, 'work must run off the calling thread'
 
 
-def test_a_failing_chunk_does_not_lose_the_others():
-    """One bad batch is logged and skipped; the rest still come back."""
+def test_a_failing_chunk_rejects_partial_anonymization():
+    """One failed chunk makes the document fail instead of exposing unredacted text."""
     positions = [10, 900, 1800, 2700, 3600]
     text = build_text(positions)
 
@@ -300,9 +302,29 @@ def test_a_failing_chunk_does_not_lose_the_others():
 
     model.predict_entities = flaky
 
-    results = make_recognizer(model).predict(text, ['organization'])
+    with pytest.raises(RuntimeError, match='Anonymization failed.*: CUDA error on this chunk$'):
+        make_recognizer(model).predict(text, ['organization'])
 
-    assert results, 'a single chunk failure must not empty the result'
+
+def test_a_cause_without_a_message_is_named_by_its_type():
+    """An exception with an empty message, such as TimeoutError(), still names a cause."""
+    model = _MarkerModel()
+
+    def timeout(chunk, labels):
+        raise TimeoutError()
+
+    model.predict_entities = timeout
+
+    with pytest.raises(RuntimeError, match=r'GLiNER inference failed for chunk 0: TimeoutError$'):
+        make_recognizer(model).predict('short text', ['organization'])
+
+
+def test_successful_empty_prediction_still_returns_original_text():
+    """A prediction that succeeds and finds nothing is a valid result, not a failure."""
+    recognizer = make_recognizer(_MarkerModel(marker='NOT_PRESENT'))
+    recognizer.redaction_style = 'mask'
+    recognizer.anonymize_char = 'X'
+    assert recognizer.process('Nothing matched.', ['person']) == 'Nothing matched.'
 
 
 @pytest.mark.parametrize('label_count', [1, 40, 70])
