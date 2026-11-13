@@ -55,7 +55,8 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ai.common.dap import DAPConn, TransportBase
-from ai.constants import CONST_PROCESS_INLINE_MAX
+from .engine_access import engine_for
+from ai.constants import CONST_PROCESS_CLOSE_SECONDS, CONST_PROCESS_INLINE_MAX
 
 from ..address import build_address, parse_address
 from ..task_control import control_key
@@ -242,9 +243,11 @@ class ProcessCommands(DAPConn):
         Raises:
             TaskError: TASK_TIMEOUT with ``address`` and ``converged``.
         """
-        # Step 1: the engine (started again if it stopped), ready
-        task = await self._server.ensure_engine(control)
-        control.touch()
+        # Step 1: the engine (started again if it stopped, after the team
+        # re-check), ready; the request is in flight through this control
+        # until it returns, so its ttl cannot expire it mid-flight
+        task = await engine_for(self, control, 'task.data')
+        control.begin_request()
         await task.wait_for_running()
 
         async def _round_trip() -> Dict[str, Any]:
@@ -263,7 +266,7 @@ class ProcessCommands(DAPConn):
             try:
                 await task._send_data(self._data_request({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
             except BaseException:
-                await task._send_data(self._data_request({'subcommand': 'close', 'pipe_id': pipe_id}))
+                await self._close_quietly(task, pipe_id)
                 raise
             closed = await task._send_data(self._data_request({'subcommand': 'close', 'pipe_id': pipe_id}))
             return dict(closed.get('body') or {})
@@ -282,7 +285,22 @@ class ProcessCommands(DAPConn):
                 converged=converged,
             ) from None
         finally:
-            control.touch()
+            control.end_request()
+
+    async def _close_quietly(self, task: Any, pipe_id: Any) -> None:
+        """
+        Close a pipe after a failed write, bounded, never raising.
+
+        The failure that got here (a timeout cancelling the write, a refused
+        write) is what the caller sees; the close is cleanup and gets
+        ``CONST_PROCESS_CLOSE_SECONDS`` at most, so a cancelled request is
+        never held open by an engine that does not answer the close.
+        """
+        close = self._data_request({'subcommand': 'close', 'pipe_id': pipe_id})
+        try:
+            await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_PROCESS_CLOSE_SECONDS)
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure
+            self.debug_message(f'process(): closing pipe {pipe_id} after a failed write did not complete: {exc!r}')
 
     def _data_request(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """One ``rrext_process`` request for the engine's data path."""

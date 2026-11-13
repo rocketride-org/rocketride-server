@@ -82,6 +82,7 @@ def _server(*controls) -> TaskServer:
     server._task_control = ControlRegistry({c.key: c for c in controls})
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server._deployment_revoked = {}
     server._control_starts = {}
     server._engine_restarts = {}
     server._restart_tasks = set()

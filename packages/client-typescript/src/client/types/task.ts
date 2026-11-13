@@ -446,10 +446,16 @@ export interface TASK_METRICS {
 	peak_gpu_memory_mb: number;
 
 	// Average values
-	/** Average CPU utilization percentage over task lifetime */
+	/**
+	 * Not computed by the server (always 0): status bodies carry counts and bytes only,
+	 * never server-side averages or rates; derive from samples client-side.
+	 */
 	avg_cpu_percent: number;
 
-	/** Average CPU memory usage in megabytes over task lifetime */
+	/**
+	 * Not computed by the server (always 0): status bodies carry counts and bytes only,
+	 * never server-side averages or rates; derive from samples client-side.
+	 */
 	avg_cpu_memory_mb: number;
 
 	/** Average GPU memory usage in megabytes over task lifetime */

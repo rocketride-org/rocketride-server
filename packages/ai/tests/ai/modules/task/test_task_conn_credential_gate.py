@@ -398,6 +398,8 @@ def _team_run(address, task_id):
         userId='',
         teamId='team-1',
         orgId='org-1',
+        deployment=None,
+        registered_at=0.0,
         live=True,
         task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False),
     )
@@ -410,6 +412,7 @@ async def _monitor_conn(identity):
     server._task_control = ControlRegistry({run.key: run for run in runs})
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server._deployment_revoked = {}
     server._control_starts = {}
     server._engine_restarts = {}
     server._restart_tasks = set()
@@ -556,6 +559,7 @@ def _session_conn(identity):
     server._task_control = ControlRegistry()
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server._deployment_revoked = {}
     server._control_starts = {}
     server._engine_restarts = {}
     server._restart_tasks = set()

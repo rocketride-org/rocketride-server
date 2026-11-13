@@ -454,7 +454,7 @@ Test connectivity to the RocketRide server. Raises `RuntimeError` if the server 
 
 ## 4. Sending Data
 
-### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None) -> Dict[str, Any]`
+### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, team: str = None) -> Dict[str, Any]`
 
 Send data directly to a pipeline. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
 
@@ -479,7 +479,7 @@ for result in results:
 
 **Note:** Upload progress events are sent through the event system as `apaevt_status_upload` events (`open`, `write`, `close`, `complete`, `error` actions).
 
-### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe`
+### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, team: str = None) -> DataPipe`
 
 Create a streaming data pipe for sending large datasets in chunks. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
 

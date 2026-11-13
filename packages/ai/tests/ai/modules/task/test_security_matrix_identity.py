@@ -65,6 +65,7 @@ def _server() -> TaskServer:
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts._deployment_revoked = {}
     ts._control_starts = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()

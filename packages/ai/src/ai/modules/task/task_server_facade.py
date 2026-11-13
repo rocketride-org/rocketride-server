@@ -79,6 +79,7 @@ async def start_server_task_as_team(
     developer_id: str = '',
     version: Optional[int] = None,
     team_context: Optional[TeamContext] = None,
+    deployment_epoch: Optional[float] = None,
 ) -> str:
     """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential; return the control's KEY.
 
@@ -179,6 +180,7 @@ async def start_server_task_as_team(
     conn._trusted_deployment = deployment
     conn._trusted_rung = rung
     conn._trusted_version = version
+    conn._trusted_deployment_epoch = deployment_epoch
     conn._trusted_team_context = team_context or TeamContext(team_id, 'deploying')
 
     # The schedule's run window rides the execute arguments: start_task

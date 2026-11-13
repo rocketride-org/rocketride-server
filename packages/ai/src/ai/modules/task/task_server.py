@@ -528,6 +528,11 @@ class TaskServer(DAPBase):
         self._task_control = ControlRegistry()  # Control registry: <rung>.<ownerId>.<address>, indexed
         self._engines = EngineRegistry()  # Engine pool: content key -> engine, start lock inside
         self._engine_unavailable: Dict[str, Tuple[str, str]] = {}  # Control key -> (engineKey, reason)
+        # Deployments whose holds were released (disabled/removed), by the monotonic
+        # time of the release: a control registered through a deployment that was
+        # revoked after its state was read, or still holding one that was revoked
+        # later, is unavailable (plan 7.2, the kill switch has no back door)
+        self._deployment_revoked: Dict[DeploymentRef, float] = {}
         self._control_starts: Dict[str, _StartGate] = {}  # Per-control-key locks for starts from an artifact
         self._engine_restarts: Dict[str, Deque[float]] = {}  # Engine key -> automatic restart times, last hour
         self._restart_tasks: Set[asyncio.Task] = set()  # Pending automatic listener restarts
@@ -749,6 +754,13 @@ class TaskServer(DAPBase):
             # engine stopped on its inactivity timer or crashed after it
             # confirmed running) still ages on its ttl
             if control.task.is_task_complete() and not control.dormant:
+                continue
+
+            # A request in flight through the control holds its idle clock:
+            # a call longer than the ttl is never expired mid-flight. Looked
+            # at again one ttl later; end_request restarts the clock.
+            if control.inflight:
+                heapq.heappush(self._control_expiry, (now + control.ttl, gen, key))
                 continue
 
             # Active since it was scheduled: back in at its real deadline
@@ -1384,7 +1396,13 @@ class TaskServer(DAPBase):
         """
         told = self._engine_unavailable.get(control.key)
         if told is None:
-            return control
+            # A deployment revoked after this control was registered (or after
+            # its state was read by the dispatch that started it) is the kill
+            # switch catching a control the release pass did not reach
+            revoked = self._deployment_revoked.get(control.deployment) if control.deployment is not None else None
+            if revoked is None or revoked <= control.registered_at:
+                return control
+            told = (control.task.engine_key if control.task is not None else '', 'unpublished')
         engine_key_value, reason = told
         self._forget_control(control)
         raise TaskError(
@@ -1442,8 +1460,11 @@ class TaskServer(DAPBase):
 
         from .task_server_facade import start_server_task_as_team
 
-        # Step 1: the pinned artifact and the source the address names
+        # Step 1: the pinned artifact and the source the address names. The
+        # pin was read as enabled before this moment; a disable/remove from
+        # here on refuses the control at registration (plan 7.2)
         deployment = pin.deployment
+        state_epoch = time.monotonic()
         pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
         components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
         source = parsed.source or pipeline.get('source')
@@ -1504,6 +1525,7 @@ class TaskServer(DAPBase):
                 org_id=org_id,
                 team_id=billing_team,
                 deployment=deployment,
+                deployment_epoch=state_epoch,
                 trigger='process',
                 ttl=CONST_DEFAULT_TTL,
                 owner_kind=owner_kind,
@@ -2045,6 +2067,30 @@ class TaskServer(DAPBase):
         await self._stop_engine_now(engine, reason)
         self.debug_message(f'Engine "{key}" stopped by an operator ({len(engine.holds)} holders told)')
 
+    def _refuse_if_revoked(self, control: TaskControl, state_epoch: float) -> None:
+        """
+        Refuse to register a control through a deployment revoked since ``state_epoch``.
+
+        Args:
+            control: The control about to be registered.
+            state_epoch: When its deployment's state was last read as enabled.
+
+        Raises:
+            TaskError: TASK_ENGINE_UNAVAILABLE with ``reason='unpublished'``.
+        """
+        if control.deployment is None:
+            return
+        revoked = self._deployment_revoked.get(control.deployment)
+        if revoked is None or revoked <= state_epoch:
+            return
+        raise TaskError(
+            TaskError.ENGINE_UNAVAILABLE,
+            f'The deployment serving {control.address!r} was disabled or removed while it started',
+            address=control.address,
+            engineKey='',
+            reason='unpublished',
+        )
+
     async def release_deployment_holds(self, deployment: DeploymentRef) -> int:
         """
         Release every hold whose control resolved through ``deployment``.
@@ -2060,15 +2106,32 @@ class TaskServer(DAPBase):
         Returns:
             The number of holds released.
         """
+        # Step 1: stamp the revocation FIRST. A control registered through this
+        # deployment after this moment (its artifact was loading, its engine
+        # starting), or one whose release below fails, is refused on its next
+        # request by _check_engine_available: the kill switch does not depend
+        # on this pass reaching every control.
+        self._deployment_revoked[deployment] = time.monotonic()
+
+        # Step 2: release every hold; one failure never stops the others
         released = 0
+        failures: List[str] = []
         for control in list(self._task_control.values()):
             if control.deployment != deployment:
                 continue
-            await self.remove_task(control.key, reason='unpublished')
-            released += 1
+            try:
+                await self.remove_task(control.key, reason='unpublished')
+                released += 1
+            except Exception as exc:  # noqa: BLE001 - every remaining control is still released
+                failures.append(f'{control.key}: {exc!r}')
         if released:
             self.debug_message(
                 f'Released {released} hold(s) of {deployment.team_id}/{deployment.project_id} (unpublished)'
+            )
+        if failures:
+            raise RuntimeError(
+                f'{len(failures)} hold(s) of {deployment.team_id}/{deployment.project_id} could not be released '
+                f'(their next request is refused): ' + '; '.join(failures)
             )
         return released
 
@@ -2093,6 +2156,7 @@ class TaskServer(DAPBase):
         version: Optional[int] = None,
         team_context: Optional[TeamContext] = None,
         on_change: Optional[str] = None,
+        deployment_epoch: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Create a control and acquire its hold on an engine, starting one if needed.
@@ -2126,6 +2190,11 @@ class TaskServer(DAPBase):
                 ``'auto'``): a live presence at the address is reused, refused
                 or repointed per plan 3.4 instead of the useExisting rule, and
                 the result carries ``converged``/``specMatch`` stamps.
+            deployment_epoch: Monotonic time the trusted dispatch READ the
+                deployment's state, before it loaded the artifact. A
+                disable/remove after that moment refuses the control instead
+                of registering it (plan 7.2): the window between the state
+                read and the registration is closed. Default: now.
 
         Returns:
             Dict[str, Any]: The task's identity; ``token`` carries the ADDRESS
@@ -2428,10 +2497,18 @@ class TaskServer(DAPBase):
         # developer's non-default shape.
         key, shared, threads = self._engine_shape(control, args)
 
+        # The moment the deployment's state is known good: the dispatch's read,
+        # or now for a run that resolved no deployment
+        state_epoch = time.monotonic() if deployment_epoch is None else float(deployment_epoch)
+
         def _register(engine: TaskEngine) -> None:
+            # A deployment disabled or removed while the artifact loaded or the
+            # engine started never gets a registered control (plan 7.2)
+            self._refuse_if_revoked(control, state_epoch)
             # Hold it, register the control and schedule its idle expiry
             engine.acquire(control.key, control.ttl)
             control.task = engine
+            control.registered_at = state_epoch
             self._task_control[control.key] = control
             control.touch()
             self._schedule_control(control)

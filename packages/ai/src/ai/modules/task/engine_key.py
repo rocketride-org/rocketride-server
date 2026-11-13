@@ -95,6 +95,8 @@ def content_hash(
     types: Mapping[str, str],
     connections: Mapping[str, Mapping[str, List[Dict[str, str]]]],
     source: str,
+    *,
+    avoid_mocks: bool = False,
 ) -> str:
     """
     sha256 over the sort-keyed JSON of the resolved spec.
@@ -105,6 +107,9 @@ def content_hash(
         types: Component id -> provider.
         connections: Component id -> ``connections_of(component)``.
         source: The entry component id.
+        avoid_mocks: The spec's ``avoidMocks`` flag. It changes the engine's
+            subprocess environment (``ROCKETRIDE_MOCK`` is stripped), so a
+            mocked and a real-model engine are two engines.
 
     Returns:
         The hex digest.
@@ -122,7 +127,10 @@ def content_hash(
         ),
         key=lambda c: str(c['id']),
     )
-    content = json.dumps({'source': source, 'components': components}, sort_keys=True, default=str)
+    identity: Dict[str, Any] = {'source': source, 'components': components}
+    if avoid_mocks:
+        identity['avoidMocks'] = True
+    content = json.dumps(identity, sort_keys=True, default=str)
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
@@ -149,6 +157,7 @@ def engine_key(
     *,
     shareable: bool,
     owner_id: str,
+    avoid_mocks: bool = False,
 ) -> str:
     """
     The engine key of a resolved spec (plan 7.2, ALB seam 1).
@@ -160,12 +169,15 @@ def engine_key(
         source: The entry component id.
         shareable: True when the engine may be held across users.
         owner_id: The owner the key is qualified with when not shareable.
+        avoid_mocks: The spec's ``avoidMocks`` flag (see ``content_hash``).
 
     Returns:
         The engine key, also the task file's ``taskId``.
     """
     return qualified_key(
-        content_hash(resolved_config, types, connections, source), shareable=shareable, owner_id=owner_id
+        content_hash(resolved_config, types, connections, source, avoid_mocks=avoid_mocks),
+        shareable=shareable,
+        owner_id=owner_id,
     )
 
 
@@ -185,9 +197,10 @@ class EngineContent:
         shareable: True when the engine may be held by controls of different
             users (a request/response source and every component certified
             ``multitenant`` and from the catalog).
+        avoid_mocks: The spec's ``avoidMocks`` flag; part of the identity.
     """
 
-    __slots__ = ('resolved_config', 'types', 'connections', 'source', 'content_hash', 'shareable')
+    __slots__ = ('resolved_config', 'types', 'connections', 'source', 'content_hash', 'shareable', 'avoid_mocks')
 
     def __init__(
         self,
@@ -196,6 +209,7 @@ class EngineContent:
         connections: Dict[str, Dict[str, List[Dict[str, str]]]],
         source: str,
         shareable: bool,
+        avoid_mocks: bool = False,
     ) -> None:
         """Hold the resolved parts and derive the hash."""
         self.resolved_config = resolved_config
@@ -203,7 +217,8 @@ class EngineContent:
         self.connections = connections
         self.source = source
         self.shareable = shareable
-        self.content_hash = content_hash(resolved_config, types, connections, source)
+        self.avoid_mocks = avoid_mocks
+        self.content_hash = content_hash(resolved_config, types, connections, source, avoid_mocks=avoid_mocks)
 
     def key(self, *, shared: bool, owner_id: str) -> str:
         """
@@ -256,4 +271,4 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         shareable = shareable and component_shareable
     source_provider: Optional[str] = types.get(str(source))
     shareable = shareable and source_provider in CONST_SHAREABLE_SOURCES
-    return EngineContent(resolved, types, wiring, source, shareable)
+    return EngineContent(resolved, types, wiring, source, shareable, avoid_mocks=bool(pipeline.get('avoidMocks')))

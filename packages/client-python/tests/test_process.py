@@ -26,6 +26,7 @@ import asyncio
 
 import pytest
 
+from rocketride.core.constants import PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN
 from rocketride.mixins import execution
 from rocketride.mixins.execution import ExecutionMixin
 
@@ -33,22 +34,39 @@ STAMPS = {'token': 'acme.docBrain.webhook_1', 'resolved': '@team', 'converged': 
 
 
 class _Client(ExecutionMixin):
-    """ExecutionMixin over a recorded ``call``/``send``."""
+    """ExecutionMixin over a recorded request path (``build_request``/``request``) and ``send``."""
+
+    TRACE_REQUEST = 0
+    TRACE_SUCCESS = 1
+    TRACE_ERROR = 2
+    _on_trace = None
 
     def __init__(self, fail: str = '') -> None:
         self.calls = []
+        self.timeouts = []
         self.sent = []
+        self.sent_teams = []
         self._env = {'ROCKETRIDE_TONE': 'dry', 'OTHER': 'x'}
         self._fail = fail
 
-    async def call(self, command, **arguments):
-        self.calls.append((command, arguments))
-        if self._fail:
-            raise RuntimeError(self._fail)
-        return {**STAMPS, **({'answers': ['inline']} if 'data' in arguments else {})}
+    def build_request(self, command, arguments=None, token=None):
+        return {'type': 'request', 'command': command, 'arguments': dict(arguments or {}), 'token': token}
 
-    async def send(self, token, data, objinfo=None, mimetype=None, on_sse=None):
+    async def request(self, message, timeout=None):
+        self.calls.append((message['command'], message['arguments']))
+        self.timeouts.append(timeout)
+        if self._fail:
+            return {'success': False, 'message': self._fail}
+        arguments = message['arguments']
+        return {'success': True, 'body': {**STAMPS, **({'answers': ['inline']} if 'data' in arguments else {})}}
+
+    @staticmethod
+    def did_fail(response):
+        return not response.get('success')
+
+    async def send(self, token, data, objinfo=None, mimetype=None, on_sse=None, team=None):
         self.sent.append((token, data, on_sse))
+        self.sent_teams.append(team)
         return {'answers': ['streamed']}
 
 
@@ -107,3 +125,22 @@ def test_an_old_server_says_process_is_not_supported():
     client = _Client(fail='Unsupported command: process')
     with pytest.raises(RuntimeError, match='does not support process'):
         _run(client.process(name='acme.docBrain'))
+
+
+def test_the_timeout_is_a_server_argument_in_seconds_and_the_transport_deadline_outlives_it():
+    """``timeout`` rides the arguments (the server enforces it, open to close); the transport waits longer."""
+    client = _Client()
+    _run(client.process(name='acme.docBrain', data=b'x', timeout=30))
+    assert client.calls[0][1]['timeout'] == 30
+    assert client.timeouts == [(30 + PROCESS_TRANSPORT_MARGIN) * 1000]
+
+    client = _Client()
+    _run(client.process(name='acme.docBrain', data=b'x'))
+    assert 'timeout' not in client.calls[0][1] and client.timeouts == [None]
+
+
+def test_a_streamed_payload_is_sent_through_the_team_that_answered():
+    """The data path resolves the address again: the stamped team keeps it on the same control."""
+    client = _Client()
+    _run(client.process(name='acme.docBrain', data=b'0' * (PROCESS_INLINE_MAX + 1)))
+    assert client.sent_teams == [STAMPS.get('team')]

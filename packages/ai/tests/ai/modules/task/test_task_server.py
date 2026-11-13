@@ -57,6 +57,7 @@ def _make_server(*, config=None, web_server=None):
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts._deployment_revoked = {}
     ts._control_starts = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
@@ -1136,6 +1137,30 @@ async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
     # Its own clock runs on: at its ttl it is released
     assert await ts._ttl_cycle(control.last_activity + 900) == 1
     ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.quiet', reason='ttl')
+
+
+@pytest.mark.asyncio
+async def test_monitor_ttl_holds_a_control_with_a_request_in_flight():
+    """A call longer than the ttl is never expired mid-flight; the clock restarts when it ends."""
+    ts = _make_server()
+    ts.stop_task = AsyncMock()
+    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.slow', ttl=900, idle=0)
+
+    # The request starts; its ttl comes and goes while it runs: re-armed, not released
+    control.begin_request()
+    started = control.last_activity
+    assert await ts._ttl_cycle(started + 900) == 1
+    ts.stop_task.assert_not_awaited()
+    assert control.inflight == 1
+
+    # It ends: the entry was re-armed one ttl after that pass; nothing is due before then, and at
+    # that pass the control's own idle time (since the request ended) decides, as always
+    control.end_request()
+    assert control.inflight == 0
+    assert await ts._ttl_cycle(started + 1799) == 0
+    ts.stop_task.assert_not_awaited()
+    assert await ts._ttl_cycle(started + 1800) == 1
+    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.slow', reason='ttl')
 
 
 @pytest.mark.asyncio

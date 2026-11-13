@@ -384,6 +384,7 @@ class TaskScheduler:
             # Re-read the deployment at fire time: a disable/remove/pointer-move
             # or schedule pause between ticks must always win over the in-memory
             # heap.
+            state_epoch = time.monotonic()
             try:
                 dep = await account.deployments_get(org_id, team_id, project_id)
             except Exception as e:
@@ -438,6 +439,9 @@ class TaskScheduler:
                     org_id=org_id,
                     team_id=billing_team,
                     deployment=DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id),
+                    # A disable/remove between the state read above and the
+                    # registration refuses the run instead of starting it
+                    deployment_epoch=state_epoch,
                     trigger='schedule',
                     ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
                     # Per-source execution settings ride the schedule record.

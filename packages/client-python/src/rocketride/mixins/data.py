@@ -131,6 +131,12 @@ class DataMixin(DAPClient):
             # Results available after pipe closes
         """
 
+        def _arguments(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+            """The request arguments, with the pipe's team when it has one."""
+            if self._team:
+                arguments['team'] = self._team
+            return arguments
+
         def __init__(
             self,
             client,
@@ -139,6 +145,7 @@ class DataMixin(DAPClient):
             mime_type: str = None,
             provider: str = None,
             on_sse=None,
+            team: str = None,
         ):
             """
             Create a new data pipe (usually called via client.pipe()).
@@ -151,9 +158,13 @@ class DataMixin(DAPClient):
                 provider: Optional provider specification
                 on_sse: Optional async callback(type: str, data: dict) called for each SSE
                         event emitted by the pipeline node for this specific pipe
+                team: Resolve the address through this one of your teams on
+                      every request of the pipe (what ``process()`` passes on
+                      from the team that answered it)
             """
             self._client = client
             self._token = token
+            self._team = team
             self._objinfo = objinfo or {}
             self._mime_type = mime_type or 'application/octet-stream'
             self._provider = provider
@@ -205,12 +216,14 @@ class DataMixin(DAPClient):
             for attempt in range(1, _PIPE_OPEN_RETRY_ATTEMPTS + 1):
                 request = self._client.build_request(
                     'rrext_process',
-                    arguments={
-                        'subcommand': 'open',
-                        'object': self._objinfo,
-                        'mimeType': self._mime_type,
-                        'provider': self._provider,
-                    },
+                    arguments=self._arguments(
+                        {
+                            'subcommand': 'open',
+                            'object': self._objinfo,
+                            'mimeType': self._mime_type,
+                            'provider': self._provider,
+                        }
+                    ),
                     token=self._token,
                 )
 
@@ -284,11 +297,13 @@ class DataMixin(DAPClient):
 
             request = self._client.build_request(
                 'rrext_process',
-                arguments={
-                    'subcommand': 'write',
-                    'pipe_id': self._pipe_id,
-                    'data': buffer,
-                },
+                arguments=self._arguments(
+                    {
+                        'subcommand': 'write',
+                        'pipe_id': self._pipe_id,
+                        'data': buffer,
+                    }
+                ),
                 token=self._token,
             )
 
@@ -326,10 +341,12 @@ class DataMixin(DAPClient):
             try:
                 request = self._client.build_request(
                     'rrext_process',
-                    arguments={
-                        'subcommand': 'close',
-                        'pipe_id': self._pipe_id,
-                    },
+                    arguments=self._arguments(
+                        {
+                            'subcommand': 'close',
+                            'pipe_id': self._pipe_id,
+                        }
+                    ),
                     token=self._token,
                 )
 
@@ -378,13 +395,15 @@ class DataMixin(DAPClient):
 
             request = self._client.build_request(
                 'rrext_process',
-                arguments={
-                    'subcommand': 'tool',
-                    'tool': tool,
-                    'nodeId': node_id,
-                    'input': input or {},
-                    'pipe_id': self._pipe_id,
-                },
+                arguments=self._arguments(
+                    {
+                        'subcommand': 'tool',
+                        'tool': tool,
+                        'nodeId': node_id,
+                        'input': input or {},
+                        'pipe_id': self._pipe_id,
+                    }
+                ),
                 token=self._token,
             )
 
@@ -417,7 +436,13 @@ class DataMixin(DAPClient):
         return out
 
     async def pipe(
-        self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None
+        self,
+        token: str,
+        objinfo: Dict[str, Any] = None,
+        mime_type: str = None,
+        provider: str = None,
+        on_sse=None,
+        team: str = None,
     ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
@@ -431,6 +456,8 @@ class DataMixin(DAPClient):
             objinfo: Optional metadata about your data (e.g., {"name": "my_data.csv"})
             mime_type: MIME type of your data (auto-detected if not provided)
             provider: Optional provider specification
+            team: Resolve the address through this one of your teams (the
+                ``@team`` rung); default: your team order
 
         Returns:
             DataPipe: A pipe object for streaming data
@@ -451,7 +478,9 @@ class DataMixin(DAPClient):
                 results = await pipe.close()
             # Results available after context exits
         """
-        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse)
+        return self.DataPipe(
+            self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse, team=team
+        )
 
     async def send(
         self,
@@ -460,6 +489,7 @@ class DataMixin(DAPClient):
         objinfo: Dict[str, Any] = None,
         mimetype: str = None,
         on_sse=None,
+        team: str = None,
     ) -> PIPELINE_RESULT:
         """
         Send data to a running pipeline.
@@ -476,6 +506,8 @@ class DataMixin(DAPClient):
             objinfo: Optional metadata about the data (e.g., {"name": "data.txt"})
             mimetype: MIME type of the data (auto-detected if not specified)
 
+            team: Resolve the address through this one of your teams (the
+                ``@team`` rung); default: your team order
         Returns:
             Dict: Results from processing your data
 
@@ -512,7 +544,7 @@ class DataMixin(DAPClient):
             raise ValueError('data must be either a string or bytes')
 
         # Create and use a temporary pipe for the data
-        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype, on_sse=on_sse)
+        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype, on_sse=on_sse, team=team)
 
         try:
             await pipe.open()

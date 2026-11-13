@@ -106,3 +106,22 @@ def test_engine_key_imports_the_standard_library_only():
             assert node.level == 0, 'relative import in engine_key.py'
             imported.add((node.module or '').split('.')[0])
     assert imported <= {'hashlib', 'json', 'typing'}, imported
+
+
+def test_avoid_mocks_is_part_of_the_content_identity():
+    """A spec that strips ROCKETRIDE_MOCK from its engine (avoidMocks) is another engine."""
+    from ai.modules.task.engine_key import content_hash, engine_content
+
+    parts = dict(resolved_config={'a': {}}, types={'a': 'webhook'}, connections={'a': connections_of({})}, source='a')
+    assert content_hash(**parts) == content_hash(**parts, avoid_mocks=False)
+    assert content_hash(**parts) != content_hash(**parts, avoid_mocks=True)
+
+    def facts(provider, stored):
+        """A one-line catalog stand-in: every component resolves to its stored config, shareable."""
+        return stored, True
+
+    spec = {'components': [{'id': 'a', 'provider': 'webhook', 'config': {}}], 'source': 'a'}
+    plain = engine_content(spec, 'a', facts)
+    mocked = engine_content({**spec, 'avoidMocks': True}, 'a', facts)
+    assert (plain.avoid_mocks, mocked.avoid_mocks) == (False, True)
+    assert plain.content_hash != mocked.content_hash

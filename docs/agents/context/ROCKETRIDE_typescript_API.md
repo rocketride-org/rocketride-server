@@ -437,7 +437,7 @@ const ocr = await client.getService('ocr');
 
 ## 4. Sending Data
 
-### `send(token, data, objinfo?, mimetype?, onSSE?): Promise<PIPELINE_RESULT | undefined>`
+### `send(token, data, objinfo?, mimetype?, onSSE?, team?): Promise<PIPELINE_RESULT | undefined>`
 
 Send data directly to a pipeline in one shot (internally: open pipe → write → close).
 
@@ -472,7 +472,7 @@ const results = await client.sendFiles(
 );
 ```
 
-### `pipe(token, objinfo?, mimeType?, provider?, onSSE?): Promise<DataPipe>`
+### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?): Promise<DataPipe>`
 
 Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`.
 

@@ -83,7 +83,16 @@ def _running_control(*, rung='dev', owner_id='user-1', engine_key='hash-1:user-1
         engine_key=engine_key,
         shared=shared,
     )
-    return SimpleNamespace(teamId='team-1', rung=rung, owner_id=owner_id, task=task, touch=MagicMock())
+    return SimpleNamespace(
+        teamId='team-1',
+        rung=rung,
+        owner_id=owner_id,
+        task=task,
+        dormant=False,
+        touch=MagicMock(),
+        begin_request=MagicMock(),
+        end_request=MagicMock(),
+    )
 
 
 def _server_for(control):
@@ -125,7 +134,9 @@ async def test_proxy_is_activity_of_the_resolved_control():
 
     await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target', 'session': 's'}})
 
-    control.touch.assert_called_once_with()
+    # In flight through the control from before the engine is awaited to after it answers
+    control.begin_request.assert_called_once_with()
+    control.end_request.assert_called_once_with()
 
 
 @pytest.mark.asyncio

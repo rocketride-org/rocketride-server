@@ -59,7 +59,7 @@ import copy
 import os
 from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
-from ..core.constants import PROCESS_INLINE_MAX
+from ..core.constants import PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN
 from ..types.pipeline import PROCESS_RESULT, PipelineConfig
 from ..types.task import TASK_STATUS
 
@@ -240,21 +240,37 @@ class ExecutionMixin(DAPClient):
         if rocket_env:
             arguments['env'] = rocket_env
 
-        # Step 3: inline in one request, unless the SDK must stream
+        # Step 3: inline in one request, unless the SDK must stream. The
+        # request is built here, not through call(): ``timeout`` is a SERVER
+        # argument (seconds, pipe open to close) that call() would take for
+        # its own transport deadline. The transport deadline is separate and
+        # outlives the server's, so the server's timeout error is the one the
+        # caller sees.
         inline = data is not None and on_sse is None and len(data) <= PROCESS_INLINE_MAX
         if inline:
             arguments['data'] = data
-        try:
-            stamps = await self.call('process', **arguments)
-        except RuntimeError as err:
-            if str(err).startswith('Unsupported command: process'):
-                raise RuntimeError('This server does not support process(); upgrade the server') from err
-            raise
+        message = self.build_request(command='process', arguments=arguments)
+        transport_timeout = None if timeout is None else (float(timeout) + PROCESS_TRANSPORT_MARGIN) * 1000
+        if self._on_trace:
+            self._on_trace(self.TRACE_REQUEST, message)
+        response = await self.request(message, timeout=transport_timeout)
+        if self.did_fail(response):
+            if self._on_trace:
+                self._on_trace(self.TRACE_ERROR, response)
+            reason = response.get('message', 'process failed')
+            if reason.startswith('Unsupported command: process'):
+                raise RuntimeError('This server does not support process(); upgrade the server')
+            raise RuntimeError(reason)
+        if self._on_trace:
+            self._on_trace(self.TRACE_SUCCESS, response)
+        stamps = response.get('body') or {}
         if inline or data is None:
             return stamps
 
-        # Step 4: stream to the address the server answered with
-        streamed = self.send(stamps['token'], data, objinfo, mimetype, on_sse=on_sse)
+        # Step 4: stream to the address the server answered with, through
+        # the team that answered (``@team``): the data path resolves the
+        # address again and must land on the same control.
+        streamed = self.send(stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'))
         result = await (asyncio.wait_for(streamed, timeout) if timeout is not None else streamed)
         return {**(result or {}), **stamps}
 

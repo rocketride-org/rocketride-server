@@ -201,6 +201,9 @@ class TaskCommands(DAPConn):
             # dispatch names it; a client's own run is its home team's (a
             # scoped key's frozen team)
             version = getattr(self, '_trusted_version', None)
+            # ... and when the dispatch read the deployment's state (plan 7.2:
+            # a disable/remove since then refuses the control)
+            deployment_epoch = getattr(self, '_trusted_deployment_epoch', None)
             team_context = getattr(self, '_trusted_team_context', None) or TeamContext(
                 home_team(self._account_info) or team_id,
                 'key' if getattr(self._account_info, 'endpoints', None) is not None else 'home',
@@ -240,6 +243,7 @@ class TaskCommands(DAPConn):
                 owner_kind=owner_kind,
                 trigger=trigger,
                 deployment=deployment,
+                deployment_epoch=deployment_epoch,
                 rung=rung,
                 version=version,
                 team_context=team_context,

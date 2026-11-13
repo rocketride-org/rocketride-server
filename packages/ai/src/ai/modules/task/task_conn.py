@@ -758,6 +758,14 @@ class TaskConn(
                 key's endpoints scope.
         """
         address = self.get_task_address(request)
+        # A data request may name the team it must resolve through: process()
+        # passes on the team that answered it, so a streamed payload lands on
+        # the control the stamps describe, never on another team's run that
+        # comes first in the caller's team order
+        arguments = request.get('arguments')
+        team = arguments.get('team') if isinstance(arguments, dict) else None
+        if team:
+            return self._server.resolve_control(address, self._account_info, permissions or None, team=str(team))
         return self._server.resolve_control(address, self._account_info, permissions or None)
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'TaskEngine':

@@ -53,6 +53,7 @@ Architecture:
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
+from .engine_access import engine_for
 from ai.common.cprofile_manager import profiler
 
 # Only import for type checking to avoid circular import errors
@@ -179,18 +180,22 @@ class CProfileCommands(DAPConn):
         self._check_profile_access(control)
 
         # The engine to profile: one that stopped on its inactivity timer
-        # starts again under the same key (plan 7.2)
-        task = await self._server.ensure_engine(control)
+        # starts again under the same key (plan 7.2), after the caller's team
+        # access is re-checked for the restart
+        task = await engine_for(self, control, 'task.control')
 
-        # A request into the engine is activity of this control only
-        control.touch()
+        # A request into the engine is activity of this control only, and in
+        # flight through it until the answer comes back
+        control.begin_request()
+        try:
+            # Wait for the task to reach running state
+            await task.wait_for_running()
 
-        # Wait for the task to reach running state
-        await task.wait_for_running()
-
-        # Forward the command — _send_data builds a fresh DAP envelope
-        # with its own seq for the eaas→subprocess hop
-        subprocess_response = await task._send_data(request)
+            # Forward the command — _send_data builds a fresh DAP envelope
+            # with its own seq for the eaas→subprocess hop
+            subprocess_response = await task._send_data(request)
+        finally:
+            control.end_request()
 
         # Re-wrap with the original client request seq
         return self.build_response(

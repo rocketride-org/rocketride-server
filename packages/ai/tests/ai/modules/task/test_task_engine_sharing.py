@@ -153,6 +153,7 @@ def _server() -> TaskServer:
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts._deployment_revoked = {}
     ts._control_starts = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
@@ -686,6 +687,7 @@ async def test_a_data_request_is_activity_of_its_own_control_only(catalog, engin
         get_control=MagicMock(return_value=caller),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
+        verify_team_permission=lambda team_id, perm: None,
     )
 
     clock.advance(45)
@@ -719,6 +721,7 @@ def _data_conn(ts, control):
         get_control=MagicMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
+        verify_team_permission=lambda team_id, perm: None,
     )
 
 
@@ -807,6 +810,7 @@ async def test_status_shows_stopped_then_running(catalog, engines, clock, servin
         get_control=MagicMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
+        verify_team_permission=lambda team_id, perm: None,
     )
 
     status = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {}})
@@ -899,6 +903,7 @@ def _lister(ts, user):
         _account_info=_account(user),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
+        verify_team_permission=lambda team_id, perm: None,
     )
 
 
@@ -1044,6 +1049,7 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
         get_control=MagicMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
+        verify_team_permission=lambda team_id, perm: None,
     )
     await _idle_out(ts, clock)
 
@@ -1105,6 +1111,71 @@ async def test_publisher_remove_stops_an_engine_only_the_deployment_held(catalog
     assert ts._task_control == {}
     assert engines == [(engine, 'unpublished')]
     assert ts._engines == {}
+
+
+@pytest.mark.asyncio
+async def test_a_deployment_revoked_while_its_run_started_is_never_registered(catalog, engines):
+    """The dispatch read the deployment enabled, then it was disabled while the artifact loaded: refused."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    state_epoch = time.monotonic()
+    await asyncio.sleep(0.05)  # the artifact loads (a monotonic tick is 15 ms on Windows)
+    await ts.release_deployment_holds(deployment)  # the disable lands after the state read
+
+    with pytest.raises(TaskError) as err:
+        await ts.start_task(
+            {'command': 'execute', 'arguments': {'pipeline': _pipeline()}},
+            MagicMock(),
+            client_id='',
+            user_id='',
+            team_id='team-1',
+            org_id='org-1',
+            run_kind='deploy',
+            owner_kind='team',
+            developer_id='acme',
+            deployment=deployment,
+            deployment_epoch=state_epoch,
+        )
+    assert (err.value.code, err.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'unpublished')
+    assert ts._task_control == {}
+    assert ts._engines == {}
+
+    # A state read AFTER the revocation (a re-enable, a later fire) registers as before
+    await asyncio.sleep(0.05)
+    run = await _start(ts, _pipeline(), user='', run_kind='deploy', owner_kind='team', deployment=deployment)
+    assert run.key in ts._task_control
+
+
+@pytest.mark.asyncio
+async def test_a_hold_the_release_pass_could_not_drop_is_refused_on_its_next_request(catalog, engines, monkeypatch):
+    """One failed remove never leaves a disabled deployment serving: the pass goes on, reports, and the resolver refuses."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    first = await _start(ts, _pipeline(), run_kind='deploy', owner_kind='user', deployment=deployment)
+    second = await _start(
+        ts, _pipeline(), run_kind='deploy', owner_kind='user', deployment=deployment, token='docBrain2'
+    )
+    assert ts.resolve_control(first.address, _account('user-a'), 'task.data') is first
+    await asyncio.sleep(0.05)  # the disable comes later than the registrations
+
+    real_remove = ts.remove_task
+
+    async def flaky_remove(key, **kwargs):
+        if key == first.key:
+            raise RuntimeError('store hiccup')
+        await real_remove(key, **kwargs)
+
+    monkeypatch.setattr(ts, 'remove_task', flaky_remove)
+    with pytest.raises(RuntimeError, match='1 hold'):
+        await ts.release_deployment_holds(deployment)
+
+    # The second hold went; the first is still registered but refused, and dropped, on its next request
+    assert second.key not in ts._task_control
+    assert first.key in ts._task_control
+    with pytest.raises(TaskError) as err:
+        ts.resolve_control(first.address, _account('user-a'), 'task.data')
+    assert (err.value.code, err.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'unpublished')
+    assert first.key not in ts._task_control
 
 
 # =============================================================================

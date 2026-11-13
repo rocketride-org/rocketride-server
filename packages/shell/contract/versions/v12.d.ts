@@ -23,10 +23,10 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-13T02:46:34.006Z
-// Source commit: d758769b10a2e182435884855808e9f4091857ba
+// Generated:     2026-11-13T03:48:06.185Z
+// Source commit: 47c642bfdb1392dbbc0438aa78b0cd24bc762a92
 // Generator:     dts-bundle-generator@9.5.1
-// Produced by:   ./builder shell:freeze
+// Produced by:   ./builder shell:remint
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
@@ -3376,9 +3376,15 @@ export interface TASK_METRICS {
     peak_cpu_memory_mb: number;
     /** Peak GPU memory usage in megabytes during task execution */
     peak_gpu_memory_mb: number;
-    /** Average CPU utilization percentage over task lifetime */
+    /**
+     * Not computed by the server (always 0): status bodies carry counts and bytes only,
+     * never server-side averages or rates; derive from samples client-side.
+     */
     avg_cpu_percent: number;
-    /** Average CPU memory usage in megabytes over task lifetime */
+    /**
+     * Not computed by the server (always 0): status bodies carry counts and bytes only,
+     * never server-side averages or rates; derive from samples client-side.
+     */
     avg_cpu_memory_mb: number;
     /** Average GPU memory usage in megabytes over task lifetime */
     avg_gpu_memory_mb: number;
@@ -3503,6 +3509,12 @@ export declare const CONST_SOCKET_TIMEOUT = 180;
  * payloads (and every call with onSSE) stream through pipe open/write/close.
  * One shared constant with the server and the Python SDK (1 MiB).
  */
+/**
+ * Seconds the TRANSPORT deadline of a process() request outlives the caller's
+ * `timeout` (which the server enforces, pipe open to close): the server's own
+ * timeout error, never the transport's, is what the caller sees.
+ */
+export declare const PROCESS_TRANSPORT_MARGIN = 60;
 export declare const PROCESS_INLINE_MAX: number;
 /**
  * WebSocket ping interval in seconds.
@@ -5075,8 +5087,18 @@ export declare class DataPipe {
      * @param provider - Optional provider name for the data source
      * @param onSSE - Optional async callback invoked for each SSE event emitted by
      *                the pipeline node for this specific pipe
+     * @param team - Resolve the address through this one of your teams on every
+     *               request of the pipe (what process() passes on from the team
+     *               that answered it)
      */
-    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>);
+    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string);
+    /**
+     * Give the pipe up without waiting for the server: the caller's operation is over
+     * (its timeout expired). The SSE subscription is dropped at once, the server-side
+     * pipe is closed best-effort in the background, and a write that was pending when
+     * the timeout fired finds the pipe closed afterwards and does not finalize it again.
+     */
+    abandon(): void;
     /**
      * Check if the pipe is currently open for writing.
      *
@@ -5616,11 +5638,11 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Create a data pipe for streaming operations.
      */
-    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<DataPipe>;
+    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
      */
-    send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<PIPELINE_RESULT | undefined>;
+    send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<PIPELINE_RESULT | undefined>;
     /**
      * Upload multiple files to a pipeline with progress tracking and parallel execution.
      *

@@ -29,7 +29,7 @@ import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PROCESS_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, PROCESS_INLINE_MAX } from './constants.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
@@ -72,6 +72,7 @@ export class DataPipe {
 	private _opened = false;
 	private _closed = false;
 	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
+	private _team?: string;
 
 	/**
 	 * Creates a new DataPipe instance.
@@ -83,14 +84,53 @@ export class DataPipe {
 	 * @param provider - Optional provider name for the data source
 	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
 	 *                the pipeline node for this specific pipe
+	 * @param team - Resolve the address through this one of your teams on every
+	 *               request of the pipe (what process() passes on from the team
+	 *               that answered it)
 	 */
-	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>) {
+	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
 		this._onSSE = onSSE;
+		this._team = team;
+	}
+
+	/** The request arguments, with the pipe's team when it has one. */
+	private _arguments(arguments_: Record<string, unknown>): Record<string, unknown> {
+		if (this._team !== undefined) {
+			arguments_.team = this._team;
+		}
+		return arguments_;
+	}
+
+	/**
+	 * Give the pipe up without waiting for the server: the caller's operation is over
+	 * (its timeout expired). The SSE subscription is dropped at once, the server-side
+	 * pipe is closed best-effort in the background, and a write that was pending when
+	 * the timeout fired finds the pipe closed afterwards and does not finalize it again.
+	 */
+	abandon(): void {
+		if (this._closed) {
+			return;
+		}
+		const pipeId = this._pipeId;
+		this._closed = true;
+		this._opened = false;
+		if (pipeId === undefined) {
+			return;
+		}
+		if (this._onSSE !== undefined) {
+			this._client._ssePipeCallbacks.delete(pipeId);
+			void this._client.setEvents(this._token, [], pipeId).catch(() => undefined);
+		}
+		const request = this._client.buildRequest('rrext_process', {
+			arguments: this._arguments({ subcommand: 'close', pipe_id: pipeId }),
+			token: this._token,
+		});
+		void this._client.request(request).catch(() => undefined);
 	}
 
 	/**
@@ -131,12 +171,12 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: {
+			arguments: this._arguments({
 				subcommand: 'open',
 				object: this._objinfo,
 				mimeType: this._mimeType,
 				provider: this._provider,
-			},
+			}),
 			token: this._token,
 		});
 
@@ -195,13 +235,16 @@ export class DataPipe {
 		if (!(buffer instanceof Uint8Array)) {
 			throw new Error('Buffer must be Uint8Array');
 		}
+		if (this._closed) {
+			throw new Error('Pipe is closed');
+		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: {
+			arguments: this._arguments({
 				subcommand: 'write',
 				pipe_id: this._pipeId,
 				data: buffer,
-			},
+			}),
 			token: this._token,
 		});
 
@@ -232,10 +275,10 @@ export class DataPipe {
 
 		try {
 			const request = this._client.buildRequest('rrext_process', {
-				arguments: {
+				arguments: this._arguments({
 					subcommand: 'close',
 					pipe_id: this._pipeId,
-				},
+				}),
 				token: this._token,
 			});
 
@@ -282,13 +325,13 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: {
+			arguments: this._arguments({
 				subcommand: 'tool',
 				tool,
 				nodeId,
 				input,
 				pipe_id: this._pipeId,
-			},
+			}),
 			token: this._token,
 		});
 
@@ -1649,9 +1692,13 @@ export class RocketRideClient extends DAPClient {
 		if (inline) {
 			arguments_.data = data;
 		}
+		// ``timeout`` is a SERVER argument (seconds, pipe open to close); the
+		// transport deadline is separate and outlives it, so the server's own
+		// timeout error is what the caller sees.
 		let stamps: PROCESS_RESULT;
 		try {
-			stamps = (await this.call('process', arguments_)) as PROCESS_RESULT;
+			const transport = timeout === undefined ? undefined : { timeout: (timeout + PROCESS_TRANSPORT_MARGIN) * 1000 };
+			stamps = (await this.call('process', arguments_, transport)) as PROCESS_RESULT;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			if (message.startsWith('Unsupported command: process')) {
@@ -1663,8 +1710,19 @@ export class RocketRideClient extends DAPClient {
 			return stamps;
 		}
 
-		// Step 4: stream to the address the server answered with
-		const streamed = this.send(stamps.token, data, objinfo ?? {}, mimetype, onSSE);
+		// Step 4: stream to the address the server answered with, through the
+		// team that answered (@team): the data path resolves the address again
+		// and must land on the same control. The pipe is owned here so a
+		// timeout can give it up: the SSE subscription goes at once, the
+		// server-side pipe is closed in the background, and a write that was
+		// pending finds the pipe closed afterwards and does not finalize it.
+		const pipe = await this.pipe(stamps.token, this._objinfoWithSize(objinfo ?? {}, data.length), mimetype, undefined, onSSE, stamps.team);
+		const run = (async () => {
+			await pipe.open();
+			await pipe.write(data);
+			return await pipe.close();
+		})();
+		run.catch(() => undefined);
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const expired = new Promise<never>((_, reject) => {
@@ -1672,8 +1730,11 @@ export class RocketRideClient extends DAPClient {
 					timer = setTimeout(() => reject(new Error(`process() exceeded its timeout of ${timeout}s`)), timeout * 1000);
 				}
 			});
-			const result = timeout === undefined ? await streamed : await Promise.race([streamed, expired]);
+			const result = timeout === undefined ? await run : await Promise.race([run, expired]);
 			return { ...(result ?? {}), ...stamps };
+		} catch (err) {
+			pipe.abandon();
+			throw err;
 		} finally {
 			if (timer !== undefined) clearTimeout(timer);
 		}
@@ -1806,14 +1867,14 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Create a data pipe for streaming operations.
 	 */
-	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE);
+	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<DataPipe> {
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team);
 	}
 
 	/**
 	 * Send data to a running pipeline.
 	 */
-	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<PIPELINE_RESULT | undefined> {
+	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<PIPELINE_RESULT | undefined> {
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
 		if (typeof data === 'string') {
@@ -1825,7 +1886,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE, team);
 
 		try {
 			await pipe.open();

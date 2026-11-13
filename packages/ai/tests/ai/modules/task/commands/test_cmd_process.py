@@ -33,6 +33,7 @@ probe advertises ``process``.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock
 
@@ -205,6 +206,26 @@ async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, m
     assert err.value.code == TaskError.TIMEOUT
     assert (err.value.address, err.value.converged) == (ADDRESS, 'started')
     assert closed == [1]
+
+
+@pytest.mark.asyncio
+async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, deployments, monkeypatch):
+    """An engine that does not answer the cleanup close never holds the timed-out request open."""
+    ts = _server()
+    deployments.deploy('team-1')
+    monkeypatch.setattr(cmd_process, 'CONST_PROCESS_CLOSE_SECONDS', 0.05)
+
+    async def send(self, request):
+        if request['arguments']['subcommand'] in ('write', 'close'):
+            await asyncio.sleep(10)
+        return {'body': {'pipe_id': 1}}
+
+    monkeypatch.setattr(TaskEngine, '_send_data', send)
+    started = time.monotonic()
+    with pytest.raises(TaskError) as err:
+        await _process(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
+    assert err.value.code == TaskError.TIMEOUT
+    assert time.monotonic() - started < 2.0
 
 
 # =============================================================================

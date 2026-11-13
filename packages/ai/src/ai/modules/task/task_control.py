@@ -225,6 +225,13 @@ class TaskControl:
             control: the control's OWN idle clock (plan 7.1).
         expiry_gen: The control's entry in the server's idle-expiry heap
             (0 = not scheduled); a heap entry with another value is stale.
+        inflight: Requests running through this control right now. While
+            one runs the idle clock is held: a call longer than the ttl is
+            never expired mid-flight (``begin_request``/``end_request``).
+        registered_at: Monotonic time the control was registered, or the
+            earlier moment its deployment's state was read when a trusted
+            dispatch started it: a deployment revoked after this moment makes
+            the control unavailable (plan 7.2, the kill switch).
         origin: The ``origin`` hint the caller sent, recorded as given.
         deployment: The deployment this control resolved through, if any.
         version: The artifact version a published rung started from (None on @dev).
@@ -285,6 +292,8 @@ class TaskControl:
     # through one control never keeps another alive (plan 7.1)
     last_activity: float = field(default_factory=time.monotonic)
     expiry_gen: int = 0
+    inflight: int = 0
+    registered_at: float = 0.0
 
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
@@ -332,6 +341,22 @@ class TaskControl:
         # Step 2: the held engine dates its idle time from its latest activity
         if self.task is not None:
             self.task.note_activity(now)
+
+    def begin_request(self) -> None:
+        """
+        A request starts running through this control: activity, and the idle clock is held.
+
+        The server's TTL pass never releases a control with a request in
+        flight, whatever its idle time says: the request may outlive the ttl
+        without touching the control (a long write, a slow pipeline).
+        """
+        self.inflight += 1
+        self.touch()
+
+    def end_request(self) -> None:
+        """The request finished (any way): activity again, and the idle clock runs from now."""
+        self.inflight = max(0, self.inflight - 1)
+        self.touch()
 
     @property
     def dormant(self) -> bool:
