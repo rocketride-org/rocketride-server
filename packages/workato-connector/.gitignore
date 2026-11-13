@@ -1,0 +1,11 @@
+# Secrets — never commit
+master.key
+settings.yaml.enc
+settings.yaml
+input.json
+
+# Workato CLI / Ruby artifacts
+.workato/
+.vcr/
+*.gem
+Gemfile.lock

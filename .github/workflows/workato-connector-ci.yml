@@ -1,0 +1,28 @@
+name: workato-connector CI
+
+on:
+  pull_request:
+    paths:
+      - 'packages/workato-connector/**'
+      - '.github/workflows/workato-connector-ci.yml'
+  push:
+    branches: [develop]
+    paths:
+      - 'packages/workato-connector/**'
+
+defaults:
+  run:
+    working-directory: packages/workato-connector
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: packages/workato-connector
+      - name: RSpec
+        run: bundle exec rspec
