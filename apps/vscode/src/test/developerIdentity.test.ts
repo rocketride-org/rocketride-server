@@ -62,7 +62,7 @@ function statusReply(status: IFake['status'], timeoutMs: number | undefined): Pr
 }
 
 /** A fake connection plus a log of the server calls (and status time limits) it received. */
-function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; registerTimeouts: (number | undefined)[]; setOrg: (orgId: string | undefined) => void } {
+function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[]; timeouts: (number | undefined)[]; registerTimeouts: (number | undefined)[]; setOrg: (orgId: string | undefined) => void; setStatus: (developerId: string | null) => void } {
 	const calls: string[] = [];
 	const timeouts: (number | undefined)[] = [];
 	const registerTimeouts: (number | undefined)[] = [];
@@ -93,7 +93,10 @@ function fake(opts: IFake): { connection: IDeveloperConnection; calls: string[];
 		getClient: () => (opts.connected === false ? undefined : client),
 		isConnected: () => opts.connected !== false,
 	};
-	return { connection, calls, timeouts, registerTimeouts, setOrg };
+	const setStatus = (developerId: string | null): void => {
+		status = developerId;
+	};
+	return { connection, calls, timeouts, registerTimeouts, setOrg, setStatus };
 }
 
 // ── resolve() ────────────────────────────────────────────────────────────────
@@ -381,4 +384,25 @@ test('messageOf: an Error gives its message, anything else its string form', () 
 	assert.equal(messageOf(new Error('500 internal error')), '500 internal error');
 	assert.equal(messageOf('timed out'), 'timed out');
 	assert.equal(messageOf(42), '42');
+});
+
+test('a claim made from the Deploy tab shows up when the account update refreshes the wizards', async () => {
+	// The Deploy tab claims through the client directly, so this session records
+	// no claim; on SaaS developer_register pushes apaext_account, which the host
+	// turns into feed.refresh(true) (appdevOps' shell:accountUpdate listener).
+	const { connection, setStatus } = fake({ status: null });
+	const identity = new DeveloperIdentity(connection);
+	const broadcasts: NewAppIdentity[] = [];
+	const feed = new IdentityFeed(
+		async () => toWizardIdentity(await identity.resolve(), { workspaceOpen: true, existingFolders: [] }),
+		(_op, p) => {
+			broadcasts.push(p as NewAppIdentity);
+		}
+	);
+	await feed.refresh(true);
+	assert.equal(broadcasts.at(-1)?.canRegisterDeveloper, true, 'the wizard shows the field');
+	setStatus('acme'); // claimed from the Deploy tab
+	await feed.refresh(true); // the account update
+	assert.equal(broadcasts.at(-1)?.developerId, 'acme');
+	assert.equal(broadcasts.at(-1)?.canRegisterDeveloper, false, 'the field becomes the chip');
 });

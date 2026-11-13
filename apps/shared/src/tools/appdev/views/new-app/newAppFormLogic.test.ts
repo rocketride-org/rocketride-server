@@ -27,7 +27,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { canCreateApp, developerIdRow, isValidDeveloperId } from './NewAppForm';
+import { canCreateApp, canRegisterDeveloperId, developerIdProblem, developerIdRow, isValidDeveloperId } from './NewAppForm';
 import type { ICreateState } from './NewAppForm';
 import type { NewAppIdentity } from '../../types';
 
@@ -73,4 +73,21 @@ test('create: allowed once the field is cleared', () => {
 
 test('create: blocked while a register request is in flight', () => {
 	assert.equal(canCreateApp(ready({ registering: true })), false);
+});
+
+test('id problem: "local" is reserved', () => {
+	assert.match(developerIdProblem('local') ?? '', /reserved/);
+	assert.equal(canRegisterDeveloperId('local'), false);
+});
+
+test('id problem: a bad shape says what is allowed', () => {
+	assert.match(developerIdProblem('Acme') ?? '', /lowercase letters and underscores/);
+	assert.equal(canRegisterDeveloperId('Acme'), false);
+});
+
+test('id problem: a valid id has none, and an empty field shows none but cannot register', () => {
+	assert.equal(developerIdProblem('acme_labs'), null);
+	assert.equal(canRegisterDeveloperId('acme_labs'), true);
+	assert.equal(developerIdProblem(''), null);
+	assert.equal(canRegisterDeveloperId(''), false);
 });
