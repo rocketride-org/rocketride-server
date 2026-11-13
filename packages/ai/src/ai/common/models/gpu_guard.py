@@ -42,16 +42,17 @@ Usage (called once from ``ai.node.run()``)::
     install_gpu_guard()
 
 The hook is installed when ``get_model_server_address()`` returns a
-non-None value, and on every task of a hosted engine (``--hosted``), model
-server or not: torch is never installed on RocketRide Cloud. Only a local
-engine without a model server loads GPU libraries normally.
+non-None value, on the hosted engine itself (``--saas``), and on every task
+of that engine (``--hosted``), model server or not: torch is never installed
+on RocketRide Cloud. Only a local engine without a model server loads GPU
+libraries normally.
 """
 
 import sys
 from importlib.machinery import ModuleSpec
 from typing import Optional
 
-from hosting import is_hosted
+from hosting import is_hosted, is_saas
 
 from .base import get_model_server_address
 
@@ -209,9 +210,10 @@ def install_gpu_guard():
     Install the GPU import guard in model server mode or under a hosted engine.
 
     Checks ``get_model_server_address()`` to determine if ``--modelserver``
-    was passed on the command line, and ``--hosted`` for a hosted engine's
-    task. If either is set, installs the import hook at the front of
-    ``sys.meta_path`` so it intercepts imports before the default finders.
+    was passed on the command line, ``--saas`` for the hosted engine itself,
+    and ``--hosted`` for one of its tasks. If any of those is set, installs
+    the import hook at the front of ``sys.meta_path`` so it intercepts imports
+    before the default finders.
 
     Safe to call multiple times — subsequent calls are no-ops.
 
@@ -223,11 +225,12 @@ def install_gpu_guard():
     if _installed:
         return
 
-    # Model server mode, or a hosted engine, which never installs torch
-    # even when it has no model server configured
+    # Model server mode, or a hosted engine (its tasks and the engine
+    # process itself), which never installs torch even when it has no
+    # model server configured.
     if get_model_server_address() is not None:
         _reason = 'modelserver'
-    elif is_hosted():
+    elif is_hosted() or is_saas():
         _reason = 'hosted'
     else:
         # Local engine without a model server: GPU libraries are needed

@@ -25,3 +25,20 @@ def test_each_flag_answers_its_own_question(monkeypatch, flags, hosted, shared_h
 
     assert hosting.is_hosted() is hosted
     assert hosting.is_shared_host() is shared_host
+
+
+@pytest.mark.parametrize(
+    ('flags', 'saas', 'delegates'),
+    [
+        ([], False, False),
+        (['--saas'], True, False),
+        (['--modelserver=wss://model.rocketride.dev'], False, True),
+        (['--modelserver='], False, False),
+        (['--saas', '--modelserver=wss://model.rocketride.dev'], True, True),
+    ],
+)
+def test_engine_and_model_server_flags(monkeypatch, flags, saas, delegates):
+    monkeypatch.setattr(sys, 'argv', ['engine', 'eaas.py', *flags])
+
+    assert hosting.is_saas() is saas
+    assert hosting.delegates_to_model_server() is delegates
