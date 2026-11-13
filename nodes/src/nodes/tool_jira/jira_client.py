@@ -90,6 +90,9 @@ class Auth(NamedTuple):
     api_token: str
 
 
+_ATLASSIAN_HOST = re.compile(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.atlassian\.net')
+
+
 def normalize_site_url(site_url: str) -> str:
     """``https://<site>.atlassian.net`` without a trailing slash. Anything else (another scheme, a path,
     a query, credentials in the URL) is refused, so a config value can't point the token somewhere else.
@@ -99,8 +102,10 @@ def normalize_site_url(site_url: str) -> str:
     host = (parts.hostname or '').lower()
     if (
         parts.scheme != 'https'
-        or not host.endswith('.atlassian.net')
-        or parts.port is not None
+        # the whole host, exactly: a suffix test passes evil.example.com\.atlassian.net, which requests sends
+        # to evil.example.com
+        or not _ATLASSIAN_HOST.fullmatch(host)
+        or parts.netloc.lower() != host
         or parts.path
         or parts.query
         or parts.fragment
@@ -284,7 +289,7 @@ _FENCE = re.compile(r'^\s*```\s*([\w+-]*)\s*$')
 
 
 def check_body_size(text: str, what: str = 'body') -> str:
-    """Refuse a description or comment over 32 KB before it is sent."""
+    """Refuse a description or comment over 32,767 bytes (Jira's limit is 32,767 characters) before it is sent."""
     if len(text.encode('utf-8')) > MAX_BODY_BYTES:
         raise JiraAPIError(0, [f'the {what} is over {MAX_BODY_BYTES:,} bytes; shorten it'])
     return text
@@ -381,6 +386,11 @@ def adf_to_text(node: Any) -> str:
         start = int(attrs.get('order') or 1)
         items = []
         for n, item in enumerate(children):
+            if not isinstance(item, dict):
+                continue
+            if item.get('type') == kind:  # a nested list sits directly in its parent: indent it, no marker
+                items.append('  ' + adf_to_text(item).replace('\n', '\n  '))
+                continue
             if kind == 'taskList':
                 marker = '- [x]' if (item.get('attrs') or {}).get('state') == 'DONE' else '- [ ]'
             else:
@@ -398,11 +408,9 @@ def adf_to_text(node: Any) -> str:
         'nestedExpand',
         'tableCell',
         'tableHeader',
-        'taskItem',
-        'decisionItem',
         'layoutSection',
         'layoutColumn',
     ):
-        sep = '\n' if kind in ('listItem', 'tableRow', 'taskItem', 'decisionItem') else '\n\n'
+        sep = '\n' if kind in ('listItem', 'tableRow') else '\n\n'
         return sep.join(t for t in (adf_to_text(c) for c in children) if t)
     return ''.join(adf_to_text(c) for c in children)
