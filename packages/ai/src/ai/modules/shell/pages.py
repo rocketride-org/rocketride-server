@@ -55,7 +55,9 @@ shell document names the current build's bundles, so it is
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; snapshot bytes, immutable per version, are
 cached by store path under its own byte budget. A snapshot over
-``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
+``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read. Concurrent misses
+on one snapshot share one store read, and after a storage failure the store
+is not asked for that snapshot again for ``_STORAGE_BACKOFF_SECONDS``.
 """
 
 import asyncio
@@ -331,16 +333,33 @@ _UNUSABLE_SNAPSHOTS_MAX = 1024
 _unusable_snapshots = _FifoCache(_UNUSABLE_SNAPSHOTS_MAX, _UNUSABLE_SNAPSHOTS_MAX)
 
 # Store path -> when (monotonic seconds) its last storage failure was warned
-# about. While a store is down every crawler request retries the read, so each
-# path warns at most once per interval, not once per request.
+# about. While a store is down each path is read again after every backoff, so
+# each path warns at most once per interval, not once per failed read.
 _STORAGE_WARNING_INTERVAL = 300.0
 _STORAGE_WARNED_MAX = 1024
 _storage_warned = _FifoCache(_STORAGE_WARNED_MAX, _STORAGE_WARNED_MAX)
 
+# Store path -> when (monotonic seconds) its last storage failure happened (a
+# read past _SNAPSHOT_READ_SECONDS included). For _STORAGE_BACKOFF_SECONDS
+# after it, crawlers get the shell document, uncached, without the store
+# being asked for that path: a failing store costs one read per path per
+# backoff, not one per crawler request.
+_STORAGE_BACKOFF_SECONDS = 30.0
+_STORAGE_FAILURES_MAX = 1024
+_storage_failures = _FifoCache(_STORAGE_FAILURES_MAX, _STORAGE_FAILURES_MAX)
+
 # How long a crawler request waits for a snapshot the snapshot cache does not
 # hold. The S3 store retries a failing read for minutes, each try holding a
-# worker thread; past this the crawler gets the shell document, uncached.
+# worker thread; past this the crawler gets the shell document, uncached,
+# while the read itself carries on (see _snapshot_reads).
 _SNAPSHOT_READ_SECONDS = 5.0
+
+# Store path -> the one read of it in flight. Concurrent misses on a path all
+# await this task instead of each starting a stat and a download on a worker
+# thread. Each request waits on it through a shield, so one that gives up
+# (its deadline, a disconnect) never cancels it; it caches what it reads, and
+# drops itself from this map when it finishes, however it finishes.
+_snapshot_reads: Dict[str, 'asyncio.Task[bytes]'] = {}
 
 
 class _SnapshotTooLarge(Exception):
@@ -384,10 +403,16 @@ def assets_base(page: Page) -> str:
 
 
 async def _snapshot_bytes(path: str) -> bytes:
-    """The snapshot at store ``path``, from the snapshot cache or the store.
+    """The snapshot at store ``path``, from the snapshot cache or the one read of it in flight.
 
-    On a miss the file is sized by a stat first, so a snapshot over the cap
-    is never downloaded.
+    On a miss, the path's read in flight (``_snapshot_reads``) is awaited, or
+    started when there is none, for at most ``_SNAPSHOT_READ_SECONDS``.
+
+    Args:
+        path: The snapshot's store path.
+
+    Returns:
+        The snapshot's bytes.
 
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
@@ -395,17 +420,27 @@ async def _snapshot_bytes(path: str) -> bytes:
             or no answer from the store within ``_SNAPSHOT_READ_SECONDS``.
     """
     raw = _snapshot_cache.get(path)
-    if raw is None:
-        try:
-            raw = await asyncio.wait_for(_stored_snapshot(path), _SNAPSHOT_READ_SECONDS)
-        except asyncio.TimeoutError as exc:
-            raise StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s') from exc
-        _snapshot_cache.put(path, raw, len(raw))
-    return raw
+    if raw is not None:
+        return raw
+    read = _snapshot_reads.get(path)
+    if read is None:
+        read = asyncio.create_task(_stored_snapshot(path))
+        _snapshot_reads[path] = read
+        read.add_done_callback(lambda finished: _snapshot_reads.pop(path, None))
+    try:
+        return await asyncio.wait_for(asyncio.shield(read), _SNAPSHOT_READ_SECONDS)
+    except asyncio.TimeoutError as exc:
+        raise StorageError(f'the store did not answer within {_SNAPSHOT_READ_SECONDS:g} s') from exc
 
 
 async def _stored_snapshot(path: str) -> bytes:
-    """Read the snapshot at store ``path`` after a stat, so one over the cap is never downloaded.
+    """Read the snapshot at store ``path`` into the snapshot cache; a stat first, so one over the cap is never read.
+
+    Args:
+        path: The snapshot's store path.
+
+    Returns:
+        The snapshot's bytes.
 
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
@@ -414,7 +449,9 @@ async def _stored_snapshot(path: str) -> bytes:
     size = (await public_pages.artifact_file_info(path))['size']
     if size > MAX_SNAPSHOT_BYTES:
         raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
-    return await public_pages.read_artifact_file(path)
+    raw = await public_pages.read_artifact_file(path)
+    _snapshot_cache.put(path, raw, len(raw))
+    return raw
 
 
 def _warn_fallback(page: Page, reason: Any) -> None:
@@ -430,9 +467,11 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
     failure (a snapshot the store does not have yet, or no answer within
-    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, so the next
-    request tries again, and is warned about at most once per store path per
-    ``_STORAGE_WARNING_INTERVAL``. Anything else is a bug and propagates.
+    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, and is warned
+    about at most once per store path per ``_STORAGE_WARNING_INTERVAL``; for
+    ``_STORAGE_BACKOFF_SECONDS`` after it, a snapshot the cache does not hold
+    falls back uncached without the store being asked. Anything else is a
+    bug and propagates.
 
     Args:
         page: A page of the aggregate.
@@ -450,6 +489,8 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
         return None, True
     if path in _unusable_snapshots:
         return None, True
+    if path not in _snapshot_cache and _storage_backing_off(path):
+        return None, False
     try:
         raw = await _snapshot_bytes(path)
         # A 2 MiB snapshot takes tens of milliseconds to render: off the event loop.
@@ -460,9 +501,25 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
         _warn_fallback(page, exc)
         return None, True
     except StorageError as exc:
+        _storage_failures.put(path, monotonic(), 1)
         if _storage_warning_due(path):
             _warn_fallback(page, exc)
         return None, False
+
+
+def _storage_backing_off(path: str) -> bool:
+    """Whether reading ``path`` failed less than ``_STORAGE_BACKOFF_SECONDS`` ago, so the store is not asked again yet.
+
+    Args:
+        path: The snapshot's store path.
+
+    Returns:
+        True while ``path``'s last storage failure is within the backoff.
+    """
+    failed_at = _storage_failures.get(path)
+    if failed_at is None:
+        return False
+    return monotonic() - failed_at < _STORAGE_BACKOFF_SECONDS
 
 
 def _storage_warning_due(path: str) -> bool:

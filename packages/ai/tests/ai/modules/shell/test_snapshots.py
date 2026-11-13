@@ -40,6 +40,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -123,11 +124,15 @@ def warned(monkeypatch):
     return lines
 
 
-def _client():
+def _app():
     app = FastAPI()
     app.add_api_route('/', public_page, methods=['GET', 'HEAD'])
     app.add_api_route(FALLBACK_PATH, public_page, methods=['GET', 'HEAD'])
-    return TestClient(app)
+    return app
+
+
+def _client():
+    return TestClient(_app())
 
 
 def _page(path='/pricing', snapshot='pages/pricing.html', **extra):
@@ -155,6 +160,13 @@ def _seed(text=SNAPSHOT, name='pages/pricing.html', dist=DIST):
 
 def _crawl(client, path='/pricing'):
     return client.get(path, headers={'User-Agent': GOOGLEBOT})
+
+
+async def _crawl_at_once(count, path='/pricing'):
+    """``count`` crawler requests for ``path``, all in flight together on one event loop."""
+    transport = httpx.ASGITransport(app=_app())
+    async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+        return await asyncio.gather(*[client.get(path, headers={'User-Agent': GOOGLEBOT}) for _ in range(count)])
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +254,9 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     async def failing(path):
         raise failure
 
+    clock = [1000.0]
     monkeypatch.setattr(pp, 'read_artifact_file', failing)
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
     client = _client()
     resp = _crawl(client)
     assert resp.status_code == 200 and SHELL_BODY in resp.text
@@ -250,14 +264,15 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     assert resp.headers['cache-control'] == 'private, no-cache'
     assert len(pages._render_cache) == 0
     assert any("'pages/pricing.html'" in line and '/pricing' in line and str(failure) in line for line in warned)
-    # The read succeeds again: the next crawl gets the snapshot.
+    # The read succeeds again: the first crawl after the backoff gets the snapshot.
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS
     resp = _crawl(client)
     assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
 
 
 def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, monkeypatch, warned):
-    # While the store is down every crawler request retries; the log gets one line per path per interval.
+    # While the store is down each path is read again after every backoff; the log gets one line per path per interval.
     _seed()
     _seed(name='pages/other.html')
     _serve(_page(), _page('/other', snapshot='pages/other.html'))
@@ -278,7 +293,7 @@ def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, mo
     clock[0] += pages._STORAGE_WARNING_INTERVAL - 1
     _crawl(client)
     assert len(warned) == 2
-    clock[0] += 1
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS
     _crawl(client)
     assert len(warned) == 3 and "'pages/pricing.html'" in warned[2]
     assert len(pages._storage_warned) == 2 <= pages._storage_warned.max_entries
@@ -300,24 +315,141 @@ def test_a_programming_error_reading_a_snapshot_is_raised_not_served(shell_root,
 
 def test_a_store_that_does_not_answer_in_time_falls_back_uncached(shell_root, monkeypatch, warned):
     # The S3 store retries a failing read for minutes; a crawler waits at most
-    # _SNAPSHOT_READ_SECONDS, then gets the shell document, uncached.
+    # _SNAPSHOT_READ_SECONDS, then gets the shell document, uncached, and the
+    # path backs off like after any storage failure.
     _seed()
     _serve(_page())
 
     async def hanging(path):
         await asyncio.sleep(60)
 
+    clock = [1000.0]
     monkeypatch.setattr(pp, 'artifact_file_info', hanging)
     monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
     client = _client()
     resp = _crawl(client)
     assert resp.status_code == 200 and SHELL_BODY in resp.text
     assert resp.headers['cache-control'] == 'private, no-cache'
     assert len(pages._render_cache) == 0 and len(pages._snapshot_cache) == 0
     assert len(warned) == 1 and 'did not answer within 0.05 s' in warned[0]
-    # The store answers again: the next crawl gets the snapshot.
+    # The store answers again: the first crawl after the backoff gets the snapshot.
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)
+    assert SHELL_BODY in _crawl(client).text
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS
     assert 'Pricing plans' in _crawl(client).text
+
+
+def test_concurrent_crawler_misses_on_one_path_share_one_store_read(shell_root, monkeypatch, reads):
+    # A crawler burst on a cold cache: one stat and one download, not one per request.
+    _seed()
+    _serve(_page())
+    stats = []
+
+    async def slow_stat(path):
+        stats.append(path)
+        await asyncio.sleep(0.05)  # every request arrives while the first read is in flight
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', slow_stat)
+    responses = asyncio.run(_crawl_at_once(20))
+    assert all(resp.status_code == 200 and 'Pricing plans' in resp.text for resp in responses)
+    path = snapshot_path(_page())
+    assert stats == [path] and reads == [path]
+    assert pages._snapshot_reads == {}
+
+
+def test_a_crawler_that_stops_waiting_never_cancels_the_shared_read(shell_root, monkeypatch):
+    # A request past its deadline, or cancelled, leaves the shared read running:
+    # it caches what it reads for the next request instead of starting over.
+    _seed()
+    path = snapshot_path(_page())
+    monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def gated_stat(stat_path):
+            await release.wait()
+            return await file_info(stat_path)
+
+        monkeypatch.setattr(pp, 'artifact_file_info', gated_stat)
+        late = asyncio.create_task(pages._snapshot_bytes(path))
+        gone = asyncio.create_task(pages._snapshot_bytes(path))
+        await asyncio.sleep(0)
+        read = pages._snapshot_reads[path]
+        gone.cancel()
+        with pytest.raises(StorageError, match='did not answer within 0.05 s'):
+            await late
+        with pytest.raises(asyncio.CancelledError):
+            await gone
+        assert not read.done()
+        release.set()
+        return await read
+
+    assert asyncio.run(scenario()) == SNAPSHOT.encode()
+    assert pages._snapshot_cache.get(path) == SNAPSHOT.encode()
+    assert pages._snapshot_reads == {}
+
+
+def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(shell_root, monkeypatch, warned):
+    # The first crawler gives up and backs the path off; the read it started
+    # still lands in the snapshot cache, which the backoff does not hide.
+    _seed()
+    _serve(_page())
+    monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
+
+    async def slow_stat(path):
+        await asyncio.sleep(0.2)
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', slow_stat)
+
+    async def scenario():
+        [late] = await _crawl_at_once(1)
+        await pages._snapshot_reads[snapshot_path(_page())]
+        [after] = await _crawl_at_once(1)
+        return late, after
+
+    late, after = asyncio.run(scenario())
+    assert SHELL_BODY in late.text and late.headers['cache-control'] == 'private, no-cache'
+    assert len(warned) == 1 and 'did not answer within 0.05 s' in warned[0]
+    assert 'Pricing plans' in after.text
+
+
+def test_a_failing_path_is_not_read_again_within_the_backoff(shell_root, monkeypatch, warned):
+    # While the store fails, crawlers cost one store call per path per backoff, not one per request.
+    _seed()
+    _seed(name='pages/other.html')
+    _serve(_page(), _page('/other', snapshot='pages/other.html'))
+    stats = []
+
+    async def down(path):
+        stats.append(path)
+        raise StorageError('store down')
+
+    clock = [1000.0]
+    monkeypatch.setattr(pp, 'artifact_file_info', down)
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+    client = _client()
+    for _ in range(3):
+        resp = _crawl(client)
+        assert SHELL_BODY in resp.text and resp.headers['cache-control'] == 'private, no-cache'
+    assert stats == [snapshot_path(_page())]
+    # The backoff is per path: another page still asks the store.
+    _crawl(client, '/other')
+    assert len(stats) == 2
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS - 1
+    _crawl(client)
+    assert len(stats) == 2
+    clock[0] += 1
+    _crawl(client)
+    assert len(stats) == 3
+    # The store recovers: the first crawl after the next backoff gets the snapshot.
+    monkeypatch.setattr(pp, 'artifact_file_info', file_info)
+    clock[0] += pages._STORAGE_BACKOFF_SECONDS
+    assert 'Pricing plans' in _crawl(client).text
+    assert len(warned) == 2
 
 
 def test_a_snapshot_the_engine_refuses_falls_back_cacheably_and_warns_once(shell_root, reads, warned):
