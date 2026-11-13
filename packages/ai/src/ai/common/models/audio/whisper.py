@@ -1215,7 +1215,7 @@ class Whisper:
             self._model,
             raw_output,
             1,
-            self.output_fields,
+            self._fields_with_error(),
             language=language,
         )
         t_post = (time.perf_counter() - t0) * 1000
@@ -1232,7 +1232,24 @@ class Whisper:
             }
         )
 
-        return results[0] if results else {}
+        return self._checked_result(results[0]) if results else {}
+
+    def _fields_with_error(self) -> List[str]:
+        """Preserve per-item failures through the loader's requested-field filter."""
+        return self.output_fields if 'error' in self.output_fields else [*self.output_fields, 'error']
+
+    def _checked_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Raise when the loader reported a failed inference; otherwise return the result.
+
+        The result carries ``error`` only when the caller asked for it.
+        """
+        error = result.get('error')
+        # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
+        if error is not None:
+            raise RuntimeError(f'Whisper inference failed: {error or "no message"}')
+        if 'error' not in self.output_fields:
+            return {key: value for key, value in result.items() if key != 'error'}
+        return result
 
     def _transcribe_remote(
         self,
@@ -1258,14 +1275,14 @@ class Whisper:
                 'vad_parameters': vad_parameters,
                 'language': language,
                 'word_timestamps': word_timestamps,
-                'output_fields': self.output_fields,
+                'output_fields': self._fields_with_error(),
                 **kwargs,
             },
         )
 
         results = result.get('result', [])
         if results and len(results) > 0:
-            return results[0]
+            return self._checked_result(results[0])
         return {}
 
     def disconnect(self) -> None:
