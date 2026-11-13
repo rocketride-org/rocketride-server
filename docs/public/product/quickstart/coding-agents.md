@@ -53,12 +53,12 @@ It answers 200 with `{"status":"OK","data":{"version":"..."}}` and needs no key.
 
 ## Use it from the CLI or SDK
 
-Install the Python package (Python 3.10 or newer) in a virtual environment. It installs the `rocketride` command while the environment is active. The first line stops with a clear message if `python3` is too old (the `python3` that ships with macOS is 3.9); if it stops, use a newer interpreter in both places, for example `python3.12`:
+Install the Python package (Python 3.10 or newer) in a virtual environment. It installs the `rocketride` command while the environment is active. The commands are joined with `&&`, so the block stops at the first line with a clear message if `python3` is too old (the `python3` that ships with macOS is 3.9); if it stops, use a newer interpreter in both places, for example `python3.12`:
 
 ```bash
-python3 -c "import sys; sys.exit(None if sys.version_info >= (3, 10) else 'RocketRide needs Python 3.10 or newer')"
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -c "import sys; sys.exit(None if sys.version_info >= (3, 10) else 'RocketRide needs Python 3.10 or newer')" &&
+python3 -m venv .venv &&
+source .venv/bin/activate &&
 pip install rocketride
 ```
 
