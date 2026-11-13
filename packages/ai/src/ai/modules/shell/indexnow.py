@@ -64,7 +64,7 @@ import asyncio
 import hashlib
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urlsplit
 
 import httpx
@@ -215,7 +215,7 @@ async def _process(aggregate: Aggregate) -> bool:
     global _last
     if not enabled():
         return True
-    k, base = key(), app_url()
+    index_key, base = key(), app_url()
     listed = [p for p in aggregate.pages() if p.listed]
     try:
         now = await asyncio.wait_for(_contents(listed, _last or {}), READ_SECONDS)
@@ -229,7 +229,7 @@ async def _process(aggregate: Aggregate) -> bool:
     paths = sorted(_failed.union(changed))
     for start in range(0, len(paths), _MAX_URLS):
         batch = paths[start : start + _MAX_URLS]
-        if await submit(base, k, [base + path for path in batch]):
+        if await submit(base, index_key, [base + path for path in batch]):
             _failed.difference_update(batch)
         else:
             _keep_failed(batch)
@@ -255,28 +255,33 @@ def _backoff() -> Iterator[float]:
         wait = min(wait * 2, MAX_RETRY_SECONDS)
 
 
-def _client() -> Any:
+def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
 
 
-async def _post(payload: dict) -> Any:
+async def _post(payload: dict) -> httpx.Response:
     async with _client() as client:
         return await client.post(ENDPOINT, json=payload)
 
 
-async def submit(base: str, k: str, urls: List[str]) -> bool:
+async def submit(base: str, index_key: str, urls: List[str]) -> bool:
     """POST ``urls`` for the host of ``base``; the outcome is logged, never raised.
 
     Args:
         base: The public origin (``RR_APP_URL`` without a trailing slash).
-        k: The IndexNow key.
+        index_key: The IndexNow key.
         urls: The absolute URLs to submit, at most ``_MAX_URLS``.
 
     Returns:
         True when IndexNow accepted the batch (a 2xx answer), False when the
         POST failed, timed out or was refused.
     """
-    payload = {'host': urlsplit(base).hostname, 'key': k, 'keyLocation': f'{base}/{k}.txt', 'urlList': urls}
+    payload = {
+        'host': urlsplit(base).hostname,
+        'key': index_key,
+        'keyLocation': f'{base}/{index_key}.txt',
+        'urlList': urls,
+    }
     try:
         response = await asyncio.wait_for(_post(payload), TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
