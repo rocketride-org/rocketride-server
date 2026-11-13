@@ -292,6 +292,17 @@ test('clearHold drops the hold and its mirror without delivering (sign-out)', ()
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null);
 });
 
+test("clearHold before the start also drops this load's pending captures: a sign-out never replays them at the start", () => {
+	const h = heldHarness(memoryStorage(), () => 1_000_000);
+	h.queue.capture('cta:click', {});
+	h.queue.capture('$pageview', {});
+	assert.equal(h.queue.peekPending().length, 2);
+	h.queue.clearHold();
+	assert.deepEqual(h.queue.peekPending(), []);
+	h.queue.start();
+	assert.deepEqual(captures(h.calls), []);
+});
+
 test('a failed init clears the mirror: a stale hold must not outlive a load with telemetry off', () => {
 	const storage = memoryStorage();
 	const first = heldHarness(storage, () => 1_000_000);

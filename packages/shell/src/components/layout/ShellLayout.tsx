@@ -718,15 +718,24 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		const remembered = activeAppId === tabSession().appId ? tabSession() : undefined;
 		if (!signedOutSurfaceHeld()) return <LoadingScreen iconUrl={activeManifest?.icon ?? remembered?.appIcon} />;
 		return (
-			<SignedOutScreen
-				appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
-				iconUrl={activeManifest?.icon ?? remembered?.appIcon}
-				// Framed shells sign in through a separate window (the popup
-				// flow) — say so; the loginRequest handler kicks it directly
-				// off this button's gesture, no second prompt.
-				note={isFramedShell() ? 'Sign in opens in a separate window; this preview continues automatically afterwards.' : undefined}
-				onSignIn={() => ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId })}
-			/>
+			<>
+				{/* This screen returns before the shell chrome below mounts, yet
+				    the shell's cookieless telemetry already captures on it — so
+				    the visitor is asked here too, and a "Privacy settings"
+				    request (openConsentBanner) reopens the banner for a
+				    withdrawal. The host itself renders nothing when telemetry
+				    is off or the embedding host owns the switch. */}
+				<ConsentBannerHost signedOut />
+				<SignedOutScreen
+					appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
+					iconUrl={activeManifest?.icon ?? remembered?.appIcon}
+					// Framed shells sign in through a separate window (the popup
+					// flow) — say so; the loginRequest handler kicks it directly
+					// off this button's gesture, no second prompt.
+					note={isFramedShell() ? 'Sign in opens in a separate window; this preview continues automatically afterwards.' : undefined}
+					onSignIn={() => ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId })}
+				/>
+			</>
 		);
 	}
 

@@ -298,10 +298,13 @@ export class SdkQueue {
 
 	/**
 	 * Drop the hold and its mirror without delivering. A sign-out calls this: captures observed for
-	 * one session must never be forwarded under the next account that signs in on this tab.
+	 * one session must never be forwarded under the next account that signs in on this tab. This
+	 * load's own queue goes with it: a sign-out before the SDK starts would otherwise replay the
+	 * signed-out session's captures at the start, under whichever account is signed in by then.
 	 */
 	clearHold(): void {
 		this.inherited = [];
+		this.pending.length = 0;
 		this.held.length = 0;
 		this.clearMirror();
 	}
