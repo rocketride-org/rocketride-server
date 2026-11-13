@@ -501,3 +501,16 @@ def test_token_rate_limit_reports_retry_delay_without_retry(client, monkeypatch,
     assert error.value.retryable is True
     requests.post.assert_called_once()
     requests.request.assert_not_called()
+
+
+@pytest.mark.parametrize('field', ['error', 'errorCode'])
+@pytest.mark.parametrize('value', [[], {}, 1, True, None])
+def test_malformed_forbidden_codes_return_api_error(client, field, value):
+    """Treat malformed forbidden error codes as API errors without exposing them."""
+    module, auth, requests, _ = client
+    body = {'error': 'insufficient_scope', 'errorCode': 'feature_not_enabled'}
+    body[field] = value
+    requests.request.return_value = response(403, body)
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'API_ERROR'

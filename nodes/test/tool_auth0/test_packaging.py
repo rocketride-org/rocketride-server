@@ -39,6 +39,10 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
         'response_answers',
     }
     agent = components['agent_rocketride_1']
+    assert agent['config']['require_tool_call'] is False
+    instructions = ' '.join(agent['config']['instructions'])
+    assert "Ask for the affected user's email and sign-in issue if they are missing" in instructions
+    assert all(name in instructions for name in ('search_users', 'get_user', 'get_user_blocks', 'get_user_logs'))
     assert agent['input'] == [{'lane': 'questions', 'from': 'chat_1'}]
     assert components['response_answers_1']['input'] == [{'lane': 'answers', 'from': 'agent_rocketride_1'}]
     for name, kind in (('llm_openai_api_1', 'llm'), ('memory_internal_1', 'memory'), ('tool_auth0_1', 'tool')):

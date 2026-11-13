@@ -82,6 +82,7 @@ def test_service_configuration():
     assert 'nosaas' not in service['capabilities']
     assert service['preconfig']['profiles']['default']['allowWrite'] is False
     assert 'unavailable' in service['fields']['auth0.allowWrite']['description']
+    assert 'Unblocking is unavailable' in ' '.join(service['description'])
     for name in ('clientSecret', 'writeClientSecret'):
         field = service['fields'][f'auth0.{name}']
         assert field['secure'] is True and field['ui']['ui:widget'] == 'ApiKeyWidget'
@@ -124,8 +125,9 @@ def test_lifecycle_and_safe_validation(node):
         with pytest.raises(ValueError) as exc:
             instance.beginGlobal()
         assert 'secret' not in str(exc.value).lower().replace('clientsecret', '')
+        warning.reset_mock()
         instance.validateConfig()
-        assert warning.called
+        warning.assert_called_once()
 
 
 def test_separate_write_credentials(node):
@@ -196,69 +198,63 @@ def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
     depends.assert_not_called()
 
 
-@pytest.mark.parametrize('secret', ['${ROCKETRIDE_AUTH0_WRITE_SECRET}', 'literal-write-secret'])
-def test_encrypted_write_credential_is_decoded_before_env_substitution(node, monkeypatch, secret, pipeline):
+def test_example_plain_environment_references_configure_auth0(node, pipeline):
+    """Expand the example's visible references before the Auth0 client validates its config."""
+    package, get_config, depends, _ = node
+    example = json.loads((NODE / 'example.pipe').read_text(encoding='utf-8'))
+    env = {
+        'ROCKETRIDE_AUTH0_DOMAIN': 'tenant.auth0.com',
+        'ROCKETRIDE_AUTH0_CLIENT_ID': 'read-id',
+        'ROCKETRIDE_AUTH0_CLIENT_SECRET': 'read-private',
+        'ROCKETRIDE_OPENROUTER_API_KEY': 'llm-private',
+    }
+    resolved = pipeline.resolve_pipeline_env(example, env)
+    config = next(item['config'] for item in resolved['components'] if item['provider'] == 'tool_auth0')
+    instance = package.IGlobal()
+    instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
+    instance.glb = types.SimpleNamespace(logicalType='tool_auth0', connConfig={})
+    get_config.return_value = config
+    instance.beginGlobal()
+    assert instance.client._config['clientSecret'] == 'read-private'
+    depends.assert_called_once()
+    instance.endGlobal()
+    assert instance.client is None
+
+
+@pytest.mark.parametrize('field', ['clientSecret', 'writeClientSecret'])
+def test_reference_inside_secure_token_is_not_expanded_by_plain_env_pass(node, pipeline, field):
+    """A reference restored after the environment pass is rejected as unresolved."""
     package, _, _, _ = node
-    encrypted = {
-        'components': [
-            {'config': {'parameters': {'secureParameters': {'secure': ['writeClientSecret'], 'token': 'opaque'}}}}
-        ]
-    }
-    decoded = {'components': [{'config': {'parameters': {'writeClientSecret': secret}}}]}
-    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', lambda value: decoded, raising=False)
-    resolved = pipeline.resolve_pipeline_env(
-        pipeline.resolve_parameter_tokens(encrypted), {'ROCKETRIDE_AUTH0_WRITE_SECRET': 'resolved-write-secret'}
-    )
-    cfg = {
+    config = {
         'domain': 'tenant.auth0.com',
-        'clientId': 'read',
-        'clientSecret': 'read-secret',
+        'clientId': 'read-id',
+        'clientSecret': 'read-private',
         'allowWrite': True,
-        'writeClientId': 'write',
-        **resolved['components'][0]['config']['parameters'],
+        'writeClientId': 'write-id',
+        'writeClientSecret': 'write-private',
     }
-    package.auth0_client.validate_config(cfg)
-    assert cfg['writeClientSecret'] == ('resolved-write-secret' if secret.startswith('${') else secret)
-    unresolved = pipeline.resolve_pipeline_env(pipeline.resolve_parameter_tokens(encrypted), {})
-    if secret.startswith('${'):
-        cfg.update(unresolved['components'][0]['config']['parameters'])
-        with pytest.raises(ValueError, match='unresolved credential reference'):
-            package.auth0_client.validate_config(cfg)
+    reference = '${ROCKETRIDE_AUTH0_SECRET}'
+    token_pipeline = {'components': [{'config': {'parameters': {'secureParameters': {'token': 'opaque'}}}}]}
+    expanded = pipeline.resolve_pipeline_env(token_pipeline, {'ROCKETRIDE_AUTH0_SECRET': 'resolved-private'})
+    assert expanded == token_pipeline
+    # Simulate the token being decoded after the environment pass; no live engine or key is required.
+    config[field] = reference
+    with pytest.raises(ValueError, match='unresolved credential reference') as error:
+        package.auth0_client.validate_config(config)
+    assert 'resolved-private' not in str(error.value)
 
 
-def test_parameter_decode_failure_does_not_expose_values(node, monkeypatch, pipeline):
-    def fail(_):
-        raise ValueError('credential-value')
-
-    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', fail, raising=False)
-    data = {'components': [{'config': {'parameters': {'secureParameters': {}}}}]}
-    with pytest.raises(ValueError) as error:
-        pipeline.resolve_parameter_tokens(data)
-    assert 'credential-value' not in str(error.value)
-    assert error.value.__suppress_context__
-
-
-def test_active_tokens_are_decoded_once_and_inactive_profiles_are_preserved(node, monkeypatch, pipeline):
-    inactive = {'secureParameters': {'secure': ['key'], 'token': 'inactive'}}
-    original = {
-        'components': [
-            {
-                'config': {
-                    'profile': 'current',
-                    'current': {'secureParameters': {'secure': ['key'], 'token': 'active'}},
-                    'other': inactive,
-                }
-            }
-        ]
+def test_plain_write_environment_reference_is_expanded_before_validation(node, pipeline):
+    """Resolve a visible write reference even though the node does not expose writes."""
+    package, _, _, _ = node
+    config = {
+        'domain': 'tenant.auth0.com',
+        'clientId': 'read-id',
+        'clientSecret': 'read-private',
+        'allowWrite': True,
+        'writeClientId': 'write-id',
+        'writeClientSecret': '${ROCKETRIDE_AUTH0_WRITE_SECRET}',
     }
-    decoded = {'components': [{'config': {'profile': 'current', 'current': {'key': 'value'}, 'other': inactive}}]}
-    calls = []
-
-    def resolve(value):
-        calls.append(value)
-        return decoded
-
-    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
-    assert pipeline.resolve_parameter_tokens(pipeline.resolve_parameter_tokens(original)) is decoded
-    assert calls == [original]
-    assert decoded['components'][0]['config']['other'] == inactive
+    resolved = pipeline.resolve_pipeline_env(config, {'ROCKETRIDE_AUTH0_WRITE_SECRET': 'write-private'})
+    package.auth0_client.validate_config(resolved)
+    assert resolved['writeClientSecret'] == 'write-private'

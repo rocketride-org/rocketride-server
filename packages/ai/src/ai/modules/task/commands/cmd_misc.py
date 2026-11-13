@@ -52,13 +52,7 @@ from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
-from ..pipeline import (
-    MultipleSourcesError,
-    resolve_implied_source,
-    resolve_pipeline_env,
-    substituted_env,
-    resolve_parameter_tokens,
-)
+from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
@@ -89,8 +83,6 @@ def _submitted_ids(resolved: Any, submitted: Any) -> Dict[str, Any]:
 def _template_message(substituted: Dict[str, str], kind: str) -> str:
     """Describe validation using submitted references, independent of value formatting."""
     references = ', '.join('${' + name + '}' for name in sorted(substituted))
-    if not references:
-        return f'Pipeline validation {kind} for config with secure parameters.'
     return f'Pipeline validation {kind} for config with template references: {references}'
 
 
@@ -326,7 +318,6 @@ class MiscCommands(DAPConn):
         { "command": "rrext_validate", "arguments": { "pipeline": { "components": [], ... }, "source": "chat_1" } }
         """
         substituted: Dict[str, str] = {}
-        secure = False
         try:
             from ai.account import account
 
@@ -366,20 +357,9 @@ class MiscCommands(DAPConn):
                     )
                 )
 
-            # Decode before expanding references, but never echo decrypted values.
-            submitted = pipeline
-            is_component = 'component' in pipeline and 'components' not in pipeline
-            if is_component:
-                wrapped = {'components': [pipeline['component']]}
-                decoded = resolve_parameter_tokens(wrapped)
-                secure = decoded is not wrapped
-                if secure:
-                    pipeline = {**pipeline, 'component': decoded['components'][0]}
-            else:
-                decoded = resolve_parameter_tokens(pipeline)
-                secure = decoded is not pipeline
-                pipeline = decoded
+            # Resolve ${ROCKETRIDE_*} variables before validation
             substituted = substituted_env(pipeline, merged_env)
+            submitted = pipeline
             pipeline = resolve_pipeline_env(pipeline, merged_env)
 
             # The node config panel validates one component at a time and sends
@@ -401,7 +381,7 @@ class MiscCommands(DAPConn):
                 # full-pipeline form is structural and runs no node code), and
                 # only the errors and warnings come from the resolved pass,
                 # with fixed messages listing the submitted references.
-                if substituted or secure:
+                if substituted:
                     original = submitted['component']
                     echo = {'version': submitted.get('version', 1), 'components': [original]}
                     echoed = original
@@ -409,11 +389,7 @@ class MiscCommands(DAPConn):
                         echoed = validatePipeline({'pipeline': echo})['pipeline']['components'][0]
                     ids = _submitted_ids([pipeline['component']], [original])
                     root = {k: v for k, v in submitted.items() if k not in _DIAGNOSTICS}
-                    data = {
-                        **root,
-                        'component': echoed,
-                        **_restored_diagnostics(data, {} if secure else substituted, ids),
-                    }
+                    data = {**root, 'component': echoed, **_restored_diagnostics(data, substituted, ids)}
             else:
                 # Resolve source: explicit arg > pipeline field > implied from components
                 source = args.get('source', None) or pipeline.get('source', None)
@@ -434,7 +410,7 @@ class MiscCommands(DAPConn):
                 # rides INSIDE the wrapped config (see the FILE-form note above).
                 data = validatePipeline({'pipeline': inner})
                 # Rebuilt from the caller's own input, as above
-                if substituted or secure:
+                if substituted:
                     echo = {**submitted, 'version': submitted.get('version', 1)}
                     echo_source = args.get('source', None) or submitted.get('source', None)
                     if not echo_source and _can_validate_echo(echo):
@@ -443,23 +419,17 @@ class MiscCommands(DAPConn):
                         echo['source'] = echo_source
                     echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
                     ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
-                    data = {'pipeline': echoed, **_restored_diagnostics(data, {} if secure else substituted, ids)}
+                    data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
 
             # Return the results
             return self.build_response(request, body=data)
 
         except Exception as e:
-            message = (
-                'Pipeline validation failed for secure parameters.'
-                if secure
-                else _template_message(substituted, 'failed')
-                if substituted
-                else str(e)
-            )
-            if (substituted or secure) and isinstance(e, MultipleSourcesError):
+            message = _template_message(substituted, 'failed') if substituted else str(e)
+            if substituted and isinstance(e, MultipleSourcesError):
                 message = 'Pipeline has multiple source components, please specify one explicitly. ' + message
             self.debug_message(f'Pipeline validation failed: {message}')
-            if substituted or secure:
+            if substituted:
                 raise RuntimeError(message) from None
             raise
 

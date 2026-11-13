@@ -16,7 +16,7 @@
 	"documentation": "https://docs.rocketride.org/nodes/tool_auth0",
 	"description": [
 		"Investigate Auth0 sign-in failures as agent tools.",
-		"Inspect user profiles, authentication events, and brute-force blocks; optionally unblock with separate write credentials."
+		"Inspect user profiles, authentication events, and brute-force blocks. Unblocking is unavailable."
 	],
 	"tile": [],
 	"lanes": {},

@@ -852,6 +852,25 @@ def test_suspect_fields_are_omitted_from_logs(tool):
     assert '192.0.2.1' not in str(result) and 'sensitive-token' not in str(result)
 
 
+@pytest.mark.parametrize(
+    'value,expected',
+    [
+        ('client:192.0.2.1', None),
+        ('client 192.0.2.1', None),
+        ('client 2001:db8::1', None),
+        ('client:auth0:login', 'client:auth0:login'),
+    ],
+)
+def test_log_fields_remove_ip_addresses_but_preserve_benign_colons(tool, value, expected):
+    """Prevent IP addresses in exposed log fields while keeping harmless colon text."""
+    instance, client, _ = tool
+    client.request.return_value = {'type': 'f', 'client_name': value, 'connection': value, 'user_id': value}
+    result = instance.get_log_event({'log_id': 'l1'})
+    assert result['client_name'] == result['connection'] == result['user_id'] == expected
+    if expected is None:
+        assert value not in str(result)
+
+
 def test_user_logs_maximum_is_enforced(tool):
     instance, client, _ = tool
     client.request.return_value = [{'log_id': str(i), 'type': 'f'} for i in range(60)]
@@ -989,3 +1008,28 @@ def test_tool_after_global_close_returns_structured_error(tool):
     result = instance.get_user({'user_id': 'u'})
     assert result['error_code'] == 'CLIENT_CLOSED'
     assert instance.unblock_user({'user_id': 'u'})['error_code'] == 'CLIENT_CLOSED'
+
+
+@pytest.mark.parametrize('page,limit', [(19, 50), (39, 25), (99, 10)])
+def test_connection_pagination_accepts_the_1000_record_boundary(tool, page, limit):
+    """Send pages whose final requested record is exactly the 1,000th."""
+    instance, client, _ = tool
+    client.request.return_value = []
+    assert instance.list_connections({'page': page, 'limit': limit})['success']
+    client.request.assert_called_once_with('list_connections', params={'page': page, 'per_page': limit})
+
+
+@pytest.mark.parametrize('page,limit', [(20, 50), (39, 26), (99, 11)])
+def test_connection_pagination_rejects_pages_beyond_1000(tool, page, limit):
+    """Reject an over-limit page before making a connection request."""
+    instance, client, _ = tool
+    assert instance.list_connections({'page': page, 'limit': limit})['error_code'] == 'INVALID_INPUT'
+    client.request.assert_not_called()
+
+
+def test_connection_limit_does_not_change_other_list_tools(tool):
+    """Keep the connection-specific offset constraint off other tools."""
+    instance, client, _ = tool
+    client.request.return_value = []
+    assert instance.list_users({'page': 20, 'limit': 50})['success']
+    client.request.assert_called_once_with('list_users', params={'page': 20, 'per_page': 50})

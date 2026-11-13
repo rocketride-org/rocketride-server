@@ -18,7 +18,7 @@ Attach this node to an agent to expose these eighteen read-only tools. Results a
 | `get_log_event` | `log_id` | Filtered event fields and allowlisted `diagnostics`; `read:logs`. |
 | `get_user_blocks` | `user_id` | Brute-force `has_blocks`, `block_count` and `blocks`; `read:users`. |
 | `get_connection` | `connection_id` (1–128 characters) | Connection `id`, `name`, and `strategy`; `read:connections`. |
-| `list_connections` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of filtered `connections` and `count`; `read:connections`. |
+| `list_connections` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of filtered `connections` and `count`; `(page + 1) * limit` must not exceed 1,000; `read:connections`. |
 | `get_connection_clients` | `connection_id`, optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `clients` containing `client_id`, `count`, and `next_cursor`; `read:connections`. |
 | `list_users` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `users` and `count`; `read:users`. |
 | `list_applications` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `applications` and `count`; `read:clients`. |
@@ -26,8 +26,8 @@ Attach this node to an agent to expose these eighteen read-only tools. Results a
 | `get_brute_force_settings` | none | `enabled`, `mode`, `max_attempts`, and `shields`; `read:attack_protection`. |
 | `get_ip_throttling_settings` | none | `enabled`, `shields`, `login_limits`, and `signup_limits`; `read:attack_protection`. |
 | `list_roles` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of tenant `roles` and `count`; `read:roles`. |
-| `get_user_roles` | `user_id`, optional `limit` (1–50, default 20) | First page of `roles` assigned directly to the user and `count`; `read:roles`. |
-| `get_user_permissions` | `user_id`, optional `limit` (1–50, default 20) | First page of the user's direct `permissions` and `count`; `read:users`. |
+| `get_user_roles` | `user_id`, optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `roles` assigned directly to the user, its `page`, and `count`; `read:roles`. |
+| `get_user_permissions` | `user_id`, optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of the user's `permissions`, its `page`, and `count`; `read:users`. |
 | `list_organizations` | optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `organizations`, `count`, and `next_cursor`; `read:organizations`. |
 | `get_organization_members` | `organization_id` (1–100 characters), optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `members`, `count`, and `next_cursor`; `read:organization_members`. |
 
@@ -41,7 +41,7 @@ Connection IDs and strategies are limited to 128 characters, names and enabled c
 
 User inventory entries contain only `user_id`, `email`, `name`, `blocked`, and `last_login`. Application inventory entries contain only `client_id`, `name`, and `app_type`; client secrets, metadata, JWT configuration, and signing keys are excluded. Missing fields are null. The connection, user, and application lists use zero-based page numbers, return at most the requested limit, and report `count` for that page rather than a total. They do not return a next-page cursor. Profile and application names are untrusted data and are bounded with control characters removed. The user inventory does not accept search queries or filters.
 
-Role entries contain only `id`, `name`, and `description`. `get_user_roles` and `get_user_permissions` report tenant-level assignments made directly to the user; organization-specific role assignments are not included, and permissions granted through roles are not expanded. Permission entries contain `permission_name`, `resource_server_identifier`, and `resource_server_name`; Auth0's permission descriptions and source lists are excluded. Role names and descriptions are administrator-defined text and are treated as untrusted data: names are bounded to 300 characters, descriptions to 1000, and control characters are removed.
+Role entries contain only `id`, `name`, and `description`. `get_user_roles` reports tenant roles assigned directly to the user; organization-specific role assignments are not included. `get_user_permissions` includes permissions assigned directly to the user and permissions from directly assigned roles. Source information is omitted, so callers cannot distinguish how a permission was granted. Both tools return only the requested zero-based page and report its number and count. Permission entries contain `permission_name`, `resource_server_identifier`, and `resource_server_name`; Auth0's permission descriptions and source lists are excluded. Role names and descriptions are administrator-defined text and are treated as untrusted data: names are bounded to 300 characters, descriptions to 1000, and control characters are removed.
 
 Organization entries contain only `id`, `name`, and `display_name`; metadata and branding are excluded. Member entries contain only `user_id`, `email`, and `name`; member pictures and roles are excluded, and profile fields are bounded and untrusted. Both organization tools use Auth0's checkpoint pagination and return one page per call. Omit `cursor` on the first call and pass a non-null `next_cursor` as `cursor` for the next page. Results exceeding the requested limit are rejected with `API_ERROR`.
 
@@ -71,7 +71,7 @@ Enter an Auth0-managed hostname such as `example.us.auth0.com`. An HTTPS prefix,
 
 ### Secret references
 
-Store client secrets in RocketRide's secure environment settings and enter references such as `${ROCKETRIDE_AUTH0_CLIENT_SECRET}` in node settings. The form rejects direct secret values because masking alone does not encrypt a local pipeline file. Programmatically generated pipelines must also avoid writing literal secrets to disk. RocketRide resolves the reference for the pipeline; the node does not read credentials directly from process environment variables. An unresolved reference fails startup without displaying its value. The node clears its client credential references when it closes.
+Store client secrets in RocketRide's secure environment settings and use references such as `${ROCKETRIDE_AUTH0_CLIENT_SECRET}` in pipeline configuration. The form rejects direct secret values because masking alone does not encrypt a local pipeline file. Programmatically generated pipelines must also avoid writing literal secrets to disk. The reference must remain visible in the pipeline configuration for RocketRide's environment substitution: if it is stored inside a `secureParameters` token, decoding occurs after substitution and the reference remains unresolved. This includes configurations where the editor or validation wraps the reference in a token; use a pipeline configuration that retains the plain reference. The node does not read credentials directly from process environment variables, and an unresolved reference fails startup without displaying its value. The node clears its client credential references when it closes.
 
 ## Authentication
 
@@ -95,7 +95,7 @@ For authentication errors, check the tenant hostname, application credentials, M
 
 ### Security and limitations
 
-The tools return only selected profile, event, connection, application, and protection fields; raw metadata, connection options, log descriptions, IP addresses, locations, and tokens are not intentionally returned. Diagnostic explanations are fixed text selected by event type. Only the thirteen tools listed above are exposed; roles, permissions, and organizations are deferred. All thirteen read-only tools, including connection-client continuation pagination, have been exercised against a development tenant. Write operations are unavailable and have not been live tested.
+The tools return only selected profile, event, connection, application, and protection fields; raw metadata, connection options, log descriptions, IP addresses, locations, and tokens are not intentionally returned. Diagnostic explanations are fixed text selected by event type. All eighteen tools listed above are exposed. The original thirteen read-only tools, including connection-client continuation pagination, have been exercised against a development tenant; the five roles, permissions, and organizations tools have not been live-tested. Write operations are unavailable and have not been live tested.
 
 ## Upstream docs
 

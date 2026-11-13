@@ -292,7 +292,11 @@ class Auth0Client:
             if status == 403:
                 try:
                     body = response.json()
-                    codes = {body.get('error'), body.get('errorCode')} if isinstance(body, dict) else set()
+                    codes = set()
+                    if isinstance(body, dict):
+                        values = [body[key] for key in ('error', 'errorCode') if key in body]
+                        if all(isinstance(value, str) for value in values):
+                            codes = set(values)
                 except ValueError:
                     codes = set()
                 if 'insufficient_scope' in codes:

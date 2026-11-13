@@ -33,14 +33,14 @@ def test_list_roles_filters_fields_and_bounds_page(tool):
         ],
         'count': 2,
     }
-    client.request.assert_called_once_with('list_roles', params={'page': 3, 'per_page': 2})
+    client.request.assert_called_once_with('list_roles', params={'page': 3, 'per_page': 2, 'type': 'tenant'})
 
 
 def test_list_roles_defaults(tool):
     instance, client, _ = tool
     client.request.return_value = []
     assert instance.list_roles({}) == {'success': True, 'roles': [], 'count': 0}
-    client.request.assert_called_once_with('list_roles', params={'page': 0, 'per_page': 20})
+    client.request.assert_called_once_with('list_roles', params={'page': 0, 'per_page': 20, 'type': 'tenant'})
 
 
 def test_get_user_roles_uses_first_page_and_default_limit(tool):
@@ -72,10 +72,30 @@ def test_get_user_permissions_excludes_descriptions(tool):
             }
         ],
         'count': 1,
+        'page': 0,
     }
     client.request.assert_called_once_with(
         'get_user_permissions', identifier='auth0|1', params={'page': 0, 'per_page': 5}
     )
+
+
+@pytest.mark.parametrize('method,key', [('get_user_roles', 'roles'), ('get_user_permissions', 'permissions')])
+def test_user_access_tools_request_one_bounded_page(tool, method, key):
+    """Forward one bounded page and cap returned items for each user access tool."""
+    instance, client, _ = tool
+    client.request.return_value = [{}, {}, {}]
+    result = getattr(instance, method)({'user_id': 'id', 'page': 99, 'limit': 2})
+    assert result['page'] == 99 and result['count'] == 2 and len(result[key]) == 2
+    client.request.assert_called_once_with(method, identifier='id', params={'page': 99, 'per_page': 2})
+
+
+@pytest.mark.parametrize('method', ['get_user_roles', 'get_user_permissions'])
+@pytest.mark.parametrize('page', [-1, 100, True, '1', None])
+def test_user_access_tools_reject_invalid_page(tool, method, page):
+    """Reject invalid page numbers before making any Auth0 request."""
+    instance, client, _ = tool
+    assert getattr(instance, method)({'user_id': 'id', 'page': page})['error_code'] == 'INVALID_INPUT'
+    client.request.assert_not_called()
 
 
 def test_list_organizations_returns_cursor_and_passes_it_back(tool):

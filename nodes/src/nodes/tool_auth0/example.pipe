@@ -37,7 +37,7 @@
           "Never call unblock_user or make account changes. This pipeline is read-only."
         ],
         "max_waves": 10,
-        "require_tool_call": true,
+        "require_tool_call": false,
         "tool_timeout": 300,
         "verify_args": "",
         "verify_tool": "",
