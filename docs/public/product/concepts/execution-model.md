@@ -1,6 +1,7 @@
 ---
 title: Execution Model
 sidebar_position: 5
+description: A pipeline describes what to run; the execution model is how the engine runs it. Data lanes carry data between nodes; control links join agents to helpers.
 ---
 
 # Execution model

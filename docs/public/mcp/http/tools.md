@@ -1,6 +1,7 @@
 ---
 title: Tools
 sidebar_position: 2
+description: The RocketRide MCP server exposes 33 tools, 32 on a deployed engine where send_files is not offered. This page is the full tool reference.
 ---
 
 # Tools

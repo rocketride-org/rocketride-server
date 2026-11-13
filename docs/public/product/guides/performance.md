@@ -1,5 +1,6 @@
 ---
 title: Performance
+description: Practical levers for making RocketRide pipelines faster and cheaper, with pointers to the Execution Model for why the levers exist.
 ---
 
 # Performance

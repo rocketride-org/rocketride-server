@@ -1,5 +1,6 @@
 ---
 title: Run from the CLI
+description: The rocketride command-line tool runs pipelines from a terminal, the same operations the SDKs expose, no code required. Install with pip or npm.
 ---
 
 # Run from the CLI

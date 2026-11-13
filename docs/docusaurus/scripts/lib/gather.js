@@ -17,6 +17,8 @@ const path = require('path');
 const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
+const { describeText, firstParagraph } = require('./description');
+const { frontMatterTitle } = require('./twin');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -315,20 +317,15 @@ function toPosix(p) {
 	return p.split(path.sep).join('/');
 }
 
-/** Extract a `title:` from a leading YAML front-matter block, if present. */
-function frontMatterTitle(content) {
-	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-	if (!m) return null;
-	const t = /(^|\n)title:\s*(.+?)\s*(\n|$)/.exec(m[1]);
-	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
-}
-
 /**
- * First-sentence description for a markdown/MDX page, mirroring what Docusaurus
- * derives for its meta description. A front-matter `description:` wins when the
- * page declares one; otherwise the first prose paragraph is used, skipping MDX
- * imports, JSX, headings, code fences, tables and admonitions. Node pages get
- * their description from services*.json instead (see extractDescription).
+ * Description for a markdown/MDX page, as shown in llms.txt. A front-matter
+ * `description:` wins when the page declares one, as it does for the meta
+ * description tag. Otherwise the first prose paragraph is used, skipping HTML
+ * comments, MDX imports, JSX, headings, code fences, tables and admonitions, and
+ * it is shortened by describeText in description.js, the same function the meta
+ * description uses. The paragraph itself is found by firstParagraph in
+ * description.js too, so both outputs agree on every page. Node pages get their
+ * description from services*.json instead (see extractDescription).
  * @param {string} content - raw page content (md/mdx).
  * @return {string} description, or '' when the page has no leading prose.
  */
@@ -356,34 +353,7 @@ function pageDescription(content) {
 		}
 	}
 	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-	const para = [];
-	let inFence = false;
-	for (const line of body.split(/\r?\n/)) {
-		const t = line.trim();
-		// Skip fenced blocks wholesale — the fence delimiters AND their contents.
-		if (/^(```|~~~)/.test(t)) {
-			if (para.length) break;
-			inFence = !inFence;
-			continue;
-		}
-		if (inFence) continue;
-		if (!t) {
-			if (para.length) break;
-			continue;
-		}
-		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,})/.test(t)) {
-			if (para.length) break;
-			continue;
-		}
-		para.push(t);
-	}
-	const prose = para
-		.join(' ')
-		.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-		.replace(/[*`_]/g, '')
-		.trim();
-	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
-	return (m ? m[1] : prose).slice(0, 200).trim();
+	return describeText(firstParagraph(body));
 }
 
 /** First markdown heading, as a title fallback. */

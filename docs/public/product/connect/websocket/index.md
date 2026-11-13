@@ -1,5 +1,6 @@
 ---
-title: WebSocket
+title: WebSocket protocol
+sidebar_label: WebSocket
 ---
 
 # WebSocket protocol

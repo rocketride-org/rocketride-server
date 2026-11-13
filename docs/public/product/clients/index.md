@@ -1,5 +1,7 @@
 ---
-title: Client Libraries
+title: RocketRide Client Libraries
+sidebar_label: Overview
+description: Official client libraries for the RocketRide Engine. The TypeScript and Python clients talk to the engine the same way and share one core API.
 ---
 
 # RocketRide Client Libraries

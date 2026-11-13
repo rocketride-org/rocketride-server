@@ -1,5 +1,6 @@
 ---
 title: Apps
+description: A RocketRide app is a user interface that runs inside the RocketRide shell against your engine. The shell provides sign-in, the connection, and settings.
 ---
 
 # Apps

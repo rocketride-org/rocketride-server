@@ -1,5 +1,7 @@
 ---
-title: Kubernetes
+title: Deploy on Kubernetes
+sidebar_label: Kubernetes
+description: "The repository ships a Helm chart for clustered deployments: a deployment, service, config and secret handling, HPA, and ingress, linted and validated in CI."
 ---
 
 # Deploy on Kubernetes

@@ -1,5 +1,6 @@
 ---
 title: Contributing
+description: RocketRide is MIT licensed and developed in the open at rocketride-org/rocketride-server. There are more ways in than writing C++, so pick the one that fits.
 ---
 
 # Contributing

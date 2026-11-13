@@ -1,5 +1,7 @@
 ---
-title: Docker
+title: Run the Engine in Docker
+sidebar_label: Docker
+description: The RocketRide engine ships as a published container image, the same one the VS Code extension Docker mode pulls. Run it with Docker in one command.
 ---
 
 # Run the Engine in Docker

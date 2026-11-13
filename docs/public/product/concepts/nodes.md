@@ -1,6 +1,7 @@
 ---
 title: Nodes
 sidebar_position: 3
+description: A pipeline is a graph and nodes are its vertices. Each node does one job, such as calling a model, embedding text, or querying a vector store.
 ---
 
 # Nodes

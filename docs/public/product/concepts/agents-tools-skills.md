@@ -1,6 +1,7 @@
 ---
 title: Agents & Tools
 sidebar_position: 4
+description: An agent reasons in a loop, deciding which model to call, which tools to use, and when it is done. It needs an LLM, optionally tools, and sometimes memory.
 ---
 
 # Agents & tools

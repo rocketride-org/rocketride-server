@@ -1,5 +1,6 @@
 ---
 title: Security
+description: An overview of how RocketRide handles credentials, network exposure, and authentication across its components.
 ---
 
 # Security
