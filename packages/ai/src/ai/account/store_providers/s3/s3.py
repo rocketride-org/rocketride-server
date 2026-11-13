@@ -3,9 +3,16 @@
 import asyncio
 from fnmatch import fnmatch
 import json
-from typing import NoReturn, Optional
-from tenacity import RetryCallState, retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from ...store import IStore, StorageError, StorageNotFoundError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS
+from typing import Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from ...store import (
+    IStore,
+    StorageError,
+    StorageNotFoundError,
+    VersionMismatchError,
+    STORE_MAX_RETRY_ATTEMPTS,
+    storage_error_after_retries,
+)
 
 # botocore raises its OWN exception types for transport failures, and none of
 # them inherit from the builtin `ConnectionError` or `TimeoutError`:
@@ -49,25 +56,6 @@ except ImportError:  # pragma: no cover - boto3 not installed; S3 is unusable an
 # One tuple, used by every retry decorator and every pass-through `except` in
 # this file, so the two can never disagree about what counts as transient.
 TRANSIENT_ERRORS: tuple = (ConnectionError, TimeoutError) + _BOTO_TRANSIENT
-
-
-def _storage_error_after_retries(retry_state: RetryCallState) -> NoReturn:
-    """Raise the failure that outlasted every retry as a StorageError, the error IStore promises.
-
-    Every retry decorator in this file passes this as ``retry_error_callback``:
-    without it, Tenacity re-raises the last transient error itself (a builtin
-    or botocore transport error), which no caller expects from a store.
-
-    Args:
-        retry_state: Tenacity's state for the call; its last attempt failed.
-
-    Raises:
-        StorageError: always, chained to the last attempt's error.
-    """
-    error = retry_state.outcome.exception()
-    raise StorageError(
-        f'S3 {retry_state.fn.__name__} failed after {retry_state.attempt_number} attempts: {error}'
-    ) from error
 
 
 class S3Store(IStore):
@@ -128,7 +116,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def write_file(self, filename: str, data: str) -> None:
         """
@@ -152,7 +140,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def read_file(self, filename: str) -> str:
         """
@@ -184,7 +172,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def write_bytes(self, filename: str, data: bytes) -> None:
         """
@@ -210,7 +198,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def read_bytes(self, filename: str) -> bytes:
         """
@@ -243,7 +231,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def read_file_with_metadata(self, filename: str) -> tuple:
         """
@@ -275,7 +263,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS + (_RaceConditionError,)),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def write_file_atomic(self, filename: str, data: str, expected_version: Optional[str] = None) -> str:
         """
@@ -349,7 +337,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def delete_file(self, filename: str, expected_version: Optional[str] = None) -> None:
         """
@@ -398,7 +386,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def move_file(self, src: str, dst: str) -> None:
         """Move an object onto ``dst``, replacing it if it exists.
@@ -440,7 +428,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def list_files(self, prefix: str = '') -> list:
         """
@@ -480,7 +468,7 @@ class S3Store(IStore):
         stop=stop_after_attempt(STORE_MAX_RETRY_ATTEMPTS),
         wait=wait_exponential(multiplier=1, min=1),
         retry=retry_if_exception_type(TRANSIENT_ERRORS),
-        retry_error_callback=_storage_error_after_retries,
+        retry_error_callback=storage_error_after_retries,
     )
     async def list_entries(
         self,

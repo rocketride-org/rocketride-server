@@ -1315,6 +1315,24 @@ class TestAzureBlobStoreMocked:
         assert content == 'Test data'
         assert mock_blob.download_blob.call_count == 3
 
+    @pytest.mark.asyncio
+    async def test_read_bytes_raises_storage_error_after_max_retries(self, store, mock_blob_client, monkeypatch):
+        """A transport failure that outlasts every retry reaches the caller as a StorageError, not the raw error."""
+        mock_client, mock_blob = mock_blob_client
+
+        async def instant_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(asyncio, 'sleep', instant_sleep)
+        failure = ConnectionError('Connection reset')
+        mock_blob.download_blob.side_effect = failure
+
+        with pytest.raises(StorageError, match='Connection reset') as exc_info:
+            await store.read_bytes('test/fail.bin')
+
+        assert exc_info.value.__cause__ is failure
+        assert mock_blob.download_blob.call_count == STORE_MAX_RETRY_ATTEMPTS
+
 
 # ============================================================================
 # Store.get_file_store Tests

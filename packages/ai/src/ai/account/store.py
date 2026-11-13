@@ -19,9 +19,11 @@ import tempfile
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
 if TYPE_CHECKING:
+    from tenacity import RetryCallState
+
     from .file_store import FileStore
 
 
@@ -42,6 +44,26 @@ class StorageNotFoundError(StorageError):
     """The file does not exist. Raised by every provider so callers can tell
     a missing file from a read that failed.
     """
+
+
+def storage_error_after_retries(retry_state: 'RetryCallState') -> NoReturn:
+    """Raise the failure that outlasted a provider's retries as a StorageError, the error IStore promises.
+
+    The cloud providers pass this to every Tenacity ``retry`` as
+    ``retry_error_callback``: without it, Tenacity re-raises the last
+    transient error itself (a builtin or SDK transport error), which no
+    caller expects from a store.
+
+    Args:
+        retry_state: Tenacity's state for the call; its last attempt failed.
+
+    Raises:
+        StorageError: always, chained to the last attempt's error.
+    """
+    error = retry_state.outcome.exception()
+    raise StorageError(
+        f'{retry_state.fn.__qualname__} failed after {retry_state.attempt_number} attempts: {error}'
+    ) from error
 
 
 class VersionMismatchError(StorageError):
