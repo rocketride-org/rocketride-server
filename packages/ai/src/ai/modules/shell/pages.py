@@ -430,9 +430,9 @@ async def _crawler_snapshot(page: Page) -> Tuple[Optional[str], bool]:
     over ``MAX_SNAPSHOT_BYTES``, or a template the engine refuses (the last
     two are remembered by store path and warned about once). A storage
     failure (a snapshot the store does not have yet, or no answer within
-    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, so the next request tries again, and is warned about at most
-    once per store path per ``_STORAGE_WARNING_INTERVAL``. Anything else is
-    a bug and propagates.
+    ``_SNAPSHOT_READ_SECONDS``, included) falls back uncached, so the next
+    request tries again, and is warned about at most once per store path per
+    ``_STORAGE_WARNING_INTERVAL``. Anything else is a bug and propagates.
 
     Args:
         page: A page of the aggregate.

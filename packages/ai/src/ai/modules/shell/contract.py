@@ -221,7 +221,15 @@ def reserved_error(path: str) -> Optional[str]:
 
 
 def snapshot_error(snapshot: Any) -> Optional[str]:
-    """Why ``snapshot`` is not a relative ``.html`` path inside the artifact, or None."""
+    """Why ``snapshot`` is not a relative ``.html`` path inside the artifact, or None.
+
+    Args:
+        snapshot: A page's ``snapshot`` value, as the manifest gives it.
+
+    Returns:
+        The reason, worded to follow the field in a publish error, or None
+        when ``snapshot`` is a relative ``.html`` path without dot segments.
+    """
     if not isinstance(snapshot, str) or not _SNAPSHOT.fullmatch(snapshot):
         return 'must be a relative path inside the artifact ending in .html (e.g. "pages/pricing.html")'
     if any(seg in ('.', '..') for seg in snapshot.split('/')):
