@@ -2498,11 +2498,6 @@ class TaskServer(DAPBase):
         except (ValueError, TypeError):
             raise ValueError(f'Invalid launch type: "{command}"')
 
-        # Save the owner so we know when to stop the task (and index the
-        # control under its launching connection, for the disconnect cleanup)
-        if control.launch_type == LAUNCH_TYPE.LAUNCH:
-            self._note_launch_owner(control, conn)
-
         # Handle task uniqueness and potential conflicts
         if control.key in self._task_control:
             # Get the existing task control
@@ -2516,7 +2511,9 @@ class TaskServer(DAPBase):
                 # A Play/.use/submit(spec) for a live presence whose engine runs
                 # other content from another workspace: say so (plan 2.3)
                 current_hash = existing_control.task.engine_key.split(':', 1)[0]
-                new_hash = engine_content(control.pipeline, control.source, component_facts).content_hash
+                # The same conversion the first start gets: an unkeyable spec
+                # is engine_start_failed here too, never a raw exception
+                new_hash = self._engine_shape(control, args)[0].split(':', 1)[0]
                 warnings = self._collision_warnings(existing_control, control, current_hash, new_hash)
 
                 # submit(spec): on_change decides (plan 3.4)
@@ -2588,6 +2585,12 @@ class TaskServer(DAPBase):
             self._task_control[control.key] = control
             control.touch()
             self._schedule_control(control)
+            # Index the control under its launching connection for the
+            # disconnect cleanup - AFTER a completed predecessor of the same
+            # key was unregistered above, whose _forget_launch_owner would
+            # otherwise drop this very key from the connection's index
+            if control.launch_type == LAUNCH_TYPE.LAUNCH:
+                self._note_launch_owner(control, conn)
 
         # Attach to the live engine of the key, or start one (the start gate)
         try:
@@ -2835,8 +2838,6 @@ class TaskServer(DAPBase):
             The engine the control now holds.
         """
         old_engine, old_pipeline = control.task, control.pipeline
-        control.pipeline = pipeline
-        key, shared, threads = self._engine_shape(control, launch_args)
 
         def _move(engine: TaskEngine) -> None:
             if control.task is engine:
@@ -2847,6 +2848,10 @@ class TaskServer(DAPBase):
             control.task = engine
 
         try:
+            # The spec and its shape are inside the rollback: a spec that
+            # cannot be keyed leaves the control on its old pipeline too
+            control.pipeline = pipeline
+            key, shared, threads = self._engine_shape(control, launch_args)
             engine = await self._acquire_engine(
                 key,
                 lambda: self._new_engine(
@@ -3156,12 +3161,15 @@ class TaskServer(DAPBase):
             # new spec's engine instead (plan 3.4, 7.3), exactly like
             # submit(spec) with onChange 'auto'; nothing is stopped for anyone else.
             if self._shares_engine(control) or control.task.shared:
-                repointed = _apply_source_defaults(pipeline, control.source)
-                if repointed.get('source') and repointed['source'] != control.source:
+                # The source is checked on the REQUEST, before normalisation
+                # stamps the control's source onto it
+                requested_source = pipeline.get('source')
+                if requested_source and requested_source != control.source:
                     raise ValueError(
                         f"The source is part of the task's identity and cannot change on a restart "
-                        f'({control.source!r} -> {repointed["source"]!r})'
+                        f'({control.source!r} -> {requested_source!r})'
                     )
+                repointed = _apply_source_defaults(pipeline, control.source)
                 old_engine = control.task
                 await self._repoint(
                     control,
@@ -3170,17 +3178,24 @@ class TaskServer(DAPBase):
                     env=None,
                     env_source=None if old_engine.shared else old_engine._env_source,
                 )
+                # The control now admits the accepted pipeline's parameters
+                control.parameters = dict(control.pipeline.get('parameters') or {})
                 if wait_for_running:
                     await control.task.wait_for_running()
                 self._note_launch_owner(control, conn)
-                self.debug_message(f'Task "{control.id}" restarted by repoint to "{control.task.engine_key}"')
+                # Unchanged content on a shared engine moves nothing: the
+                # engine keeps serving its holders and nothing was reset, which
+                # the stamp says (plan 7.3: a shared engine is never restarted
+                # for one holder)
+                converged = 'repointed' if control.task is not old_engine else 'none'
+                self.debug_message(f'Task "{control.id}" restart: {converged} ("{control.task.engine_key}")')
                 return {
                     'token': control.address,
                     'projectId': control.project_id,
                     'source': control.source,
                     'provider': control.provider,
                     'engineKey': control.task.engine_key,
-                    'converged': 'repointed',
+                    'converged': converged,
                 }
 
             # Find and validate the provider from new pipeline
@@ -3248,6 +3263,7 @@ class TaskServer(DAPBase):
             # record still holds whatever was launched originally, so a later
             # useExisting compares against a configuration that was replaced here.
             control.pipeline = pipeline
+            control.parameters = dict(pipeline.get('parameters') or {})
 
             # Wait for running state if requested
             if wait_for_running:

@@ -39,8 +39,11 @@ class IInstance(IInstanceBase):
         self.question = Question()
 
     def open(self, entry: Entry):
-        # The turn starts here
+        # The turn starts here. One binding may open several objects before it
+        # is returned (a source pipe does), so the question is per OBJECT: what
+        # an earlier object collected must not ride the next one
         self.has_output = False
+        self.question = Question()
 
     # The engine forwards a handler's raw input unless preventDefault() raises, so
     # each collector ends with it, after the input is stored. Only the merged

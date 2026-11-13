@@ -441,3 +441,33 @@ def test_binding_construction_stays_cheap(endpoint):
     with_instance = cycle(True)
 
     assert with_instance - without < 50e-6, f'{(with_instance - without) * 1e6:.1f} us per instance'
+
+
+def test_a_failing_end_instance_is_the_puts_error_and_the_slot_is_still_free(monkeypatch):
+    """An endInstance that raises surfaces on putPipe; the binding is ended all the same and the slot is reusable."""
+
+    def boom(self):
+        raise RuntimeError('cannot let go')
+
+    monkeypatch.setattr(_response_class(), 'endInstance', boom)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        node = _node(pipe, 'response_1')
+        node.pyInstance
+        with pytest.raises(Exception, match='cannot let go'):
+            endpoint.putPipe(pipe)
+        assert not node.bound
+
+        again = endpoint.getPipe('none')
+        try:
+            assert again.pipeId == pipe.pipeId, 'the slot came back despite the failed teardown'
+            assert not node.bound
+        finally:
+            # No touch this time: nothing to end, the put succeeds
+            endpoint.putPipe(again)
+    finally:
+        loader.endLoad()

@@ -306,6 +306,22 @@ def test_open_starts_a_turn_clean(build):
     assert captured.questions[0].context == ['the real question']
 
 
+def test_two_objects_on_one_binding_do_not_share_a_question(build):
+    """A binding may open several objects before it is returned; each open starts its own question."""
+    inst, captured = build()
+
+    inst.open(None)
+    _write(inst, 'text', 'first object')
+    inst.closing()
+    inst.open(None)
+    _write(inst, 'text', 'second object')
+    inst.closing()
+
+    assert len(captured.questions) == 2
+    assert captured.questions[1].context == ['second object']
+    assert len(captured.questions[1].instructions) == len(_INSTRUCTIONS)
+
+
 def test_a_turn_that_received_nothing_emits_nothing(build):
     """
     A pipe holds one prompt node per intake lane and a turn reaches one of them.

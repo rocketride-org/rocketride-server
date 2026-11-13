@@ -52,3 +52,15 @@ async def test_a_failing_slot_read_raises_too():
 
     with pytest.raises(RuntimeError, match='slot read failed'):
         await publish_rows(account, 'org-1', 'docBrain', ['team-1'])
+
+
+@pytest.mark.asyncio
+async def test_a_failing_audience_read_raises_too():
+    """publish_get failing propagates the same way: no slot read masks it."""
+    account = AsyncMock()
+    account.deployments_versions = AsyncMock(return_value=[{'version': 1, 'kind': 'pipe', 'state': 'ready'}])
+    account.deployments_get = AsyncMock(return_value=None)
+    account.publish_get = AsyncMock(side_effect=RuntimeError('audience read failed'))
+
+    with pytest.raises(RuntimeError, match='audience read failed'):
+        await publish_rows(account, 'org-1', 'docBrain', ['team-1'])

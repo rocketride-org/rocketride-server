@@ -930,12 +930,14 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_FUNCTION(
             putPipe,
             [](IServiceEndpoint &self, IServiceFilterInstance &pipe) -> void {
-                // Allow others to run while we are doing this
-                engine::python::UnlockPython unlock;
-
-                // Return the pipe to the endpoint for reuse
-                self.putPipe(pipe.pipe);
-                return;
+                // Return the pipe to the endpoint for reuse, letting others
+                // run meanwhile; a binding's teardown failure (an endInstance
+                // that raised) is this call's error, like getPipe's
+                auto ccode = [&] {
+                    engine::python::UnlockPython unlock;
+                    return self.putPipe(pipe.pipe);
+                }();
+                if (ccode) throw ccode;
             })
 
         .PYBIND(insertFilter, &IServiceEndpoint::insertFilter)

@@ -89,3 +89,14 @@ async def wait_running(engine: 'TaskEngine') -> None:
             f'The engine {engine.engine_key!r} did not confirm running: {exc}',
             engineKey=engine.engine_key,
         ) from exc
+    except TaskError as exc:
+        # A subprocess that completed or was stopped BEFORE it ever confirmed
+        # running never started: that is the start failure too. An engine that
+        # ran and then ended keeps its terminal code
+        if exc.code in (TaskError.COMPLETED, TaskError.STOPPED) and not getattr(engine, 'reached_running', False):
+            raise TaskError(
+                TaskError.ENGINE_START_FAILED,
+                f'The engine {engine.engine_key!r} ended before it confirmed running: {exc}',
+                engineKey=engine.engine_key,
+            ) from exc
+        raise

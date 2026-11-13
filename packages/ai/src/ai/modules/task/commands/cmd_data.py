@@ -140,10 +140,18 @@ class DataCommands(DAPConn):
             if isinstance(arguments, dict):
                 arguments.pop('correlationId', None)
 
-            # The caller's control for the address: its live run on the first
-            # rung that answers, or its publication started from the artifact,
-            # the way submit() resolves (plan 3.2, one resolver for every verb)
-            control = await self.resolve_control_or_start(request, 'task.data')
+            # The caller's control for the address. An OPEN resolves the way
+            # submit() does: the live run on the first rung that answers, or
+            # the publication started from its artifact (plan 3.2, one resolver
+            # for every verb). The frames of an open pipe (write/close/tool)
+            # ATTACH only: they must land on the control the open found, never
+            # start a publication a colder rung could not. C.8's open-pipe
+            # record pins each slot to the engine it opened on (plan 3.1 P2).
+            subcommand = arguments.get('subcommand') if isinstance(arguments, dict) else None
+            if subcommand == 'open':
+                control = await self.resolve_control_or_start(request, 'task.data')
+            else:
+                control = self.get_control(request, 'task.data')
 
             # Per-call params on an open are admitted by public name against
             # the control's parameters map (plan 5.4 item 5): an unknown name
