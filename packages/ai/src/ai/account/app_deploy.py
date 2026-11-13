@@ -497,6 +497,16 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
                 pass  # best-effort: the 'failed' state alone gates serving
         try:
             await account.set_artifact_state(org_id, app_id, version, 'failed', _actor_of(conn))
+            try:
+                await account.deployments_set_build(org_id, app_id, version, {
+                    'status': 'failed',
+                    'phase': 'upload',
+                    'queuedAt': time.time(),
+                    'endedAt': time.time(),
+                    'attempt': 0,
+                })
+            except Exception as build_exc:
+                debug(f'[app_deploy] could not mark {app_id} v{version} build as failed: {build_exc}')
             # Teammates' rails show the dead version without a manual refresh.
             fail_server = getattr(conn, '_server', None)
             if fail_server is not None:
