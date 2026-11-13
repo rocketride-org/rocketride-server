@@ -16,6 +16,8 @@ Save this as `extract.pipe`:
 
 ```json
 {
+  "project_id": "extraction-example",
+  "source": "source_1",
   "components": [
     {
       "id": "source_1",
@@ -29,6 +31,7 @@ Save this as `extract.pipe`:
     {
       "id": "parser_1",
       "provider": "parse",
+      "config": {},
       "input": [
         { "lane": "tags", "from": "source_1" }
       ]
@@ -62,7 +65,8 @@ Save this as `extract.pipe`:
     },
     {
       "id": "target_1",
-      "provider": "response",
+      "provider": "response_answers",
+      "config": {},
       "input": [
         { "lane": "answers", "from": "extract_1" }
       ]
@@ -79,20 +83,36 @@ Save this as `extract.pipe`:
 | `parser_1` | `parse` | Converts each file (PDF, Word, image, etc.) into clean text on the `text` lane. |
 | `extract_1` | `extract_data` | Uses an LLM to pull the four named fields out of each document and emits the result as structured JSON on the `answers` lane. |
 | `llm_1` | `llm_openai` | Answers `extract_1`'s extraction prompts over the `llm` invoke channel. |
-| `target_1` | `response` | Returns the extracted JSON to the caller. |
+| `target_1` | `response_answers` | Returns the extracted JSON for each file that is sent to the pipeline (the dropper page below shows it). |
 
 ## Start the pipeline
 
 Put some PDF invoices in `/data/invoices`, then:
 
 ```bash
-export OPENAI_API_KEY=sk-...
+# The key the CLI sends. Replace rr_local with the key your engine requires (its
+# RR_APIKEY). A local engine started without a key accepts any non-empty value.
+export ROCKETRIDE_APIKEY=rr_local
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
 
 rocketride start --pipeline ./extract.pipe
 ```
 
-The engine scans the directory, processes each file through the pipeline, and
-streams the extracted JSON:
+`start` prints the run's token and exits; the pipeline keeps running on the engine:
+
+```text
+Starting pipeline from ./extract.pipe...
+Pipeline started.
+Token: =control/1234abcd...
+Stop it with: rocketride stop --token =control/1234abcd...
+```
+
+The engine scans the directory and processes each file through the pipeline.
+This pipeline sends no reply: `start` exits after it prints the token, and no
+request is made, so nothing comes back to you. To see each file's JSON, use the
+`dropper` variant below: its page shows each file's result.
+`rocketride upload` only reports whether each file was uploaded. The extracted
+JSON for each file has this shape:
 
 ```json
 {
@@ -102,6 +122,9 @@ streams the extracted JSON:
   "vendor_name": "Acme Supplies Ltd."
 }
 ```
+
+In a reply, this object is inside the `answers` array of the result, as
+`"answers": [[ { ... } ]]`.
 
 ## Upload files on demand
 
@@ -124,8 +147,20 @@ Or via the Drag & Drop UI by using the `dropper` provider:
 { "id": "source_1", "provider": "dropper" }
 ```
 
-The engine prints a browser URL where you can drop files and see results in
-JSON, text, and table tabs.
+`start` does not print an address. The drop page is the platform app
+`rocketride.dropper`: open it from the dropper node in the Builder, or by a
+signed-in deep link on the engine's own address:
+
+```text
+http://localhost:5565/?appid=rocketride.dropper&pipe=rocketride.extraction-example.source_1
+```
+
+The `pipe` value is the run's address, `developerId.pipelineId.source`: the
+pipeline's `project_id` and source, under your developer id (`rocketride` on a
+local engine). Drop files there to see each file's result.
+
+The link carries no credential: whoever opens it signs in, so it is safe to
+pass on. The token `start` prints is not part of it.
 
 ## Next steps
 

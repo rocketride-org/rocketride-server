@@ -6,11 +6,15 @@ Rules, in order:
 1. Explicit ``rocketride_uri`` config / ``RR_MCP_ENGINE_URI`` env wins, as-is.
 2. Loopback-only bind -> the engine's own local address (``ws://<host>:<port>``),
    so a laptop engine never silently drives RocketRide's cloud.
-3. Otherwise -> the public origin of ``MCP_RESOURCE_IDENTIFIER``
+3. Otherwise, with ``MCP_RESOURCE_IDENTIFIER`` set -> its public origin
    (``https`` -> ``wss``, ``http`` -> ``ws``, path dropped).
+4. Otherwise (non-loopback bind, identifier not set) -> this engine on loopback,
+   ``ws://127.0.0.1:<port>``, never the built-in cloud default.
 
 That single value feeds the shared and per-caller engine clients, the widget
-CSP ``connectDomains`` origin, and the user-facing upload/dropper links.
+CSP ``connectDomains`` origin and the file-drop page link. Upload links name
+this server's OWN origin, which takes the same defaults (rules 2 to 4) and is
+never the engine address when that one is explicit.
 """
 
 import logging
@@ -146,14 +150,196 @@ def test_engine_default_bind_is_loopback_on_default_port(monkeypatch, fake_web_s
 
 
 # ---------------------------------------------------------------------------
-# Rule 3: public bind -> public origin of the MCP resource identifier
+# Rule 3: public bind + explicit resource identifier -> its public origin
+# Rule 4: public bind, identifier not set -> this engine on loopback
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None])
-def test_public_bind_defaults_to_public_resource_origin(monkeypatch, fake_web_server, host):
+def test_public_bind_with_explicit_default_valued_identifier_derives_from_it(monkeypatch, fake_web_server, host):
+    """Hosted deployments set the identifier explicitly; that derivation is unchanged."""
+    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'https://api.rocketride.ai/mcp')
     captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
     _assert_wiring(captured, 'wss://api.rocketride.ai', 'https://api.rocketride.ai')
+
+
+@pytest.mark.parametrize(
+    ('host', 'uri', 'origin'),
+    [
+        ('0.0.0.0', 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000'),
+        ('', 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000'),
+        (None, 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000'),
+        # An IPv6 wildcard socket is IPv6-only: 127.0.0.1 would be refused.
+        ('::', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('::0', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('0:0:0:0:0:0:0:0', 'ws://[::1]:6000', 'http://[::1]:6000'),
+        ('[::]', 'ws://[::1]:6000', 'http://[::1]:6000'),
+    ],
+)
+def test_wildcard_bind_without_identifier_stays_on_the_local_engine(monkeypatch, fake_web_server, host, uri, origin):
+    """The Docker image binds 0.0.0.0 with nothing set: never default to the cloud."""
+    captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, uri, origin)
+
+
+@pytest.mark.parametrize(
+    ('host', 'uri', 'origin'),
+    [
+        ('10.0.0.5', 'ws://10.0.0.5:6000', 'http://10.0.0.5:6000'),
+        ('2001:db8::5', 'ws://[2001:db8::5]:6000', 'http://[2001:db8::5]:6000'),
+    ],
+)
+def test_ip_literal_bind_without_identifier_uses_the_bind_address(
+    monkeypatch, fake_web_server, caplog, host, uri, origin
+):
+    """A socket bound to one address is reachable only there; loopback would be refused."""
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, uri, origin)
+    assert any('bind address' in r.getMessage() for r in caplog.records)
+    assert any('RR_MCP_ENGINE_URI' in r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+
+
+@pytest.mark.parametrize('host', ['engine.internal', 'my-host'])
+def test_hostname_bind_without_identifier_falls_back_to_loopback_with_one_warning(
+    monkeypatch, fake_web_server, caplog, host
+):
+    """A bind NAME could resolve to another machine later, so the key is not sent to it over ws://."""
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, 'ws://127.0.0.1:6000', 'http://127.0.0.1:6000')
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, warnings
+    assert warnings[0] == (
+        'MCP engine address defaulted to loopback (ws://127.0.0.1:6000) because the bind host is a name, not an '
+        'IP address. Nothing may be listening there. Set RR_MCP_ENGINE_URI to the address MCP tool calls should '
+        'use, and MCP_RESOURCE_IDENTIFIER to the address upload links should name.'
+    )
+    assert host not in warnings[0]
+
+
+@pytest.mark.parametrize('host', ['10.0.0.5', '2001:db8::5', 'engine.internal'])
+@pytest.mark.parametrize('variable', ['RR_MCP_ENGINE_URI', 'MCP_RESOURCE_IDENTIFIER'])
+def test_explicit_address_still_wins_on_a_specific_bind(monkeypatch, fake_web_server, caplog, host, variable):
+    if variable == 'RR_MCP_ENGINE_URI':
+        monkeypatch.setenv(variable, 'wss://engine.example')
+    else:
+        monkeypatch.setenv(variable, 'https://engine.example/mcp')
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        captured = _init(monkeypatch, fake_web_server, host=host, port=6000)
+    _assert_wiring(captured, 'wss://engine.example', 'https://engine.example')
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    if variable == 'MCP_RESOURCE_IDENTIFIER':
+        assert not warnings
+    else:
+        # The engine address is configured; this server's own address is still a default.
+        assert len(warnings) == 1, warnings
+        assert warnings[0].startswith('MCP own address defaulted to ')
+        assert 'engine address' not in warnings[0]
+
+
+def test_public_bind_without_identifier_logs_the_self_default_rule(monkeypatch, fake_web_server, caplog):
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    assert any('ws://127.0.0.1:5565' in r.getMessage() and 'self default' in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize('host', ['0.0.0.0', '::', '', '10.0.0.5'])
+def test_defaulted_address_logs_one_warning_about_links(monkeypatch, fake_web_server, caplog, host):
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host=host, port=5565)
+    warnings = [
+        r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and 'defaulted' in r.getMessage()
+    ]
+    assert len(warnings) == 1, warnings
+    assert 'Upload links' in warnings[0] and 'file-drop page' in warnings[0] and 'widget' in warnings[0]
+    assert 'MCP_RESOURCE_IDENTIFIER' in warnings[0] and 'RR_MCP_ENGINE_URI' in warnings[0]
+    assert 'ROCKETRIDE_URI' not in warnings[0]
+
+
+@pytest.mark.parametrize(
+    ('host', 'resource', 'uri'),
+    [
+        ('0.0.0.0', 'https://engine.example/mcp', None),
+        ('0.0.0.0', 'https://engine.example/mcp', 'wss://engine.example'),
+        ('127.0.0.1', None, None),
+        ('127.0.0.1', None, 'wss://engine.example'),
+    ],
+)
+def test_no_defaulted_address_warning_when_an_address_is_configured(
+    monkeypatch, fake_web_server, caplog, host, resource, uri
+):
+    if resource:
+        monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', resource)
+    if uri:
+        monkeypatch.setenv('RR_MCP_ENGINE_URI', uri)
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host=host, port=5565)
+    assert not [r for r in caplog.records if 'defaulted' in r.getMessage()]
+
+
+@pytest.mark.parametrize(
+    ('host', 'own', 'names_loopback'),
+    [
+        ('0.0.0.0', 'http://127.0.0.1:5565', False),
+        ('::', 'http://[::1]:5565', False),
+        ('10.0.0.5', 'http://10.0.0.5:5565', False),
+        ('engine.internal', 'http://127.0.0.1:5565', True),
+    ],
+)
+def test_an_engine_address_alone_leaves_one_warning_about_upload_links(
+    monkeypatch, fake_web_server, caplog, host, own, names_loopback
+):
+    """RR_MCP_ENGINE_URI moves the engine address; the upload links name this server, which is still a default."""
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'wss://engine.example')
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host=host, port=5565)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1, warnings
+    assert own in warnings[0] and 'MCP_RESOURCE_IDENTIFIER' in warnings[0]
+    assert 'engine.example' not in warnings[0] and 'RR_MCP_ENGINE_URI' not in warnings[0]
+    assert ('Nothing may be listening there' in warnings[0]) is names_loopback
+    assert ('Upload links' in warnings[0]) is not names_loopback
+
+
+@pytest.mark.parametrize(
+    ('host', 'resource', 'origin', 'rule'),
+    [
+        ('127.0.0.1', None, 'http://127.0.0.1:6000', 'loopback'),
+        ('localhost', 'https://mcp.example/mcp', 'http://127.0.0.1:6000', 'loopback'),
+        ('::1', None, 'http://[::1]:6000', 'loopback'),
+        ('0.0.0.0', 'https://user:secret@mcp.example/mcp', 'https://mcp.example', 'public'),
+        ('engine.internal', 'https://mcp.example:8443/mcp', 'https://mcp.example:8443', 'public'),
+        # No identifier: never the built-in one, which names RocketRide Cloud.
+        ('0.0.0.0', None, 'http://127.0.0.1:6000', 'self default'),
+        ('', None, 'http://127.0.0.1:6000', 'self default'),
+        ('[::]', None, 'http://[::1]:6000', 'self default'),
+        ('10.0.0.5', None, 'http://10.0.0.5:6000', 'bind address'),
+        ('2001:db8::5', None, 'http://[2001:db8::5]:6000', 'bind address'),
+        ('engine.internal', None, 'http://127.0.0.1:6000', 'bind name default'),
+    ],
+)
+def test_own_origin_takes_the_engine_defaults_and_never_the_cloud(monkeypatch, host, resource, origin, rule):
+    """The upload route is served here, so its links name this server; an explicit engine address never moves them."""
+    import ai.modules.mcp as mcp_module
+
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'wss://engine.example')
+    if resource:
+        monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', resource)
+    assert mcp_module._resolve_mcp_origin(host, 6000) == (origin, rule)
+
+
+def test_own_origin_is_logged_with_its_rule(monkeypatch, fake_web_server, caplog):
+    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
+        _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    lines = [r.getMessage() for r in caplog.records if 'own origin' in r.getMessage()]
+    assert lines == ['MCP own origin: http://127.0.0.1:5565 (self default)']
+
+
+def test_explicit_uri_beats_the_self_default_on_a_public_bind(monkeypatch, fake_web_server):
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'wss://engine-host:5565')
+    captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
+    _assert_wiring(captured, 'wss://engine-host:5565', 'https://engine-host:5565')
 
 
 @pytest.mark.parametrize(
@@ -196,6 +382,7 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
     import ai.modules.mcp.handlers as handlers_mod
     from ai.modules.mcp import apps
 
+    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'https://api.rocketride.ai/mcp')
     captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     (tmp_path / 'dropper.html').write_text('<!doctype html><html><body>d</body></html>', encoding='utf-8')
     server = handlers_mod.build_mcp_server(
@@ -209,20 +396,33 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ('host', 'env_uri', 'origin'),
+    ('host', 'env_uri', 'resource', 'origin', 'own'),
     [
-        ('0.0.0.0', None, 'https://api.rocketride.ai'),
-        ('127.0.0.1', None, 'http://127.0.0.1:5565'),
-        ('127.0.0.1', 'wss://engine-host:5565', 'https://engine-host:5565'),
+        ('0.0.0.0', None, None, 'http://127.0.0.1:5565', 'http://127.0.0.1:5565'),
+        ('127.0.0.1', None, None, 'http://127.0.0.1:5565', 'http://127.0.0.1:5565'),
+        ('127.0.0.1', 'wss://engine-host:5565', None, 'https://engine-host:5565', 'http://127.0.0.1:5565'),
+        ('0.0.0.0', 'wss://engine-host:5565', None, 'https://engine-host:5565', 'http://127.0.0.1:5565'),
+        (
+            '0.0.0.0',
+            'wss://engine-host:5565',
+            'https://mcp.example/mcp',
+            'https://engine-host:5565',
+            'https://mcp.example',
+        ),
+        ('0.0.0.0', None, 'https://mcp.example/mcp', 'https://mcp.example', 'https://mcp.example'),
     ],
 )
-async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, fake_engine, host, env_uri, origin):
+async def test_dropper_links_use_resolved_origin(
+    monkeypatch, fake_web_server, fake_engine, host, env_uri, resource, origin, own
+):
     from ai.modules.mcp.registry import TaskRegistry
     from ai.modules.mcp.tooling import ToolRegistry
     from ai.modules.mcp.tools import execution
 
     if env_uri:
         monkeypatch.setenv('RR_MCP_ENGINE_URI', env_uri)
+    if resource:
+        monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', resource)
     captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
     # The real client the factory builds decides base_url; the fake only
     # stands in for the engine round-trip.
@@ -233,7 +433,7 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
 
     # handle_mcp binds the server's OWN origin per request; the handler is
     # driven directly here, so bind what initModule resolved for this bind.
-    mcp_origin = mcp_module._resolve_mcp_origin(host, 5565)
+    mcp_origin, _rule = mcp_module._resolve_mcp_origin(host, 5565)
     registry = ToolRegistry()
     execution.register(registry)
     origin_token = identity.MCP_ORIGIN.set(mcp_origin)
@@ -247,10 +447,12 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     assert result['ok'] is True, result
     # The upload door is the MCP module's own nonce route on THIS server's
     # origin (plan 3.7) -- a loopback bind is reached at 127.0.0.1, any other
-    # at the resource identifier's origin -- never on the engine origin, which
-    # does not hold the nonce. Only the one-time nonce rides the URL.
-    expected = 'http://127.0.0.1:5565' if host == '127.0.0.1' else 'https://api.rocketride.ai'
-    assert mcp_origin == expected
+    # at the resource identifier's origin when one is set and on this machine
+    # when none is -- never on the engine origin, which does not hold the
+    # nonce, and never on RocketRide Cloud, the built-in identifier. Only the
+    # one-time nonce rides the URL.
+    assert mcp_origin == own
+    assert 'rocketride.ai' not in result['upload_url']
     assert result['upload_url'].startswith(f'{mcp_origin}/mcp/upload/')
     assert '?' not in result['upload_url']
     assert result['address'] not in result['upload_url']
@@ -269,7 +471,7 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     [
         ('0.0.0.0', 'wss://user:secret@engine-host/?auth=hunter2', 'explicit', 'wss://engine-host/'),
         ('127.0.0.1', None, 'loopback default', 'ws://127.0.0.1:5565'),
-        ('0.0.0.0', None, 'public default', 'wss://api.rocketride.ai'),
+        ('0.0.0.0', None, 'self default', 'ws://127.0.0.1:5565'),
     ],
 )
 def test_logs_one_startup_line_without_credentials(monkeypatch, fake_web_server, caplog, host, env_uri, rule, shown):

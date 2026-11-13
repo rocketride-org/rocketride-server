@@ -24,14 +24,17 @@ Save this as `rag.pipe`:
 ```json
 {
   "project_id": "rag-example",
+  "source": "source_1",
   "components": [
     {
       "id": "source_1",
-      "provider": "webhook"
+      "provider": "webhook",
+      "config": {}
     },
     {
       "id": "parser_1",
       "provider": "parse",
+      "config": {},
       "input": [
         { "lane": "tags", "from": "source_1" }
       ]
@@ -92,7 +95,8 @@ Save this as `rag.pipe`:
     },
     {
       "id": "target_1",
-      "provider": "response",
+      "provider": "response_answers",
+      "config": {},
       "input": [
         { "lane": "answers", "from": "llm_1" }
       ]
@@ -111,49 +115,74 @@ Save this as `rag.pipe`:
 | `embed_1` | `embedding_openai` | Turns document chunks into vectors using `text-embedding-3-small` and emits `documents` (vectors + metadata). Also embeds incoming questions before retrieval. |
 | `store_1` | `qdrant` | Upserts vectors from `embed_1` into the `rag-docs` collection. When an embedded question arrives, it retrieves the top matching chunks and re-emits them as `questions` with context injected. |
 | `llm_1` | `llm_openai` | Receives the question + retrieved context and generates an answer using GPT-4o. |
-| `target_1` | `response` | Returns the answer to the caller. |
+| `target_1` | `response_answers` | Returns the answer to the caller. |
 
 ## Start the pipeline
 
 ```bash
+# The key the CLI sends. Replace rr_local with the key your engine requires (its
+# RR_APIKEY). A local engine started without a key accepts any non-empty value.
+export ROCKETRIDE_APIKEY=rr_local
+export ROCKETRIDE_OPENAI_API_KEY=sk-...
+
 rocketride start --pipeline ./rag.pipe
 ```
 
-When the source node reports `Webhook ready`, its Endpoint Info shows the
-webhook URL: the run's address `developerId.pipelineId.source` in one path
-segment. For developer id `acme`, this pipeline (`project_id: rag-example`,
-source `source_1`) is reached at:
+The CLI sends your `ROCKETRIDE_*` variables to the engine, which fills the
+`${ROCKETRIDE_OPENAI_API_KEY}` placeholders in the pipeline. `start` prints the
+run's token and exits; it does not print an address:
 
 ```text
-http://localhost:5567/webhook/acme.rag-example.source_1
+Starting pipeline from ./rag.pipe...
+Pipeline started.
+Token: =control/1234abcd...
+Stop it with: rocketride stop --token =control/1234abcd...
 ```
 
-Requests authenticate with your API key (`rr_...`); see
-[Endpoint authentication](/operate/security#endpoint-authentication).
+The webhook is on the engine port, at `/webhook/<address>`. The address is
+`developerId.pipelineId.source` in one path segment: this pipeline's
+`project_id` (`rag-example`) and source (`source_1`), under your developer id.
+On a local engine the developer id is `rocketride`, so this pipeline is reached
+at:
+
+```text
+http://localhost:5565/webhook/rocketride.rag-example.source_1
+```
+
+In the Builder, the source node's Endpoint Info shows the same URL. Requests
+authenticate with an API key (`rr_...`) as a bearer token: on a local engine,
+the key the engine requires, which is the `ROCKETRIDE_APIKEY` you set for the
+CLI. See [Endpoint authentication](/operate/security#endpoint-authentication)
+and the [webhook pipeline](/examples/webhook-pipeline) for details.
 
 ## Ingest documents
 
-POST a document to the webhook URL. The pipeline embeds and stores it:
+POST a document to the webhook URL. The pipeline embeds and stores it. curl
+reads the key from your shell, not from `.env`. It is the `ROCKETRIDE_APIKEY` you
+exported before `start`:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/acme.rag-example.source_1 \
+curl -X POST http://localhost:5565/webhook/rocketride.rag-example.source_1 \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
 ```
 
 ## Ask a question
 
-Send a plain-text question to the same endpoint:
+Send the question to the same endpoint as `application/rocketride-question`, so
+that it arrives on the `questions` lane (plain text is not treated as a
+question):
 
 ```bash
-curl -X POST http://localhost:5567/webhook/acme.rag-example.source_1 \
+curl -X POST http://localhost:5565/webhook/rocketride.rag-example.source_1 \
   -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
-  -H "Content-Type: text/plain" \
-  -d "What does the document say about refund policy?"
+  -H "Content-Type: application/rocketride-question" \
+  -d '{"type":"question","questions":[{"text":"What does the document say about refund policy?"}]}'
 ```
 
-The pipeline retrieves the relevant chunks from Qdrant, asks GPT-4o, and streams
-back the answer.
+The pipeline retrieves the relevant chunks from Qdrant and asks GPT-4o. The
+answer comes back in the `answers` array of the JSON reply, as shown on the
+[webhook pipeline](/examples/webhook-pipeline) page.
 
 ## Next steps
 

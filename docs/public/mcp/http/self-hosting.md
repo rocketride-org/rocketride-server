@@ -14,8 +14,39 @@ http://<host>:5565/mcp
 
 The engine binds `localhost` by default, so the endpoint is only reachable
 from the machine itself until you configure a wider bind host. The moment you
-do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
-(`Authorization: Bearer rr_...`) works in every configuration.
+do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below). API-key auth
+(`Authorization: Bearer rr_...`) is the simplest sign-in for a self-hosted
+engine. On an engine not bound to localhost (this includes the Docker image, even
+with a `127.0.0.1` port mapping), the key must start with `rr_`; other API
+keys are refused with 401.
+
+> **Note:** when neither `RR_MCP_ENGINE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set,
+> the engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`; `ws://[::1]:<port>`
+> for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and
+> `ws://127.0.0.1:<port>` for a bind host that is a name, which also logs a warning).
+> Upload links name the same address, so they work only for clients that can reach it.
+> For clients on other machines, set `MCP_RESOURCE_IDENTIFIER` to the public URL of
+> this engine's `/mcp` endpoint (an `https://` address they can reach): upload links
+> and the engine address then follow it.
+>
+> Engine image 3.6.0 and earlier read `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` where
+> this version reads `RR_MCP_ENGINE_URI` and `RR_APIKEY`, and with nothing set they
+> connect tool calls to `wss://api.rocketride.ai` (RocketRide Cloud), not to your
+> engine: `initialize` and `tools/list` succeed, then every tool call fails with
+> `Invalid or revoked API key`. On those versions, set
+> `ROCKETRIDE_URI=ws://127.0.0.1:<port>`.
+
+A Docker command that works end to end (MCP calls then use
+`Authorization: Bearer rr_local`):
+
+```bash
+docker run -d --name rocketride-engine --platform linux/amd64 \
+  -p 127.0.0.1:5565:5565 \
+  -v rocketride-data:/opt/data \
+  --restart unless-stopped \
+  -e RR_APIKEY=rr_local \
+  ghcr.io/rocketride-org/rocketride-engine:latest
+```
 
 ## Configuration
 
@@ -25,7 +56,7 @@ do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
 | `MCP_AUTHORIZATION_SERVER` | `https://auth.rocketride.ai` | OAuth authorization server advertised in discovery metadata. |
 | `MCP_EXPECTED_AUDIENCE` | _(unset)_ | Audience OAuth tokens must carry — for the default Zitadel setup this is a **project id**, not a URL. When unset, OAuth tokens are accepted only on loopback binds. |
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
-| `RR_MCP_ENGINE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin the widget CSP allows. Upload and dropper links never use it: they name this MCP server's own origin (`http://127.0.0.1:<port>` on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER`), which differs whenever the engine is another host. The engine config key `rocketride_uri` wins over it. When neither is set: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. `ROCKETRIDE_URI` is the address a client connects to and is never read here. |
+| `RR_MCP_ENGINE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of the file-drop page link and the one the widget CSP allows. Upload links never use it: they name this MCP server's own origin, which differs whenever the engine is another host. The engine config key `rocketride_uri` wins over it. When neither is set: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise, when `MCP_RESOURCE_IDENTIFIER` is set, its origin with `https`→`wss` / `http`→`ws`; on a non-loopback bind with neither set (for example the Docker image), `ws://127.0.0.1:<port>`, so tool calls stay on this engine (`ws://[::1]:<port>` for a `::` bind, `ws://<bind address>:<port>` for a bind to one specific IP address, and `ws://127.0.0.1:<port>` for a bind host that is a name, which logs a warning). This server's own origin takes the same defaults: `http://127.0.0.1:<port>` on a loopback bind, the origin of `MCP_RESOURCE_IDENTIFIER` when it is set, and otherwise the `http://` form of the address above, never RocketRide Cloud. When either address is such a default on a non-loopback bind, the engine logs one warning: set `MCP_RESOURCE_IDENTIFIER` to the engine's public address for clients on other machines. The engine logs both resolved values at startup. `ROCKETRIDE_URI` is the address a client connects to and is never read here. |
 | `RR_MCP_ENGINE_AUTH` | `RR_APIKEY` | Credential of the module's shared engine client (the engine config key `rocketride_auth` wins over it). Unset, the engine's own key `RR_APIKEY` is used. `ROCKETRIDE_AUTH` and `ROCKETRIDE_APIKEY` are what a client sends and are never read here. |
 | `MCP_OPENAI_APPS_CHALLENGE_TOKEN` | _(unset)_ | Served as the plain-text body of `GET /.well-known/openai-apps-challenge` for OpenAI's plugin domain verification. Unset: the route answers 404. |
 

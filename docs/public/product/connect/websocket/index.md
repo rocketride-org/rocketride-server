@@ -27,7 +27,8 @@ send so you can debug, trace, or build your own client.
   its `arguments`: the CONTROL ID, an opaque transient handle valid for the life
   of the control (never persist it; `execute` returns the task's `address` beside
   it).
-  Cloud requires a key; a local engine typically does not.
+  Cloud requires a key. The SDKs and the CLI also need one for a local engine;
+  an engine started without a key (no `RR_APIKEY`) accepts any non-empty value.
 
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.

@@ -349,6 +349,59 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     )
 
 
+def _wildcard_family(bind_host: Optional[str]) -> Optional[int]:
+    """Return the IP version (4 or 6) of a bind-all host, or None if it is not one.
+
+    ``''`` and unset count as IPv4 (asyncio binds them to both families; 127.0.0.1
+    serves). Any spelling of the unspecified address counts (``0.0.0.0``, ``::``,
+    ``::0``, ``0:0:0:0:0:0:0:0``, bracketed ``[::]``); see _resolve_engine_uri.
+    """
+    if not bind_host:
+        return 4
+    try:
+        addr = ipaddress.ip_address(bind_host.strip('[]'))
+    except ValueError:
+        return None
+    return addr.version if addr.is_unspecified else None
+
+
+def _self_default(bind_host: Optional[str], bind_port: int) -> Tuple[str, str]:
+    """Return ``host:port`` of this server on a non-loopback bind, and the rule that chose it.
+
+    The default both ``_resolve_engine_uri`` (rules 4 to 6) and
+    ``_resolve_mcp_origin`` take when ``MCP_RESOURCE_IDENTIFIER`` is not set:
+    the built-in identifier names RocketRide Cloud, so nothing on a self-hosted
+    engine may be derived from it.
+
+    - ``self default`` -- a bind-all host is reached on the loopback address of
+      its family. asyncio binds ``''`` to IPv4 and IPv6, ``0.0.0.0`` to IPv4
+      only and ``::`` to IPv6 only (IPV6_V6ONLY), so each needs the loopback
+      it serves.
+    - ``bind address`` -- a socket bound to one IP address is listened on only
+      there, so loopback would be refused (IPv6 bracketed).
+    - ``bind name default`` -- a bind host that is a NAME may resolve to another
+      machine on a later lookup, so it is not trusted with a credential over
+      cleartext; loopback is the safe default.
+
+    Args:
+        bind_host: The configured bind host (see ``_bind_host``), not a loopback one.
+        bind_port: The configured bind port (see ``_bind_port``).
+
+    Returns:
+        Tuple[str, str]: ``host:port`` and the name of the rule.
+    """
+    wildcard_family = _wildcard_family(bind_host)
+    if wildcard_family:
+        host = '[::1]' if wildcard_family == 6 else '127.0.0.1'
+        return f'{host}:{bind_port}', 'self default'
+    try:
+        ipaddress.ip_address(bind_host)
+    except ValueError:
+        return f'127.0.0.1:{bind_port}', 'bind name default'
+    host = f'[{bind_host}]' if ':' in bind_host else bind_host
+    return f'{host}:{bind_port}', 'bind address'
+
+
 def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) -> Tuple[str, str]:
     """Resolve the engine URI the MCP tools connect back to.
 
@@ -365,9 +418,35 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
        silently drives RocketRide's cloud. ``localhost`` maps to
        ``127.0.0.1`` (uvicorn binds a non-literal host as IPv4); ``::1`` is
        bracketed.
-    3. ``public default`` -- any other bind (including bind-all / unset) uses
-       the public origin of the MCP resource identifier: path dropped,
-       ``https`` -> ``wss``, ``http`` -> ``ws``.
+    3. ``public default`` -- any other bind (including bind-all / unset) with
+       ``MCP_RESOURCE_IDENTIFIER`` set uses the public origin of that
+       identifier: path dropped, ``https`` -> ``wss``, ``http`` -> ``ws``.
+    4. ``self default`` -- a bind-all host (``''``, unset, ``0.0.0.0`` or ``::``)
+       with ``MCP_RESOURCE_IDENTIFIER`` NOT set connects back to this engine on
+       the loopback address that reaches that socket: ``ws://127.0.0.1:<port>``,
+       or ``ws://[::1]:<port>`` for ``::`` (an IPv6 wildcard socket is
+       IPv6-only, so 127.0.0.1 is refused). The built-in identifier default is
+       RocketRide Cloud's address; deriving from it on a self-hosted engine
+       (for example the Docker image, which binds ``0.0.0.0``) sent every tool
+       call, and the caller's key, to the cloud.
+    5. ``bind address`` -- a specific non-loopback IP literal (IPv4 or IPv6)
+       with neither variable set listens only on that address, so loopback
+       would be refused; the engine connects to ``ws://<bind_host>:<port>``
+       instead (IPv6 bracketed). The cleartext check does not apply: the
+       target is an address of this machine's own socket, so the credential is
+       delivered locally. Failing at boot is not used because
+       ``server.use('mcp')`` runs inside engine start-up, and an exception
+       there stops the whole engine, including deployments that never use MCP.
+       ``initModule`` logs a warning naming ``RR_MCP_ENGINE_URI``.
+    6. ``bind name default`` -- a specific bind host that is a NAME (for
+       example ``engine.internal``) with neither variable set. A name is not
+       assumed to resolve back to this machine (a later DNS lookup could point
+       at another one, and the caller's key would then travel over ``ws://``),
+       so the rule falls back to ``ws://127.0.0.1:<port>``. Nothing may listen
+       there; ``initModule`` logs a warning naming ``RR_MCP_ENGINE_URI``.
+
+    Rules 4 to 6 are ``_self_default``, which this server's own origin takes
+    too (``_resolve_mcp_origin``).
 
     Whatever rule wins, the resolved URI requires ENCRYPTED transport whenever
     it addresses a REMOTE engine: the caller's own credential is handed to the
@@ -378,7 +457,7 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     somewhere else. Cleartext to a loopback target stays allowed, since that
     credential never reaches a wire. See ``_refuse_cleartext_engine_uri``.
 
-    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 and 3); it
+    ``bind_host`` therefore only selects the DEFAULT URI (rules 2 to 6); it
     has no say in whether a value is encrypted enough.
 
     Args:
@@ -401,6 +480,11 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     if auth.is_loopback_bind(bind_host):
         host = '[::1]' if bind_host == '::1' else '127.0.0.1'
         return f'ws://{host}:{bind_port}', 'loopback default'
+    if not os.environ.get(oauth_resource.ENV_RESOURCE):
+        # Only the built-in default would apply; it names RocketRide Cloud, not
+        # this engine. A deployment that wants the derivation sets the variable.
+        netloc, rule = _self_default(bind_host, bind_port)
+        return f'ws://{netloc}', rule
     resource = oauth_resource.resource_identifier()
     parts = urlsplit(resource)
     scheme = {'https': 'wss', 'http': 'ws'}.get(parts.scheme, parts.scheme)
@@ -409,35 +493,102 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     return uri, 'public default'
 
 
-def _resolve_mcp_origin(bind_host: str, bind_port: int) -> str:
+def _resolve_mcp_origin(bind_host: str, bind_port: int) -> Tuple[str, str]:
     """Resolve THIS MCP server's own public HTTP(S) origin.
 
     The dropper widget's upload route (``apps.UPLOAD_PATH``) is served by this
     server and its nonce lives in this server's task tracker, so the links the
     tools hand out must name this origin -- never the engine the tools talk
     to (``_resolve_engine_uri``), which is another host whenever
-    ``rocketride_uri`` is explicit. The two rules mirror that function's
-    defaults:
+    ``rocketride_uri`` is explicit. The rules mirror that function's
+    defaults, first match wins:
 
     1. ``loopback`` -- a loopback-only bind is reached at
        ``http://<host>:<port>`` (``localhost`` as ``127.0.0.1``, ``::1``
        bracketed), the same literal the loopback engine default uses.
-    2. ``public`` -- any other bind is reached at the origin of the MCP
-       resource identifier (``MCP_RESOURCE_IDENTIFIER``), the URL clients
-       already POST ``/mcp`` to.
+    2. ``public`` -- any other bind with ``MCP_RESOURCE_IDENTIFIER`` set is
+       reached at the origin of that identifier, the URL clients already POST
+       ``/mcp`` to.
+    3. ``self default``, ``bind address`` or ``bind name default`` -- any other
+       bind with ``MCP_RESOURCE_IDENTIFIER`` NOT set is reached at
+       ``http://<host>:<port>`` of ``_self_default``, the address the engine
+       default takes in the same case. The built-in identifier names
+       RocketRide Cloud: an upload link derived from it sent a self-hosted
+       user's files to a server that does not hold the nonce. ``initModule``
+       logs a warning naming ``MCP_RESOURCE_IDENTIFIER``.
 
     Args:
         bind_host: The configured bind host (see ``_bind_host``).
         bind_port: The configured bind port (see ``_bind_port``).
 
     Returns:
-        str: The origin, scheme and netloc only, no trailing slash.
+        Tuple[str, str]: The origin (scheme and netloc only, no trailing
+        slash) and the name of the rule that chose it.
     """
     if auth.is_loopback_bind(bind_host):
         host = '[::1]' if bind_host == '::1' else '127.0.0.1'
-        return f'http://{host}:{bind_port}'
+        return f'http://{host}:{bind_port}', 'loopback'
+    if not os.environ.get(oauth_resource.ENV_RESOURCE):
+        netloc, rule = _self_default(bind_host, bind_port)
+        return f'http://{netloc}', rule
     parts = urlsplit(oauth_resource.resource_identifier())
-    return f'{parts.scheme}://{parts.netloc.rpartition("@")[2]}'
+    return f'{parts.scheme}://{parts.netloc.rpartition("@")[2]}', 'public'
+
+
+# The rules of _self_default whose address is one this server listens on.
+_LISTENING_DEFAULTS = ('self default', 'bind address')
+
+
+def _warn_defaulted_addresses(engine_uri: str, engine_uri_rule: str, mcp_origin: str, mcp_origin_rule: str) -> None:
+    """Log one warning when an address clients are handed is a default.
+
+    A defaulted address works for the machine itself and for no one the
+    operator did not think about, and nothing else says so. Exactly one
+    warning is logged, by the first case that applies:
+
+    - The engine address is a default. This server's own origin is then the
+      same default (both come from ``_self_default``), so one sentence covers
+      the upload links (own origin), the file-drop page and the widget
+      addresses (engine address).
+    - The engine address is explicit and only this server's own origin is a
+      default: the upload links alone are affected.
+
+    Args:
+        engine_uri: The resolved engine URI.
+        engine_uri_rule: The rule that chose it (see ``_resolve_engine_uri``).
+        mcp_origin: This server's own origin.
+        mcp_origin_rule: The rule that chose it (see ``_resolve_mcp_origin``).
+    """
+    if engine_uri_rule in _LISTENING_DEFAULTS:
+        logger.warning(
+            'MCP engine address defaulted to %s because neither RR_MCP_ENGINE_URI nor MCP_RESOURCE_IDENTIFIER is set. '
+            'Upload links, the file-drop page and widget addresses use that address, so they work only for clients '
+            'that can reach it. Set MCP_RESOURCE_IDENTIFIER to the address clients on other machines use to reach '
+            'this engine (RR_MCP_ENGINE_URI moves the engine address alone; upload links follow '
+            'MCP_RESOURCE_IDENTIFIER).',
+            _redacted_uri(engine_uri),
+        )
+    elif engine_uri_rule == 'bind name default':
+        logger.warning(
+            'MCP engine address defaulted to loopback (%s) because the bind host is a name, not an IP address. '
+            'Nothing may be listening there. Set RR_MCP_ENGINE_URI to the address MCP tool calls should use, and '
+            'MCP_RESOURCE_IDENTIFIER to the address upload links should name.',
+            _redacted_uri(engine_uri),
+        )
+    elif mcp_origin_rule in _LISTENING_DEFAULTS:
+        logger.warning(
+            'MCP own address defaulted to %s because MCP_RESOURCE_IDENTIFIER is not set. Upload links use that '
+            'address, so they work only for clients that can reach it. Set MCP_RESOURCE_IDENTIFIER to the address '
+            'clients on other machines use to reach this server.',
+            mcp_origin,
+        )
+    elif mcp_origin_rule == 'bind name default':
+        logger.warning(
+            'MCP own address defaulted to loopback (%s) because the bind host is a name, not an IP address, and '
+            'MCP_RESOURCE_IDENTIFIER is not set. Nothing may be listening there. Set MCP_RESOURCE_IDENTIFIER to '
+            'the address upload links should name.',
+            mcp_origin,
+        )
 
 
 def _log_bind_mode(bind_host: str, local_engine: bool, host_configured: bool) -> None:
@@ -538,8 +689,9 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     logger.info('MCP engine URI: %s (%s)', _redacted_uri(engine_uri), engine_uri_rule)
     # This server's own origin: where the dropper's nonce route is served and
     # where its links point (apps.py); the engine may be another host.
-    mcp_origin = _resolve_mcp_origin(bind_host, bind_port)
-    logger.info('MCP own origin: %s', mcp_origin)
+    mcp_origin, mcp_origin_rule = _resolve_mcp_origin(bind_host, bind_port)
+    logger.info('MCP own origin: %s (%s)', mcp_origin, mcp_origin_rule)
+    _warn_defaulted_addresses(engine_uri, engine_uri_rule, mcp_origin, mcp_origin_rule)
     config = {**config, 'rocketride_uri': engine_uri, 'local_engine': local_engine}
     engine_factory = _make_engine_factory(config)
 
