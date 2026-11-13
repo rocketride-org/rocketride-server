@@ -327,8 +327,11 @@ jobs:
       - name: Test
         if: inputs.codeql == false && inputs.test
         # A hung step fails here, before the job's 90-minute limit cancels the job,
-        # so the log and artifact steps below still run.
-        timeout-minutes: 45
+        # so the log and artifact steps below still run. A Windows runner whose tests
+        # hang can drop off GitHub about 48 minutes into this step, before any later
+        # step starts, so Windows stops at 30 minutes (its Test step ends within 20).
+        # Ubuntu and macOS take up to about 28 minutes and keep 45.
+        timeout-minutes: ${{ matrix.platform == 'windows' && 30 || 45 }}
         # Integration tests boot a local server on :5565 and connect a test
         # client. Both sides need the same shared secret to authenticate;
         # without ROCKETRIDE_APIKEY the server raises AuthenticationException

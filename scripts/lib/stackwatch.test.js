@@ -26,6 +26,8 @@ const {
 	claimFile,
 	lockHoldersScript,
 	cdbScript,
+	formatMemoryLine,
+	memoryLineFromJson,
 	startStackWatch,
 } = require('./stackwatch');
 
@@ -946,4 +948,47 @@ test('the old command string runs when the script file cannot be written', async
 	const args = calls.find((c) => c.file === __filename).args;
 	assert.deepStrictEqual(args.slice(-2), ['-c', '~*kn 80; !locks; lm; qd']);
 	assert.match(fs.readFileSync(path.join(dir, 'native_9280.txt'), 'utf8'), /NATIVE STACK/);
+});
+
+test('formatMemoryLine writes the machine numbers and the top processes', () => {
+	const mem = { physTotalMb: 16383, physFreeMb: 5120, commitUsedMb: 12000, commitLimitMb: 20000 };
+	const top = [
+		{ name: 'engine.exe', pid: 4120, mb: 2300 },
+		{ name: 'python.exe', pid: 5004, mb: 900 },
+	];
+	assert.strictEqual(
+		formatMemoryLine(mem, top),
+		'memory phys_total_mb=16383 phys_free_mb=5120 commit_used_mb=12000 commit_limit_mb=20000 ' +
+			'top=engine.exe:4120:2300,python.exe:5004:900'
+	);
+});
+
+test('formatMemoryLine keeps only the first 5 processes', () => {
+	const top = Array.from({ length: 7 }, (_, i) => ({ name: `p${i}.exe`, pid: i, mb: 100 - i }));
+	const line = formatMemoryLine({ physTotalMb: 1, physFreeMb: 1, commitUsedMb: 1, commitLimitMb: 1 }, top);
+	assert.strictEqual(line.split('top=')[1].split(',').length, 5);
+});
+
+test('formatMemoryLine writes ? for missing or NaN values and an empty list', () => {
+	assert.strictEqual(
+		formatMemoryLine({ physTotalMb: NaN, physFreeMb: undefined, commitUsedMb: null }, [{ name: 'a.exe', pid: 1 }]),
+		'memory phys_total_mb=? phys_free_mb=? commit_used_mb=? commit_limit_mb=? top=a.exe:1:?'
+	);
+	assert.match(formatMemoryLine(undefined, undefined), /^memory phys_total_mb=\? .* top=\?$/);
+});
+
+test('memoryLineFromJson converts KB to MB and derives the commit charge', () => {
+	const json = JSON.stringify({
+		physTotalKb: 16383 * 1024,
+		physFreeKb: 5120 * 1024,
+		commitTotalKb: 20000 * 1024,
+		commitFreeKb: 8000 * 1024,
+		top: { name: 'engine.exe', pid: 4120, mb: 2300 },
+	});
+	assert.strictEqual(
+		memoryLineFromJson(json),
+		'memory phys_total_mb=16383 phys_free_mb=5120 commit_used_mb=12000 commit_limit_mb=20000 ' +
+			'top=engine.exe:4120:2300'
+	);
+	assert.throws(() => memoryLineFromJson('not json'));
 });

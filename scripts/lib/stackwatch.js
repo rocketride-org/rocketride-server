@@ -110,6 +110,22 @@ const HOLDER_CDB_TIMEOUT_MS = 120_000;
 // Total time for all holder_<pid>.txt captures of one job, and their number.
 const HOLDER_BUDGET_MS = 600_000;
 const MAX_HOLDER_CAPTURES = 12;
+// One memory line in stackwatch.log per this time; the first sample comes MEMORY_FIRST_MS after the start.
+const MEMORY_MS = 60_000;
+const MEMORY_FIRST_MS = 5_000;
+const MEMORY_TIMEOUT_MS = 15_000;
+const MEMORY_TOP = 5;
+// Commit charge is the total virtual size minus the free virtual size (what the system may still promise).
+const MEMORY_SCRIPT = [
+	"$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'",
+	'$o = Get-CimInstance Win32_OperatingSystem',
+	`$p = @(Get-Process | Sort-Object PrivateMemorySize64 -Descending | Select-Object -First ${MEMORY_TOP} | ` +
+		"ForEach-Object { @{ name = ($_.ProcessName + '.exe'); pid = $_.Id; " +
+		'mb = [math]::Round($_.PrivateMemorySize64 / 1MB) } })',
+	'@{ physTotalKb = $o.TotalVisibleMemorySize; physFreeKb = $o.FreePhysicalMemory; ' +
+		'commitTotalKb = $o.TotalVirtualMemorySize; commitFreeKb = $o.FreeVirtualMemory; top = $p } | ' +
+		'ConvertTo-Json -Compress -Depth 3',
+].join('\n');
 const TIME_RE = /^(\d{4}-\d\d-\d\d)T(\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:?\d\d)$/;
 
 /**
@@ -671,6 +687,48 @@ function run(file, args, options, exec, onChild) {
 }
 
 /**
+ * Format one memory line for stackwatch.log. A value that is not a finite number is written as `?`.
+ *
+ * @param {{physTotalMb: number, physFreeMb: number, commitUsedMb: number, commitLimitMb: number}} mem -
+ *   The machine's physical memory and commit charge in MB
+ * @param {{name: string, pid: number, mb: number}[]} top - The processes with the most private bytes,
+ *   largest first; only the first MEMORY_TOP are written
+ * @returns {string} `memory phys_total_mb=.. phys_free_mb=.. commit_used_mb=.. commit_limit_mb=.. top=name:pid:MB,...`
+ */
+function formatMemoryLine(mem, top) {
+	const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? String(Math.round(v)) : '?');
+	const procs = (Array.isArray(top) ? top : []).slice(0, MEMORY_TOP);
+	const list = procs.map((p) => `${p?.name ?? '?'}:${num(p?.pid)}:${num(p?.mb)}`).join(',');
+	return (
+		`memory phys_total_mb=${num(mem?.physTotalMb)} phys_free_mb=${num(mem?.physFreeMb)} ` +
+		`commit_used_mb=${num(mem?.commitUsedMb)} commit_limit_mb=${num(mem?.commitLimitMb)} top=${list || '?'}`
+	);
+}
+
+/**
+ * Turn the JSON of MEMORY_SCRIPT into the memory line.
+ *
+ * @param {string} stdout - The script output (one JSON object; sizes in KB, process sizes in MB)
+ * @returns {string} The line (see formatMemoryLine)
+ * @throws {Error} When the output is not a JSON object
+ */
+function memoryLineFromJson(stdout) {
+	const j = JSON.parse(stdout);
+	if (!j || typeof j !== 'object') throw new Error('unexpected output');
+	const mb = (kb) => (typeof kb === 'number' ? kb / 1024 : NaN);
+	const top = Array.isArray(j.top) ? j.top : j.top ? [j.top] : [];
+	return formatMemoryLine(
+		{
+			physTotalMb: mb(j.physTotalKb),
+			physFreeMb: mb(j.physFreeKb),
+			commitUsedMb: mb(j.commitTotalKb) - mb(j.commitFreeKb),
+			commitLimitMb: mb(j.commitTotalKb),
+		},
+		top.map((p) => ({ name: p.name, pid: p.pid, mb: p.mb }))
+	);
+}
+
+/**
  * Tell whether a process is alive.
  *
  * @param {number} pid - The process id
@@ -693,6 +751,8 @@ function isAlive(pid) {
  * @param {string} [opts.platform] - process.platform
  * @param {object} [opts.env] - Environment used to find cdb
  * @param {number} [opts.intervalMs] - Time between scans
+ * @param {number} [opts.memoryMs] - Time between memory samples
+ * @param {number} [opts.memoryFirstMs] - Time from the start to the first memory sample
  * @param {Function} [opts.exec] - child_process.execFile
  * @param {(pid: number) => boolean} [opts.alive] - Process liveness check
  * @param {string} [opts.cacheDir] - Symbol cache directory
@@ -720,6 +780,9 @@ function startStackWatch(dumpDir, opts = {}) {
 	let cdb = null;
 	let ready = false;
 	let timer = null;
+	let memoryFirst = null;
+	let memoryTimer = null;
+	let memoryBusy = false;
 
 	const log = (msg) => {
 		try {
@@ -732,6 +795,30 @@ function startStackWatch(dumpDir, opts = {}) {
 	const halt = () => {
 		stopped = true;
 		clearInterval(timer);
+		clearTimeout(memoryFirst);
+		clearInterval(memoryTimer);
+	};
+
+	/**
+	 * Append one memory line to the log from a single PowerShell call. It never throws; a failed
+	 * sample logs one `memory sample failed` line. A sample does not start while the previous runs.
+	 *
+	 * @returns {Promise<void>}
+	 */
+	const sampleMemory = async () => {
+		if (stopped || memoryBusy) return;
+		memoryBusy = true;
+		try {
+			const script = Buffer.from(MEMORY_SCRIPT, 'utf16le').toString('base64');
+			const args = ['-NoProfile', '-NonInteractive', '-EncodedCommand', script];
+			const res = await run('powershell', args, { timeout: MEMORY_TIMEOUT_MS, killSignal: 'SIGKILL' }, exec);
+			if (res.error !== null) throw new Error(res.error);
+			log(memoryLineFromJson(res.stdout));
+		} catch (err) {
+			log(`memory sample failed: ${String(err.message).split('\n')[0].slice(0, 200)}`);
+		} finally {
+			memoryBusy = false;
+		}
 	};
 
 	/**
@@ -1032,6 +1119,11 @@ function startStackWatch(dumpDir, opts = {}) {
 	// scan() catches everything itself, so the promise it returns never rejects.
 	timer = setInterval(() => void scan(), opts.intervalMs ?? SCAN_MS);
 	timer.unref();
+	// Memory samples: the first soon after the start, then one per minute. Neither timer keeps the process alive.
+	memoryFirst = setTimeout(() => void sampleMemory(), opts.memoryFirstMs ?? MEMORY_FIRST_MS);
+	memoryFirst.unref();
+	memoryTimer = setInterval(() => void sampleMemory(), opts.memoryMs ?? MEMORY_MS);
+	memoryTimer.unref();
 
 	return {
 		scan,
@@ -1067,5 +1159,7 @@ module.exports = {
 	findCdb,
 	hexThreadId,
 	cdbScript,
+	formatMemoryLine,
+	memoryLineFromJson,
 	startStackWatch,
 };
