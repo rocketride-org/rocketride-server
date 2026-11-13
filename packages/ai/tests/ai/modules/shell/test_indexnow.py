@@ -236,6 +236,15 @@ async def test_a_snapshot_read_failure_counts_as_changed(sent, warnings):
     assert _urls(sent) == [[f'{BASE}/pricing']] * 2
 
 
+async def test_an_unexpected_error_reading_a_snapshot_is_not_swallowed(monkeypatch):
+    async def broken(path):
+        raise RuntimeError('a bug, not a storage failure')
+
+    monkeypatch.setattr(pp, 'read_artifact_file', broken)
+    with pytest.raises(RuntimeError):
+        await indexnow._contents([_version(1)[1]], {})
+
+
 async def test_a_snapshot_page_without_a_production_version_is_not_resubmitted(sent, warnings, reads):
     await _build(*_version(1))
     # Declares a snapshot, but there is no production build to read it from.

@@ -70,6 +70,7 @@ from urllib.parse import urlsplit
 import httpx
 from fastapi.responses import PlainTextResponse
 
+from ai.account.store import StorageError
 from ai.web import Request
 
 from rocketlib import debug, warning
@@ -170,7 +171,7 @@ async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphor
             if info['size'] > MAX_SNAPSHOT_BYTES:
                 return _Content(entry, path, '')
             raw = await public_pages.read_artifact_file(path)
-    except Exception as exc:
+    except StorageError as exc:
         warning(f'[indexnow] {page.path}: snapshot {page.snapshot!r} unreadable, counted as changed: {exc}')
         return _Content(entry, '', None)
     return _Content(entry, path, hashlib.sha256(raw).hexdigest())
