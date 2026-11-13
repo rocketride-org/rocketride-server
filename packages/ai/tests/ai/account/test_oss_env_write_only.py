@@ -391,6 +391,19 @@ def test_a_name_sent_in_another_case_addresses_the_upper_cased_stored_one(monkey
     assert env == {'ROCKETRIDE_B': 'sk-two'}
 
 
+@pytest.mark.parametrize('second', [None, 'other', ENV_MASK])
+def test_one_stored_variable_sent_under_two_cases_writes_nothing(monkeypatch, second):
+    """Windows: 'ROCKETRIDE_A' and 'ROCKETRIDE_a' are one variable; the second must not silently win."""
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv('ROCKETRIDE_A', 'stored')
+
+    env, error = _merged_env({'ROCKETRIDE_A': 'new', 'ROCKETRIDE_a': second}, fold_case=True)
+
+    assert env == {} and 'ROCKETRIDE_A, ROCKETRIDE_a' in error and 'nothing was saved' in error
+    assert 'new' not in error and 'stored' not in error
+
+
 @pytest.mark.skipif(os.name != 'nt', reason='Windows upper-cases environment names')
 def test_on_windows_a_name_saved_in_lower_case_is_deleted_by_that_name(env_file):
     assert _call('update_env', env={'ROCKETRIDE_my-key': 'sk-one'})['ok'] is True
