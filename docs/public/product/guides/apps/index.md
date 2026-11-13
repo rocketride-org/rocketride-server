@@ -359,7 +359,9 @@ not always say they are bots), also carries `og:site_name` (`site.title`),
 `article:published_time` and `article:modified_time` (`modified`, else
 `published`); any other page is a `website`. `og:image` is the page's `image`,
 else `site.image`, and asks for the large card (`summary_large_image`, else
-`summary`). An `https://` image is used as declared; a root path is made
+`summary`). A snapshot's own hand-written preview tags (`og:image`,
+`twitter:card`, `og:type`) are removed, so the page's `image` and `site.image`
+are the only source. An `https://` image is used as declared; a root path is made
 absolute with `RR_APP_URL`; a relative path is a file of the declaring app's
 build output, served from its production version
 (`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an
