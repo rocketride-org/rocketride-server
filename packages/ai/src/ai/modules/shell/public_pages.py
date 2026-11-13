@@ -232,7 +232,7 @@ async def load_published(
         winners[str(row.get('appId') or '')] = row
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
-        if app_id == exclude or (row.get('audience') or {}).get('type') != 'public' or not is_privileged(app_id):
+        if app_id == exclude or not is_privileged(app_id):
             continue
         if (row.get('snapshot') or {}).get('public', True) is False:
             continue
