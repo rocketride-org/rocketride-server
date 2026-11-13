@@ -96,7 +96,7 @@ from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
-from .task_conn import TaskConn
+from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
@@ -324,6 +324,9 @@ class TaskServer(DAPBase):
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
+        # Authority re-check counters (#972): revoked, denied_unavailable,
+        # read_failed. Reported in the revoke/deny warning lines.
+        self._authz_counters: Dict[str, int] = {}
 
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
@@ -497,6 +500,24 @@ class TaskServer(DAPBase):
                 task.cancel()
         await asyncio.gather(*bg_tasks, return_exceptions=True)
 
+    def acquire_unauthed_slot(self, ip: str) -> None:
+        """
+        Increment the unauthenticated connection count for an IP.
+
+        Called when an authenticated connection drops back to unauthenticated
+        (deauth or revoke), so the slot its auth released is held again and the
+        disconnect handler's ``release_unauthed_slot`` balances.
+        """
+        if not ip:
+            return
+        self._unauthed_by_ip[ip] = self._unauthed_by_ip.get(ip, 0) + 1
+
+    def count_authz(self, name: str) -> int:
+        """Increment and return one authority re-check counter (#972)."""
+        counters = self.__dict__.setdefault('_authz_counters', {})
+        counters[name] = counters.get(name, 0) + 1
+        return counters[name]
+
     def release_unauthed_slot(self, ip: str) -> None:
         """
         Decrement the unauthenticated connection count for an IP.
@@ -600,7 +621,11 @@ class TaskServer(DAPBase):
         if not getattr(conn, '_authenticated', False):
             self.release_unauthed_slot(getattr(conn, '_client_ip', ''))
 
-        conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
+        # A revoked connection holds the bare identity by now; its dashboard
+        # event is still scoped to the user it belonged to (#972).
+        conn_user_id = getattr(conn, '_revoked_user_id', None) or getattr(
+            getattr(conn, '_account_info', None), 'userId', None
+        )
 
         # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
         # registration lives in preview pages and dies with them; the
@@ -1099,12 +1124,9 @@ class TaskServer(DAPBase):
             # userToken (to_push_result) for the full-user connections.
             if (getattr(conn._account_info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
-            try:
-                fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
-            except Exception as e:
-                self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
+            if not getattr(conn, '_authenticated', False):
+                continue
+            await self._push_rebuilt(account, conn, conn._account_info, 'push_account_update')
 
     async def push_org_update(self, org_id: str) -> None:
         """
@@ -1135,16 +1157,66 @@ class TaskServer(DAPBase):
             # rebuilt as the full user or handed the user's rr_ session key.
             if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
-            try:
-                fresh = await account._service.get_authentication_result(info.userId, info.auth)
-                conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+            if not getattr(conn, '_authenticated', False):
+                continue
+            if await self._push_rebuilt(account, conn, info, 'push_org_update'):
                 notified += 1
-            except Exception as e:
-                self.debug_message(f'push_org_update failed for conn {conn.get_connection_id()}: {e}')
 
         if notified:
             self.debug_message(f'push_org_update notified {notified} connection(s) for org={org_id}')
+
+    async def _push_rebuilt(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """
+        Rebuild one connection's identity and push it (#972, F1).
+
+        ``info`` is the identity the rebuild starts from. For a connection
+        holding platform authority (``authority_subject``) a failed rebuild
+        never keeps the old identity: a narrower result (waitlisted, or a
+        cached ``sysPermissions`` element missing) or ``ValueError`` (user not
+        found) revokes the connection, and any other exception revokes it
+        too. For every connection, a good result replaces the identity only
+        if the connection is still authenticated and still holds ``info`` (a
+        deauth or newer auth during the rebuild wins). Other connections keep
+        today's behaviour otherwise: log on error, replace on success. The
+        notice send is bounded by NOTICE_SEND_TIMEOUT.
+
+        Returns:
+            bool: True when a fresh identity was installed and pushed.
+        """
+        subject = authority_subject(info)
+        try:
+            fresh = await account.rebuild_account_info(info)
+        except ValueError as e:
+            if subject:
+                await conn.revoke(info, f'{label}: user not found ({e})')
+            else:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+        except Exception as e:
+            if subject:
+                await conn.revoke(info, f'{label}: rebuild failed ({e})')
+            else:
+                self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+
+        # The edition cannot rebuild identities: nothing to push.
+        if fresh is None:
+            return False
+
+        if subject and authority_narrowed(info, fresh):
+            await conn.revoke(info, f'{label}: authority narrowed', pushed=fresh)
+            return False
+        # Never install over a deauth or a newer auth that landed during the rebuild
+        if conn._account_info is not info or not getattr(conn, '_authenticated', False):
+            return False
+
+        try:
+            conn._account_info = fresh
+            await asyncio.wait_for(conn.send_event('apaext_account', body=fresh.to_push_result()), NOTICE_SEND_TIMEOUT)
+        except Exception as e:
+            self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
+            return False
+        return True
 
     async def push_org_changed(self, user_id: str, org_id: str) -> None:
         """

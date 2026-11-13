@@ -33,7 +33,10 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Optional
+
+if TYPE_CHECKING:
+    from .models import AccountInfo
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -123,6 +126,31 @@ class AccountBase(ABC):
     # =========================================================================
     # CONCRETE SHARED — both editions use these; override if needed
     # =========================================================================
+
+    async def rebuild_account_info(self, info: 'AccountInfo') -> 'Optional[AccountInfo]':
+        """
+        Rebuild a connection's identity from the account store (#972).
+
+        Used by the identity pushes (``TaskServer.push_account_update`` and
+        ``push_org_update``). The default calls the edition's
+        ``_service.get_authentication_result(userId, auth)`` when it has one,
+        and returns None (nothing to rebuild; the push skips the connection)
+        when it does not. An edition overrides this to pass more context.
+
+        Args:
+            info: The identity the connection holds now.
+
+        Returns:
+            The rebuilt AccountInfo, or None when this edition cannot rebuild.
+
+        Raises:
+            ValueError: The user no longer exists.
+            Exception: Anything the rebuild raises; the caller decides.
+        """
+        service = getattr(self, '_service', None)
+        if service is None:
+            return None
+        return await service.get_authentication_result(info.userId, info.auth)
 
     def generate_token(self, content: dict, prefix: str = '') -> str:
         """

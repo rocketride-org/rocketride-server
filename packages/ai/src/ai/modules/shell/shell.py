@@ -410,14 +410,19 @@ async def shell_static(request: Request):
 # The cookie the browser attaches to every /apps/* fetch (set by apps_session).
 _APP_COOKIE = 'rr_apps_token'
 
-# Sliding permission cache: sha256('<token>.<app_id>') -> {auth: bool, expiry,
-# appId} (appId lets invalidate_app_serving drop one app's verdicts).
-# DENIALS are cached too — an unauthorized caller hammering denied apps is then
-# served from cache instead of a DB walk per file (a cheap-DoS guard). Every
-# reference slides the entry 5 min forward. Only the permission DECISION is
-# cached; token validity is (cheaply) re-derived inside _resolve_app_access.
+# Permission cache: sha256('<token>.<app_id>') -> {auth: bool, expiry, appId}
+# (appId lets invalidate_app_serving drop one app's verdicts). DENIALS are
+# cached too — an unauthorized caller hammering denied apps is then served from
+# cache instead of a DB walk per file (a cheap-DoS guard). HARD 5-min expiry,
+# never slid by a hit, so a revoked caller converges within the TTL however
+# hot their traffic is (#972). A verdict reached because authentication itself
+# failed (``_AuthUnavailable``) is never cached.
 _APP_AUTH_TTL = 300.0
 _app_auth_cache: dict = {}
+
+
+class _AuthUnavailable(Exception):
+    """``account.authenticate`` raised: the caller's identity is unknown, not anonymous."""
 
 
 def _is_saas() -> bool:
@@ -445,8 +450,9 @@ async def _apps_for_token(token: str) -> list:
     if token:
         try:
             info = await account.authenticate(token)
-        except Exception:
-            info = None
+        except Exception as e:
+            # Not a verdict: callers answer anonymously WITHOUT caching (#972).
+            raise _AuthUnavailable(str(e)) from e
     # authenticate() returns an (int, str) error tuple on failure — treat any
     # non-AccountInfo as anonymous rather than a hard deny.
     if info is not None and hasattr(info, 'userId'):
@@ -491,8 +497,14 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
     the caller cannot actually fetch (unbuilt or unentitled) — the answer
     is resolved against the SAME servable map ``_serve_versioned`` uses, so
     the probe can never advertise an entry URL that would 404.
+
+    When authentication itself fails, the caller is answered as anonymous.
     """
-    for entry in await _apps_for_token(token):
+    try:
+        entries = await _apps_for_token(token)
+    except _AuthUnavailable:
+        entries = await _apps_for_token('')
+    for entry in entries:
         if _app_field(entry, 'id') != app_id:
             continue
         registry_version = _app_field(entry, 'registryVersion')
@@ -512,26 +524,29 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
 
 
 async def _authorize_app(token: str, app_id: str) -> bool:
-    """Cached wrapper over _resolve_app_access (sliding 5-min window).
+    """Cached wrapper over _resolve_app_access (hard 5-min expiry).
 
     Anonymous (empty token) is a VALID caller for public bundles, so it is
-    cached too — the key folds the empty token.
+    cached too — the key folds the empty token. When authenticating the token
+    fails, the caller gets the anonymous verdict and nothing is cached.
     """
     if not app_id:
         return False
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     now = time.time()
     hit = _app_auth_cache.get(key)
-    if hit is not None and hit['expiry'] > now:
-        hit['expiry'] = now + _APP_AUTH_TTL  # slide on reference
+    if hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
         return hit['auth']
-    auth = await _resolve_app_access(token, app_id)
+    try:
+        auth = await _resolve_app_access(token, app_id)
+    except _AuthUnavailable:
+        return await _resolve_app_access('', app_id)
     _app_auth_cache[key] = {'auth': auth, 'expiry': now + _APP_AUTH_TTL, 'appId': app_id}
     # Bounded for real: expired entries go first, and if a flood of DISTINCT
     # random tokens fills the map inside one TTL window (nothing expired to
-    # drop), evict the soonest-to-expire entries down to the cap — with the
-    # sliding TTL, soonest-expiry is least-recently-referenced, so this is
-    # LRU-shaped and the map can never exceed the cap.
+    # drop), evict the soonest-to-expire entries down to the cap — nothing
+    # slides, so this is FIFO by insertion time and the map can never exceed
+    # the cap.
     if len(_app_auth_cache) > 4096:
         for k in [k for k, v in _app_auth_cache.items() if v['expiry'] <= now]:
             _app_auth_cache.pop(k, None)
@@ -559,9 +574,9 @@ _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
-# 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
-# sliding window); every deploy change also drops the app's entries
-# (invalidate_app_serving).
+# 'resolvedAt', 'floor', 'appId'} — HARD expiry (like _app_auth_cache); a
+# resolution whose authentication failed is not cached; every deploy change
+# also drops the app's entries (invalidate_app_serving).
 _version_dir_cache: dict = {}
 # BASE floor between miss-forced re-resolutions of one caller's map: a map
 # younger than its key's CURRENT floor answers as-is even when it lacks the
@@ -603,18 +618,23 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     from ai.account import account
     from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
 
+    auth_failed = False
     if _is_saas():
         info = None
         if token:
             try:
                 info = await account.authenticate(token)
             except Exception:
+                # Answer as anonymous, but never cache it (#972)
+                auth_failed = True
                 info = None
         if info is not None and not hasattr(info, 'userId'):
             info = None  # authenticate() returns an error tuple on failure
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
+    if auth_failed:
+        return dirs
 
     # The key's NEXT floor: a miss-forced walk that still lacks the wanted
     # version was fruitless — double the floor (capped at the TTL) so a
