@@ -20,7 +20,7 @@
  * the error happened; else the named one unless it is in the sanitizer
  * runtime; else the first frame of that stack outside the runtime. The
  * binary's name is never part of it, so one defect in code that several
- * programs link (engtest, nodetest) is one group.
+ * programs link (infra_tests, engine_tests) is one group.
  *
  * Usage: node scripts/ci/sanitizer-report.mjs <log dir>
  *
@@ -61,7 +61,7 @@ const PID_LINE_RE = /^==\d+==/;
 const UBSAN_RE = /^(?:(.*?): )?runtime error: (.*)$/;
 const SUMMARY_RE = /^SUMMARY: (\w*Sanitizer): (\S+)(.*)$/;
 const FRAME_RE = /^\s*#\d+ 0x[0-9a-f]+ (.*)$/;
-// The binary a frame is in, with the offset into it: ` (/x/dist/server/engtest+0x2701032)`
+// The binary a frame is in, with the offset into it: ` (/x/dist/server/infra_tests+0x2701032)`
 const MODULE_RE = /\s*\([^()]*\+0x[0-9a-f]+\)/g;
 // `in <function> <file:line>`, the order of a frame; the file is optional
 const FRAME_PLACE_RE = /^in (.+?)(?: (\S+:\d+(?::\d+)?))?$/;

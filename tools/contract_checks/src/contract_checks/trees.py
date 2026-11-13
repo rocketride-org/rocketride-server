@@ -61,7 +61,7 @@ SCANNED_TREES: list[Tree] = [
     ),
     Tree(
         name='rocketlib',
-        root=REPO_ROOT / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib',
+        root=REPO_ROOT / 'packages' / 'server' / 'python' / 'src',
         internal_packages=frozenset({'rocketlib', 'engLib', 'depends', 'util', 'msauth', 'dbgconn'}),
     ),
 ]

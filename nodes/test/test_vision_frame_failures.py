@@ -13,7 +13,7 @@ error. The handler now raises RuntimeError and the engine fails the object. An
 engine error raised through a lane write, for example by a downstream node, is
 re-raised unchanged so it keeps its own code, text and location.
 The engine builds the object's error from str() of the raised exception only and
-never reads __cause__ (engLib/python/call.hpp), so the message must carry the cause.
+never reads __cause__ (infra/src/python/call.hpp), so the message must carry the cause.
 
 Each node's real IInstance.py runs with rocketlib, ai.common.* and the node's own
 IGlobal stubbed. Failures are injected at the decoder, at the model call or at the
@@ -111,7 +111,7 @@ def _fail_write(*args, **kwargs):
 def _engine_error(message):
     """Build the exception the engine raises when the node on a lane fails.
 
-    The engine's exception translator (engLib/store/python/bindings.cpp) raises a plain
+    The engine's exception translator (infra/src/store/python/bindings.cpp) raises a plain
     Exception with __formatted, code, message, filename, function and line set, and
     call.hpp reads those fields back only when __formatted is present.
     """

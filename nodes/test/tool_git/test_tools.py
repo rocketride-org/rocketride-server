@@ -75,7 +75,7 @@ _ai_stub.common = _ai_common_stub
 
 # Make rocketlib importable from this test by adding its lib path to sys.path,
 # then patch tool_git's other (still-stubbed) sibling modules.
-_rocketlib_lib = Path(__file__).resolve().parents[3] / 'packages' / 'server' / 'engine-lib' / 'rocketlib-python' / 'lib'
+_rocketlib_lib = Path(__file__).resolve().parents[3] / 'packages' / 'server' / 'python' / 'src'
 sys.path.insert(0, str(_rocketlib_lib))
 
 # Load only the lightweight production utility modules used by tool_git. Importing

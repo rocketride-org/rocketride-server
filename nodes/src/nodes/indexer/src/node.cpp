@@ -32,7 +32,7 @@
 //	that outlives the module it points into is a crash waiting for shutdown.
 //
 //-----------------------------------------------------------------------------
-#include <node_api.h>
+#include <rocketride/node_api.h>
 
 #include "indexer.hpp"
 

@@ -359,7 +359,7 @@ def _install_all_requirements(trees, *, install_all: bool, verbose: bool) -> Non
     unless ``install_all`` is set.
 
     Matches the engine's own ``requirement*.txt`` glob in
-    ``packages/server/engine-lib/rocketlib-python/lib/depends.py``. Recursive,
+    ``packages/server/python/src/depends.py``. Recursive,
     so model-bundle files like
     ``packages/ai/src/ai/common/models/audio/requirements_kokoro.txt``
     get picked up (they were invisible to the previous per-component finder).

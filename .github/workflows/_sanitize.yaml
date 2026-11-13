@@ -168,7 +168,7 @@ jobs:
       # server:test builds the three test programs it runs and copies them into
       # dist/server, so they are checked after it, the same way as the engine.
       - name: Check that the test programs are instrumented
-        run: bash scripts/ci/check-sanitizer-symbols.sh dist/server/aptest dist/server/engtest dist/server/nodetest
+        run: bash scripts/ci/check-sanitizer-symbols.sh dist/server/core_tests dist/server/infra_tests dist/server/engine_tests
 
       # Under halt_on_error=0 the programs exit 0 after a report, so this step is
       # what fails the job: it exits 1 when any report was written.
