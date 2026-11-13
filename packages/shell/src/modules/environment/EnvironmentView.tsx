@@ -71,7 +71,7 @@ export interface EnvironmentViewProps {
 	onLoadEnv: (slotId: string, scope: EnvironmentScope, scopeId?: string) => void;
 
 	/** Saves env data for a scope. */
-	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => Promise<void>;
+	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => Promise<void>;
 
 	/** Keys that must have non-empty values before save is allowed (user scope only). */
 	requiredKeys?: string[];
@@ -157,7 +157,7 @@ const SlotPanel: React.FC<{
 	/** Requests env data load. */
 	onLoadEnv: (slotId: string, scope: EnvironmentScope, scopeId?: string) => void;
 	/** Saves env data. */
-	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => Promise<void>;
+	onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => Promise<void>;
 	/** Required keys for user scope. */
 	requiredKeys?: string[];
 }> = ({ slot, single, envs, onLoadEnv, onSaveEnv, requiredKeys }) => {

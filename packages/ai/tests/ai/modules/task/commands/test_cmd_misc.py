@@ -13,8 +13,11 @@ Three categories:
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -279,6 +282,78 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     assert 'source' not in captured['pipeline']
 
 
+_NO_SOURCE = 'Pipeline has no source component'
+
+
+async def _validate_body(monkeypatch, arguments, *, validator=None):
+    """The body on_rrext_validate returns, with the engine validator faked."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator or (lambda payload: {'errors': [], 'warnings': []}))
+    return (await MiscCommands.on_rrext_validate(_make_conn(), {'arguments': arguments}))['body']
+
+
+def _no_source_warnings(body):
+    """The no-source warnings in a validate reply."""
+    return [w for w in body.get('warnings', []) if w['message'].startswith(_NO_SOURCE)]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_warns_when_no_source_resolves(monkeypatch):
+    """No explicit source, no pipeline.source and no Source-mode component: one warning, no error."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert [w['message'] for w in body['warnings']] == [
+        'Pipeline has no source component: add "source": "<component id>" at the top level, or pass a source when starting; without one it will not start.'
+    ]
+    assert body['errors'] == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_keeps_engine_warnings_when_no_source(monkeypatch):
+    """The no-source warning is appended to what the engine reported, not substituted for it."""
+    engine = {'errors': [], 'warnings': [{'message': 'engine says hi'}]}
+    body = await _validate_body(monkeypatch, {'pipeline': {'components': []}}, validator=lambda payload: dict(engine))
+
+    assert body['warnings'][0] == {'message': 'engine says hi'}
+    assert len(_no_source_warnings(body)) == 1
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_with_pipeline_source_field(monkeypatch):
+    """A top-level source field means start has a source: no warning."""
+    pipeline = {'source': 'webhook_1', 'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_when_source_is_implied(monkeypatch):
+    """One Source-mode component is the implied source start uses: no warning (real resolver)."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {'mode': 'Source'}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_warning_with_explicit_source_argument(monkeypatch):
+    """A source passed with the request is what start would use: no warning."""
+    pipeline = {'components': [{'id': 'webhook_1', 'provider': 'webhook', 'config': {}}]}
+    body = await _validate_body(monkeypatch, {'pipeline': pipeline, 'source': 'webhook_1'})
+
+    assert _no_source_warnings(body) == []
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_single_component_form_gets_no_source_warning(monkeypatch):
+    """A single component is validated alone and never needs a source."""
+    component = {'id': 'webhook_1', 'provider': 'webhook', 'config': {}}
+    body = await _validate_body(monkeypatch, {'pipeline': {'version': 1, 'component': component}})
+
+    assert _no_source_warnings(body) == []
+
+
 @pytest.mark.asyncio
 async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
     """The C++ payload is {'pipeline': <config>} — the same envelope pipe_Validate
@@ -359,6 +434,30 @@ async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_unwraps_the_mcp_tools_component_envelope(monkeypatch):
+    """The MCP validate_pipeline tool wraps the component form once more before sending it.
+
+    The engine still has to see the bare {version, component}: it dispatches on the
+    root ``component`` key to the provider's configuration probe, which is why the
+    MCP tool is annotated as a write.
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    component = {'id': 'llm_openai_api_1', 'provider': 'llm_openai_api', 'config': {}}
+    envelope = {'pipeline': {'version': 1, 'component': component}}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': envelope}})
+
+    assert captured == {'version': 1, 'component': component}
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_does_not_infer_source_for_a_single_component(monkeypatch):
     """Source inference is a full-pipeline concern; a lone component is passed through."""
     seen = []
@@ -411,6 +510,497 @@ async def test_on_rrext_validate_propagates_validate_pipeline_errors(monkeypatch
     with pytest.raises(RuntimeError, match='invalid pipeline'):
         await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {}}})
     conn.debug_message.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# on_rrext_validate — the reply returns the config as submitted
+# ---------------------------------------------------------------------------
+
+# Invented values the handler expands these references to before validating.
+SERVICE_TOKEN_REF = '${ROCKETRIDE_SERVICE_TOKEN}'
+SERVICE_TOKEN_VALUE = 'configured-value-xyz'
+CUSTOM_MODEL_REF = '${ROCKETRIDE_CUSTOM_MODEL}'
+CUSTOM_MODEL_VALUE = 'custom-endpoint-val-123'
+ENV = {'ROCKETRIDE_SERVICE_TOKEN': SERVICE_TOKEN_VALUE, 'ROCKETRIDE_CUSTOM_MODEL': CUSTOM_MODEL_VALUE}
+
+
+def _template_message(env, kind):
+    references = ', '.join('${' + name + '}' for name in sorted(env))
+    return f'Pipeline validation {kind} for config with template references: {references}'
+
+
+def _validate_conn(monkeypatch, env=None):
+    """A connection whose account environment is ``env`` (default ``ENV``)."""
+    from ai.account import account
+
+    merged = AsyncMock(return_value=ENV if env is None else env)
+    monkeypatch.setattr(account, 'get_merged_env', merged)
+    return _make_conn(account_info=SimpleNamespace(userId='user-1', devTeam='', organization=None))
+
+
+def _llm(component_id, provider):
+    """An LLM component that uses the references in fields, an inactive profile, text and a key name."""
+    return {
+        'id': component_id,
+        'provider': provider,
+        'config': {
+            'profile': 'openai-4o-mini',
+            'openai-4o-mini': {'apikey': SERVICE_TOKEN_REF, 'model': CUSTOM_MODEL_REF},
+            'spare': {'apikey': SERVICE_TOKEN_REF},
+            'note': f'served from {SERVICE_TOKEN_REF}',
+            CUSTOM_MODEL_REF: 'keyed',
+        },
+    }
+
+
+def _fake_validator(payload):
+    """Stand in for the engine's validator, returning a new root.
+
+    For ``llm_openai`` each ``apikey`` moves into ``secureParameters`` under a
+    stand-in token that depends on the moved value, so two runs over the same
+    input agree. Each ``model`` gets an error that quotes it, and a warning
+    quotes the whole input.
+    """
+    root = copy.deepcopy(payload)
+    components = root['pipeline']['components'] if 'pipeline' in root else [root['component']]
+    errors = []
+    for component in components:
+        for section in component['config'].values():
+            if not isinstance(section, dict):
+                continue
+            if component['provider'] == 'llm_openai' and 'apikey' in section:
+                moved = json.dumps({'apikey': section.pop('apikey')}).encode()
+                section['secureParameters'] = {'secure': ['apikey'], 'token': hashlib.sha256(moved).hexdigest()}
+            if 'model' in section:
+                errors.append({'message': f'model {section["model"]} is not available', 'id': component['id']})
+    root['warnings'] = [{'message': f'checked {json.dumps(payload)}'}]
+    root['errors'] = errors
+    return root
+
+
+async def _reply(conn, pipeline):
+    """The body the handler sends back for ``pipeline``."""
+    return (await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}}))['body']
+
+
+def _has_expanded_value(value):
+    """Whether ``value`` holds either expanded value from ``ENV`` anywhere."""
+    text = json.dumps(value)
+    return SERVICE_TOKEN_VALUE in text or CUSTOM_MODEL_VALUE in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('enveloped', [False, True])
+async def test_on_rrext_validate_returns_submitted_config_when_env_expanded(monkeypatch, enveloped):
+    """Validation sees the expanded values; the reply is the submitted config, validated.
+
+    Covers a misspelled provider, a known provider whose key moves into
+    secureParameters, ordinary fields, an inactive profile, text, a key name,
+    and the errors and warnings.
+    """
+    calls = []
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or _fake_validator(payload))
+    conn = _validate_conn(monkeypatch)
+    config = {'components': [_llm('llm_1', 'llm_openai'), _llm('llm_2', 'llm_opnai')], 'source': 'llm_1'}
+    request = {'arguments': {'pipeline': {'pipeline': config} if enveloped else config}}
+    sent = copy.deepcopy(request)
+
+    reply = (await MiscCommands.on_rrext_validate(conn, request))['body']
+
+    assert _has_expanded_value(calls[0])
+    submitted = {'pipeline': {**config, 'version': 1}}
+    assert reply['pipeline'] == _fake_validator(submitted)['pipeline']
+    assert not _has_expanded_value(reply)
+    assert reply['errors'] == [
+        {'message': _template_message(ENV, 'error'), 'id': 'llm_1'},
+        {'message': _template_message(ENV, 'error'), 'id': 'llm_2'},
+    ]
+    assert reply['warnings'] == [{'message': _template_message(ENV, 'warning')}]
+    assert request == sent
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_single_component_returns_submitted_config(monkeypatch):
+    """The node panel's {version, component} form: validated expanded, echoed as submitted."""
+    calls = []
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or _fake_validator(payload))
+    conn = _validate_conn(monkeypatch)
+    component = _llm('llm_1', 'llm_openai')
+    request = {'arguments': {'pipeline': {'version': 1, 'component': component, 'extra': CUSTOM_MODEL_REF}}}
+    sent = copy.deepcopy(request)
+
+    reply = (await MiscCommands.on_rrext_validate(conn, request))['body']
+
+    assert set(calls[0]) == {'version', 'component', 'extra'}
+    assert _has_expanded_value(calls[0]['component'])
+    direct = _fake_validator({'pipeline': {'version': 1, 'components': [component]}})
+    assert reply['component'] == direct['pipeline']['components'][0]
+    assert reply['extra'] == CUSTOM_MODEL_REF
+    assert reply['errors'] == [{'message': _template_message(ENV, 'error'), 'id': 'llm_1'}]
+    assert not _has_expanded_value(reply)
+    assert request == sent
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_short_values_keep_structural_fields(monkeypatch):
+    """Values such as 'error' and '1' do not change diagnostic keys, ids or tokens."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _fake_validator)
+    conn = _validate_conn(monkeypatch, env={'ROCKETRIDE_LEVEL': 'error', 'ROCKETRIDE_SERVICE_TOKEN': '1'})
+    component = _llm('llm_1', 'llm_openai')
+    component['config']['level'] = '${ROCKETRIDE_LEVEL}'
+
+    reply = await _reply(conn, {'version': 1, 'component': component})
+
+    assert set(reply) == {'version', 'component', 'errors', 'warnings'}
+    assert reply['errors'][0]['id'] == 'llm_1'
+    direct = _fake_validator({'pipeline': {'version': 1, 'components': [component]}})
+    assert reply['component'] == direct['pipeline']['components'][0]
+    assert reply['component']['config']['level'] == '${ROCKETRIDE_LEVEL}'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_maps_component_ids_back(monkeypatch):
+    """A component id written as a reference comes back as the reference in diagnostics."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _fake_validator)
+    env = {'ROCKETRIDE_NODE_ID': 'node-7', 'ROCKETRIDE_CUSTOM_MODEL': CUSTOM_MODEL_VALUE}
+    conn = _validate_conn(monkeypatch, env=env)
+    pipeline = {'components': [_llm('${ROCKETRIDE_NODE_ID}', 'llm_opnai')]}
+
+    full = await _reply(conn, pipeline)
+    single = await _reply(conn, {'version': 1, 'component': _llm('${ROCKETRIDE_NODE_ID}', 'llm_opnai')})
+
+    expected = [{'message': _template_message(env, 'error'), 'id': '${ROCKETRIDE_NODE_ID}'}]
+    assert full['errors'] == expected
+    assert single['errors'] == expected
+    assert full['pipeline']['components'][0]['id'] == '${ROCKETRIDE_NODE_ID}'
+    assert single['component']['id'] == '${ROCKETRIDE_NODE_ID}'
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch):
+    """Errors and warnings in a {version, component} payload are not passed to the validator."""
+    calls = []
+
+    def _validator(payload):
+        """Append to the root's errors, as the engine does."""
+        calls.append(payload)
+        root = copy.deepcopy(payload)
+        root.setdefault('errors', []).append({'message': 'checked', 'id': 'llm_1'})
+        return root
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _validator)
+    conn = _validate_conn(monkeypatch)
+    supplied = [{'message': 'x', 'id': CUSTOM_MODEL_REF, CUSTOM_MODEL_REF: CUSTOM_MODEL_REF}]
+    payload = {'version': 1, 'component': _llm('llm_1', 'llm_opnai'), 'errors': supplied, 'warnings': supplied}
+
+    reply = await _reply(conn, payload)
+
+    assert 'errors' not in calls[0]
+    assert 'warnings' not in calls[0]
+    assert reply['errors'] == [{'message': _template_message(ENV, 'error'), 'id': 'llm_1'}]
+    assert 'warnings' not in reply
+    assert not _has_expanded_value(reply)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch):
+    """Nothing expanded, no second pass: the reply is the validator's result as before."""
+    calls = []
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or {'ok': True})
+    conn = _validate_conn(monkeypatch, env={})
+    request = {'arguments': {'pipeline': {'source': 'llm_1', 'components': [_llm('llm_1', 'llm_opnai')]}}}
+
+    result = await MiscCommands.on_rrext_validate(conn, request)
+
+    assert len(calls) == 1
+    assert result == {'type': 'response', 'body': {'ok': True}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('expanded', [False, True])
+async def test_on_rrext_validate_multiple_sources_keeps_fixed_reason(monkeypatch, expanded):
+    """The caller still gets the instruction to specify a source when references are used."""
+    validator = MagicMock()
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    conn = _validate_conn(monkeypatch, env=ENV if expanded else {})
+    pipeline = {
+        'components': [
+            {'id': 'source-1', 'provider': 'source', 'config': {'mode': 'Source', 'model': CUSTOM_MODEL_REF}},
+            {'id': 'source-2', 'provider': 'source', 'config': {'mode': 'Source'}},
+        ],
+    }
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    assert response['success'] is False
+    expected = 'Pipeline has multiple source components, please specify one explicitly'
+    if expanded:
+        expected += '. ' + _template_message({'ROCKETRIDE_CUSTOM_MODEL': CUSTOM_MODEL_VALUE}, 'failed')
+    assert response['message'] == expected
+    assert conn.debug_message.call_args.args == (f'Pipeline validation failed: {expected}',)
+    validator.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_error_keeps_template_references(monkeypatch):
+    """An exception that quotes expanded values reaches the log and the error reply with the references."""
+
+    def _raise(payload):
+        raise RuntimeError(f'engine rejected {json.dumps(payload)} and {SERVICE_TOKEN_VALUE}')
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _raise)
+    conn = _validate_conn(monkeypatch)
+    pipeline = {'components': [_llm('llm_1', 'llm_opnai')]}
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+
+    # The dispatcher's own path: the handler raises, build_exception makes the reply
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    assert response['success'] is False
+    assert response['message'] == _template_message(ENV, 'failed')
+    assert not _has_expanded_value(response)
+    assert not _has_expanded_value(str(conn.debug_message.call_args_list))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('single', [False, True])
+@pytest.mark.parametrize('kind', ['errors', 'warnings', 'exception'])
+@pytest.mark.parametrize(
+    'value, formatted',
+    [
+        (' configured-value-xyz ', 'configured-value-xyz'),
+        ('Configured-Value-XYZ', 'configured-value-xyz'),
+        ('configured\x07value', r'configured\x07value'),
+        ('configured-value-xyz', 'configured-value'),
+    ],
+)
+async def test_on_rrext_validate_transformed_messages_use_template_references(
+    monkeypatch, single, kind, value, formatted
+):
+    """Diagnostic and exception formatting does not change the template-reference contract."""
+    env = {'ROCKETRIDE_CUSTOM_MODEL': value}
+    conn = _validate_conn(monkeypatch, env=env)
+    calls = 0
+
+    def validator(payload):
+        nonlocal calls
+        calls += 1
+        if kind == 'exception':
+            raise RuntimeError('invalid setting ' + formatted)
+        result = copy.deepcopy(payload)
+        if calls == 1:
+            result[kind] = [{'id': 'node-1', 'ccode': 75, 'message': 'invalid setting ' + formatted}]
+        return result
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
+    pipeline = {'version': 1, 'component': component} if single else {'source': 'node-1', 'components': [component]}
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    if kind == 'exception':
+        assert response['success'] is False
+        assert response['message'] == _template_message(env, 'failed')
+        assert conn.debug_message.call_args_list
+    else:
+        message = _template_message(env, 'error' if kind == 'errors' else 'warning')
+        assert response['body'][kind] == [{'id': 'node-1', 'ccode': 75, 'message': message}]
+    for candidate in (value, formatted):
+        assert json.dumps(candidate)[1:-1] not in json.dumps(response)
+        assert repr(candidate)[1:-1] not in str(conn.debug_message.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_no_source_warning_follows_templated_diagnostics(monkeypatch):
+    """With a substituted reference and no source, the warning is appended as is, after the templated ones."""
+    env = {'ROCKETRIDE_CUSTOM_MODEL': 'configured-value-xyz'}
+    conn = _validate_conn(monkeypatch, env=env)
+    calls = 0
+
+    def validator(payload):
+        nonlocal calls
+        calls += 1
+        result = copy.deepcopy(payload)
+        if calls == 1:
+            result['warnings'] = [{'id': 'node-1', 'ccode': 75, 'message': 'invalid setting configured-value-xyz'}]
+        return result
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
+    request = {
+        'seq': 7,
+        'command': 'rrext_validate',
+        'arguments': {'pipeline': {'components': [component]}},
+    }
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    messages = [w['message'] for w in response['body']['warnings']]
+    assert messages == [_template_message(env, 'warning'), cmd_misc._NO_SOURCE_WARNING]
+    assert 'configured-value-xyz' not in json.dumps(response)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('value', [' configured-value-xyz ', 'Configured-Value-XYZ', 'configured\x07value'])
+async def test_on_rrext_validate_engine_formatted_messages_use_template_references(monkeypatch, value):
+    """The native node validator may normalize or escape a configured setting."""
+    if not cmd_misc.getServiceDefinition('tool_git'):
+        pytest.skip('tool_git service definition is not loaded')
+    env = {'ROCKETRIDE_CUSTOM_MODEL': value}
+    conn = _validate_conn(monkeypatch, env=env)
+    component = {'id': 'node-1', 'provider': 'tool_git', 'config': {'authType': CUSTOM_MODEL_REF}}
+
+    reply = await _reply(conn, {'version': 1, 'component': component})
+
+    assert reply.get('errors') or reply.get('warnings')
+    for kind, label in (('errors', 'error'), ('warnings', 'warning')):
+        assert all(entry['message'] == _template_message(env, label) for entry in reply.get(kind, []))
+    assert reply['component']['config']['authType'] == CUSTOM_MODEL_REF
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('single', [False, True])
+@pytest.mark.parametrize('field, original', [('id', []), ('provider', []), ('config', [])])
+async def test_on_rrext_validate_engine_echoes_submitted_structural_types(monkeypatch, single, field, original):
+    """A resolved key may replace a field whose submitted type the native pass cannot accept."""
+    calls = _spy_validator(monkeypatch)
+    env = {'ROCKETRIDE_FIELD': field}
+    conn = _validate_conn(monkeypatch, env=env)
+    component = {'id': 'node-1', 'provider': 'llm_openai', 'config': {'profile': ''}}
+    replacement = component[field]
+    component[field] = original
+    component['${ROCKETRIDE_FIELD}'] = replacement
+    pipeline = {'version': 1, 'component': component} if single else {'version': 1, 'components': [component]}
+    sent = copy.deepcopy(pipeline)
+
+    # Both forms use the native structural validator, without invoking node code.
+    reply = await _reply(conn, pipeline)
+
+    assert len(calls) == 1
+    echoed = reply['component'] if single else reply['pipeline']['components'][0]
+    assert echoed == component
+    assert pipeline == sent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('single', [False, True])
+async def test_on_rrext_validate_second_pass_error_uses_template_references(monkeypatch, single):
+    """Failures while building the echoed config follow the same message contract."""
+    conn = _validate_conn(monkeypatch)
+    calls = 0
+
+    def validator(payload):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError('invalid configured-value')
+        return _fake_validator(payload)
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', validator)
+    component = _llm('llm_1', 'llm_opnai')
+    pipeline = {'version': 1, 'component': component} if single else {'components': [component]}
+    request = {'seq': 7, 'command': 'rrext_validate', 'arguments': {'pipeline': pipeline}}
+
+    handled, response = await MiscCommands._call_method(conn, request, 'on_rrext_validate', None)
+
+    assert handled
+    assert calls == 2
+    assert response['success'] is False
+    assert response['message'] == _template_message(ENV, 'failed')
+    assert 'configured-value' not in str(conn.debug_message.call_args_list)
+
+
+def _with_fixed_tokens(value):
+    """``value`` with every ``secureParameters`` token string replaced by one placeholder.
+
+    The engine issues a new token string on every run, so two runs over the
+    same config compare equal only with the token strings set aside.
+    """
+    if isinstance(value, dict):
+        fixed = {key: _with_fixed_tokens(item) for key, item in value.items()}
+        if isinstance(fixed.get('secureParameters'), dict) and 'token' in fixed['secureParameters']:
+            fixed['secureParameters'] = {**fixed['secureParameters'], 'token': '<token>'}
+        return fixed
+    if isinstance(value, list):
+        return [_with_fixed_tokens(item) for item in value]
+    return value
+
+
+def _spy_validator(monkeypatch):
+    """Record each (payload, result) of the engine's own validator."""
+    calls = []
+    native = cmd_misc.validatePipeline
+
+    def _spy(payload):
+        sent = copy.deepcopy(payload)
+        result = native(payload)
+        calls.append((sent, result))
+        return result
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _spy)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_engine_returns_submitted_config(monkeypatch):
+    """The engine's own validator: the reply matches validating the submitted config directly."""
+    if not cmd_misc.getServiceDefinition('llm_openai'):
+        pytest.skip('llm_openai service definition is not loaded')
+
+    direct = cmd_misc.validatePipeline
+    calls = _spy_validator(monkeypatch)
+    conn = _validate_conn(monkeypatch)
+    literal = {'id': 'llm_3', 'provider': 'llm_openai', 'config': {'profile': 'p', 'p': {'apikey': 'typed-literal'}}}
+    components = [_llm('llm_1', 'llm_openai'), _llm('llm_2', 'llm_opnai'), literal]
+
+    reply = await _reply(conn, {'version': 1, 'components': components})
+
+    (expanded, _), (submitted, echoed) = calls
+    assert _has_expanded_value(expanded)
+    assert submitted == {'pipeline': {'version': 1, 'components': components}}
+    assert reply['pipeline'] == echoed['pipeline']
+    direct_pipeline = direct(copy.deepcopy(submitted))['pipeline']
+    assert _with_fixed_tokens(reply['pipeline']) == _with_fixed_tokens(direct_pipeline)
+    assert not _has_expanded_value(reply)
+
+    llm_1, llm_2, llm_3 = reply['pipeline']['components']
+    assert llm_1['config']['openai-4o-mini']['secureParameters']['secure'] == ['apikey']
+    assert llm_1['config']['openai-4o-mini']['model'] == CUSTOM_MODEL_REF
+    assert llm_2['config']['openai-4o-mini']['apikey'] == SERVICE_TOKEN_REF
+    assert llm_2['config']['note'] == f'served from {SERVICE_TOKEN_REF}'
+    # A literal value the caller typed still moves into secureParameters, as before
+    assert 'apikey' not in llm_3['config']['p']
+    assert llm_3['config']['p']['secureParameters']['secure'] == ['apikey']
+    assert 'typed-literal' not in json.dumps(reply)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_engine_single_component_returns_submitted_config(monkeypatch):
+    """The engine's single-component validator, stopped by an empty profile name before any node code runs."""
+    if not cmd_misc.getServiceDefinition('llm_openai'):
+        pytest.skip('llm_openai service definition is not loaded')
+
+    direct = cmd_misc.validatePipeline
+    calls = _spy_validator(monkeypatch)
+    conn = _validate_conn(monkeypatch)
+    config = {'profile': '', 'parameters': {'apikey': SERVICE_TOKEN_REF}}
+    component = {'id': 'llm_1', 'provider': 'llm_openai', 'config': config}
+
+    reply = await _reply(conn, {'version': 1, 'component': component})
+
+    (expanded, _), (submitted, echoed) = calls
+    assert _has_expanded_value(expanded)
+    assert submitted == {'pipeline': {'version': 1, 'components': [component]}}
+    assert reply['component'] == echoed['pipeline']['components'][0]
+    direct_component = direct(copy.deepcopy(submitted))['pipeline']['components'][0]
+    assert _with_fixed_tokens(reply['component']) == _with_fixed_tokens(direct_component)
+    assert reply['errors']
+    assert reply['component']['config']['parameters']['secureParameters']['secure'] == ['apikey']
+    assert not _has_expanded_value(reply)
 
 
 # ---------------------------------------------------------------------------

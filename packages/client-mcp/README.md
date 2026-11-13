@@ -27,28 +27,33 @@
 
 > [!WARNING]
 > **This package is deprecated.** The RocketRide engine now ships a built-in
-> **HTTP MCP server** with a far larger tool surface — create, validate, run,
-> and trace pipelines directly from your AI assistant. Use it instead:
->
-> ```bash
-> claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
-> ```
->
-> Self-hosted engines serve the same endpoint automatically at
-> `http://<host>:5565/mcp` — nothing extra to install. See the
-> [HTTP MCP Server documentation](https://docs.rocketride.org/connect/mcp/http)
-> for Claude, Cursor, and ChatGPT setup.
+> **HTTP MCP server** with a far larger tool surface: create, validate, run,
+> and trace pipelines directly from your AI assistant. Use it instead; the
+> setup is in the next section.
 >
 > `rocketride-mcp` 1.5.0 is the final release. It continues to work against
 > existing engines, but receives no new features or fixes.
 
-## Quick Start
+## Connect with the built-in server
+
+The RocketRide engine has a built-in MCP server, so there is nothing to
+install. The hosted server is at `https://api.rocketride.ai/mcp`. A
+self-hosted engine serves it on its own port: use `http://localhost:5565/mcp` on
+the same machine, or `https://<host>/mcp` behind a TLS proxy for any other host. See
+[MCP self-hosting](https://docs.rocketride.org/connect/mcp/http/self-hosting).
+
+The quickest example, with Claude Code:
 
 ```bash
-pip install rocketride-mcp
+claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
-Configure your MCP client to use the server (see examples below), then ask your AI assistant to process files through your running RocketRide pipelines.
+For every other client and for sign-in details, see
+[Connect a client](https://docs.rocketride.org/connect/mcp/http/connect).
+
+The rest of this page is about the deprecated stdio package. If you must stay
+on it, the install and config commands are in the last section, "Only if you
+must stay on stdio".
 
 ## How It Works
 
@@ -104,119 +109,6 @@ Pipeline processes it         →  result streamed back to Claude
 
 Stop the pipeline and the tool disappears from the next tool-list refresh.
 Start a new pipeline and it appears automatically.
-
-## Worked example
-
-**1. Start the MCP server** (if not already running via a client config):
-
-```bash
-export ROCKETRIDE_URI=ws://localhost:5565
-export ROCKETRIDE_AUTH=your-api-key
-rocketride-mcp
-```
-
-**2. Start a pipeline** — for example, a simple chat pipeline (`chat.pipe`):
-
-```json
-{
-  "nodes": [
-    { "id": "source_1", "provider": "webhook" },
-    {
-      "id": "llm_1", "provider": "llm_openai",
-      "config": { "profile": "openai-4o-mini", "apikey": "${OPENAI_API_KEY}" },
-      "input": [{ "lane": "questions", "from": "source_1" }]
-    },
-    { "id": "target_1", "provider": "response",
-      "input": [{ "lane": "answers", "from": "llm_1" }] }
-  ]
-}
-```
-
-```bash
-rocketride start ./chat.pipe
-```
-
-**3. Ask Claude to use it.** Open Claude Desktop (configured with the
-`mcpServers` block above) and type:
-
-> Use the RocketRide pipeline to answer: what is the boiling point of water?
-
-Claude discovers the tool, calls it with the question, and returns the answer
-streamed from your pipeline.
-
-**4. Inspect resources** — Claude can also list your pipelines and check server
-status using MCP resources:
-
-> Show me the available RocketRide pipelines.
-
-This reads `rocketride://pipelines` and returns the list of running tasks.
-
-## Installation
-
-```bash
-pip install rocketride-mcp
-```
-
-Requires Python 3.10+ and `rocketride` >= 1.0.4.
-
-## Client Configuration
-
-### Claude Desktop
-
-Add to your Claude Desktop config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-	"mcpServers": {
-		"rocketride": {
-			"command": "rocketride-mcp",
-			"env": {
-				"ROCKETRIDE_URI": "ws://localhost:5565",
-				"ROCKETRIDE_AUTH": "your-api-key"
-			}
-		}
-	}
-}
-```
-
-### Cursor
-
-Add to `.cursor/mcp.json` in your workspace:
-
-```json
-{
-	"mcpServers": {
-		"rocketride": {
-			"command": "rocketride-mcp",
-			"env": {
-				"ROCKETRIDE_URI": "ws://localhost:5565",
-				"ROCKETRIDE_AUTH": "your-api-key"
-			}
-		}
-	}
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add rocketride -- rocketride-mcp
-```
-
-Set `ROCKETRIDE_URI` and `ROCKETRIDE_AUTH` in your environment before running.
-
-### Command line
-
-```bash
-# Using the installed entry point
-rocketride-mcp
-
-# Or using Python module
-python -m rocketride_mcp
-```
 
 ## Available Tools
 
@@ -337,19 +229,19 @@ result = await session.get_prompt(
 # result.messages[0].content.text contains the rendered message
 ```
 
-## SSE Mode
+## Only if you must stay on stdio
 
-For remote or Docker deployments, the server can run as an HTTP/SSE server instead of stdio:
+These are the install and config commands for the deprecated `rocketride-mcp` package. New setups should use the built-in server above.
+
+### Installation
 
 ```bash
-pip install rocketride-mcp[sse]
-export MCP_API_KEY=your-secret-token
-rocketride-mcp-sse --host 0.0.0.0 --port 8080
+pip install rocketride-mcp
 ```
 
-SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment variable — optional when binding localhost, but mandatory for non-loopback binds (the server refuses to start on hosts like `0.0.0.0` without it). The `/health` endpoint is always accessible for monitoring.
+Requires Python 3.10+ and `rocketride` >= 1.0.4. Then configure your MCP client (see the client examples below) and ask your AI assistant to process files through your running RocketRide pipelines.
 
-## Configuration
+### Configuration
 
 Set these environment variables (required; no config file is used):
 
@@ -361,6 +253,144 @@ Set these environment variables (required; no config file is used):
 | `MCP_API_KEY`       | No (loopback) / Yes (non-loopback binds) | Bearer token for SSE server authentication      |
 
 \*Either `ROCKETRIDE_AUTH` or `ROCKETRIDE_APIKEY` must be set.
+
+### Client Configuration
+
+#### Claude Desktop
+
+Add to your Claude Desktop config file:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+	"mcpServers": {
+		"rocketride": {
+			"command": "rocketride-mcp",
+			"env": {
+				"ROCKETRIDE_URI": "ws://localhost:5565",
+				"ROCKETRIDE_AUTH": "your-api-key"
+			}
+		}
+	}
+}
+```
+
+#### Cursor
+
+Add to `.cursor/mcp.json` in your workspace:
+
+```json
+{
+	"mcpServers": {
+		"rocketride": {
+			"command": "rocketride-mcp",
+			"env": {
+				"ROCKETRIDE_URI": "ws://localhost:5565",
+				"ROCKETRIDE_AUTH": "your-api-key"
+			}
+		}
+	}
+}
+```
+
+#### Claude Code
+
+```bash
+claude mcp add rocketride -- rocketride-mcp
+```
+
+Set `ROCKETRIDE_URI` and `ROCKETRIDE_AUTH` in your environment before running.
+
+#### Command line
+
+```bash
+# Using the installed entry point
+rocketride-mcp
+
+# Or using Python module
+python -m rocketride_mcp
+```
+
+### Worked example
+
+The stdio server turns each running pipeline into a tool that takes one
+argument, `filepath`, and sends that file to the pipeline.
+
+**1. Start the MCP server** (if not already running via a client config). The
+`rocketride` command in step 2 reads `ROCKETRIDE_APIKEY` too, so set that one:
+
+```bash
+export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=your-api-key
+rocketride-mcp
+```
+
+**2. Start a pipeline**, for example one that reads a file and returns its text
+(`file-text.pipe`). It needs no model provider key:
+
+```json
+{
+  "project_id": "file-text-example",
+  "source": "source_1",
+  "components": [
+    {
+      "id": "source_1",
+      "provider": "webhook",
+      "config": {}
+    },
+    {
+      "id": "parse_1",
+      "provider": "parse",
+      "config": {},
+      "input": [
+        { "lane": "tags", "from": "source_1" }
+      ]
+    },
+    {
+      "id": "target_1",
+      "provider": "response_text",
+      "config": {},
+      "input": [
+        { "lane": "text", "from": "parse_1" }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+rocketride start --pipeline ./file-text.pipe
+```
+
+**3. Ask Claude to use it.** Open Claude Desktop (configured with the
+`mcpServers` block above) and type, with a real path on the machine that runs
+the MCP server:
+
+> Use the RocketRide pipeline to read /path/to/report.pdf and summarize it.
+
+Claude discovers the tool, calls it with the file path, gets the file's text
+back from your pipeline, and summarizes it.
+
+**4. Inspect resources.** Claude can also list your pipelines and check server
+status using MCP resources:
+
+> Show me the available RocketRide pipelines.
+
+This reads `rocketride://pipelines` and returns the list of running tasks.
+
+### SSE Mode
+
+For remote or Docker deployments, the server can run as an HTTP/SSE server instead of stdio:
+
+```bash
+pip install rocketride-mcp[sse]
+export MCP_API_KEY=your-secret-token
+rocketride-mcp-sse --host 0.0.0.0 --port 8080
+```
+
+SSE mode supports Bearer token authentication via the `MCP_API_KEY` environment variable. It is optional when binding localhost, but mandatory for non-loopback binds (the server refuses to start on hosts like `0.0.0.0` without it). The server speaks plain HTTP only, so the token is not encrypted on the way. For clients on another machine, put it behind a TLS proxy and connect with `https://`. The `/health` endpoint is always accessible for monitoring.
 
 ## Links
 

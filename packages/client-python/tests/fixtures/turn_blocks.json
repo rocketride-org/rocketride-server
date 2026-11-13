@@ -1,0 +1,61 @@
+{
+	"question": {
+		"role": "You are the Rocket agent.",
+		"cachePrefix": true,
+		"tools": [
+			{
+				"name": "tool_github_1.create_issue",
+				"description": "Create a GitHub issue.",
+				"inputSchema": {
+					"type": "object",
+					"properties": { "title": { "type": "string" } },
+					"required": ["title"]
+				}
+			},
+			{
+				"name": "memory.peek",
+				"description": "",
+				"inputSchema": { "type": "object", "properties": {} }
+			}
+		],
+		"messages": [
+			{ "role": "user", "content": "File an issue about the flaky test." },
+			{
+				"role": "assistant",
+				"content": [
+					{
+						"type": "reasoning",
+						"text": "I should file it.",
+						"state": { "origin": "anthropic-chat", "block": { "type": "thinking", "thinking": "I should file it.", "signature": "EqQBsig==" } }
+					},
+					{ "type": "text", "text": "Filing it." },
+					{ "type": "tool_call", "id": "toolu_01", "name": "tool_github_1.create_issue", "args": { "title": "Flaky test" } },
+					{ "type": "tool_call", "id": "toolu_02", "name": "memory.peek", "args": "{\"key\": " }
+				]
+			},
+			{
+				"role": "user",
+				"content": [
+					{ "type": "tool_result", "callId": "toolu_01", "content": "#42", "isError": false },
+					{ "type": "tool_result", "callId": "toolu_02", "content": "bad arguments", "isError": true },
+					{ "type": "text", "text": "Now label it bug." }
+				]
+			}
+		]
+	},
+	"result": {
+		"answers": [
+			{
+				"message": {
+					"role": "assistant",
+					"content": [
+						{ "type": "text", "text": "Labelling #42." },
+						{ "type": "tool_call", "id": "toolu_03", "name": "tool_github_1.create_issue", "args": { "title": "Flaky test", "labels": ["bug"] } }
+					]
+				},
+				"stopReason": "tool_use",
+				"tokens": { "input": 120, "output": 18, "cache_read": 100, "cache_creation": 0, "model": "claude-sonnet-4-5" }
+			}
+		]
+	}
+}

@@ -53,7 +53,6 @@ Features:
 import os
 import sys
 import traceback
-import inspect
 import logging
 from typing import Dict, Any, Optional, Union
 
@@ -714,18 +713,11 @@ class DAPBase:
         }
 
         try:
-            # Get the call stack
-            stack = inspect.stack()
-
-            # stack[0] is current function, stack[1] is caller
-            caller = stack[1]
-
-            # Get filename and line number from caller frame
-            filename = os.path.basename(caller.filename)
-            lineno = caller.lineno
-
-            # Put it in the response
-            response['trace'] = {'file': filename, 'lineno': lineno}
+            # The caller's frame only: inspect.stack() reads every frame's source
+            # and, on its first call after new imports, maps every module in
+            # sys.modules, which blocks the event loop for seconds on a slow disk
+            caller = sys._getframe(1)
+            response['trace'] = {'file': os.path.basename(caller.f_code.co_filename), 'lineno': caller.f_lineno}
 
         except Exception:
             # It is not critical we add these

@@ -1,0 +1,13 @@
+{
+  "name": "rocketride",
+  "displayName": "RocketRide",
+  "description": "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Five skills that take a plain-language request to a validated, running RocketRide pipeline, plus the hosted RocketRide MCP server.",
+  "author": {
+    "name": "RocketRide",
+    "url": "https://rocketride.org/"
+  },
+  "homepage": "https://docs.rocketride.org/",
+  "repository": "https://github.com/rocketride-org/rocketride-server",
+  "license": "MIT",
+  "keywords": ["rocketride", "agents", "pipelines", "mcp", "ai-meta-harness"]
+}

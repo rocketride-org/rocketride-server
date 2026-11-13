@@ -13,7 +13,7 @@ from typing import Any, Dict
 
 from .. import credentials as credentials_mod
 from ..errors import _bad
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call
 
 
@@ -90,4 +90,7 @@ def register(registry: ToolRegistry) -> None:
                 'name': {'type': 'string', 'description': 'Integration name for full field detail'},
             },
         },
+        hints=ToolHints.reads(
+            'Reports credential setup status by variable name; values never transit MCP; nothing is stored.'
+        ),
     )(_list_integrations)

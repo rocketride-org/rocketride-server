@@ -910,8 +910,8 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 **Environment secrets** (the layered `ROCKETRIDE_*` store, merged server-side at auth):
 
 - `getEnvironmentKeys(): Promise<string[]>` — available key NAMES from the merged environment (no values; for dropdowns)
-- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — read one scope's dict (org: pass orgId; team: pass teamId; user: omit)
-- `setEnv(scope, env, scopeId?): Promise<void>` — write one scope's FULL dict (replaces the entire set at that level)
+- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned (org: pass orgId; team: pass teamId; user: omit)
+- `setEnv(scope, env, scopeId?): Promise<void>` — merge into one scope: a value sets, `null` deletes, the mask keeps the stored value; names not sent are untouched
 
 #### What members can do vs admins
 
@@ -1063,7 +1063,10 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 The package installs a `rocketride` command (use `pnpm exec rocketride` /
 `npx rocketride` for local installs). The Python client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with fewer verbs: of the `app` commands it has only `create`,
+`verify`, and `deploy`, and it has no `deploy source-config`. It adds
+`diff` and `otel`, which this package lacks. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.

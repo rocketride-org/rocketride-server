@@ -51,6 +51,7 @@ from .engine import outputException
 from .engine import outputField
 from .engine import processArguments
 from .engine import readLine
+from .engine import resolveSecureParameters
 from .engine import validatePipeline
 from .engine import warning
 from .error import APERR
@@ -147,6 +148,7 @@ __all__ = [
     'outputField',
     'processArguments',
     'readLine',
+    'resolveSecureParameters',
     'PROTOCOL_CAPS',
     'SERVICE_MODE',
     'shorten_path_component',

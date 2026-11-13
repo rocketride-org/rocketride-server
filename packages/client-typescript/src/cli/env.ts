@@ -28,7 +28,7 @@
  * import paths stable.
  */
 
-export { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_TARGET_MESSAGE, loadDotEnv, writeDotEnv, parseEnvLine } from '../../../client-common/typescript/src/env';
+export { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE, loadDotEnv, writeDotEnv, parseEnvLine } from '../../../client-common/typescript/src/env';
 
 /**
  * Resolve the deploy-target connection pair for lifecycle verbs.

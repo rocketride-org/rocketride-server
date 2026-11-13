@@ -71,6 +71,7 @@ def node(monkeypatch):
             graphql_allow_mutations=False,
             retry_policy=github_client.RetryPolicy(sleep=sleep),
         )
+        inst.IGlobal.secrets = lambda: (inst.IGlobal.token, inst.IGlobal.private_key_pem)
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
         yield SimpleNamespace(inst=inst, request=request, client=github_client, client_guard=graphql_guard, sleep=sleep)
@@ -557,14 +558,16 @@ def test_sentinel_token_never_reaches_a_result(node, case):
 
 
 def test_private_key_and_configured_token_are_redacted_under_app_auth(node, rsa_private_key_pem):
-    # The installation token is redacted by the client; the PEM and any PAT only by the node.
+    # The installation token is redacted by the client; the PEM and any PAT by the tool
+    # wrapper every engine call goes through, so the tool runs through the tool map here.
     node.inst.IGlobal.auth_type = 'app'
     node.inst.IGlobal.token = 'sentinel-pat-left-in-config'
     node.inst.IGlobal.private_key_pem = rsa_private_key_pem
+    node.inst.IGlobal.secrets = lambda: (node.inst.IGlobal.token, node.inst.IGlobal.private_key_pem)
     node.inst.IGlobal.get_token.return_value = 'installation-sentinel'
     echoed = f'{rsa_private_key_pem} sentinel-pat-left-in-config installation-sentinel'
     node.request.return_value = gql_response({'data': None, 'errors': [{'message': echoed}]})
-    result = node.inst.graphql({'query': VIEWER})
+    result = node.inst._collect_tool_methods()['graphql']({'query': VIEWER})
     dumped = json.dumps(result)
     for secret in (rsa_private_key_pem, 'sentinel-pat-left-in-config', 'installation-sentinel'):
         assert secret not in dumped

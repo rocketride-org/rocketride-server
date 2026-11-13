@@ -68,6 +68,36 @@ own `ROCKETRIDE_CRASHDB_DIR` to keep them apart.
 | `ROCKETRIDE_CRASHPAD_HANDLER` | Override the handler path (relocated installs, containers). |
 | `ROCKETRIDE_CRASHDB_DIR` | Override the crash database directory. The same ownership and mode checks apply, so let the engine create it -- a directory you pre-create with the usual `0755` umask is rejected. `chmod 700` it if it must exist first. |
 
+## What the server learns
+
+A crashing engine sends its monitor at most two lines before it exits:
+
+- `>DUMP*<file>` -- the dump's file name, only with `--dumps` and only when a
+  dump was written.
+- `>EXIT*Crash*<text>*<place>` -- the crash: the exception code (Windows,
+  `Application caught unhandled SEH exception: 0xc0000005`), the signal
+  (`Application received system signal: SIGSEGV: Invalid access to storage (11)`)
+  or the JVM's abort and exit hooks (`JVM called abort on thread <N>`). It never
+  names the dump.
+
+On Linux and macOS a JVM hook's dump, like the dump of any other fatal error, is
+written by `abort()` after `>EXIT`, so its `>DUMP` may arrive after the task
+has ended, or not at all.
+
+`eaas.py` shows `Crash dump: <file>` and `Unexpected termination: <text>` in the
+task's console, ends the task as `Stopped unexpectedly` (status and exit
+message) and records the run's outcome as `error`. A task process that sent no
+`>EXIT`, with no stop requested and not killed by the server, ends the same way
+when a crash signal (`SIGSEGV`, `SIGBUS`, `SIGFPE`, `SIGILL`, `SIGABRT`) or an
+OOM kill (`SIGKILL`) ended it, or on Windows a crash exception code such as a
+fast fail's `0xc0000602`: these skip the engine's handlers. Its console then
+shows `Unexpected termination: <name> (code <N>)`, for example
+`Unexpected termination: SIGKILL (code 9)`. Any other exit code, such as
+`exit(-1)` or Ctrl+C, reads `Stopped`. A start that fails with a fatal error
+before the monitor is up, such as a log file that cannot be opened, differs by
+platform: on Windows it exits with code 1 and reads `Stopped`; on Linux and
+macOS it ends in `abort()` and reads `Unexpected termination: SIGABRT (code 6)`.
+
 ## Getting a dump by hand
 
 A dump left in the database is already a complete minidump: take it from there.

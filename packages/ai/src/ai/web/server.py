@@ -72,6 +72,7 @@ from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_W
 from ai.web import exception, error, Result
 from ai.account import account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
+from .access_log import install_access_log_redaction
 from .middleware import AuthMiddleware
 from .endpoints import use, ping, version, shutdown, status, auth_callback, vscode_oauth_bounce
 from .denied import (
@@ -502,6 +503,13 @@ class WebServer:
             ws_ping_interval=CONST_WS_PING_INTERVAL,
             ws_ping_timeout=CONST_WS_PING_TIMEOUT,
         )
+
+        # Keep OAuth codes, ``?auth=`` credentials and signed fetch tokens out
+        # of the request log. A filter on the uvicorn loggers runs before any
+        # handler, covers the WebSocket handshake lines on uvicorn.error as
+        # well as the HTTP access line, and survives uvicorn's dictConfig (which
+        # Config.__init__ has just run). The ASGI scope is not touched.
+        install_access_log_redaction()
 
         # Return the configured server instance
         server = uvicorn.Server(config)
