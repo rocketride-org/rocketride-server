@@ -22,7 +22,7 @@
 set -euo pipefail
 
 NAME=${1:-rr-pgtls}
-PORT=${2:-55434}
+PORT=${2:-55435}
 OUT=${3:-$(mktemp -d)}
 IMAGE=${RR_TEST_PG_TLS_IMAGE:-pgvector/pgvector:0.8.0-pg16}
 

@@ -104,7 +104,10 @@ uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu als
 starts moto (S3), Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 on
 `:55433` and 1.6.0 on `:55434`) for the storage tests and the live database node
 tests (`nodes/test/test_*_live.py`), then runs the graph suite once more against
-AGE 1.6.0.
+AGE 1.6.0. A TLS-only PostgreSQL on `:55435` (`nodes/test/db_harness/start-pg-tls.sh`)
+serves the cloud database TLS and isolation suites
+(`nodes/test/test_rocketride_db_{tls,isolation}_full.py`), which run in a step of
+their own because `nodes:test` skips `test_*_full.py`.
 
 Per-module equivalents when you only touched one area:
 
