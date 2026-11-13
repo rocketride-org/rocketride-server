@@ -24,6 +24,7 @@ Save this as `rag.pipe`:
 ```json
 {
   "project_id": "rag-example",
+  "source": "source_1",
   "components": [
     {
       "id": "source_1",
@@ -92,7 +93,7 @@ Save this as `rag.pipe`:
     },
     {
       "id": "target_1",
-      "provider": "response",
+      "provider": "response_answers",
       "input": [
         { "lane": "answers", "from": "llm_1" }
       ]
@@ -111,7 +112,7 @@ Save this as `rag.pipe`:
 | `embed_1` | `embedding_openai` | Turns document chunks into vectors using `text-embedding-3-small` and emits `documents` (vectors + metadata). Also embeds incoming questions before retrieval. |
 | `store_1` | `qdrant` | Upserts vectors from `embed_1` into the `rag-docs` collection. When an embedded question arrives, it retrieves the top matching chunks and re-emits them as `questions` with context injected. |
 | `llm_1` | `llm_openai` | Receives the question + retrieved context and generates an answer using GPT-4o. |
-| `target_1` | `response` | Returns the answer to the caller. |
+| `target_1` | `response_answers` | Returns the answer to the caller. |
 
 ## Start the pipeline
 

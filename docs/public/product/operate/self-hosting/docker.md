@@ -15,11 +15,16 @@ ghcr.io/rocketride-org/rocketride-engine
 
 ```bash
 docker run -d --name rocketride-engine \
+  --platform linux/amd64 \
   -p 127.0.0.1:5565:5565 \
   -v rocketride-data:/opt/data \
   --restart unless-stopped \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
+
+The image is `linux/amd64`; the `--platform` flag is required on Apple Silicon
+and on every arm64 host (the VS Code extension adds it for you, so only
+terminal use needs it).
 
 Point any client at it and go:
 
@@ -63,6 +68,10 @@ The engine reads configuration from its environment — pass variables with
 - **MCP OAuth settings** if AI assistants will connect to `/mcp` on this
   engine: `MCP_EXPECTED_AUDIENCE` and friends — see
   [MCP self-hosting](/connect/mcp/http/self-hosting).
+- **`ROCKETRIDE_URI`** — set this to the engine's own address (usually
+  `ws://localhost:5565`) so tool calls from MCP clients run against this
+  engine instead of RocketRide Cloud. See
+  [MCP self-hosting](/connect/mcp/http/self-hosting) for how the lookup works.
 
 ## Persistence
 
