@@ -1,0 +1,45 @@
+name: Validate MCP server.json
+
+# Runs on pull requests that change server.json or package.json. Downloads the
+# same pinned mcp-publisher release that publish-mcp-registry.yml uses (via the
+# shared setup-mcp-publisher action), verifies it with cosign, and runs
+# `mcp-publisher validate`. Read-only: no secrets and no OIDC.
+on:
+  pull_request:
+    paths:
+      - server.json
+      - package.json
+      - .github/workflows/validate-mcp-server-json.yml
+      - .github/actions/setup-mcp-publisher/**
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate server.json
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup mcp-publisher
+        uses: ./.github/actions/setup-mcp-publisher
+        with:
+          version: v1.8.1
+
+      - name: Check server.json version matches package.json
+        run: |
+          set -euo pipefail
+          pkg="$(jq -r '.version // empty' package.json)"
+          srv="$(jq -r '.version // empty' server.json)"
+          if [ -z "$pkg" ] || [ "$pkg" != "$srv" ]; then
+            echo "::error::server.json version ($srv) must equal package.json version ($pkg)."
+            exit 1
+          fi
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate

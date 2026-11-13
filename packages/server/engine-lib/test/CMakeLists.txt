@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 # Add the engLib.test executable
 rocketride_add_executable(engtest *.cpp *.hpp *.h EXCLUDE /rest/)
 

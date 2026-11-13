@@ -8,8 +8,12 @@
 Mirrors the direct-IInstance harness used by extract_facts/test_extract_facts.py
 and guardrails/test_all.py: rocketlib and ai.common.* are stubbed, IInstance.py is
 loaded from source via spec_from_file_location, and the engine collaborator
-(self.instance) is a SimpleNamespace that captures writeQuestions. No running
-server is required.
+(self.instance) is a SimpleNamespace that records what reaches the next node on
+each lane. No running server is required.
+
+Every write goes through `_write`, which models the engine bridge: after a lane
+handler returns, the engine also forwards the handler's input on the same lane,
+unless the handler raised PreventDefault (__checkCallParent, engLib/python/call.hpp).
 
 WHY THESE EXIST. The node merges everything written to it and emits on close, but
 it did not start over afterwards, and the instance outlives the turn in a resident
@@ -23,7 +27,9 @@ Asserts:
   (b) instructions do not multiply turn over turn,
   (c) `open` starts a turn clean even without a preceding close,
   (d) a turn that received nothing emits nothing,
-  (e) a turn that raised does not leak its context into the next one.
+  (e) a turn that raised does not leak its context into the next one,
+  (f) each collector consumes its input, so the next node gets only the merged
+      question from `closing`, once, and never the raw input as well.
 """
 
 from __future__ import annotations
@@ -42,8 +48,8 @@ _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'prompt')
 
 # ---------------------------------------------------------------------------
 # Fake schema collaborator. Shape matches ai.common.schema.Question as the node
-# uses it: addQuestion/addContext/addDocuments/addInstruction/getPrompt, over the
-# list fields the real model declares (question.py:306).
+# uses it: addQuestion/addContext/addDocuments/addHistory/addInstruction/getPrompt,
+# over the list fields the real model declares (question.py:306).
 # ---------------------------------------------------------------------------
 
 
@@ -53,6 +59,12 @@ class FakeQuestion:
         self.questions = []
         self.documents = []
         self.instructions = []
+        self.history = []
+        self.messages = []
+        self.tools = []
+
+    def addHistory(self, item):
+        self.history.append(item)
 
     def addInstruction(self, title, instruction):
         self.instructions.append((title, instruction))
@@ -76,6 +88,10 @@ class FakeQuestion:
 # ---------------------------------------------------------------------------
 
 
+class PreventDefaultRaised(Exception):
+    """Stand-in for the APERR(Ec.PreventDefault) the real preventDefault() raises."""
+
+
 #: Error-level lines the node logged, newest last.
 #:
 #: The stub below appends here, and the node binds that function at import
@@ -84,7 +100,8 @@ class FakeQuestion:
 LOGGED_ERRORS: list[str] = []
 
 
-def _load_iinstance_class():
+def _load_iinstance_class(question_cls=FakeQuestion):
+    """Load the node's IInstance class from source with its imports stubbed, then restore sys.modules."""
     saved = {}
     stubs = {
         'rocketlib': types.ModuleType('rocketlib'),
@@ -101,6 +118,10 @@ def _load_iinstance_class():
         def __init__(self):
             pass
 
+        def preventDefault(self):
+            # Raises, like the real one (rocketlib/filters.py), rather than setting a flag.
+            raise PreventDefaultRaised()
+
     class FakeIGlobalBase:
         glb = None
 
@@ -113,7 +134,7 @@ def _load_iinstance_class():
     stubs['rocketlib'].debug = lambda *a, **kw: None
     stubs['rocketlib'].error = lambda message, *a, **kw: LOGGED_ERRORS.append(str(message))
     stubs['rocketlib'].OPEN_MODE = types.SimpleNamespace(CONFIG='config')
-    stubs['ai.common.schema'].Question = FakeQuestion
+    stubs['ai.common.schema'].Question = question_cls
     stubs['ai.common.config'].Config = types.SimpleNamespace(getNodeConfig=lambda *a: {})
 
     for name, stub in stubs.items():
@@ -170,26 +191,59 @@ def build():
     is exactly what a resident task does to it.
     """
 
-    def _build(instructions=None):
-        IInstance = _load_iinstance_class()
+    def _build(instructions=None, question_cls=FakeQuestion):
+        """Build one IInstance with these instructions, wired to a fake engine that records each lane."""
+        IInstance = _load_iinstance_class(question_cls)
 
         inst = IInstance()
         inst.IGlobal = types.SimpleNamespace(
             config={'instructions': _INSTRUCTIONS if instructions is None else instructions}
         )
 
-        captured = types.SimpleNamespace(questions=[])
-        inst.instance = types.SimpleNamespace(writeQuestions=captured.questions.append)
+        # What reaches the next node, per lane: the node's own writes and the
+        # engine's default forwards land in the same place, as they do downstream.
+        captured = types.SimpleNamespace(questions=[], documents=[], text=[], table=[])
+        captured.writeQuestions = captured.questions.append
+        inst.instance = captured
         return inst, captured
 
     return _build
+
+
+_HANDLERS = {
+    'questions': 'writeQuestions',
+    'documents': 'writeDocuments',
+    'text': 'writeText',
+    'table': 'writeTable',
+}
+
+
+def _write(inst, lane, payload):
+    """Write one input on a lane the way the engine bridge does.
+
+    The bridge calls the handler, then forwards the original input on the same
+    lane unless the handler raised PreventDefault. Any other exception propagates.
+    """
+    try:
+        getattr(inst, _HANDLERS[lane])(payload)
+    except PreventDefaultRaised:
+        return
+    getattr(inst.instance, lane).append(payload)
+
+
+def _question(*texts):
+    """A question carrying the given question texts, as a chat turn writes it."""
+    question = FakeQuestion()
+    for text in texts:
+        question.addQuestion(text)
+    return question
 
 
 def _turn(inst, *texts):
     """One turn: open, write each text on the text lane, close."""
     inst.open(None)
     for text in texts:
-        inst.writeText(text)
+        _write(inst, 'text', text)
     inst.closing()
 
 
@@ -245,13 +299,37 @@ def test_open_starts_a_turn_clean(build):
     inst, captured = build()
 
     inst.open(None)
-    inst.writeText('abandoned mid-turn')
+    _write(inst, 'text', 'abandoned mid-turn')
     # No closing() - the turn goes nowhere.
 
     _turn(inst, 'the real question')
 
     assert len(captured.questions) == 1
     assert captured.questions[0].context == ['the real question']
+
+
+def test_a_turn_mode_question_keeps_its_conversation_and_tools(build):
+    """
+    A turn-mode question has no `questions`; its conversation is `messages`. Dropping it
+    sent the LLM node a question with nothing in it. The merged question keeps the
+    conversation and tools, the instructions become its system prompt, and text written
+    to the node joins the last user message.
+    """
+    from ai.common.schema import Question
+
+    inst, captured = build(question_cls=Question)
+    turn = Question(tools=[{'name': 'search'}], messages=[{'role': 'user', 'content': 'Find the doc.'}])
+
+    inst.open(None)
+    _write(inst, 'questions', turn)
+    _write(inst, 'text', 'The page is /home.')
+    inst.closing()
+
+    (merged,) = captured.questions
+    merged.checkTurn()
+    assert (merged.messages, merged.tools) == (turn.messages, turn.tools)
+    assert _INSTRUCTIONS[0] in merged.getSystemPrompt()
+    assert 'The page is /home.' in merged.getTurnMessages()[-1].content[-1].text
 
 
 def test_a_turn_that_received_nothing_emits_nothing(build):
@@ -275,7 +353,7 @@ def test_an_emitted_turn_is_still_recorded_as_output(build):
 
     inst.open(None)
     assert inst.has_output is False
-    inst.writeText('something')
+    _write(inst, 'text', 'something')
     inst.closing()
 
     assert len(captured.questions) == 1
@@ -304,7 +382,7 @@ def test_the_documents_lane_also_counts_as_input(build):
     inst, captured = build()
 
     inst.open(None)
-    inst.writeDocuments(['a document'])
+    _write(inst, 'documents', ['a document'])
     inst.closing()
 
     assert len(captured.questions) == 1
@@ -316,11 +394,8 @@ def test_the_questions_lane_also_counts_as_input(build):
     """The third lane `_received_input` reads, and the one a chat turn arrives on."""
     inst, captured = build()
 
-    question = FakeQuestion()
-    question.addQuestion('what is on the card?')
-
     inst.open(None)
-    inst.writeQuestions(question)
+    _write(inst, 'questions', _question('what is on the card?'))
     inst.closing()
 
     assert len(captured.questions) == 1
@@ -340,7 +415,7 @@ def test_a_failed_turn_does_not_leak_into_the_next(build):
     LOGGED_ERRORS.clear()
 
     inst.open(None)
-    inst.writeText('the turn that failed')
+    _write(inst, 'text', 'the turn that failed')
     inst.closing()
 
     assert captured.questions == []
@@ -356,3 +431,104 @@ def test_a_failed_turn_does_not_leak_into_the_next(build):
 
     assert len(captured.questions) == 1
     assert captured.questions[0].context == ['the turn after']
+
+
+# ---------------------------------------------------------------------------
+# What the next node receives
+# ---------------------------------------------------------------------------
+
+
+def test_each_chat_turn_reaches_the_next_node_once_with_its_instructions(build):
+    """
+    THE DUPLICATE ANSWER.
+
+    A chat turn arrives on the questions lane. `writeQuestions` collected it and
+    returned normally, so the engine also forwarded the bare question: the LLM
+    answered it once without the instructions, then again when `closing` sent
+    the merged question. Only the merged question may reach the next node.
+    """
+    inst, captured = build()
+
+    for n, text in enumerate(['Good morning. What time does the library open?', 'And on Sundays?']):
+        inst.open(None)
+        _write(inst, 'questions', _question(text))
+        assert len(captured.questions) == n, 'the bare question reached the next node before closing'
+
+        inst.closing()
+
+        assert len(captured.questions) == n + 1, f'turn {n} reached the next node more than once'
+        merged = captured.questions[n]
+        assert [q.text for q in merged.questions] == [text]
+        assert [instruction for _, instruction in merged.instructions] == _INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    'lane, payload',
+    [
+        ('questions', lambda: _question('a question')),
+        ('documents', lambda: ['a document']),
+        ('text', lambda: 'some text'),
+        ('table', lambda: '| a | table |'),
+    ],
+    ids=['questions', 'documents', 'text', 'table'],
+)
+def test_each_collector_consumes_its_input(build, lane, payload):
+    """
+    Each lane the node collects from is consumed, not passed through: the node
+    declares no output for documents, text or table, and its questions output
+    carries only the merged question.
+    """
+    inst, captured = build()
+
+    inst.open(None)
+    _write(inst, lane, payload())
+    inst.closing()
+
+    assert (captured.documents, captured.text, captured.table) == ([], [], []), (
+        f'the raw {lane} input was passed through'
+    )
+    assert len(captured.questions) == 1, f'{len(captured.questions)} questions reached the next node, expected 1'
+    assert len(captured.questions[0].instructions) == len(_INSTRUCTIONS)
+
+
+def test_a_mixed_turn_emits_one_question_holding_everything(build):
+    """Several writes on several lanes in one turn still make one question, sent once."""
+    inst, captured = build()
+
+    inst.open(None)
+    _write(inst, 'questions', _question('first question', 'second question'))
+    _write(inst, 'questions', _question('third question'))
+    _write(inst, 'text', 'some context')
+    _write(inst, 'table', '| a | table |')
+    _write(inst, 'documents', ['a document'])
+    inst.closing()
+
+    assert (captured.documents, captured.text, captured.table) == ([], [], [])
+    assert len(captured.questions) == 1
+    merged = captured.questions[0]
+    assert [q.text for q in merged.questions] == ['first question', 'second question', 'third question']
+    assert merged.context == ['some context', '| a | table |']
+    assert merged.documents == [['a document']]
+
+
+def test_the_merged_question_keeps_the_conversation_history(build):
+    """
+    Chat clients send the last turns as the question's history. The raw question
+    no longer goes downstream, so the merged one carries that history, once, even
+    when several questions arrive in one turn with the same history.
+    """
+    inst, captured = build()
+    history = [
+        types.SimpleNamespace(role='user', content='Good morning. What time does the library open?'),
+        types.SimpleNamespace(role='assistant', content='It opens at nine.'),
+    ]
+
+    inst.open(None)
+    for text in ('And on Sundays?', 'Is it open late on Fridays?'):
+        question = _question(text)
+        question.history = list(history)
+        _write(inst, 'questions', question)
+    inst.closing()
+
+    assert len(captured.questions) == 1
+    assert captured.questions[0].history == history

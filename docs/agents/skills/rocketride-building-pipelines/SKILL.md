@@ -50,8 +50,8 @@ Each step has the same fallback ladder — use the **first** option your environ
 | Need | Layer | Preferred (MCP tool) | Fallback (bundled shim, uses SDK) | Offline |
 |---|---|---|---|---|
 | List/select nodes | L1 | `list_components` (names/summaries only — **wire** from the bundled index) | `tools/generate-index.py` | bundled `LAYER1_NODE_INDEX.json` |
-| One node's config schema | L2 | `describe_component` | `tools/fetch-node-schema.py <node>` | `.rocketride/schema/<node>.json` |
-| Validate the whole pipeline | L3 | `validate_pipeline` | `tools/validate-pipeline.py <file>` (calls `client.validate`) | `tools/validate-pipeline.py --static <file>` (lint only) |
+| One node's config schema | L2 | `describe_component` | `../rocketride-configuring-pipelines/tools/fetch-node-schema.py <node>` | `.rocketride/schema/<node>.json` |
+| Validate the whole pipeline | L3 | `validate_pipeline` | `../rocketride-configuring-pipelines/tools/validate-pipeline.py <file>` (calls `client.validate`) | `../rocketride-configuring-pipelines/tools/validate-pipeline.py --static <file>` (lint only) |
 | Run it | — | `run_pipeline` → `send_data`/`run_dropper_pipe` → `monitor` | SDK `use()` → `send`/`chat` → `get_task_status` | — |
 | Understand a node/SDK/concept in depth | docs | WebFetch one `/path.md` | `tools/fetch-doc.py "<topic>"` (fetches ONE live page) | `ROCKETRIDE_DOC_MAP.md` (this skill dir) + bundled `.rocketride/docs/*` |
 
@@ -101,7 +101,7 @@ go ahead", enter the full lifecycle from Phase 0.
 ## Phases
 
 0. **Load capabilities** — read the node index (L1) **directly** from its bundled path
-   (`rocketride-designing-pipelines/LAYER1_NODE_INDEX.json`, or `.rocketride/services-catalog.json`
+   (`../rocketride-designing-pipelines/LAYER1_NODE_INDEX.json`, or `.rocketride/services-catalog.json`
    in a project). **Do NOT `find`/`ls`/search for it, and do NOT run `generate-index.py`** — you
    already know the path; discovery just burns turns. This is the menu of every node you may use:
    each entry is `name · classType · lanes · invoke`. Keep it open; you select and wire from it.

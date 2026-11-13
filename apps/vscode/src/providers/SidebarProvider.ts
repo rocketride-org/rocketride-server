@@ -201,8 +201,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				switch (message.type) {
 					case 'view:ready':
 						// A fresh page restarts its service-subscription ids —
-						// drop the previous page's watchers. Everything the page
-						// DISPLAYS replays off the retained topics.
+						// drop the previous page's watchers (the new page's own
+						// may already be live; the service keeps those).
+						// Everything the page DISPLAYS replays off the retained topics.
 						this.workspaceFs.resetSubscriptions();
 						break;
 					case 'sidebar:command':

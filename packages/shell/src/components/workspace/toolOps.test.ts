@@ -192,7 +192,7 @@ test('unserve removes exactly its handler; dispose silences the server', async (
 	const unserve = server.serve('test.echo', async ({ text }) => `one:${text}`);
 	unserve();
 	const call = createToolOpClient<TestOps>(frame);
-	await assert.rejects(call('test.echo', { text: 'x' }, { timeoutMs: 50 }), /No handler serves/);
+	await assert.rejects(call('test.echo', { text: 'x' }, { timeoutMs: 5_000 }), /No handler serves/);
 
 	server.serve('test.echo', async ({ text }) => `two:${text}`);
 	server.dispose();

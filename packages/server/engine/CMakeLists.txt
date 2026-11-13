@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 # Add the engine target
 rocketride_add_executable(engine src/*.cpp src/*.hpp src/*.h)
 

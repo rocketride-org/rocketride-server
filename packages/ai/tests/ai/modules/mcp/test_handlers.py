@@ -61,6 +61,24 @@ async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine
 
 
 @pytest.mark.asyncio
+async def test_call_tool_validation_rejection_is_error_with_structured_parity():
+    """A rejection is {ok, errors, warnings}: isError is set, but it is not the shared error envelope."""
+    import ai.modules.mcp.handlers as handlers_mod
+
+    from .conftest import FakeEngineClient
+
+    engine = FakeEngineClient(validate_result={'errors': [{'type': 'x', 'message': 'bad', 'id': '1'}], 'warnings': []})
+    server = handlers_mod.build_mcp_server(lambda: engine)
+    async with Client(server) as client:
+        result = await client.call_tool('validate_pipeline', {'pipeline': {'components': []}})
+
+    assert result.is_error is True
+    assert json.loads(result.content[0].text) == result.structured_content
+    assert set(result.structured_content) == {'ok', 'errors', 'warnings'}
+    assert result.structured_content['ok'] is False
+
+
+@pytest.mark.asyncio
 async def test_call_tool_hard_error_surfaces_as_mcp_tool_error(monkeypatch, fake_engine):
     import ai.modules.mcp.handlers as handlers_mod
 
@@ -271,3 +289,52 @@ async def test_call_tool_normalizer_raised_harderror_still_maps_to_mcp_error(fak
     async with Client(server) as client:
         with pytest.raises(MCPError, match='engine went away'):
             await client.call_tool('drops', {})
+
+
+# --- serverInfo version ----------------------------------------------------
+
+
+def _fake_rocketlib(monkeypatch, get_version):
+    """Install a stand-in `rocketlib` so the test needs no compiled engine."""
+    import sys
+    import types as pytypes
+
+    monkeypatch.setitem(sys.modules, 'rocketlib', pytypes.SimpleNamespace(getVersion=get_version))
+
+
+@pytest.mark.asyncio
+async def test_server_info_reports_engine_version_from_dict(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    _fake_rocketlib(monkeypatch, lambda: {'version': '9.9.9.1', 'hash': '', 'stamp': ''})
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '9.9.9.1'
+
+
+@pytest.mark.asyncio
+async def test_server_info_version_falls_back_when_version_is_empty(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    _fake_rocketlib(monkeypatch, lambda: {'version': '', 'hash': '', 'stamp': ''})
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '0.0.0'
+
+
+@pytest.mark.asyncio
+async def test_server_info_version_falls_back_when_get_version_raises(monkeypatch, fake_engine, caplog):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    def _boom():
+        raise RuntimeError('engine not ready')
+
+    _fake_rocketlib(monkeypatch, _boom)
+
+    with caplog.at_level('DEBUG', logger=handlers_mod.logger.name):
+        server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '0.0.0'
+    assert 'engine version unavailable' in caplog.text

@@ -17,6 +17,8 @@ Documentation written for AI coding assistants, not people.
   when you change a doc; items it cannot complete are the gaps. Not part of the
   bundle.
 
+This folder is now a plugin root (for Claude Code and Codex), so every file in it goes to each plugin user.
+
 The site does not render this folder. Edit `context/` and rebuild any client
 (`./builder client-typescript:build`, `client-python:build`, `vscode:build`)
 or run `./builder client-docs:agent` to restage the bundle.

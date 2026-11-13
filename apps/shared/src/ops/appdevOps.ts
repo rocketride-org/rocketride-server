@@ -30,6 +30,12 @@ export interface AppDevOpMap extends ShellOpMap {
 	 * success signal; failures reject with the validation message.
 	 */
 	'host.appdev.scaffold': ShellOpSpec<{ appName: string; displayName: string; frame: FrameOptions }, void>;
+	/**
+	 * Claims the org's developer id from the wizard (shown only when the
+	 * identity says canRegisterDeveloper). Resolves with the fresh identity;
+	 * failures reject with the server's message.
+	 */
+	'host.appdev.registerDeveloper': ShellOpSpec<{ developerId: string }, NewAppIdentity>;
 	/** PUSH — the identity changed (connection/account events) while a
 	 *  wizard may be open. */
 	'host.appdev.identityChanged': ShellOpSpec<NewAppIdentity, void>;

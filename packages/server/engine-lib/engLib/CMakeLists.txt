@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-
 if(NOT TARGET engLib.lib)
     # Add the engLib library
     rocketride_add_library(engLib LIST_ONLY "*.json;*.ipp" *.cpp *.hpp *.h *.json *.ipp *.y)
