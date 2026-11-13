@@ -630,9 +630,12 @@ class TestCliProfile:
         try:
             await client.connect()
             token = (await client.use(pipeline=get_echo_pipeline(), token=private_token(self.TOKEN_BASE)))['token']
-            other = (await client.use(pipeline=get_echo_pipeline(), token=private_token(f'{self.TOKEN_BASE}-other')))[
-                'token'
-            ]
+            # Engines are content-addressed and the profiler is engine-level: a second run of the
+            # IDENTICAL spec would share this run's engine and list as profiled too. The other run
+            # wires a differently named response component, so it has an engine of its own.
+            other_spec = get_echo_pipeline()
+            other_spec['components'][1]['id'] = 'response_2'
+            other = (await client.use(pipeline=other_spec, token=private_token(f'{self.TOKEN_BASE}-other')))['token']
             assert (await client.cprofile_start(target=token)).get('status') == 'started'
 
             listed = await run_cli_json('profile', 'list', '--json', *server_args())
