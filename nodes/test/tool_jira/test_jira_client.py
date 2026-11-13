@@ -249,6 +249,21 @@ def test_wrap_puts_the_jql_inside_the_allowlist_and_keeps_order_by_last():
     assert out == 'project in ("RRT", "OPS") AND (status = Done OR assignee = currentUser()) ORDER BY updated DESC'
 
 
+def test_order_by_is_found_after_text_whose_lowercase_is_longer():
+    # "İ".lower() is two code points; matching on a lowercased copy shifted the offsets and missed ORDER BY
+    out = jc.wrap_jql('summary ~ "İ" ORDER BY updated', ['RRT'])
+    assert out == 'project in ("RRT") AND (summary ~ "İ") ORDER BY updated'
+
+
+@pytest.mark.parametrize(
+    'body', [{'errors': ['unavailable']}, {'errorMessages': 1}, {'errorMessages': 'x', 'errors': 2}]
+)
+def test_an_error_body_of_an_unexpected_shape_still_raises_jira_api_error(fake_requests, body):
+    fake_requests.request.return_value = _resp(400, json_data=body, text='Bad Request')
+    with pytest.raises(jc.JiraAPIError, match='Bad Request'):
+        jc.request('GET', '/myself', auth=AUTH)
+
+
 def test_wrap_with_only_order_by():
     assert jc.wrap_jql('order by created', ['RRT']) == 'project in ("RRT") order by created'
 
