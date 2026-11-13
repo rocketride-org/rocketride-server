@@ -243,7 +243,7 @@ def test_pages_carry_their_version_and_binding_time():
 async def test_rebuild_tracks_publish_unpublish_and_repoint():
     acct = hostile_account()
     swaps = []
-    pp.on_swap(lambda old, new: swaps.append((old, new)))
+    pp.page_map.listeners.append(lambda old, new: swaps.append((old, new)))
     assert pp.current().legacy  # before the first build: the legacy map serves
 
     assert await pp.rebuild(acct)
@@ -277,7 +277,7 @@ async def _a_swap_listener_fails(monkeypatch):
     def boom(old, new):
         raise RuntimeError('listener down')
 
-    pp.on_swap(boom)
+    pp.page_map.listeners.append(boom)
     assert await pp.rebuild(hostile_account())
 
 
@@ -332,8 +332,8 @@ async def test_a_failing_swap_listener_never_stops_the_swap():
         raise RuntimeError('listener down')
 
     seen = []
-    pp.on_swap(boom)
-    pp.on_swap(lambda old, new: seen.append(new))
+    pp.page_map.listeners.append(boom)
+    pp.page_map.listeners.append(lambda old, new: seen.append(new))
     assert await pp.rebuild(hostile_account())
     assert seen == [pp.current()] and not pp.current().legacy
 
@@ -512,7 +512,7 @@ async def test_only_platform_app_changes_schedule_a_rebuild(monkeypatch):
 async def test_an_unchanged_map_is_not_swapped():
     acct = hostile_account()
     swaps = []
-    pp.on_swap(lambda old, new: swaps.append(new))
+    pp.page_map.listeners.append(lambda old, new: swaps.append(new))
     assert await pp.rebuild(acct)
     built = pp.current()
     assert await pp.rebuild(acct)

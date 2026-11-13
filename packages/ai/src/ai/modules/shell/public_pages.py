@@ -561,34 +561,6 @@ def current() -> Aggregate:
     return page_map.current()
 
 
-def set_live_conflict(fn: Optional[Callable[[str], Optional[str]]]) -> None:
-    """Install the live-route collision check (the shell module installs ``pages.live_route_conflict``).
-
-    Args:
-        fn: Maps a path to the live route it collides with, or None; None
-            removes the check.
-    """
-    page_map.live_conflict = fn
-
-
-def live_conflict() -> Optional[Callable[[str], Optional[str]]]:
-    """The installed live-route collision check.
-
-    Returns:
-        The check, or None when none is installed.
-    """
-    return page_map.live_conflict
-
-
-def on_swap(callback: Callable[[Aggregate, Aggregate], None]) -> None:
-    """Register ``callback(old, new)``, run after every aggregate swap.
-
-    Args:
-        callback: Called with the old and the new aggregate.
-    """
-    page_map.listeners.append(callback)
-
-
 def swap(aggregate: Aggregate) -> None:
     """Atomically replace the current aggregate, then notify listeners (``PageMap.swap``).
 
