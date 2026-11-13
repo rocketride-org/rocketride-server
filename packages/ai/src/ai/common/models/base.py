@@ -35,13 +35,19 @@ import contextlib
 import threading
 import hashlib
 import json
+import os
 import sys
 import asyncio
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketride import RocketRideClient
+from rocketride.core.transport_websocket import TransportWebSocket
 from ai import node as ai_node
+
+# Shared secret the model server requires on the /models handshake
+# (rocketride-saas #974). Unset sends nothing, for local dev servers.
+MODEL_SERVER_AUTH_TOKEN_ENV = 'RR_MODEL_SERVER_AUTH_TOKEN'
 
 
 # =============================================================================
@@ -246,6 +252,20 @@ def get_model_server_address() -> Optional[str]:
     return None
 
 
+def get_model_server_auth_headers() -> Dict[str, str]:
+    """
+    Handshake headers that authenticate this engine to the model server.
+
+    Reads ``RR_MODEL_SERVER_AUTH_TOKEN`` at call time, so a reconnect picks up
+    a rotated value.
+
+    Returns:
+        ``{'Authorization': 'Bearer <token>'}`` when the token is set, else ``{}``.
+    """
+    token = os.environ.get(MODEL_SERVER_AUTH_TOKEN_ENV, '').strip()
+    return {'Authorization': f'Bearer {token}'} if token else {}
+
+
 def is_model_server_enabled() -> bool:
     """
     True when a model server is configured via ``--modelserver``.
@@ -308,6 +328,18 @@ class ModelClient(RocketRideClient):
         self._model_type: Optional[str] = None
         self._loader_options: Optional[dict] = None
         self._connect_lock = asyncio.Lock()
+
+    async def _internal_attach(self, timeout: Optional[float] = None) -> None:
+        """Open the /models socket, sending the model server's shared secret on the handshake."""
+        # The SDK builds a header-less transport when none exists; build it here
+        # with the bearer header instead. on_disconnected clears the transport, so
+        # every reconnect comes back through here and reads the current token.
+        if self._transport is None:
+            headers = get_model_server_auth_headers()
+            if headers:
+                self._transport = TransportWebSocket(uri=self._uri, headers=headers)
+                self._bind_transport(self._transport)
+        await super()._internal_attach(timeout)
 
     def load_model(
         self,
