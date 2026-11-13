@@ -212,6 +212,28 @@ class TestPublishes:
         assert not (deploys[1].get('data') or {})  # v1 had no comment
 
     @pytest.mark.asyncio
+    async def test_publish_set_lands_the_binding_in_the_requested_state(self, backend):
+        """A caller carrying a disabled state through a version bump lands it in
+        the same write; a repoint without one re-enables; anything else is refused.
+        """
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        v2 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        row = await backend.publish_set(
+            'org-1', 'app', 'acme.brandy', AUD_TEAM, v1['version'], {'name': 'B'}, ACTOR, state='disabled'
+        )
+        assert (row['state'], row['version']) == ('disabled', 1)
+        rows = await backend.publish_of_app('org-1', 'app', 'acme.brandy')
+        assert [(r['state'], r['version']) for r in rows] == [('disabled', 1)]
+
+        row = await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_TEAM, v2['version'], {'name': 'B'}, ACTOR)
+        assert (row['state'], row['version']) == ('enabled', 2)
+
+        with pytest.raises(ValueError):
+            await backend.publish_set(
+                'org-1', 'app', 'acme.brandy', AUD_TEAM, v2['version'], {'name': 'B'}, ACTOR, state='removed'
+            )
+
+    @pytest.mark.asyncio
     async def test_publish_set_requires_a_registry_version(self, backend):
         """Publishing a version the rail has never seen is refused."""
         await backend.publish('org-1', 'acme.brandy', APP, ACTOR)

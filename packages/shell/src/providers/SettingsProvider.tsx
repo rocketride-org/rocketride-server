@@ -72,6 +72,10 @@ import EnvironmentProvider from './EnvironmentProvider';
 import AccountProvider from './AccountProvider';
 import { useAuthUser } from '../hooks/useAuthUser';
 import { lockedAppId } from '../util/devGate';
+import { telemetryEnabled } from '../telemetry/host';
+import { getConsentState } from '../telemetry/consentState';
+import { privacySectionVisible } from '../telemetry/consentUi';
+import { PrivacyPanel } from '../telemetry/PrivacyPanel';
 
 // =============================================================================
 // CONSTANTS
@@ -990,6 +994,10 @@ const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }
 	// Nav order (product rule): Account (10), Environment Variables (20),
 	// Integrations (30, VS Code), Connections (40, VS Code), then every other
 	// category at the default (100).
+	// Read per render: telemetry can switch off mid-load (its init failed). An
+	// acceptance on record keeps the section (and its withdrawal) reachable even
+	// while capture is off, a privacy signal at load among the reasons.
+	const privacyAvailable = privacySectionVisible(telemetryEnabled(), getConsentState());
 	const extraSections = useMemo<SettingsRichSection[]>(() => {
 		const sections: SettingsRichSection[] = [
 			{ id: 'environment', title: 'Environment Variables', order: 20, render: () => <EnvironmentProvider /> },
@@ -1015,8 +1023,17 @@ const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }
 				},
 			);
 		}
+		// Privacy: the device's analytics-consent record, mirrored from the
+		// banner's localStorage state (one key, one transition set). Offered
+		// wherever telemetry is live, saas or not: the banner's withdrawal path
+		// must exist on every shell that captures. VS Code never gets here (its
+		// consent source is the editor's setting, so telemetry is off in the
+		// host), and a server serving no telemetry key has nothing to consent to.
+		if (privacyAvailable) {
+			sections.push({ id: 'privacy', title: 'Privacy', order: 50, render: () => <PrivacyPanel /> });
+		}
 		return sections;
-	}, [isSaas, appManifest]);
+	}, [isSaas, appManifest, privacyAvailable]);
 
 	// Signed out, the workspace store never writes — changes would apply in
 	// memory and vanish on reload. Say so instead of failing silently.

@@ -645,9 +645,17 @@ class AccountBase(ABC):
         version: int,
         snapshot: dict,
         actor: dict,
+        state: str = 'enabled',
     ) -> dict:
-        """Create or repoint one audience's binding (pure pointer, born enabled)."""
-        return await self._deployment_backend().publish_set(org_id, kind, app_id, audience, version, snapshot, actor)
+        """Create or repoint one audience's binding (pure pointer).
+
+        `state` is the binding state the write lands with: 'enabled' (the
+        default; a repoint re-enables) or 'disabled', for a caller that must
+        carry a prior disabled state through a version bump in ONE write.
+        """
+        return await self._deployment_backend().publish_set(
+            org_id, kind, app_id, audience, version, snapshot, actor, state=state
+        )
 
     async def set_artifact_state(self, org_id: str, project_id: str, version: int, new_state: str, actor: dict) -> dict:
         """Transition one deployment's review state (submit/approve/reject)."""

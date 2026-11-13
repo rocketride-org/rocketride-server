@@ -22,32 +22,21 @@
 
 import { isEmbeddedDevShell } from './devGate';
 import { normalizeSignupProperties, type SignupProperties } from 'rocketride';
+import { CONSENT_KEY, parseConsent, privacySignalOn } from 'rocketride/analytics';
+import { consentDecisionUnsaved } from '../telemetry/consentState';
 
 /** Tab-scoped, single-use signup context retained across the native OAuth redirect. */
 export const SIGNUP_CONTEXT_KEY = 'rr:auth:signup';
 
-// Written by the SaaS consent banner in localStorage. Shared schema:
-// { v: 1, choice: 'accepted' | 'rejected', at: number (milliseconds since epoch) }.
-// Coordinate changes with rocketride-saas; this shell only reads the record.
-const CONSENT_STORAGE_KEY = 'rr_consent_v1';
-const CONSENT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
-const CONSENT_CLOCK_SKEW_MS = 60 * 1000;
 const MAX_STORED_CONTEXT_LENGTH = 2048;
 // Version of the OAuth state envelope `{ v, signup }` that carries a cookieless context.
 const SIGNUP_STATE_VERSION = 1;
 
-function isPrivacySignal(value: unknown): boolean {
-	return value === true || value === 1 || value === '1' || value === 'yes';
-}
-
 function hasPrivacySignal(): boolean {
 	try {
-		const browserNavigator = navigator as Navigator & { globalPrivacyControl?: unknown; msDoNotTrack?: unknown };
-		const browserWindow = window as Window & { doNotTrack?: unknown };
-		if (isPrivacySignal(browserNavigator.doNotTrack)) return true;
-		if (isPrivacySignal(browserNavigator.msDoNotTrack)) return true;
-		if (isPrivacySignal(browserNavigator.globalPrivacyControl)) return true;
-		return isPrivacySignal(browserWindow.doNotTrack);
+		// The ONE privacy-signal read (rocketride/analytics): DNT, GPC and
+		// their vendor spellings are decided there, nowhere else.
+		return privacySignalOn();
 	} catch {
 		return true;
 	}
@@ -56,29 +45,31 @@ function hasPrivacySignal(): boolean {
 /**
  * The visitor's choice on the SaaS consent banner, read from its record.
  *
+ * The ONE consent-record parser (rocketride/analytics) owns the key, version,
+ * TTL and clock-skew rules; a record it rejects reads as undecided. This page's
+ * own decision comes first: one whose write failed (or that had no storage to
+ * go to) lives in memory only, the stored record no longer reflects it, and it
+ * would not survive the redirect either, so it shows no usable choice.
+ *
  * @returns The choice of a valid, current record; 'undecided' when the record is missing, malformed or expired;
- *          null when storage cannot be read, which shows neither a choice nor its absence.
+ *          null when storage cannot be read or this page's decision is not stored, which shows neither a choice
+ *          nor its absence.
  */
 function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
-	let raw: string | null;
+	// Step 1: a decision this page could not store fails closed (a stored-looking 'undecided' would be a lie).
 	try {
-		raw = localStorage.getItem(CONSENT_STORAGE_KEY);
+		if (consentDecisionUnsaved()) return null;
 	} catch {
 		return null;
 	}
+	// Step 2: the stored record, through the one parser.
+	let raw: string | null;
 	try {
-		const consent = JSON.parse(raw ?? 'null');
-		if (consent?.v !== 1) return 'undecided';
-		if (consent.choice !== 'accepted' && consent.choice !== 'rejected') return 'undecided';
-		if (typeof consent.at !== 'number') return 'undecided';
-		if (!Number.isFinite(consent.at)) return 'undecided';
-		const now = Date.now();
-		if (now - consent.at > CONSENT_LIFETIME_MS) return 'undecided';
-		if (consent.at > now + CONSENT_CLOCK_SKEW_MS) return 'undecided';
-		return consent.choice;
+		raw = localStorage.getItem(CONSENT_KEY);
 	} catch {
-		return 'undecided';
+		return null;
 	}
+	return parseConsent(raw, Date.now())?.choice ?? 'undecided';
 }
 
 function hasConsent(): boolean {

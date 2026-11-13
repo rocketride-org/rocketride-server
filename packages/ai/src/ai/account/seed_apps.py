@@ -383,6 +383,22 @@ def _build_ok(entry: Dict[str, Any]) -> bool:
 # =============================================================================
 
 
+def public_serves_user_deploy(rows: List[Dict[str, Any]], public: Optional[Dict[str, Any]]) -> bool:
+    """Whether the public audience is bound to a direct (non-seed) deploy.
+
+    The guard every automatic re-seed honors: when someone deployed the id on
+    purpose and the public rung serves that deploy, a release must not
+    repoint it. ``rows`` are the app's rail rows; ``public`` is the public
+    publish binding (None when unbound). An unbound rung, or a binding to a
+    version not among ``rows``, is not a user deploy.
+    """
+    if public is None:
+        return False
+    bound = int(public.get('version', 0))
+    live = next((row for row in rows or [] if int(row.get('version', 0)) == bound), None)
+    return live is not None and live.get('comment') != SEED_COMMENT
+
+
 async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
     """Whether this pod's built bundle differs from the one the app was last seeded with.
 
@@ -398,7 +414,9 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     rail rows (the plain seed handles a fresh app), no seed rows (a user
     deployed the id first, and it is left alone), or when the public audience
     serves a direct deploy rather than a seed: a release must not replace what
-    someone deployed on purpose. A manual ``--reseed`` still does.
+    someone deployed on purpose. The SaaS fleet pass (``saas:seed --reseed``)
+    honors this guard too; the deliberate per-app replace is the
+    ``admin_reseed`` verb.
     """
     app_id = str(entry['id'])
     local = bundle_digest(app_id)
@@ -410,11 +428,8 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     if not seeds:
         return False
     public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
-    if public is not None:
-        bound = int(public.get('version', 0))
-        live = next((row for row in rows if int(row.get('version', 0)) == bound), None)
-        if live is not None and live.get('comment') != SEED_COMMENT:
-            return False
+    if public_serves_user_deploy(rows, public):
+        return False
     metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
     build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
     return build.get('bundleSha256') != local
@@ -561,7 +576,15 @@ async def seed_manifest_app(
         # (public AND any team/user pins) to this fresh version in one pass.
         await repoint_latest(app_id, old_latest, version, snapshot)
     else:
-        await account.publish_set(org_id, 'app', app_id, PUBLIC_AUDIENCE, version, snapshot, actor)
+        # publish_set writes the binding 'enabled' unless told otherwise, so a
+        # reseed would silently re-enable a built-in the admin disabled. The
+        # prior state rides INTO the binding write: one row update, no window
+        # in which a disabled app serves, and nothing left to repair when the
+        # process dies between two writes (the new version is still bound, so
+        # re-enabling later serves the current build).
+        prior = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE) if old_latest is not None else None
+        state = 'disabled' if prior is not None and prior.get('state') == 'disabled' else 'enabled'
+        await account.publish_set(org_id, 'app', app_id, PUBLIC_AUDIENCE, version, snapshot, actor, state=state)
     return True
 
 
