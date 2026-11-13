@@ -400,15 +400,18 @@ def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(
     _serve(_page())
     monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
 
-    async def slow_stat(path):
-        await asyncio.sleep(0.2)
-        return await file_info(path)
-
-    monkeypatch.setattr(pp, 'artifact_file_info', slow_stat)
-
     async def scenario():
+        release = asyncio.Event()
+
+        async def gated_stat(path):
+            await release.wait()
+            return await file_info(path)
+
+        monkeypatch.setattr(pp, 'artifact_file_info', gated_stat)
         [late] = await _crawl_at_once(['/pricing'])
-        await pages._snapshot_reads[snapshot_path(_page())]
+        read = pages._snapshot_reads[snapshot_path(_page())]
+        release.set()
+        await read
         [after] = await _crawl_at_once(['/pricing'])
         return late, after
 

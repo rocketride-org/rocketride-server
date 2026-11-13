@@ -842,11 +842,11 @@ def _render(path: str, page: Page, document: Path, snapshot: Optional[str]) -> T
     the shell document when it is None, people's always. Either way the
     page's head metadata is injected.
     """
-    # The shell document names the current build's bundles: revalidated on every use.
     body = snapshot
     cache_control = _SNAPSHOT_CACHE_CONTROL
     if body is None:
         body = document.read_text(encoding='utf-8')
+        # The shell document names the current build's bundles: revalidated on every use.
         cache_control = 'private, no-cache'
     body = inject_head(
         body,
