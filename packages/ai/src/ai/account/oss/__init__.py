@@ -103,14 +103,15 @@ def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dic
     Returns:
         The merged names and values and None, or an empty dict and the error
         text when the mask names nothing stored, one variable is sent under
-        two names that fold to it, or the locale cannot hold a name or value.
+        two names that differ only in case (fold_case), or the locale cannot
+        hold a name or value.
     """
     env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
     if fold_case:
         folded: Dict[str, List[str]] = {}
         for k in changes:
-            folded.setdefault(k.upper() if k.upper() in env else k, []).append(k)
-        # Two sent names that address one stored variable would overwrite each other
+            folded.setdefault(k.upper(), []).append(k)
+        # Two sent names that differ only in case are one variable here, stored or new
         twice = sorted(name for sent in folded.values() if len(sent) > 1 for name in sent)
         if twice:
             return {}, (
