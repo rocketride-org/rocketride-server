@@ -119,7 +119,10 @@ def invalidate(name: str) -> None:
 
 
 def _https(url: str) -> str:
-    return url if url.startswith('https://') else ''
+    """``url`` when it is ``https://``, else ''."""
+    if url.startswith('https://'):
+        return url
+    return ''
 
 
 async def app(app_id: str, acct: Any = None) -> Optional[Dict[str, str]]:
@@ -192,6 +195,9 @@ def _plan(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(name, str) or not name or price is None:
         return None
     currency = str(raw.get('currency') or '')
+    # Only ASCII is upper-cased ('u\u017fd'.upper() is 'USD').
+    if currency.isascii():
+        currency = currency.upper()
     features = raw.get('features')
     if not isinstance(features, list):
         features = []
@@ -199,8 +205,7 @@ def _plan(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         'id': str(raw.get('id') or ''),
         'name': name,
         'price': price,
-        # Only ASCII is upper-cased ('u\u017fd'.upper() is 'USD').
-        'currency': currency.upper() if currency.isascii() else currency,
+        'currency': currency,
         'period': str(raw.get('period') or ''),
         'features': [str(f) for f in features if isinstance(f, (str, int, float)) and not isinstance(f, bool)],
     }
