@@ -557,6 +557,7 @@ test('a fact whose listener leaves before the dispatch is held as logged, id inc
 	const leaveAgain = manager.on('shell:telemetry', (fact) => received.push(fact));
 	manager.reportTelemetry('auth:start', { register: false, auto: false });
 	leaveAgain();
+	manager.clearToken = () => {}; // node has no localStorage; the token store is not under test here
 	manager.dropRejectedCredential(); // a rejected credential (or a sign-out) in the same tick
 	await Promise.resolve();
 	assert.equal(received.length, 0, 'still nobody listening');
@@ -604,6 +605,7 @@ test('facts on their way to a listener keep their order and are delivered or hel
 
 	// a drop while the listener stays: the fact raised before it still reaches that listener, and nothing is held
 	manager.reportTelemetry('auth:complete', { is_new: true, waitlisted: false, source: 'shell' });
+	manager.clearToken = () => {}; // node has no localStorage; the token store is not under test here
 	manager.dropRejectedCredential();
 	await Promise.resolve();
 	assert.deepEqual(received.map((f) => f.event), ['auth:start', 'auth:complete'], 'delivered live');

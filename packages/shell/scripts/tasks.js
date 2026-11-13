@@ -39,6 +39,7 @@ const path = require('path');
 const { readdir } = require('node:fs/promises');
 const {
 	execCommand,
+	execLocalBin,
 	syncDir,
 	formatSyncStats,
 	removeDir,
@@ -152,14 +153,14 @@ function makeBundleAction() {
 
 			// Clean build output before rebuilding to prevent stale chunks
 			await removeDir(BUILD_DIR);
-			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
+			await execLocalBin('rsbuild', ['build'], { task, cwd: APP_ROOT });
 
 			// DEV FLAVOR: the same shell with development React (react-refresh
 			// hooks) for the App Builder's HMR preview, built beside the
 			// production output, then stitched behind index.html's inline
 			// flavor picker — one URL, one OAuth callback, CDN-safe.
 			task.output = 'Building dev flavor (development React)...';
-			await execCommand('npx', ['rsbuild', 'build'], {
+			await execLocalBin('rsbuild', ['build'], {
 				task,
 				cwd: APP_ROOT,
 				env: { ...process.env, RR_SHELL_FLAVOR: 'dev' },
@@ -285,7 +286,7 @@ const shellModule = {
 					task.output = 'Clearing port 3000...';
 					await killPort(3000);
 					task.output = 'Starting development server...';
-					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
+					await execLocalBin('rsbuild', ['dev'], { task, cwd: APP_ROOT });
 				},
 			}),
 		},

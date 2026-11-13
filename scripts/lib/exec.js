@@ -282,6 +282,55 @@ async function execCommand(command, args, options = {}) {
 	});
 }
 
+// =============================================================================
+// LOCAL BIN EXECUTION
+// =============================================================================
+
+/** The package that ships each locally installed tool the build runs. */
+const BIN_PACKAGES = {
+	jest: 'jest',
+	rsbuild: '@rsbuild/core',
+	tsc: 'typescript',
+	vsce: '@vscode/vsce',
+};
+
+/**
+ * Resolve a locally installed tool's JavaScript entry point.
+ *
+ * The build runs these tools through node directly instead of `npx`: on
+ * Node 24 npx spawns the resolved bin with shell:true and an args array,
+ * which emits DEP0190 on every invocation.
+ *
+ * @param {string} bin - Tool name (a key of BIN_PACKAGES).
+ * @param {string} cwd - Directory whose node_modules hold the tool.
+ * @returns {string} Absolute path to the tool's bin script.
+ */
+function resolveLocalBin(bin, cwd) {
+	const pkg = BIN_PACKAGES[bin];
+	if (!pkg) throw new Error(`execLocalBin: unknown tool "${bin}"`);
+	const pkgJsonPath = require.resolve(`${pkg}/package.json`, { paths: [cwd] });
+	const { bin: binField } = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+	const rel = typeof binField === 'string' ? binField : binField?.[bin];
+	if (!rel) throw new Error(`execLocalBin: ${pkg} declares no "${bin}" bin`);
+	return path.join(path.dirname(pkgJsonPath), rel);
+}
+
+/**
+ * Run a locally installed tool (tsc, jest, rsbuild) through node.
+ *
+ * @param {string} bin - Tool name (a key of BIN_PACKAGES).
+ * @param {string[]} args - Arguments for the tool.
+ * @param {Object} [options] - execCommand options, plus `resolveFrom`: the
+ *   directory whose node_modules hold the tool when that is not `cwd`.
+ * @returns {Promise<Object>} execCommand's result.
+ */
+function execLocalBin(bin, args, options = {}) {
+	const { resolveFrom, ...execOptions } = options;
+	const from = resolveFrom || execOptions.cwd || process.cwd();
+	return execCommand('node', [resolveLocalBin(bin, from), ...args], execOptions);
+}
+
 module.exports = {
 	execCommand,
+	execLocalBin,
 };

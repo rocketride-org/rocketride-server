@@ -49,7 +49,7 @@
 const fs = require('fs');
 const path = require('path');
 const {
-	execCommand,
+	execLocalBin,
 	syncDir,
 	formatSyncStats,
 	removeDir,
@@ -165,7 +165,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 
 				// Clean build output before rebuilding to prevent stale chunks
 				await removeDir(buildDir);
-				await execCommand('npx', ['rsbuild', 'build'], { task, cwd: appRoot });
+				await execLocalBin('rsbuild', ['build'], { task, cwd: appRoot });
 
 				// Persist the pre-build hash so any concurrent edits force a rebuild next time
 				await saveSourceHash(buildHashKey, hash);
@@ -244,7 +244,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 				description: `Start ${name} (dev)`,
 				run: async (ctx, task) => {
 					task.output = 'Starting development server...';
-					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: appRoot });
+					await execLocalBin('rsbuild', ['dev'], { task, cwd: appRoot });
 				},
 			}),
 		});
