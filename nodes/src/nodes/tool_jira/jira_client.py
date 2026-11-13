@@ -53,7 +53,7 @@ from urllib.parse import urlsplit
 API_PATH = '/rest/api/3'
 DEFAULT_TIMEOUT = 30
 MAX_RESULTS_CAP = 100
-MAX_BODY_BYTES = 32 * 1024
+MAX_BODY_BYTES = 32 * 1024 - 1  # Jira refuses a text field of 32,768 characters or more
 # a Retry-After longer than this is reported instead of waited out, so one tool call can't stall an agent
 MAX_RETRY_AFTER_SECONDS = 30.0
 READ_RATE_LIMIT_RETRIES = 2
@@ -96,9 +96,18 @@ def normalize_site_url(site_url: str) -> str:
     """
     raw = (site_url or '').strip().rstrip('/')
     parts = urlsplit(raw)
-    if parts.scheme != 'https' or not parts.hostname or parts.path or parts.query or parts.fragment or parts.username:
+    host = (parts.hostname or '').lower()
+    if (
+        parts.scheme != 'https'
+        or not host.endswith('.atlassian.net')
+        or parts.port is not None
+        or parts.path
+        or parts.query
+        or parts.fragment
+        or parts.username
+    ):
         raise JiraAPIError(0, [f'siteUrl must look like https://<site>.atlassian.net, got {raw!r}'])
-    return f'https://{parts.netloc}'
+    return f'https://{host}'
 
 
 def _auth_header(auth: Auth) -> str:
@@ -127,6 +136,7 @@ def _retry_after(resp, fallback: float) -> Optional[float]:
         delay = float(value) if value else fallback
     except ValueError:
         delay = fallback
+    delay = max(0.0, delay)
     return delay if delay <= MAX_RETRY_AFTER_SECONDS else None
 
 
@@ -221,10 +231,10 @@ def _order_by_start(jql: str) -> Optional[int]:
     lowered = jql.lower()
     while i < len(jql):
         ch = jql[i]
+        if ch == '\\':  # JQL escapes the next character inside and outside quotes alike
+            i += 2
+            continue
         if quote:
-            if ch == '\\':
-                i += 2
-                continue
             if ch == quote:
                 quote = ''
         elif ch in ('"', "'"):
@@ -276,7 +286,7 @@ _FENCE = re.compile(r'^\s*```\s*([\w+-]*)\s*$')
 def check_body_size(text: str, what: str = 'body') -> str:
     """Refuse a description or comment over 32 KB before it is sent."""
     if len(text.encode('utf-8')) > MAX_BODY_BYTES:
-        raise JiraAPIError(0, [f'the {what} is over {MAX_BODY_BYTES // 1024} KB; shorten it'])
+        raise JiraAPIError(0, [f'the {what} is over {MAX_BODY_BYTES:,} bytes; shorten it'])
     return text
 
 
@@ -367,11 +377,14 @@ def adf_to_text(node: Any) -> str:
         return str(attrs.get('url') or '')
     if kind == 'codeBlock':
         return f'```{attrs.get("language") or ""}\n' + ''.join(adf_to_text(c) for c in children) + '\n```'
-    if kind in ('bulletList', 'orderedList'):
+    if kind in ('bulletList', 'orderedList', 'taskList', 'decisionList'):
         start = int(attrs.get('order') or 1)
         items = []
         for n, item in enumerate(children):
-            marker = '-' if kind == 'bulletList' else f'{start + n}.'
+            if kind == 'taskList':
+                marker = '- [x]' if (item.get('attrs') or {}).get('state') == 'DONE' else '- [ ]'
+            else:
+                marker = '-' if kind != 'orderedList' else f'{start + n}.'
             items.append(f'{marker} ' + adf_to_text(item).replace('\n', '\n  '))
         return '\n'.join(items)
     if kind in (
@@ -382,9 +395,14 @@ def adf_to_text(node: Any) -> str:
         'table',
         'tableRow',
         'expand',
+        'nestedExpand',
+        'tableCell',
+        'tableHeader',
+        'taskItem',
+        'decisionItem',
         'layoutSection',
         'layoutColumn',
     ):
-        sep = '\n' if kind in ('listItem', 'tableRow') else '\n\n'
+        sep = '\n' if kind in ('listItem', 'tableRow', 'taskItem', 'decisionItem') else '\n\n'
         return sep.join(t for t in (adf_to_text(c) for c in children) if t)
     return ''.join(adf_to_text(c) for c in children)

@@ -93,6 +93,10 @@ def test_site_url_is_normalized(url):
         'https://acme.atlassian.net?x=1',
         'https://user:pw@acme.atlassian.net',
         '',
+        # the token goes only to an Atlassian site
+        'https://evil.example.com',
+        'https://acme.atlassian.net.evil.example.com',
+        'https://acme.atlassian.net:8443',
     ],
 )
 def test_site_url_other_than_a_bare_https_host_is_refused(url):
@@ -139,6 +143,12 @@ def test_a_retry_after_longer_than_the_cap_is_reported_not_waited(fake_requests)
         jc.request('GET', '/myself', auth=AUTH)
     assert fake_requests.request.call_count == 1
     jc.time.sleep.assert_not_called()
+
+
+def test_a_negative_retry_after_waits_nothing_instead_of_crashing(fake_requests):
+    fake_requests.request.side_effect = [_resp(429, headers={'Retry-After': '-1'}), _resp(200, json_data={'a': 1})]
+    assert jc.request('GET', '/myself', auth=AUTH) == {'a': 1}
+    jc.time.sleep.assert_called_once_with(0.0)
 
 
 def test_search_post_counts_as_a_read(fake_requests):
@@ -361,6 +371,56 @@ def test_adf_to_text_of_a_non_node_is_empty(value):
 
 
 def test_body_size_cap():
-    assert jc.check_body_size('x' * jc.MAX_BODY_BYTES) == 'x' * jc.MAX_BODY_BYTES
-    with pytest.raises(jc.JiraAPIError, match='32 KB'):
-        jc.check_body_size('é' * (jc.MAX_BODY_BYTES // 2 + 1), 'comment')
+    # Jira refuses a text field of 32,768 characters, so the largest accepted body is one byte short of it
+    assert jc.check_body_size('x' * 32767) == 'x' * 32767
+    with pytest.raises(jc.JiraAPIError, match='32,767 bytes'):
+        jc.check_body_size('x' * 32768)
+    with pytest.raises(jc.JiraAPIError, match='comment'):
+        jc.check_body_size('é' * (32767 // 2 + 1), 'comment')
+
+
+def test_a_backslash_escapes_outside_quotes_too():
+    # JQL reads \" outside a string as an escaped quote; reading it as an opening quote hid the ")" that
+    # closes the allowlist wrapper
+    with pytest.raises(jc.JiraAPIError, match='unmatched'):
+        jc.wrap_jql('labels = \\" ) OR project = SECRET OR (summary ~ "x\\"y"', ['RRT'])
+
+
+def test_checklists_decisions_and_table_cells_keep_their_breaks():
+    doc = {
+        'type': 'doc',
+        'content': [
+            {
+                'type': 'taskList',
+                'content': [
+                    {'type': 'taskItem', 'attrs': {'state': 'TODO'}, 'content': [{'type': 'text', 'text': 'buy milk'}]},
+                    {'type': 'taskItem', 'attrs': {'state': 'DONE'}, 'content': [{'type': 'text', 'text': 'call bob'}]},
+                ],
+            },
+            {
+                'type': 'decisionList',
+                'content': [
+                    {'type': 'decisionItem', 'content': [{'type': 'text', 'text': 'ship friday'}]},
+                ],
+            },
+            {
+                'type': 'table',
+                'content': [
+                    {
+                        'type': 'tableRow',
+                        'content': [
+                            {
+                                'type': 'tableHeader',
+                                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'a'}]}],
+                            },
+                            {
+                                'type': 'tableCell',
+                                'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'b'}]}],
+                            },
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    assert jc.adf_to_text(doc) == '- [ ] buy milk\n- [x] call bob\n\n- ship friday\n\na\nb'

@@ -195,7 +195,7 @@ def test_max_results_is_clamped(monkeypatch, raw, expected):
     assert g.max_results == expected
 
 
-@pytest.mark.parametrize('raw,expected', [(False, False), ('false', False), ('true', True), ('', True)])
+@pytest.mark.parametrize('raw,expected', [(False, False), ('false', False), ('true', True), ('', True), ('ture', True)])
 def test_read_only_accepts_string_forms(monkeypatch, raw, expected):
     g = _global(monkeypatch, {'siteUrl': 'https://acme.atlassian.net', 'email': 'a', 'apiToken': 't', 'readOnly': raw})
     g._read()
@@ -252,6 +252,7 @@ def test_search_always_sends_fields_wraps_the_allowlist_and_pages(api):
                             'assignee': {'displayName': 'Maya'},
                             'priority': {'name': 'High'},
                             'updated': '2026-11-13T00:00:00.000+0000',
+                            'project': {'key': 'RRT'},
                         },
                     }
                 ],
@@ -289,6 +290,13 @@ def test_search_passes_the_page_token_and_ends_on_the_last_page(api):
     assert api.calls[0][2]['json']['nextPageToken'] == 'tok2'
     assert api.calls[0][2]['json']['maxResults'] == 100
     assert out == {'success': True, 'issues': [], 'next_page_token': None}
+
+
+def test_search_refuses_results_from_outside_the_allowlist(api):
+    # a JQL quirk the wrapper missed must not leak another project's issues
+    api.queue = [_resp(200, {'issues': [_issue('RRT-1'), _issue('SEC-9', project='SECRET')], 'isLast': True})]
+    out = _node(projects=['RRT']).jira_search({'jql': 'summary ~ "x"'})
+    assert out['success'] is False and 'outside the project allowlist' in out['error']
 
 
 def test_search_needs_jql_and_refuses_an_escape_from_the_allowlist(api):
@@ -423,7 +431,7 @@ def test_create_refuses_a_description_over_32_kb(api):
     out = _node(read_only=False).jira_issue_create(
         {'project': 'RRT', 'issue_type': 'Task', 'summary': 's', 'description': 'x' * 40000}
     )
-    assert out['success'] is False and '32 KB' in out['error'] and api.calls == []
+    assert out['success'] is False and '32,767 bytes' in out['error'] and api.calls == []
 
 
 def test_comment_checks_the_issue_project_first_then_posts_adf(api):
