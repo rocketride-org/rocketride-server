@@ -41,9 +41,10 @@ python -m ruff check <path>      # Python lint (format: ruff format)
 npx tsc --noEmit                 # TypeScript type-check
 
 # Documentation checks
-./builder docs:validate                              # node README + client-doc schemas (also inside docs:test)
+./builder docs:validate                              # node README, client-doc, and CLI-doc checks (also inside docs:test)
 python3 scripts/validate-node-readme.py <node-dir>   # one node (--all nodes/src/nodes for every node)
 python3 scripts/validate-client-docs.py              # client docs parity
+python3 scripts/validate-cli-docs.py                 # CLI docs against both CLIs' commands
 node scripts/build.js docs:check                     # export drift gate (CI-enforced)
 ./builder docs:build                                 # stage the docs site
 ```
@@ -57,7 +58,7 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 - **Store apps**: pipelines bundled in an app for the public store use
   catalog nodes only (the nodes that ship with the engine; see 'Catalog
   nodes only' in `docs/agents/context/ROCKETRIDE_APPS.md`). `scaffold_node`
-  and `local_nodes` are for self-hosted engines and for nodes contributed
+  and custom nodes are for self-hosted engines and for nodes contributed
   to the catalog, never for a store app.
 - **VS Code extension only**: log through `getLogger()` from
   `src/shared/util/output.ts` (the Output-channel logger — never

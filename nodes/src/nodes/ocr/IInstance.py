@@ -124,6 +124,13 @@ class IInstance(IInstanceBase):
             warning(f'OCR table extraction failed: {e}\n{traceback.format_exc()}')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        """Collect an image stream; at its end OCR the text to the text lane and the tables to the table lane.
+
+        Args:
+            action: ``AVI_ACTION.BEGIN``, ``WRITE`` or ``END``.
+            mimeType: The image type; a GIF is read frame by frame.
+            buffer: A chunk of the image for ``WRITE``.
+        """
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the stream descriptor (not image bytes); start empty so
@@ -150,8 +157,7 @@ class IInstance(IInstanceBase):
                     while True:
                         frame = gif.convert('RGB')
                         frame_np = np.array(frame)
-                        with self.IGlobal.readerLock:
-                            frame_text = self.IGlobal.reader.read(frame_np)
+                        frame_text = self.IGlobal.reader.read(frame_np)
                         if isinstance(frame_text, list):
                             frame_text = ' '.join(frame_text)
                         text_list.append(frame_text)
@@ -161,9 +167,7 @@ class IInstance(IInstanceBase):
 
                 text = '\n'.join(text_list)
             else:
-                # Acquire the lock before starting the OCR process
-                with self.IGlobal.readerLock:
-                    text = self.IGlobal.reader.read(self.image_data)
+                text = self.IGlobal.reader.read(self.image_data)
 
             # Read the tables by OCR model , invoke writeTable
             self.extract_tables_from_image(self.image_data, self.instance.writeTable)
@@ -177,6 +181,17 @@ class IInstance(IInstanceBase):
             self.instance.writeText(text)
 
     def writeDocuments(self, documents: List[Doc]):
+        """OCR image documents to the text and documents lanes, and their tables to the table lane.
+
+        The image documents do not go on: ``preventDefault`` stops the engine passing them to
+        the next node.
+
+        Args:
+            documents: Documents of type ``Image`` with base64 page content.
+
+        Raises:
+            ValueError: A document is not an image.
+        """
         txtdocs: List[Doc] = []
 
         # Iterate through the documents
@@ -189,8 +204,7 @@ class IInstance(IInstanceBase):
             image_data = base64.b64decode(doc.page_content)
 
             # Read the text by OCR model
-            with self.IGlobal.readerLock:
-                text = self.IGlobal.reader.read(image_data)
+            text = self.IGlobal.reader.read(image_data)
 
             if isinstance(text, list):
                 text = ' '.join(text)

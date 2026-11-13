@@ -143,6 +143,18 @@ about why it was rejected. A client therefore cannot tell an invalidated task
 key from any other bad credential at connect time; the codes above appear only
 once a command is in flight.
 
+### Validation (`rrext_validate`)
+
+Validation accepts a full pipeline or a `{version, component}` payload. It
+resolves `${ROCKETRIDE_*}` references for validation and returns the submitted
+template config in the response. The echoed config receives the usual
+structural normalization when its submitted field types permit it.
+
+When a reference was substituted, errors, warnings and validation exceptions
+use fixed messages listing the submitted references. Diagnostic counts and
+integer `ccode` values are retained. Component ids refer to the submitted
+components. With no substitution, diagnostic messages keep their usual text.
+
 ### Events
 
 The engine pushes **events** that are not replies to any request: this is how
@@ -193,12 +205,21 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 | --- | --- |
 | `application/json` | `json` |
 | `text/*` | `text` |
+| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane or raw (`tags`) | `text` |
 | `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
-| `application/rocketride-question+json` | `questions` |
+| `application/rocketride-question+json` | `questions`; with no `questions` reader it goes to raw, never `text` |
 | `application/rocketlib-tag` | `tags` |
 | anything else, or no reader above | raw, delivered on `tags` |
 
 The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+On the `text` lane the body is decoded as UTF-8 and delivered as **one** text when
+the pipe closes, however many `write` calls carried it. A node such as `question`
+makes one question per text, so a webhook body that arrives in two chunks still
+makes one question. A body over 8 MiB is not held whole: what has arrived is
+written as one text when the limit is crossed, and each later chunk as its own
+text. Invalid UTF-8, including a body that ends inside a character, fails the
+request.
 
 ### When nothing reads the chosen lane
 

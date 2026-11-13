@@ -47,6 +47,7 @@
  */
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { deepEquals } from '@rjsf/utils';
 
 import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges, useUpdateNodeInternals } from '@xyflow/react';
 
@@ -60,6 +61,7 @@ import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
 import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from 'shared/components/node-config';
+import { mergeFormDefaults } from 'shared/components/node-config/storedArrays';
 
 // =============================================================================
 // Quick-add state (click handle → popup → create + connect)
@@ -931,7 +933,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 					// the hidden defaults (e.g. the `mode: "Source"` marker the
 					// DEVELOPMENT page keys on); explicit node values always win.
 					const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-					const config = { ...(resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>), ...existing };
+					const config = mergeFormDefaults(pipe.schema, resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>, existing);
 					(data as any).config = config;
 					// hideForm/no-properties schemas render no config form: force
 					// valid (self-healing any stale persisted flag) instead of
@@ -1061,17 +1063,17 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// Backfill schema defaults UNDER the persisted config. Nodes created
 			// while the full definition was unavailable are missing the hidden
 			// defaults (e.g. the `mode: "Source"` marker the DEVELOPMENT page
-			// keys on); explicit node values always win, so the merge only adds
-			// keys and is idempotent.
+			// keys on). Explicit values win; null placeholders for encrypted
+			// arrays are removed so they do not hide the saved entries.
 			const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-			const config = { ...(resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>), ...existing };
-			const configGrew = Object.keys(config).length !== Object.keys(existing).length;
+			const config = mergeFormDefaults(pipe.schema, resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>, existing);
+			const configChanged = !deepEquals(config, existing);
 
 			// hideForm/no-properties schemas render no config form: force valid
 			// (self-healing any stale persisted flag) instead of validating a
 			// form the user could never fill in.
 			const valid = hasConfigurableSchema(pipe) ? validateFormData(pipe.schema, config).errors.length === 0 : true;
-			if (configGrew || (data as any).formDataValid !== valid) {
+			if (configChanged || (data as any).formDataValid !== valid) {
 				changed = true;
 				return { ...node, data: { ...data, config, formDataValid: valid } };
 			}

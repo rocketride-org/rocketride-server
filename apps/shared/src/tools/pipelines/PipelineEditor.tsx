@@ -359,7 +359,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		try {
 			const client = ConnectionManager.getInstance().getClient();
 			if (!client) return { errors: [], warnings: [] };
-			return await client.validate(pipeline);
+			return await client.validate({ pipeline });
 		} catch {
 			return { errors: [], warnings: [] };
 		}

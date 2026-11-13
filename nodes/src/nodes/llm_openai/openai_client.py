@@ -32,6 +32,18 @@ from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
 
+class _ResponsesChatOpenAI(ChatOpenAI):
+    """ChatOpenAI on the Responses API, for turns on reasoning models.
+
+    LangChain forwards a stream_usage kwarg into Responses.create, which rejects it; the
+    Responses stream reports usage on its own.
+    """
+
+    def _stream(self, *args, **kwargs):
+        kwargs.pop('stream_usage', None)
+        return super()._stream(*args, **kwargs)
+
+
 class Chat(ChatBase):
     """
     Create an OpenAI chat bot.
@@ -40,6 +52,8 @@ class Chat(ChatBase):
     # Reasoning-capable models route through the OpenAI Responses API so we can
     # stream the reasoning summary as well as the answer.
     SUPPORTS_REASONING_STREAMING = True
+    SUPPORTS_NATIVE_TOOLS = True
+    _responses_llm = None
 
     _llm: ChatOpenAI
 
@@ -77,6 +91,23 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _turn_llm(self) -> ChatOpenAI:
+        # Reasoning models take turns on the Responses API, stateless (store=False), so their
+        # encrypted reasoning rides back in the conversation between tool calls.
+        if not self._is_reasoning:
+            return self._llm
+        if self._responses_llm is None:
+            self._responses_llm = _ResponsesChatOpenAI(
+                model=self._model,
+                api_key=self._apikey,
+                use_responses_api=True,
+                max_tokens=self._modelOutputTokens,
+                reasoning={'summary': 'auto'},
+                include=['reasoning.encrypted_content'],
+                store=False,
+            )
+        return self._responses_llm
 
     def is_retryable_error(self, error):
         """

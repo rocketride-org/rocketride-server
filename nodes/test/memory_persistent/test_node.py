@@ -18,7 +18,7 @@ import math
 import sys
 import threading
 import time
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -558,16 +558,19 @@ class TestTTLEnforcement:
         assert backend.resume_session('forever')['ok'] is True
 
     def test_ttl_from_store_config_preserves_fractional_seconds(self):
-        store = PersistentMemoryStore(backend='memory', session_ttl_hours=0.0001)  # ~0.36 seconds
-        assert math.isclose(store._ttl_seconds, 0.36)
-        store.create_session('s1')
-        store.put('s1', 'k', 'v')
-        # Should be accessible immediately
-        assert store.resume_session('s1')['ok'] is True
-        time.sleep(0.45)
-        result = store.resume_session('s1')
-        assert result['ok'] is False
-        assert 'expired' in result['error']
+        now = [1000.0]
+        with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+            fake_time.time = lambda: now[0]
+            store = PersistentMemoryStore(backend='memory', session_ttl_hours=0.0001)  # ~0.36 seconds
+            assert math.isclose(store._ttl_seconds, 0.36)
+            store.create_session('s1')
+            store.put('s1', 'k', 'v')
+            # Should be accessible immediately
+            assert store.resume_session('s1')['ok'] is True
+            now[0] += 0.45
+            result = store.resume_session('s1')
+            assert result['ok'] is False
+            assert 'expired' in result['error']
 
 
 # =============================================================================

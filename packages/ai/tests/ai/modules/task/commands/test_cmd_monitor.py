@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from rocketride import EVENT_TYPE
+from rocketride import EVENT_TYPE, TASK_STATE
 from ai.modules.task.commands.cmd_monitor import MonitorCommands
 
 
@@ -288,6 +288,68 @@ async def test_send_updates_no_new_bits_is_noop():
     conn = _make_conn()
     await MonitorCommands._send_updates(conn, None, EVENT_TYPE.SUMMARY, EVENT_TYPE.SUMMARY)
     conn.send_event.assert_not_called()
+
+
+def _deny_monitor(perm):
+    """Stand in for verify_permission on a credential that lacks task.monitor."""
+    if perm == 'task.monitor':
+        raise PermissionError(f'Permission {perm!r} denied')
+
+
+def _running_control():
+    """Build the caller's own running dev run, registered on a server stub."""
+    control = _control()
+    control.task = MagicMock()
+    control.task.get_status = MagicMock(return_value=SimpleNamespace(state=TASK_STATE.RUNNING.value, name='My run'))
+    server = MagicMock()
+    server._task_control = {'tk_1': control}
+    return control, server
+
+
+@pytest.mark.asyncio
+async def test_send_updates_summary_withheld_without_monitor_permission():
+    """Without task.monitor, a newly-enabled SUMMARY bit sends no snapshot of the running task."""
+    control, server = _running_control()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_permission = MagicMock(side_effect=_deny_monitor)
+
+    # project_id/source are given too: a running task must not fall through
+    # to the "not running" state either.
+    await MonitorCommands._send_updates(
+        conn, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY, project_id='proj-1', source='src-1'
+    )
+
+    conn.verify_permission.assert_called_with('task.monitor')
+    control.task.get_status.assert_not_called()
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_updates_task_list_withheld_without_monitor_permission():
+    """Without task.monitor, a newly-enabled TASK bit sends no active-task list."""
+    control, server = _running_control()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_permission = MagicMock(side_effect=_deny_monitor)
+
+    await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.TASK)
+
+    conn.verify_permission.assert_called_with('task.monitor')
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_updates_task_list_sent_with_monitor_permission():
+    """With task.monitor, a newly-enabled TASK bit lists the caller's active runs."""
+    control, server = _running_control()
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.TASK)
+
+    conn.send_event.assert_awaited_once()
+    _, kwargs = conn.send_event.await_args
+    assert kwargs['event'] == 'apaevt_task'
+    assert kwargs['body']['action'] == 'running'
+    assert [task['id'] for task in kwargs['body']['tasks']] == ['task-1']
 
 
 # ---------------------------------------------------------------------------

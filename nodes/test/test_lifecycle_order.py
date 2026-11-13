@@ -34,19 +34,17 @@ algorithm; this covers the binding that consumes it, which is where a silent
 regression would live: drop the guard in `bindFilters` and every unit test still
 passes while a join starts losing a branch's flush-time output.
 
-The pipeline is a diamond of buffer-and-flush nodes - `prompt` forwards what it
-is written straight away AND accumulates it, emitting the merged question only
-on `closing()`:
+The pipeline is a diamond of buffer-and-flush nodes - `prompt` accumulates what
+it is written and emits the merged question only on `closing()`:
 
     webhook -> branch_a -\\
     webhook -> branch_b --> join -> response
 
-So each branch reaches the join twice: once forwarded at write time, once when
-the branch flushes. The join's own merged question therefore holds exactly two
-entries per branch. If the join were flushed before a branch (declaration order
-instead of dependency order), that branch's flush would land on an
-already-flushed join and be dropped, leaving the join's merge one entry short
-per late branch.
+So each branch reaches the join once, when the branch flushes. The join's own
+merged question therefore holds exactly one entry per branch. If the join were
+flushed before a branch (declaration order instead of dependency order), that
+branch's flush would land on an already-flushed join and be dropped, leaving
+the join's merge one entry short per late branch.
 
 No LLM, agent or mock is involved: `prompt` merges locally, so the run is
 deterministic.
@@ -94,9 +92,9 @@ COMPONENTS = [
     },
 ]
 
-# Each branch reaches the join twice - forwarded when it is written, and again
-# when it flushes - so the join's merged question holds two entries per branch.
-EXPECTED_JOIN_ENTRIES = 4
+# Each branch reaches the join once, when it flushes, so the join's merged
+# question holds one entry per branch.
+EXPECTED_JOIN_ENTRIES = 2
 
 
 def _diamond_pipeline() -> dict:
@@ -146,7 +144,8 @@ async def test_join_flushes_after_every_branch(client):
 
     merged = _join_merge_size(response)
     assert merged == EXPECTED_JOIN_ENTRIES, (
-        f'the join merged {merged} entries, expected {EXPECTED_JOIN_ENTRIES} (two per '
-        f'branch: forwarded + flushed) - a branch flushed after the join, so its '
-        f'flush-time output was dropped. Response: {response!r}'
+        f'the join merged {merged} entries, expected {EXPECTED_JOIN_ENTRIES} (one per '
+        f'branch, at flush) - a branch flushed after the join, so its flush-time '
+        f'output was dropped, or a branch forwarded its raw input too. '
+        f'Response: {response!r}'
     )

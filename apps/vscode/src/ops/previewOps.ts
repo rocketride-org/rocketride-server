@@ -29,6 +29,7 @@ import { runListingPreflight } from 'shared/tools/appdev/preflight';
 import { probePackage } from 'shared/tools/appdev/compatProbe';
 import { getDevSessionManager } from '../appdev/devSessionManager';
 import { deployApp } from '../appdev/publish';
+import { adoptDeveloperId } from '../appdev/adoptDeveloperId';
 import { getLogger } from '../shared/util/output';
 import { signInPreview } from '../auth/previewAuth';
 import { ConfigManager } from '../config';
@@ -36,6 +37,10 @@ import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
 import type { IRetainedRegistry } from 'shell/src/ops/retained';
 import type { PreviewHostOpMap, AppBuilderLoadPayload } from 'shared/ops/previewOps';
+
+/** Longest wait for each server check before a move: a silent server fails
+ *  the move instead of holding the request open. */
+const SERVER_CHECK_TIMEOUT_MS = 10_000;
 
 /** What the registration needs from the extension. */
 interface IAppBuilderOpsDeps {
@@ -72,6 +77,30 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			throw new Error('Path escapes the app folder.');
 		}
 		return abs;
+	};
+
+	/**
+	 * Replaces the App Builder tab of a renamed app with one on its new id.
+	 * The tab's document (the folder's .rrapp trigger) keeps its path, so the
+	 * old tab must close first or VS Code would only reveal it. The old dev
+	 * server stops right away (not after the closed-panel linger) so the new
+	 * one gets the app's port.
+	 */
+	const reopenRenamed = async (folder: string, oldId: string, newId: string): Promise<void> => {
+		await getDevSessionManager()?.stop(oldId, { immediate: true });
+		const folderKey = vscode.Uri.file(folder).fsPath;
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => tab.input instanceof vscode.TabInputCustom && tab.input.viewType === 'rocketride.appBuilder' && path.dirname(tab.input.uri.fsPath) === folderKey);
+		const document = tabs.length > 0 ? (tabs[0].input as vscode.TabInputCustom).uri : undefined;
+		const column = tabs.length > 0 ? tabs[0].group.viewColumn : undefined;
+		if (tabs.length > 0) await vscode.window.tabGroups.close(tabs);
+		if (document) {
+			// Same document, same editor column: it now resolves to the new id.
+			await vscode.commands.executeCommand('vscode.openWith', document, 'rocketride.appBuilder', column);
+		} else {
+			await vscode.commands.executeCommand('rocketride.app.open', newId);
+		}
 	};
 
 	/**
@@ -167,6 +196,30 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			// next deploy packs it as metadata.manifest).
 			const app = await resolveApp(p.app);
 			saveAppListing(app.folder, p.draft);
+		},
+
+		'host.preview.adoptDeveloperId': async (p) => {
+			// The checks and the rewrite live in adoptDeveloperId (tested);
+			// this wires them to the server, the workspace and the editor.
+			const client = connectionManager.getClient();
+			if (!client) throw new Error('Not connected to server');
+			const result = await adoptDeveloperId(p.app, p.developerId, {
+				developerStatus: async () => (await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.developerId ?? '',
+				versionsOf: async (appId) => (await client.call<{ versions?: unknown[] } | undefined>('rrext_deploy_app', { subcommand: 'versions', appId }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.versions?.length ?? 0,
+				scan: () => scanWorkspaceApps(hostWorkspaceFs),
+				dirtyPaths: (paths) => {
+					const keys = paths.map((f) => vscode.Uri.file(f).fsPath);
+					return vscode.workspace.textDocuments.filter((d) => d.isDirty && keys.includes(d.uri.fsPath)).map((d) => d.uri.fsPath);
+				},
+			});
+			for (const line of result.changes) getLogger().output(`[appdev] ${line}`);
+			// After this reply: the panel that asked is the one being replaced.
+			setTimeout(() => {
+				reopenRenamed(result.folder, p.app, result.appId).catch((err) => {
+					void vscode.window.showErrorMessage(`The app is now ${result.appId}, but the App Builder could not reopen: ${err instanceof Error ? err.message : String(err)}`);
+				});
+			}, 0);
+			return { appId: result.appId };
 		},
 
 		'host.preview.preflight': async (p) => {

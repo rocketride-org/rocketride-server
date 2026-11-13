@@ -42,7 +42,7 @@ APUTIL_DEFINE_ENUM(
     Write, HandleInvalid, HandleInvalidSeq, HandleInvalidState,
     HandleOutOfSlots, TagInvalidClass, TagInvalidFileSig, TagInvalidHdr,
     TagInvalidSig, TagInvalidSize, TagInvalidType, PackInvalidSig, PackInvalid,
-    Lz4Inflate, Lz4Deflate, LicenseLimit, InvalidFilename);
+    Lz4Inflate, Lz4Deflate, LicenseLimit, InvalidFilename, Crash);
 
 ROCKETRIDE_CORE_API ErrorCode make_error_code(Ec code) noexcept;
 

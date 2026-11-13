@@ -972,6 +972,28 @@ updateAppState((prev) => ({ ...prev, lastQuery: 'foo' }));
 The Documents system can bind to it for automatic persistence of open
 documents and layout — see [The Documents System](#the-documents-system).
 
+### Data in the RocketRide cloud databases
+
+Tables your app's pipelines write with `rocketride_sql`, `rocketride_vector`
+or `rocketride_graph` belong to the organization, team or member the run
+belongs to, never to the app:
+
+- Each organization has one database shared by its members, plus one per
+  team and one personal database per member. A store app's pipelines run in
+  the organization of the person using the app, so its data lands in that
+  organization's databases, not the publisher's.
+- There is no database or schema per app: every app using the same database
+  can read, change and drop the other apps' tables in its `public` schema, so
+  prefix your table names.
+- Uninstalling the app, or ending its subscription, leaves its tables in
+  place. Only a member leaving, a team being deleted or an organization being
+  deleted retains a database; after 30 days it is dumped and deleted.
+- Each database runs up to 6 transactions at once on RocketRide Cloud; there
+  are no storage, table or query-rate quotas. Backups cover the whole cluster
+  only, and there is no export: read data out through the nodes.
+
+Full rules: https://docs.rocketride.org/operate/cloud-databases
+
 ### The two-phase startup: `seeded` vs `loaded`
 
 1. **Seeded** (`seeded = true`, `loaded = false`): the workspace holds
@@ -1031,8 +1053,8 @@ before authoring the `.pipe` content itself, and
 
 **Catalog nodes only.** A store app's pipelines may use only catalog nodes:
 the nodes that ship with the engine (`nodes/src/nodes` in the server repo;
-the node catalog on the docs site). A custom node (`local_nodes`, loaded
-with `--node_path`) exists only on the engine that loads it. RocketRide
+the node catalog on the docs site). A custom node (written into an
+engine's `nodes/` directory) exists only on that engine. RocketRide
 Cloud loads none, and also refuses the few catalog nodes marked `nosaas`,
 so being in the catalog is necessary, not sufficient. Store reviewers
 reject a submission whose pipelines reference a provider outside the
@@ -1040,7 +1062,7 @@ catalog, and nothing before review checks it: the Package and Store
 preflights do not read `.pipe` providers, and
 `.rocketride/services-catalog.json` mirrors whichever engine the workspace
 last synced from, local nodes included, so on a self-hosted engine with
-`--node_path` that file is not the catalog. Decide this before building.
+custom nodes that file is not the catalog. Decide this before building.
 If the catalog has no node for a step, keep that logic in the app (the app
 already sends documents, controls pipes and makes decisions), or give an
 agent step bounded Python through `tool_python` (sandboxed: allowlisted
@@ -1093,19 +1115,20 @@ your app calls `use()`, the owner is the signed-in **user**. So every user
 of your app gets their own instance of the pipeline, automatically.
 `useExisting` does not change that: it attaches to *that user's* own
 already-running instance (a reload, a second tab, a second component)
-instead of failing with 'Pipeline is already running.' — with the default
+instead of failing with 'Pipeline is already running' — with the default
 token it never crosses user boundaries. (A custom token is looked up by its
 value alone; see below.)
 
 To run two instances of one pipeline for the same user at once (a second
 tab, say), give each `use()` its own `token`: the server then keys the task
 on that token instead of the hash. Use an unguessable value that keeps the
-`tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
+`tk_` prefix (`tk_` plus a UUID, for example; a `tk_` token with fewer than 32
+letters, digits, `-` or `_` after the prefix is refused): the value is the run's private
 token (full control for anyone who presents it), tokens share one namespace
 across every user of the server, and a token without the prefix cannot serve
-as a private token on webhook or dropper endpoints. With `useExisting`, a
-token that matches a running task attaches to it, whoever started it: one
-more reason the value must be unguessable. Keep the tokens you chose: both
+as a private token on webhook or dropper endpoints. A token that matches
+another owner's task is refused; with `useExisting`, one that matches your
+own running task attaches to it. Keep the tokens you chose: both
 instances get the same `pk_` public authorization key, and a webhook call or
 dropper upload that uses it always reaches the instance that started first
 (to send data to one specific instance, use its `tk_` token); `getTaskToken()`
@@ -1770,6 +1793,19 @@ banner. Claim a slug (letters and underscores, e.g. `acme_labs`); every app
 you deploy must be named `<developerId>.<name>` — the namespace guarantee:
 nobody outside your org can ever deploy into it.
 
+Registering is an org admin's step, happens once, and is permanent: the
+slug is the org's publisher identity, a different one later is refused, and
+`local` (the scaffold's fallback while the org has no id) is reserved. It
+exists on RocketRide Cloud only; a self-hosted server publishes under the
+fixed `rocketride` namespace. Without the App Builder, the npm CLI's
+`rocketride app developer status` shows whether it is done and `rocketride
+app developer register <id>` claims it (both use the deployment target,
+`ROCKETRIDE_DEPLOY_*`; the Python CLI does not have the `app developer`
+verbs yet, so use the SDK calls); in code, `client.developerStatus()` and
+`client.registerDeveloper(id)` (Python: `developer_status()` and
+`register_developer(id)`). Deploying from an org with no developer id fails
+with "requires a registered developer id" and names the same ways.
+
 ### Deploy — the "+ Deploy" card
 
 Clicking **Deploy** ("snapshot the current build to the server") asks for
@@ -1791,6 +1827,10 @@ While the server works, the version card shows a live build ticker
 (`uploaded`, `installing`, `checking`, `building`, ...). On success it
 clears; on failure the card gets a **failed** badge that is a door — click
 it to open the full phase-by-phase build log, failure reason at the end.
+The Dashboard's status card opens the same log with **View build log**. An
+app whose builds have all failed is missing from the shell, so opening it
+shows your organization a screen that names
+`rocketride deploy log <appId> <version>` instead of "App not found".
 
 A fresh deployment is born **private**: it exists in your org's registry,
 can be published internally, and is invisible to everyone else.
