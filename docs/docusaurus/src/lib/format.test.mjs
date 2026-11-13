@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatStars, markdownUrl, isExternal } from './format.mjs';
+import { formatStars, markdownUrl, isExternal, withTrailingSlash } from './format.mjs';
 
 describe('formatStars', () => {
 	it('renders counts under 1000 verbatim', () => {
@@ -36,5 +36,22 @@ describe('isExternal', () => {
 
 	it('is false for internal routes', () => {
 		assert.equal(isExternal('/quickstart'), false);
+	});
+});
+
+describe('withTrailingSlash', () => {
+	it('adds a slash to a URL that has none', () => {
+		assert.equal(withTrailingSlash('https://docs.rocketride.org/quickstart'), 'https://docs.rocketride.org/quickstart/');
+	});
+
+	it('leaves a URL that already ends with a slash unchanged', () => {
+		assert.equal(withTrailingSlash('https://docs.rocketride.org/quickstart/'), 'https://docs.rocketride.org/quickstart/');
+	});
+
+	it('returns a value that is not a string as it is', () => {
+		assert.equal(withTrailingSlash(undefined), undefined);
+		assert.equal(withTrailingSlash(null), null);
+		const obj = { a: 1 };
+		assert.equal(withTrailingSlash(obj), obj);
 	});
 });

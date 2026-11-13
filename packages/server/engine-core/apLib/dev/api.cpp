@@ -71,9 +71,9 @@ void deRegisterFatalityHandler(size_t slot) noexcept {
     g_fatalityHandlers.erase(slot);
 }
 
-void onFatality(Location location, std::string_view reason) noexcept {
+void onFatality(Location location, const Error &ccode) noexcept {
     auto handlers = g_fatalityHandlers;
-    for (auto &[slot, handler] : handlers) _call(handler, location, reason);
+    for (auto &[slot, handler] : handlers) _call(handler, location, ccode);
 }
 
 Text &crashDumpPrefix() noexcept {

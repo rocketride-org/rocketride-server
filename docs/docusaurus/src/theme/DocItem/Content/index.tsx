@@ -14,7 +14,7 @@ import { markdownUrl } from '../../../lib/format.mjs';
  * Renders the doc title ourselves so the View/Copy-as-Markdown controls can sit
  * directly beneath it (Docusaurus' default puts the title inside the MDX body,
  * leaving no DOM seam between it and the content). The body's leading `# Title`
- * is hidden via CSS (`.rr-doc-header + h1`) to avoid a duplicate heading.
+ * is removed at build time (`src/lib/remark-strip-title.mjs`) to avoid a duplicate heading.
  *
  * @param props - The doc's MDX `children`.
  * @return The markdown container with a custom header and the rendered content.

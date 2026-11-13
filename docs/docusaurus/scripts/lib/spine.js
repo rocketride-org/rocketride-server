@@ -32,6 +32,7 @@ const SPINE = [
 		label: 'Get Started',
 		items: [
 			{ id: 'quickstart', label: 'Overview' },
+			{ id: 'quickstart/coding-agents', label: 'Use from a coding agent' },
 			{ id: 'quickstart/ide-walkthrough', label: 'Build in your IDE' },
 			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' },
 			{ id: 'quickstart/cli', label: 'Run from the CLI' },
@@ -106,6 +107,7 @@ const SPINE = [
 		items: [
 			{ id: 'operate', label: 'Choose How to Run' },
 			{ id: 'operate/cloud', label: 'Cloud' },
+			{ id: 'operate/cloud-databases', label: 'Cloud Databases' },
 			{
 				label: 'Self-hosting',
 				items: [

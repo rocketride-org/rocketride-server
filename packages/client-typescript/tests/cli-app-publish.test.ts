@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { RocketRideClient } from '../src/client/client';
 import { findApp } from '../src/app-pack/index';
 import * as common from '../src/cli/common';
 import { executeAppDeploy, executeAppPublish, executeAppReply, executeAppReview, executeAppUnbind, normalizePublishTarget, splitAppVersion } from '../src/cli/commands/app';
@@ -100,6 +101,28 @@ function stubClient(overrides: Record<string, unknown> = {}) {
 }
 
 const target = { uri: 'https://deploy.test', apikey: 'k' };
+
+describe('connectDeploy hard stop', () => {
+	it('stops early on an empty or blank key, naming the deploy variable and --apikey', async () => {
+		const connect = jest.spyOn(RocketRideClient.prototype, 'connect').mockResolvedValue(undefined as never);
+		for (const apikey of ['', '   ', undefined]) {
+			errors.length = 0;
+			const out = new Output(undefined);
+			expect(await common.connectDeploy({ uri: 'https://deploy.test', apikey }, out)).toBeNull();
+			expect(errors.join('\n')).toContain('ROCKETRIDE_DEPLOY_APIKEY');
+			expect(errors.join('\n')).toContain('--apikey');
+		}
+		expect(connect).not.toHaveBeenCalled();
+	});
+
+	it('passes a set key through to the client', async () => {
+		const connect = jest.spyOn(RocketRideClient.prototype, 'connect').mockResolvedValue(undefined as never);
+		const out = new Output(undefined);
+		expect(await common.connectDeploy({ uri: 'https://deploy.test', apikey: 'k' }, out)).not.toBeNull();
+		expect(connect).toHaveBeenCalledTimes(1);
+		expect(errors).toEqual([]);
+	});
+});
 
 describe('argument helpers', () => {
 	it('splitAppVersion reads a lone number as the version', () => {

@@ -391,6 +391,15 @@ export interface IAppBuilderHost {
 	/** Claim the org's developer id slug (org.admin, self-service — letters and
 	 * underscore only). Returns the assigned slug. */
 	registerDeveloper?: (developerId: string) => Promise<string>;
+	/** Move a `local.<name>` app into the org's developer namespace: rewrite
+	 * its id to `<developerId>.<name>` in the app's files (package.json, the
+	 * .rrapp trigger, src/AppDescriptor.ts). `developerId` is the id the user
+	 * confirmed; the host refuses when the org's id on the server differs or
+	 * the new id is already taken. Resolves once the files are written; the
+	 * host then reopens the App Builder on the new id, which disposes the
+	 * calling panel. Server records are untouched. Absent = the banner keeps
+	 * the hand-edit instruction. */
+	adoptDeveloperId?: (developerId: string) => Promise<void>;
 
 	// ── Dashboard ────────────────────────────────────────────────────────
 	/** Load the app's full deployment history, oldest first — the ONE fetch

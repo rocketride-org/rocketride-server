@@ -28,6 +28,7 @@ patch lands they fail; after it lands they pass.
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -290,23 +291,95 @@ async def test_dataconn_init_with_server_target_None_does_not_AttributeError():
         await conn.disconnect()
 
 
-async def test_dataconn_ensure_pipe_sem_defaults_thread_count_when_target_None(monkeypatch):
-    """When `_ensure_pipe_sem` runs with no target bound, _thread_count falls back to 4."""
+async def test_dataconn_ensure_pipe_sem_fails_when_target_never_bound(monkeypatch):
+    """A source that never binds `state.target` ends the wait with a clear error and no semaphore."""
     from ai.modules.data import data_conn as data_conn_mod
     from ai.modules.data.data_conn import DataConn
 
-    # Dial down the wait so the test doesn't block 5s on the missing target.
-    monkeypatch.setattr(data_conn_mod, 'CONST_DATA_OPEN_TARGET_WAIT', 0.05)
+    # Dial down the bound so the test does not wait the real time.
+    monkeypatch.setattr(data_conn_mod, 'CONST_DATA_OPEN_TARGET_WAIT', 0.2)
+    monkeypatch.setattr(data_conn_mod, 'isCancelled', lambda: False)
 
     server_mock = MagicMock()
     server_mock._target = None
-    transport_mock = MagicMock()
-    conn = DataConn(server=server_mock, transport=transport_mock)
+    conn = DataConn(server=server_mock, transport=MagicMock())
     try:
-        # Deferred: not set at __init__ — only after _ensure_pipe_sem.
-        assert conn._thread_count is None
-        await conn._ensure_pipe_sem()
-        assert conn._thread_count == 4
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='did not become ready'):
+            await conn._ensure_pipe_sem()
+        assert time.monotonic() - started >= 0.2
+        assert conn._pipe_sem is None
+    finally:
+        await conn.disconnect()
+
+
+async def test_dataconn_wait_for_target_fails_fast_when_task_is_cancelled(monkeypatch):
+    """A task that stops while the open waits ends the wait at once, well before the bound."""
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConn
+
+    monkeypatch.setattr(data_conn_mod, 'CONST_DATA_OPEN_TARGET_WAIT', 30.0)
+    cancelled = {'value': False}
+    monkeypatch.setattr(data_conn_mod, 'isCancelled', lambda: cancelled['value'])
+
+    server_mock = MagicMock()
+    server_mock._target = None
+    conn = DataConn(server=server_mock, transport=MagicMock())
+    try:
+
+        async def _cancel_soon():
+            await asyncio.sleep(0.1)
+            cancelled['value'] = True
+
+        canceller = asyncio.create_task(_cancel_soon())
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='task stopped'):
+            await conn._wait_for_target()
+        assert time.monotonic() - started < 5
+        await canceller
+    finally:
+        await conn.disconnect()
+
+
+async def test_dataconn_wait_for_target_fails_fast_when_connection_closes(monkeypatch):
+    """A connection that closes while the open waits ends the wait at once."""
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConn
+
+    monkeypatch.setattr(data_conn_mod, 'CONST_DATA_OPEN_TARGET_WAIT', 30.0)
+    monkeypatch.setattr(data_conn_mod, 'isCancelled', lambda: False)
+
+    server_mock = MagicMock()
+    server_mock._target = None
+    conn = DataConn(server=server_mock, transport=MagicMock())
+    try:
+        asyncio.get_running_loop().call_later(0.1, conn._shutdown_event.set)
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match='task stopped'):
+            await conn._wait_for_target()
+        assert time.monotonic() - started < 5
+    finally:
+        await conn.disconnect()
+
+
+async def test_dataconn_concurrent_opens_wait_side_by_side_for_late_target(monkeypatch):
+    """Several opens that arrive before the target is bound all succeed once it binds."""
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConn
+
+    monkeypatch.setattr(data_conn_mod, 'isCancelled', lambda: False)
+
+    server_mock = MagicMock()
+    server_mock._target = None
+    conn = DataConn(server=server_mock, transport=MagicMock())
+    try:
+        target = MagicMock()
+        target.taskConfig = {'threadCount': 3}
+        asyncio.get_running_loop().call_later(0.2, lambda: setattr(server_mock, '_target', target))
+
+        sems = await asyncio.wait_for(asyncio.gather(*(conn._ensure_pipe_sem() for _ in range(3))), timeout=5)
+        assert sems[0] is sems[1] is sems[2]
+        assert conn._thread_count == 3
     finally:
         await conn.disconnect()
 

@@ -21,9 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-# Require 3.16 for the built-in unity support
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-
 # Upstream BoostConfig.cmake package config
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
@@ -117,8 +114,6 @@ function(rocketride_set_common_target_options target)
     endif()
 
     target_compile_definitions(${target} PRIVATE -DBUILD_${PRIVATE_DEF})
-
-    set_target_properties(${target} PROPERTIES CXX_STANDARD 20)
 
 endfunction()
 
