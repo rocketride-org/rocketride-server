@@ -56,9 +56,11 @@ def _write(root, files):
 class _Registry:
     """Just enough of the account for the seeder: rows newest-first, publish captured."""
 
-    def __init__(self, rows=None, public=None):
+    def __init__(self, rows=None, public=None, state='enabled'):
         self.rows = list(rows or [])
         self.public = public
+        self.state = state
+        self.state_flips = []
         self.published = []
         self.build_stamps = []
         self.bindings = []
@@ -79,10 +81,18 @@ class _Registry:
         return {}
 
     async def publish_get(self, org_id, kind, app_id, audience):
-        return None if self.public is None else {'version': self.public, 'state': 'enabled'}
+        return None if self.public is None else {'version': self.public, 'state': self.state}
 
     async def publish_set(self, org_id, kind, app_id, audience, version, snapshot, actor):
+        # Like the real backend: (re)binding always writes the row 'enabled'.
         self.bindings.append(version)
+        self.public = version
+        self.state = 'enabled'
+        return {}
+
+    async def publish_set_state(self, org_id, kind, app_id, audience, state, actor):
+        self.state_flips.append(state)
+        self.state = state
         return {}
 
 
@@ -295,3 +305,68 @@ async def test_without_a_local_bundle_there_is_nothing_to_reseed_from(static_app
     registry = _Registry([_seed_row('0' * 64)])
 
     assert await bundle_changed(registry, 'org', ENTRY) is False
+
+
+# =============================================================================
+# forced reseed keeps an admin's disabled public binding disabled
+# =============================================================================
+
+
+@pytest.fixture
+def copies_bundle(static_apps, monkeypatch):
+    """A local bundle plus a bundle copy that always lands bytes."""
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+
+    async def copied(app_id, artifact_path):
+        return 1
+
+    monkeypatch.setattr(seed_apps, 'copy_bundle_to_store', copied)
+
+
+@pytest.mark.asyncio
+async def test_a_forced_reseed_keeps_a_disabled_binding_disabled(copies_bundle):
+    registry = _Registry([_seed_row('0' * 64)], public=1, state='disabled')
+
+    assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, force=True) is True
+    assert registry.bindings == [2]
+    assert registry.public == 2
+    assert registry.state == 'disabled'
+
+
+@pytest.mark.asyncio
+async def test_a_changed_bundle_reseed_keeps_a_disabled_binding_disabled(copies_bundle):
+    registry = _Registry([_seed_row('0' * 64)], public=1, state='disabled')
+
+    assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, reseed_changed=True) is True
+    assert registry.bindings == [2]
+    assert registry.state == 'disabled'
+
+
+@pytest.mark.asyncio
+async def test_a_forced_reseed_leaves_an_enabled_binding_enabled(copies_bundle):
+    registry = _Registry([_seed_row('0' * 64)], public=1)
+
+    assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, force=True) is True
+    assert registry.bindings == [2]
+    assert registry.state == 'enabled'
+    assert registry.state_flips == []
+
+
+@pytest.mark.asyncio
+async def test_a_forced_reseed_with_a_repoint_hook_leaves_the_state_to_the_hook(copies_bundle):
+    registry = _Registry([_seed_row('0' * 64)], public=1, state='disabled')
+    repoints = []
+
+    async def repoint_latest(app_id, old_latest, new_version, snapshot):
+        repoints.append((app_id, old_latest, new_version))
+
+    assert (
+        await seed_manifest_app(
+            registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR, force=True, repoint_latest=repoint_latest
+        )
+        is True
+    )
+    assert repoints == [(APP_ID, 1, 2)]
+    assert registry.bindings == []
+    assert registry.state_flips == []
+    assert registry.state == 'disabled'

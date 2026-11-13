@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.5 — never edit by hand
 // =============================================================================
 // Floor key:     1.5 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: d9d9a002f71427705d9df4f5a0201d99090d1565
+// Source commit: b76848a6fd325981d2f4cf719b2ff1f519d04e9e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1974,6 +1974,22 @@ export interface ServerInfoResult {
      * Absent on servers without billing (OSS).
      */
     stripePublishableKey?: string;
+    /**
+     * PostHog project token (`phc_*`) configured on this server.
+     *
+     * Lets the shell initialise product telemetry with the key matching
+     * this environment instead of a build-time value; apps never carry a
+     * key at all. Absent on servers without telemetry (OSS) — telemetry is
+     * then structurally off. Always accompanied by {@link ServerInfoResult.posthogHost}.
+     */
+    posthogPublishableKey?: string;
+    /**
+     * The analytics ingestion address telemetry requests go to.
+     *
+     * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
+     * is; defaults server-side to the managed analytics proxy.
+     */
+    posthogHost?: string;
     /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
@@ -4020,6 +4036,7 @@ export interface DatabaseLike {
     }): Promise<{
         rows: Record<string, unknown>[];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     /** Begin a database transaction. */
     beginTransaction(options: {
@@ -4064,6 +4081,7 @@ export interface DrizzleDatabaseLike {
     }): Promise<{
         rows: unknown[][];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     query(options: {
         token: string;
@@ -4075,6 +4093,7 @@ export interface DrizzleDatabaseLike {
     }): Promise<{
         rows: Record<string, unknown>[];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     query(options: {
         token: string;
@@ -4086,6 +4105,7 @@ export interface DrizzleDatabaseLike {
     }): Promise<{
         rows: unknown[][] | Record<string, unknown>[];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     /** Begin a database transaction. */
     beginTransaction(options: {
@@ -4154,7 +4174,7 @@ export declare class DatabaseApi {
      *   objects keyed by column name; `'array'` returns positional arrays
      *   (column order preserved, duplicate column names kept) — the shape ORM
      *   drivers such as Drizzle require.
-     * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
+     * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number); `graph_falkordb` adds `truncated: true` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`.
      */
     query(options: {
         token: string;
@@ -4166,6 +4186,7 @@ export declare class DatabaseApi {
     }): Promise<{
         rows: unknown[][];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     query(options: {
         token: string;
@@ -4177,6 +4198,7 @@ export declare class DatabaseApi {
     }): Promise<{
         rows: Record<string, unknown>[];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     query(options: {
         token: string;
@@ -4188,6 +4210,7 @@ export declare class DatabaseApi {
     }): Promise<{
         rows: unknown[][] | Record<string, unknown>[];
         affected_rows: number;
+        truncated?: boolean;
     }>;
     /**
      * Begin a database transaction on a pipeline node.

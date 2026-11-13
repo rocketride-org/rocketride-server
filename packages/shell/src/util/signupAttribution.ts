@@ -22,35 +22,19 @@
 
 import { isEmbeddedDevShell } from './devGate';
 import { normalizeSignupProperties, type SignupProperties } from 'rocketride';
+import { CONSENT_KEY, parseConsent, privacySignalOn } from 'rocketride/analytics';
 
 /** Tab-scoped, single-use signup context retained across the native OAuth redirect. */
 export const SIGNUP_CONTEXT_KEY = 'rr:auth:signup';
 
-// Written by the SaaS consent banner in localStorage. Shared schema:
-// { v: 1, choice: 'accepted' | 'rejected', at: number (milliseconds since epoch) }.
-// Coordinate changes with rocketride-saas; this shell only reads the record.
-const CONSENT_STORAGE_KEY = 'rr_consent_v1';
-const CONSENT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
-const CONSENT_CLOCK_SKEW_MS = 60 * 1000;
 const MAX_STORED_CONTEXT_LENGTH = 2048;
 // Version of the OAuth state envelope `{ v, signup }` that carries a cookieless context.
 const SIGNUP_STATE_VERSION = 1;
 
-function isPrivacySignal(value: unknown): boolean {
-	return value === true || value === 1 || value === '1' || value === 'yes';
-}
-
 function hasPrivacySignal(): boolean {
-	try {
-		const browserNavigator = navigator as Navigator & { globalPrivacyControl?: unknown; msDoNotTrack?: unknown };
-		const browserWindow = window as Window & { doNotTrack?: unknown };
-		if (isPrivacySignal(browserNavigator.doNotTrack)) return true;
-		if (isPrivacySignal(browserNavigator.msDoNotTrack)) return true;
-		if (isPrivacySignal(browserNavigator.globalPrivacyControl)) return true;
-		return isPrivacySignal(browserWindow.doNotTrack);
-	} catch {
-		return true;
-	}
+	// The ONE privacy-signal read (rocketride/analytics): DNT, msDoNotTrack,
+	// window.doNotTrack and GPC are enumerated there, nowhere else.
+	return privacySignalOn();
 }
 
 /**
@@ -62,20 +46,14 @@ function hasPrivacySignal(): boolean {
 function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
 	let raw: string | null;
 	try {
-		raw = localStorage.getItem(CONSENT_STORAGE_KEY);
+		raw = localStorage.getItem(CONSENT_KEY);
 	} catch {
 		return null;
 	}
 	try {
-		const consent = JSON.parse(raw ?? 'null');
-		if (consent?.v !== 1) return 'undecided';
-		if (consent.choice !== 'accepted' && consent.choice !== 'rejected') return 'undecided';
-		if (typeof consent.at !== 'number') return 'undecided';
-		if (!Number.isFinite(consent.at)) return 'undecided';
-		const now = Date.now();
-		if (now - consent.at > CONSENT_LIFETIME_MS) return 'undecided';
-		if (consent.at > now + CONSENT_CLOCK_SKEW_MS) return 'undecided';
-		return consent.choice;
+		// The ONE consent-record parser (rocketride/analytics): key, version,
+		// TTL and clock-skew rules live there, nowhere else.
+		return parseConsent(raw, Date.now())?.choice ?? 'undecided';
 	} catch {
 		return 'undecided';
 	}

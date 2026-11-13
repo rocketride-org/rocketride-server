@@ -299,7 +299,7 @@ With `persist=True`, a dropped connection reconnects automatically using LINEAR 
 
 #### `staticmethod async RocketRideClient.get_server_info(uri: str, timeout: float = None) -> ServerInfoResult`
 
-Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey`, and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
+Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey`, optionally `posthogPublishableKey` + `posthogHost` (product-telemetry config; absent = telemetry off), and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
 
 ```python
 info = await RocketRideClient.get_server_info('localhost:5565')
@@ -959,7 +959,7 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Members:**
 
 - `async list_members(org_id: str) -> list[MemberRecord]`
-- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
+- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams that grants `task.control`; when the invitee's `role` is `'admin'` any org team qualifies, a `'member'` invitee still needs that grant on the chosen team. `invite_member` takes the same arguments, returns `None`, and is deprecated.
 - `async update_member_role(org_id: str, user_id: str, role: str) -> None`
 - `async remove_member(org_id: str, user_id: str) -> None`
 

@@ -26,6 +26,7 @@ import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
 import type { ShellApiV10 } from '../contract/versions/v10';
 import type { ShellApiV11 } from '../contract/versions/v11';
+import type { ShellApiV12 } from '../contract/versions/v12';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -846,6 +847,18 @@ import type { StopReason as Frozen_StopReason } from '../contract/versions/v11';
 import type { StopReason as Current_StopReason } from './api';
 import type { AnswerError as Frozen_AnswerError } from '../contract/versions/v11';
 import type { AnswerError as Current_AnswerError } from './api';
+import type { ConsentChoice as Frozen_ConsentChoice } from '../contract/versions/v12';
+import type { ConsentChoice as Current_ConsentChoice } from './api';
+import type { ConsentState as Frozen_ConsentState } from '../contract/versions/v12';
+import type { ConsentState as Current_ConsentState } from './api';
+import type { ConsentOrigin as Frozen_ConsentOrigin } from '../contract/versions/v12';
+import type { ConsentOrigin as Current_ConsentOrigin } from './api';
+import type { TelemetryProviderProps as Frozen_TelemetryProviderProps } from '../contract/versions/v12';
+import type { TelemetryProviderProps as Current_TelemetryProviderProps } from './api';
+import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v12';
+import type { ConsentApi as Current_ConsentApi } from './api';
+import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v12';
+import type { SdkLike as Current_SdkLike } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -872,6 +885,8 @@ const _floor_v10: ShellApiV10 = {} as ShellApiShape;
 void _floor_v10;
 const _floor_v11: ShellApiV11 = {} as ShellApiShape;
 void _floor_v11;
+const _floor_v12: ShellApiV12 = {} as ShellApiShape;
+void _floor_v12;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1696,3 +1711,15 @@ const _t_StopReason: Frozen_StopReason = {} as Current_StopReason;
 void _t_StopReason;
 const _t_AnswerError: Frozen_AnswerError = {} as Current_AnswerError;
 void _t_AnswerError;
+const _t_ConsentChoice: Frozen_ConsentChoice = {} as Current_ConsentChoice;
+void _t_ConsentChoice;
+const _t_ConsentState: Frozen_ConsentState = {} as Current_ConsentState;
+void _t_ConsentState;
+const _t_ConsentOrigin: Frozen_ConsentOrigin = {} as Current_ConsentOrigin;
+void _t_ConsentOrigin;
+const _t_TelemetryProviderProps: Frozen_TelemetryProviderProps = {} as Current_TelemetryProviderProps;
+void _t_TelemetryProviderProps;
+const _t_ConsentApi: Frozen_ConsentApi = {} as Current_ConsentApi;
+void _t_ConsentApi;
+const _t_SdkLike: Frozen_SdkLike = {} as Current_SdkLike;
+void _t_SdkLike;
