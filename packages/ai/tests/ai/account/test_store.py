@@ -903,6 +903,8 @@ class TestS3StoreMocked:
 
         with pytest.raises(StorageError, match='Could not connect to the endpoint URL') as exc_info:
             await store.read_bytes('test/fail.bin')
+        # The message names the call and its file, as the store's other errors do.
+        assert "S3Store.read_bytes('test/fail.bin') failed after 10 attempts" in str(exc_info.value)
 
         assert exc_info.value.__cause__ is failure
         assert mock_s3_client.get_object.call_count == STORE_MAX_RETRY_ATTEMPTS
@@ -1341,6 +1343,7 @@ class TestAzureBlobStoreMocked:
 
         with pytest.raises(StorageError, match='Connection reset') as exc_info:
             await store.read_bytes('test/fail.bin')
+        assert "AzureBlobStore.read_file('test/fail.bin') failed after 10 attempts" in str(exc_info.value)
 
         assert exc_info.value.__cause__ is failure
         assert mock_blob.download_blob.call_count == STORE_MAX_RETRY_ATTEMPTS
