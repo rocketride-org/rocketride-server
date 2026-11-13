@@ -19,8 +19,21 @@
 /** The namespace the scaffold uses when the org has no developer id. */
 export const LOCAL_NAMESPACE = 'local';
 
-/** Developer-id grammar (mirrors the scaffold and the server). */
-const DEVELOPER_RE = /^[a-z][a-z_]*$/;
+/** Developer-id grammar (mirrors the scaffold and the server): lowercase
+ *  letters and underscores, starting with a letter. The one client-side copy;
+ *  the New App wizard's field uses it too. */
+export const DEVELOPER_ID_RE = /^[a-z][a-z_]*$/;
+
+/**
+ * Client-side developer id shape check (the server has the final word, and
+ * also refuses the reserved {@link LOCAL_NAMESPACE}).
+ *
+ * @param developerId - The trimmed id.
+ * @returns True for lowercase letters and underscores, starting with a letter.
+ */
+export function isValidDeveloperId(developerId: string): boolean {
+	return DEVELOPER_ID_RE.test(developerId);
+}
 
 /**
  * The id a `local.*` app takes in the org's developer namespace.
@@ -31,7 +44,7 @@ const DEVELOPER_RE = /^[a-z][a-z_]*$/;
  *   or the developer id is missing, malformed, or `local` itself.
  */
 export function adoptedAppId(appId: string, developerId: string | null | undefined): string | null {
-	if (!developerId || developerId === LOCAL_NAMESPACE || !DEVELOPER_RE.test(developerId)) return null;
+	if (!developerId || developerId === LOCAL_NAMESPACE || !isValidDeveloperId(developerId)) return null;
 	const prefix = `${LOCAL_NAMESPACE}.`;
 	if (!appId.startsWith(prefix) || appId.length === prefix.length) return null;
 	return `${developerId}.${appId.slice(prefix.length)}`;

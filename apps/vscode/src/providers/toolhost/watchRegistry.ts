@@ -73,12 +73,18 @@ export class WatchRegistry {
 	private newestPage: string | undefined;
 
 	/** Every page ever seen, so a page whose watchers were all removed and
-	 *  that watches again is not mistaken for a new page boot. */
+	 *  that watches again is not mistaken for a new page boot. Bounded by one
+	 *  short entry per page boot for the extension's lifetime; it can't be
+	 *  pruned, because a dead page's late watch must still read as old. */
 	private seenPages = new Set<string>();
 
 	/** view:ready arrived before the new page's first watch: that watch
 	 *  retires every older page's watchers. */
 	private bootPending = false;
+
+	/** The newest page at the last view:ready (detects whether a new page
+	 *  watched in between). */
+	private newestAtLastBoot: string | undefined;
 
 	/**
 	 * Starts (or replaces) one subscription.
@@ -92,7 +98,9 @@ export class WatchRegistry {
 			this.seenPages.add(page);
 			this.newestPage = page;
 			if (this.bootPending) {
+				// This page completes the pending boot: it is now the booted page.
 				this.bootPending = false;
+				this.newestAtLastBoot = page;
 				this.dropOtherPages(page);
 			}
 		}
@@ -114,14 +122,23 @@ export class WatchRegistry {
 
 	/**
 	 * Page boot (view:ready): stops every subscription except the newest
-	 * page's, and leaves a boot pending so that, if the new page has not
-	 * watched yet, its first watch retires the rest.
+	 * page's. A boot is left pending only when no new page has watched since
+	 * the last view:ready (the new page's watch comes after this one); in the
+	 * usual order (watch, then view:ready) the new page is already the newest
+	 * and nothing is left to retire.
+	 *
+	 * Known limit: view:ready carries no page id, so if a page watches and is
+	 * then reloaded before its own view:ready, the next page's view:ready can't
+	 * tell the two apart, and that page's watchers linger until the next boot
+	 * (their events go to a page that ignores them; the live page is never
+	 * affected). Sending the page id with view:ready would close it.
 	 */
 	public resetForPageBoot(): void {
 		if (this.newestPage !== undefined) {
 			this.dropOtherPages(this.newestPage);
 		}
-		this.bootPending = true;
+		this.bootPending = this.newestPage === this.newestAtLastBoot;
+		this.newestAtLastBoot = this.newestPage;
 	}
 
 	/** Stops every subscription (provider teardown). */
@@ -130,9 +147,10 @@ export class WatchRegistry {
 		this.newestPage = undefined;
 		this.seenPages.clear();
 		this.bootPending = false;
+		this.newestAtLastBoot = undefined;
 	}
 
-	/** The live subscription keys, oldest first. */
+	/** The live subscription keys, oldest first (used by the tests). */
 	public keys(): string[] {
 		return [...this.watchers.keys()];
 	}

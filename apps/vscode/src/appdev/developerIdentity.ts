@@ -56,6 +56,19 @@ export interface IResolvedDeveloperId {
 	lookupError?: unknown;
 }
 
+/**
+ * The readable message of anything thrown.
+ *
+ * @param err - The caught value.
+ * @returns Its message when it is an Error, else its string form.
+ */
+export function messageOf(err: unknown): string {
+	if (err instanceof Error) {
+		return err.message;
+	}
+	return String(err);
+}
+
 /** Longest wait for the developer_status lookup before it counts as failed. */
 export const STATUS_TIMEOUT_MS = 10_000;
 
@@ -109,7 +122,7 @@ export class DeveloperIdentity {
 		} catch (err) {
 			// OSS servers always carry an id at login, so this is a SaaS lookup
 			// failure or timeout: keep why, show it up front, and let scaffolding refuse.
-			this.log?.(`developer_status lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+			this.log?.(`developer_status lookup failed: ${messageOf(err)}`);
 			return { ...fallback, lookupFailed: true, lookupError: err };
 		}
 	}
@@ -239,7 +252,7 @@ export function makeRegisterDeveloperHandler(deps: IRegisterHandlerDeps): (param
 			await deps.identity.register(params.developerId);
 		} catch (err) {
 			await deps.feed.refresh(true).catch((refreshErr: unknown) => {
-				deps.log?.(`identity refresh after a failed claim failed: ${refreshErr instanceof Error ? refreshErr.message : String(refreshErr)}`);
+				deps.log?.(`identity refresh after a failed claim failed: ${messageOf(refreshErr)}`);
 			});
 			throw err;
 		}
