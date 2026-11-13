@@ -751,11 +751,10 @@ async def robots_txt(request: Request):
     Serve ``/robots.txt`` — policy depends on the deployment mode.
 
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
-    sitemap, with one named group per rostered crawler (the roster that
-    also classifies requesters) plus ``*``; every group carries the same
-    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise (OSS,
-    self-hosted, desktop): a customer engine is not a marketing site —
-    tell crawlers to stay out entirely.
+    sitemap, with one named group per rostered crawler plus ``*``; every
+    group carries the same rule (RFC 9309), so the policy equals ``*``
+    alone. Otherwise (OSS, self-hosted, desktop): a customer engine is not
+    a marketing site — tell crawlers to stay out entirely.
 
     Args:
         request: Incoming HTTP request.
