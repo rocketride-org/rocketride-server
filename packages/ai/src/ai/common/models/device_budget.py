@@ -353,7 +353,6 @@ class DeviceBudget:
         self._queue: collections.deque = collections.deque()
         self._inside: List[Optional[float]] = []
         self._idle_allocated = 0.0
-        self._based = False
         self._loads = 0
         self._shared = False
         self._shared_since = 0.0
@@ -416,18 +415,20 @@ class DeviceBudget:
                 self._warm_warned = True
                 logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
 
-    def _load_started(self, base_mb: float, loads: int = 1) -> None:
-        """Note models starting to load in this process: the base stays as it is until they end.
+    def _load_started(self, base_mb: Optional[float], loads: int = 1) -> None:
+        """Note models starting to load in this process: from then on the base stays as it is until they end.
 
         Args:
-            base_mb: What the device held when the first of them started; the base of a guard that has none yet.
+            base_mb: What the device held when the first of them started, or ``None`` if not measured; an idle guard
+                takes it as its base, since what changed while it sat idle is no call's progress.
             loads: How many started.
         """
         if not self._gpu:
             return
         with self._cond:
-            if not self._based:
-                self._idle_allocated, self._based = base_mb, True
+            # the calls inside measure their progress from the base they entered with
+            if base_mb is not None and not self._inside and not self._loads:
+                self._idle_allocated = base_mb
             self._loads += loads
 
     def _load_ended(self, weights_mb: float) -> None:
@@ -519,7 +520,7 @@ class DeviceBudget:
             free, cache_free, allocated = self._probe()
             if not self._loads:
                 # a model loading now is partly allocated; its weights join the base when it ends
-                self._idle_allocated, self._based = allocated, True
+                self._idle_allocated = allocated
             if shared and cost_mb is not None and time.monotonic() - self._shared_since < SHARED_WAIT_S:
                 # the neighbour may still be draining the calls it admitted alone
                 return cost_mb <= free + cache_free - MARGIN_MB
@@ -572,10 +573,11 @@ def loading_model(load: Callable[[], Any]) -> Any:
     from what those calls take meanwhile, so the weights are counted from the loaded model's
     own tensors and added to the base of their device's guard when the load ends. Until then
     no guard takes its base again, which would take in part of the weights, so the part loaded
-    so far, like any other lasting allocation made meanwhile, still counts as progress of the
-    calls inside, as without this function. A guard made during the load takes what its
-    device held when the load started. A load that fails adds nothing. A failed measurement
-    is logged once and adds nothing either. With ``--modelserver`` the model is loaded as it is.
+    so far, like any other lasting allocation made meanwhile, counts as progress of the calls
+    inside until the load ends. A guard with no call inside when the load starts,
+    or made during it, takes what its device held at the start. A load that fails adds nothing.
+    A failed measurement is logged once and adds nothing either. With ``--modelserver`` the
+    model is loaded as it is.
 
     Args:
         load: Loads the model and returns it.
@@ -603,7 +605,7 @@ def _begin_load() -> None:
             _load_base.update(_measure(_allocated_mb))
         _loads += 1
         for budget in _budgets.values():
-            budget._load_started(_load_base.get(budget.device, 0.0))
+            budget._load_started(_load_base.get(budget.device))
 
 
 def _end_load(sizes: Dict[str, float]) -> None:
@@ -772,5 +774,5 @@ def _new_budget(device: str) -> DeviceBudget:
     """
     budget = DeviceBudget(device)
     if _loads:
-        budget._load_started(_load_base.get(device, 0.0), _loads)
+        budget._load_started(_load_base.get(device), _loads)
     return budget

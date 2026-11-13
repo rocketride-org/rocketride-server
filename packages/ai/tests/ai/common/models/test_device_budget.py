@@ -1492,6 +1492,37 @@ def test_after_the_load_an_idle_device_takes_its_base_again(loads):
     first.leave()
 
 
+def test_an_idle_guard_takes_its_base_when_a_load_starts(loads):
+    """What the device took while its guard sat idle is no call's progress: a load starting then takes the base."""
+    probe = _Probe(free=8000)
+    loads.setattr(budgetmod, '_allocated_mb', lambda torch=None: {'cuda:0': probe.allocated})
+    budget = _registered(_gpu(probe))
+    first = _Call(budget, 500)
+    assert first.enters()  # the base: 0
+    first.leave()
+    _load_weights(probe, 2000)  # taken while the guard sits idle
+    calls = []
+
+    def load():
+        """Let a 3000 MB call in, then load 2000 MB of weights.
+
+        Returns:
+            The loaded model.
+        """
+        calls.append(_Call(budget, 3000))
+        assert calls[0].enters()
+        _load_weights(probe, 2000)
+        return _Model({'cuda:0': 2000.0})
+
+    budgetmod.loading_model(load)
+    assert budget._idle_allocated == 4000.0  # the base of the first call would give 2000
+    b = _Call(budget, 1500)  # 4000 free, less A's 3000 and the margin, leaves 488
+    assert b.stays_out()
+    _leave_all(calls)
+    assert b.enters()
+    b.leave()
+
+
 def test_a_guard_made_during_the_load_takes_what_its_device_held_at_the_start(loads):
     """The first text call makes the guard mid-load: its base is the memory before the load, then the weights."""
     probe = _Probe(free=6000, allocated=500)  # a model loaded earlier
@@ -1615,6 +1646,41 @@ def test_a_guard_made_inside_two_loads_keeps_its_base_until_both_end(loads):
     _leave_all(calls)
 
 
+def test_a_guard_idle_when_a_second_load_starts_keeps_its_base(loads):
+    """The memory read at the first load's start may be a call's: a guard idle when a later load starts keeps its base."""
+    probe = _Probe(free=8000)
+    loads.setattr(budgetmod, '_allocated_mb', lambda torch=None: {'cuda:0': probe.allocated})
+    budget = _registered(_gpu(probe))
+    a = _Call(budget, 1000)
+    assert a.enters()
+    _load_weights(probe, 800)  # call A's memory when the first load starts
+
+    def inner():
+        """Load a 1000 MB model on the idle device.
+
+        Returns:
+            The loaded model.
+        """
+        _load_weights(probe, 1000)
+        return _Model({'cuda:0': 1000.0})
+
+    def outer():
+        """Let call A leave and free its 800 MB, load 1500 MB, run the inner load, then load the other 500 MB.
+
+        Returns:
+            The loaded model.
+        """
+        a.leave()
+        _load_weights(probe, -800)
+        _load_weights(probe, 1500)
+        budgetmod.loading_model(inner)
+        _load_weights(probe, 500)
+        return _Model({'cuda:0': 2000.0})
+
+    budgetmod.loading_model(outer)
+    assert budget._idle_allocated == 3000.0  # taken when the inner load starts, it would hold A's 800 too
+
+
 def test_a_model_on_another_gpu_leaves_this_base_alone(loads):
     """Each guard gets the weights on its own device only."""
     first_probe, second_probe = _Probe(free=4000), _Probe(free=4000)
@@ -1695,10 +1761,13 @@ def test_a_failed_start_measurement_still_loads(loads):
         raise RuntimeError('CUDA error')
 
     loads.setattr(budgetmod, '_allocated_mb', broken)
-    budget = _registered(_gpu(_Probe(free=6000)))
+    budget = _registered(_gpu(_Probe(free=6000, allocated=500)))
+    first = _Call(budget, 100)
+    assert first.enters()  # the base: 500
+    first.leave()
     budgetmod.loading_model(lambda: _Model({'cuda:0': 1000.0}))
     assert len(warnings) == 1
-    assert budget._idle_allocated == 1000.0
+    assert budget._idle_allocated == 1500.0  # the unread start keeps the base, it does not zero it
 
 
 def test_with_the_model_server_a_load_is_not_measured(loads):
