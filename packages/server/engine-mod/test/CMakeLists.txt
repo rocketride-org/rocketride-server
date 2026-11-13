@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 # The node test binary. Unlike engtest, which links engLib statically and so
 # has to keep node modules switched off, this one hosts the shared engine
 # module exactly as engine does - that is what lets a test drive a filter that

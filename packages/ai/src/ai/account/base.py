@@ -31,8 +31,18 @@
 # =============================================================================
 
 import os
+import re
 from abc import ABC, abstractmethod
 from typing import NamedTuple
+
+# What clients see in place of a stored environment value. A secret is
+# written once and never read back; sending the mask back keeps the value.
+# The SDKs export the same string as CONST_ENV_MASK.
+ENV_MASK = '••••••••'
+
+# The environment names accepted: a .env key ends at whitespace, '=' or '#',
+# a quote is stripped from it, and the process environment ends at a NUL
+ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
 
 # Seconds the database broker gets to answer. A tenant's first provision
 # creates its database from a template, which is not instant; the SaaS client

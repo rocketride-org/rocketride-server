@@ -63,6 +63,12 @@ class TestBlockVocabulary:
         text, reasoning, _ = flatten_content_blocks(blocks)
         assert (text, reasoning) == ('answer', 'ponder')
 
+    def test_a_responses_api_summary_list_joins_one_part_per_line(self):
+        summary = [{'type': 'summary_text', 'text': 'First.'}, {'type': 'summary_text', 'text': 'Second.'}]
+        blocks = [{'type': 'reasoning', 'summary': summary}, {'type': 'text', 'text': 'answer'}]
+        text, reasoning, _ = flatten_content_blocks(blocks)
+        assert (text, reasoning) == ('answer', 'First.\nSecond.')
+
     def test_untyped_block_counts_as_text(self):
         assert flatten_content_blocks([{'text': 'bare'}])[0] == 'bare'
 

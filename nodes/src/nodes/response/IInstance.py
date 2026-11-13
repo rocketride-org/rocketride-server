@@ -214,6 +214,13 @@ class IInstance(IInstanceBase):
         if key not in self.instance.currentObject.response:
             self.instance.currentObject.response[key] = []
 
+        # A turn is written as one object under the same key, as a JSON answer already is;
+        # Answer.fromResult reads it back.
+        if answer.message is not None or answer.error is not None:
+            turn = answer.model_dump(include={'message', 'stopReason', 'error', 'tokens'})
+            self.instance.currentObject.response[key].append({k: v for k, v in turn.items() if v is not None})
+            return
+
         # Add the documents
         if answer.isJson():
             self.instance.currentObject.response[key].append(answer.getJson())

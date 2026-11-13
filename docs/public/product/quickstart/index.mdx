@@ -3,9 +3,10 @@ sidebar_position: 2
 sidebar_label: Overview
 title: Quickstart
 hide_table_of_contents: true
+description: "Pick how you want to build: the VS Code IDE, an SDK, the CLI, or a coding agent over MCP. Each path takes you from zero to a running pipeline."
 ---
 
-import { LuLayoutDashboard, LuCode, LuTerminal } from 'react-icons/lu';
+import { LuLayoutDashboard, LuCode, LuTerminal, LuBot } from 'react-icons/lu';
 
 # Quickstart
 
@@ -14,19 +15,24 @@ to a running pipeline.
 
 <div className="rr-card-grid">
 
-<a className="rr-side-card" href="/quickstart/ide-walkthrough">
+<a className="rr-side-card" href="/quickstart/ide-walkthrough/">
   <span className="rr-side-card__head"><LuLayoutDashboard className="rr-card-icon" /><span className="rr-side-card__title">Build in your IDE</span></span>
   <span className="rr-side-card__body">Install the extension, deploy a local runtime, and wire up your first pipeline on the visual canvas.</span>
 </a>
 
-<a className="rr-side-card" href="/quickstart/sdk-integration">
+<a className="rr-side-card" href="/quickstart/sdk-integration/">
   <span className="rr-side-card__head"><LuCode className="rr-card-icon" /><span className="rr-side-card__title">Integrate with an SDK</span></span>
   <span className="rr-side-card__body">Run the <code>.pipe</code> file you built from your own Python or TypeScript application.</span>
 </a>
 
-<a className="rr-side-card" href="/quickstart/cli">
+<a className="rr-side-card" href="/quickstart/cli/">
   <span className="rr-side-card__head"><LuTerminal className="rr-card-icon" /><span className="rr-side-card__title">Run from the CLI</span></span>
   <span className="rr-side-card__body">Start, feed, and monitor pipelines from a terminal — no code required.</span>
+</a>
+
+<a className="rr-side-card" href="/quickstart/coding-agents">
+  <span className="rr-side-card__head"><LuBot className="rr-card-icon" /><span className="rr-side-card__title">Start with a coding agent</span></span>
+  <span className="rr-side-card__body">Point your coding agent at one page: run the engine, try an example that needs no key, and connect over the built-in MCP server.</span>
 </a>
 
 </div>

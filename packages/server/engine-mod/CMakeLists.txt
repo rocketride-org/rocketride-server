@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
-
 # The shared engine module: engLib behind the engine_run() facade, imported by
 # engine.exe and by C++ node DLLs
 add_library(engineMod SHARED

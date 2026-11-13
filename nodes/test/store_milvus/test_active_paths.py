@@ -36,5 +36,10 @@ def test_paths_filter_trash_before_paging(parent, monkeypatch):
     if parent is not None:
         expression += f' and meta["parent"] == {json.dumps(parent)}'
     store.client.query.assert_called_once_with(
-        collection_name='documents', filter=expression, output_fields=['meta'], offset=3, limit=2
+        collection_name='documents',
+        filter=expression,
+        output_fields=['meta'],
+        offset=3,
+        limit=2,
+        consistency_level='Session',
     )

@@ -47,10 +47,10 @@ set(TOOLCHAIN_FLAGS "${TOOLCHAIN_FLAGS} -Werror=idiomatic-parentheses")
 set(TOOLCHAIN_FLAGS "${TOOLCHAIN_FLAGS} -Wno-logical-op-parentheses")
 
 # Set the CXX flags using the resolved deployment target
-set(CMAKE_CXX_FLAGS "${TOOLCHAIN_FLAGS} -std=c++2a -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
+set(CMAKE_CXX_FLAGS "${TOOLCHAIN_FLAGS} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
 set(CMAKE_C_FLAGS "${TOOLCHAIN_FLAGS} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
 
-set(CMAKE_CXX_FLAGS_DEBUG "${TOOLCHAIN_FLAGS} -std=c++2a" CACHE STRING "" FORCE)
+set(CMAKE_CXX_FLAGS_DEBUG "${TOOLCHAIN_FLAGS}" CACHE STRING "" FORCE)
 
 # ThreadSanitizer
 set(CMAKE_C_FLAGS_TSAN

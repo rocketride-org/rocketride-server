@@ -37,11 +37,13 @@ from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import (
+    CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
     Task,
     cap_trace_payload,
     filter_subprocess_env,
+    resolve_parameter_tokens,
     saas_pipeline_violation,
 )
 
@@ -1658,6 +1660,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             # engine-only: deployment credentials and server-side settings
             'RR_DB_URL': 'postgresql://platform',
             'RR_MASTER_KEY': 'fernet',
+            'RR_PARAM_TOKEN_SECRET': 'param-token-secret',
             'RR_IDP_SERVICE_TOKEN': 'jwt',
             'RR_APP_URL': 'https://app.example',
             'ENGINE_API_KEY': 'engine',
@@ -1717,6 +1720,65 @@ def test_filter_subprocess_env_star_passes_everything():
     """A bare '*' is the explicit opt-out back to full inheritance."""
     src = {'RR_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
     assert filter_subprocess_env(src) == src
+
+
+# ---------------------------------------------------------------------------
+# resolve_parameter_tokens — the child gets values, not tokens it cannot read
+# ---------------------------------------------------------------------------
+
+_TOKEN_PIPELINE = {
+    'source': 'source_1',
+    'components': [
+        {
+            'id': 'source_1',
+            'provider': 'filesys',
+            'config': {'parameters': {'secureParameters': {'secure': ['password'], 'token': 'UlJQVAI='}}},
+        }
+    ],
+}
+
+
+@pytest.fixture
+def engine_resolve(monkeypatch):
+    """Record calls to rocketlib.resolveSecureParameters and return a decoded pipeline."""
+    calls = []
+    decoded = {'source': 'source_1', 'components': [{'id': 'source_1', 'config': {'parameters': {'password': 'pw'}}}]}
+
+    def resolve(pipeline):
+        calls.append(pipeline)
+        return decoded
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
+    return SimpleNamespace(calls=calls, decoded=decoded)
+
+
+def test_resolve_parameter_tokens_without_secret_passes_through(engine_resolve):
+    """Without the deployment secret the child decodes its own tokens, as before."""
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={}) is _TOKEN_PIPELINE
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: ''}) is _TOKEN_PIPELINE
+    assert engine_resolve.calls == []
+
+
+def test_resolve_parameter_tokens_with_secret_decodes_in_engine(engine_resolve):
+    """With the deployment secret set, the engine decodes the tokens before the task file is written."""
+    result = resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert result is engine_resolve.decoded
+    assert engine_resolve.calls == [_TOKEN_PIPELINE]
+
+
+def test_resolve_parameter_tokens_reads_process_environment(engine_resolve, monkeypatch):
+    """The default environment is the engine process's own."""
+    monkeypatch.delenv(CONST_PARAM_TOKEN_SECRET_ENV, raising=False)
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is _TOKEN_PIPELINE
+
+    monkeypatch.setenv(CONST_PARAM_TOKEN_SECRET_ENV, 'param-token-secret')
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is engine_resolve.decoded
+
+
+def test_param_token_secret_stays_out_of_subprocess():
+    """The child never gets the secret, which is why the engine decodes for it."""
+    env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert env == {'PATH': '/usr/bin'}
 
 
 def test_filter_subprocess_env_matches_names_case_insensitively():
@@ -2590,6 +2652,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2683,6 +2747,52 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+    # The server's own kill is not a crash
+    Task._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# A crash the engine reported with >EXIT*Crash
+# ---------------------------------------------------------------------------
+
+_SEGV = {'exitCode': 1, 'message': 'Application received system signal: SIGSEGV', 'crash': True}
+
+
+def _ending_task(process_exit_code):
+    """A task whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'stop_requested, status, outcome',
+    [
+        (False, 'Stopped unexpectedly', 'error'),
+        # A crash during a requested stop is part of the stop
+        (True, 'Stopped', 'cancelled'),
+    ],
+)
+async def test_a_reported_crash_ends_the_task(stop_requested, status, outcome):
+    t = _ending_task(-6)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await Task._terminated(t)
+    assert t._status.status == status
+    assert run_log.end_run.await_args.args[0] == outcome
 
 
 # ---------------------------------------------------------------------------

@@ -64,6 +64,14 @@ from ..core import (
 from ..core.exceptions import AuthenticationException
 from ..types.client import ConnectResult
 
+# Exact text the server sends when it receives an empty credential.
+_NO_AUTH_MESSAGE = 'No authorization provided'
+_NO_AUTH_HINT = (
+    'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. '
+    'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. '
+    'RocketRide Cloud needs a key: run `rocketride login`.'
+)
+
 
 class ConnectionMixin(DAPClient):
     """
@@ -159,7 +167,14 @@ class ConnectionMixin(DAPClient):
             raise
         if not response.get('success', False):
             message = response.get('message', 'Authentication failed')
-            raise AuthenticationException({'message': message})
+            result: Dict[str, Any] = {'message': message}
+            if message == _NO_AUTH_MESSAGE and not str(auth_args['auth'] or '').strip():
+                result['hint'] = _NO_AUTH_HINT
+            error = AuthenticationException(result)
+            if 'hint' in result and hasattr(error, 'add_note'):
+                # Python 3.11+: an uncaught traceback prints the hint under the message.
+                error.add_note(result['hint'])
+            raise error
 
         auth_body = response.get('body') or {}
         self._connect_result = auth_body  # type: ignore[assignment]

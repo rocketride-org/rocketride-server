@@ -391,6 +391,15 @@ export interface IAppBuilderHost {
 	/** Claim the org's developer id slug (org.admin, self-service — letters and
 	 * underscore only). Returns the assigned slug. */
 	registerDeveloper?: (developerId: string) => Promise<string>;
+	/** Move a `local.<name>` app into the org's developer namespace: rewrite
+	 * its id to `<developerId>.<name>` in the app's files (package.json, the
+	 * .rrapp trigger, src/AppDescriptor.ts). `developerId` is the id the user
+	 * confirmed; the host refuses when the org's id on the server differs or
+	 * the new id is already taken. Resolves once the files are written; the
+	 * host then reopens the App Builder on the new id, which disposes the
+	 * calling panel. Server records are untouched. Absent = the banner keeps
+	 * the hand-edit instruction. */
+	adoptDeveloperId?: (developerId: string) => Promise<void>;
 
 	// ── Dashboard ────────────────────────────────────────────────────────
 	/** Load the app's full deployment history, oldest first — the ONE fetch
@@ -456,6 +465,15 @@ export interface NewAppIdentity {
 	workspaceOpen: boolean;
 	/** Folder names already in the scaffold target — used for live collision validation. */
 	existingFolders: string[];
+	/** True when the org has no developer id yet and this host can claim one
+	 *  from the wizard (host.appdev.registerDeveloper). Omitted = no form. */
+	canRegisterDeveloper?: boolean;
+	/** The host could not confirm the org's developer id (the lookup failed);
+	 *  the wizard says so up front, and Create re-checks before scaffolding. */
+	lookupFailed?: boolean;
+	/** Increases with every identity the host builds; a wizard ignores an
+	 *  identity older than the one it shows. Hosts without revisions omit it. */
+	revision?: number;
 }
 
 // =============================================================================
