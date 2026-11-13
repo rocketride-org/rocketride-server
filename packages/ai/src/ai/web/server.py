@@ -1081,7 +1081,7 @@ class WebServer:
         # can answer it unauthenticated. /use is admin-only; guard private
         # routes if modules are loaded at runtime in production.
         routes = self.app.router.routes
-        routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
+        routes[:] = [route for route in routes if route is not self._catch_all] + [self._catch_all]
 
     def add_socket(
         self,

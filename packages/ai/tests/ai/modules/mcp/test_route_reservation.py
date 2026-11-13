@@ -201,8 +201,10 @@ async def test_the_catch_all_never_opens_the_mcp_paths(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_mcp_loaded_after_the_catch_all_still_owns_its_paths(monkeypatch, tmp_path):
-    # POST /use mcp at runtime: the catch-all is already registered, so MCP's
-    # routes must still land ahead of it, or /mcp is a public 404/405.
+    # MCP loaded after register_public_pages (eaas order changed, or a later
+    # module): its routes must still land ahead of the catch-all, or /mcp is a
+    # public 404/405. Route order and the guard only: the lifespan runs after
+    # the load here, which a load on a running server would not get.
     built = []
     server = _web_server(monkeypatch, tmp_path, built)
     server.use('shell', {})

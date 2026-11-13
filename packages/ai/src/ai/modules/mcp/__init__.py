@@ -130,11 +130,11 @@ def _refuse_existing_claimants(server: Any) -> None:
     """Fail engine boot if anything already owns or opens the MCP paths.
 
     ``WebServer.add_route`` rejects duplicate ``(method, path)`` pairs, but
-    the endpoint below is registered through ``add_raw_route``, which checks
-    none, so that check never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
-    (a GET-only page answers ``POST /mcp`` with 405), and a public pattern
-    matching it -- or any of its DESCENDANTS, since the Mount forwards
-    ``/mcp/anything`` to ``handle_mcp`` just the same -- would make
+    the endpoint below is registered through ``add_raw_route``, which does
+    not, so a clash would go unnoticed. A route at ``/mcp`` would shadow the
+    bare endpoint (a GET-only page answers ``POST /mcp`` with 405), and a
+    public pattern matching it -- or any of its DESCENDANTS, since the Mount
+    forwards ``/mcp/anything`` to ``handle_mcp`` just the same -- would make
     AuthMiddleware skip those MCP requests.
 
     Public entries are patterns, not literals, so the registered pattern
@@ -149,14 +149,14 @@ def _refuse_existing_claimants(server: Any) -> None:
         RuntimeError: naming the claimant(s).
     """
     claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
-    public = {p for p in _registered_public_patterns(server) if _claims_mcp_pattern(p)}
-    claimants += [f'public:{p}' for p in sorted(public)]
+    public = {pattern for pattern in _registered_public_patterns(server) if _claims_mcp_pattern(pattern)}
+    claimants += [f'public:{pattern}' for pattern in sorted(public)]
     if claimants:
         raise _claimed(claimants)
 
 
 def _refuse_public_probes(server: Any, mcp_routes: Tuple[Any, ...]) -> None:
-    """Unmount ``mcp_routes`` and fail if any probed MCP path is public once they are mounted.
+    """Fail, and unmount ``mcp_routes``, if any probed MCP path is public once they are mounted.
 
     Runs after the mount: a public-path predicate (the shell's public pages)
     answers for the current route table, so before the mount it counts an
@@ -172,7 +172,7 @@ def _refuse_public_probes(server: Any, mcp_routes: Tuple[Any, ...]) -> None:
     is_public = getattr(server, 'is_public_route', None)
     if is_public is None:
         return
-    public = [f'public:{p}' for p in _PUBLIC_PROBE_PATHS if is_public(p)]
+    public = [f'public:{path}' for path in _PUBLIC_PROBE_PATHS if is_public(path)]
     if not public:
         return
     routes = server.app.router.routes
@@ -545,8 +545,8 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     lifespan across app startup/shutdown, and applies the auth seam.
 
     Args:
-        server: The WebServer (or FakeServer in tests) providing ``.app``
-            and optional public-path registration hooks.
+        server: The WebServer (or FakeServer in tests) providing ``.app``,
+            ``add_raw_route`` and optional public-path registration hooks.
         config: Module configuration dict. Recognised keys:
 
             - ``mcp_dev_no_auth`` (bool): skip auth for ``/mcp`` and
@@ -625,7 +625,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     # 4. Route the raw ASGI handler at /mcp and /mcp/
     # app.add_api_route / add_route expect FastAPI callables with Request
-    # signatures, so the handler goes straight onto the router. A Mount only
+    # signatures, so the handler goes in through add_raw_route. A Mount only
     # matches /mcp/..., and bare /mcp -- the advertised resource identifier
     # spec clients POST to -- would otherwise get a 307 to /mcp/ (or be
     # shadowed by any route at /mcp), so an exact, method-agnostic Route
@@ -714,8 +714,11 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             if pending is not None:
                 raise pending
 
-    # Through add_raw_route: loaded through /use after startup, MCP must still
-    # match ahead of the public-page catch-all.
+    # Through add_raw_route, so MCP matches ahead of the public-page catch-all
+    # even when loaded after register_public_pages. That settles route order
+    # and the startup guard only: MCP loaded after the server has started
+    # also needs its session manager started, and step 5 starts it from the
+    # lifespan only. Production never loads it late (eaas routes no /use).
     mcp_routes = (
         Mount(_MOUNT_PATH, app=handle_mcp),
         Route(_MOUNT_PATH, endpoint=_AsgiEndpoint(handle_mcp), include_in_schema=False),

@@ -495,7 +495,8 @@ async def register_public_pages(server: WebServer) -> None:
 
     Call once, at the end of server startup, after every module's initModule
     and the account layer's init_account, and before serving. Routes that
-    ``add_route`` registers later still match first: it keeps the catch-all last.
+    ``add_route`` or ``add_raw_route`` registers later still match first:
+    both keep the catch-all last.
 
     Until the first build lands (it is bounded, see
     ``public_pages.build_at_startup``), the legacy page list serves, filtered
@@ -509,8 +510,9 @@ async def register_public_pages(server: WebServer) -> None:
     # method, unknown ones (TRACE, PROPFIND) included: with a method list, the
     # router would answer any other method on any path with its partial match
     # (405, not 404), and a non-GET route appended after it (straight to
-    # ``router.routes``; ``add_route`` keeps the catch-all last) would fully
-    # match a claimed path that the auth predicate already exempted.
+    # ``router.routes``; ``add_route`` and ``add_raw_route`` keep the
+    # catch-all last) would fully match a claimed path that the auth
+    # predicate already exempted.
     # Starlette defaults a function endpoint to GET and HEAD, hence the
     # override; test_unknown_methods_404_off_pages_and_405_on_them pins it.
     route = Route(FALLBACK_PATH, public_page, include_in_schema=False)
