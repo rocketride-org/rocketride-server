@@ -508,8 +508,10 @@ def test_a_render_overtaken_by_an_invalidation_is_served_but_not_cached(acct, sh
         return [{'name': 'Old', 'price': '1'}]
 
     monkeypatch.setattr(singleton, 'get_public_plans', repriced_mid_render)
-    assert 'Old' in _crawl(_client()).text
-    assert len(pages._render_cache) == 0
+    resp = _crawl(_client())
+    assert 'Old' in resp.text and len(pages._render_cache) == 0
+    # The data may already be stale: no cache may keep it either.
+    assert resp.headers['cache-control'] == 'private, no-cache'
 
 
 def test_unrelated_source_events_keep_entries(acct, shell_root):
@@ -555,15 +557,15 @@ async def test_one_bind_reads_a_named_app_once(acct, monkeypatch):
     assert acct.publish_list_calls == calls + 1 and reads == ['acme.brandy']
 
 
-def test_shared_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, shell_root, monkeypatch):
+def test_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, shell_root, monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
     _seed()
     _serve(_page('/pricing', ['plans:acme.brandy']), _page('/about', []))
     client = _client()
     assert _crawl(client).headers['cache-control'] == 'private, max-age=300'
-    # A hit carries what is left of the entry's lifetime, so a shared cache
-    # never holds the data past the TTL counted from the render.
+    # A hit carries what is left of the entry's lifetime, so the crawler's
+    # cache never holds the data past the TTL counted from the render.
     clock[0] += 120.5
     assert _crawl(client).headers['cache-control'] == 'private, max-age=180'
     clock[0] += 179.5

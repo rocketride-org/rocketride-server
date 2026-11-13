@@ -60,8 +60,10 @@ crawler's snapshot.
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
 also dropped when that source is invalidated, and expires after
-``data_sources.TTL_SECONDS``. The crawler may keep such a response only for
-what is left of that time, so the TTL bounds staleness end to end. Snapshot
+``data_sources.TTL_SECONDS``. Such a response is ``private``: only the
+crawler's own cache may keep it, and only for what is left of that time, so
+the TTL bounds staleness end to end. A render overtaken by a swap or an
+invalidation is served ``private, no-cache``. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
 Concurrent misses on one snapshot share one store read, and after a storage
@@ -835,8 +837,10 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     Keyed by (path, UA class, shell document, its mtime and size,
     ``RR_APP_URL``), so a new shell build or origin renders afresh. A
     crawler's copy is the page's rendered snapshot (``_crawler_snapshot``). A
-    render that falls back uncacheably, or that a swap overtook, is served,
-    not cached.
+    render that falls back uncacheably is served, not cached; one that a swap
+    or a data-source invalidation overtook is served ``private, no-cache``,
+    not cached. A crawler response bound to data is ``private``, with a
+    ``max-age`` of what is left of its TTL.
 
     Returns:
         The page's response.
@@ -852,13 +856,17 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     if cached is None or cached.expires <= now:
         generation = _generation
         cached, cacheable = await _render(path, page, crawler, document, now)
-        if cacheable and generation == _generation:
+        if generation != _generation:
+            # A swap or an invalidation landed mid-render: this copy may already be stale.
+            return HTMLResponse(cached.body, headers={**cached.headers, 'Cache-Control': 'private, no-cache'})
+        if cacheable:
             _render_cache.put(key, cached, len(cached.body))
     headers = dict(cached.headers)
     if cached.sources and headers['Cache-Control'] == _SNAPSHOT_CACHE_CONTROL:
-        # The crawler keeps bound data no longer than this server would.
-        # min() caps it at the TTL: (now + TTL) - now can come out a hair over
-        # it in floating point, and ceil would round that up a whole second.
+        # Only the crawler's own cache may keep bound data, and no longer than
+        # this server would. min() caps it at the TTL: (now + TTL) - now can
+        # come out a hair over it in floating point, and ceil would round that
+        # up a whole second.
         max_age = math.ceil(min(cached.expires - now, data_sources.TTL_SECONDS))
         headers['Cache-Control'] = f'private, max-age={max_age}'
     return HTMLResponse(cached.body, headers=headers)

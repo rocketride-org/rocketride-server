@@ -186,7 +186,7 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert '<img src="/apps/rocketride.home/v3/seo-assets/logo.svg" alt="RocketRide">' in crawler.text
     assert '<title>Pricing | RocketRide</title>' in crawler.text and '<title>snap</title>' not in crawler.text
     assert '<meta name="description" content="Plans and prices.">' in crawler.text
-    # The page binds plans: the crawler keeps it no longer than the data's TTL.
+    # The page binds plans: only the crawler's own cache, no longer than the data's TTL.
     assert crawler.headers['cache-control'] == 'private, max-age=300'
     assert crawler.headers['vary'] == 'User-Agent'
     human = client.get('/pricing', headers={'User-Agent': BROWSER})
