@@ -146,8 +146,6 @@ async def test_public_winners_picks_each_apps_serving_precedence_winner():
         # An anonymous caller holds no permissions.
         _public('a.x', 'org-1', snapshot={'requiredPermissions': ['billing.read']}),
         _public('a.x', 'org-a'),
-        # Not the public rung, though it would outrank every public row.
-        {**_binding(AUD_TEAM), 'appId': 'a.x', 'orgId': 'org-z'},
         _public('a.y', 'org-c', artifactState='submit'),
     ]
     _, winners = await public_winners(_Account(rows))

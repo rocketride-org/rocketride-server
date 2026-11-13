@@ -157,7 +157,8 @@ async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     Each app's winning public binding, as the store walk resolves it for an anonymous caller.
 
     The public rung is listed under ``''`` (every org) on a SaaS server and
-    ``'local'`` otherwise. A binding competes only when it is public, serves
+    ``'local'`` otherwise; both store editions return only public rows for
+    the public audience. A binding competes only when it serves
     (``serving_block_of``) and requires no permissions; among those, the
     precedence winner (``precedence_sorted``) is each app's. The public page
     map and the ``plans:``/``app:`` page data sources both read the rung
@@ -181,8 +182,6 @@ async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
     for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
         # Rows that do not serve an anonymous caller never compete; the
         # precedence winner among the rest lands last.
-        if (row.get('audience') or {}).get('type') != 'public':
-            continue
         if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
             continue
         winners[str(row.get('appId') or '')] = row

@@ -187,18 +187,6 @@ async def test_private_named_app_yields_nothing(acct):
         assert ds.jsonld(context, f'{APP_URL}/pricing') == [], app_id
 
 
-async def test_only_public_bindings_make_a_named_app_visible(acct, monkeypatch):
-    from ai.account import account as singleton
-
-    async def every_row(org_id, kind, audiences):
-        return [dict(r) for r in acct.rows if r['state'] != 'removed']
-
-    monkeypatch.setattr(singleton, 'publish_list', every_row)
-    for app_id in ('rocketride.preview', 'acme.private', 'acme.orgonly'):
-        assert await ds.app(app_id) is None, app_id
-    assert (await ds.app('acme.brandy'))['name'] == 'Brandy'
-
-
 async def test_a_malformed_winning_row_is_a_read_failure_as_in_the_page_map(acct):
     # app_rows.public_artifact decides for both readers: the page map skips
     # such an app as unreadable, and a page binding it is served without its data.
