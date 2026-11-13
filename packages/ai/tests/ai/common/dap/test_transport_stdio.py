@@ -336,36 +336,35 @@ async def test_dbg_message_parses_all_fields():
     """A well-formed DBG line decodes op + ids + JSON trace.
 
     Dict-equality pins the body shape: a new key added on the source side
-    without updating this expected dict will make the test fail.
+    without updating this expected dict will make the test fail. No
+    totalPipes: the engine does not report its pipe count to a holder.
     """
     trace = {'frame': 1}
-    raw = '>DBG*ENTER*A*B*prompt_1*1F*1E*' + json.dumps(trace)
+    raw = '>DBG*ENTER*A*prompt_1*1F*' + json.dumps(trace)
     events, _ = await _drive(raw)
     event = _single_event(events)
     assert event['event'] == 'apaevt_trace'
     assert event['body'] == {
         'op': 'enter',  # lowercased by the parser
         'pipeId': 0xA,
-        'totalPipes': 0xB,
         'componentId': 'prompt_1',
-        'bindingId': 0x1F,
-        'rootBindingId': 0x1E,
+        'traceId': 0x1F,
         'trace': trace,
     }
 
 
 @pytest.mark.asyncio
 async def test_dbg_message_has_no_snake_keys():
-    """The trace body is camelCase end to end: no id / total_pipes / pipe_id survive."""
-    events, _ = await _drive('>DBG*BEGIN*0*1*file.txt*5*5*{}')
+    """The trace body is camelCase end to end: no id / pipe_id / trace_id survive."""
+    events, _ = await _drive('>DBG*BEGIN*0*file.txt*5*{}')
     body = _single_event(events)['body']
-    assert not {'id', 'total_pipes', 'pipe_id'} & set(body)
+    assert not {'id', 'pipe_id', 'trace_id'} & set(body)
 
 
 @pytest.mark.asyncio
 async def test_dbg_message_invalid_trace_json_is_dropped_silently():
     """If the trace blob is not valid JSON, trace is replaced with {}."""
-    raw = '>DBG*LEAVE*A*B*prompt_1*1F*1E*not-json'
+    raw = '>DBG*LEAVE*A*prompt_1*1F*not-json'
     events, _ = await _drive(raw)
     event = _single_event(events)
     assert event['event'] == 'apaevt_trace'
@@ -374,8 +373,8 @@ async def test_dbg_message_invalid_trace_json_is_dropped_silently():
 
 @pytest.mark.asyncio
 async def test_dbg_message_too_few_fields_is_malformed():
-    """Fewer than eight '*'-separated fields hits the malformed-DBG output path."""
-    events, _ = await _drive('>DBG*STEP*A*B*pipe-1*{}')
+    """Fewer than six '*'-separated fields hits the malformed-DBG output path."""
+    events, _ = await _drive('>DBG*STEP*A*B*{}')
     event = _single_event(events)
     assert event['event'] == 'output'
     assert 'Malformed DBG message' in event['body']['output']
@@ -440,7 +439,7 @@ async def test_exit_message_too_short_dispatches_incomplete_event_and_disconnect
 @pytest.mark.asyncio
 async def test_sse_message_parses_json_payload():
     """SSE yields apaevt_sse with the decoded JSON body."""
-    payload = {'pipe_id': 1, 'message': 'hello', 'data': {}}
+    payload = {'pipe_id': 1, 'traceId': 7, 'message': 'hello', 'data': {}}
     events, _ = await _drive('>SSE*' + json.dumps(payload))
     event = _single_event(events)
     assert event['event'] == 'apaevt_sse'

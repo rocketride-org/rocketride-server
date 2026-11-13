@@ -18,7 +18,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai.account.models import AccountInfo
-from ai.modules.task.task_server import TaskServer, TASK_CONTROL
+from ai.modules.task.task_control import TaskControl
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 
 ADDRESS = 'acme.project-1.src'
 KEY = f'dev.user-1.{ADDRESS}'
@@ -29,7 +30,15 @@ IDENTITY = dict(client_id='user-1', user_id='user-1', team_id='team-1', org_id='
 def _make_server():
     """A TaskServer with no event loop, no ports, and no real account service."""
     ts = TaskServer.__new__(TaskServer)
-    ts._task_control = {}
+    ts._task_control = ControlRegistry()
+    ts._engines = EngineRegistry()
+    ts._engine_unavailable = {}
+    ts._control_starts = {}
+    ts._engine_restarts = {}
+    ts._restart_tasks = set()
+    ts._control_expiry = []
+    ts._engine_expiry = []
+    ts._expiry_gen = 0
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -54,8 +63,8 @@ def _pipeline(model='gpt-4.1-mini'):
 
 
 def _running(pipeline):
-    """A TASK_CONTROL whose task reports itself as still running, owned by user-1."""
-    control = TASK_CONTROL()
+    """A TaskControl whose task reports itself as still running, owned by user-1."""
+    control = TaskControl()
     control.key = KEY
     control.address = ADDRESS
     control.id = ADDRESS
@@ -70,6 +79,9 @@ def _running(pipeline):
     control.pipeline = pipeline
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
+    # A private engine this control holds alone: restartable in place
+    control.task.shared = False
+    control.task.holds = frozenset({KEY})
     return control
 
 
@@ -202,7 +214,7 @@ async def test_an_invalid_pipeline_is_refused_before_the_task_is_stopped():
     """
     Normalisation doubles as validation, so it has to happen first.
 
-    Rejecting after the restart would leave the task stopped, Task.restart_task
+    Rejecting after the restart would leave the task stopped, TaskEngine.restart_task
     holding the new pipeline, and control.pipeline still naming the old one —
     three views of the world, none of them running.
     """

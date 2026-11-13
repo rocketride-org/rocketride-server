@@ -141,6 +141,26 @@ class AccountBase(ABC):
         org = await self.get_organization(org_id)
         return (org or {}).get('developerId') or None
 
+    async def get_org_of_developer_id(self, developer_id: str) -> Optional[str]:
+        """
+        The organization that owns a developer id (the reverse of ``get_developer_id``).
+
+        The pipe resolver (``pipe_deploy.resolve_pins``) needs it for the
+        @public rung, where the address names a namespace in ANOTHER org: the
+        publication and its artifact live under the publisher's org. A
+        caller's own namespace never comes here (its org is on the session).
+        OSS has one org, so every address it can resolve is its own; the
+        default answers that no other org is known. SaaS overrides it with
+        the ``Organization.developer_id`` UNIQUE lookup.
+
+        Args:
+            developer_id: The address namespace.
+
+        Returns:
+            The owning org id, or ``None`` when no other org claims it.
+        """
+        return None
+
     # =========================================================================
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================

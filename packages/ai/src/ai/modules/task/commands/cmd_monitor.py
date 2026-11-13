@@ -62,7 +62,8 @@ from ..address import in_endpoint_scope
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
-    from ..task_server import TaskServer, TASK_CONTROL
+    from ..task_control import TaskControl
+    from ..task_server import TaskServer
 
 
 def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str:
@@ -329,7 +330,7 @@ class MonitorCommands(DAPConn):
 
     async def _send_updates(
         self,
-        control: 'TASK_CONTROL | None',
+        control: 'TaskControl | None',
         prev: EVENT_TYPE,
         curr: EVENT_TYPE,
         project_id: str = None,
@@ -357,7 +358,7 @@ class MonitorCommands(DAPConn):
         source the caller supplied.
 
         Args:
-            control (TASK_CONTROL | None): The task control for the subscription,
+            control (TaskControl | None): The task control for the subscription,
                 or None if the task is not currently running.
             prev (EVENT_TYPE): The bitmask of event types that were subscribed
                 before this call (used to compute which bits are newly set).
@@ -436,7 +437,7 @@ class MonitorCommands(DAPConn):
                                 # deploy runs to DEPLOYMENTS, never ad-hoc.
                                 # Read from the CONTROL — the previous getattr
                                 # fallbacks targeted fields that never existed
-                                # on TASK_CONTROL, so every row reported a dev
+                                # on TaskControl, so every row reported a dev
                                 # run with no team.
                                 'runKind': target.run_kind,
                                 'teamId': target.teamId if target.run_kind == 'deploy' else '',

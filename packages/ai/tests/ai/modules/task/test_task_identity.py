@@ -39,7 +39,8 @@ from types import SimpleNamespace
 import pytest
 
 from ai.modules.task.address import build_address
-from ai.modules.task.task_server import TaskServer, TASK_CONTROL
+from ai.modules.task.task_control import TaskControl
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.commands.cmd_monitor import owner_key
 
 
@@ -49,8 +50,8 @@ from ai.modules.task.commands.cmd_monitor import owner_key
 
 
 def _control(*, run_kind='dev', user_id='user-1', team_id='team-1', project_id='proj-1', source='src-1'):
-    """Build a real TASK_CONTROL carrying the owner model."""
-    control = TASK_CONTROL()
+    """Build a real TaskControl carrying the owner model."""
+    control = TaskControl()
     control.run_kind = run_kind
     control.userId = user_id
     control.teamId = team_id
@@ -78,7 +79,15 @@ def _account(*, user_id='user-1', team_id='team-1', permissions=('task.monitor',
 def _server(*controls) -> TaskServer:
     """A TaskServer shell holding only the task-control registry."""
     server = TaskServer.__new__(TaskServer)
-    server._task_control = {c.key: c for c in controls}
+    server._task_control = ControlRegistry({c.key: c for c in controls})
+    server._engines = EngineRegistry()
+    server._engine_unavailable = {}
+    server._control_starts = {}
+    server._engine_restarts = {}
+    server._restart_tasks = set()
+    server._control_expiry = []
+    server._engine_expiry = []
+    server._expiry_gen = 0
     return server
 
 
@@ -117,7 +126,7 @@ def test_me_deploy_key_differs_from_dev_for_the_same_user():
 
 
 # ---------------------------------------------------------------------------
-# TASK_CONTROL.owner_id — the single owner derivation
+# TaskControl.owner_id — the single owner derivation
 # ---------------------------------------------------------------------------
 
 

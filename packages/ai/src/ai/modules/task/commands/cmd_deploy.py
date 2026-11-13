@@ -60,7 +60,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
 from ..address import validate_component_ids, validate_segment
-from ..deploy_events import broadcast_deploy_changed
+from ..deploy_events import broadcast_deploy_changed, release_deployment_holds
 
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
@@ -220,6 +220,9 @@ class _DeployBase(DAPConn):
         the record; this is what replaces the deploy surfaces' polling.
         Best-effort: a failed broadcast never fails the mutation.
         """
+        # Disable/remove is the kill switch: every run resolved through the
+        # deployment releases its hold before anyone is told
+        await release_deployment_holds(self._server, org_id, team_id, project_id, action)
         await broadcast_deploy_changed(self._server, org_id, team_id, project_id, action)
 
     async def _dispatch_deploy(self, request: Dict[str, Any], handlers: Dict[str, Any], label: str) -> Dict[str, Any]:

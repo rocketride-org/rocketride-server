@@ -372,6 +372,25 @@ result = await client.use(pipeline=pipeline, args=['--trace=debugOut'])
 - They apply at task start only — attaching to an already-running task
   (`use_existing=True`) leaves the running process's arguments unchanged.
 
+### `async process(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipelineTraceLevel=None, on_change='error', timeout=None, team=None) -> PROCESS_RESULT`
+
+One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Pass exactly one of `name`, `pipeline` or `filepath`.
+
+- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@dev` run (attach only; a name never starts a dev run), your `@me` deployment, the first team in your team order that publishes it (`team='...'` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
+- **`pipeline` / `filepath`** address your own `@dev` run for that spec. When it already runs other content, `on_change` decides: `'error'` (default, fails with both hashes), `'keep'` (deliver to the running engine; `specMatch` is `False`), `'auto'` (move your run to the new spec; nothing is stopped for anyone else).
+- Data up to `PROCESS_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe. Same result either way.
+- `timeout` (seconds) covers the request only, pipe open to close. The pipeline stays up afterwards and expires on its idle ttl.
+
+Returns the pipe close body plus the stamps `token` (the address that answered), `resolved` (`'@dev'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@dev`), `engineKey`, `specMatch`, `converged` (`'none'`, `'started'`, `'repointed'`), `ignored`, and `warnings` (`address_collision`, `repoint_storm`) when any.
+
+```python
+result = await client.process(name='acme.docBrain', data='What is in this file?')
+print(result['resolved'], result.get('answers'))
+
+# The zero-publish loop: your own dev run of a local spec
+result = await client.process(filepath='docBrain.pipe', data=b'...', on_change='auto')
+```
+
 ### `async terminate(token: str) -> None`
 
 Terminate a running pipeline. Termination is graceful (in-flight items finish) and final — start a new pipeline for further processing.

@@ -39,6 +39,7 @@ import ai.modules.task.commands.cmd_pipe as pipe_mod
 from ai.modules.task.commands.cmd_deploy import DeployCommands
 from ai.modules.task.commands.cmd_pipe import DeployPipeCommands
 from ai.account.models import resolve_team_permissions
+from ai.modules.task.task_control import DeploymentRef
 
 
 # ============================================================================
@@ -348,6 +349,7 @@ class TestReads:
             *,
             org_id,
             team_id,
+            deployment,
             trigger,
             ttl=None,
             trace_level=None,
@@ -359,6 +361,7 @@ class TestReads:
                 pipeline=pipeline,
                 org_id=org_id,
                 team_id=team_id,
+                deployment=deployment,
                 trigger=trigger,
                 ttl=ttl,
                 trace_level=trace_level,
@@ -389,6 +392,9 @@ class TestReads:
         conn._server.control_by_key.assert_called_once_with('deploy.team-1.acme.proj-1.webhook_1')
         assert dispatched['trigger'] == 'manual'
         assert dispatched['team_id'] == 'team-1'
+        # The run names the deployment it resolved through: disabling or
+        # removing that deployment releases the run's hold
+        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1')
         assert dispatched['pipeline']['source'] == 'webhook_1'
         # No actor rides the dispatch — the run is owned by the team alone.
         assert 'actor' not in dispatched

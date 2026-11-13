@@ -87,6 +87,11 @@ CONST_WS_PING_TIMEOUT = 300
 # update_env / set_env keeps that value
 CONST_ENV_MASK = '••••••••'
 
+# process() data up to this many bytes travels inline in ONE request; larger
+# payloads (and every call with on_sse) stream through pipe open/write/close.
+# One shared constant with the server and the TypeScript SDK (1 MiB).
+PROCESS_INLINE_MAX = 1024 * 1024
+
 # Default store directory for project pipeline files.
 # Use this constant instead of hardcoding '.projects'.
 PROJECT_DIR = '.projects'

@@ -158,15 +158,16 @@ class IServiceEndpoint(Protocol):
     def setToken(self, serviceConfig: IServiceEndpoint_ServiceConfig, key: str, value: str) -> None:  #
         ...
 
-    def getPipe(self, traceLevel: Optional[str] = None, parentBindingId: int = 0) -> 'IServiceFilterInstance':  #
+    def getPipe(self, traceLevel: Optional[str] = None, traceId: int = 0) -> 'IServiceFilterInstance':  #
         """
         Take a pipe as a new binding.
 
         Args:
             traceLevel: 'none' / 'metadata' / 'summary' / 'full'; None binds at the
                 endpoint default (the task file's pipelineTraceLevel).
-            parentBindingId: The live binding this one is opened from; the child
-                joins its tree (same rootBindingId) and inherits its trace level.
+            traceId: 0 mints a new id and starts a request tree; a live id joins
+                that tree: the pipe reports the same traceId and inherits its trace
+                level. An unknown or released id is refused.
         """
         ...
 
@@ -532,8 +533,7 @@ class IServiceFilterInstance(Protocol):
     currentObject: Entry
     pipeType: IServiceFilterInstance_PipeType
     pipeId: int  #: The pipe SLOT (0..n, reused).
-    bindingId: int  #: The binding this instance is serving (monotonic, never reused).
-    rootBindingId: int  #: The root of the binding tree (= bindingId for a root binding).
+    traceId: int  #: The request tree this instance is serving (monotonic, never reused).
     traceLevel: str  #: The binding's trace level: 'none' / 'metadata' / 'summary' / 'full'.
     next: 'IServiceFilterInstance | None'
 
@@ -983,10 +983,9 @@ class BindingLogger:
     like the module-level functions; ``sendSSE`` tags the captured ids.
     """
 
-    def __init__(self, pipe_id: int, binding_id: int, root_binding_id: int):
+    def __init__(self, pipe_id: int, trace_id: int):
         self.pipeId = pipe_id  #: The pipe slot at capture.
-        self.bindingId = binding_id  #: The binding at capture.
-        self.rootBindingId = root_binding_id  #: The binding tree at capture.
+        self.traceId = trace_id  #: The request tree at capture.
 
     def debug(self, *args) -> None:
         """Output a debug message to the engine log (not binding-tagged; the module-level ``debug``)."""
@@ -1010,7 +1009,7 @@ class BindingLogger:
         """Send a real-time SSE event tagged with the captured binding."""
         from .engine import monitorSSE
 
-        monitorSSE(self.pipeId, type, data or None, self.bindingId, self.rootBindingId)
+        monitorSSE(self.pipeId, type, data or None, self.traceId)
 
 
 class IInstanceBase:
@@ -1082,38 +1081,33 @@ class IInstanceBase:
     # ------------------------------------------------------------------
     # Binding identity
     #
-    # Every instance of one getPipe() shares one pipe object, so the ids
-    # below are the same for the whole chain. The slot (pipeId) is reused;
-    # the binding id never is.
+    # Every instance of one getPipe() shares one pipe object, so the id
+    # below is the same for the whole chain. The slot (pipeId) is reused;
+    # the trace id never is.
     # ------------------------------------------------------------------
 
     @property
-    def bindingId(self) -> int:
-        """The binding this instance is serving."""
-        return self.instance.bindingId
-
-    @property
-    def rootBindingId(self) -> int:
-        """The root of this binding's tree: its own id, or the caller's root when opened from inside a binding."""
-        return self.instance.rootBindingId
+    def traceId(self) -> int:
+        """The request tree this instance is serving: one id for every pipe the request opens."""
+        return self.instance.traceId
 
     def getPipe(self, traceLevel: Optional[str] = None) -> IServiceFilterPipe:
         """
         Open a sub-pipe from inside this binding.
 
-        The sub-pipe is a child binding: it reports this binding's ``rootBindingId``
+        The sub-pipe joins this binding's tree: it reports the same ``traceId``
         and inherits its trace level, so its trace and SSE reach the same control as
         the request that caused them. The caller context (``_caller``) is stamped
         down the sub-pipe's chain so its nodes read this call's ``settings``.
 
         Args:
-            traceLevel: Ignored when inside a binding (the child inherits); kept for
-                the root case where the instance has no binding yet.
+            traceLevel: Ignored when inside a binding (the joined pipe inherits);
+                kept for the case where the instance has no binding yet.
 
         Returns:
             IServiceFilterPipe: The bound pipe; return it with ``putPipe``.
         """
-        pipe = self.IEndpoint.endpoint.getPipe(traceLevel, self.bindingId)
+        pipe = self.IEndpoint.endpoint.getPipe(traceLevel, self.traceId)
         self._stamp_caller(pipe, self._caller)
         return pipe
 
@@ -1148,7 +1142,7 @@ class IInstanceBase:
         Returns:
             BindingLogger: sendSSE tagged with this binding, plus the engine log calls.
         """
-        return BindingLogger(self.instance.pipeId, self.bindingId, self.rootBindingId)
+        return BindingLogger(self.instance.pipeId, self.traceId)
 
     # ------------------------------------------------------------------
     # Media lane normalization
@@ -1821,7 +1815,7 @@ def _patch_classes():
     def sendSSE(self, type: str, **data) -> None:
         from .engine import monitorSSE
 
-        monitorSSE(self.pipeId, type, data or None, self.bindingId, self.rootBindingId)
+        monitorSSE(self.pipeId, type, data or None, self.traceId)
 
     # Add to the actual C++ class
     from engLib import IFilterInstance as Impl_IFilterInstance

@@ -271,6 +271,12 @@ Error IServiceEndpoint::setConfig(const json::Value &_jobConfig,
     config.taskConfig.lookupAssign("pipelineTraceLevel", traceLevelStr);
     parseTraceLevel(traceLevelStr, config.pipelineTraceLevel);
 
+    // The launch's trace epoch seeds the traceId counter's high 16 bits
+    // (plan 7.4): ids from two engines one connection holds never collide
+    uint32_t traceEpoch = 0;
+    config.taskConfig.lookupAssign("traceEpoch", traceEpoch);
+    seedTraceEpoch(traceEpoch);
+
     // Done
     return ccode;
 }

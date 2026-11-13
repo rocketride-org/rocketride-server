@@ -82,7 +82,7 @@ def make_stamp(start: int = SEED):
     state = {'next': start, 'floor_calls': []}
 
     def stamp(message, *, event_time=None):
-        # Mirror Task.stamp_log_event: the stamps ride in the BODY (the DAP
+        # Mirror TaskEngine.stamp_log_event: the stamps ride in the BODY (the DAP
         # envelope is pure protocol); eventTime once; logSeq assigned once.
         body = message.get('body')
         if not isinstance(body, dict):
@@ -96,7 +96,7 @@ def make_stamp(start: int = SEED):
         return message
 
     def raise_floor(floor):
-        # Mirror Task.raise_log_seq_floor: only ever move forward.
+        # Mirror TaskEngine.raise_log_seq_floor: only ever move forward.
         state['floor_calls'].append(floor)
         if floor > state['next']:
             state['next'] = floor

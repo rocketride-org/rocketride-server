@@ -423,17 +423,17 @@ def test_accumulate_sample_tracks_peaks(fake_psutil, no_gpu):
     assert status.metrics.peak_cpu_memory_mb == 250.0
 
 
-def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
-    """avg_* fields equal accumulated total / duration."""
+def test_accumulate_sample_keeps_totals_and_computes_no_averages(fake_psutil, no_gpu):
+    """The status is summable: totals accumulate, avg_* stay at 0 (plan 7.5, ALB seam 3)."""
     tm, status = _make_metrics(fake_psutil)
     tm.set_service_up(True)  # ungate billing accumulators
     tm._cpu_percent_raw = 200.0
     status.metrics.cpu_memory_mb = 100.0
     tm._accumulate_sample(2.0)
-    # avg_cpu_percent = cpu_seconds / duration * 100 = (4 / 2) * 100 = 200
-    assert status.metrics.avg_cpu_percent == pytest.approx(200.0)
-    # avg memory = 200 / 2 = 100
-    assert status.metrics.avg_cpu_memory_mb == pytest.approx(100.0)
+    assert tm._cpu_seconds == pytest.approx(4.0)
+    assert tm._memory_mb_seconds == pytest.approx(200.0)
+    assert status.metrics.avg_cpu_percent == 0
+    assert status.metrics.avg_cpu_memory_mb == 0
 
 
 # ---------------------------------------------------------------------------

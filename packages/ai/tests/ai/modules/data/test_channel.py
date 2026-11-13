@@ -3,7 +3,7 @@ The task's channel to the engine, end to end over a loopback socket (T1a).
 
 The task side is a real ``WebServer`` with the ``data`` module, served on
 its own loop thread the way ``node.py`` does it; the engine side is a real
-``Task.TaskData`` opened with ``Task._dial``. Requests go from the task
+``TaskEngine.TaskData`` opened with ``TaskEngine._dial``. Requests go from the task
 through ``task_channel`` (from another thread, as in production) to a
 handler registered on the engine side, and back.
 """
@@ -37,7 +37,7 @@ from ai.modules.task.task_channel import (
     register_channel_command,
     unregister_channel_command,
 )
-from ai.modules.task.task_engine import Task
+from ai.modules.task.task_engine import TaskEngine
 from ai.node import _channel_authenticator
 
 TOKEN = 'run-token'
@@ -125,7 +125,7 @@ def task_side():
 
 def _engine_task(port):
     """The engine-side ``Task`` with what ``_dial`` and the request path consult."""
-    t = Task.__new__(Task)
+    t = TaskEngine.__new__(TaskEngine)
     t.id = 'task-1'
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
@@ -134,7 +134,7 @@ def _engine_task(port):
     t._data_port = port
     t._engine_process = None
     t.debug_message = MagicMock()
-    Task._reset_channel_state(t)
+    TaskEngine._reset_channel_state(t)
     return t
 
 
@@ -142,7 +142,7 @@ async def _connect(task_side, task=None):
     """Dial the task from the engine side and return ``(task, client)`` once the task holds the connection."""
     task = task or _engine_task(task_side.port)
     old = task_channel._conn
-    client = await Task._dial(task)
+    client = await TaskEngine._dial(task)
     task._data_client = client
     task._data_connected.set()
     # The handshake completes before the task's on_connected attaches the connection
@@ -277,11 +277,11 @@ async def test_startup_command_is_refused_once_startup_is_over(task_side, comman
     task, client = await _connect(task_side)
 
     assert (await ask('node.resolve', {'names': []})).body['echo'] == {'names': []}
-    Task._on_channel_signal(task, '2', None)
+    TaskEngine._on_channel_signal(task, '2', None)
     with pytest.raises(ChannelError, match='closed'):
         await ask('node.resolve', {'names': []})
     # Only a new run reopens it
-    Task._on_channel_signal(task, '1', None)
+    TaskEngine._on_channel_signal(task, '1', None)
     with pytest.raises(ChannelError, match='closed'):
         await ask('node.resolve', {'names': []})
     await client.disconnect()

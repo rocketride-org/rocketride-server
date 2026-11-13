@@ -259,14 +259,20 @@ public:
     //-----------------------------------------------------------------
     virtual int getPipeCount() noexcept;
 
-    // Hands out a pipe as a new BINDING: mints its bindingId, sets its
-    // rootBindingId (its own id, or the root of the live parent binding
-    // it is opened from) and its trace level (the argument, or the parent's
-    // when a parent is given). The argless form binds at the endpoint's
+    // Hands out a pipe as a new BINDING. traceId 0 mints a new id and
+    // starts a request tree at the given trace level; a non-zero traceId
+    // joins that live tree: the pipe is stamped with THAT id and inherits
+    // the tree's trace level. The argless form binds at the endpoint's
     // default level (the task file's pipelineTraceLevel).
     virtual ErrorOr<ServicePipe> getPipe(PIPELINE_TRACE_LEVEL traceLevel,
-                                         uint64_t parentBindingId = 0) noexcept;
+                                         uint64_t traceId = 0) noexcept;
     virtual ErrorOr<ServicePipe> getPipe() noexcept;
+
+    // Seeds the high 16 bits of the process-wide traceId counter from the
+    // launch's traceEpoch (the task file's config.traceEpoch), so trace ids
+    // stay unique across the engines one connection may hold. 0 leaves the
+    // counter as it is; an epoch already in effect is not re-seeded.
+    static void seedTraceEpoch(uint32_t epoch) noexcept;
 
     // Runs before getPipe() hands out a pipe; an error refuses it
     static inline std::function<Error()> pipeGate;
@@ -340,11 +346,11 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Source of binding ids - one counter for the whole process,
-    ///		so a binding id is unique across every endpoint the engine
+    ///		Source of trace ids - one counter for the whole process,
+    ///		so a trace id is unique across every endpoint the engine
     ///		holds and is never reused while the process lives
     //-----------------------------------------------------------------
-    static inline std::atomic<uint64_t> s_nextBindingId{1};
+    static inline std::atomic<uint64_t> s_nextTraceId{1};
 
     //-----------------------------------------------------------------
     // These are valid to be called during beginFilterGlobal and

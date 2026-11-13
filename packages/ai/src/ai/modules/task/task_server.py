@@ -59,7 +59,11 @@ Security Features:
 Architecture:
 -------------
 Central orchestration server managing:
-- Task instances (computational workloads)
+- Controls (``TaskControl``): the callers' views of runs, one per
+  ``(owner, address, rung)``, each holding exactly one engine
+- Engines (``TaskEngine``): the running processes, keyed by the content hash
+  of the resolved spec and shared by every control whose spec hashes the
+  same (across users only when the pipeline is certified shareable)
 - DAP connections (debugging and control interfaces)
 - Event broadcasting (real-time monitoring and notifications)
 - Resource management (automatic cleanup and metrics)
@@ -68,19 +72,29 @@ Central orchestration server managing:
 
 import time
 import errno
+import heapq
 import socket
 import sys
 import asyncio
 import uuid
-from typing import List
+from collections import deque
+from collections.abc import Mapping, MutableMapping
+from contextlib import asynccontextmanager
+from typing import Deque, List
 from fastapi import WebSocket
-from dataclasses import dataclass
-from typing import Awaitable, Callable, Dict, Any, Optional, Set
+from dataclasses import dataclass, field
+from typing import AsyncIterator, Awaitable, Callable, Dict, Any, Optional, Set, Tuple
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
     CONST_TEARDOWN_WAIT_TIMEOUT,
+    CONST_DEFAULT_MAX_THREADS,
     CONST_DEFAULT_TTL,
+    CONST_ENGINE_IDLE_TTL,
+    CONST_ENGINE_RESTART_BACKOFF,
+    CONST_ENGINE_RESTART_MAX_PER_HOUR,
+    CONST_REPOINT_STORM_MAX,
+    CONST_REPOINT_STORM_WINDOW,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
@@ -89,14 +103,18 @@ from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
-from ai.account.models import AccountInfo, resolve_run_permissions
+from ai.account.models import AccountInfo, home_team, resolve_run_permissions, resolve_task_permissions
+from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
-from .task_engine import Task
+from .task_control import RUNGS, DeploymentRef, TaskControl, TeamContext, control_key, rung_of
+from .engine_key import engine_content
+from .task_engine import TaskEngine, component_facts
 from .types import LAUNCH_TYPE, TaskError
-from .pipeline import resolve_implied_source
+from .pipeline import MultipleSourcesError, resolve_implied_source
 from .commands.cmd_monitor import owner_key
 from .address import (
+    Address,
     build_address,
     check_endpoint_scope,
     parse_address,
@@ -105,87 +123,11 @@ from .address import (
     validate_segment,
 )
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 
-@dataclass
-class TASK_CONTROL:
-    """
-    Task control structure containing all metadata and references for a managed task.
-
-    This dataclass encapsulates the complete state and metadata required to
-    manage a computational task throughout its lifecycle. It serves as the
-    central registry entry that tracks task ownership, configuration, and status.
-
-    Attributes:
-        address (str): The task's public name ``developerId.pipelineId.source``
-            — what clients send in the token slot, the display id, and the
-            name every event carries
-        key (str): The registry key ``runKind.ownerId.address`` — internal,
-            never sent to a client
-        task (Optional[Task]): Reference to the actual Task instance managing execution
-        launch_type (LAUNCH_TYPE): The method used to create this task (launch/execute)
-        pipeline (Optional[Dict[str, Any]]): Task configuration and execution parameters
-    """
-
-    # Display id — the address (used for display and events)
-    id: str = ''
-
-    # Connection identifier (the launching user's id on every dev run)
-    client_id: str = ''
-
-    # The address ``developerId.pipelineId.source`` and the registry key
-    # ``runKind.ownerId.address``. The address omits the owner on purpose:
-    # the same address names different controls for different callers, and
-    # the resolver picks the caller's own.
-    developer_id: str = ''
-    address: str = ''
-    key: str = ''
-
-    # User, team, and org identity (derived from AccountInfo after auth)
-    userId: str = ''
-    teamId: str = ''
-    orgId: str = ''
-
-    # Run classification: 'dev' | 'deploy'. Part of task identity — the
-    # OWNER of a dev run is its user, the owner of a deploy run is its
-    # team, and the registry key, monitor keys, and lookups all scope by
-    # that owner. teamId above remains billing/permission attribution and
-    # is NOT the owner for dev runs.
-    run_kind: str = 'dev'
-
-    # Owner scope: 'user' | 'team'. Decides the VISIBILITY owner INDEPENDENTLY
-    # of run_kind — a deployed run may be team-owned (@team) or user-owned
-    # (@me, a personal deploy). Empty falls back to the run_kind default
-    # (deploy -> team, else user) for a control built before it is stamped.
-    owner_kind: str = ''
-
-    # Launch type and owning connection
-    launch_owner: TaskConn = None
-    launch_type: LAUNCH_TYPE = LAUNCH_TYPE.LAUNCH
-
-    # Meta info about the task
-    project_id: str = None
-    source: str = None
-    provider: str = None
-    pipeline: Optional[Dict[str, Any]] = None
-
-    # And finally, the task reference
-    task: Optional[Task] = None
-
-    @property
-    def owner_id(self) -> str:
-        """
-        The identity that OWNS this run — what monitor keys, the registry key,
-        and identity lookups scope by (never the attribution teamId of a
-        user-owned run).
-
-        owner_kind is the authority: a team-owned run resolves to teamId, a
-        user-owned run to userId. When owner_kind is unset (a control built
-        before it is stamped) it falls back to the run_kind default.
-        """
-        kind = self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
-        return self.teamId if kind == 'team' else self.userId
+#: What a spec call does when the caller's live presence runs other content (plan 3.4)
+ON_CHANGE_MODES = ('error', 'keep', 'auto')
 
 
 def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
@@ -214,6 +156,302 @@ def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, A
                 component['config'] = {}
             return pipeline
     raise ValueError(f'Pipeline source component "{source}" not found in components list')
+
+
+@dataclass
+class _StartGate:
+    """
+    The per-engine-key start lock (plan 7.2).
+
+    Concurrent starters of one engine key serialize on ``lock``; the first
+    starts the engine, the rest find it registered and attach to it. ``users``
+    counts the starters inside or waiting, so the gate is dropped when the
+    last one leaves. This is the deploy rail's check-and-claim reservation
+    (``try_reserve_run``/``release_run``) generalized from one deployment
+    source to every engine key; the scheduler keeps its own per-source guard,
+    which protects a team storage anchor rather than an engine start.
+    """
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
+@asynccontextmanager
+async def _gated(gates: Dict[str, _StartGate], key: str) -> AsyncIterator[None]:
+    """
+    Hold the start lock of ``key`` in ``gates``; the gate goes when its last user leaves.
+
+    Args:
+        gates: The gate table (per engine key, or per control key).
+        key: The key to serialize on.
+    """
+    gate = gates.setdefault(key, _StartGate())
+    gate.users += 1
+    try:
+        async with gate.lock:
+            yield
+    finally:
+        gate.users -= 1
+        if gate.users == 0 and gates.get(key) is gate:
+            gates.pop(key, None)
+
+
+class EngineRegistry(Mapping):
+    """
+    The engine pool: running engines by content key, with the per-key start lock inside (plan 7.2).
+
+    ALB seam 2: everything the server does with engines as a set goes through
+    this interface (``get`` / ``try_start_lock`` / ``release_lock`` /
+    ``register`` / ``unregister`` / ``holders``), so a second backend (a
+    fleet-wide pool behind the ALB) replaces the dict without touching a
+    caller. Read-only as a mapping (``key -> TaskEngine``); writes go through
+    ``register``/``unregister``.
+
+    The start lock is the deploy rail's check-and-claim reservation
+    (``try_reserve_run``/``release_run``) generalized from one deployment
+    source to every engine key: concurrent starters of one key serialize, the
+    first starts the engine, the rest attach to it.
+    """
+
+    def __init__(self) -> None:
+        """An empty pool with no start in progress."""
+        self._engines: Dict[str, TaskEngine] = {}
+        self._starts: Dict[str, _StartGate] = {}
+
+    # ==== Mapping =================================================================
+
+    def __getitem__(self, key: str) -> TaskEngine:
+        """The engine registered under ``key``."""
+        return self._engines[key]
+
+    def __iter__(self):
+        """The registered engine keys."""
+        return iter(self._engines)
+
+    def __len__(self) -> int:
+        """The number of registered engines."""
+        return len(self._engines)
+
+    # ==== Registration ============================================================
+
+    def register(self, key: str, engine: TaskEngine) -> None:
+        """Put ``engine`` in the pool under ``key`` (its engine key; a newer engine replaces an older one)."""
+        self._engines[key] = engine
+
+    def unregister(self, engine: TaskEngine) -> bool:
+        """
+        Take ``engine`` out of the pool, unless a newer engine already holds its key.
+
+        Returns:
+            True when ``engine`` was the registered one and is now gone.
+        """
+        if self._engines.get(engine.engine_key) is not engine:
+            return False
+        self._engines.pop(engine.engine_key, None)
+        return True
+
+    def holders(self, key: str) -> frozenset:
+        """The control keys holding the engine of ``key`` (empty when none is registered)."""
+        engine = self._engines.get(key)
+        return engine.holds if engine is not None else frozenset()
+
+    # ==== The start lock ==========================================================
+
+    async def try_start_lock(self, key: str) -> None:
+        """
+        Take the start lock of ``key``, waiting behind any starter already holding it.
+
+        Every call is paired with one ``release_lock(key)``; ``start_lock``
+        does the pairing.
+        """
+        gate = self._starts.setdefault(key, _StartGate())
+        gate.users += 1
+        try:
+            await gate.lock.acquire()
+        except BaseException:
+            self._leave(key, gate)
+            raise
+
+    def release_lock(self, key: str) -> None:
+        """Give back the start lock of ``key``; the gate goes when its last user leaves."""
+        gate = self._starts.get(key)
+        if gate is None:
+            return
+        gate.lock.release()
+        self._leave(key, gate)
+
+    def _leave(self, key: str, gate: _StartGate) -> None:
+        """One user left ``gate``; drop it when it was the last."""
+        gate.users -= 1
+        if gate.users == 0 and self._starts.get(key) is gate:
+            self._starts.pop(key, None)
+
+    @asynccontextmanager
+    async def start_lock(self, key: str) -> AsyncIterator[None]:
+        """Hold the start lock of ``key`` for the ``async with`` body."""
+        await self.try_start_lock(key)
+        try:
+            yield
+        finally:
+            self.release_lock(key)
+
+    @property
+    def starting(self) -> frozenset:
+        """The engine keys with a start in progress (or starters waiting)."""
+        return frozenset(self._starts)
+
+
+class ControlRegistry(MutableMapping):
+    """
+    The control registry and its two indexes (plan 3.2: lookups are indexed, never scanned).
+
+    A mapping ``<rung>.<ownerId>.<address> -> TaskControl`` (``_by_key``)
+    that keeps, in its ONE register path (``__setitem__``) and its ONE forget
+    path (``__delitem__``, which ``pop`` goes through):
+
+    - ``_by_address_owner[(address, ownerId)]``: the controls of one owner at
+      one address (one per rung). ``@team`` probes it once per team the
+      caller belongs to;
+    - ``_sources[(developerId, pipeId)]``: the sources registered for a pipe,
+      with the number of controls at each, so a two-segment address finds
+      its sources without a walk;
+    - ``_by_owner[ownerId]``: every control of one owner (user or team), so
+      an owner-scoped lookup never walks the registry.
+
+    ALB seam 2: callers outside the registry use ``get`` / ``get_or_create``
+    / ``remove`` / ``for_owner`` (and the counted resolver probes below),
+    never an iteration over every control.
+
+    ``probes`` counts the index entries the resolver touched: the
+    instrumentation behind the O(caller's teams) guarantee.
+    """
+
+    def __init__(self, controls: Optional[Dict[str, TaskControl]] = None) -> None:
+        """
+        Build an empty registry, or one holding ``controls``.
+
+        Args:
+            controls: Initial ``key -> control`` entries, registered one by one.
+        """
+        self._by_key: Dict[str, TaskControl] = {}
+        self._by_address_owner: Dict[Tuple[str, str], List[TaskControl]] = {}
+        self._sources: Dict[Tuple[str, str], Dict[str, int]] = {}
+        self._by_owner: Dict[str, Dict[str, TaskControl]] = {}
+        self.probes = 0
+        for key, control in (controls or {}).items():
+            self[key] = control
+
+    # ==== Mapping =================================================================
+
+    def __getitem__(self, key: str) -> TaskControl:
+        """The control registered under ``key``."""
+        return self._by_key[key]
+
+    def __iter__(self):
+        """The registered keys."""
+        return iter(self._by_key)
+
+    def __len__(self) -> int:
+        """The number of registered controls."""
+        return len(self._by_key)
+
+    def __setitem__(self, key: str, control: TaskControl) -> None:
+        """
+        THE register path: the key, the owner index and the source index.
+
+        A control already under ``key`` is forgotten first, so a replacement
+        never leaves its predecessor in an index.
+        """
+        # Step 1: a predecessor under the key leaves every index
+        if key in self._by_key:
+            del self[key]
+
+        # Step 2: the exact key, the owner index and the pipe's sources
+        self._by_key[key] = control
+        self._by_address_owner.setdefault((control.address, control.owner_id), []).append(control)
+        sources = self._sources.setdefault((control.developer_id, control.project_id or ''), {})
+        sources[control.source or ''] = sources.get(control.source or '', 0) + 1
+        self._by_owner.setdefault(control.owner_id, {})[key] = control
+
+    def __delitem__(self, key: str) -> None:
+        """THE forget path: out of the key, the owner index and the source index."""
+        # Step 1: the exact key
+        control = self._by_key.pop(key)
+
+        # Step 2: the owner index entry, by identity
+        owner = (control.address, control.owner_id)
+        held = [c for c in self._by_address_owner.get(owner, []) if c is not control]
+        if held:
+            self._by_address_owner[owner] = held
+        else:
+            self._by_address_owner.pop(owner, None)
+
+        # Step 3: the pipe's source count
+        pipe = (control.developer_id, control.project_id or '')
+        sources = self._sources.get(pipe, {})
+        source = control.source or ''
+        if sources.get(source, 0) > 1:
+            sources[source] -= 1
+        else:
+            sources.pop(source, None)
+            if not sources:
+                self._sources.pop(pipe, None)
+
+        # Step 4: the owner index
+        owned = self._by_owner.get(control.owner_id, {})
+        owned.pop(key, None)
+        if not owned:
+            self._by_owner.pop(control.owner_id, None)
+
+    # ==== Interface (ALB seam 2) =================================================
+
+    def get_or_create(self, key: str, create: Callable[[], TaskControl]) -> Tuple[TaskControl, bool]:
+        """
+        The control under ``key``, or a new one built by ``create`` and registered.
+
+        Args:
+            key: The registry key.
+            create: Builds the control when none is registered (its ``key`` must be ``key``).
+
+        Returns:
+            The control and True when it was created here.
+        """
+        existing = self._by_key.get(key)
+        if existing is not None:
+            return existing, False
+        control = create()
+        self[key] = control
+        return control, True
+
+    def remove(self, key: str) -> Optional[TaskControl]:
+        """Forget the control under ``key``; returns it, or None when none was registered."""
+        if key not in self._by_key:
+            return None
+        control = self._by_key[key]
+        del self[key]
+        return control
+
+    def for_owner(self, owner_id: str) -> List[TaskControl]:
+        """Every control one owner (a user or a team) holds, in registration order."""
+        self.probes += 1
+        return list(self._by_owner.get(owner_id, {}).values())
+
+    # ==== Resolver lookups (counted) ==============================================
+
+    def lookup(self, key: str) -> Optional[TaskControl]:
+        """One exact-key probe (``@dev``, ``@me``, ``@public``)."""
+        self.probes += 1
+        return self._by_key.get(key)
+
+    def owned(self, address: str, owner_id: str) -> List[TaskControl]:
+        """One owner-index probe: ``owner_id``'s controls at ``address``."""
+        self.probes += 1
+        return list(self._by_address_owner.get((address, owner_id), ()))
+
+    def sources_of(self, developer_id: str, pipe_id: str) -> List[str]:
+        """One source-index probe: the sources registered for a pipe, sorted."""
+        self.probes += 1
+        return sorted(self._sources.get((developer_id, pipe_id), {}))
 
 
 class TaskServer(DAPBase):
@@ -254,7 +492,13 @@ class TaskServer(DAPBase):
 
     Attributes:
         _connections: Registry of active DAP client connections
-        _task_control: Registry of all managed tasks with metadata
+        _task_control: Registry of the controls (the callers' views of runs)
+        _engines: The engine pool (``EngineRegistry``): running engines by
+            content key, with the per-key start lock inside
+        _engine_unavailable: Controls whose engine an operator stopped, told once
+        _control_starts: Per-control-key locks for starts from a published artifact
+        _engine_restarts: Automatic listener-engine restarts per engine key (rolling hour)
+        _restart_tasks: Pending automatic listener-engine restarts
         _connection_id: Monotonic counter for connection identification
         _server: Reference to parent web server for statistics
     """
@@ -281,10 +525,26 @@ class TaskServer(DAPBase):
         5. Configure DAP base class for protocol handling
         """
         # Initialize registries for connection and task management
-        self._task_control: Dict[str, TASK_CONTROL] = {}  # Task registry and metadata
+        self._task_control = ControlRegistry()  # Control registry: <rung>.<ownerId>.<address>, indexed
+        self._engines = EngineRegistry()  # Engine pool: content key -> engine, start lock inside
+        self._engine_unavailable: Dict[str, Tuple[str, str]] = {}  # Control key -> (engineKey, reason)
+        self._control_starts: Dict[str, _StartGate] = {}  # Per-control-key locks for starts from an artifact
+        self._engine_restarts: Dict[str, Deque[float]] = {}  # Engine key -> automatic restart times, last hour
+        self._restart_tasks: Set[asyncio.Task] = set()  # Pending automatic listener restarts
+        self._repoints: Dict[Tuple[str, str], Deque[float]] = {}  # (owner, address) -> repoint times (storm detector)
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
+
+        # Idle expiry (plan 7.1, 7.2): lazy-deletion min-heaps of
+        # (deadline, generation, key|engine). A stored deadline is never later
+        # than the real one, so a pass pops only what may be due and re-pushes
+        # what was active since it was scheduled. Generations are unique, so
+        # ties never compare the third member, and an entry whose generation
+        # no longer matches its control or engine is stale and dropped.
+        self._control_expiry: List[Tuple[float, int, str]] = []
+        self._engine_expiry: List[Tuple[float, int, TaskEngine]] = []
+        self._expiry_gen = 0
 
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
@@ -365,8 +625,11 @@ class TaskServer(DAPBase):
                     if not control:
                         continue  # Task may have been removed by another process
 
-                    # Skip tasks that are still actively runnings
-                    if not control.task.is_task_complete():
+                    # Skip tasks that are still running, and dormant controls:
+                    # their engine stopped on its inactivity timer or crashed
+                    # after it confirmed running, and the control lives on
+                    # until its own ttl (plan 7.2)
+                    if not control.task.is_task_complete() or control.dormant:
                         continue
 
                     # Check if sufficient time has passed since completion
@@ -374,6 +637,11 @@ class TaskServer(DAPBase):
                     if task_status.endTime + CONST_CLEANUP_DELAY_TIME < current_time:
                         # Remove the expired completed task
                         await self.remove_task(control.key)
+
+                # An engine that finished with nobody holding it leaves the pool
+                for engine in list(self._engines.values()):
+                    if not engine.holds and engine.is_task_complete():
+                        self._engines.unregister(engine)
 
             except Exception as e:
                 # Log cleanup errors but continue operation to maintain system stability
@@ -384,72 +652,148 @@ class TaskServer(DAPBase):
 
     async def _monitor_ttl(self) -> None:
         """
-        Background process for monitoring task idle times and enforcing TTL limits.
+        Background process enforcing idle ttls on controls and on engines.
 
-        This coroutine runs continuously to automatically terminate tasks that have
-        been idle (no activity) longer than their configured TTL (time-to-live).
+        Idle time is per CONTROL (plan 7.1): a request through one control
+        never keeps another alive, so on a shared engine kept busy by one
+        holder every other holder still expires on its own ttl. Each pass
+        (every ``CONST_TTL_CHECK`` seconds, see ``_ttl_cycle``):
 
-        TTL Policy:
-        - Check interval: 60 seconds (1 minute)
-        - Idle timer incremented by elapsed time each cycle
-        - Tasks exceeding their TTL are automatically terminated
-        - Only running tasks are checked (completed tasks handled by cleanup)
-        - Tasks with ttl=0 have no timeout (run indefinitely until explicitly stopped)
-
-        Count-up Timer Approach:
-        - idle_timer starts at 0 when task created or activity occurs
-        - Each cycle adds ~60 seconds to idle_timer
-        - When idle_timer >= ttl, task is terminated
-        - reset_idle_timer() sets idle_timer back to 0 on activity
+        - releases every control whose own idle time reached its ttl
+          (``stop_task(key, reason='ttl')``): the engine keeps serving the
+          other holders, and stops at once when that was its last hold; a
+          control with ttl 0 never expires by idle;
+        - stops every engine whose own inactivity reached
+          ``CONST_ENGINE_IDLE_TTL`` (plan 7.2), even while controls hold it:
+          they stay, dormant, and their next request starts the engine again
+          (``ensure_engine``). An engine with a ttl-0 holder does not age.
 
         This method runs as a background async task throughout server lifetime.
         """
-        # Check interval in seconds (run every 1 minute)
-        check_interval = CONST_TTL_CHECK
-
         while True:
             try:
                 # Wait for the check interval before processing
-                await asyncio.sleep(check_interval)
-
-                # Create snapshot of task tokens to avoid modification during iteration
-                task_keys = list(self._task_control.keys())
-
-                # Examine each task for TTL enforcement
-                for task_key in task_keys:
-                    control = self._task_control.get(task_key)
-                    if not control or not control.task:
-                        continue  # Task may have been removed
-
-                    # Skip completed tasks (handled by cleanup process)
-                    if control.task.is_task_complete():
-                        continue
-
-                    # Skip TTL enforcement if ttl is 0 (no timeout)
-                    if control.task._ttl == 0:
-                        continue
-
-                    # Increment the idle timer by the check interval
-                    control.task._idle_time += check_interval
-
-                    # Check if task has exceeded its TTL
-                    if control.task._idle_time >= control.task._ttl:
-                        self.debug_message(
-                            f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...'
-                        )
-                        # Terminate the idle task — reason 'ttl', so the
-                        # run records as completed, never as cancelled.
-                        await self.stop_task(control.key, reason='ttl')
-
+                await asyncio.sleep(CONST_TTL_CHECK)
+                await self._ttl_cycle()
                 self._debug_task_census()
 
             except Exception as e:
                 # Log errors but continue operation to maintain system stability
                 self.debug_message(f'Error during TTL monitoring cycle: {e}')
 
+    def _next_expiry_gen(self) -> int:
+        """Hand out the next idle-expiry generation (unique, increasing)."""
+        self._expiry_gen += 1
+        return self._expiry_gen
+
+    def _schedule_control(self, control: TaskControl) -> None:
+        """
+        Schedule a control's idle expiry: O(log n), once per registration.
+
+        Activity afterwards only moves ``control.last_activity``; the pass
+        that pops this entry re-pushes it at the later deadline. A control
+        with ttl 0 is never scheduled: it does not expire by idle.
+
+        Args:
+            control: The registered control.
+        """
+        if not control.ttl:
+            return
+        control.expiry_gen = self._next_expiry_gen()
+        heapq.heappush(self._control_expiry, (control.last_activity + control.ttl, control.expiry_gen, control.key))
+
+    def _schedule_engine(self, engine: TaskEngine) -> None:
+        """
+        Schedule a running engine's inactivity stop: O(log n), once per start.
+
+        Activity afterwards only moves the engine's idle clock; the pass that
+        pops this entry re-pushes it at the later deadline. A new generation
+        makes any earlier entry of the engine stale.
+
+        Args:
+            engine: The engine being started.
+        """
+        engine._expiry_gen = self._next_expiry_gen()
+        heapq.heappush(self._engine_expiry, (engine.idle_since + CONST_ENGINE_IDLE_TTL, engine._expiry_gen, engine))
+
+    async def _ttl_cycle(self, now: Optional[float] = None) -> int:
+        """
+        One TTL pass (see ``_monitor_ttl``): pops only the entries that are due.
+
+        Per pass the cost is O(k log n) for the k entries whose stored
+        deadline has passed, never a walk of the registry. A popped entry is
+        stale (its control or engine is gone, replaced or rescheduled) and
+        dropped; or re-pushed at its real deadline when there was activity
+        since it was scheduled; or acted on.
+
+        Args:
+            now: Monotonic time of the pass (default: now).
+
+        Returns:
+            The number of heap entries the pass popped.
+        """
+        now = time.monotonic() if now is None else now
+        popped = 0
+
+        # Step 1: controls whose own idle time may have reached their ttl
+        while self._control_expiry and self._control_expiry[0][0] <= now:
+            _, gen, key = heapq.heappop(self._control_expiry)
+            popped += 1
+
+            # Stale: the control is gone, replaced under its key, or unbounded
+            control = self._task_control.get(key)
+            if control is None or control.expiry_gen != gen or not control.ttl or control.task is None:
+                continue
+
+            # Finished runs are the cleanup pass's; a dormant control (its
+            # engine stopped on its inactivity timer or crashed after it
+            # confirmed running) still ages on its ttl
+            if control.task.is_task_complete() and not control.dormant:
+                continue
+
+            # Active since it was scheduled: back in at its real deadline
+            idle = control.idle_seconds(now)
+            if idle < control.ttl:
+                heapq.heappush(self._control_expiry, (now - idle + control.ttl, gen, key))
+                continue
+
+            # Its own idle time reached its ttl: release this hold only.
+            # Reason 'ttl', so the run records as completed, never as cancelled
+            self.debug_message(f'Task "{control.id}" exceeded TTL ({int(idle)}s >= {control.ttl}s), releasing...')
+            await self.stop_task(control.key, reason='ttl')
+
+        # Step 2: engines whose own inactivity reached the policy timer
+        while self._engine_expiry and self._engine_expiry[0][0] <= now:
+            _, gen, engine = heapq.heappop(self._engine_expiry)
+            popped += 1
+
+            # Stale: rescheduled, stopping or finished
+            if engine._expiry_gen != gen or engine._stop_requested or engine.is_task_complete():
+                continue
+
+            # A ttl-0 holder (a listener source) keeps it from aging: looked
+            # at again one timer later, in case that holder has gone
+            if not engine.ages:
+                heapq.heappush(self._engine_expiry, (now + CONST_ENGINE_IDLE_TTL, gen, engine))
+                continue
+
+            # Activity since it was scheduled: back in at its real deadline
+            idle = engine.idle_seconds(now)
+            if idle < CONST_ENGINE_IDLE_TTL:
+                heapq.heappush(self._engine_expiry, (now - idle + CONST_ENGINE_IDLE_TTL, gen, engine))
+                continue
+
+            # Inactive for the whole timer: it stops, its holders stay. Their
+            # next request starts it again under the same key (plan 7.2)
+            self.debug_message(f'Engine "{engine.engine_key}" inactive for {int(idle)}s, stopping...')
+            engine.dormant_reason = 'ttl'
+            await self._stop_engine_now(engine, 'ttl')
+
+        return popped
+
     async def shutdown(self) -> None:
-        """Cancel all background tasks."""
-        bg_tasks = getattr(self, '_bg_tasks', [])
+        """Cancel all background tasks, pending listener restarts included."""
+        bg_tasks = getattr(self, '_bg_tasks', []) + list(getattr(self, '_restart_tasks', ()))
         for task in bg_tasks:
             if not task.done():
                 task.cancel()
@@ -585,9 +929,14 @@ class TaskServer(DAPBase):
                 # Detach this connection from the task
                 await control.task.detach_task(conn)
 
-                # Auto-terminate launched tasks when the launching client disconnects
+                # Auto-terminate launched tasks when the launching client
+                # disconnects: that ends THIS control's hold; an engine other
+                # controls hold keeps serving them
                 if control.launch_type == LAUNCH_TYPE.LAUNCH and control.launch_owner == conn:
-                    await control.task.stop_task()
+                    if self._shares_engine(control):
+                        await self.remove_task(control.key)
+                    else:
+                        await self._stop_engine_now(control.task, 'user')
                     self.debug_message(f'Auto-terminated launched task "{control.id}" after client disconnect')
 
             except Exception as e:
@@ -613,7 +962,7 @@ class TaskServer(DAPBase):
         require: Optional[str] = None,
         team_id: str = '',
         run_kind: str = '',
-    ) -> TASK_CONTROL:
+    ) -> TaskControl:
         """
         Retrieve task control structure by its owner-scoped identity.
 
@@ -648,7 +997,7 @@ class TaskServer(DAPBase):
         if account_info is None:
             raise PermissionError('Not authenticated')
 
-        def _verify(control: TASK_CONTROL) -> TASK_CONTROL:
+        def _verify(control: TaskControl) -> TaskControl:
             """Run-scoped permission check (owner-private for user-owned runs)."""
             return self._verify_control(control, account_info, require)
 
@@ -657,7 +1006,7 @@ class TaskServer(DAPBase):
         # matching it here would let any teammate reach a personal run
         # through team permissions.
         if team_id:
-            for control in self._task_control.values():
+            for control in self._task_control.for_owner(team_id):
                 if (
                     control.run_kind == 'deploy'
                     and control.owner_kind != 'user'
@@ -671,10 +1020,13 @@ class TaskServer(DAPBase):
         # Own scope: the caller's run in the selected continuum (dev by
         # default; the caller's @me deploy when run_kind says so) — unique
         # per user per continuum by construction.
+        # A @public control is user-owned and deploy-kind too: it is never
+        # the caller's @me deploy.
         wanted_kind = run_kind or 'dev'
-        for control in self._task_control.values():
+        for control in self._task_control.for_owner(account_info.userId):
             if (
                 control.run_kind == wanted_kind
+                and control.rung != 'public'
                 and control.owner_id == account_info.userId
                 and control.project_id == project_id
                 and control.source == source
@@ -683,7 +1035,7 @@ class TaskServer(DAPBase):
         raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     @staticmethod
-    def _verify_control(control: TASK_CONTROL, account_info: AccountInfo, require: Optional[str]) -> TASK_CONTROL:
+    def _verify_control(control: TaskControl, account_info: AccountInfo, require: Optional[str]) -> TaskControl:
         """
         Run-scoped permission check, applied to EVERY resolution.
 
@@ -710,7 +1062,7 @@ class TaskServer(DAPBase):
             raise PermissionError(f'Permission {require!r} denied for this task')
         return control
 
-    def control_by_key(self, key: str) -> TASK_CONTROL:
+    def control_by_key(self, key: str) -> TaskControl:
         """
         Internal registry lookup by the control's own key.
 
@@ -720,10 +1072,10 @@ class TaskServer(DAPBase):
         control under the request's account.
 
         Args:
-            key (str): The registry key ``runKind.ownerId.address``.
+            key (str): The registry key ``<rung>.<ownerId>.<address>``.
 
         Returns:
-            TASK_CONTROL: The live control.
+            TaskControl: The live control.
 
         Raises:
             TaskError: Code TASK_NOT_REGISTERED if the key names no live task.
@@ -738,27 +1090,40 @@ class TaskServer(DAPBase):
         address: str,
         account_info: AccountInfo,
         require: Optional[str] = None,
-    ) -> TASK_CONTROL:
+        *,
+        team: Optional[str] = None,
+    ) -> TaskControl:
         """
-        THE resolver: an address plus the request's account yields one control.
+        THE resolver over the registry: an address plus the request's account yields one control.
 
         Walks the rungs in the fixed order and takes the first that answers
-        (``@dev`` — the caller's own live presence, attach-only; ``@me`` — the
-        caller's personal deployment run; ``@team`` — a team-owned deployment
-        run on a team where the caller holds ``require``). Published rungs
-        that are not live start from the artifact — that step is
-        ``_resolve_published_rungs``, which the TaskControl/TaskEngine split
-        fills in with ``resolve_pipe_pins``. Every hit is permission-checked;
-        a key with an ``endpoints`` scope skips ``@dev`` (a production webhook
-        must never land on the owner's Play'd run) and is refused outside
-        its scope. There is NO owner qualifier: nobody can name another
-        user's control.
+        (``@dev``: the caller's own presence, attach-only; ``@me``: the
+        caller's personal deployment run; ``@team``: the first team in the
+        caller's TEAM ORDER with a team-owned run of the address; ``@public``:
+        the caller's control on a store publication). Starting a published
+        rung from its artifact when nothing is registered is
+        ``resolve_or_start``. Every hit is permission-checked; a key with an
+        ``endpoints`` scope skips ``@dev`` (a production webhook must never
+        land on the owner's Play'd run), probes its frozen team only, and is
+        refused outside its scope. There is NO owner qualifier: nobody can
+        name another user's control.
+
+        Every probe is an index lookup (plan 3.2), never a registry walk:
+        ``@dev``/``@me``/``@public`` are one exact key each
+        (``<rung>.<userId>.<address>``), ``@team`` is one owner-index probe
+        per team in the order (first hit wins; the order is total, so there
+        is no ambiguity), and a two-segment address first reads the pipe's
+        registered sources. The cost is O(caller's teams x sources) whatever
+        the registry holds.
 
         The walk runs over LIVE controls first: a stopped run never answers
         its address while another rung has a live one (a dead ``@dev`` falls
-        through). Only when no rung has a live control is the walk repeated
-        over every registered control, so a run that just finished keeps its
-        final status readable until the cleanup pass removes it.
+        through). A dormant control (its engine stopped on its inactivity
+        timer, or crashed after it confirmed running) is live: its next
+        request starts the engine again. Only when no rung has a live control
+        is the walk repeated over every registered control, so a run that
+        just finished keeps its final status readable until the cleanup pass
+        removes it.
 
         A two-segment address (no source) resolves when exactly one live
         source answers; several live sources raise ``TASK_SOURCE_REQUIRED``.
@@ -769,32 +1134,166 @@ class TaskServer(DAPBase):
             account_info (AccountInfo): The request's account (required).
             require (Optional[str]): The permission the request needs
                 (``'task.data'``, ``'task.control'``, ``'task.monitor'`` ...).
+            team (Optional[str]): Per-call ``@team`` override (one of the
+                caller's teams).
 
         Returns:
-            TASK_CONTROL: The resolved control.
+            TaskControl: The resolved control.
 
         Raises:
             TaskError: TASK_INVALID_ARGUMENT (grammar), TASK_SOURCE_REQUIRED,
-                TASK_AMBIGUOUS (several of the caller's teams run the address
-                and none is the caller's development team), or
-                TASK_NOT_REGISTERED when no rung answers.
-            PermissionError: Unauthenticated, no permission, or outside the
-                key's endpoints scope.
+                or TASK_NOT_REGISTERED (with ``rungsTried``) when no rung answers.
+            PermissionError: Unauthenticated, no permission, ``team`` is not
+                the caller's, or outside the key's endpoints scope.
         """
+        # Step 1: the account and the address grammar
         if account_info is None:
             raise PermissionError('Not authenticated')
         parsed = parse_address(address)
+        rungs: List[str] = []
+
+        # Step 2: live controls first, then anything still registered
+        for live_only in (True, False):
+            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team)
+            if control is not None:
+                return self._check_engine_available(control)
+
+        # Step 3: no rung answers
+        raise self._not_registered(address, rungs)
+
+    async def resolve_or_start(
+        self,
+        address: str,
+        account_info: AccountInfo,
+        require: Optional[str] = None,
+        *,
+        team: Optional[str] = None,
+    ) -> TaskControl:
+        """
+        Resolve a NAME call: the caller's control on the first rung that answers, started when needed.
+
+        See ``resolve_name``; this returns the control only.
+        """
+        control, _started = await self.resolve_name(address, account_info, require, team=team)
+        return control
+
+    async def resolve_name(
+        self,
+        address: str,
+        account_info: AccountInfo,
+        require: Optional[str] = None,
+        *,
+        team: Optional[str] = None,
+    ) -> Tuple[TaskControl, bool]:
+        """
+        Resolve a NAME call rung by rung: live control or publication, whichever comes first.
+
+        The fixed order of plan 3.2, each rung answered by its live control
+        or, failing that, by its publication (started from the artifact):
+        ``@dev`` (live only: a name never starts a dev run), ``@me``,
+        ``@team`` slot by slot in the caller's team order (``team=``
+        overrides it), ``@public``. So a live ``@team`` control of a LATER
+        team never beats an earlier team's publication, and a live
+        ``@team`` control never beats the caller's own ``@me`` deployment.
+        A live ``@dev``/``@me`` hit answers without reading publications.
+
+        Args:
+            address: ``developerId.pipelineId[.source]``.
+            account_info: The request's account (required).
+            require: The permission the request needs.
+            team: Per-call ``@team`` override.
+
+        Returns:
+            The control (``control.rung`` says which rung answered) and True
+            when this call started it from an artifact.
+
+        Raises:
+            TaskError: As ``resolve_control``; TASK_NOT_REGISTERED lists the rungs tried.
+            PermissionError: As ``resolve_control``.
+        """
+        # Step 1: a live control on any rung
+        if account_info is None:
+            raise PermissionError('Not authenticated')
+        parsed = parse_address(address)
+        rungs: List[str] = []
+        live = self._walk_rungs(parsed, address, account_info, require, True, rungs, team)
+        if live is not None and live.rung in ('dev', 'me'):
+            return self._check_engine_available(live), False
+
+        # Step 2: the publications that may come before it
+        pins = await resolve_pins('pipe', account_info, address, team=team)
+        probe = teams_to_probe(account_info, team)
+
+        def _rank(rung: str, team_id: str) -> int:
+            """Position of a rung slot in the fixed order (me, each team, public)."""
+            if rung == 'me':
+                return 0
+            if rung == 'team':
+                return 1 + (probe.index(team_id) if team_id in probe else len(probe))
+            return 2 + len(probe)
+
+        live_rank = _rank(live.rung, live.owner_id) if live is not None else None
+
+        # Step 3: the earlier of the live control and each pin answers
+        for pin in pins.pins:
+            if live_rank is not None and live_rank <= _rank(pin.rung, pin.deployment.team_id):
+                break
+            control, started = await self._start_from_pin(pin, pins.address, account_info, require)
+            if control is not None:
+                return control, started
+        if live is not None:
+            return self._check_engine_available(live), False
+
+        # Step 4: nothing on any rung
+        raise self._not_registered(address, rungs)
+
+    def _walk_rungs(
+        self,
+        parsed: Address,
+        address: str,
+        account_info: AccountInfo,
+        require: Optional[str],
+        live_only: bool,
+        rungs: List[str],
+        team: Optional[str] = None,
+    ) -> Optional[TaskControl]:
+        """
+        One walk of the rungs over the registry indexes: the first hit, verified, or None.
+
+        Args:
+            parsed: The parsed address.
+            address: The address as sent (for messages).
+            account_info: The request's account.
+            require: The permission the request needs.
+            live_only: Consider only live (or dormant) controls.
+            rungs: Filled with the rungs this walk tried, in order.
+            team: Per-call ``@team`` override.
+
+        Returns:
+            The control the first answering rung resolved, or None.
+
+        Raises:
+            TaskError: TASK_SOURCE_REQUIRED.
+            PermissionError: No permission, ``team`` is not the caller's, or
+                outside the key's endpoints scope.
+        """
+        registry = self._task_control
         endpoints = getattr(account_info, 'endpoints', None)
+        user_id = account_info.userId
+        rungs.clear()
 
-        def _matches(control: TASK_CONTROL) -> bool:
-            return (
-                control.developer_id == parsed.developer_id
-                and control.project_id == parsed.pipe_id
-                and (parsed.source is None or control.source == parsed.source)
-            )
+        # Step 1: the full addresses: the one given, or one per registered source
+        if parsed.source is not None:
+            addresses = [address]
+        else:
+            sources = registry.sources_of(parsed.developer_id, parsed.pipe_id)
+            addresses = [build_address(parsed.developer_id, parsed.pipe_id, source) for source in sources if source]
 
-        def _pick(candidates: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
-            """One control, or the source-required error when several sources are live."""
+        def _usable(control: Optional[TaskControl]) -> bool:
+            return control is not None and (control.live or not live_only)
+
+        def _pick(candidates: List[TaskControl]) -> Optional[TaskControl]:
+            """One control, or the source-required error when several sources answer."""
             if not candidates:
                 return None
             if len(candidates) > 1:
@@ -807,105 +1306,216 @@ class TaskServer(DAPBase):
                 )
             return candidates[0]
 
-        user_id = account_info.userId
-        rungs: List[str] = []
+        def _exact(rung: str) -> Optional[TaskControl]:
+            """The caller's own control on ``rung``: one key per full address."""
+            found = [registry.lookup(control_key(rung, user_id, a)) for a in addresses]
+            return _pick([c for c in found if _usable(c)])
 
-        def _walk(pool: List[TASK_CONTROL]) -> Optional[TASK_CONTROL]:
-            """The rungs in order over ``pool``: the first hit, verified, or None."""
-            rungs.clear()
-
-            # @dev: the caller's own presence. Attach-only, and skipped for a
-            # scoped (machine) credential.
-            if endpoints is None:
-                rungs.append('@dev')
-                control = _pick([c for c in pool if c.run_kind == 'dev' and c.owner_id == user_id and _matches(c)])
-                if control is not None:
-                    return self._verify_control(control, account_info, require)
-
-            # @me: the caller's personal (user-owned) deployment run.
-            rungs.append('@me')
-            control = _pick(
-                [
-                    c
-                    for c in pool
-                    if c.run_kind == 'deploy' and c.owner_kind == 'user' and c.owner_id == user_id and _matches(c)
-                ]
-            )
+        # Step 2: @dev, the caller's own presence. Attach-only, and skipped
+        # for a scoped (machine) credential.
+        if endpoints is None:
+            rungs.append('@dev')
+            control = _exact('dev')
             if control is not None:
-                check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
-            # @team: a team-owned deployment run the caller may reach. The address
-            # carries no owner, so two of the caller's teams can each have it live:
-            # the caller's active (development) team answers; with neither run on
-            # it the choice is the caller's, so the lookup is ambiguous, not a guess.
-            rungs.append('@team')
-            team_runs = [
+        # Step 3: @me, the caller's personal (user-owned) deployment run
+        rungs.append('@me')
+        control = _exact('me')
+        if control is not None:
+            check_endpoint_scope(endpoints, control.address)
+            return self._verify_control(control, account_info, require)
+
+        # Step 4: @team, the first team in the caller's team order (or the
+        # team= override, or a scoped key's frozen team) with a team-owned
+        # run of the address: one owner-index probe per team and address
+        rungs.append('@team')
+        for team_id in teams_to_probe(account_info, team):
+            runs = [
                 c
-                for c in pool
+                for a in addresses
+                for c in registry.owned(a, team_id)
                 if c.run_kind == 'deploy'
                 and c.owner_kind != 'user'
-                and _matches(c)
+                and _usable(c)
                 and resolve_run_permissions(account_info, c)
             ]
-            teams = sorted({c.owner_id for c in team_runs})
-            if len(teams) > 1:
-                active_team = getattr(account_info, 'devTeam', None)
-                team_runs = [c for c in team_runs if c.owner_id == active_team]
-                if not team_runs:
-                    raise TaskError(
-                        TaskError.AMBIGUOUS,
-                        f'{address!r} is deployed by several of your teams ({", ".join(teams)}); '
-                        'make the one you mean your development team',
-                        address=address,
-                        teams=teams,
-                    )
-            control = _pick(team_runs)
+            control = _pick(runs)
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
-            return None
 
-        # Live controls first: a finished run never shadows a running one on
-        # this or a later rung
-        controls = list(self._task_control.values())
-        control = _walk([c for c in controls if not c.task.is_task_complete()])
+        # Step 5: @public, the caller's own control on a store publication
+        rungs.append('@public')
+        control = _exact('public')
         if control is not None:
-            return control
+            check_endpoint_scope(endpoints, control.address)
+            return self._verify_control(control, account_info, require)
+        return None
 
-        # Nothing live answers: a finished run still in the registry does, so
-        # its final status stays readable until the cleanup pass removes it
-        control = _walk(controls)
-        if control is not None:
-            return control
-
-        return self._resolve_published_rungs(address, account_info, require, rungs)
-
-    def _resolve_published_rungs(
-        self,
-        address: str,
-        account_info: AccountInfo,
-        require: Optional[str],
-        rungs_tried: List[str],
-    ) -> TASK_CONTROL:
-        """
-        SEAM for the published rungs (@me/@team/@public from the artifact).
-
-        The TaskControl/TaskEngine split replaces this with ``resolve_pipe_pins``
-        (the twin of ``resolve_app_pins``): find the caller's deployment or
-        publication for ``address`` and start it from the artifact when no
-        control is live. Until then a name with no live control is not found,
-        and the error says which rungs were tried.
-
-        Raises:
-            TaskError: Code TASK_NOT_REGISTERED with ``address`` and ``rungsTried``.
-        """
-        raise TaskError(
+    @staticmethod
+    def _not_registered(address: str, rungs_tried: List[str]) -> TaskError:
+        """The not-found error: the address and the rungs ACTUALLY tried (plan 3.8)."""
+        return TaskError(
             TaskError.NOT_REGISTERED,
             f'Your pipeline is not running ({address!r}; tried {", ".join(rungs_tried)})',
             address=address,
             rungsTried=list(rungs_tried),
         )
+
+    def _check_engine_available(self, control: TaskControl) -> TaskControl:
+        """
+        Tell a holder, once, that an operator stopped its engine.
+
+        ``rrext_engine_stop`` stops an engine regardless of holds and marks
+        every holder. The first request that resolves such a control gets
+        ``TASK_ENGINE_UNAVAILABLE`` and the control is dropped, so the next
+        call re-resolves (plan 3.8, 7.2).
+
+        Args:
+            control: The control the rungs resolved.
+
+        Returns:
+            ``control`` when its engine was not stopped out from under it.
+
+        Raises:
+            TaskError: TASK_ENGINE_UNAVAILABLE with ``address``, ``engineKey``
+                and ``reason``.
+        """
+        told = self._engine_unavailable.get(control.key)
+        if told is None:
+            return control
+        engine_key_value, reason = told
+        self._forget_control(control)
+        raise TaskError(
+            TaskError.ENGINE_UNAVAILABLE,
+            f'The engine serving {control.address!r} was stopped ({reason}); call again to re-resolve',
+            address=control.address,
+            engineKey=engine_key_value,
+            reason=reason,
+        )
+
+    async def _start_from_pin(
+        self,
+        pin: Pin,
+        parsed: Address,
+        account_info: AccountInfo,
+        require: Optional[str],
+    ) -> Tuple[Optional[TaskControl], bool]:
+        """
+        The caller's control on ``pin``'s rung: attached when live, else started from the artifact.
+
+        The start reuses the deploy-run dispatch (``start_server_task_as_team``,
+        the path ``cmd_pipe``'s ``deploy.run`` and the scheduler take) with
+        ``trigger='process'``. The control is owned by the CALLER: the user
+        on ``@me`` and ``@public``, the answering team on ``@team``; its key
+        is ``<rung>.<owner>.<address>``, its ``rung`` the pin's rung, its
+        ``DeploymentRef`` the pinned publication's (so the publisher's
+        disable/remove releases it) and its ``version`` the pinned version.
+        Its TEAM CONTEXT (plan 6.2) is the answering team on ``@team``, the
+        frozen team of a scoped key, and the caller's home team otherwise.
+        ``@public`` bills the caller's home team (plan 8.3); ``@me`` and
+        ``@team`` read the row's billing stamp until C.13 moves attribution
+        to the caller. The ttl is policy (``CONST_DEFAULT_TTL``): a name call
+        never sets it (plan 1).
+
+        Args:
+            pin: The serving publication.
+            parsed: The parsed address.
+            account_info: The request's account.
+            require: The permission the request needs.
+
+        Returns:
+            The control (None when the pinned artifact has no such source)
+            and True when this call started it.
+
+        Raises:
+            TaskError: TASK_SOURCE_REQUIRED (two-segment address, several
+                sources and no default).
+            PermissionError: No permission on the team, no home team for a
+                public run, or outside the key's endpoints scope.
+            ValueError: A personal deployment without its billing stamp.
+        """
+        # Deferred: the account singleton and the facade (which imports
+        # TaskConn) load after this module
+        from ai.account import account
+
+        from .task_server_facade import start_server_task_as_team
+
+        # Step 1: the pinned artifact and the source the address names
+        deployment = pin.deployment
+        pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
+        components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
+        source = parsed.source or pipeline.get('source')
+        if not source:
+            try:
+                source = resolve_implied_source(pipeline)
+            except MultipleSourcesError:
+                source = None
+        if not source:
+            pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
+            raise TaskError(
+                TaskError.SOURCE_REQUIRED,
+                f'{pipe_address!r} has several sources and no default; name one',
+                address=pipe_address,
+                sources=sorted(str(c.get('id')) for c in components if (c.get('config') or {}).get('mode') == 'Source'),
+            )
+        if source not in {c.get('id') for c in components}:
+            return None, False
+        address = build_address(parsed.developer_id, parsed.pipe_id, source)
+        endpoints = getattr(account_info, 'endpoints', None)
+        check_endpoint_scope(endpoints, address)
+
+        # Step 2: the owner, the paying team and the team context on this rung
+        user_id = account_info.userId
+        home = home_team(account_info)
+        if pin.rung == 'team':
+            owner_kind, owner_id, owner_user = 'team', deployment.team_id, ''
+            billing_team = deployment.team_id
+            context = TeamContext(deployment.team_id, 'key' if endpoints is not None else 'answering')
+            perms = resolve_task_permissions(account_info, deployment.team_id)
+            if not perms or (require and require not in perms):
+                raise PermissionError(f'Permission {require or "task"!r} denied for this task')
+        elif pin.rung == 'me':
+            owner_kind, owner_id, owner_user = 'user', user_id, user_id
+            billing_team = pin.billing_team_id
+            context = TeamContext(home, 'key' if endpoints is not None else 'home')
+            if not billing_team:
+                raise ValueError('This deployment has no billing team; re-publish it')
+        else:
+            owner_kind, owner_id, owner_user = 'user', user_id, user_id
+            billing_team = home
+            context = TeamContext(home, 'key' if endpoints is not None else 'home')
+            if not billing_team:
+                raise PermissionError('Running a published pipeline needs a team; you are not a member of one')
+        org = getattr(account_info, 'organization', None) or {}
+        org_id = str(org.get('id') or deployment.org_id)
+        key = control_key(pin.rung, owner_id, address)
+
+        # Step 3: one start per control key; a concurrent request attaches
+        async with _gated(self._control_starts, key):
+            existing = self._task_control.get(key)
+            if existing is not None and existing.live:
+                return self._check_engine_available(self._verify_control(existing, account_info, require)), False
+            pipeline['source'] = source
+            started = await start_server_task_as_team(
+                self,
+                pipeline,
+                org_id=org_id,
+                team_id=billing_team,
+                deployment=deployment,
+                trigger='process',
+                ttl=CONST_DEFAULT_TTL,
+                owner_kind=owner_kind,
+                owner_user_id=owner_user,
+                rung=pin.rung,
+                developer_id=parsed.developer_id,
+                version=pin.version,
+                team_context=context,
+            )
+
+        # Step 4: the started control, checked like any other hit
+        return self._verify_control(self.control_by_key(started), account_info, require), True
 
     def assign_port(self) -> int:
         """
@@ -1175,41 +1785,42 @@ class TaskServer(DAPBase):
                 # Log individual monitor failures but continue broadcasting
                 self.debug_message(f'Failed to broadcast event to connection: {e}')
 
-    async def remove_task(self, key: str) -> TASK_CONTROL:
-        """
-        Remove task from registry and perform comprehensive cleanup.
+    # ==== Holds ===================================================================
 
-        This method handles complete task removal including resource cleanup,
-        registry maintenance, and proper task termination. It ensures no
-        resources are leaked and all associated components are properly cleaned up.
+    @staticmethod
+    def _shares_engine(control: TaskControl) -> bool:
+        """True when another control also holds the engine ``control`` holds."""
+        return control.task is not None and any(key != control.key for key in control.task.holds)
+
+    def _unregister_control(self, control: TaskControl) -> None:
+        """
+        Take a control out of the registry and release its hold; its subscriptions stay.
 
         Args:
-            key (str): The control's registry key
-
-        Returns:
-            TASK_CONTROL: The removed task control structure for caller cleanup
-
-        Raises:
-            TaskError: Code TASK_NOT_REGISTERED if the key names no live task
-
-        Cleanup Process:
-        1. Validate task ownership and existence
-        2. Remove task from central registry
-        3. Remove all monitoring subscriptions
-        4. Stop task execution and cleanup resources
-        5. Log removal for audit trail
-        6. Return control structure for additional caller-specific cleanup
+            control: The control to unregister.
         """
-        # Remove task from central registry
-        # pop with a default: without one an unknown key raises KeyError and the
-        # TaskError below never runs, so the failure reaches the caller unclassified.
-        control = self._task_control.pop(key, None)
+        # Out of the registry, unless a replacement already took the key
+        if self._task_control.get(control.key) is control:
+            self._task_control.pop(control.key, None)
+            self._engine_unavailable.pop(control.key, None)
 
-        # If not there, it wasn't running
-        if not control:
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
+        # The control's one hold
+        if control.task is not None:
+            control.task.release(control.key)
 
-        # Remove monitor subscriptions that reference this task from all
+    def _forget_control(self, control: TaskControl) -> None:
+        """
+        Drop a control: out of the registry, its subscriptions gone, its hold released.
+
+        Never stops the engine: whether the engine stops is the caller's call
+        (it does only when this was the last hold).
+
+        Args:
+            control: The control to drop.
+        """
+        self._unregister_control(control)
+
+        # Remove monitor subscriptions that reference this control from all
         # connections — keys are owner-scoped, so build from the control.
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
         # key whose prefix (everything before the last dot) IS that key —
@@ -1221,9 +1832,56 @@ class TaskServer(DAPBase):
                 for monitor_key in keys_to_remove:
                     conn._monitors.pop(monitor_key, None)
 
-        # Stop the run only after its subscriptions are gone: a subscription a
-        # client installs for a replacement run during the await must survive
-        await control.task.stop_task()
+    def _drop_engine(self, engine: TaskEngine) -> None:
+        """Take ``engine`` out of the pool, unless a newer engine already holds its key."""
+        self._engines.unregister(engine)
+
+    async def _stop_engine_now(self, engine: TaskEngine, reason: str) -> None:
+        """
+        Stop an engine and take it out of the pool.
+
+        Args:
+            engine: The engine to stop.
+            reason: Why ('user', 'ttl', 'ops', 'unpublished').
+        """
+        self._drop_engine(engine)
+        await engine.stop_task(reason)
+
+    async def remove_task(self, key: str, *, reason: str = 'user') -> TaskControl:
+        """
+        Remove a control from the registry and release its hold.
+
+        When this was the engine's LAST hold the engine stops at once, with
+        no linger (plan 7.2); an engine other controls hold keeps serving
+        them. An engine that already stopped is left as it is.
+
+        Args:
+            key (str): The control's registry key
+            reason (str): Why, when the engine stops ('user', 'ttl', 'unpublished', ...)
+
+        Returns:
+            TaskControl: The removed control, for caller cleanup
+
+        Raises:
+            TaskError: Code TASK_NOT_REGISTERED if the key names no live control
+        """
+        control = self._task_control.get(key)
+
+        # If not there, it wasn't running
+        if not control:
+            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
+
+        engine = control.task
+        last_hold = not self._shares_engine(control)
+
+        # Subscriptions go first and the hold with them: a subscription a
+        # client installs for a replacement run during the await below must
+        # survive
+        self._forget_control(control)
+
+        # The last hold dropped: the engine stops now, unless it already has
+        if engine is not None and last_hold and not engine.is_task_complete() and not engine._stop_requested:
+            await self._stop_engine_now(engine, reason)
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -1238,6 +1896,181 @@ class TaskServer(DAPBase):
         # Log task removal for audit trail and debugging
         self.debug_message(f'Task status for "{control.id}" removed')
         return control
+
+    def engine_crashed(self, engine: TaskEngine) -> None:
+        """
+        An engine exited abnormally after it had confirmed running.
+
+        Called by the engine from its teardown, in the same step that marks it
+        dormant (``dormant_reason == 'crash'``). It leaves the pool like an
+        engine stopped on its inactivity timer; its holders stay, dormant, and
+        the next request through any of them starts it again under the same
+        key (plan 7.2). An engine that never confirmed running does not come
+        here: its holders see the failure as before. A LISTENER engine (one
+        with a ttl-0 holder) gets no requests, so it is restarted
+        automatically with backoff (``_schedule_listener_restart``);
+        request/response engines are never restarted without a request.
+
+        Args:
+            engine: The crashed engine.
+        """
+        # Step 1: out of the pool, so the next start under the key builds anew
+        self._drop_engine(engine)
+
+        # Step 2: say what happened and who it leaves dormant
+        status = engine.get_status()
+        self.debug_message(
+            f'Engine "{engine.engine_key}" crashed after it confirmed running '
+            f'(exit code {status.exitCode}: {status.exitMessage or "no message"}); '
+            f'{len(engine.holds)} holder(s) restart it on their next request'
+        )
+
+        # Step 3: a listener engine (a ttl-0 holder) receives no requests, so
+        # it is restarted here; a request/response engine waits for a request
+        if engine.holds and not engine.ages:
+            self._schedule_listener_restart(engine)
+
+    # ==== Listener auto-restart ==================================================
+
+    def _listener_restart_delay(self, key: str, now: Optional[float] = None) -> Optional[float]:
+        """
+        Claim the next automatic restart of engine ``key``: its backoff, or None at the cap.
+
+        Exponential backoff (plan 7.2): ``CONST_ENGINE_RESTART_BACKOFF``
+        seconds before the first restart in a rolling hour, doubling with each
+        further one, and at most ``CONST_ENGINE_RESTART_MAX_PER_HOUR``
+        restarts per engine key per rolling hour. A claimed attempt counts
+        whether or not the restart succeeds.
+
+        Args:
+            key: The engine key.
+            now: Monotonic time of the claim (default: now).
+
+        Returns:
+            Seconds to wait before restarting, or None when the hour's cap is spent.
+        """
+        # Step 1: the attempts of the last hour
+        now = time.monotonic() if now is None else now
+        recent = self._engine_restarts.setdefault(key, deque())
+        while recent and recent[0] <= now - 3600:
+            recent.popleft()
+
+        # Step 2: the cap, else the next doubling of the backoff
+        if len(recent) >= CONST_ENGINE_RESTART_MAX_PER_HOUR:
+            return None
+        delay = CONST_ENGINE_RESTART_BACKOFF * (2 ** len(recent))
+        recent.append(now)
+        return delay
+
+    def _schedule_listener_restart(self, engine: TaskEngine) -> None:
+        """
+        Schedule the automatic restart of a crashed listener engine, or leave it dormant at the cap.
+
+        At the cap the engine stays stopped: its holders stay dormant and are
+        listed ``stopped``, and their next request (if any) still restarts it.
+
+        Args:
+            engine: The crashed engine (still held by its dormant controls).
+        """
+        delay = self._listener_restart_delay(engine.engine_key)
+        if delay is None:
+            # TODO(C.9): route this to the OPS stream and the owner's run log
+            message = (
+                f'Engine "{engine.engine_key}" crashed again: {CONST_ENGINE_RESTART_MAX_PER_HOUR} automatic '
+                'restarts in the last hour, leaving it stopped'
+            )
+            warning(message)
+            self.debug_message(message)
+            return
+        self.debug_message(f'Engine "{engine.engine_key}" is a listener; restarting it in {delay:g}s')
+        task = asyncio.ensure_future(self._restart_listener(engine, delay))
+        self._restart_tasks.add(task)
+        task.add_done_callback(self._restart_tasks.discard)
+
+    async def _restart_listener(self, engine: TaskEngine, delay: float) -> None:
+        """
+        After ``delay``, start a crashed listener engine again for its dormant holders.
+
+        Every holder still dormant on ``engine`` goes through ``ensure_engine``:
+        the first starts the engine under the same key through the start gate,
+        the rest attach to it. Nothing happens when the holders went or a
+        request already restarted it, or when no ttl-0 holder is left. A
+        restart that fails claims the next backoff (within the cap).
+
+        Args:
+            engine: The crashed engine.
+            delay: Seconds to wait first.
+        """
+        # Step 1: the backoff
+        await asyncio.sleep(delay)
+
+        # Step 2: the holders still dormant on this engine
+        holders = [
+            control
+            for key in sorted(engine.holds)
+            if (control := self._task_control.get(key)) is not None and control.task is engine and control.dormant
+        ]
+        if not holders or engine.ages:
+            return
+
+        # Step 3: one start, every holder repointed onto it
+        try:
+            for control in holders:
+                await self.ensure_engine(control)
+        except Exception as e:
+            self.debug_message(f'Automatic restart of engine "{engine.engine_key}" failed: {e}')
+            self._schedule_listener_restart(engine)
+
+    async def stop_engine(self, key: str, reason: str = 'ops') -> None:
+        """
+        Stop an engine outright, whoever holds it (the operator's stop, plan 7.2).
+
+        Every holder's control is told ``TASK_ENGINE_UNAVAILABLE`` on its next
+        request and is then dropped, so the call after that re-resolves.
+        Callers authorize first: this is ``sys.admin``/``internal`` only.
+
+        Args:
+            key: The engine key.
+            reason: Why, as the holders will be told.
+
+        Raises:
+            TaskError: TASK_NOT_REGISTERED when no engine has that key.
+        """
+        engine = self._engines.get(key)
+        if engine is None:
+            raise TaskError(TaskError.NOT_REGISTERED, f'No engine {key!r} is running', engineKey=key)
+        engine.unavailable_reason = reason
+        for control_key_value in engine.holds:
+            self._engine_unavailable[control_key_value] = (key, reason)
+        await self._stop_engine_now(engine, reason)
+        self.debug_message(f'Engine "{key}" stopped by an operator ({len(engine.holds)} holders told)')
+
+    async def release_deployment_holds(self, deployment: DeploymentRef) -> int:
+        """
+        Release every hold whose control resolved through ``deployment``.
+
+        The publisher's kill switch (disable/remove, plan 7.2): each such
+        control is removed, and an engine stops when no hold remains on it.
+        Holds of controls that did not resolve through the deployment (the
+        owner's own @dev run of identical content) keep their engine.
+
+        Args:
+            deployment: The deployment that was disabled or removed.
+
+        Returns:
+            The number of holds released.
+        """
+        released = 0
+        for control in list(self._task_control.values()):
+            if control.deployment != deployment:
+                continue
+            await self.remove_task(control.key, reason='unpublished')
+            released += 1
+        if released:
+            self.debug_message(
+                f'Released {released} hold(s) of {deployment.team_id}/{deployment.project_id} (unpublished)'
+            )
+        return released
 
     async def start_task(
         self,
@@ -1255,9 +2088,14 @@ class TaskServer(DAPBase):
         owner_kind: str = '',
         trigger: str = '',
         developer_id: str = '',
+        deployment: Optional[DeploymentRef] = None,
+        rung: str = '',
+        version: Optional[int] = None,
+        team_context: Optional[TeamContext] = None,
+        on_change: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Create and start a new computational task with full lifecycle management.
+        Create a control and acquire its hold on an engine, starting one if needed.
 
         This method handles the complete task creation process including validation,
         registry management, resource allocation, and startup coordination. It
@@ -1273,6 +2111,21 @@ class TaskServer(DAPBase):
             env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
             developer_id: The owner org's developer id — the address namespace.
                 Required: the address exists from the first run.
+            deployment: The deployment a deployment run resolved through
+                (trusted dispatch only); its disable/remove releases the hold.
+            rung: The published rung a ``process(name)`` start answered on
+                (trusted dispatch only): ``'me'``, ``'team'`` or ``'public'``.
+                Empty derives it from ``run_kind``/``owner_kind``. A
+                ``@public`` control is a user-owned deployment run that only
+                this stamp tells apart from ``@me``.
+            version: The artifact version a published rung started from.
+            team_context: The team whose environment the control runs with
+                (plan 6.2). Default: ``team_id`` as the home team of a dev
+                run, the deploying team of a deployment run.
+            on_change: Set by ``process(spec)`` (``'error'``/``'keep'``/
+                ``'auto'``): a live presence at the address is reused, refused
+                or repointed per plan 3.4 instead of the useExisting rule, and
+                the result carries ``converged``/``specMatch`` stamps.
 
         Returns:
             Dict[str, Any]: The task's identity; ``token`` carries the ADDRESS
@@ -1289,13 +2142,13 @@ class TaskServer(DAPBase):
 
         Task Creation Process:
         1. Parse and validate request parameters and identities
-        2. Validate the pipeline and derive the address and registry key
-        3. Check for task uniqueness and handle conflicts
-        4. Create Task instance with full configuration
-        5. Register task in central registry with security metadata
-        6. Set up initial monitoring if connection provided
-        7. Start task execution
-        8. Return the address for client use
+        2. Validate the pipeline and derive the address, rung and registry key
+        3. Check for control uniqueness and handle conflicts
+        4. Compute the engine key from the spec's content (plan 7.2)
+        5. Under the engine key's start lock: attach to the live engine of
+           that key, or create and start one
+        6. Register the control holding the engine
+        7. Return the address for client use
 
         Launch Types:
         - LAUNCH:
@@ -1309,29 +2162,49 @@ class TaskServer(DAPBase):
                 of the task controls its life cycle
         """
 
-        def _return_results(control: TASK_CONTROL, reused: bool = False) -> Dict[str, Any]:
+        def _return_results(
+            control: TaskControl,
+            reused: bool = False,
+            *,
+            converged: Optional[str] = None,
+            spec_match: Optional[bool] = None,
+            warnings: Optional[List[Dict[str, Any]]] = None,
+        ) -> Dict[str, Any]:
             """
             Return the task's identity, the address in the token slot.
 
             Args:
-                control (TASK_CONTROL): The existing task control structure
+                control (TaskControl): The existing task control structure
                 reused (bool): True when this is a live instance returned under
                     useExisting rather than a task launched from the submitted
                     pipeline. Without it the two are indistinguishable to the
                     caller, and a run against stale configuration reads as a
                     successful run of the configuration just sent.
+                converged: With ``on_change``: ``'none'``, ``'started'`` or
+                    ``'repointed'`` (plan 3.1 stamps).
+                spec_match: With ``on_change``: whether the engine runs the
+                    submitted spec.
+                warnings: ``address_collision`` / ``repoint_storm`` warnings.
             """
-            return {
+            result = {
                 'id': control.id,
                 'token': control.address,
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
                 'reused': reused,
+                'engineKey': control.task.engine_key if control.task is not None else '',
             }
+            if converged is not None:
+                result['converged'] = converged
+            if spec_match is not None:
+                result['specMatch'] = spec_match
+            if warnings:
+                result['warnings'] = list(warnings)
+            return result
 
         # Initialize task control structure for new task
-        control = TASK_CONTROL()
+        control = TaskControl()
 
         # For launch/exec token is in args. An explicit "arguments": null is a
         # request with no pipeline, refused by the guard below.
@@ -1449,11 +2322,30 @@ class TaskServer(DAPBase):
         if not control.provider:
             raise ValueError(f'Source "{control.source}" not found in pipeline')
 
-        # The registry key: one control per (owner, address, rung). The
-        # owner FIELD (user for dev and @me, team for @team) rides owner_id,
-        # and run_kind separates a user's dev run from their @me deploy of
-        # the same pipeline — the only pair that shares an owner.
-        control.key = f'{control.run_kind}.{control.owner_id}.{control.address}'
+        # The rung and the registry key: one control per (owner, address,
+        # rung). The owner FIELD (user for dev and @me, team for @team) rides
+        # owner_id, and the rung separates a user's dev run from their @me
+        # deploy of the same pipeline — the only pair that shares an owner.
+        # A published rung stamped by the trusted dispatch must fit the run:
+        # @me and @public are user-owned deployment runs, @team a team-owned one
+        derived = rung_of(control.run_kind, control.owner_kind)
+        if rung and (rung not in RUNGS or derived != ('me' if rung == 'public' else rung) or derived == 'dev'):
+            raise ValueError(f'rung {rung!r} does not fit a {control.owner_kind}-owned {control.run_kind} run')
+        control.rung = rung or derived
+        control.key = control_key(control.rung, control.owner_id, control.address)
+
+        # Caller-side settings: they belong to the control and never enter
+        # the engine key
+        control.trigger = trigger
+        control.ttl = CONST_DEFAULT_TTL if ttl is None else int(ttl)
+        control.trace_level = args.get('pipelineTraceLevel')
+        control.parameters = dict(control.pipeline.get('parameters') or {})
+        control.origin = args.get('origin')
+        control.deployment = deployment
+        control.version = version
+        control.team_context = team_context or TeamContext(
+            control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
+        )
 
         # Parse and validate launch type from request command
         try:
@@ -1471,12 +2363,40 @@ class TaskServer(DAPBase):
             # Get the existing task control
             existing_control = self._task_control[control.key]
 
-            # Prevent duplicate active tasks
-            if not existing_control.task.is_task_complete():
+            # Prevent duplicate active tasks. A dormant control (its engine
+            # stopped on its inactivity timer) is reused when asked, else
+            # replaced like a finished one
+            reusable = use_existing_task or on_change is not None
+            if not existing_control.task.is_task_complete() or (reusable and existing_control.dormant):
+                # A Play/.use/process(spec) for a live presence whose engine runs
+                # other content from another workspace: say so (plan 2.3)
+                current_hash = existing_control.task.engine_key.split(':', 1)[0]
+                new_hash = engine_content(control.pipeline, control.source, component_facts).content_hash
+                warnings = self._collision_warnings(existing_control, control, current_hash, new_hash)
+
+                # process(spec): on_change decides (plan 3.4)
+                if on_change is not None:
+                    return await self._converge(
+                        existing_control,
+                        control,
+                        on_change,
+                        current_hash=current_hash,
+                        new_hash=new_hash,
+                        launch_args=args,
+                        env=env,
+                        env_source=env_source,
+                        warnings=warnings,
+                        wait_for_running=wait_for_running,
+                        results=_return_results,
+                    )
+
                 # This is an active task, if we are told we can use it, then,
                 # make sure the user actually specified the task to use. If so,
                 # then all is ok, just use the existing task
                 if use_existing_task:
+                    # A dormant control's engine starts again under its key
+                    await self.ensure_engine(existing_control)
+
                     # The submitted pipeline is not applied to a running instance.
                     # Say so when it differs from what is actually running, otherwise
                     # an edit-and-rerun loop silently measures the old configuration.
@@ -1488,7 +2408,7 @@ class TaskServer(DAPBase):
                         )
                     if wait_for_running:
                         await existing_control.task.wait_for_running()
-                    return _return_results(existing_control, reused=True)
+                    return _return_results(existing_control, reused=True, warnings=warnings)
 
                 # We are absolutely supposed to create a task. Name the running
                 # task, not this request's id: the two can differ by source.
@@ -1497,48 +2417,51 @@ class TaskServer(DAPBase):
                     'Reuse it (useExisting / use_existing), or stop it and run again.'
                 )
 
-            # Clean up completed task with the same key
-            self._task_control.pop(control.key, None)
+            # Clean up the completed control with the same key (its engine is
+            # done). Its subscriptions stay: they are the replacement's too.
+            self._unregister_control(existing_control)
             self.debug_message(f'Replaced completed task "{control.id}"...')
 
+        # The engine: content-addressed (plan 7.2). Threads come from policy
+        # outside @dev; a @dev spec call that moves threads or args away from
+        # policy gets an engine of its own, so a name call never attaches to a
+        # developer's non-default shape.
+        key, shared, threads = self._engine_shape(control, args)
+
+        def _register(engine: TaskEngine) -> None:
+            # Hold it, register the control and schedule its idle expiry
+            engine.acquire(control.key, control.ttl)
+            control.task = engine
+            self._task_control[control.key] = control
+            control.touch()
+            self._schedule_control(control)
+
+        # Attach to the live engine of the key, or start one (the start gate)
         try:
-            # Create new Task instance with complete configuration
-            control.task = Task(
-                server=self,
-                id=control.id,
-                project_id=control.project_id,
-                source=control.source,
-                key=control.key,
-                address=control.address,
-                pipeline=control.pipeline,
-                launch_args=args,
-                launch_type=control.launch_type,
-                provider=control.provider,
-                ttl=ttl,
-                client_id=control.client_id,
-                team_id=control.teamId,
-                org_id=control.orgId,
-                env=env or {},
-                env_source=env_source,
-                run_kind=run_kind,
-                owner_kind=control.owner_kind,
-                trigger=trigger,
+            await self._acquire_engine(
+                key,
+                lambda: self._new_engine(
+                    control,
+                    key=key,
+                    shared=shared,
+                    threads=threads,
+                    launch_args=args,
+                    env={} if shared else (env or {}),
+                    env_source=None if shared else env_source,
+                ),
+                _register,
             )
 
-            # Register task in central registry
-            self._task_control[control.key] = control
-
-            # Start task execution
-            await control.task.start_task()
-
-            self._debug_task_started(control, trigger, ttl)
+            self._debug_task_started(control, trigger, control.ttl)
 
             # Retrieve the task instance for status monitoring
             if wait_for_running:
-                # Block until the task transitions to running state
+                # Block until the engine transitions to running state
                 await control.task.wait_for_running()
 
-            # Return formatted results
+            # Return formatted results (a process(spec) start is 'started')
+            if on_change is not None:
+                return _return_results(control, converged='started', spec_match=True)
             return _return_results(control)
 
         except Exception:
@@ -1546,21 +2469,421 @@ class TaskServer(DAPBase):
             # stop that raced with startup / wait_for_running.  When the user
             # terminates before the task reaches RUNNING, the exception
             # propagates here but the task was NOT a creation failure.
-            if control.task and control.task._stop_requested:
+            engine = control.task
+            last_hold = not self._shares_engine(control)
+            if engine is not None:
+                self._unregister_control(control)
+            if engine is not None and engine._stop_requested:
                 self.debug_message(f'Task stopped during startup: {control.id}...')
-            else:
+            elif engine is not None and last_hold:
                 self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
                 # Kill the subprocess so it doesn't linger as an orphan
-                # consuming resources and reporting stale metrics.
-                if control.task:
-                    try:
-                        await asyncio.wait_for(control.task.stop_task(), timeout=30)
-                    except asyncio.TimeoutError:
-                        self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
-                    except Exception:
-                        self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
-            self._task_control.pop(control.key, None)
+                # consuming resources and reporting stale metrics. An engine
+                # other controls hold is theirs and keeps running.
+                self._drop_engine(engine)
+                try:
+                    await asyncio.wait_for(engine.stop_task(), timeout=30)
+                except asyncio.TimeoutError:
+                    self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
+                except Exception:
+                    self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             raise
+
+    # ==== Spec calls: shape, convergence, collision, storm =======================
+
+    @staticmethod
+    def _engine_shape(control: TaskControl, launch_args: Dict[str, Any]) -> Tuple[str, bool, int]:
+        """
+        The engine key, cross-user sharing and thread count for ``control``'s spec (plan 7.2).
+
+        Threads come from policy outside @dev; a @dev spec call that moves
+        threads or args away from policy gets an engine of its own, so a name
+        call never attaches to a developer's non-default shape.
+
+        Args:
+            control: The control (its pipeline, source, rung and owner are set).
+            launch_args: The launch arguments (``threads``, ``args``).
+
+        Returns:
+            ``(engine key, shared, threads)``.
+        """
+        content = engine_content(control.pipeline, control.source, component_facts)
+        threads = CONST_DEFAULT_MAX_THREADS
+        custom_shape = False
+        if control.rung == 'dev':
+            requested_threads = launch_args.get('threads')
+            if requested_threads is not None and requested_threads != CONST_DEFAULT_MAX_THREADS:
+                threads = requested_threads
+                custom_shape = True
+            if launch_args.get('args'):
+                custom_shape = True
+        shared = content.shareable and not custom_shape
+        return content.key(shared=shared, owner_id=control.owner_id), shared, threads
+
+    @staticmethod
+    def _collision_warnings(
+        existing: TaskControl, incoming: TaskControl, current_hash: str, new_hash: str
+    ) -> List[Dict[str, Any]]:
+        """
+        The ``address_collision`` warning (plan 2.3), or none.
+
+        Fires when a spec call meets a live presence at the same address whose
+        engine runs different content AND whose ``origin`` (workspace root +
+        path) differs from the caller's: two workspaces reuse one short id.
+
+        Returns:
+            ``[{code, address, origins}]`` or ``[]``.
+        """
+        origins = [existing.origin, incoming.origin]
+        if current_hash == new_hash or not all(origins) or origins[0] == origins[1]:
+            return []
+        return [{'code': 'address_collision', 'address': existing.address, 'origins': origins}]
+
+    def _storm_warning(self, control: TaskControl, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """
+        Count one repoint of ``control``'s address; the ``repoint_storm`` warning past the limit (plan 7.3).
+
+        One owner repointing one address more than
+        ``CONST_REPOINT_STORM_MAX`` times in ``CONST_REPOINT_STORM_WINDOW``
+        seconds is a symptom of per-request values baked into the spec
+        (they belong in ``params``/``data``).
+
+        Returns:
+            ``[{code, address, count, window}]`` or ``[]``.
+        """
+        now = time.monotonic() if now is None else now
+        recent = self._repoints.setdefault((control.owner_id, control.address), deque())
+        recent.append(now)
+        while recent and recent[0] <= now - CONST_REPOINT_STORM_WINDOW:
+            recent.popleft()
+        if len(recent) <= CONST_REPOINT_STORM_MAX:
+            return []
+        return [
+            {
+                'code': 'repoint_storm',
+                'address': control.address,
+                'count': len(recent),
+                'window': CONST_REPOINT_STORM_WINDOW,
+            }
+        ]
+
+    async def _converge(
+        self,
+        existing: TaskControl,
+        incoming: TaskControl,
+        on_change: str,
+        *,
+        current_hash: str,
+        new_hash: str,
+        launch_args: Dict[str, Any],
+        env: Optional[Dict[str, str]],
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
+        warnings: List[Dict[str, Any]],
+        wait_for_running: bool,
+        results: Callable[..., Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        A spec call against the caller's live @dev presence, per ``on_change`` (plan 3.4, 7.3).
+
+        - the same content: reuse, ``converged:'none'``, ``specMatch:true``;
+        - ``'error'``: refuse with ``TASK_SPEC_CHANGED`` and both hashes;
+        - ``'keep'``: deliver to the existing engine, ``specMatch:false``;
+        - ``'auto'``: REPOINT the control (release its hold on the old engine,
+          acquire one on the new spec's engine, starting it if needed), stamp
+          ``converged:'repointed'``. Nothing is killed: the old engine keeps
+          serving its other holders and stops when none remain.
+
+        Returns:
+            The start result with the stamps.
+
+        Raises:
+            TaskError: TASK_INVALID_ARGUMENT (unknown ``on_change``) or
+                TASK_SPEC_CHANGED (``{address, currentHash, newHash, warnings}``).
+        """
+        if on_change not in ON_CHANGE_MODES:
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                f'onChange must be one of {", ".join(ON_CHANGE_MODES)}',
+                field='onChange',
+            )
+
+        # Step 1: the same content, or the caller keeps the running one
+        if current_hash == new_hash or on_change == 'keep':
+            await self.ensure_engine(existing)
+            if wait_for_running:
+                await existing.task.wait_for_running()
+            return results(
+                existing, reused=True, converged='none', spec_match=current_hash == new_hash, warnings=warnings
+            )
+
+        # Step 2: refuse
+        if on_change == 'error':
+            raise TaskError(
+                TaskError.SPEC_CHANGED,
+                f'{existing.address!r} runs another spec ({current_hash[:12]}); '
+                "pass onChange='auto' to move to the new one or 'keep' to use the running one",
+                address=existing.address,
+                currentHash=current_hash,
+                newHash=new_hash,
+                warnings=warnings,
+            )
+
+        # Step 3: repoint onto the new spec's engine
+        await self._repoint(existing, incoming.pipeline, launch_args=launch_args, env=env, env_source=env_source)
+        if wait_for_running:
+            await existing.task.wait_for_running()
+        return results(
+            existing,
+            reused=True,
+            converged='repointed',
+            spec_match=True,
+            warnings=warnings + self._storm_warning(existing),
+        )
+
+    async def _repoint(
+        self,
+        control: TaskControl,
+        pipeline: Dict[str, Any],
+        *,
+        launch_args: Dict[str, Any],
+        env: Optional[Dict[str, str]],
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
+    ) -> TaskEngine:
+        """
+        Move ``control``'s ONE hold onto the engine of ``pipeline`` (plan 7.3).
+
+        The control's identity, ttl and subscriptions stay; its spec becomes
+        ``pipeline``. The new engine is acquired through the start gate
+        (attached when another control already runs that content). The old
+        engine loses this hold only; it stops at once when that was its last
+        hold (no linger, plan 7.2), and otherwise keeps serving its holders.
+
+        Returns:
+            The engine the control now holds.
+        """
+        old_engine, old_pipeline = control.task, control.pipeline
+        control.pipeline = pipeline
+        key, shared, threads = self._engine_shape(control, launch_args)
+
+        def _move(engine: TaskEngine) -> None:
+            if control.task is engine:
+                return
+            if control.task is not None:
+                control.task.release(control.key)
+            engine.acquire(control.key, control.ttl)
+            control.task = engine
+
+        try:
+            engine = await self._acquire_engine(
+                key,
+                lambda: self._new_engine(
+                    control,
+                    key=key,
+                    shared=shared,
+                    threads=threads,
+                    launch_args=launch_args,
+                    env={} if shared else (env or {}),
+                    env_source=None if shared else env_source,
+                ),
+                _move,
+            )
+        except Exception:
+            # A failed start leaves the control on its old engine and spec
+            failed = control.task
+            if failed is not old_engine and failed is not None:
+                failed.release(control.key)
+                old_engine.acquire(control.key, control.ttl)
+                control.task = old_engine
+            control.pipeline = old_pipeline
+            raise
+
+        # The old engine's last hold went with this repoint: it stops now
+        if old_engine is not None and old_engine is not engine and not old_engine.holds:
+            if not old_engine.is_task_complete() and not old_engine._stop_requested:
+                await self._stop_engine_now(old_engine, 'repointed')
+        self.debug_message(f'Task "{control.id}" repointed to engine "{engine.engine_key}"')
+        return engine
+
+    def _new_engine(
+        self,
+        control: TaskControl,
+        *,
+        key: str,
+        shared: bool,
+        threads: int,
+        launch_args: Dict[str, Any],
+        env: Optional[Dict[str, str]],
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
+    ) -> TaskEngine:
+        """
+        Build (not start) an engine for ``key`` on behalf of ``control``.
+
+        A cross-user engine names no user (S13), anchors no storage, carries
+        no caller's env (it holds the placeholders; env rides per call) and
+        traces nothing by default; a private engine is its owner's, as today.
+
+        Args:
+            control: The control the engine is started for.
+            key: The engine key (plan 7.2).
+            shared: True for a cross-user engine.
+            threads: The engine's thread count.
+            launch_args: The launch arguments (``name``, ``args``).
+            env: Fixed values for ${...} placeholders (private engines).
+            env_source: Loads those values at each start (private engines).
+
+        Returns:
+            The new, not yet started engine.
+        """
+        return TaskEngine(
+            server=self,
+            id=control.id,
+            project_id=control.project_id,
+            source=control.source,
+            engine_key=key,
+            address=control.address,
+            pipeline=control.pipeline,
+            launch_args=launch_args,
+            launch_type=control.launch_type,
+            provider=control.provider,
+            shared=shared,
+            threads=threads,
+            trace_level='none' if shared else control.trace_level,
+            client_id='' if shared else control.client_id,
+            team_id=control.teamId,
+            org_id=control.orgId,
+            env=env,
+            env_source=env_source,
+            run_kind=control.run_kind,
+            owner_kind=control.owner_kind,
+            trigger=control.trigger,
+        )
+
+    async def _acquire_engine(
+        self,
+        key: str,
+        build: Callable[[], TaskEngine],
+        hold: Callable[[TaskEngine], None],
+    ) -> TaskEngine:
+        """
+        The start gate: attach to the live engine of ``key``, or start one.
+
+        Concurrent callers of one key serialize on the key's lock: the first
+        builds and starts the engine, the rest attach to it. A finished or
+        stopping engine takes no new holds. ``start_task`` (a new control) and
+        ``ensure_engine`` (a dormant control's next request) both come here,
+        so a restart and a fresh start of the same key are one start.
+
+        Args:
+            key: The engine key.
+            build: Builds the engine when none is live.
+            hold: Takes the caller's hold on the engine (under the lock).
+
+        Returns:
+            The engine the hold is on.
+        """
+        # Step 1: one gate per key, removed when its last user leaves
+        async with self._engines.start_lock(key):
+            # Step 2: the live engine of the key, if any
+            engine = self._engines.get(key)
+            if engine is not None and (engine.is_task_complete() or engine._stop_requested):
+                engine = None
+
+            # Step 3: hold it, building one when none is live
+            started = engine is None
+            if started:
+                engine = build()
+            hold(engine)
+
+            # Step 4: start the engine this caller built; a failed start
+            # leaves the pool before the next waiter looks
+            if started:
+                self._engines.register(key, engine)
+                self._schedule_engine(engine)
+                try:
+                    await engine.start_task()
+                except Exception:
+                    self._drop_engine(engine)
+                    raise
+            return engine
+
+    async def ensure_engine(self, control: TaskControl) -> Optional[TaskEngine]:
+        """
+        The engine a request through ``control`` runs on, started again if dormant.
+
+        A control entitles its caller to an engine but does not keep it
+        running (plan 7.2): an engine that stopped on its inactivity timer, or
+        crashed after it had confirmed running, is started again under the
+        SAME key through the start gate, and the control is repointed.
+        Identity, holds, deployment and ttl are the control's and do not
+        change. Concurrent requests (through this or any
+        other holder of the stopped engine) attach to the one new engine.
+        Startup is paid once; there is no error and no re-resolve.
+
+        An engine that is running, or that stopped for any other reason (an
+        operator's stop, a terminate, a natural completion, a failure before
+        it confirmed running), is returned as it is.
+
+        Args:
+            control: The resolved control.
+
+        Returns:
+            The engine to send the request to.
+        """
+        # Step 1: anything but a dormant control is used as it is
+        stopped = control.task
+        if stopped is None or not control.dormant:
+            return stopped
+
+        def _repoint(engine: TaskEngine) -> None:
+            # A concurrent request through this control may have repointed it
+            if control.task is engine:
+                return
+            control.task.release(control.key)
+            engine.acquire(control.key, control.ttl)
+            control.task = engine
+
+        # Step 2: the same key, the same engine shape, through the start gate.
+        # The engine shape (key, sharing, threads, launch args, env source) is
+        # the stopped engine's; the identity is the requesting control's.
+        # While the request waits in the gate the control reads 'starting'.
+        self.debug_message(
+            f'Task "{control.id}" request on a stopped engine ({stopped.dormant_reason}), '
+            f'starting "{stopped.engine_key}" again'
+        )
+        control.engine_starting = True
+        try:
+            return await self._acquire_engine(
+                stopped.engine_key,
+                lambda: self._new_engine(
+                    control,
+                    key=stopped.engine_key,
+                    shared=stopped.shared,
+                    threads=stopped._threads,
+                    launch_args=stopped._launch_args or {},
+                    env=None,
+                    env_source=None if stopped.shared else stopped._env_source,
+                ),
+                _repoint,
+            )
+
+        except Exception:
+            # Step 3: a failed start leaves the control dormant on the stopped
+            # engine, so the next request tries again
+            failed = control.task
+            if failed is not stopped:
+                failed.release(control.key)
+                stopped.acquire(control.key, control.ttl)
+                control.task = stopped
+                if not failed.holds:
+                    try:
+                        await asyncio.wait_for(failed.stop_task(), timeout=30)
+                    except Exception:
+                        self.debug_message(f'Warning: failed to stop a failed engine start: {control.id}')
+            raise
+
+        finally:
+            # Step 4: the gate is behind this request either way
+            control.engine_starting = False
 
     async def restart_task(
         self,
@@ -1614,7 +2937,7 @@ class TaskServer(DAPBase):
         6. Extract and validate new pipeline configuration
         7. Verify project_id and source match existing (cannot change)
         8. Validate source component exists in new pipeline
-        9. Update TASK_CONTROL with new configuration (pipeline, provider)
+        9. Update TaskControl with new configuration (pipeline, provider)
         10. Call task.restart_task() to restart engine process
         11. Optionally wait for running state
         12. Transfer launch ownership to the caller (only once 10-11 succeeded)
@@ -1654,6 +2977,16 @@ class TaskServer(DAPBase):
             if control.task.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
 
+            # A restart replaces the engine's content in place, so it is open
+            # only to the sole holder of a private engine: an engine other
+            # controls hold keeps serving them unchanged.
+            # TODO(plan 3.4, C.7 phase 3): repoint the control onto the new
+            # spec's engine instead (on_change 'auto').
+            if self._shares_engine(control) or control.task.shared:
+                raise RuntimeError(
+                    'Cannot restart a pipeline whose engine other runs share. Stop it and run the new version instead.'
+                )
+
             # Find and validate the provider from new pipeline
             components = pipeline.get('components', [])
             if type(components) is not list:
@@ -1680,14 +3013,30 @@ class TaskServer(DAPBase):
             # by Task.restart_task, and control.pipeline still naming the old one.
             pipeline = _apply_source_defaults(pipeline, control.source)
 
-            # Call the Task's restart method to restart the engine process
+            # The restarted engine runs different content, so it takes the new
+            # content's key (the task file's taskId is written at the start).
+            # When another engine already serves that key this one stays out of
+            # the pool and serves only its own holder until it stops.
+            engine = control.task
+            new_key = engine_content(pipeline, control.source, component_facts).key(
+                shared=False, owner_id=control.owner_id
+            )
+            self._engines.unregister(engine)
+            engine.engine_key = new_key
+            if new_key not in self._engines:
+                self._engines.register(new_key, engine)
+
+            # Call the engine's restart method to restart the engine process
             # This preserves all statistics and monitoring while restarting the subprocess
-            await control.task.restart_task(
+            await engine.restart_task(
                 pipeline=pipeline,
                 project_id=control.project_id,
                 source=control.source,
                 provider=control.provider,
             )
+
+            # The restarted engine ages from now; a dormant one had no entry left
+            self._schedule_engine(engine)
 
             # The control now describes the pipeline that is running: without this the
             # record still holds whatever was launched originally, so a later
@@ -1725,11 +3074,12 @@ class TaskServer(DAPBase):
 
     async def stop_task(self, key: str, reason: str = 'user'):
         """
-        Stop a running task with proper cleanup and resource management.
+        Terminate a control: release its hold, stopping the engine if it was the last.
 
-        This method handles task termination requests by validating ownership
-        and performing clean shutdown for appropriate task types. It ensures
-        proper resource cleanup while handling various edge cases gracefully.
+        ``terminate`` is a release (plan 7.2): an engine other controls hold
+        keeps serving them and only this control goes. When this was the last
+        hold the engine stops at once: there is no linger. A dormant control
+        (its engine already stopped on its inactivity timer) just goes.
 
         Args:
             key (str): The control's registry key (resolved by the caller
@@ -1753,7 +3103,24 @@ class TaskServer(DAPBase):
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
-                await control.task.stop_task(reason)
+                engine = control.task
+
+                # Other controls hold the engine: release only this hold and
+                # drop the control; the engine keeps serving them
+                if self._shares_engine(control):
+                    await self.remove_task(control.key, reason=reason)
+                    self.debug_message(f'Task "{control.id}" released its engine (reason: {reason})')
+                    return
+
+                # A dormant control: its engine already stopped, the control goes
+                if control.dormant:
+                    await self.remove_task(control.key, reason=reason)
+                    self.debug_message(f'Task "{control.id}" released its stopped engine (reason: {reason})')
+                    return
+
+                # The last hold: the engine stops with it, at once
+                self._drop_engine(engine)
+                await engine.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
 
                 # A @dev control ends with its run: no grace window and no
@@ -1772,6 +3139,7 @@ class TaskServer(DAPBase):
                             f'Task "{control.id}" teardown exceeded {CONST_TEARDOWN_WAIT_TIMEOUT}s; left to cleanup'
                         )
                         return
+                    # The engine stopped above: the removal only drops the control
                     if self._task_control.get(control.key) is control:
                         await self.remove_task(control.key)
 
@@ -2043,7 +3411,7 @@ class TaskServer(DAPBase):
             f'{tallies["unexpected"]} unexpected probe failures). {hint}{clamped}'
         )
 
-    def _debug_task_started(self, control: TASK_CONTROL, trigger: str, ttl: int) -> None:
+    def _debug_task_started(self, control: TaskControl, trigger: str, ttl: int) -> None:
         """Log a started task with its launch type, run classification and run window."""
         run = control.run_kind if control.run_kind == 'dev' or not trigger else f'{control.run_kind}/{trigger}'
         window = f'{ttl}s' if ttl else 'none'
@@ -2072,7 +3440,7 @@ class TaskServer(DAPBase):
         unbounded = [
             (c, int(now - c.task.get_status().startTime) if c.task.get_status().startTime else 0)
             for c in live
-            if c.task._ttl == 0
+            if c.ttl == 0
         ]
         message = f'Tasks running: {len(live)} ({kinds}), unbounded: {len(unbounded)}'
         if unbounded:

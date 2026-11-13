@@ -107,7 +107,6 @@ class TaskError(RuntimeError):
     - TASK_NOT_REGISTERED: the address or project/source names no live task
       on any rung the caller may reach — never started, terminated,
       replaced, or the engine restarted and rebuilt its in-memory registry
-    - TASK_AMBIGUOUS: a lookup matched several running tasks
     - TASK_COMPLETED: the task finished before the request could be served
     - TASK_STOPPED: the task was stopped or cancelled before the request
     - TASK_INVALID_ARGUMENT: a request value breaks the grammar — an address
@@ -116,17 +115,29 @@ class TaskError(RuntimeError):
       whitespace or ``~``, or a client trying to name the registry key
     - TASK_SOURCE_REQUIRED: a two-segment address names a pipe with several
       live sources and no default; ``sources`` lists them
+    - TASK_SPEC_CHANGED: a spec call with ``onChange='error'`` met a live
+      presence running other content; ``currentHash`` and ``newHash``
+    - TASK_TIMEOUT: a ``process()`` request exceeded the caller's
+      ``timeout`` (open to close); ``address`` and ``converged``
+    - TASK_PAYLOAD_TOO_LARGE: inline ``process()`` data over
+      ``CONST_PROCESS_INLINE_MAX``; ``limit``
+    - TASK_ENGINE_UNAVAILABLE: the engine under the caller's hold was stopped
+      by an operator; ``engineKey`` and ``reason`` say which and why. Told
+      once per control: the next call re-resolves
 
     Extra keyword fields (``field``, ``address``, ``sources``, …) become
     attributes so a caller can classify on more than the code.
     """
 
     NOT_REGISTERED = 'TASK_NOT_REGISTERED'
-    AMBIGUOUS = 'TASK_AMBIGUOUS'
     COMPLETED = 'TASK_COMPLETED'
     STOPPED = 'TASK_STOPPED'
     INVALID_ARGUMENT = 'TASK_INVALID_ARGUMENT'
     SOURCE_REQUIRED = 'TASK_SOURCE_REQUIRED'
+    ENGINE_UNAVAILABLE = 'TASK_ENGINE_UNAVAILABLE'
+    SPEC_CHANGED = 'TASK_SPEC_CHANGED'
+    TIMEOUT = 'TASK_TIMEOUT'
+    PAYLOAD_TOO_LARGE = 'TASK_PAYLOAD_TOO_LARGE'
 
     def __init__(self, code: str, message: str, **fields: Any):
         super().__init__(message)

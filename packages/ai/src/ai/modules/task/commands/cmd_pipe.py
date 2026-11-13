@@ -59,6 +59,7 @@ from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
 from .cmd_deploy import _DeployBase
+from ..task_control import DeploymentRef
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -497,6 +498,7 @@ class DeployPipeCommands(_DeployBase):
                 pipeline,
                 org_id=org_id,
                 team_id=billing_team,
+                deployment=DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id),
                 trigger='manual',
                 ttl=None,
                 trace_level=sched.get('traceLevel') or 'full',

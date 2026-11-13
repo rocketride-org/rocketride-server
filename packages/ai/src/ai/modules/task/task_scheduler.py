@@ -55,6 +55,7 @@ from rocketlib import debug, error, warning
 
 from ai.account import account
 from .deploy_events import broadcast_deploy_changed
+from .task_control import DeploymentRef
 from .task_server_facade import start_server_task_as_team
 
 if TYPE_CHECKING:
@@ -436,6 +437,7 @@ class TaskScheduler:
                     pipeline,
                     org_id=org_id,
                     team_id=billing_team,
+                    deployment=DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id),
                     trigger='schedule',
                     ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
                     # Per-source execution settings ride the schedule record.

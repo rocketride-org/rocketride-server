@@ -28,8 +28,8 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PROCESS_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, PROCESS_INLINE_MAX } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
@@ -1533,6 +1533,149 @@ export class RocketRideClient extends DAPClient {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline execution failed: ${errorMsg}`);
 			throw err;
+		}
+	}
+
+	/**
+	 * Run ONE request through a named or inline pipeline: `use()` plus one `send()`.
+	 *
+	 * Exactly one of `name`, `pipeline` or `filepath`. A `name` is the address
+	 * `developerId.pipelineId[.source]` and resolves through the fixed rungs: your
+	 * live `@dev` presence (attach only), your `@me` deployment, the first team in
+	 * your team order that publishes it (`team` overrides the order for this call),
+	 * then `@public`; a published rung starts from its artifact when nothing is
+	 * live. A `pipeline`/`filepath` addresses your own `@dev` presence for that
+	 * spec; when it already runs other content, `onChange` decides: `'error'`
+	 * (default), `'keep'` (use the running engine) or `'auto'` (move to the new
+	 * spec; nothing is stopped for anyone else).
+	 *
+	 * The pipeline stays up after the call and expires on its idle ttl.
+	 * `threads`/`args`/`env`/`ttl` apply to spec calls only; a name call ignores
+	 * them and lists them in `ignored`. Data up to `PROCESS_INLINE_MAX` bytes
+	 * travels inline in the one request; larger data, and every call with
+	 * `onSSE`, streams through a pipe to the address the server answered with.
+	 *
+	 * @param options.name - The pipeline's address (XOR with pipeline/filepath)
+	 * @param options.pipeline - An inline flat PipelineConfig (XOR)
+	 * @param options.filepath - A `.pipe`/JSON file, loaded here (Node only, XOR)
+	 * @param options.source - The entry component; overrides the address's third segment
+	 * @param options.params - Per-call parameter values by public name
+	 * @param options.data - The payload (a string is sent as UTF-8)
+	 * @param options.objinfo - Object metadata for the payload
+	 * @param options.mimetype - The payload's MIME type (default `application/octet-stream`)
+	 * @param options.onSSE - Callback for the request's SSE events
+	 * @param options.threads - Engine threads (spec calls only)
+	 * @param options.args - Engine arguments (spec calls only)
+	 * @param options.ttl - Idle ttl in seconds (spec calls only)
+	 * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
+	 * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
+	 * @param options.onChange - `'error'` | `'keep'` | `'auto'` (spec calls)
+	 * @param options.timeout - Seconds for the request (pipe open to close)
+	 * @param options.team - Answer `@team` from this one of your teams
+	 * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
+	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `process`
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.process({ name: 'acme.docBrain', data: 'What is in this file?' });
+	 * console.log(result.resolved, result.answers);
+	 * ```
+	 */
+	async process(
+		options: {
+			name?: string;
+			pipeline?: PipelineConfig;
+			filepath?: string;
+			source?: string;
+			params?: Record<string, unknown>;
+			data?: string | Uint8Array;
+			objinfo?: Record<string, unknown>;
+			mimetype?: string;
+			onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
+			threads?: number;
+			args?: string[];
+			ttl?: number;
+			env?: Record<string, string>;
+			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+			onChange?: 'error' | 'keep' | 'auto';
+			timeout?: number;
+			team?: string;
+		} = {}
+	): Promise<PROCESS_RESULT> {
+		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel, onChange, timeout, team } = options;
+
+		// Step 1: exactly one of name / pipeline / filepath
+		if ([name, pipeline, filepath].filter((value) => value !== undefined).length !== 1) {
+			throw new Error('Pass exactly one of name, pipeline or filepath');
+		}
+		const data = typeof options.data === 'string' ? new TextEncoder().encode(options.data) : options.data;
+
+		// Step 2: the request arguments
+		const arguments_: Record<string, unknown> = {};
+		if (name !== undefined) {
+			arguments_.name = name;
+		} else {
+			let spec: PipelineConfig;
+			if (filepath !== undefined) {
+				if (typeof window !== 'undefined') {
+					throw new Error('File loading not available in browser environment. Please provide pipeline object directly.');
+				}
+				const fsPromises = await this._loadNodeFsPromises();
+				const parsed = JSON.parse(await fsPromises.readFile(filepath, 'utf-8'));
+				spec = parsed.pipeline ?? parsed;
+			} else {
+				spec = pipeline!;
+			}
+			arguments_.pipeline = JSON.parse(JSON.stringify(spec));
+			arguments_.onChange = onChange ?? 'error';
+		}
+		const optional: Record<string, unknown> = { source, team, params, objinfo, mimetype, threads, args, ttl, pipelineTraceLevel, timeout };
+		for (const [key, value] of Object.entries(optional)) {
+			if (value !== undefined) arguments_[key] = value;
+		}
+		const rocketEnv: Record<string, string> = {};
+		if (name === undefined) {
+			for (const [k, v] of Object.entries(this._env)) {
+				if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
+			}
+		}
+		if (env) Object.assign(rocketEnv, env);
+		if (Object.keys(rocketEnv).length > 0) {
+			arguments_.env = rocketEnv;
+		}
+
+		// Step 3: inline in one request, unless the SDK must stream
+		const inline = data !== undefined && onSSE === undefined && data.length <= PROCESS_INLINE_MAX;
+		if (inline) {
+			arguments_.data = data;
+		}
+		let stamps: PROCESS_RESULT;
+		try {
+			stamps = (await this.call('process', arguments_)) as PROCESS_RESULT;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			if (message.startsWith('Unsupported command: process')) {
+				throw new Error('This server does not support process(); upgrade the server');
+			}
+			throw err;
+		}
+		if (inline || data === undefined) {
+			return stamps;
+		}
+
+		// Step 4: stream to the address the server answered with
+		const streamed = this.send(stamps.token, data, objinfo ?? {}, mimetype, onSSE);
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const expired = new Promise<never>((_, reject) => {
+				if (timeout !== undefined) {
+					timer = setTimeout(() => reject(new Error(`process() exceeded its timeout of ${timeout}s`)), timeout * 1000);
+				}
+			});
+			const result = timeout === undefined ? await streamed : await Promise.race([streamed, expired]);
+			return { ...(result ?? {}), ...stamps };
+		} finally {
+			if (timer !== undefined) clearTimeout(timer);
 		}
 	}
 

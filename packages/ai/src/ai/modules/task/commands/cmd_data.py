@@ -132,16 +132,35 @@ class DataCommands(DAPConn):
         - Response format is determined by the individual task's processing logic
         """
         try:
-            # Locate the target task instance using authentication and token
-            task = self.get_task(request, 'task.data')
+            # The correlationId is server-minted (it makes `open` idempotent,
+            # ALB seam 7): a client-sent one must never name another
+            # request's binding
+            arguments = request.get('arguments')
+            if isinstance(arguments, dict):
+                arguments.pop('correlationId', None)
+
+            # Locate the caller's control using authentication and token
+            control = self.get_control(request, 'task.data')
+
+            # The engine this request runs on: one that stopped on its
+            # inactivity timer starts again under the same key (plan 7.2)
+            task = await self._server.ensure_engine(control)
+
+            # A data request (pipe open/write/close, tool, ...) is activity
+            # of THIS control only: another holder of the engine keeps aging
+            control.touch()
 
             # Ensure the task is ready to process data (blocks until running)
             # This is critical as tasks may be in startup, initialization, or other states
             await task.wait_for_running()
 
             # Forward the data processing request to the task instance and get
-            # the raw response from the subprocess.
-            subprocess_response = await task._send_data(request)
+            # the raw response from the subprocess. The answer is activity
+            # too: the control's idle clock restarts when the call ends.
+            try:
+                subprocess_response = await task._send_data(request)
+            finally:
+                control.touch()
 
             # Rebuild the response envelope keyed off the INBOUND request so the
             # inbound DAPConn can correlate it back to the originating chat client.

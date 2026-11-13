@@ -432,20 +432,22 @@ int IServiceEndpoint::getPipeCount() noexcept {
 ///		Gets a pipe for the endpoint - the pipe is a stacked set
 ///		of filters that we can read from/write to. If no pipes
 ///		are available, one will be created
-///		The pipe comes back as a new BINDING: a fresh, never-reused
-///		bindingId, a rootBindingId and a trace level. Opened from inside
-///		a live binding (parentBindingId != 0) it joins that binding's
-///		tree - the parent's root and the parent's trace level - so a
-///		sub-pipeline's trace reaches the caller that caused it.
+///		The pipe comes back as a new BINDING stamped with a traceId and a
+///		trace level. With traceId 0 it starts a request tree: a fresh,
+///		never-reused id from the process-wide counter. With a non-zero
+///		traceId it joins that live tree: another slot stamped with THAT
+///		SAME id, the tree's trace level, and the depth of the deepest busy
+///		pipe holding the id plus one - so a sub-pipeline's trace reaches
+///		the caller that caused it and the recursion guard counts the tree.
 ///	@param[in]	traceLevel
-///		The trace level of this binding (ignored when a parent is given)
-///	@param[in]	parentBindingId
-///		The live binding this one is opened from, or 0 for a root
+///		The trace level of this binding (ignored when joining a tree)
+///	@param[in]	traceId
+///		The live tree to join, or 0 to start a new one
 ///	@returns
 ///		ErrorOr<ServicePipe>
 //-------------------------------------------------------------------------
-ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
-    PIPELINE_TRACE_LEVEL traceLevel, uint64_t parentBindingId) noexcept {
+ErrorOr<ServicePipe> IServiceEndpoint::getPipe(PIPELINE_TRACE_LEVEL traceLevel,
+                                               uint64_t traceId) noexcept {
     // If we are not open, stop
     if (config.openMode == OPEN_MODE::NONE)
         return APERR(Ec::InvalidCommand,
@@ -455,23 +457,22 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
     if (pipeGate)
         if (auto ccode = pipeGate()) return ccode;
 
-    // What the new binding inherits - its own id as root, the requested
-    // level and depth zero, unless a parent binding is named: then the
-    // parent's root and level, and the parent's depth plus one, so the
-    // recursion guard counts the whole binding TREE (a node opening a
-    // sub-pipe that opens the node again...) and not each pipe alone
-    uint64_t rootBindingId = 0;
+    // What the new binding inherits - the requested level and depth zero
+    // for a new tree, unless a traceId is named: then the tree's level and
+    // the depth of its deepest busy pipe plus one, so the recursion guard
+    // counts the whole TREE (a node opening a sub-pipe that opens the node
+    // again...) and not each pipe alone
     int bindDepth = 0;
 
     // Stamps the binding onto a pipe that is busy for us. Runs UNDER
-    // m_stackLock: the parent lookup above reads these fields of every busy
+    // m_stackLock: the tree lookup below reads these fields of every busy
     // pipe under the same lock, so a pipe is never visible as busy with the
-    // previous holder's id. The id is minted from the process-wide counter
-    // and never comes back; the slot (pipeId) does
+    // previous holder's id. A new tree's id is minted from the process-wide
+    // counter and never comes back; the slot (pipeId) does
     auto stamp = [&](ServicePipe &bound) noexcept {
-        bound->bindingId =
-            s_nextBindingId.fetch_add(1, std::memory_order_relaxed);
-        bound->rootBindingId = rootBindingId ? rootBindingId : bound->bindingId;
+        bound->traceId =
+            traceId ? traceId
+                    : s_nextTraceId.fetch_add(1, std::memory_order_relaxed);
         bound->traceLevel = traceLevel;
         bound->bindDepth = bindDepth;
     };
@@ -482,30 +483,29 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
 
-        // A parent must be a live binding on this endpoint
-        if (parentBindingId) {
+        // A named tree must be live on this endpoint: take its level from
+        // the deepest busy pipe holding the id
+        if (traceId) {
             bool found = false;
             for (auto &stack : m_instanceStacks) {
-                ServicePipe &parent = (ServicePipe &)stack[0];
-                if (!parent->busy || parent->bindingId != parentBindingId)
-                    continue;
-                rootBindingId = parent->rootBindingId;
-                traceLevel = parent->traceLevel;
-                bindDepth = parent->bindDepth.load() + 1;
+                ServicePipe &holder = (ServicePipe &)stack[0];
+                if (!holder->busy || holder->traceId != traceId) continue;
+                int depth = holder->bindDepth.load() + 1;
+                if (found && depth <= bindDepth) continue;
+                traceLevel = holder->traceLevel;
+                bindDepth = depth;
                 found = true;
-                break;
             }
             if (!found)
-                return APERR(Ec::NotFound, "Parent binding is not live",
-                             parentBindingId);
+                return APERR(Ec::NotFound, "Trace is not live", traceId);
 
-            // Refuse the child BEFORE a pipe (a whole filter stack) is
+            // Refuse the join BEFORE a pipe (a whole filter stack) is
             // built or handed out for it: the tree is already at the limit
             if (bindDepth > filter::pipe::CONST_MAX_BIND_DEPTH)
                 return APERR(Ec::Recursion,
                              "Pipeline binding depth exceeded",
                              filter::pipe::CONST_MAX_BIND_DEPTH,
-                             "opening a child binding of", parentBindingId);
+                             "joining trace", traceId);
         }
 
         // Loop through them
@@ -535,7 +535,7 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
     // If we got an error
     if (!result) return result.ccode();
 
-    // Bind it under the same lock the parent lookup takes
+    // Bind it under the same lock the tree lookup takes
     _block() {
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
@@ -556,6 +556,29 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(
 //-------------------------------------------------------------------------
 ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
     return getPipe(config.pipelineTraceLevel);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Seeds the high 16 bits of the process-wide traceId counter from
+///		the launch's trace epoch; the low 48 bits count. EaaS assigns one
+///		epoch per engine launch (monotonic per server process), so the
+///		trace ids of two engines one connection holds never collide
+///		(plan 7.4). Called for every endpoint the task configures; an
+///		epoch already in effect is left alone, and 0 seeds nothing.
+///	@param[in]	epoch
+///		The launch's trace epoch (only the low 16 bits are used)
+//-------------------------------------------------------------------------
+void IServiceEndpoint::seedTraceEpoch(uint32_t epoch) noexcept {
+    const uint64_t high = static_cast<uint64_t>(epoch & 0xFFFFu) << 48;
+    if (!high) return;
+
+    auto current = s_nextTraceId.load(std::memory_order_relaxed);
+    while ((current >> 48) != (high >> 48)) {
+        if (s_nextTraceId.compare_exchange_weak(current, high | 1,
+                                                std::memory_order_relaxed))
+            break;
+    }
 }
 
 //-------------------------------------------------------------------------

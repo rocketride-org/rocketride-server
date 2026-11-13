@@ -184,6 +184,7 @@ from .core.constants import (
     CONST_SOCKET_TIMEOUT,
     CONST_WS_PING_INTERVAL,
     CONST_WS_PING_TIMEOUT,
+    PROCESS_INLINE_MAX,
     PROJECT_DIR,
 )
 
@@ -217,6 +218,7 @@ __all__ = [
     'CONST_ENV_MASK',
     'CONST_SOCKET_TIMEOUT',
     'CONST_WS_PING_INTERVAL',
+    'PROCESS_INLINE_MAX',
     'CONST_WS_PING_TIMEOUT',
     'PROJECT_DIR',
     'ConnectCallback',

@@ -48,7 +48,7 @@ public:
 std::vector<std::string> fields(const std::string &line) {
     std::vector<std::string> out;
     size_t start = 0;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 4; i++) {
         auto pos = line.find('*', start);
         out.push_back(line.substr(start, pos - start));
         start = pos + 1;
@@ -59,9 +59,9 @@ std::vector<std::string> fields(const std::string &line) {
 }  // namespace
 
 //-----------------------------------------------------------------------------
-// getPipe() hands out BINDINGS: a never-reused id, a root, a trace level that
-// the pipe's own gates read. One engine serves a NONE and a FULL binding side
-// by side and only the FULL one speaks.
+// getPipe() hands out BINDINGS: a traceId (minted, or the live tree it joins)
+// and a trace level that the pipe's own gates read. One engine serves a NONE
+// and a FULL binding side by side and only the FULL one speaks.
 //-----------------------------------------------------------------------------
 TEST_CASE("store::bindings") {
     IFilterTest test({"pipe", "null", "bottom"});
@@ -73,26 +73,44 @@ TEST_CASE("store::bindings") {
     auto endpoint = (*first)->endpoint;
     REQUIRE_NO_ERROR(test.putPipe(*first));
 
-    SECTION("bindingId is monotonic and never reused across 10,000 cycles") {
-        std::set<uint64_t> seen{(*first)->bindingId};
-        uint64_t last = (*first)->bindingId;
+    SECTION("traceId is monotonic and never reused across 10,000 cycles") {
+        std::set<uint64_t> seen{(*first)->traceId};
+        uint64_t last = (*first)->traceId;
         for (int i = 0; i < 10000; i++) {
             auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
             REQUIRE_NO_ERROR(pipe);
-            REQUIRE((*pipe)->bindingId > last);
-            REQUIRE(seen.insert((*pipe)->bindingId).second);
-            last = (*pipe)->bindingId;
+            REQUIRE((*pipe)->traceId > last);
+            REQUIRE(seen.insert((*pipe)->traceId).second);
+            last = (*pipe)->traceId;
             REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
         }
         // The whole run reused the one slot
         REQUIRE(endpoint->getPipeCount() == 1);
     }
 
-    SECTION("a root binding is its own root and carries the requested level") {
+    SECTION("the launch's trace epoch seeds the high 16 bits of every id") {
+        IServiceEndpoint::seedTraceEpoch(0x7A5Eu);
+        auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(pipe);
+        REQUIRE(((*pipe)->traceId >> 48) == 0x7A5Eu);
+        auto id = (*pipe)->traceId;
+        REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
+
+        // The epoch in effect is not re-seeded: the counter keeps counting
+        IServiceEndpoint::seedTraceEpoch(0x7A5Eu);
+        auto next = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(next);
+        REQUIRE((*next)->traceId > id);
+        REQUIRE(((*next)->traceId >> 48) == 0x7A5Eu);
+        REQUIRE_NO_ERROR(endpoint->putPipe(*next));
+    }
+
+    SECTION("a new tree gets a minted id and carries the requested level") {
         auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::SUMMARY);
         REQUIRE_NO_ERROR(pipe);
-        REQUIRE((*pipe)->rootBindingId == (*pipe)->bindingId);
+        REQUIRE((*pipe)->traceId != 0);
         REQUIRE((*pipe)->traceLevel == PIPELINE_TRACE_LEVEL::SUMMARY);
+        REQUIRE((*pipe)->bindDepth == 0);
         REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
     }
 
@@ -103,62 +121,96 @@ TEST_CASE("store::bindings") {
         REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
     }
 
-    SECTION("a child binding joins the parent's tree and inherits its level") {
-        auto parent = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
-        REQUIRE_NO_ERROR(parent);
+    SECTION("joining an existing traceId shares the id and inherits the level") {
+        auto first = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE_NO_ERROR(first);
 
-        auto child = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
-                                       (*parent)->bindingId);
-        REQUIRE_NO_ERROR(child);
-        REQUIRE((*child)->bindingId != (*parent)->bindingId);
-        REQUIRE((*child)->rootBindingId == (*parent)->bindingId);
-        REQUIRE((*child)->traceLevel == PIPELINE_TRACE_LEVEL::FULL);
+        auto joined = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
+                                        (*first)->traceId);
+        REQUIRE_NO_ERROR(joined);
+        REQUIRE((*joined)->traceId == (*first)->traceId);
+        REQUIRE((*joined)->traceLevel == PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE((*joined)->bindDepth == 1);
 
-        // A grandchild reports the same root
-        auto grandchild =
-            endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, (*child)->bindingId);
-        REQUIRE_NO_ERROR(grandchild);
-        REQUIRE((*grandchild)->rootBindingId == (*parent)->bindingId);
+        // A third join reports the same id again, one level deeper still
+        auto third =
+            endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, (*joined)->traceId);
+        REQUIRE_NO_ERROR(third);
+        REQUIRE((*third)->traceId == (*first)->traceId);
+        REQUIRE((*third)->bindDepth == 2);
 
-        REQUIRE_NO_ERROR(endpoint->putPipe(*grandchild));
-        REQUIRE_NO_ERROR(endpoint->putPipe(*child));
-        REQUIRE_NO_ERROR(endpoint->putPipe(*parent));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*third));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*joined));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*first));
     }
 
-    SECTION("a released or unknown parent is refused") {
-        auto parent = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
-        REQUIRE_NO_ERROR(parent);
-        auto released = (*parent)->bindingId;
-        REQUIRE_NO_ERROR(endpoint->putPipe(*parent));
+    SECTION("two pipes with the same traceId differ only in their slot") {
+        auto first = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(first);
+        auto second = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
+                                        (*first)->traceId);
+        REQUIRE_NO_ERROR(second);
+
+        REQUIRE((*second)->traceId == (*first)->traceId);
+        REQUIRE((*second)->pipeId != (*first)->pipeId);
+
+        REQUIRE_NO_ERROR(endpoint->putPipe(*second));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*first));
+    }
+
+    SECTION("a joined tree outlives the pipe that minted its id") {
+        auto first = endpoint->getPipe(PIPELINE_TRACE_LEVEL::SUMMARY);
+        REQUIRE_NO_ERROR(first);
+        auto id = (*first)->traceId;
+        auto second = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, id);
+        REQUIRE_NO_ERROR(second);
+
+        // The minting pipe goes back; the id is still live through the
+        // second, so a third can still join
+        REQUIRE_NO_ERROR(endpoint->putPipe(*first));
+        auto third = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, id);
+        REQUIRE_NO_ERROR(third);
+        REQUIRE((*third)->traceId == id);
+        REQUIRE((*third)->traceLevel == PIPELINE_TRACE_LEVEL::SUMMARY);
+
+        REQUIRE_NO_ERROR(endpoint->putPipe(*third));
+        REQUIRE_NO_ERROR(endpoint->putPipe(*second));
+    }
+
+    SECTION("a released or unknown traceId is refused") {
+        auto first = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE_NO_ERROR(first);
+        auto released = (*first)->traceId;
+        REQUIRE_NO_ERROR(endpoint->putPipe(*first));
 
         REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, released),
-                      Ec::NotFound, "Parent binding is not live");
+                      Ec::NotFound, "Trace is not live");
         REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, 0xFFFFFFFF),
-                      Ec::NotFound, "Parent binding is not live");
+                      Ec::NotFound, "Trace is not live");
     }
 
     SECTION("a released id never attaches to the slot's next holder") {
-        auto parent = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
-        REQUIRE_NO_ERROR(parent);
-        auto released = (*parent)->bindingId;
-        REQUIRE_NO_ERROR(endpoint->putPipe(*parent));
+        auto first = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL);
+        REQUIRE_NO_ERROR(first);
+        auto released = (*first)->traceId;
+        REQUIRE_NO_ERROR(endpoint->putPipe(*first));
 
-        // The same slot is busy again under a NEW binding: the moment it is
+        // The same slot is busy again under a NEW tree: the moment it is
         // visible as busy it already carries the new id, never the old one
         auto next = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
         REQUIRE_NO_ERROR(next);
-        REQUIRE((*next)->pipeId == (*parent)->pipeId);
+        REQUIRE((*next)->pipeId == (*first)->pipeId);
         REQUIRE((*next)->busy);
-        REQUIRE((*next)->bindingId != released);
+        REQUIRE((*next)->traceId != released);
 
         REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, released),
-                      Ec::NotFound, "Parent binding is not live");
+                      Ec::NotFound, "Trace is not live");
 
-        // While the new holder's own id is a valid parent
+        // While the new holder's own id is a valid tree to join
         auto child = endpoint->getPipe(PIPELINE_TRACE_LEVEL::FULL,
-                                       (*next)->bindingId);
+                                       (*next)->traceId);
         REQUIRE_NO_ERROR(child);
-        REQUIRE((*child)->rootBindingId == (*next)->bindingId);
+        REQUIRE((*child)->traceId == (*next)->traceId);
         REQUIRE((*child)->traceLevel == PIPELINE_TRACE_LEVEL::NONE);
 
         REQUIRE_NO_ERROR(endpoint->putPipe(*child));
@@ -194,20 +246,20 @@ TEST_CASE("store::bindings") {
         REQUIRE_NO_ERROR((*loud)->close());
         REQUIRE(capture->lines.size() == 2);
 
-        // BEGIN*pipeId*totalPipes*componentId*bindingId*rootBindingId*trace
+        // BEGIN*pipeId*componentId*traceId*trace (no engine-wide pipe
+        // count: a holder of a shared engine must not learn it)
         auto begin = fields(capture->lines[0]);
-        REQUIRE(begin.size() == 7);
+        REQUIRE(begin.size() == 5);
         REQUIRE(begin[0] == "BEGIN");
         REQUIRE(std::stoull(begin[1], nullptr, 16) == (*loud)->pipeId);
-        REQUIRE(std::stoull(begin[2], nullptr, 16) == endpoint->getPipeCount());
-        REQUIRE(begin[3] == "loud.txt");
-        REQUIRE(std::stoull(begin[4], nullptr, 16) == (*loud)->bindingId);
-        REQUIRE(std::stoull(begin[5], nullptr, 16) == (*loud)->rootBindingId);
-        REQUIRE(begin[6] == "{}");
+        REQUIRE(begin[2] == "loud.txt");
+        REQUIRE(std::stoull(begin[3], nullptr, 16) == (*loud)->traceId);
+        REQUIRE(begin[4] == "{}");
 
         auto end = fields(capture->lines[1]);
+        REQUIRE(end.size() == 5);
         REQUIRE(end[0] == "END");
-        REQUIRE(std::stoull(end[4], nullptr, 16) == (*loud)->bindingId);
+        REQUIRE(std::stoull(end[3], nullptr, 16) == (*loud)->traceId);
 
         // A '*' in the entry name cannot shift the fields after it
         capture->lines.clear();
@@ -216,20 +268,18 @@ TEST_CASE("store::bindings") {
         REQUIRE_NO_ERROR((*loud)->close());
         REQUIRE(capture->lines.size() == 2);
         auto starredBegin = fields(capture->lines[0]);
-        REQUIRE(starredBegin[3] == "abc.txt");
-        REQUIRE(std::stoull(starredBegin[4], nullptr, 16) == (*loud)->bindingId);
-        REQUIRE(std::stoull(starredBegin[5], nullptr, 16) ==
-                (*loud)->rootBindingId);
-        REQUIRE(starredBegin[6] == "{}");
+        REQUIRE(starredBegin[2] == "abc.txt");
+        REQUIRE(std::stoull(starredBegin[3], nullptr, 16) == (*loud)->traceId);
+        REQUIRE(starredBegin[4] == "{}");
 
         REQUIRE_NO_ERROR(endpoint->putPipe(*loud));
         REQUIRE_NO_ERROR(endpoint->putPipe(*quiet));
     }
 
-    SECTION("child bindings inherit the tree depth and stop at the limit") {
-        // Each child starts one level deeper than its parent, so a node
-        // that opens a sub-pipe of itself is bounded by the same limit as
-        // in-pipe recursion. Open a chain of children from one root.
+    SECTION("joined pipes inherit the tree depth and stop at the limit") {
+        // Each join starts one level deeper than the deepest busy pipe of
+        // the tree, so a node that opens a sub-pipe of itself is bounded by
+        // the same limit as in-pipe recursion. Join one tree repeatedly.
         std::vector<ServicePipe> chain;
         auto root = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
         REQUIRE_NO_ERROR(root);
@@ -239,27 +289,30 @@ TEST_CASE("store::bindings") {
         for (int depth = 1; depth <= filter::pipe::CONST_MAX_BIND_DEPTH;
              depth++) {
             auto child = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
-                                           chain.back()->bindingId);
+                                           (*root)->traceId);
             REQUIRE_NO_ERROR(child);
             REQUIRE((*child)->bindDepth == depth);
-            REQUIRE((*child)->rootBindingId == (*root)->bindingId);
+            REQUIRE((*child)->traceId == (*root)->traceId);
             chain.push_back(*child);
         }
 
-        // The next child would stand past the limit: refused before any
+        // The next join would stand past the limit: refused before any
         // pipe is built for it, and the engine keeps serving
         auto pipesBefore = endpoint->getPipeCount();
-        REQUIRE_ERROR(endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
-                                        chain.back()->bindingId),
-                      Ec::Recursion, "Pipeline binding depth exceeded");
+        REQUIRE_ERROR(
+            endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, (*root)->traceId),
+            Ec::Recursion, "Pipeline binding depth exceeded");
         REQUIRE(endpoint->getPipeCount() == pipesBefore);
 
-        // A sibling of the deepest child, from one level up, is still fine
-        auto sibling = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE,
-                                         chain[chain.size() - 2]->bindingId);
-        REQUIRE_NO_ERROR(sibling);
-        REQUIRE((*sibling)->bindDepth == filter::pipe::CONST_MAX_BIND_DEPTH);
-        REQUIRE_NO_ERROR(endpoint->putPipe(*sibling));
+        // With the deepest pipe back, a join lands at the limit again
+        auto deepest = chain.back();
+        chain.pop_back();
+        REQUIRE_NO_ERROR(endpoint->putPipe(deepest));
+        auto again =
+            endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE, (*root)->traceId);
+        REQUIRE_NO_ERROR(again);
+        REQUIRE((*again)->bindDepth == filter::pipe::CONST_MAX_BIND_DEPTH);
+        chain.push_back(*again);
 
         // The deepest child cannot even serve one callback on its own pipe
         auto entry = test.getDummyEntry("deepest.txt");

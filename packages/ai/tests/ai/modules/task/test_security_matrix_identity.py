@@ -49,7 +49,8 @@ from ai.modules.task.address import (
 )
 from ai.modules.task.commands.cmd_misc import MiscCommands
 from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
-from ai.modules.task.task_server import TASK_CONTROL, TaskServer
+from ai.modules.task.task_control import TaskControl, control_key, rung_of
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 
 
@@ -61,7 +62,15 @@ from ai.modules.task.types import TaskError
 def _server() -> TaskServer:
     """A TaskServer shell holding only the registries the resolver reads."""
     ts = TaskServer.__new__(TaskServer)
-    ts._task_control = {}
+    ts._task_control = ControlRegistry()
+    ts._engines = EngineRegistry()
+    ts._engine_unavailable = {}
+    ts._control_starts = {}
+    ts._engine_restarts = {}
+    ts._restart_tasks = set()
+    ts._control_expiry = []
+    ts._engine_expiry = []
+    ts._expiry_gen = 0
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -102,9 +111,9 @@ def _control(
     developer_id='acme',
     project_id='docBrain',
     source='parsePDF',
-) -> TASK_CONTROL:
+) -> TaskControl:
     """Register a live control on ``ts`` the way start_task stamps one."""
-    control = TASK_CONTROL()
+    control = TaskControl()
     control.run_kind = run_kind
     control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
     control.userId = user_id
@@ -115,9 +124,11 @@ def _control(
     control.source = source
     control.address = build_address(developer_id, project_id, source)
     control.id = control.address
-    control.key = f'{control.run_kind}.{control.owner_id}.{control.address}'
+    control.rung = rung_of(control.run_kind, control.owner_kind)
+    control.key = control_key(control.rung, control.owner_id, control.address)
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
+    control.task.dormant_reason = None
     control.task.stop_task = AsyncMock()
     control.task.wait_terminated = AsyncMock()
     ts._task_control[control.key] = control
@@ -172,7 +183,7 @@ async def test_s1_legacy_token_strings_are_an_auth_error(credential):
 
 def test_s1_control_carries_no_token_fields():
     """The control is addressed, never tokened."""
-    fields = set(TASK_CONTROL.__dataclass_fields__)
+    fields = set(TaskControl.__dataclass_fields__)
     assert 'token' not in fields
     assert 'public_auth' not in fields
     assert {'address', 'key', 'developer_id'} <= fields
@@ -238,10 +249,12 @@ def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
     assert ts.resolve_control(control.address, _account(developer_id='acme'), 'task.data') is control
 
 
-def test_s4_two_teams_deploying_one_address_resolve_to_the_active_team():
-    """The address carries no owner, so two teams can each run it. A member of both
-    reaches the run of their development team; with neither on it, the lookup is
-    ambiguous and names the teams instead of asking for a source already given.
+def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
+    """The address carries no owner, so two teams can each run it. A member of
+    both reaches the run of the FIRST team in their team order that runs it
+    (the development team first, then membership order); teams running nothing
+    are skipped, ``team=`` overrides the order for one call, and there is no
+    ambiguity error: the order is total.
     """
     ts = _server()
     run_1 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
@@ -268,10 +281,11 @@ def test_s4_two_teams_deploying_one_address_resolve_to_the_active_team():
 
     assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor') is run_1
     assert ts.resolve_control(run_2.address, member('team-2'), 'task.monitor') is run_2
-    with pytest.raises(TaskError) as err:
-        ts.resolve_control(run_1.address, member('team-3'), 'task.monitor')
-    assert err.value.code == TaskError.AMBIGUOUS
-    assert err.value.teams == ['team-1', 'team-2']
+    # team-3 first holds nothing and is skipped: team-1 comes next in membership order
+    assert ts.resolve_control(run_1.address, member('team-3'), 'task.monitor') is run_1
+    assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-2') is run_2
+    with pytest.raises(PermissionError):
+        ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-9')
 
 
 # =============================================================================
@@ -279,7 +293,7 @@ def test_s4_two_teams_deploying_one_address_resolve_to_the_active_team():
 # =============================================================================
 
 
-def _finish(control: TASK_CONTROL) -> TASK_CONTROL:
+def _finish(control: TaskControl) -> TaskControl:
     """Mark ``control`` as a stopped run still waiting for the cleanup pass."""
     control.task.is_task_complete.return_value = True
     return control
@@ -511,7 +525,7 @@ def test_s6_identity_boundary_rejects_path_and_scope_characters(bad):
 async def test_s6_start_task_returns_the_address_in_the_token_slot():
     """use() hands back the address where the token used to be."""
     ts = _server()
-    with patch('ai.modules.task.task_server.Task') as task_cls:
+    with patch('ai.modules.task.task_server.TaskEngine') as task_cls:
         task = task_cls.return_value
         task.start_task = AsyncMock()
         task.wait_for_running = AsyncMock()
@@ -532,13 +546,14 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
 
 
 async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_id='acme') -> dict:
-    """Run start_task with a stubbed Task, as the authenticated dev user."""
-    with patch('ai.modules.task.task_server.Task') as task_cls:
+    """Run start_task with a stubbed TaskEngine, as the authenticated dev user."""
+    with patch('ai.modules.task.task_server.TaskEngine') as task_cls:
         task = task_cls.return_value
         task.start_task = AsyncMock()
         task.wait_for_running = AsyncMock()
         task.is_task_complete.return_value = False
         task._stop_requested = False
+        task.dormant_reason = None
         return await ts.start_task(
             request,
             conn=MagicMock(),
