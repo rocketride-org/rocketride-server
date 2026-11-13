@@ -323,9 +323,9 @@ private:
             _tsbo(msg, {Format::HEX, {}, '*'}, ccode.code().message(),
                   ccode.message(), ccode.location());
         } else {
-            // Use the root cause
-            _tsbo(msg, {Format::HEX, {}, '*'}, root.code().message(),
-                  root.message(), root.location());
+            // Use the root cause; an empty text still keeps its field
+            _tsbo(msg, {Format::HEX | Format::DOUBLE_DELIMOK, {}, '*'},
+                  root.code().message(), root.message(), root.location());
         }
 
         // Format the output to >ERR or >WRN specs

@@ -2123,6 +2123,7 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._status.exitMessage = ''
     t._status.state = 0
     t._is_restarting = False
+    t._stop_requested = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2140,6 +2141,7 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._status.exitMessage = ''
     t._status.state = 0
     t._is_restarting = False
+    t._stop_requested = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2459,20 +2461,20 @@ def _ending_task(process_exit_code):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'stop_requested, status, outcome',
+    'stop_requested, status, exit_code, outcome',
     [
-        (False, 'Stopped unexpectedly', 'error'),
+        (False, 'Stopped unexpectedly', 1, 'error'),
         # A crash during a requested stop is part of the stop
-        (True, 'Stopped', 'cancelled'),
+        (True, 'Stopped', 0, 'cancelled'),
     ],
 )
-async def test_a_reported_crash_ends_the_task(stop_requested, status, outcome):
+async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code, outcome):
     t = _ending_task(-6)
     t._stop_requested = stop_requested
     run_log = t._run_log = AsyncMock()
     await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
     await Task._terminated(t)
-    assert t._status.status == status
+    assert (t._status.status, t._status.exitCode) == (status, exit_code)
     assert run_log.end_run.await_args.args[0] == outcome
 
 

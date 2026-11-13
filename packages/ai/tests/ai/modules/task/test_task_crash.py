@@ -1,4 +1,4 @@
-"""A real eaas.py runs a pipeline whose Python node crashes its task process.
+"""A real eaas.py runs a pipeline whose Python node ends its task process, or stops the task itself.
 
 Each server writes the node, under a name of its own, where the engine looks
 for nodes, and removes it when it stops. The name starts with `_`, which the
@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -51,7 +52,8 @@ class IGlobal(IGlobalBase):
 
 # A plain read of address 0: ctypes.string_at(0) would only raise OSError on
 # Windows, where ctypes guards its foreign calls. A fast fail and SIGKILL skip
-# every handler in the process; exit(-1) is no crash.
+# every handler in the process; exit(-1) is no crash; a SIGTERM is a cancel
+# the server did not ask for.
 _IINSTANCE = """import ctypes
 import os
 import signal
@@ -69,6 +71,8 @@ class IInstance(IInstanceBase):
             os.kill(os.getpid(), signal.SIGKILL)
         elif text == 'exit':
             os._exit(-1)
+        elif text == 'sigterm':
+            os.kill(os.getpid(), signal.SIGTERM)
 """
 
 
@@ -193,8 +197,8 @@ async def _connect(uri: str, on_event) -> RocketRideClient:
             await asyncio.sleep(1)
 
 
-async def _run(server, text: str):
-    """Send the text to the crash node; return the final status and the console lines."""
+async def _run(server, text: Optional[str]):
+    """Send the text to the crash node (none: stop the running task); return the final status and the console lines."""
     lines = []
 
     async def on_event(message):
@@ -206,9 +210,16 @@ async def _run(server, text: str):
         token = (await client.use(pipeline=_pipeline(server['provider'])))['token']
         await client.add_monitor({'token': token}, ['output'])
 
-        # The task dies while it handles the text, so the send itself may fail
-        with contextlib.suppress(Exception):
-            await asyncio.wait_for(client.send(token, text, {}, 'text/plain'), 60)
+        if text is None:
+            deadline = time.monotonic() + 120
+            while (status := await client.get_task_status(token))['state'] != TASK_STATE.RUNNING.value:
+                assert time.monotonic() < deadline, f'the task did not start: {status}'
+                await asyncio.sleep(0.5)
+            await client.terminate(token)
+        else:
+            # The task dies while it handles the text, so the send itself may fail
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(client.send(token, text, {}, 'text/plain'), 60)
 
         ended = [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
         deadline = time.monotonic() + 120
@@ -279,3 +290,26 @@ async def test_a_node_that_exits_stops_its_task(server):
     assert status['status'] == 'Stopped', server['log'].read_text(errors='replace')
     assert _crash_lines(lines) == []
     assert _dumps_of(token) == []
+
+
+@pytest.mark.asyncio
+async def test_a_stop_by_the_server_is_no_error(server):
+    """On Linux and macOS the engine reports its cancel; on Windows it is ended and reports nothing."""
+    _, status, lines = await _run(server, None)
+    log = server['log'].read_text(errors='replace')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == ('Stopped', 0, ''), log
+    assert _crash_lines(lines) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_from_outside_the_server_stops_its_task(server):
+    """A SIGTERM the server did not send.
+
+    On Linux and macOS the engine reports its cancel with no text, so the message is empty, not the
+    place in the code; on Windows os.kill is TerminateProcess, which tells the engine nothing.
+    """
+    _, status, lines = await _run(server, 'sigterm')
+    log = server['log'].read_text(errors='replace')
+    expected = ('Stopped', 15, 'Stopped') if os.name == 'nt' else ('Stopped', 1, '')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == expected, log
+    assert _crash_lines(lines) == []
