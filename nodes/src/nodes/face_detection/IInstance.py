@@ -5,7 +5,7 @@
 
 import json
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION
 from ai.common.image import ImageProcessor
 from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 
@@ -73,6 +73,10 @@ class IInstance(IInstanceBase):
 
         Returns:
             preventDefault() on END to suppress default forwarding; None otherwise.
+
+        Raises:
+            RuntimeError: On END, the frame could not be decoded, processed or written;
+                the message names the cause.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -89,7 +93,8 @@ class IInstance(IInstanceBase):
                     faces = self.IGlobal.detector.detect(image)
                 self._emit(image, faces, self._chunk_id)
             except Exception as exc:
-                warning(f'face_detection: dropped frame {self._chunk_id}: {exc}')
+                cause = str(exc) or type(exc).__name__
+                raise RuntimeError(f'face_detection failed to process the input frame: {cause}') from exc
             finally:
                 self._image_data = None
                 self._chunk_id += 1

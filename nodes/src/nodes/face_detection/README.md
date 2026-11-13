@@ -37,7 +37,7 @@ The implementation runs MediaPipe Tasks on CPU/XNNPACK; it does not enable a GPU
 
 ### Output and failures
 
-The node writes its text and image results only if the corresponding output lane has a listener. If a frame cannot be decoded or detection fails, it logs a warning, drops that frame, and suppresses default image forwarding rather than emitting a partial result.
+The node writes its text and image results only if the corresponding output lane has a listener. If a frame cannot be decoded, or face detection or writing the outputs fails, the node raises an error that names the cause, and the engine marks the object as failed: the image, or the whole video the frame came from. The task goes on with the next object. Output already written is not withdrawn, such as the faces JSON when only the annotated image fails, or other frames of the same video.
 
 ## Upstream docs
 

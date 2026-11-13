@@ -25,7 +25,7 @@
 import json
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug
 from ai.common.image import ImageProcessor
 from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 from .IGlobal import IGlobal
@@ -92,6 +92,10 @@ class IInstance(IInstanceBase):
 
         Returns:
             preventDefault() on END to suppress default forwarding; None otherwise.
+
+        Raises:
+            RuntimeError: On END, the frame could not be decoded, processed or written;
+                the message names the cause.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -116,7 +120,8 @@ class IInstance(IInstanceBase):
                     f'emit={t_emit:.0f}ms total={t_decode + t_detect + t_emit:.0f}ms'
                 )
             except Exception as exc:
-                warning(f'detect: dropping frame due to inference error: {exc}')
+                cause = str(exc) or type(exc).__name__
+                raise RuntimeError(f'detect failed to process the input frame: {cause}') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()

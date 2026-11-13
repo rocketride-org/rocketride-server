@@ -25,7 +25,7 @@
 import json
 import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug
 from ai.common.image import ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
 from ai.common.utils import colorize_depth
@@ -89,6 +89,10 @@ class IInstance(IInstanceBase):
 
         Returns:
             preventDefault() on END to suppress default forwarding; None otherwise.
+
+        Raises:
+            RuntimeError: On END, the frame could not be decoded, processed or written;
+                the message names the cause.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -101,7 +105,8 @@ class IInstance(IInstanceBase):
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 self._emit(image)
             except Exception as exc:
-                warning(f'depth_estimate: dropping frame due to inference error: {exc}')
+                cause = str(exc) or type(exc).__name__
+                raise RuntimeError(f'depth_estimate failed to process the input frame: {cause}') from exc
             finally:
                 self._image_data = None
             return self.preventDefault()
