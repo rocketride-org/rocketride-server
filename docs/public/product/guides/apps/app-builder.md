@@ -26,7 +26,8 @@ the same loop runs from a terminal or CI.
   workspace root.
 - A developer id for your organization, on RocketRide Cloud. Every app id
   is `<developerId>.<name>`. Your organization claims its developer id
-  once, on the Deploy tab or with the npm CLI's
+  once, in the New App wizard in VS Code, on the Deploy tab, or with the
+  npm CLI's
   `rocketride app developer register <id>`, which talks to the deployment
   target named by `ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`
   (the pip CLI has no `app developer` verbs). The id is lowercase letters
@@ -54,8 +55,11 @@ Start from the Dashboard tab, or run **RocketRide: New App** from the
 command palette. The wizard asks for a name and a template (Blank or
 Dashboard) and scaffolds the app under `apps/<slug>-ui`. Always create apps
 this way; a hand-made folder fails later with symptoms far from the cause.
-The scaffold starts the id at `local.<slug>` until your organization has a
-developer id; renaming the id later makes it a different app.
+If your organization has no developer id yet, the wizard's Developer ID
+field lets you claim one before you create the app. Skip it and the
+scaffold starts the id at `local.<slug>`; renaming the id later makes it a
+different app, though an app still on `local.<name>` can move into your
+namespace from the Deploy tab's banner in VS Code.
 
 The `<name>.rrapp` file it creates holds only the app id. Opening it opens
 the App Builder; the app's identity lives in `package.json`.

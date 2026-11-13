@@ -130,8 +130,8 @@ const SOCIALS: SocialLink[] = [
 /** Site footer: brand, social links, and the docs navigation spine. */
 export default function Footer(): React.ReactNode {
 	const { siteConfig } = useDocusaurusContext();
-	const logoLight = useBaseUrl('img/rocketride-wordmark-positive.png');
-	const logoDark = useBaseUrl('img/rocketride-wordmark-negative.png');
+	const logoLight = useBaseUrl('img/rocketride-logo-color.png');
+	const logoDark = useBaseUrl('img/rocketride-logo-white.png');
 	const year = new Date().getFullYear();
 
 	return (

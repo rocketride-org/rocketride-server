@@ -57,6 +57,9 @@ export interface INewAppWizardHost {
 	 * Rejection re-enables the form with the validation message.
 	 */
 	scaffold(appName: string, displayName: string, frame: FrameOptions): Promise<void>;
+	/** Claims the org's developer id; resolves with the fresh identity.
+	 *  Used only when the identity reports canRegisterDeveloper. */
+	registerDeveloper?(developerId: string): Promise<NewAppIdentity>;
 	/** Close the untitled document without creating anything. */
 	cancel(): void;
 	/** Scaffold location prefix for the identity summary (e.g. 'apps/'). */
@@ -68,6 +71,23 @@ export interface INewAppWizardHost {
 /** Props for {@link NewAppWizard}. */
 export interface INewAppWizardProps {
 	host: INewAppWizardHost;
+}
+
+/**
+ * Whether `next` may replace the identity a wizard shows. The host stamps
+ * each identity with a revision; an older one (a slow initial pull that
+ * lands after a push) is ignored. Without revisions (hosts that don't stamp
+ * them), every identity applies, as before.
+ *
+ * @param current - The identity shown now (null before the first one).
+ * @param next - The identity that just arrived.
+ * @returns True when `next` should be shown.
+ */
+export function isNewerIdentity(current: NewAppIdentity | null, next: NewAppIdentity): boolean {
+	if (!current || current.revision === undefined || next.revision === undefined) {
+		return true;
+	}
+	return next.revision >= current.revision;
 }
 
 // =============================================================================
@@ -112,18 +132,27 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 	/** Error from a failed identity pull, shown in place of the loading text. */
 	const [identityError, setIdentityError] = useState<string | null>(null);
 
+	/** Shows `next` unless an identity at least as new is already shown. */
+	const applyIdentity = useCallback((next: NewAppIdentity) => {
+		setIdentity((current) => {
+			return isNewerIdentity(current, next) ? next : current;
+		});
+	}, []);
+
 	useEffect(() => {
 		let cancelled = false;
 		void host.identity().then(
-			(i) => { if (!cancelled) setIdentity(i); },
+			(i) => { if (!cancelled) applyIdentity(i); },
 			(err: unknown) => { if (!cancelled) setIdentityError(err instanceof Error ? err.message : String(err)); },
 		);
-		const off = host.onIdentityChanged?.((i) => setIdentity(i));
+		const off = host.onIdentityChanged?.((i) => {
+			applyIdentity(i);
+		});
 		return () => {
 			cancelled = true;
 			off?.();
 		};
-	}, [host]);
+	}, [host, applyIdentity]);
 
 	/** One scaffold pass; success retires this document (the host did the
 	 *  transition — stay locked), a rejection re-enables the form. */
@@ -137,6 +166,16 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 			});
 		},
 		[host],
+	);
+
+	/** Claim a developer id from the form; the fresh identity replaces the
+	 *  'local' default. Rejections propagate so the form shows the reason. */
+	const handleRegister = useCallback(
+		async (developerId: string): Promise<void> => {
+			if (!host.registerDeveloper) return;
+			applyIdentity(await host.registerDeveloper(developerId));
+		},
+		[host, applyIdentity],
 	);
 
 	if (!identity) {
@@ -156,6 +195,7 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 				{...(host.locationPrefix !== undefined ? { locationPrefix: host.locationPrefix } : {})}
 				{...(host.noWorkspaceNote !== undefined ? { noWorkspaceNote: host.noWorkspaceNote } : {})}
 				onCreate={handleCreate}
+				{...(host.registerDeveloper && identity.canRegisterDeveloper ? { onRegisterDeveloper: handleRegister } : {})}
 				onCancel={() => host.cancel()}
 			/>
 		</div>

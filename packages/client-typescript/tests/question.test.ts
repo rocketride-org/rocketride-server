@@ -22,8 +22,15 @@
  * SOFTWARE.
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, it, expect } from '@jest/globals';
-import { Question } from '../src/client/schema/Question';
+import { Answer, Question } from '../src/client/schema/Question';
+
+// The same fixture the Python SDK round-trips, so the two cannot drift on the wire shape.
+const FIXTURES = join(__dirname, '../../client-python/tests/fixtures');
+const FIXTURE = JSON.parse(readFileSync(join(FIXTURES, 'turn_blocks.json'), 'utf8'));
+const INVALID: Array<{ update: Record<string, unknown>; rule: string }> = JSON.parse(readFileSync(join(FIXTURES, 'turn_invalid.json'), 'utf8'));
 
 describe('Question.cachePrefix', () => {
 	it('is off unless the caller turns it on', () => {
@@ -49,5 +56,65 @@ describe('Question.cachePrefix', () => {
 
 		expect(cachePrefix).toBe(false);
 		expect(Question.fromDict(older).cachePrefix).toBe(false);
+	});
+});
+
+describe('Question turn mode', () => {
+	it('leaves messages and tools out of a legacy question', () => {
+		const sent = new Question({ role: 'Planner.' }).toDict();
+
+		expect('messages' in sent).toBe(false);
+		expect('tools' in sent).toBe(false);
+	});
+
+	it('round-trips every block type in the shared fixture', () => {
+		const sent = Question.fromDict(FIXTURE.question).toDict();
+
+		expect(sent.messages).toEqual(FIXTURE.question.messages);
+		expect(sent.tools).toEqual(FIXTURE.question.tools);
+	});
+
+	it('builds the next turn from an answer, with results under the same call ids', () => {
+		const question = Question.fromDict(FIXTURE.question);
+		const answer = Answer.fromResult(FIXTURE.result);
+
+		question.addMessage(answer.message!);
+		for (const call of answer.toolCalls) {
+			question.addToolResult(call.id, 'done');
+		}
+
+		expect(answer.stopReason).toBe('tool_use');
+		expect(answer.getText()).toBe('Labelling #42.');
+		expect(answer.tokens).toEqual(FIXTURE.result.answers[0].tokens);
+		expect(question.messages[question.messages.length - 1]).toEqual({
+			role: 'user',
+			content: [{ type: 'tool_result', callId: 'toolu_03', content: 'done', isError: false }],
+		});
+		expect(() => question.addToolResult('unknown', 'x')).toThrow('no tool call');
+	});
+
+	it('reads a text entry as a text answer', () => {
+		const answer = Answer.fromResult({ answers: ['plain'] } as never);
+
+		expect(answer.getText()).toBe('plain');
+		expect(answer.toolCalls).toEqual([]);
+		expect(answer.message).toBeUndefined();
+	});
+
+	it('names the key when the result has no entry under it', () => {
+		expect(() => Answer.fromResult({} as never)).toThrow("no 'answers' entry in the result");
+		expect(() => Answer.fromResult({ answers: [] } as never)).toThrow("no 'answers' entry in the result");
+	});
+
+	it.each(INVALID)('refuses a broken turn rule at parse: $rule', ({ update, rule }) => {
+		expect(() => Question.fromDict({ ...FIXTURE.question, ...update })).toThrow(new RegExp(rule));
+	});
+
+	it('refuses a message on a question already using history, and leaves it as it was', () => {
+		const question = new Question();
+		question.addHistory({ role: 'user', content: 'old' });
+
+		expect(() => question.addMessage({ role: 'user', content: 'new' })).toThrow('history cannot be used with messages');
+		expect(question.messages).toEqual([]);
 	});
 });

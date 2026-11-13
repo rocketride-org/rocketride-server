@@ -2,12 +2,12 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
-on branch `fix/mcp-auth` (PR #2315, not yet merged), where `register_all` wires **33 tools** — every
+on `develop` (merged in PR #2315), where `register_all` wires **33 tools** — every
 one of them listed below. Deploy tools are on the deploy-2 SDK API.
 **Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
-previous `origin/develop @ eb67ddea` pin predated this branch and was already inaccurate; once
-PR #2315 lands on `develop`, replace the branch reference above with the merge commit if a pin is
-wanted. The check that actually matters is `register_all` still registering exactly these 33 names.
+previous `origin/develop @ eb67ddea` pin was already inaccurate; if a pin is wanted, use the
+PR #2315 merge commit or a later one. The check that actually matters is `register_all` still
+registering exactly these 33 names.
 The skills reference **only** names and shapes in this file; anything not listed here does not
 exist — never invent a tool.
 
@@ -82,7 +82,7 @@ chapters/console but **empty traces**.
 
 | Tool | Input | Result |
 |---|---|---|
-| `scaffold_node` | `{name, lane_in?, lane_out?, class_type?}` (`lane_in` defaults to `text`, `lane_out` to `lane_in`, `class_type` to `lane_in`) | `{ok, name, provider, files, next_steps}`. `files` maps `local_nodes/__init__.py` (the parent package marker) and `local_nodes/<name>/...` paths to contents — it **writes nothing itself**; you write **every** returned path under the engine's `--node_path`. Skipping the marker leaves `local_nodes` a non-package, and the engine cannot import `local_nodes.<name>`. `lane_in`/`lane_out`/`class_type` are validated against the live catalog, so an unknown value comes back as `ok: false` listing what is in service. The engine reads node manifests once at startup: restart it after writing. A local node runs only on an engine started with `--node_path`: RocketRide Cloud loads none and store review rejects pipelines that use one, so never scaffold one for an app headed for the store. |
+| `scaffold_node` | `{name, lane_in?, lane_out?, class_type?}` (`lane_in` defaults to `text`, `lane_out` to `lane_in`, `class_type` to `lane_in`) | `{ok, name, provider, files, next_steps}`. `files` maps `nodes/<name>/...` paths to contents — it **writes nothing itself**; you write **every** returned path relative to the folder that holds the engine's `nodes/` directory (`nodes/src` in a source tree). `lane_in`/`lane_out`/`class_type` are validated against the live catalog, so an unknown value comes back as `ok: false` listing what is in service. The engine reads node manifests once at startup: restart it after writing. A node written there runs only on that engine: RocketRide Cloud loads none and store review rejects pipelines that use one, so never scaffold one for an app headed for the store. |
 
 ## Integrations / credentials
 

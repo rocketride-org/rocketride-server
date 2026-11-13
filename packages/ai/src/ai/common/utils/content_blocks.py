@@ -21,9 +21,20 @@ non-streaming response paths read it from the same place.
 
 from __future__ import annotations
 
-from typing import Any, Tuple
+from typing import Any, Dict, Tuple
 
-__all__ = ['flatten_content_blocks']
+__all__ = ['flatten_content_blocks', 'reasoning_text']
+
+
+def reasoning_text(block: Dict[str, Any]) -> str:
+    """Return the readable text of one reasoning block, in any shape a provider sends.
+
+    Anthropic thinking carries it in ``thinking``, the LangChain v1 standard block in
+    ``reasoning``, and the OpenAI Responses API (through LangChain) in a ``summary``
+    list, whose parts are joined one per line.
+    """
+    summary = '\n'.join(part.get('text', '') for part in block.get('summary') or [] if isinstance(part, dict))
+    return block.get('thinking') or block.get('reasoning') or block.get('text') or summary
 
 
 def flatten_content_blocks(content: Any) -> Tuple[str, str, bool]:
@@ -66,14 +77,14 @@ def flatten_content_blocks(content: Any) -> Tuple[str, str, bool]:
         if btype == 'thinking':
             # Carries either readable deltas or, on the final delta, only the
             # block verification signature.
-            piece = block.get('thinking') or block.get('text') or ''
+            piece = reasoning_text(block)
             if piece:
                 reasoning_parts.append(piece)
             elif block.get('signature'):
                 saw_signature_only = True
         elif btype == 'reasoning':
             # LangChain v1 renamed the standard block: thinking -> reasoning.
-            piece = block.get('reasoning') or block.get('text') or ''
+            piece = reasoning_text(block)
             if piece:
                 reasoning_parts.append(piece)
         elif btype == 'text' or not btype:
