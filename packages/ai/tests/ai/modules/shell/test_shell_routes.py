@@ -913,18 +913,28 @@ def test_routes_without_a_path_pattern_fail_closed(monkeypatch):
 
 
 def test_failing_public_predicate_fails_closed(web_server, monkeypatch):
-    def boom(path):
-        raise RuntimeError('broken')
+    broken = [True]
+
+    def flaky(path):
+        if broken[0]:
+            raise RuntimeError('broken')
+        return False
 
     logged = []
     monkeypatch.setattr('ai.web.server.warning', logged.append)
-    web_server.add_public_predicate(boom)
+    web_server.add_public_predicate(flaky)
     assert web_server.is_public_route('/anything') is False
     # Every public page now answers 401: a warning, so production logs show it.
     assert len(logged) == 1 and "'/anything'" in logged[0] and 'broken' in logged[0]
-    # Once per predicate, not once per request.
+    # Once per failure streak, not once per request.
     assert web_server.is_public_route('/other') is False
     assert len(logged) == 1
+    # A success ends the streak: the next failure warns again.
+    broken[0] = False
+    assert web_server.is_public_route('/fine') is False
+    broken[0] = True
+    assert web_server.is_public_route('/again') is False
+    assert len(logged) == 2 and "'/again'" in logged[1]
 
 
 def test_unknown_paths_404_for_every_method(web_server, shell_root, monkeypatch):

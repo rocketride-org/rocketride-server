@@ -246,7 +246,7 @@ class WebServer:
         # Dynamic public-path predicates (data-driven routes, e.g. the shell's
         # public pages), consulted after the static patterns.
         self._public_predicates: List[Callable[[str], bool]] = []
-        # Predicates that have raised: each logs its first failure only.
+        # Predicates whose last call raised: each failure streak logs once.
         self._failed_predicates: Set[Callable[[str], bool]] = set()
         self._catch_all: Optional[BaseRoute] = None
 
@@ -921,12 +921,15 @@ class WebServer:
         # that raises fails closed: the path stays private.
         for predicate in self._public_predicates:
             try:
-                if predicate(path):
-                    return True
+                public = predicate(path)
             except Exception as exc:
                 if predicate not in self._failed_predicates:
                     self._failed_predicates.add(predicate)
-                    warning(f'public-path predicate failed for {path!r}: {exc} (later failures are not logged)')
+                    warning(f'public-path predicate failed for {path!r}: {exc} (not logged again until it succeeds)')
+                continue
+            self._failed_predicates.discard(predicate)
+            if public:
+                return True
 
         # Path did not match any public pattern — treat as private by default
         return False
