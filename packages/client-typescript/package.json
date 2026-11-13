@@ -3,7 +3,7 @@
 	"version": "1.6.0",
 	"author": "RocketRide, Inc.",
 	"license": "MIT",
-	"description": "TypeScript client for RocketRide data processing and AI services",
+	"description": "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. TypeScript SDK and CLI.",
 	"type": "commonjs",
 	"main": "./dist/cjs/client/index.js",
 	"module": "./dist/esm/client/index.js",
@@ -58,7 +58,7 @@
 		"url": "https://github.com/rocketride-org/rocketride-server.git",
 		"directory": "packages/client-typescript"
 	},
-	"homepage": "https://rocketride.ai/",
+	"homepage": "https://docs.rocketride.org/",
 	"bugs": {
 		"url": "https://github.com/rocketride-org/rocketride-server/issues/"
 	},
@@ -67,7 +67,13 @@
 		"data-processing",
 		"ai",
 		"websocket",
-		"typescript"
+		"typescript",
+		"llm",
+		"agents",
+		"ai-agents",
+		"meta-harness",
+		"mcp",
+		"rag"
 	],
 	"dependencies": {
 		"adm-zip": "^0.6.0",

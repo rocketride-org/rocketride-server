@@ -53,8 +53,8 @@ schedules, server-side file storage, and run-log replay.
 
 [RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline
 platform: build, debug, and deploy production AI workflows without leaving your IDE,
-on a visual canvas or code-first. 140+ ready-to-use nodes (15+ LLM providers, 10+
-vector stores, OCR, NER, PII anonymization) run on a high-performance C++ engine,
+on a visual canvas or code-first. Ready-to-use nodes (LLM providers, vector stores,
+OCR, NER, PII anonymization) run on a high-performance C++ engine,
 deployable anywhere, MIT licensed. You build your `.pipe` — and run it against the
 fastest AI runtime available.
 

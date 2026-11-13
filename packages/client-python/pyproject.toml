@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rocketride"
 version = "1.6.0"
-description = "RocketRide Pipeline Python Client SDK"
+description = "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Python SDK and CLI."
 readme = "README.md"
 authors = [
     {name = "RocketRide, Inc.", email = "dev@rocketride.ai"}
@@ -36,6 +36,13 @@ keywords = [
     "client-sdk",
     "async",
     "websocket",
+    "ai",
+    "llm",
+    "agents",
+    "ai-agents",
+    "meta-harness",
+    "mcp",
+    "rag",
 ]
 dependencies = [
     "websockets>=11.0.0",
@@ -89,10 +96,10 @@ otel = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rocketride-ai/rocketride-server"
-Documentation = "https://github.com/rocketride-ai/rocketride-server#readme"
-Repository = "https://github.com/rocketride-ai/rocketride-server.git"
-"Bug Reports" = "https://github.com/rocketride-ai/rocketride-server/issues"
+Homepage = "https://github.com/rocketride-org/rocketride-server"
+Documentation = "https://docs.rocketride.org/"
+Repository = "https://github.com/rocketride-org/rocketride-server"
+"Bug Reports" = "https://github.com/rocketride-org/rocketride-server/issues"
 
 [project.scripts]
 rocketride = "rocketride.cli.main:main"

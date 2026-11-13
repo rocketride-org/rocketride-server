@@ -48,7 +48,7 @@ PostgreSQL — as a pipeline node via lanes or as an agent tool.
 - H1 is the node's directory name.
 - The first paragraph is a one-to-two sentence summary, plain language, no
   marketing: what the node is and when to pick it, for someone choosing
-  between 100+ nodes.
+  between 150+ nodes.
 
 ## 1. `## About <Vendor>` — OPTIONAL
 
