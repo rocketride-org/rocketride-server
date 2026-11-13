@@ -265,10 +265,15 @@ class IStore(ABC):
             File contents as bytes
 
         Raises:
-            StorageError: If file doesn't exist or read fails
+            StorageError: If file doesn't exist or read fails, or holds
+                text past U+00FF (written as text, not by ``write_bytes``),
+                which latin-1 cannot return as bytes
         """
         content = await self.read_file(filename)
-        return content.encode('latin-1')
+        try:
+            return content.encode('latin-1')
+        except UnicodeEncodeError as e:
+            raise StorageError(f'Failed to read file {filename} as bytes: {e}') from e
 
     async def move_file(self, src: str, dst: str) -> None:
         """

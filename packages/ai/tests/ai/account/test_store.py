@@ -417,6 +417,18 @@ class TestMemoryStore(BaseStoreTest):
         """Create in-memory store instance."""
         return MemoryStore()
 
+    @pytest.mark.asyncio
+    async def test_text_beyond_latin1_is_a_storage_error_as_bytes(self, store):
+        """The inherited read_bytes and get_file_info raise StorageError for text latin-1 cannot return as bytes."""
+        await store.write_file('pages/dash.html', '<p>a \u2014 b</p>')
+        for read in (store.read_bytes, store.get_file_info):
+            with pytest.raises(StorageError, match='pages/dash.html') as exc_info:
+                await read('pages/dash.html')
+            assert isinstance(exc_info.value.__cause__, UnicodeEncodeError)
+        # Bytes written as bytes still round-trip, every byte value included.
+        await store.write_bytes('blob.bin', bytes(range(256)))
+        assert await store.read_bytes('blob.bin') == bytes(range(256))
+
 
 # ============================================================================
 # S3 Tests
@@ -879,7 +891,7 @@ class TestS3StoreMocked:
 
     @pytest.mark.asyncio
     async def test_read_bytes_raises_storage_error_after_max_retries(self, store, mock_s3_client, monkeypatch):
-        """A transport failure that outlasts every retry reaches the caller as a StorageError, not botocore's own type."""
+        """A transport failure that outlasts every retry reaches the caller as a StorageError, not botocore's."""
         boto_errors = pytest.importorskip('botocore.exceptions')
 
         async def instant_sleep(seconds):
@@ -1332,6 +1344,17 @@ class TestAzureBlobStoreMocked:
 
         assert exc_info.value.__cause__ is failure
         assert mock_blob.download_blob.call_count == STORE_MAX_RETRY_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_of_a_blob_beyond_latin1_is_a_storage_error(self, store, mock_blob_client):
+        """A raw UTF-8 blob with a character past U+00FF fails the inherited latin-1 read_bytes as a StorageError."""
+        mock_client, mock_blob = mock_blob_client
+        mock_blob.download_blob.return_value = Mock(readall=Mock(return_value='<p>a \u2014 b</p>'.encode('utf-8')))
+
+        with pytest.raises(StorageError, match='pages/dash.html') as exc_info:
+            await store.read_bytes('pages/dash.html')
+
+        assert isinstance(exc_info.value.__cause__, UnicodeEncodeError)
 
 
 # ============================================================================
