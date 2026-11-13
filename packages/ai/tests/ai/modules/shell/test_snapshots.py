@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import gc
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -162,11 +163,11 @@ def _crawl(client, path='/pricing'):
     return client.get(path, headers={'User-Agent': GOOGLEBOT})
 
 
-async def _crawl_at_once(count, path='/pricing'):
-    """``count`` crawler requests for ``path``, all in flight together on one event loop."""
+async def _crawl_at_once(paths):
+    """A crawler request for each of ``paths``, all in flight together on one event loop."""
     transport = httpx.ASGITransport(app=_app())
     async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
-        return await asyncio.gather(*[client.get(path, headers={'User-Agent': GOOGLEBOT}) for _ in range(count)])
+        return await asyncio.gather(*[client.get(path, headers={'User-Agent': GOOGLEBOT}) for path in paths])
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +353,7 @@ def test_concurrent_crawler_misses_on_one_path_share_one_store_read(shell_root, 
         return await file_info(path)
 
     monkeypatch.setattr(pp, 'artifact_file_info', slow_stat)
-    responses = asyncio.run(_crawl_at_once(20))
+    responses = asyncio.run(_crawl_at_once(['/pricing'] * 20))
     assert all(resp.status_code == 200 and 'Pricing plans' in resp.text for resp in responses)
     path = snapshot_path(_page())
     assert stats == [path] and reads == [path]
@@ -374,8 +375,8 @@ def test_a_crawler_that_stops_waiting_never_cancels_the_shared_read(shell_root, 
             return await file_info(stat_path)
 
         monkeypatch.setattr(pp, 'artifact_file_info', gated_stat)
-        late = asyncio.create_task(pages._snapshot_bytes(path))
-        gone = asyncio.create_task(pages._snapshot_bytes(path))
+        late = asyncio.create_task(pages._snapshot_bytes(_page(), path))
+        gone = asyncio.create_task(pages._snapshot_bytes(_page(), path))
         await asyncio.sleep(0)
         read = pages._snapshot_reads[path]
         gone.cancel()
@@ -406,9 +407,9 @@ def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(
     monkeypatch.setattr(pp, 'artifact_file_info', slow_stat)
 
     async def scenario():
-        [late] = await _crawl_at_once(1)
+        [late] = await _crawl_at_once(['/pricing'])
         await pages._snapshot_reads[snapshot_path(_page())]
-        [after] = await _crawl_at_once(1)
+        [after] = await _crawl_at_once(['/pricing'])
         return late, after
 
     late, after = asyncio.run(scenario())
@@ -417,18 +418,22 @@ def test_a_read_that_outlives_its_deadline_serves_the_next_crawl_in_the_backoff(
     assert 'Pricing plans' in after.text
 
 
-def test_a_shared_read_that_fails_after_its_waiters_left_still_backs_off(shell_root, monkeypatch, warned):
-    # Every crawler waiting on the read went away (disconnects); the read then
-    # fails. The read records the failure itself, so the next crawl within the
-    # backoff does not start another.
+def test_a_shared_read_that_fails_after_its_waiters_left_is_logged_and_backs_off(shell_root, monkeypatch, warned):
+    # One crawler gave up at its deadline, the other disconnected; the read then
+    # fails. The read retrieves its own failure, logs the real store error and
+    # starts the backoff: asyncio never sees an unretrieved task exception, and
+    # the next crawl within the backoff does not read.
     _seed()
     _serve(_page())
     path = snapshot_path(_page())
     stats = []
+    unhandled = []
     clock = [1000.0]
     monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(pages, '_SNAPSHOT_READ_SECONDS', 0.05)
 
     async def scenario():
+        asyncio.get_running_loop().set_exception_handler(lambda loop, context: unhandled.append(context))
         release = asyncio.Event()
 
         async def failing_stat(stat_path):
@@ -437,21 +442,27 @@ def test_a_shared_read_that_fails_after_its_waiters_left_still_backs_off(shell_r
             raise StorageError('store down')
 
         monkeypatch.setattr(pp, 'artifact_file_info', failing_stat)
-        waiters = [asyncio.create_task(pages._crawler_snapshot(_page())) for _ in range(2)]
+        late = asyncio.create_task(pages._crawler_snapshot(_page()))
+        gone = asyncio.create_task(pages._crawler_snapshot(_page()))
         await asyncio.sleep(0)
         read = pages._snapshot_reads[path]
-        for waiter in waiters:
-            waiter.cancel()
-        await asyncio.gather(*waiters, return_exceptions=True)
+        gone.cancel()
+        assert await late == (None, False)
+        await asyncio.gather(gone, return_exceptions=True)
         release.set()
-        with pytest.raises(StorageError):
-            await read
-        [after] = await _crawl_at_once(1)
+        await asyncio.wait([read])  # waits without retrieving its outcome
+        del read
+        gc.collect()
+        [after] = await _crawl_at_once(['/pricing'])
         return after
 
     after = asyncio.run(scenario())
+    gc.collect()
+    assert unhandled == []
     assert SHELL_BODY in after.text and after.headers['cache-control'] == 'private, no-cache'
     assert stats == [path]
+    assert len([line for line in warned if 'did not answer within 0.05 s' in line]) == 1
+    assert len([line for line in warned if "'pages/pricing.html'" in line and 'store down' in line]) == 1
     clock[0] += pages._STORAGE_BACKOFF_SECONDS
     _crawl(_client())
     assert stats == [path, path]
