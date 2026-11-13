@@ -32,7 +32,7 @@ Usage:
 
     # The pipeline will be created on demand with current environment variables
     pipeline = get_chat_pipeline()
-    token = await client.use(pipeline)
+    token = (await client.use(pipeline=pipeline))['token']
 """
 
 import os
