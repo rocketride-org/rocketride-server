@@ -146,6 +146,7 @@ class DataMixin(DAPClient):
             provider: str = None,
             on_sse=None,
             team: str = None,
+            params: Dict[str, Any] = None,
         ):
             """
             Create a new data pipe (usually called via client.pipe()).
@@ -159,12 +160,15 @@ class DataMixin(DAPClient):
                 on_sse: Optional async callback(type: str, data: dict) called for each SSE
                         event emitted by the pipeline node for this specific pipe
                 team: Resolve the address through this one of your teams on
-                      every request of the pipe (what ``process()`` passes on
+                      every request of the pipe (what ``submit()`` passes on
                       from the team that answered it)
+                params: Per-call parameter values by public name; they ride
+                        the open, the one door every per-call value enters by
             """
             self._client = client
             self._token = token
             self._team = team
+            self._params = dict(params) if params else None
             self._objinfo = objinfo or {}
             self._mime_type = mime_type or 'application/octet-stream'
             self._provider = provider
@@ -222,6 +226,7 @@ class DataMixin(DAPClient):
                             'object': self._objinfo,
                             'mimeType': self._mime_type,
                             'provider': self._provider,
+                            **({'params': self._params} if self._params else {}),
                         }
                     ),
                     token=self._token,
@@ -443,6 +448,7 @@ class DataMixin(DAPClient):
         provider: str = None,
         on_sse=None,
         team: str = None,
+        params: Dict[str, Any] = None,
     ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
@@ -458,6 +464,8 @@ class DataMixin(DAPClient):
             provider: Optional provider specification
             team: Resolve the address through this one of your teams (the
                 ``@team`` rung); default: your team order
+            params: Per-call parameter values by public name (the pipeline's
+                ``parameters`` map); an unknown name is refused by the server
 
         Returns:
             DataPipe: A pipe object for streaming data
@@ -479,7 +487,14 @@ class DataMixin(DAPClient):
             # Results available after context exits
         """
         return self.DataPipe(
-            self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse, team=team
+            self,
+            token=token,
+            objinfo=objinfo,
+            mime_type=mime_type,
+            provider=provider,
+            on_sse=on_sse,
+            team=team,
+            params=params,
         )
 
     async def send(
@@ -490,6 +505,7 @@ class DataMixin(DAPClient):
         mimetype: str = None,
         on_sse=None,
         team: str = None,
+        params: Dict[str, Any] = None,
     ) -> PIPELINE_RESULT:
         """
         Send data to a running pipeline.
@@ -508,6 +524,8 @@ class DataMixin(DAPClient):
 
             team: Resolve the address through this one of your teams (the
                 ``@team`` rung); default: your team order
+            params: Per-call parameter values by public name (the pipeline's
+                ``parameters`` map); an unknown name is refused by the server
         Returns:
             Dict: Results from processing your data
 
@@ -544,7 +562,9 @@ class DataMixin(DAPClient):
             raise ValueError('data must be either a string or bytes')
 
         # Create and use a temporary pipe for the data
-        pipe = await self.pipe(token, self._objinfo_with_size(objinfo, len(buffer)), mimetype, on_sse=on_sse, team=team)
+        pipe = await self.pipe(
+            token, self._objinfo_with_size(objinfo, len(buffer)), mimetype, on_sse=on_sse, team=team, params=params
+        )
 
         try:
             await pipe.open()

@@ -145,7 +145,11 @@ Error Binder::callMethods(
     }
 
     // If pipeline mode is disabled, directly invoke the next driver
-    if (!pThis->isPipeline()) return callback(pThis->m_pInstance->pDown.get());
+    if (!pThis->isPipeline()) {
+        auto *pDown = pThis->m_pInstance->pDown.get();
+        if (ccode = pDown->bindToGeneration()) return ccode;
+        return callback(pDown);
+    }
 
     // Locate the method in the method map
     auto it = pThis->methodMap.find(methodName);
@@ -157,6 +161,16 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
+        // First touch of this instance under the current binding builds
+        // its per-binding state (plan 4.1 rule 2). A failure is a node
+        // error on the entry, exactly like a failing callback below
+        if (ccode = pInstance->bindToGeneration()) {
+            if (pInstance->currentEntry
+                && !pInstance->currentEntry->objectFailed())
+                pInstance->currentEntry->completionCode(ccode);
+            return ccode;
+        }
+
         // Build enter trace
         json::Value enterTrace;
         if (traceLevel >= PIPELINE_TRACE_LEVEL::METADATA) {

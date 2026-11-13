@@ -498,8 +498,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     //-------------------------------------------------------------
     /// @details
     ///		Returns the RAW service definition for a logical type - the
-    ///		services.json as authored. Existing callers (Config.getNodeConfig
-    ///		on the nodes not yet converted) read "preconfig" from it.
+    ///		services.json as authored. Plan gating (pipeline_validation
+    ///		reads "plans") and the hosted capability refusal read its
+    ///		top-level keys; the resolved schema is getServiceSchema.
     ///		Returns None for an unknown type.
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(
@@ -1006,12 +1007,35 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 return self.pipe;
             })
 
+        // Whether this instance is bound to the pipe's current binding -
+        // a component a binding never touched is never constructed
+        .PYBIND_PROP_READONLY_CUSTOM(
+            bound,
+            [](const IServiceFilterInstance &self) -> bool {
+                return self.isBound();
+            })
+
+        // The binding's caller context, held on the PIPE (plan 5.3): the
+        // opener sets it right after getPipe(), the loader copies it into
+        // each Python instance at construction, putPipe() clears it.
+        // Readable from any instance of the chain; None = no caller
+        .PYBIND_PROP_READWRITE_CUSTOM(
+            caller,
+            [](IServiceFilterInstance &self) -> py::object {
+                return self.pipe->caller ? self.pipe->caller : py::none();
+            },
+            [](IServiceFilterInstance &self, py::object value) {
+                self.pipe->caller = value.is_none() ? py::object{} : value;
+            })
+
+        // The node's IInstance for the current binding, constructed on
+        // this first touch if the binding has not reached the node yet
         .PYBIND_PROP_READONLY_CUSTOM(
             pyInstance,
             [](IServiceFilterInstance &self) -> py::object {
                 IPythonInstanceBase *pySelf =
                     _dynCast<IPythonInstanceBase *>(&self);
-                return pySelf ? pySelf->getPythonInstance() : py::none();
+                return pySelf ? pySelf->boundInstance() : py::none();
             })
 
         .PYBIND(sendOpen, &IServiceFilterInstance::cb_sendOpen)
@@ -1106,8 +1130,11 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     py::class_<IPythonInstanceBase, IServiceFilterInstance>(engLib,
                                                             "IFilterInstance")
-        .PYBIND_PROP_READONLY(IPythonInstanceBase, py::object, pyInstance,
-                              getPythonInstance())
+        .PYBIND_PROP_READONLY_CUSTOM(
+            pyInstance,
+            [](IPythonInstanceBase &self) -> py::object {
+                return self.boundInstance();
+            })
 
         .PYBIND_PROP_READONLY_CUSTOM(
             targetObjectUrl,

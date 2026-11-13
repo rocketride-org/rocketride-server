@@ -372,23 +372,23 @@ result = await client.use(pipeline=pipeline, args=['--trace=debugOut'])
 - They apply at task start only — attaching to an already-running task
   (`use_existing=True`) leaves the running process's arguments unchanged.
 
-### `async process(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipelineTraceLevel=None, on_change='error', timeout=None, team=None) -> PROCESS_RESULT`
+### `async submit(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipeline_trace_level=None, on_change='error', timeout=None, team=None) -> SUBMIT_RESULT`
 
 One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Pass exactly one of `name`, `pipeline` or `filepath`.
 
 - **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@dev` run (attach only; a name never starts a dev run), your `@me` deployment, the first team in your team order that publishes it (`team='...'` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
 - **`pipeline` / `filepath`** address your own `@dev` run for that spec. When it already runs other content, `on_change` decides: `'error'` (default, fails with both hashes), `'keep'` (deliver to the running engine; `specMatch` is `False`), `'auto'` (move your run to the new spec; nothing is stopped for anyone else).
-- Data up to `PROCESS_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe. Same result either way.
+- Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe. Same result either way.
 - `timeout` (seconds) covers the request only, pipe open to close. The pipeline stays up afterwards and expires on its idle ttl.
 
 Returns the pipe close body plus the stamps `token` (the address that answered), `resolved` (`'@dev'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@dev`), `engineKey`, `specMatch`, `converged` (`'none'`, `'started'`, `'repointed'`), `ignored`, and `warnings` (`address_collision`, `repoint_storm`) when any.
 
 ```python
-result = await client.process(name='acme.docBrain', data='What is in this file?')
+result = await client.submit(name='acme.docBrain', data='What is in this file?')
 print(result['resolved'], result.get('answers'))
 
 # The zero-publish loop: your own dev run of a local spec
-result = await client.process(filepath='docBrain.pipe', data=b'...', on_change='auto')
+result = await client.submit(filepath='docBrain.pipe', data=b'...', on_change='auto')
 ```
 
 ### `async terminate(token: str) -> None`
@@ -454,7 +454,7 @@ Test connectivity to the RocketRide server. Raises `RuntimeError` if the server 
 
 ## 4. Sending Data
 
-### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, team: str = None) -> Dict[str, Any]`
+### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> Dict[str, Any]`
 
 Send data directly to a pipeline. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
 
@@ -479,7 +479,7 @@ for result in results:
 
 **Note:** Upload progress events are sent through the event system as `apaevt_status_upload` events (`open`, `write`, `close`, `complete`, `error` actions).
 
-### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, team: str = None) -> DataPipe`
+### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> DataPipe`
 
 Create a streaming data pipe for sending large datasets in chunks. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
 

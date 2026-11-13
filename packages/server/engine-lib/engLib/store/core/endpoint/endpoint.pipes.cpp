@@ -475,6 +475,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(PIPELINE_TRACE_LEVEL traceLevel,
                     : s_nextTraceId.fetch_add(1, std::memory_order_relaxed);
         bound->traceLevel = traceLevel;
         bound->bindDepth = bindDepth;
+
+        // A new binding: every instance of the chain is constructed again
+        // on its first touch under this generation (plan 4.1 rule 2)
+        ++bound->generation;
     };
 
     // Find a pipe
@@ -560,29 +564,6 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Seeds the high 16 bits of the process-wide traceId counter from
-///		the launch's trace epoch; the low 48 bits count. EaaS assigns one
-///		epoch per engine launch (monotonic per server process), so the
-///		trace ids of two engines one connection holds never collide
-///		(plan 7.4). Called for every endpoint the task configures; an
-///		epoch already in effect is left alone, and 0 seeds nothing.
-///	@param[in]	epoch
-///		The launch's trace epoch (only the low 16 bits are used)
-//-------------------------------------------------------------------------
-void IServiceEndpoint::seedTraceEpoch(uint32_t epoch) noexcept {
-    const uint64_t high = static_cast<uint64_t>(epoch & 0xFFFFu) << 48;
-    if (!high) return;
-
-    auto current = s_nextTraceId.load(std::memory_order_relaxed);
-    while ((current >> 48) != (high >> 48)) {
-        if (s_nextTraceId.compare_exchange_weak(current, high | 1,
-                                                std::memory_order_relaxed))
-            break;
-    }
-}
-
-//-------------------------------------------------------------------------
-/// @details
 ///		Releases a pipe back to the endpoint. This is called after
 ///		the operation on a specific object has completed and will
 ///		be returned to the queue for re-use
@@ -605,6 +586,29 @@ Error IServiceEndpoint::putPipe(ServicePipe &pipe) noexcept {
         if (auto ccode = pipe->close()) object->completionCode(ccode);
     }
 
+    // End the binding on every instance of the chain BEFORE the slot can
+    // be handed out again (plan 4.1 rule 2): endInstance() runs and the
+    // per-binding state is dropped. This calls into Python, so it runs
+    // on a copy of the stack outside the stack lock; every instance gets
+    // its turn and the first failure is reported after the last one
+    Error ccode;
+    ServiceInstanceStack instances;
+    _block() {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        if (pipe->pipeId < m_instanceStacks.size())
+            instances = m_instanceStacks[pipe->pipeId];
+    }
+    for (auto &instance : instances)
+        if (auto rc = instance->releaseBinding(); rc && !ccode) ccode = rc;
+
+    // The caller context dies with the binding
+    _block() {
+        engine::python::LockPython lock;
+
+        pipe->caller = {};
+    }
+
     // Release this pipe
     _block() {
         // Lock the pipes - we probably don't have to lock here,
@@ -616,7 +620,7 @@ Error IServiceEndpoint::putPipe(ServicePipe &pipe) noexcept {
         pipe->busy = false;
     }
 
-    return {};
+    return ccode;
 }
 
 }  // namespace engine::store

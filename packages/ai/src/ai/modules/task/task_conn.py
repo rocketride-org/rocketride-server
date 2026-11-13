@@ -67,7 +67,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
-from .commands.cmd_process import ProcessCommands
+from .commands.cmd_submit import SubmitCommands
 from .commands.cmd_monitor import MonitorCommands
 from .commands.cmd_misc import MiscCommands
 from .commands.cmd_cprofile import CProfileCommands
@@ -138,7 +138,7 @@ SCOPED_KEY_COMMANDS = frozenset(
         'rrext_ping',
         'rrext_identify',
         'rrext_process',
-        'process',
+        'rrext_submit',
         'rrext_monitor',
         'rrext_get_task_status',
         'rrext_get_pipeline',
@@ -166,7 +166,7 @@ def scoped_key_commands(account_info: Any) -> Optional[frozenset]:
 class TaskConn(
     TaskCommands,
     DataCommands,
-    ProcessCommands,
+    SubmitCommands,
     MonitorCommands,
     MiscCommands,
     CProfileCommands,
@@ -199,7 +199,7 @@ class TaskConn(
     - DAP standard commands (initialize, terminate, etc.) → specialized handlers
     - Task commands (launch, execute, attach) → TaskCommands mixin
     - Data commands (ext_process) → DataCommands mixin
-    - process (resolve + one request) → ProcessCommands mixin
+    - rrext_submit (resolve + one request) → SubmitCommands mixin
     - Monitor commands (ext_monitor) → MonitorCommands mixin
     - Generic task commands → delegated to task instances
 
@@ -758,7 +758,7 @@ class TaskConn(
                 key's endpoints scope.
         """
         address = self.get_task_address(request)
-        # A data request may name the team it must resolve through: process()
+        # A data request may name the team it must resolve through: submit()
         # passes on the team that answered it, so a streamed payload lands on
         # the control the stamps describe, never on another team's run that
         # comes first in the caller's team order
@@ -767,6 +767,35 @@ class TaskConn(
         if team:
             return self._server.resolve_control(address, self._account_info, permissions or None, team=str(team))
         return self._server.resolve_control(address, self._account_info, permissions or None)
+
+    async def resolve_control_or_start(self, request: Dict[str, Any], permissions: str = '') -> 'TaskControl':
+        """
+        Resolve the control a DATA request addresses, starting its publication when nothing is live.
+
+        ``send``/``pipe`` (and the HTTP door, which rides them) resolve the
+        way ``submit()`` does (plan 3.2, one resolver for every verb): the
+        caller's rungs in order, ``@dev`` attach-only, a published rung
+        answered by its live control or started from its artifact. ``team``
+        in the arguments overrides the caller's team order for the call.
+
+        Args:
+            request (Dict[str, Any]): The command request.
+            permissions (str): The permission the command needs.
+
+        Returns:
+            TaskControl: The resolved control, live.
+
+        Raises:
+            TaskError: Bad address grammar, no rung answered, or the start failed.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
+        """
+        address = self.get_task_address(request)
+        arguments = request.get('arguments')
+        team = arguments.get('team') if isinstance(arguments, dict) else None
+        return await self._server.resolve_or_start(
+            address, self._account_info, permissions or None, team=str(team) if team else None
+        )
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'TaskEngine':
         """

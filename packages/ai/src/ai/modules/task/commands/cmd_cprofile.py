@@ -53,7 +53,7 @@ Architecture:
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
-from .engine_access import engine_for
+from .engine_access import engine_for, wait_running
 from ai.common.cprofile_manager import profiler
 
 # Only import for type checking to avoid circular import errors
@@ -188,8 +188,8 @@ class CProfileCommands(DAPConn):
         # flight through it until the answer comes back
         control.begin_request()
         try:
-            # Wait for the task to reach running state
-            await task.wait_for_running()
+            # Wait for the task to reach running state (engine_start_failed if it never does)
+            await wait_running(task)
 
             # Forward the command — _send_data builds a fresh DAP envelope
             # with its own seq for the eaas→subprocess hop

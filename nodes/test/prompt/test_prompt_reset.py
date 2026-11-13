@@ -184,8 +184,9 @@ _INSTRUCTIONS = ['CHANNEL: LIVE CHAT.', 'Answer the person in front of you.']
 def build():
     """Returns a factory for one IInstance wired to a captured engine.
 
-    The instance is deliberately reused across turns by the tests, because that
-    is exactly what a resident task does to it.
+    The engine constructs a node's IInstance per binding (plan 4.1 rule 2), so a
+    turn starts on a freshly constructed instance; `_turn` does the same to the
+    one object the tests hold, keeping its wiring.
     """
 
     def _build(instructions=None):
@@ -238,7 +239,8 @@ def _question(*texts):
 
 
 def _turn(inst, *texts):
-    """One turn: open, write each text on the text lane, close."""
+    """One turn: a fresh instance (as the engine builds one per binding), open, write each text on the text lane, close."""
+    inst.__init__()
     inst.open(None)
     for text in texts:
         _write(inst, 'text', text)
@@ -252,12 +254,11 @@ def _turn(inst, *texts):
 
 def test_a_second_turn_carries_only_its_own_context(build):
     """
-    THE BUG, IN ONE ASSERTION.
-
-    Two turns on one instance. The second must not be able to see the first: the
-    text of a business card read three turns ago is not part of what the person is
-    asking now, and a spoken request that was already carried out must not be
-    handed to the agent again as though it were still waiting.
+    Two turns, each on a freshly constructed instance (what the engine does per
+    binding). The second must not see the first: the text of a business card read
+    three turns ago is not part of what the person is asking now, and a spoken
+    request that was already carried out must not be handed to the agent again as
+    though it were still waiting.
     """
     inst, captured = build()
 
@@ -273,9 +274,9 @@ def test_a_second_turn_carries_only_its_own_context(build):
 
 def test_instructions_do_not_multiply_turn_over_turn(build):
     """
-    `closing` adds the configured instructions every time it runs. Against a
-    question it never replaced, the system prompt was repeated once per turn - six
-    copies by the fourth - crowding out the turn it was supposed to frame.
+    `closing` adds the configured instructions every time it runs; a fresh
+    question per turn means the system prompt appears once per turn, never
+    accumulating across them.
     """
     inst, captured = build()
 
@@ -290,9 +291,8 @@ def test_instructions_do_not_multiply_turn_over_turn(build):
 
 def test_open_starts_a_turn_clean(build):
     """
-    `open` is the turn's beginning, so it resets even if the previous turn never
-    reached `closing` - a turn that was abandoned must not donate its context to
-    the next one.
+    A turn that was abandoned before `closing` donates nothing to the next one:
+    the next turn is a new instance, so nothing of the abandoned one is there.
     """
     inst, captured = build()
 
@@ -342,7 +342,7 @@ def test_a_silent_turn_after_an_emitted_one_is_not_recorded_as_output(build):
     _turn(inst, 'something')
     assert inst.has_output is True
 
-    inst.closing()  # nothing written, and no open in between
+    _turn(inst)  # a turn that received nothing
 
     assert inst.has_output is False
     assert len(captured.questions) == 1
@@ -379,9 +379,8 @@ def test_the_questions_lane_also_counts_as_input(build):
 
 def test_a_failed_turn_does_not_leak_into_the_next(build):
     """
-    If `closing` raises on its way out, the turn's context must still be dropped.
-    Otherwise one bad turn poisons every turn after it - the same accumulation,
-    reached by the error path.
+    If `closing` raises on its way out, the turn emits nothing and is not recorded
+    as output; the next turn, on its own instance, is unaffected.
     """
     inst, captured = build()
 
@@ -424,6 +423,7 @@ def test_each_chat_turn_reaches_the_next_node_once_with_its_instructions(build):
     inst, captured = build()
 
     for n, text in enumerate(['Good morning. What time does the library open?', 'And on Sundays?']):
+        inst.__init__()  # each turn is its own instance, as the engine builds it
         inst.open(None)
         _write(inst, 'questions', _question(text))
         assert len(captured.questions) == n, 'the bare question reached the next node before closing'

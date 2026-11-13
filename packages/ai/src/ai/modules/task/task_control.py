@@ -41,11 +41,11 @@ this control holds".
 
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
 from rocketride import TASK_STATE
 
-from .types import LAUNCH_TYPE
+from .types import LAUNCH_TYPE, TaskError
 
 if TYPE_CHECKING:
     from .task_conn import TaskConn
@@ -213,7 +213,7 @@ class TaskControl:
         owner_kind: ``'user'`` or ``'team'``: who owns the run.
         rung: ``'dev'``, ``'me'``, ``'team'`` or ``'public'``.
         trigger: What fired a deployment run (``''``, ``'manual'``, ``'schedule'``, or
-            ``'process'`` for a name call started from a published artifact).
+            ``'submit'`` for a name call started from a published artifact).
         launch_owner / launch_type: The connection that launched it and how.
         project_id / source / provider: The pipeline's short id, entry
             component and that component's provider.
@@ -341,6 +341,50 @@ class TaskControl:
         # Step 2: the held engine dates its idle time from its latest activity
         if self.task is not None:
             self.task.note_activity(now)
+
+    def check_params(self, params: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        """
+        Admit per-call ``params`` by PUBLIC NAME against this control's ``parameters`` map.
+
+        The map half of plan 5.4 item 5: a name the pipeline does not expose
+        is refused here, never silently dropped, before anything reaches the
+        engine. The descriptor half (type, bounds, never a selector or a
+        secret) is the data path's allow-list (C.8).
+
+        Args:
+            params: The caller's ``params`` (public name -> value), or None.
+
+        Returns:
+            The admitted params, a copy; empty when none were given.
+
+        Raises:
+            TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``
+                for every unknown name, and for a value that is not scalar.
+        """
+        if not params:
+            return {}
+        if not isinstance(params, Mapping):
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                'params must be a mapping of public name to value',
+                address=self.address,
+                errors=[{'name': '', 'reason': 'params is not a mapping'}],
+            )
+        errors = []
+        for name, value in params.items():
+            if name not in self.parameters:
+                errors.append({'name': str(name), 'reason': 'not a parameter of this pipeline'})
+            elif isinstance(value, (dict, list, tuple, set)):
+                errors.append({'name': str(name), 'reason': 'a parameter value is a scalar'})
+        if errors:
+            names = ', '.join(e['name'] for e in errors)
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                f'params rejected on {self.address!r}: {names}',
+                address=self.address,
+                errors=errors,
+            )
+        return dict(params)
 
     def begin_request(self) -> None:
         """

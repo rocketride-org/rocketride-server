@@ -37,7 +37,6 @@ import tempfile
 import time
 import socket
 import hashlib
-import itertools
 import secrets
 import shlex
 import shutil
@@ -459,24 +458,6 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
 register_channel_command('spend.check', _check_spend)
 
 
-# ==== Trace epochs ===========================================================
-
-#: The trace epochs this server process hands out, one per engine launch
-#: (plan 7.4): the engine seeds the high 16 bits of its traceId counter from
-#: it, so the ids of two engines one connection holds never collide.
-_trace_epochs = itertools.count(1)
-
-
-def next_trace_epoch() -> int:
-    """
-    The next launch's trace epoch: monotonic per server process, 1..65535, then wraps.
-
-    Returns:
-        A 16-bit epoch, never 0 (0 means "no epoch" to the engine).
-    """
-    return (next(_trace_epochs) - 1) % 0xFFFF + 1
-
-
 # ==== Engine identity: the catalog facts behind the content key =============
 
 
@@ -501,8 +482,9 @@ def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, An
 
     Raises:
         Exception: The service is unknown or the config does not fit its
-            schema; the key then holds the stored config and the engine stays
-            private (the engine itself reports the config error at start).
+            schema. ``engine_content`` lets it through: a spec that cannot be
+            keyed is refused at start (``TaskServer._engine_shape``), never
+            run under a private key over its raw config.
     """
     from rocketlib import getServiceDefinition
 
@@ -712,7 +694,7 @@ class TaskEngine(DAPBase):
                 start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
-            trigger: What fired the run ('' | 'manual' | 'schedule' | 'process');
+            trigger: What fired the run ('' | 'manual' | 'schedule' | 'submit');
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
@@ -723,6 +705,7 @@ class TaskEngine(DAPBase):
         self.project_id = project_id
         self.source = source
         self.engine_key = engine_key
+        self.engine_id = 0  # This launch's id, minted by the server at every start (plan 7.4); 0 = never started
         self.address = address
         self.client_id = client_id
         self.team_id = team_id
@@ -881,7 +864,7 @@ class TaskEngine(DAPBase):
         # run: only the trusted dispatch stamps manual/schedule/process.)
         if run_kind not in ('dev', 'deploy'):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
-        if trigger not in ('', 'manual', 'schedule', 'process'):
+        if trigger not in ('', 'manual', 'schedule', 'submit'):
             raise ValueError(f'invalid trigger: {trigger!r}')
         # owner_kind picks the storage/run-log tree exactly like run_kind picks
         # the continuum: any value outside the closed vocabulary ('Team',
@@ -1245,9 +1228,6 @@ class TaskEngine(DAPBase):
             # The engine DEFAULT level, for work outside any binding; the
             # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
-            # This launch's trace epoch: the engine seeds the high 16 bits of
-            # its traceId counter from it (plan 7.4, P31)
-            'traceEpoch': next_trace_epoch(),
         }
 
         # Trusted identity for in-process tools (surfaced to nodes as
@@ -1680,7 +1660,30 @@ class TaskEngine(DAPBase):
                 raise OutOfCreditsError(response.get('message'))
             raise RuntimeError(response.get('message', 'Data request failed'))
 
+        # An open answers with the binding's bare trace counter; the caller
+        # gets the wire traceId (plan 7.4) - the same string its events carry
+        body = response.get('body')
+        if isinstance(body, dict) and isinstance(body.get('traceId'), int):
+            body['traceId'] = self.trace_ref(body['traceId'])
         return response
+
+    def trace_ref(self, trace_id: int) -> str:
+        """
+        The wire form of one of this launch's trace ids: ``{nodeId}.{engineId}.{traceId}``.
+
+        The engine mints a bare counter per launch and knows nothing of servers
+        or launches; the prefix makes the id unique across every engine and
+        server a client may hold, exact in every language, and tells a stale
+        launch's id from a live one (plan 7.4, 2026-11-13). Clients treat the
+        string as opaque.
+
+        Args:
+            trace_id: The engine's bare trace counter.
+
+        Returns:
+            str: The wire traceId.
+        """
+        return f'{self._server.node_id}.{self.engine_id}.{trace_id}'
 
     async def _process_exit_code(self) -> Optional[int]:
         """The subprocess exit code, or None if it could not be reaped (see below).
@@ -2233,6 +2236,11 @@ class TaskEngine(DAPBase):
         # its engineKey; the controlId is stamped per holder below
         if isinstance(body, dict):
             body['engineKey'] = self.engine_key
+
+            # The engine's bare trace counter becomes the wire traceId here,
+            # the one place its events leave the task process (plan 7.4)
+            if isinstance(body.get('traceId'), int):
+                body['traceId'] = self.trace_ref(body['traceId'])
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -3070,6 +3078,10 @@ class TaskEngine(DAPBase):
             self._stop_reason = None
             self.dormant_reason = None
             self.reached_running = False
+
+            # Every start is a new launch: a new engineId, so the trace ids
+            # of a dormant restart never alias the previous launch's (plan 7.4)
+            self.engine_id = self._server.next_engine_id()
             self._is_terminating = False
             self._reset_channel_state()
 

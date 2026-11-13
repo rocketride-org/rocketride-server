@@ -59,8 +59,8 @@ import copy
 import os
 from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
-from ..core.constants import PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN
-from ..types.pipeline import PROCESS_RESULT, PipelineConfig
+from ..core.constants import SUBMIT_INLINE_MAX, SUBMIT_TRANSPORT_MARGIN
+from ..types.pipeline import SUBMIT_RESULT, PipelineConfig
 from ..types.task import TASK_STATUS
 
 try:
@@ -125,7 +125,7 @@ class ExecutionMixin(DAPClient):
             rocket_env.update(env)
         return rocket_env
 
-    async def process(
+    async def submit(
         self,
         *,
         name: str = None,
@@ -141,12 +141,11 @@ class ExecutionMixin(DAPClient):
         args: List[str] = None,
         ttl: int = None,
         env: Dict[str, str] = None,
-        pipelineTraceLevel: str = None,
         pipeline_trace_level: str = None,
         on_change: str = 'error',
         timeout: float = None,
         team: str = None,
-    ) -> PROCESS_RESULT:
+    ) -> SUBMIT_RESULT:
         """
         Run ONE request through a named or inline pipeline: ``use()`` plus one ``send()``.
 
@@ -165,7 +164,7 @@ class ExecutionMixin(DAPClient):
         ``threads``/``args``/``env``/``ttl`` apply to spec calls only; a name
         call ignores them and lists them in ``ignored``.
 
-        Data up to ``PROCESS_INLINE_MAX`` bytes travels inline in the one
+        Data up to ``SUBMIT_INLINE_MAX`` bytes travels inline in the one
         request; larger data, and every call with ``on_sse``, streams through
         a pipe to the address the server answered with (same result).
 
@@ -183,14 +182,14 @@ class ExecutionMixin(DAPClient):
             args: Engine arguments (spec calls only).
             ttl: Idle ttl in seconds (spec calls only).
             env: ``ROCKETRIDE_*`` overrides (spec calls only).
-            pipelineTraceLevel: Trace level for this pipeline's requests.
-            pipeline_trace_level: Snake-case alias of ``pipelineTraceLevel``.
+            pipeline_trace_level: Trace level for this pipeline's requests
+                (``'none'``, ``'metadata'``, ``'summary'``, ``'full'``).
             on_change: ``'error'`` | ``'keep'`` | ``'auto'`` (spec calls).
             timeout: Seconds for the request (pipe open to close).
             team: Answer ``@team`` from this one of your teams.
 
         Returns:
-            PROCESS_RESULT: the pipe close body plus ``token``, ``resolved``,
+            SUBMIT_RESULT: the pipe close body plus ``token``, ``resolved``,
             ``team`` (on ``@team``), ``version`` (not on ``@dev``),
             ``engineKey``, ``specMatch``, ``converged``, ``ignored`` and any
             ``warnings``.
@@ -199,11 +198,11 @@ class ExecutionMixin(DAPClient):
             ValueError: Not exactly one of name/pipeline/filepath, or data
                 that is neither str nor bytes.
             RuntimeError: The server refused (not found, spec changed,
-                permission, timeout ...), or does not support ``process``.
+                permission, timeout ...), or does not support ``submit``.
             TimeoutError: A streamed request outlived ``timeout``.
 
         Example:
-            result = await client.process(name='acme.docBrain', data='What is in this file?')
+            result = await client.submit(name='acme.docBrain', data='What is in this file?')
             print(result['resolved'], result['answers'])
         """
         # Step 1: exactly one of name / pipeline / filepath
@@ -232,7 +231,7 @@ class ExecutionMixin(DAPClient):
             'threads': threads,
             'args': args,
             'ttl': ttl,
-            'pipelineTraceLevel': pipelineTraceLevel or pipeline_trace_level,
+            'pipelineTraceLevel': pipeline_trace_level,
             'timeout': timeout,
         }
         arguments.update({key: value for key, value in optional.items() if value is not None})
@@ -246,11 +245,11 @@ class ExecutionMixin(DAPClient):
         # its own transport deadline. The transport deadline is separate and
         # outlives the server's, so the server's timeout error is the one the
         # caller sees.
-        inline = data is not None and on_sse is None and len(data) <= PROCESS_INLINE_MAX
+        inline = data is not None and on_sse is None and len(data) <= SUBMIT_INLINE_MAX
         if inline:
             arguments['data'] = data
-        message = self.build_request(command='process', arguments=arguments)
-        transport_timeout = None if timeout is None else (float(timeout) + PROCESS_TRANSPORT_MARGIN) * 1000
+        message = self.build_request(command='rrext_submit', arguments=arguments)
+        transport_timeout = None if timeout is None else (float(timeout) + SUBMIT_TRANSPORT_MARGIN) * 1000
         if self._on_trace:
             self._on_trace(self.TRACE_REQUEST, message)
         response = await self.request(message, timeout=transport_timeout)
@@ -258,8 +257,8 @@ class ExecutionMixin(DAPClient):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
             reason = response.get('message', 'process failed')
-            if reason.startswith('Unsupported command: process'):
-                raise RuntimeError('This server does not support process(); upgrade the server')
+            if reason.startswith('Unsupported command: rrext_submit'):
+                raise RuntimeError('This server does not support submit(); upgrade the server')
             raise RuntimeError(reason)
         if self._on_trace:
             self._on_trace(self.TRACE_SUCCESS, response)
@@ -270,7 +269,9 @@ class ExecutionMixin(DAPClient):
         # Step 4: stream to the address the server answered with, through
         # the team that answered (``@team``): the data path resolves the
         # address again and must land on the same control.
-        streamed = self.send(stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'))
+        streamed = self.send(
+            stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'), params=params
+        )
         result = await (asyncio.wait_for(streamed, timeout) if timeout is not None else streamed)
         return {**(result or {}), **stamps}
 

@@ -451,7 +451,60 @@ public:
     //-----------------------------------------------------------------
     bool busy = false;
 
+    //-----------------------------------------------------------------
+    // Binding lifetime (plan 4.1 rule 2)
+    //
+    // An instance's per-binding state lives exactly one getPipe() /
+    // putPipe() bracket. getPipe() bumps the pipe's generation; the
+    // first call into this instance under a new generation runs
+    // beginBinding() (the Python loader constructs the node's IInstance
+    // there), and putPipe() runs endBinding() on every instance bound
+    // under the generation. The C++ filter object itself stays pooled
+    // with the slot: nothing here rebuilds the filter chain.
+    //-----------------------------------------------------------------
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Bind this instance to the pipe's current generation if it is
+    ///		not already bound to it: the "first touch" of a binding. A
+    ///		binding left behind by a putPipe() that never ran is ended
+    ///		first
+    //-----------------------------------------------------------------
+    Error bindToGeneration() noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		End the binding (endBinding) if this instance holds one
+    //-----------------------------------------------------------------
+    Error releaseBinding() noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Whether this instance is bound to the pipe's current
+    ///		generation
+    //-----------------------------------------------------------------
+    bool isBound() const noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Per-binding constructor hook; the default does nothing
+    //-----------------------------------------------------------------
+    virtual Error beginBinding() noexcept { return {}; }
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Per-binding destructor hook; the default does nothing
+    //-----------------------------------------------------------------
+    virtual Error endBinding() noexcept { return {}; }
+
 protected:
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The pipe generation this instance is bound under; 0 = not
+    ///		bound
+    //-----------------------------------------------------------------
+    uint64_t m_boundGeneration = 0;
+
     //-----------------------------------------------------------------
     /// @details
     ///		Built in tag buffer allocated only when needed via the

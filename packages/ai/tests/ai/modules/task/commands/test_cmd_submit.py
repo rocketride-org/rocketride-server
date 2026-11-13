@@ -20,14 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""The DAP ``process`` command (plan section 3, section 14 Step 3 "process").
+"""The DAP ``rrext_submit`` command (plan section 3, section 14 Step 3 "submit").
 
 One-of validation; name calls walk the rungs and start a published rung from
 its artifact, ignoring server-controlled arguments into ``ignored``; spec
 calls address the caller's @dev presence and converge per ``onChange``
 (repoint, never kill); inline delivery runs open/write/close in process with
 a server-minted ``correlationId``; ``timeout`` covers open to close; the
-probe advertises ``process``.
+probe advertises ``submit``.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ import pytest
 
 from ai.constants import CONST_DEFAULT_MAX_THREADS
 from ai.modules.task import task_server
-from ai.modules.task.commands import cmd_process
+from ai.modules.task.commands import cmd_submit
 from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.task_server_facade import _InProcessConn
 from ai.modules.task.types import TaskError
@@ -87,9 +87,9 @@ def _conn(ts, account) -> _InProcessConn:
     return conn
 
 
-async def _process(conn, **arguments) -> Dict[str, Any]:
-    """Run ``process`` and return the response body."""
-    response = await conn.on_process(conn.build_request('process', arguments=arguments))
+async def _submit(conn, **arguments) -> Dict[str, Any]:
+    """Run ``submit`` and return the response body."""
+    response = await conn.on_rrext_submit(conn.build_request('rrext_submit', arguments=arguments))
     return response['body']
 
 
@@ -104,16 +104,16 @@ async def test_exactly_one_of_name_or_pipeline(catalog, engines, deployments):
     conn = _conn(_server(), _caller())
     for arguments in ({}, {'name': ADDRESS, 'pipeline': _pipeline()}):
         with pytest.raises(TaskError) as err:
-            await _process(conn, **arguments)
+            await _submit(conn, **arguments)
         assert err.value.code == TaskError.INVALID_ARGUMENT and err.value.field == 'name'
 
 
 @pytest.mark.asyncio
 async def test_inline_data_over_the_limit_is_refused(catalog, engines, deployments, monkeypatch):
     """Inline data is capped; the SDK streams anything larger."""
-    monkeypatch.setattr(cmd_process, 'CONST_PROCESS_INLINE_MAX', 4)
+    monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_INLINE_MAX', 4)
     with pytest.raises(TaskError) as err:
-        await _process(_conn(_server(), _caller()), name=ADDRESS, data=b'12345')
+        await _submit(_conn(_server(), _caller()), name=ADDRESS, data=b'12345')
     assert err.value.code == TaskError.PAYLOAD_TOO_LARGE and err.value.limit == 4
 
 
@@ -131,7 +131,7 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
     deployments.deploy('team-1')
     conn = _conn(ts, _caller())
 
-    body = await _process(conn, name=ADDRESS, data=b'hello', threads=4, ttl=5, objinfo={'name': 'q'})
+    body = await _submit(conn, name=ADDRESS, data=b'hello', threads=4, ttl=5, objinfo={'name': 'q'})
 
     assert body['answer'] == 'ok'
     assert body['token'] == ADDRESS
@@ -147,7 +147,7 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
     assert data_path[0][2]['correlationId'] and data_path[0][2]['object'] == {'name': 'q', 'size': 5}
 
     # The hold stays: the next call attaches
-    again = await _process(conn, name=ADDRESS, data=b'again')
+    again = await _submit(conn, name=ADDRESS, data=b'again')
     assert again['converged'] == 'none' and again['ignored'] == []
 
 
@@ -157,7 +157,7 @@ async def test_without_data_the_call_returns_the_address_for_streaming(catalog, 
     ts = _server()
     deployments.deploy('team-1')
 
-    body = await _process(_conn(ts, _caller()), name='acme.docBrain')
+    body = await _submit(_conn(ts, _caller()), name='acme.docBrain')
 
     assert body['token'] == ADDRESS and body['resolved'] == '@team'
     assert data_path == []
@@ -167,7 +167,7 @@ async def test_without_data_the_call_returns_the_address_for_streaming(catalog, 
 async def test_rung_order_and_the_rungs_tried(catalog, engines, deployments):
     """Nothing anywhere: not_found lists every rung walked."""
     with pytest.raises(TaskError) as err:
-        await _process(_conn(_server(), _caller()), name=ADDRESS)
+        await _submit(_conn(_server(), _caller()), name=ADDRESS)
     assert err.value.code == TaskError.NOT_REGISTERED
     assert err.value.rungsTried == ['@dev', '@me', '@team', '@public']
 
@@ -181,8 +181,8 @@ async def test_team_overrides_the_order_for_one_call(catalog, engines, deploymen
     account = _caller(teams=('team-1', 'team-2'))
     conn = _conn(ts, account)
 
-    assert (await _process(conn, name=ADDRESS, team='team-2'))['team'] == 'team-2'
-    assert (await _process(conn, name=ADDRESS))['team'] == 'team-1'
+    assert (await _submit(conn, name=ADDRESS, team='team-2'))['team'] == 'team-2'
+    assert (await _submit(conn, name=ADDRESS))['team'] == 'team-1'
 
 
 @pytest.mark.asyncio
@@ -202,7 +202,7 @@ async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, m
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     with pytest.raises(TaskError) as err:
-        await _process(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
+        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
     assert err.value.code == TaskError.TIMEOUT
     assert (err.value.address, err.value.converged) == (ADDRESS, 'started')
     assert closed == [1]
@@ -213,7 +213,7 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
     """An engine that does not answer the cleanup close never holds the timed-out request open."""
     ts = _server()
     deployments.deploy('team-1')
-    monkeypatch.setattr(cmd_process, 'CONST_PROCESS_CLOSE_SECONDS', 0.05)
+    monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
 
     async def send(self, request):
         if request['arguments']['subcommand'] in ('write', 'close'):
@@ -223,9 +223,63 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     started = time.monotonic()
     with pytest.raises(TaskError) as err:
-        await _process(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
+        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
     assert err.value.code == TaskError.TIMEOUT
     assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.asyncio
+async def test_params_ride_the_inline_open_and_an_unknown_name_is_refused(catalog, engines, deployments, data_path):
+    """Per-call params enter by the open (one door); a name the map does not expose is param_rejected."""
+    ts = _server()
+    exposed = {'tone': {'node': 'prompt_1', 'key': 'instructions'}}
+    deployments.deploy('team-1', pipeline=_pipeline(parameters=exposed))
+    conn = _conn(ts, _caller())
+
+    body = await _submit(conn, name=ADDRESS, data=b'x', params={'tone': 'dry'})
+    assert body['answer'] == 'ok'
+    opens = [arguments for _engine, sub, arguments in data_path if sub == 'open']
+    assert [o['params'] for o in opens] == [{'tone': 'dry'}]
+
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=ADDRESS, data=b'x', params={'tone': 'dry', 'nope': 1})
+    assert err.value.code == TaskError.PARAM_REJECTED
+    assert err.value.errors == [{'name': 'nope', 'reason': 'not a parameter of this pipeline'}]
+    assert len([1 for _engine, sub, _args in data_path if sub == 'open']) == 1, 'nothing reached the engine'
+
+
+@pytest.mark.asyncio
+async def test_a_data_request_on_a_name_starts_its_publication_like_process(catalog, engines, deployments):
+    """send/pipe (and the HTTP door through them) resolve through the same resolver: an artifact start."""
+    ts = _server()
+    deployments.deploy('team-1')
+    conn = _conn(ts, _caller())
+
+    control = await conn.resolve_control_or_start({'arguments': {'token': ADDRESS}}, 'task.data')
+    assert (control.rung, control.live, control.trigger) == ('team', True, 'submit')
+    assert list(ts._task_control) == [control.key]
+
+    # The next data request attaches; nothing starts twice
+    again = await conn.resolve_control_or_start({'arguments': {'token': ADDRESS}}, 'task.data')
+    assert again is control and len(ts._engines) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_start_that_never_confirms_running_is_engine_start_failed(
+    catalog, engines, deployments, data_path, monkeypatch
+):
+    """The liveness detector's bare TimeoutError reaches the caller as the structured error, with the key."""
+    ts = _server()
+    deployments.deploy('team-1')
+    conn = _conn(ts, _caller())
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
+
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=ADDRESS, data=b'x')
+    assert err.value.code == TaskError.ENGINE_START_FAILED
+    assert isinstance(err.value.engineKey, str) and len(err.value.engineKey) == 64, 'the content key rides the error'
+    # A start that never confirmed is not retried and leaves nothing registered (plan 7.2)
+    assert ts._task_control == {} and ts._engines == {}
 
 
 # =============================================================================
@@ -235,19 +289,19 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
 
 @pytest.mark.asyncio
 async def test_a_spec_call_creates_then_reuses_the_dev_presence(catalog, engines, deployments, data_path):
-    """process(spec) starts the caller's @dev control; the same hash reuses it."""
+    """submit(spec) starts the caller's @dev control; the same hash reuses it."""
     ts = _server()
     conn = _conn(ts, _caller())
 
-    first = await _process(conn, pipeline=_pipeline(), data=b'a')
-    second = await _process(conn, pipeline=_pipeline(), data=b'b')
+    first = await _submit(conn, pipeline=_pipeline(), data=b'a')
+    second = await _submit(conn, pipeline=_pipeline(), data=b'b')
 
     assert (first['resolved'], first['converged']) == ('@dev', 'started')
     assert 'version' not in first
     assert (second['converged'], second['specMatch']) == ('none', True)
     assert first['engineKey'] == second['engineKey']
     # A name call by the owner attaches to the same presence
-    assert (await _process(conn, name=ADDRESS))['resolved'] == '@dev'
+    assert (await _submit(conn, name=ADDRESS))['resolved'] == '@dev'
 
 
 @pytest.mark.asyncio
@@ -255,22 +309,22 @@ async def test_on_change_error_keep_and_auto(catalog, engines, deployments, data
     """On a changed spec: error refuses with both hashes, keep uses the old engine, auto repoints."""
     ts = _server()
     conn = _conn(ts, _caller())
-    old = await _process(conn, pipeline=_pipeline())
+    old = await _submit(conn, pipeline=_pipeline())
 
     with pytest.raises(TaskError) as err:
-        await _process(conn, pipeline=_pipeline(instructions=['new']))
+        await _submit(conn, pipeline=_pipeline(instructions=['new']))
     assert err.value.code == TaskError.SPEC_CHANGED
     assert err.value.currentHash == old['engineKey'].split(':')[0] and err.value.newHash != err.value.currentHash
 
-    kept = await _process(conn, pipeline=_pipeline(instructions=['new']), onChange='keep')
+    kept = await _submit(conn, pipeline=_pipeline(instructions=['new']), onChange='keep')
     assert (kept['specMatch'], kept['engineKey']) == (False, old['engineKey'])
 
-    moved = await _process(conn, pipeline=_pipeline(instructions=['new']), onChange='auto')
+    moved = await _submit(conn, pipeline=_pipeline(instructions=['new']), onChange='auto')
     assert (moved['converged'], moved['specMatch']) == ('repointed', True)
     assert moved['engineKey'] != old['engineKey']
 
     with pytest.raises(TaskError) as err:
-        await _process(conn, pipeline=_pipeline(), onChange='sometimes')
+        await _submit(conn, pipeline=_pipeline(), onChange='sometimes')
     assert err.value.code == TaskError.INVALID_ARGUMENT
 
 
@@ -279,17 +333,17 @@ async def test_a_repoint_never_interrupts_the_old_engines_other_holder(catalog, 
     """Nothing is killed: the old engine keeps serving user-b; the last hold dropping stops it."""
     ts = _server()
     mine = _conn(ts, _caller('user-a'))
-    await _process(mine, pipeline=_pipeline())
+    await _submit(mine, pipeline=_pipeline())
     theirs = await _start(ts, _pipeline(), user='user-b')
     shared = theirs.task
 
-    await _process(mine, pipeline=_pipeline(instructions=['new']), onChange='auto')
+    await _submit(mine, pipeline=_pipeline(instructions=['new']), onChange='auto')
 
     assert shared.holds == frozenset({theirs.key})
     assert engines == []
 
     # Alone on its engine, a repoint stops the old one at once
-    await _process(mine, pipeline=_pipeline(instructions=['newer']), onChange='auto')
+    await _submit(mine, pipeline=_pipeline(instructions=['newer']), onChange='auto')
     assert [reason for _, reason in engines] == ['repointed']
 
 
@@ -298,10 +352,10 @@ async def test_a_second_workspace_on_the_same_address_warns_of_a_collision(catal
     """Another origin, another hash: address_collision rides the error (and a repoint's result)."""
     ts = _server()
     conn = _conn(ts, _caller())
-    await _process(conn, pipeline=_pipeline(), origin='C:/ws-one/pipelines/docBrain')
+    await _submit(conn, pipeline=_pipeline(), origin='C:/ws-one/pipelines/docBrain')
 
     with pytest.raises(TaskError) as err:
-        await _process(conn, pipeline=_pipeline(instructions=['x']), origin='C:/ws-two/pipelines/docBrain')
+        await _submit(conn, pipeline=_pipeline(instructions=['x']), origin='C:/ws-two/pipelines/docBrain')
     assert err.value.warnings == [
         {
             'code': 'address_collision',
@@ -311,7 +365,7 @@ async def test_a_second_workspace_on_the_same_address_warns_of_a_collision(catal
     ]
 
     # Same origin, or the same hash: no warning
-    same = await _process(conn, pipeline=_pipeline(), origin='C:/ws-two/pipelines/docBrain')
+    same = await _submit(conn, pipeline=_pipeline(), origin='C:/ws-two/pipelines/docBrain')
     assert 'warnings' not in same
 
 
@@ -321,9 +375,9 @@ async def test_repointing_one_address_too_often_warns_of_a_storm(catalog, engine
     monkeypatch.setattr(task_server, 'CONST_REPOINT_STORM_MAX', 2)
     ts = _server()
     conn = _conn(ts, _caller())
-    await _process(conn, pipeline=_pipeline())
+    await _submit(conn, pipeline=_pipeline())
 
-    results = [await _process(conn, pipeline=_pipeline(instructions=[f'v{n}']), onChange='auto') for n in range(3)]
+    results = [await _submit(conn, pipeline=_pipeline(instructions=[f'v{n}']), onChange='auto') for n in range(3)]
 
     assert all('warnings' not in r for r in results[:2])
     assert results[2]['warnings'] == [{'code': 'repoint_storm', 'address': ADDRESS, 'count': 3, 'window': 60}]
@@ -336,7 +390,7 @@ async def test_repointing_one_address_too_often_warns_of_a_storm(catalog, engine
 
 @pytest.mark.asyncio
 async def test_the_probe_advertises_process():
-    """An SDK checks the probe before process(); an old server lacks the feature."""
+    """An SDK checks the probe before submit(); an old server lacks the feature."""
     ts = _server()
     ts._server.account.capabilities = ['oss']
     ts._server.account.get_public_apps = AsyncMock(return_value=[])
@@ -344,4 +398,4 @@ async def test_the_probe_advertises_process():
 
     response = await conn.on_rrext_public_probe(conn.build_request('rrext_public_probe'))
 
-    assert 'process' in response['body']['features']
+    assert 'submit' in response['body']['features']

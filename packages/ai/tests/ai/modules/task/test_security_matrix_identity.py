@@ -31,6 +31,7 @@ identity work landed and is GREEN after it.
 
 from __future__ import annotations
 
+import itertools
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -66,7 +67,9 @@ def _server() -> TaskServer:
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
     ts._deployment_revoked = {}
-    ts._control_starts = {}
+    ts._engine_ids = itertools.count(1)
+    ts._node_id = 1
+    ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
     ts._control_expiry = []

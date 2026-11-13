@@ -32,7 +32,7 @@ Types Defined:
     PipelineComponent: Individual processing unit within a pipeline
     PipelineInputConnection: Data flow connection between components
     PipelineConfig: Complete pipeline configuration with components and execution parameters
-    PROCESS_RESULT: What process() returns: the pipe close body plus the resolution stamps
+    SUBMIT_RESULT: What submit() returns: the pipe close body plus the resolution stamps
 
 Pipeline Architecture:
     Pipelines consist of components connected in a directed graph where data flows
@@ -145,9 +145,9 @@ class PipelineConfig(TypedDict, total=False):
     editorMode: str  # Active editor mode (e.g. 'design', 'status', 'flow')
 
 
-class PROCESS_RESULT(TypedDict, total=False):
+class SUBMIT_RESULT(TypedDict, total=False):
     """
-    What ``process()`` returns: the pipe ``close`` body plus the stamps.
+    What ``submit()`` returns: the pipe ``close`` body plus the stamps.
 
     The close body's own fields (``result_types``, ``objects`` ...) ride
     beside these. Stamps:

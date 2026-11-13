@@ -41,6 +41,7 @@ an engine that never confirmed running is not retried.
 
 from __future__ import annotations
 
+import itertools
 import asyncio
 import copy
 import time
@@ -154,7 +155,9 @@ def _server() -> TaskServer:
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
     ts._deployment_revoked = {}
-    ts._control_starts = {}
+    ts._engine_ids = itertools.count(1)
+    ts._node_id = 1
+    ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
     ts._repoints = {}
@@ -292,9 +295,11 @@ def test_shareable_needs_a_request_source_certified_nodes_and_the_catalog(catalo
     # A listener (not request/response) entry source
     assert not engine_content(_pipeline(), 'prompt_1', component_facts).shareable
 
-    # A component the resolver cannot resolve
+    # A component the resolver cannot resolve is an ERROR, never a private key
+    # over its raw config (audit 2026-11-12): the start refuses the spec
     unknown = {'id': 'x_1', 'provider': 'no_such_node', 'config': {}}
-    assert not engine_content(_pipeline(extra=unknown), 'webhook_1', component_facts).shareable
+    with pytest.raises(Exception):
+        engine_content(_pipeline(extra=unknown), 'webhook_1', component_facts)
 
 
 def test_the_real_resolver_applies_schema_defaults():
@@ -685,6 +690,7 @@ async def test_a_data_request_is_activity_of_its_own_control_only(catalog, engin
     conn = SimpleNamespace(
         _server=ts,
         get_control=MagicMock(return_value=caller),
+        resolve_control_or_start=AsyncMock(return_value=caller),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -719,6 +725,7 @@ def _data_conn(ts, control):
     return SimpleNamespace(
         _server=ts,
         get_control=MagicMock(return_value=control),
+        resolve_control_or_start=AsyncMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -808,6 +815,7 @@ async def test_status_shows_stopped_then_running(catalog, engines, clock, servin
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     conn = SimpleNamespace(
         get_control=MagicMock(return_value=control),
+        resolve_control_or_start=AsyncMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -1047,6 +1055,7 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
     other = await _start(ts, _pipeline(), user='user-b', ttl=3600)
     conn = SimpleNamespace(
         get_control=MagicMock(return_value=control),
+        resolve_control_or_start=AsyncMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -1178,6 +1187,97 @@ async def test_a_hold_the_release_pass_could_not_drop_is_refused_on_its_next_req
     assert first.key not in ts._task_control
 
 
+@pytest.mark.asyncio
+async def test_a_spec_that_cannot_be_keyed_is_refused_at_start(catalog, engines):
+    """An unknown node is engine_start_failed, never a private key over the raw config."""
+    ts = _server()
+    unknown = {'id': 'x_1', 'provider': 'no_such_node', 'config': {}}
+
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _pipeline(extra=unknown))
+    assert err.value.code == TaskError.ENGINE_START_FAILED
+    assert ts._task_control == {} and ts._engines == {}
+
+
+@pytest.mark.asyncio
+async def test_a_restart_on_a_shared_engine_repoints_the_control(catalog, engines):
+    """The other holder keeps its engine unchanged; this control moves to the new spec's engine (plan 3.4)."""
+    catalog.discard('prompt')  # per-owner engine: the owner's dev run and @me deploy share it
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    dev = await _start(ts, _pipeline(), user='user-a')
+    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    assert dev.task is deployed.task
+    old_engine = dev.task
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task(
+        {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}}, conn=conn
+    )
+
+    assert result['converged'] == 'repointed'
+    assert dev.task is not old_engine and deployed.task is old_engine
+    assert dev.task.holds == {dev.key} and old_engine.holds == {deployed.key}
+    assert engines == [], 'nothing was stopped for the other holder'
+    assert dev.pipeline['components'][1]['config']['instructions'] == 'second draft'
+
+
+@pytest.mark.asyncio
+async def test_the_deployment_index_names_the_kill_switch_targets(catalog, engines):
+    """for_deployment lists the controls that resolved through a deployment; a removed control leaves it."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    run = await _start(ts, _pipeline(), user='', run_kind='deploy', owner_kind='team', deployment=deployment)
+    dev = await _start(ts, _pipeline(), user='user-a')
+
+    assert ts._task_control.for_deployment(deployment) == [run]
+    assert ts._task_control.for_deployment(DeploymentRef(org_id='org-1', team_id='team-2', project_id='x')) == []
+    assert dev.deployment is None
+
+    await ts.remove_task(run.key)
+    assert ts._task_control.for_deployment(deployment) == []
+
+
+@pytest.mark.asyncio
+async def test_the_control_start_gate_serializes_and_is_dropped_when_empty():
+    """Two starters of one control key run one after the other; the gate leaves the registry with them."""
+    registry = EngineRegistry()
+    order: List[str] = []
+
+    async def starter(name):
+        async with registry.control_start_lock('me.user-a.acme.docBrain.webhook_1'):
+            order.append(f'{name}:in')
+            await asyncio.sleep(0)
+            order.append(f'{name}:out')
+
+    await asyncio.gather(starter('a'), starter('b'))
+
+    assert order == ['a:in', 'a:out', 'b:in', 'b:out']
+    assert registry._control_starts == {}
+
+
+@pytest.mark.asyncio
+async def test_a_data_open_with_an_unknown_param_is_refused_before_the_engine(catalog, engines, serving):
+    """The data path admits params by public name like submit() does; nothing reaches the engine."""
+    ts = _server()
+    control = await _start(ts, _pipeline(parameters={'tone': {'node': 'prompt_1', 'key': 'instructions'}}))
+
+    with pytest.raises(TaskError) as err:
+        await DataCommands.on_rrext_process(
+            _data_conn(ts, control), {'arguments': {'subcommand': 'open', 'params': {'nope': 'x'}}}
+        )
+    assert err.value.code == TaskError.PARAM_REJECTED
+    TaskEngine._send_data.assert_not_awaited()
+
+    response = await DataCommands.on_rrext_process(
+        _data_conn(ts, control), {'arguments': {'subcommand': 'open', 'params': {'tone': 'dry'}}}
+    )
+    assert response == {'body': {'ok': True}}
+    forwarded = TaskEngine._send_data.await_args.args[-1]
+    assert forwarded['arguments']['params'] == {'tone': 'dry'}
+
+
 # =============================================================================
 # THE OPERATOR'S STOP
 # =============================================================================
@@ -1266,9 +1366,9 @@ async def test_stopping_an_unknown_engine_says_so():
 # =============================================================================
 
 
-def _engine(*, shared, pipeline):
+def _engine(*, shared, pipeline, server=None):
     return TaskEngine(
-        server=MagicMock(),
+        server=server or MagicMock(),
         id='acme.docBrain.webhook_1',
         project_id='docBrain',
         source='webhook_1',
@@ -1300,19 +1400,32 @@ def test_build_task_round_trips_parameters_and_names_the_engine(monkeypatch, tmp
     assert task['config']['pipelineTraceLevel'] == 'full'
 
 
-def test_every_launch_writes_a_fresh_trace_epoch(monkeypatch, tmp_path):
-    """Two engines (or two launches of one) never share an epoch, so their traceIds never collide (P31)."""
+def test_the_task_file_carries_no_trace_epoch(monkeypatch, tmp_path):
+    """The engine's trace counter is a bare per-launch uint64; the launch is named by EaaS, never seeded into the engine (plan 7.4)."""
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
+    ts = _server()
     pipeline = _pipeline()
-    first = _engine(shared=False, pipeline=pipeline)._build_task(pipeline)['config']['traceEpoch']
-    second = _engine(shared=True, pipeline=pipeline)._build_task(pipeline)['config']['traceEpoch']
 
-    assert 0 < first < 0x10000 and 0 < second < 0x10000
-    assert second != first
+    task = _engine(shared=False, pipeline=pipeline, server=ts)._build_task(pipeline)
 
-    # The epoch is 16 bits and never 0: it wraps from 65535 to 1
-    monkeypatch.setattr(task_engine, '_trace_epochs', iter([0xFFFF, 0x10000]))
-    assert [task_engine.next_trace_epoch(), task_engine.next_trace_epoch()] == [0xFFFF, 1]
+    assert 'traceEpoch' not in task['config']
+
+
+def test_every_launch_gets_its_own_engine_id_and_the_wire_trace_id_names_it():
+    """The server mints one engine id per launch; a trace counter leaves as `{nodeId}.{engineId}.{traceId}`."""
+    ts = _server()
+    first = _engine(shared=False, pipeline=_pipeline(), server=ts)
+    second = _engine(shared=True, pipeline=_pipeline(), server=ts)
+    first.engine_id = ts.next_engine_id()
+    second.engine_id = ts.next_engine_id()
+
+    assert (first.engine_id, second.engine_id) == (1, 2)
+    assert first.trace_ref(7) == '1.1.7'
+    assert second.trace_ref(7) == '1.2.7'
+
+    # A restart is a new launch: the same engine, a new id, so the old ids never alias the new ones
+    first.engine_id = ts.next_engine_id()
+    assert first.trace_ref(7) == '1.3.7'
 
 
 def test_a_cross_user_engine_names_no_user(monkeypatch, tmp_path):
@@ -1490,7 +1603,7 @@ async def test_play_creates_the_dev_control_and_a_name_call_attaches_to_it(catal
 
 @pytest.mark.asyncio
 async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog, engines, deployments):
-    """Stop means gone: the name falls through to @me, which starts from the artifact with trigger='process'."""
+    """Stop means gone: the name falls through to @me, which starts from the artifact with trigger='submit'."""
     ts = _server()
     deployments.deploy('user~user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
@@ -1500,7 +1613,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
 
     assert control.rung == 'me' and control.key == f'me.user-a.{ADDRESS}'
     assert (control.run_kind, control.owner_kind, control.owner_id) == ('deploy', 'user', 'user-a')
-    assert control.trigger == 'process'
+    assert control.trigger == 'submit'
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
     assert control.teamId == 'team-1' and control.engine_state == 'running'
 
@@ -1552,7 +1665,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     assert (control.owner_kind, control.owner_id, control.userId) == ('user', 'user-z', 'user-z')
     assert (control.orgId, control.teamId) == ('org-2', 'team-z')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='~public', project_id='docBrain')
-    assert control.trigger == 'process'
+    assert control.trigger == 'submit'
     assert ts.resolve_control(ADDRESS, stranger, 'task.data') is control
 
     # The publisher's kill switch releases it

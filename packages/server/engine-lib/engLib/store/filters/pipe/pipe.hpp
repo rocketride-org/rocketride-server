@@ -175,6 +175,25 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
+    ///		The binding generation: bumped by every getPipe() that hands
+    ///		this pipe out. Each instance of the chain binds to it on its
+    ///		first touch and is ended by putPipe() (plan 4.1 rule 2);
+    ///		0 = never handed out
+    //-----------------------------------------------------------------
+    uint64_t generation = 0;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The binding's caller context (plan 5.3): set by the opener
+    ///		right after getPipe(), copied into each Python instance of
+    ///		the chain when the binder constructs it, cleared by
+    ///		putPipe(). A null handle means no caller (C++-driven work).
+    ///		Never keyed, never indexed: a node reaches only its own
+    //-----------------------------------------------------------------
+    py::object caller;
+
+    //-----------------------------------------------------------------
+    /// @details
     ///		Emit one `>DBG` trace line for this binding, gated on
     ///		traceLevel >= METADATA. Fields, '*'-separated:
     ///		kind, pipeId, componentId, traceId, trace json. No engine-wide

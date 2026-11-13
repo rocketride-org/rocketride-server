@@ -605,6 +605,13 @@ class IServiceFilterPipe(Protocol):
     pipeId: int
     traceId: int
     traceLevel: str
+    #: Whether this instance is bound to the pipe's current binding (a component
+    #: the binding never touched is never constructed).
+    bound: bool
+    #: The binding's caller context, held on the pipe: set by the opener right
+    #: after getPipe(), copied into each instance at construction, cleared by
+    #: putPipe(). None = no caller.
+    caller: Optional[Dict[str, Any]]
     next: Optional['IServiceFilterPipe']
     targetObjectPath: str
     targetObjectUrl: str
@@ -761,7 +768,7 @@ class IInstanceBase:
     @property
     def traceId(self) -> int: ...
     def getPipe(self, traceLevel: Optional[str] = None) -> IServiceFilterPipe:
-        """Open a sub-pipe in this binding's tree (same traceId, inherited trace level, caller stamped)."""
+        """Open a sub-pipe in this binding's tree (same traceId, inherited trace level, caller set on the pipe)."""
         ...
     def putPipe(self, pipe: IServiceFilterPipe) -> None: ...
     def logger(self) -> BindingLogger: ...

@@ -242,8 +242,10 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
     Shareable across users iff the entry source is a request/response source
     (webhook, chat, dropper) AND ``facts`` says every component may run on a
     cross-user engine (plan section 1, 4.4); anything else is shared per
-    owner only. A component ``facts`` cannot resolve enters with its stored
-    config verbatim and makes the engine private.
+    owner only. A component ``facts`` cannot resolve (an unknown node, a
+    config that does not fit its schema) is an ERROR, raised as ``facts``
+    raised it: a spec that cannot be keyed is never run under a private key
+    over its raw config (audit 2026-11-12).
 
     Args:
         pipeline: The spec as submitted (placeholders unexpanded).
@@ -261,10 +263,7 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         component_id = str(component.get('id'))
         provider = str(component.get('provider') or '')
         stored = component.get('config') or {}
-        try:
-            config, component_shareable = facts(provider, stored)
-        except Exception:
-            config, component_shareable = stored, False
+        config, component_shareable = facts(provider, stored)
         resolved[component_id] = config
         types[component_id] = provider
         wiring[component_id] = connections_of(component)

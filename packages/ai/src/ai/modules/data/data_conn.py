@@ -181,6 +181,10 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
+        # The server-minted correlationId of each open pipe -> its pipe id, so
+        # an open repeated for one request finds its binding in O(1) (ALB seam 7)
+        self._open_by_correlation: Dict[str, int] = {}
+
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
@@ -575,6 +579,13 @@ class DataConn(DAPConn):
                 self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
 
+            # The request id no longer names an open binding
+            if (
+                conn_pipe.correlation_id
+                and self._open_by_correlation.get(conn_pipe.correlation_id) == conn_pipe.pipe_id
+            ):
+                self._open_by_correlation.pop(conn_pipe.correlation_id, None)
+
             # Release the entry
             if conn_pipe.entry:
                 conn_pipe.entry = None
@@ -733,11 +744,9 @@ class DataConn(DAPConn):
         # An open already served for this request: hand back the same binding
         correlation_id = args.get('correlationId') or None
         if correlation_id is not None:
-            for conn_pipe in list(self._pipe_map.values()):
-                if conn_pipe.correlation_id == correlation_id and conn_pipe.is_open:
-                    return self.build_response(
-                        request, body={'pipe_id': conn_pipe.pipe_id, 'traceId': conn_pipe.trace_id}
-                    )
+            served = self._pipe_map.get(self._open_by_correlation.get(correlation_id, -1))
+            if served is not None and served.correlation_id == correlation_id and served.is_open:
+                return self.build_response(request, body={'pipe_id': served.pipe_id, 'traceId': served.trace_id})
 
         # Waits for the source to bind `state.target`, then sizes the semaphore
         # from its threadCount config; see `_ensure_pipe_sem`.
@@ -793,8 +802,10 @@ class DataConn(DAPConn):
                     # Begin the pipe
                     self._begin(conn_pipe)
 
-                    # Store in pipe map
+                    # Store in pipe map (and by its request id, for the idempotent open)
                     self._pipe_map[pipe_id] = conn_pipe
+                    if correlation_id is not None:
+                        self._open_by_correlation[correlation_id] = pipe_id
 
                     self.debug_message(
                         f'Successfully opened pipe {pipe_id} with lane {lane}, zombie timeout: {self._pipe_timeout}s'
@@ -1060,7 +1071,7 @@ class DataConn(DAPConn):
         Emit one ``>DBG`` trace event for a tool invocation.
 
         Routed through ``monitorOther('DBG', ...)`` — the SAME monitor channel
-        the C++ Debugger uses for data-lane trace ops — so the supervisor's
+        the pipe's C++ trace emitter uses for data-lane trace ops — so the supervisor's
         stdio transport parses it into an ``apaevt_trace`` event and
         everything downstream follows for free: the derived ``apaevt_flow``
         events, the live Trace/Flow panes, the run-log continuum, and replay.

@@ -41,7 +41,7 @@ Error IPythonInstanceBase::writeJson(const json::Value &jsonData) noexcept {
         auto pyJson = IJson(jsonData);
 
         // Call it
-        m_pyInstance.attr("writeJson")(pyJson);
+        boundInstance().attr("writeJson")(pyJson);
         return {};
     };
 

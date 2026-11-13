@@ -74,8 +74,10 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
         Task: bare instance ready for method calls.
     """
     t = TaskEngine.__new__(TaskEngine)
+    t._server = SimpleNamespace(next_engine_id=lambda: 1, node_id=1)  # the server hands out engine ids
     t.id = 'task-test'
     t.engine_key = 'enginehash:user-1'
+    t.engine_id = 1
     t.shared = False
     # One hold: the control that started it
     t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
@@ -2253,6 +2255,25 @@ async def test_a_real_trace_level_still_derives_a_flow_event(level):
 
 
 @pytest.mark.asyncio
+async def test_an_sse_event_leaves_with_the_wire_trace_id():
+    """The engine's bare counter becomes `{nodeId}.{engineId}.{traceId}` where the event leaves the task process (plan 7.4)."""
+    t = _trace_task('full')
+    t.engine_id = 4
+    t._forward_task_event = TaskEngine._forward_task_event.__get__(t)  # the real forwarder stamps the body
+    t._server.broadcast_task_event = AsyncMock()
+    t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
+    t._run_log = None
+    t._debugger = None
+    message = {'event': 'apaevt_sse', 'body': {'pipe_id': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
+
+    await TaskEngine.on_event(t, message)
+
+    sent = t._server.broadcast_task_event.await_args.kwargs['event']
+    assert sent['body']['traceId'] == '1.4.7'
+    assert sent['body']['engineKey'] == 'enginehash:user-1'
+
+
+@pytest.mark.asyncio
 async def test_the_none_level_emits_no_flow_at_all():
     """
     `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
@@ -2587,7 +2608,9 @@ def _startable_task(monkeypatch):
     t._send_status_update = AsyncMock()
     t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
     t._terminated = AsyncMock()
-    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+    t._server = SimpleNamespace(
+        assign_port=MagicMock(return_value=20001), _config={}, next_engine_id=lambda: 1, node_id=1
+    )
 
     launches = []
 

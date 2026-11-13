@@ -330,7 +330,27 @@ public:
     //-----------------------------------------------------------------
     // Public API	: Utilities
     //-----------------------------------------------------------------
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The node's IInstance for the CURRENT binding, constructed on
+    ///		first use (plan 4.1 rule 2). Throws the bind error, so a
+    ///		caller inside callPython sees it as the call's error. Must be
+    ///		called with the GIL held
+    //-----------------------------------------------------------------
+    py::object &boundInstance();
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The instance as built: none while this binding has not
+    ///		touched the node
+    //-----------------------------------------------------------------
     py::object getPythonInstance() const noexcept { return m_pyInstance; }
+
+    //-----------------------------------------------------------------
+    // Binding lifetime - python-instance.cpp
+    //-----------------------------------------------------------------
+    virtual Error beginBinding() noexcept override;
+    virtual Error endBinding() noexcept override;
     const Url &getTargetObjectUrl() const noexcept { return m_targetObjectUrl; }
     const Text &getTargetObjectPath() const noexcept {
         return m_targetObjectPath;
@@ -349,7 +369,15 @@ private:
 
     //-------------------------------------------------------------
     /// @details
-    ///		Handle to our python IInstance object
+    ///		The node's IInstance class, probed once when the filter is
+    ///		built; instances are constructed from it per binding
+    //-------------------------------------------------------------
+    py::object m_pyInstanceClass;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Handle to the IInstance object of the CURRENT binding; none
+    ///		between bindings
     //-------------------------------------------------------------
     py::object m_pyInstance;
 

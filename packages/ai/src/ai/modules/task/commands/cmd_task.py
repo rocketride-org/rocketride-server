@@ -194,7 +194,7 @@ class TaskCommands(DAPConn):
             # The deployment a deployment run resolved through rides the same
             # trusted channel; nothing on the wire can name one
             deployment = getattr(self, '_trusted_deployment', None)
-            # So does the published rung a process(name) start answered on
+            # So does the published rung a submit(name) start answered on
             rung = getattr(self, '_trusted_rung', '') or ''
             # ... the artifact version it started from, and the team whose
             # environment the control runs with (plan 6.2): the trusted

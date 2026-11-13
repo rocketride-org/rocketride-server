@@ -107,8 +107,8 @@ class PublicCommands(DAPConn):
             'capabilities': acct.capabilities,
             'platform': sys.platform,
             # Server features a client checks before using them: an SDK's
-            # process() refuses clearly against a server without it (plan 3.1)
-            'features': ['process'],
+            # submit() refuses clearly against a server without it (plan 3.1)
+            'features': ['submit'],
             'apps': await acct.get_public_apps(),
             # The server's public addresses. ALWAYS present, both keys, so no
             # client ever branches on absence: each value is an absolute URL

@@ -30,7 +30,14 @@ IFilterInstance::IFilterInstance(const FactoryArgs &args) noexcept
     : Parent(args),
       global(std::dynamic_pointer_cast<IFilterGlobal>(Parent::global)) {}
 
-IFilterInstance::~IFilterInstance() noexcept {}
+IFilterInstance::~IFilterInstance() noexcept {
+    // The caller handle is a Python object: drop it under the GIL
+    _block() {
+        engine::python::LockPython lock;
+
+        caller = {};
+    }
+}
 
 //-------------------------------------------------------------------------
 /// @details

@@ -358,6 +358,7 @@ def test_cleanup_pipe_returns_pipe_to_endpoint_on_success(monkeypatch):
     conn = _make_conn()
     pipe = MagicMock()
     pipe_conn = SimpleNamespace(
+        correlation_id=None,
         pipe=pipe,
         pipe_id='p-1',
         size=None,
@@ -385,6 +386,7 @@ def test_cleanup_pipe_calls_monitor_failed_on_error(monkeypatch):
     conn = _make_conn()
     pipe = MagicMock()
     pipe_conn = SimpleNamespace(
+        correlation_id=None,
         pipe=pipe,
         pipe_id='p-1',
         size=100,
