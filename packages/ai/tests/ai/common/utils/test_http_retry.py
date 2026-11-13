@@ -176,3 +176,28 @@ def test_get_does_not_retry_4xx(monkeypatch):
     with pytest.raises(requests.exceptions.HTTPError):
         get_with_retry('https://api.example.com', base_delay=0)
     assert calls['n'] == 1  # no retry on a non-429 4xx
+
+
+def test_get_follows_redirects_by_default(monkeypatch):
+    seen = {}
+
+    def fake_get(*a, **k):
+        seen.update(k)
+        return _FakeResp(200, {})
+
+    _patch_get(monkeypatch, fake_get)
+    get_with_retry('https://api.example.com', base_delay=0)
+    assert seen['allow_redirects'] is True
+
+
+def test_get_can_disable_redirects_and_returns_the_3xx(monkeypatch):
+    seen = {}
+    redirect = _FakeResp(302)
+
+    def fake_get(*a, **k):
+        seen.update(k)
+        return redirect
+
+    _patch_get(monkeypatch, fake_get)
+    assert get_with_retry('https://api.example.com', base_delay=0, allow_redirects=False) is redirect
+    assert seen['allow_redirects'] is False
