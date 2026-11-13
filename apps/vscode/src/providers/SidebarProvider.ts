@@ -199,13 +199,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.onDidReceiveMessage(async (message) => {
 			try {
 				switch (message.type) {
-					case 'view:ready':
-						// A fresh page restarts its service-subscription ids —
-						// drop the previous page's watchers (the new page's own
-						// may already be live; the service keeps those).
-						// Everything the page DISPLAYS replays off the retained topics.
-						this.workspaceFs.resetSubscriptions();
+					case 'view:ready': {
+						// A fresh page restarts its service-subscription ids:
+						// keep exactly this page's watchers (it names its watch
+						// prefix) and retire every other page's. Everything the
+						// page DISPLAYS replays off the retained topics.
+						let page: string | undefined;
+						if (typeof message.page === 'string') {
+							page = message.page;
+						}
+						this.workspaceFs.resetSubscriptions(page);
 						break;
+					}
 					case 'sidebar:command':
 						vscode.commands.executeCommand(message.command, ...(message.args ?? []));
 						break;
@@ -219,6 +224,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			this.detachBusRealm?.();
 			this.detachBusRealm = undefined;
 			this._view = undefined;
+			// No page is left to hear the watchers' events; a re-resolved view
+			// boots a new page that watches again.
+			this.workspaceFs.stopAll();
 		});
 	}
 

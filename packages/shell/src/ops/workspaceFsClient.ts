@@ -53,6 +53,21 @@ export interface IWorkspaceFsBus {
 // double-invoked memo factories found this the hard way.
 const instances = new WeakMap<IWorkspaceFsBus, WorkspaceFs>();
 
+/** Each client's watch-key prefix (one per page boot). */
+const prefixes = new WeakMap<WorkspaceFs, string>();
+
+/**
+ * The watch-key prefix a client mints its keys under (`<prefix>-<seq>`), so a
+ * page can tell the host which page boot it is (the VS Code sidebar sends it
+ * with view:ready, and the host keeps exactly that page's watchers).
+ *
+ * @param fs - A client from {@link createWorkspaceFs}.
+ * @returns The prefix, or undefined for any other WorkspaceFs.
+ */
+export function watchPrefixOf(fs: WorkspaceFs): string | undefined {
+	return prefixes.get(fs);
+}
+
 /**
  * The realm-side WorkspaceFs over the `host.fs.*` op family — one shared
  * instance per bus (repeat calls return it).
@@ -89,7 +104,7 @@ function buildWorkspaceFs(bus: IWorkspaceFsBus): WorkspaceFs {
 		if (typeof p?.sub === 'string' && typeof p?.path === 'string') watchers.get(p.sub)?.(p.path);
 	});
 
-	return {
+	const client: WorkspaceFs = {
 		// ── Discovery / read ─────────────────────────────────────────────────
 		findFiles: (include, exclude) => bus.request('host.fs.findFiles', { include, ...(exclude !== undefined ? { exclude } : {}) }) as Promise<string[]>,
 		workspaceRoots: () => bus.request('host.fs.workspaceRoots', {}) as Promise<string[]>,
@@ -134,4 +149,6 @@ function buildWorkspaceFs(bus: IWorkspaceFsBus): WorkspaceFs {
 		// it has already awaited its own readiness.
 		whenReady: () => Promise.resolve(),
 	};
+	prefixes.set(client, prefix);
+	return client;
 }
