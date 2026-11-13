@@ -6,7 +6,7 @@ import ipaddress
 import json
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from starlette.routing import Mount, Route
@@ -130,36 +130,69 @@ def _refuse_existing_claimants(server: Any) -> None:
     """Fail engine boot if anything already owns or opens the MCP paths.
 
     ``WebServer.add_route`` rejects duplicate ``(method, path)`` pairs, but
-    the endpoint below is registered straight onto the router, so that check
-    never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
+    the endpoint below is registered through ``add_raw_route``, which checks
+    none, so that check never sees a clash. A route at ``/mcp`` would shadow the bare endpoint
     (a GET-only page answers ``POST /mcp`` with 405), and a public pattern
     matching it -- or any of its DESCENDANTS, since the Mount forwards
     ``/mcp/anything`` to ``handle_mcp`` just the same -- would make
     AuthMiddleware skip those MCP requests.
 
-    Public entries are patterns, not literals, so the endpoint paths are
-    probed alongside representative descendants (``_PUBLIC_PROBE_PATHS``) AND
-    the registered pattern strings are read directly
-    (``_registered_public_patterns``). Probing alone is not enough: a
-    converter-typed pattern such as ``/mcp/{id:int}`` compiles to a regex no
-    fixed probe satisfies, yet still disarms auth for every ``/mcp/<digits>``
-    the Mount forwards.
+    Public entries are patterns, not literals, so the registered pattern
+    strings are read directly here (``_registered_public_patterns``), and
+    once the endpoint is mounted ``_refuse_public_probes`` probes the
+    endpoint paths alongside representative descendants. Probing alone is
+    not enough: a converter-typed pattern such as ``/mcp/{id:int}`` compiles
+    to a regex no fixed probe satisfies, yet still disarms auth for every
+    ``/mcp/<digits>`` the Mount forwards.
 
     Raises:
         RuntimeError: naming the claimant(s).
     """
     claimants = sorted({p for p in (getattr(r, 'path', None) for r in server.app.router.routes) if _claims_mcp_path(p)})
-    public: set = set()
-    is_public = getattr(server, 'is_public_route', None)
-    if is_public is not None:
-        public.update(p for p in _PUBLIC_PROBE_PATHS if is_public(p))
-    public.update(p for p in _registered_public_patterns(server) if _claims_mcp_pattern(p))
+    public = {p for p in _registered_public_patterns(server) if _claims_mcp_pattern(p)}
     claimants += [f'public:{p}' for p in sorted(public)]
     if claimants:
-        raise RuntimeError(
-            f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
-            + ', '.join(claimants)
-        )
+        raise _claimed(claimants)
+
+
+def _refuse_public_probes(server: Any, mcp_routes: Tuple[Any, ...]) -> None:
+    """Unmount ``mcp_routes`` and fail if any probed MCP path is public once they are mounted.
+
+    Runs after the mount: a public-path predicate (the shell's public pages)
+    answers for the current route table, so before the mount it counts an
+    MCP path its catch-all would answer as public.
+
+    Args:
+        server: The WebServer (or test double) the endpoint was mounted onto.
+        mcp_routes: The routes just mounted, removed again on refusal.
+
+    Raises:
+        RuntimeError: naming the public paths.
+    """
+    is_public = getattr(server, 'is_public_route', None)
+    if is_public is None:
+        return
+    public = [f'public:{p}' for p in _PUBLIC_PROBE_PATHS if is_public(p)]
+    if not public:
+        return
+    routes = server.app.router.routes
+    routes[:] = [route for route in routes if not any(route is mounted for mounted in mcp_routes)]
+    raise _claimed(public)
+
+
+def _claimed(claimants: List[str]) -> RuntimeError:
+    """The error that refuses the mount, naming what already claims the MCP paths.
+
+    Args:
+        claimants: Route paths, and public paths or patterns as ``public:<path>``.
+
+    Returns:
+        The error to raise.
+    """
+    return RuntimeError(
+        f'{_MOUNT_PATH} and {_MOUNT_PATH}/* are reserved for the MCP API, but already claimed by: '
+        + ', '.join(claimants)
+    )
 
 
 def _base_url_from_uri(uri: str) -> str:
@@ -681,8 +714,15 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
             if pending is not None:
                 raise pending
 
-    server.app.router.routes.append(Mount(_MOUNT_PATH, app=handle_mcp))
-    server.app.router.routes.append(Route(_MOUNT_PATH, endpoint=_AsgiEndpoint(handle_mcp), include_in_schema=False))
+    # Through add_raw_route: loaded through /use after startup, MCP must still
+    # match ahead of the public-page catch-all.
+    mcp_routes = (
+        Mount(_MOUNT_PATH, app=handle_mcp),
+        Route(_MOUNT_PATH, endpoint=_AsgiEndpoint(handle_mcp), include_in_schema=False),
+    )
+    for route in mcp_routes:
+        server.add_raw_route(route)
+    _refuse_public_probes(server, mcp_routes)
 
     # ------------------------------------------------------------------
     # 5. Session-manager lifespan + engine-client teardown

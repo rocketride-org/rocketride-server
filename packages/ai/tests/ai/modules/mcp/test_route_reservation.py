@@ -199,6 +199,27 @@ async def test_the_catch_all_never_opens_the_mcp_paths(monkeypatch, tmp_path):
     assert built == []
 
 
+@pytest.mark.asyncio
+async def test_mcp_loaded_after_the_catch_all_still_owns_its_paths(monkeypatch, tmp_path):
+    # POST /use mcp at runtime: the catch-all is already registered, so MCP's
+    # routes must still land ahead of it, or /mcp is a public 404/405.
+    built = []
+    server = _web_server(monkeypatch, tmp_path, built)
+    server.use('shell', {})
+    await _register_public_pages(monkeypatch, server)
+    server.use('mcp', {})
+
+    assert server.app.router.routes[-1].path == '/{public_page_path:path}'
+    for path in ('/mcp', '/mcp/', '/mcp/anything'):
+        assert server.is_public_route(path) is False, path
+    async with _serve(server) as app:
+        anonymous = await app.post('/mcp', json=_TOOLS_CALL, headers=_HEADERS)
+        authenticated = await app.post('/mcp', json=_TOOLS_CALL, headers=_AUTH_HEADERS)
+    assert anonymous.status_code == 401 and 'resource_metadata=' in anonymous.headers.get('www-authenticate', '')
+    assert authenticated.status_code == 200, f'{authenticated.status_code} {authenticated.text[:200]}'
+    assert built and built[-1].auth == 'rr_e2e_key'
+
+
 # --- the page validator against the real route table ------------------------
 
 
@@ -359,6 +380,18 @@ def test_mcp_refuses_to_mount_under_a_public_pattern_matching_it(monkeypatch, tm
 
     with pytest.raises(RuntimeError, match='/mcp'):
         server.use('mcp', {})
+
+
+def test_a_public_pattern_only_the_probe_sees_unmounts_mcp(monkeypatch, tmp_path):
+    # '/{name}' is not rooted at /mcp, so only the probe, run once the routes
+    # are mounted, sees that it opens /mcp; the refused mount leaves nothing behind.
+    server = _web_server(monkeypatch, tmp_path, [])
+    server._public_paths.append('/{name}')
+    server._compiled_public_paths = None
+
+    with pytest.raises(RuntimeError, match='public:/mcp'):
+        server.use('mcp', {})
+    assert [r.path for r in server.app.router.routes if getattr(r, 'path', '').startswith('/mcp')] == []
 
 
 @pytest.mark.parametrize('pattern', ['/mcp-server', '/mcpx', '/mcp-server/{page}', '/mcpx/{rest:path}', '/'])

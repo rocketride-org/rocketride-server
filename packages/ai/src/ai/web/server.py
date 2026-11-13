@@ -1015,17 +1015,7 @@ class WebServer:
 
         # Add the route to the FastAPI application's router
         self.app.router.add_api_route(path, routeHandler, methods=methods, deprecated=deprecated)
-        if self._catch_all is not None:
-            # Keep the catch-all last, or a route added after it (a module
-            # loaded through /use, in a worker thread) would never match. One
-            # slice assignment, so no request sees a table without it.
-            # Known gap (tracked in rocketride-org/rocketride-server#3166):
-            # a request already judged public on the old table (an unrouted path)
-            # is routed on the new one, so for that instant a new private route
-            # can answer it unauthenticated. /use is admin-only; guard private
-            # routes if modules are loaded at runtime in production.
-            routes = self.app.router.routes
-            routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
+        self._keep_catch_all_last()
 
         # Record the pairs only once the router has accepted them, so a
         # rejected registration stays retryable.
@@ -1047,7 +1037,7 @@ class WebServer:
             self._compiled_private_paths = None
 
     def add_catch_all(self, route: BaseRoute) -> None:
-        """Register ``route`` to match after every other route, including routes ``add_route`` adds later.
+        """Register ``route`` to match after every other route, including routes ``add_route`` and ``add_raw_route`` add later.
 
         A route appended to ``app.router.routes`` directly is not moved ahead of it.
 
@@ -1057,6 +1047,34 @@ class WebServer:
         """
         self._catch_all = route
         self.app.router.routes.append(route)
+
+    def add_raw_route(self, route: BaseRoute) -> None:
+        """Register a prebuilt Starlette route (a ``Mount``, an ASGI ``Route``) ahead of the catch-all.
+
+        For routes ``add_route`` cannot build. Unlike ``add_route``, it checks
+        no duplicates, registers no public or private path and adds nothing
+        to the OpenAPI schema.
+
+        Args:
+            route: The route to match before the catch-all.
+        """
+        self.app.router.routes.append(route)
+        self._keep_catch_all_last()
+
+    def _keep_catch_all_last(self) -> None:
+        """Move the catch-all back behind a route just appended after it."""
+        if self._catch_all is None:
+            return
+        # Keep the catch-all last, or a route added after it (a module
+        # loaded through /use, in a worker thread) would never match. One
+        # slice assignment, so no request sees a table without it.
+        # Known gap (tracked in rocketride-org/rocketride-server#3166):
+        # a request already judged public on the old table (an unrouted path)
+        # is routed on the new one, so for that instant a new private route
+        # can answer it unauthenticated. /use is admin-only; guard private
+        # routes if modules are loaded at runtime in production.
+        routes = self.app.router.routes
+        routes[:] = [r for r in routes if r is not self._catch_all] + [self._catch_all]
 
     def add_socket(
         self,
