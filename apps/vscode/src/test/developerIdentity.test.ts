@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DeveloperIdentity, IdentityFeed, LOOKUP_FAILED_MESSAGE, REGISTER_TIMEOUT_MS, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { DeveloperIdentity, IdentityFeed, LOOKUP_FAILED_MESSAGE, REGISTER_TIMEOUT_MS, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, messageOf, toWizardIdentity } from '../appdev/developerIdentity';
 import type { IDeveloperClient, IDeveloperConnection } from '../appdev/developerIdentity';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 
@@ -375,4 +375,10 @@ test('resolve: a failed lookup is logged', async () => {
 	await identity.resolve();
 	assert.equal(lines.length, 1);
 	assert.match(lines[0], /500 internal error/);
+});
+
+test('messageOf: an Error gives its message, anything else its string form', () => {
+	assert.equal(messageOf(new Error('500 internal error')), '500 internal error');
+	assert.equal(messageOf('timed out'), 'timed out');
+	assert.equal(messageOf(42), '42');
 });

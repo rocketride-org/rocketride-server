@@ -21,7 +21,7 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
-import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, messageOf, toWizardIdentity } from '../appdev/developerIdentity';
 import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
@@ -86,7 +86,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	// name — push the fresh identity to every realm.
 	const push = (): void => {
 		feed.refresh(true).catch((err: unknown) => {
-			logError(`identity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+			logError(`identity refresh failed: ${messageOf(err)}`);
 		});
 	};
 	for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
