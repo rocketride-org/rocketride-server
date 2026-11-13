@@ -31,6 +31,8 @@ from ai.common.chat import ChatBase
 from ai.common.config import Config, check_credential_resolved
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_breakpoint
 from langchain_aws import ChatBedrock
+from langchain_core.messages import AIMessageChunk
+from langchain_core.outputs import ChatGenerationChunk
 from packaging.version import InvalidVersion, Version
 
 # Claude 3 models on Bedrock that accept a cache marker. Every Claude from 4 on does.
@@ -110,6 +112,31 @@ def _count_cache_as_input(usage: Any, fresh: Any = None) -> None:
         pass  # metering is best effort; never fail a reply that was already paid for
 
 
+def _usage_from_invocation_metrics(metrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Build a ``usage_metadata`` from Bedrock's raw ``amazon-bedrock-invocationMetrics``.
+
+    Input counts the whole prompt, cached tokens included once (see
+    _count_cache_as_input), the way langchain-aws builds it from the same metrics.
+    Returns None when the metrics hold no counts.
+    """
+    try:
+        fresh = int(metrics.get('inputTokenCount') or 0)
+        output = int(metrics.get('outputTokenCount') or 0)
+        read = int(metrics.get('cacheReadInputTokenCount') or 0)
+        write = int(metrics.get('cacheWriteInputTokenCount') or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (fresh or output or read or write):
+        return None
+    total_input = fresh + read + write
+    return {
+        'input_tokens': total_input,
+        'output_tokens': output,
+        'total_tokens': total_input + output,
+        'input_token_details': {'cache_read': read, 'cache_creation': write},
+    }
+
+
 class _ChatBedrock(ChatBedrock):
     """ChatBedrock that marks the cacheable start of a Claude prompt and meters cached tokens.
 
@@ -140,10 +167,29 @@ class _ChatBedrock(ChatBedrock):
         return result
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        # TODO(#2722): remove once a langchain-aws release that meters "length" is pinned.
+        # langchain-aws (1.9.0 and before) reports a streamed Meta or Mistral reply's
+        # usage only when it stops with "stop" (prepare_output_stream). One that reaches
+        # the output limit stops with "length", and nothing is metered, though Bedrock sent
+        # the counts in the last chunk. When a stream ends with no usage but carried those
+        # counts, report them once. A release that fixes this sends the usage itself, and
+        # this adds nothing.
+        metered = False
+        metrics = None
         for chunk in super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs):
+            usage = getattr(chunk.message, 'usage_metadata', None)
             if not self.beta_use_converse_api:
-                _count_cache_as_input(getattr(chunk.message, 'usage_metadata', None))
+                _count_cache_as_input(usage)
+            metered = metered or bool(usage)
+            metadata = getattr(chunk.message, 'response_metadata', None) or {}
+            raw = metadata.get('amazon-bedrock-invocationMetrics')
+            if isinstance(raw, dict):
+                metrics = raw
             yield chunk
+        if not metered and metrics is not None and not self.beta_use_converse_api:
+            usage = _usage_from_invocation_metrics(metrics)
+            if usage:
+                yield ChatGenerationChunk(message=AIMessageChunk(content='', usage_metadata=usage))
 
 
 class Chat(ChatBase):
