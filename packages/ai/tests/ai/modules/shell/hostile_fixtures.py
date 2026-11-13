@@ -65,6 +65,8 @@ import copy
 import json
 from typing import Any, Dict, List
 
+from ai.account.store import StorageError
+
 LEAK_MARKERS = (
     'LEAKSECRET',
     'LEAKREVIEW',
@@ -273,6 +275,8 @@ class HostileAccount:
     async def deployments_artifact(self, org_id: str, app_id: str, version: int) -> Dict[str, Any]:
         if self.fail:
             raise RuntimeError('store down')
+        if (org_id, app_id, version) not in self.artifacts:
+            raise StorageError(f'{app_id} v{version}: not in the registry')
         return copy.deepcopy(self.artifacts[(org_id, app_id, version)])
 
 

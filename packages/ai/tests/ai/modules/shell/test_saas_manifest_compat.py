@@ -38,6 +38,7 @@ import json
 import pytest
 
 import ai.modules.shell.public_pages as pp
+from ai.account.store import StorageError
 from ai.modules.shell.contract import check_manifest
 from ai.modules.shell.legacy_manifest import legacy_page_manifest
 from ai.modules.shell.public_pages import load_published
@@ -130,7 +131,7 @@ async def test_store_errors_other_than_not_found_skip_the_app_or_fail_the_gate(m
     acct.add(PLATFORM, 'rocketride.home', {'name': 'Home', **_emitted()}, emit=True)
 
     async def broken(path):
-        raise OSError('store down')
+        raise StorageError('store down')
 
     monkeypatch.setattr(pp, 'read_artifact_file', broken)
     assert await load_published(acct) == []  # aggregate: skipped, never a partial manifest

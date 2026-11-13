@@ -35,9 +35,10 @@ import pytest
 
 import ai.modules.shell.public_pages as pp
 import ai.modules.task.deploy_events as deploy_events
+from ai.account.store import StorageError
 from ai.modules.shell.public_pages import Published, build_aggregate, legacy_aggregate, load_published
 
-from .hostile_fixtures import HOME_MANIFEST, LEAK_MARKERS, dist_of, hostile_account
+from .hostile_fixtures import FILES, HOME_MANIFEST, LEAK_MARKERS, dist_of, hostile_account
 
 # Every hostile platform app is a root claimant here, so ONLY the serving
 # gate (disabled / unapproved / unbuilt / gated / team rung) keeps it out.
@@ -66,7 +67,7 @@ def _store_timeout(monkeypatch, app_id='rocketride.home'):
 
     async def flaky(path):
         if f'/.deployments/{app_id}/' in path:
-            raise OSError('store timeout')
+            raise StorageError('store timeout')
         return await read(path)
 
     monkeypatch.setattr(pp, 'read_artifact_file', flaky)
@@ -419,6 +420,25 @@ async def test_malformed_rows_are_skipped():
             row['artifactPath'] = ''  # would map every app to '/dist'
     assert await pp.rebuild(acct)
     assert pp.current().legacy
+
+
+async def test_a_programming_error_reading_a_row_reaches_the_rebuild_boundary(monkeypatch, warnings):
+    # load_published skips an app only for storage and parse errors; an
+    # AttributeError is a bug and must surface (PageMap.rebuild logs and keeps the map).
+    async def broken(*args, **kwargs):
+        raise AttributeError("'NoneType' object has no attribute 'get'")
+
+    monkeypatch.setattr(pp, 'page_manifest', broken)
+    with pytest.raises(AttributeError):
+        await load_published(hostile_account())
+    assert not await pp.rebuild(hostile_account())
+    assert 'rebuild failed' in warnings[-1]
+
+
+async def test_a_malformed_emitted_manifest_skips_only_that_app():
+    acct = hostile_account()
+    FILES[f'{dist_of("00000000-platform", "rocketride.home")}/app-manifest.json'] = b'not json'
+    assert await load_published(acct) == []
 
 
 async def test_the_gate_loader_is_strict_for_root_claimants_and_names_the_app(monkeypatch):

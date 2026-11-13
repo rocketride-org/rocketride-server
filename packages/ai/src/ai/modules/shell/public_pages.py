@@ -214,6 +214,8 @@ async def load_published(
         RuntimeError: with ``strict``, a root claimant that cannot be read
             (the message names it).
     """
+    from ai.account.store import StorageError
+
     if acct is None:
         from ai.account import account as acct
 
@@ -251,7 +253,7 @@ async def load_published(
                 continue
             dist_dir = dist_dir_of(artifact_path)
             manifest = await page_manifest(stored, dist_dir)
-        except Exception as exc:
+        except (StorageError, ValueError) as exc:
             _skip_unreadable(app_id, str(exc), strict, unreadable, exc)
             continue
         if 'publicPages' not in manifest and 'site' not in manifest:
