@@ -869,12 +869,31 @@ class TestS3StoreMocked:
         # Mock connection error on all attempts
         mock_s3_client.put_object.side_effect = ConnectionError('Connection failed')
 
-        # Should fail after STORE_MAX_RETRY_ATTEMPTS attempts
-        with pytest.raises(ConnectionError):  # ConnectionError after retries exhausted
+        # Should fail after STORE_MAX_RETRY_ATTEMPTS attempts, with the StorageError IStore promises
+        with pytest.raises(StorageError) as exc_info:
             await store.write_file(filename, data)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
         # Verify it was called STORE_MAX_RETRY_ATTEMPTS times
         assert mock_s3_client.put_object.call_count == STORE_MAX_RETRY_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_raises_storage_error_after_max_retries(self, store, mock_s3_client, monkeypatch):
+        """A transport failure that outlasts every retry reaches the caller as a StorageError, not botocore's own type."""
+        boto_errors = pytest.importorskip('botocore.exceptions')
+
+        async def instant_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(asyncio, 'sleep', instant_sleep)
+        failure = boto_errors.EndpointConnectionError(endpoint_url='https://s3.amazonaws.com')
+        mock_s3_client.get_object.side_effect = failure
+
+        with pytest.raises(StorageError, match='Could not connect to the endpoint URL') as exc_info:
+            await store.read_bytes('test/fail.bin')
+
+        assert exc_info.value.__cause__ is failure
+        assert mock_s3_client.get_object.call_count == STORE_MAX_RETRY_ATTEMPTS
 
     @pytest.mark.asyncio
     async def test_write_atomic_with_deleted_file_and_version(self, store, mock_s3_client):
@@ -986,9 +1005,10 @@ class TestS3StoreMocked:
 
         mock_s3_client.put_object.side_effect = NoSuchKeyError('NoSuchKey during PutObject')
 
-        # Should fail after STORE_MAX_RETRY_ATTEMPTS
-        with pytest.raises(S3Store._RaceConditionError):
+        # Should fail after STORE_MAX_RETRY_ATTEMPTS, with a StorageError: the internal race signal never leaks
+        with pytest.raises(StorageError) as exc_info:
             await store.write_file_atomic(filename, data, expected_version=expected_version)
+        assert isinstance(exc_info.value.__cause__, S3Store._RaceConditionError)
 
         # Verify put_object was called STORE_MAX_RETRY_ATTEMPTS times
         assert mock_s3_client.put_object.call_count == STORE_MAX_RETRY_ATTEMPTS
