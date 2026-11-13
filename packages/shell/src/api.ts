@@ -243,7 +243,7 @@ export type { ToolHostServices } from './components/workspace/toolHost';
 // (vscode: real files; rocket-ui: the staged store view). All-async.
 export type { WorkspaceFs, ChangeKind, CommitResult, StagedConflict, LayerMeta, PendingState } from './workspace/workspaceFs';
 export { StaleWriteError, globToRegExp } from './workspace/workspaceFs';
-export { createWorkspaceFs } from './ops/workspaceFsClient';
+export { createWorkspaceFs, watchPrefixOf } from './ops/workspaceFsClient';
 export type { IWorkspaceFsBus } from './ops/workspaceFsClient';
 
 // Tool relay — the ONE relay policy between a tool's two mounts (hosts wire

@@ -21,7 +21,9 @@
 
 /** The webview's requests to the extension host. */
 export type SidebarWebviewToHost =
-	| { type: 'view:ready' }
+	/** Page boot. `page` is this page's watch-key prefix, so the host keeps
+	 *  exactly this page's file watchers and retires every other page's. */
+	| { type: 'view:ready'; page?: string }
 	| { type: 'sidebar:command'; command: string; args?: unknown[] };
 
 /** The extension host pushes NOTHING over postMessage any more — every

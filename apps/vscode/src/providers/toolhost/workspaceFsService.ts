@@ -190,17 +190,22 @@ export class WorkspaceFsService {
 	}
 
 	/**
-	 * Page boot (view:ready): drops earlier pages' watchers and keeps the
-	 * newest page's (see ./watchRegistry). HTML rewrites (the CSP reboot, the
+	 * Page boot (view:ready): keeps exactly the named page's watchers and
+	 * drops every other page's (see ./watchRegistry). HTML rewrites (the CSP reboot, the
 	 * Dev Tools RESET) reboot the page WITHOUT re-resolving the webview, so
 	 * view:ready stays the page-lifecycle signal.
 	 */
-	public resetSubscriptions(): void {
-		this.watchers.resetForPageBoot();
+	public resetSubscriptions(page?: string): void {
+		this.watchers.resetForPageBoot(page);
+	}
+
+	/** Stops every watcher (the view was disposed; a new page watches again). */
+	public stopAll(): void {
+		this.watchers.dispose();
 	}
 
 	/** Disposes all watchers (provider teardown). */
 	public dispose(): void {
-		this.watchers.dispose();
+		this.stopAll();
 	}
 }
