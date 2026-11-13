@@ -48,9 +48,10 @@ build output, rendered by the restricted template engine (``template.py``)
 with ``assets``, the version's URL base. A page without a snapshot, or with
 one that cannot be read or rendered, serves crawlers the shell document too.
 Either way the page's head metadata (title, description, canonical URL,
-robots) is injected. Only a rendered snapshot may sit in shared caches; the
-shell document names the current build's bundles, so it is
-``private, no-cache`` for everyone.
+robots) is injected. No page response may sit in a shared cache: one that
+ignores ``Vary: User-Agent`` (CloudFront does) would hand people a crawler's
+snapshot. A rendered snapshot is ``private, max-age=3600``; the shell
+document names the current build's bundles, so it is ``private, no-cache``.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; snapshot bytes, immutable per version, are
@@ -82,7 +83,7 @@ from .crawlers import CRAWLER, classify
 from .head import inject_head
 from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
-from .shell import CACHE_CONTROL, capture_candidate, shell_document_path, shell_static
+from .shell import capture_candidate, shell_document_path, shell_static
 from .template import TemplateError, render
 
 # The web server whose route table the auth predicate and the live-route
@@ -96,6 +97,11 @@ FALLBACK_PATH = '/{public_page_path:path}'
 # Bounds how long browsers keep a 301: the redirect map and page paths are
 # manifest data that can change, and an unbounded 301 is cached indefinitely.
 _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
+
+# A crawler may keep a rendered snapshot for an hour, but no shared cache may:
+# one that ignores Vary: User-Agent (CloudFront does) would serve it to people.
+# The render cache already spares the server the re-render.
+_SNAPSHOT_CACHE_CONTROL = 'private, max-age=3600'
 
 
 def set_web_server(server: WebServer) -> None:
@@ -771,10 +777,9 @@ def _render(path: str, page: Page, document: Path, snapshot: Optional[str]) -> T
     the shell document when it is None, people's always. Either way the
     page's head metadata is injected.
     """
-    # Only a rendered snapshot may sit in shared caches: the shell document
-    # names the current build's bundles. Caches key on the UA.
+    # The shell document names the current build's bundles: revalidated on every use.
     body = snapshot
-    cache_control = CACHE_CONTROL
+    cache_control = _SNAPSHOT_CACHE_CONTROL
     if body is None:
         body = document.read_text(encoding='utf-8')
         cache_control = 'private, no-cache'

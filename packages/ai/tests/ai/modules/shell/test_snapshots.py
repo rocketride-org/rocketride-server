@@ -184,7 +184,7 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert '<img src="/apps/rocketride.home/v3/seo-assets/logo.svg" alt="RocketRide">' in crawler.text
     assert '<title>Pricing | RocketRide</title>' in crawler.text and '<title>snap</title>' not in crawler.text
     assert '<meta name="description" content="Plans and prices.">' in crawler.text
-    assert crawler.headers['cache-control'] == 'public, max-age=3600'
+    assert crawler.headers['cache-control'] == 'private, max-age=3600'
     assert crawler.headers['vary'] == 'User-Agent'
     human = client.get('/pricing', headers={'User-Agent': BROWSER})
     assert SHELL_BODY in human.text and 'Pricing plans' not in human.text
@@ -268,7 +268,7 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     clock[0] += pages._STORAGE_BACKOFF_SECONDS
     resp = _crawl(client)
-    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
+    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'private, max-age=3600'
 
 
 def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, monkeypatch, warned):
