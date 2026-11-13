@@ -747,8 +747,10 @@ def test_a_render_overtaken_by_a_swap_is_served_but_not_cached(shell_root, monke
 
     monkeypatch.setattr(pp, 'read_artifact_file', swapping_read)
     client = _client()
-    assert '<title>Pricing | RocketRide</title>' in _crawl(client).text
-    assert len(pages._render_cache) == 0
+    resp = _crawl(client)
+    assert '<title>Pricing | RocketRide</title>' in resp.text and len(pages._render_cache) == 0
+    # Rendered from the old page map: no cache may keep it either.
+    assert resp.headers['cache-control'] == 'private, no-cache'
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     assert '<title>Renamed</title>' in _crawl(client).text
 
