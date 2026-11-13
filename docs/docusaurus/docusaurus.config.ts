@@ -3,6 +3,7 @@ import { themes as prismThemes } from 'prism-react-renderer';
 import type { Config } from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 import redirects, { createRedirects } from './redirects';
+import remarkStripTitle from './src/lib/remark-strip-title.mjs';
 
 // Use Algolia DocSearch when credentials are present; otherwise fall back to the
 // local search index (matches the previous site).
@@ -29,6 +30,11 @@ const config: Config = {
 	url: 'https://docs.rocketride.org/',
 	baseUrl: '/',
 
+	// GitHub Pages serves every page at its trailing-slash URL and 301s the
+	// slashless one. Emitting slash URLs in the sitemap, canonical tags and
+	// internal links removes that redirect from every crawl.
+	trailingSlash: true,
+
 	// Bing Webmaster site verification. Docusaurus injects this into every page's
 	// <head> at build time, which is what Bing's crawler scans. Renders only on
 	// docs.rocketride.org (this package is built and deployed by .github/workflows/
@@ -48,6 +54,24 @@ const config: Config = {
 				name: 'msvalidate.01',
 				content: '3A430890C971A1BA3BAEA33678904734',
 			},
+		},
+		// Site-wide structured data: the WebSite is this docs site, the
+		// Organization is RocketRide (marketing site as url; cloud app, GitHub and open source site as sameAs).
+		{
+			tagName: 'script',
+			attributes: { type: 'application/ld+json' },
+			innerHTML: JSON.stringify({
+				'@context': 'https://schema.org',
+				'@graph': [
+					{ '@type': 'WebSite', name: 'RocketRide', url: 'https://docs.rocketride.org/' },
+					{
+						'@type': 'Organization',
+						name: 'RocketRide',
+						url: 'https://rocketride.ai/',
+						sameAs: ['https://cloud.rocketride.ai/', 'https://github.com/rocketride-org', 'https://rocketride.org/'],
+					},
+				],
+			}),
 		},
 	],
 
@@ -101,9 +125,13 @@ const config: Config = {
 					routeBasePath: '/',
 					sidebarPath: './sidebars.ts',
 					showLastUpdateTime: true,
+					// The theme renders the page title itself; drop the body's duplicate <h1>.
+					beforeDefaultRemarkPlugins: [remarkStripTitle],
 				},
 				blog: false,
 				sitemap: {
+					// The search page is noindex with no content of its own.
+					ignorePatterns: ['/search/**'],
 					lastmod: 'date',
 					changefreq: null,
 					priority: null,
@@ -132,6 +160,8 @@ const config: Config = {
 
 	themeConfig: {
 		...(algolia ? { algolia } : {}),
+		// Site-wide social card (1200x630): docs title on the paper background.
+		image: 'img/rocketride-social-card.png',
 		// Follow the visitor's OS theme: respectPrefersColorScheme makes the
 		// system `prefers-color-scheme` win on first visit. defaultMode is only the
 		// fallback when the browser reports no preference; the manual toggle still
@@ -145,8 +175,8 @@ const config: Config = {
 			hideOnScroll: false,
 			logo: {
 				alt: 'RocketRide',
-				src: 'img/rocketride-wordmark-positive.png',
-				srcDark: 'img/rocketride-wordmark-negative.png',
+				src: 'img/rocketride-logo-color.png',
+				srcDark: 'img/rocketride-logo-white.png',
 				href: 'https://rocketride.ai',
 				target: '_self',
 				className: 'navbar__logo--wordmark',

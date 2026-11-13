@@ -36,7 +36,7 @@ for each client are on [Connect a client](/connect/mcp/http/connect).
 
 ## What you can do
 
-The server exposes 33 tools (`send_files` only on a local engine), organized by capability — the full parameter-level
+The server exposes 33 tools (32 on an engine that is not bound to localhost, where `send_files` is not offered), organized by capability — the full parameter-level
 reference is on [Tools](/connect/mcp/http/tools):
 
 | Capability | Tools |
@@ -88,22 +88,22 @@ Two things to know when working with the tools:
 
 <div className="rr-card-grid">
 
-<a className="rr-side-card" href="/connect/mcp/http/connect">
+<a className="rr-side-card" href="/connect/mcp/http/connect/">
   <span className="rr-side-card__head"><LuPlug className="rr-card-icon" /><span className="rr-side-card__title">Connect a client</span></span>
   <span className="rr-side-card__body">Setup for Claude, Claude Code, Cursor, and VS Code; OAuth and API-key auth; transport details.</span>
 </a>
 
-<a className="rr-side-card" href="/connect/mcp/http/tools">
+<a className="rr-side-card" href="/connect/mcp/http/tools/">
   <span className="rr-side-card__head"><LuWrench className="rr-card-icon" /><span className="rr-side-card__title">Tools</span></span>
   <span className="rr-side-card__body">All 33 tools with parameters, return shapes, and the error contract.</span>
 </a>
 
-<a className="rr-side-card" href="/connect/mcp/http/resources-and-widgets">
+<a className="rr-side-card" href="/connect/mcp/http/resources-and-widgets/">
   <span className="rr-side-card__head"><LuLayoutGrid className="rr-card-icon" /><span className="rr-side-card__title">Resources &amp; Widgets</span></span>
   <span className="rr-side-card__body">Live MCP resources and the interactive widgets rendered in MCP Apps hosts.</span>
 </a>
 
-<a className="rr-side-card" href="/connect/mcp/http/self-hosting">
+<a className="rr-side-card" href="/connect/mcp/http/self-hosting/">
   <span className="rr-side-card__head"><LuServer className="rr-card-icon" /><span className="rr-side-card__title">Self-hosting</span></span>
   <span className="rr-side-card__body">OAuth configuration, environment variables, and the dev-mode auth bypass.</span>
 </a>

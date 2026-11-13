@@ -29,7 +29,7 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
 | **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
 | **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
-| **MCP**        | `rocketride-mcp` | [MCP server](/connect/mcp/stdio)                  |
+| **MCP**        | `rocketride-mcp` (deprecated) | [MCP server](/connect/mcp/stdio) |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 
@@ -52,10 +52,9 @@ npm install rocketride
 
 # Python
 pip install rocketride
-
-# MCP
-pip install rocketride-mcp
 ```
+
+The `rocketride-mcp` package is deprecated. Use the built-in server instead; see [HTTP MCP Server](/connect/mcp/http). Existing users can still find the old package on the [stdio MCP page](/connect/mcp/stdio).
 
 The chat widget is **not on a public registry yet**; build it from this repository and self-host the bundle:
 

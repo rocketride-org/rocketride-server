@@ -16,22 +16,29 @@ ghcr.io/rocketride-org/rocketride-engine
 ## Quickstart
 
 ```bash
-docker run -d --name rocketride-engine \
+docker run -d --name rocketride-engine --platform linux/amd64 \
   -p 127.0.0.1:5565:5565 \
   -v rocketride-data:/opt/data \
   --restart unless-stopped \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-Point any client at it and go:
+This command is enough for the CLI and SDK. For the built-in MCP server use the
+command in [MCP on this engine](#mcp-on-this-engine) instead, which adds two `-e`
+settings. Both commands carry `--platform linux/amd64`, which Apple Silicon needs
+and Intel and AMD machines ignore (see [The image](#the-image)).
+
+Point any client at it and go. A client needs a non-empty key, and an engine
+started without one accepts any value:
 
 ```bash
 export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_APIKEY=rr_local
 ```
 
 The `127.0.0.1:` prefix keeps the engine reachable only from the machine
-itself — the right default, since a fresh engine accepts unauthenticated
-connections. Widen it only behind TLS and authentication (see
+itself — the right default, since an engine started without a key accepts any
+non-empty one. Widen it only behind TLS and authentication (see
 [Security](/operate/security)).
 
 ## The image
@@ -66,6 +73,32 @@ The engine reads configuration from its environment — pass variables with
   engine: `MCP_EXPECTED_AUDIENCE` and friends — see
   [MCP self-hosting](/connect/mcp/http/self-hosting).
 
+## MCP on this engine
+
+The image binds all container interfaces, so the engine treats itself as a
+public bind. For the built-in MCP server at `http://localhost:5565/mcp` to work,
+start the container with an `rr_` key. Engine image 3.6.0 and earlier also need
+`ROCKETRIDE_URI` (see below); the command sets it because it is safe on any
+version. If you already ran the quickstart command, remove that container first with `docker rm -f rocketride-engine`; the `rocketride-data` volume is kept.
+
+```bash
+docker run -d --name rocketride-engine --platform linux/amd64 \
+  -p 127.0.0.1:5565:5565 \
+  -v rocketride-data:/opt/data \
+  --restart unless-stopped \
+  -e ROCKETRIDE_APIKEY=rr_local \
+  -e ROCKETRIDE_URI=ws://127.0.0.1:5565 \
+  ghcr.io/rocketride-org/rocketride-engine:latest
+```
+
+MCP clients then send `Authorization: Bearer rr_local`. The key must start with
+`rr_`. When neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set, the
+engine runs MCP tool calls against itself (`ws://127.0.0.1:<port>`). Engine image 3.6.0
+and earlier instead connect them to RocketRide Cloud, where they fail with
+`Invalid or revoked API key`; on those versions set `ROCKETRIDE_URI` as in the
+command above (setting it is safe on an engine that listens on loopback or on all interfaces, which is the default and the Docker image). The CLI and SDK must send the same
+`ROCKETRIDE_APIKEY` the engine was started with. See [MCP self-hosting](/connect/mcp/http/self-hosting).
+
 ## Persistence
 
 The engine writes runtime data to `/opt/data` (declared as a volume). Mount a
@@ -82,16 +115,16 @@ endpoint, so `docker ps` shows real health:
 curl http://localhost:5565/version
 ```
 
-(Use `/version`, not `/ping`: the engine entrypoint starts its web server
-without the standard endpoints, so `/ping` is never registered and returns
-404. `/version` is always registered and public.)
+(Use `/version`, not `/ping`: `/version` is the address that answers without
+a key. Every unknown path, including `/ping`, `/health` and `/healthz`,
+answers 401.)
 
 Upgrading is pull-and-replace; state lives in the volume:
 
 ```bash
-docker pull ghcr.io/rocketride-org/rocketride-engine:latest
+docker pull --platform linux/amd64 ghcr.io/rocketride-org/rocketride-engine:latest
 docker rm -f rocketride-engine
-# re-run the docker run command above
+# re-run the same docker run command you started it with
 ```
 
 Upgrading from an image that ran as a system user (uid 999): the existing volume
@@ -113,6 +146,7 @@ A minimal production compose file:
 services:
   engine:
     image: ghcr.io/rocketride-org/rocketride-engine:latest
+    platform: linux/amd64
     ports:
       - '127.0.0.1:5565:5565'
     volumes:

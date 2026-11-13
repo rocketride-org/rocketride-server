@@ -66,7 +66,7 @@ pipeline after changing a provider.
 
 ## The catalog
 
-Every available provider (100+ nodes across 15+ LLM providers, 9 vector
+Every available provider (LLM providers, vector
 databases, OCR, NER, PII anonymization, transcription, and web tools) is
 documented with its config, inputs, and outputs in
 **[Nodes](/nodes)**.

@@ -20,6 +20,10 @@ const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide 
 // Mirrors `url` in docusaurus.config.ts.
 const SITE_URL = 'https://docs.rocketride.org';
 
+// The page written for coding agents. llms.txt lists it first, ahead of the
+// spine sections, so an agent that reads only the top of the file lands on it.
+const AGENT_START_ID = 'quickstart/coding-agents';
+
 // One-line description per node type (category label from gather.js
 // NODE_CATEGORIES). Used to annotate each heading in the catalog. A label with
 // no entry falls back to a generic line.
@@ -192,7 +196,11 @@ function llmsIndex(manifest) {
 	const lines = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, ''];
 	const order = sections().map((s) => s.label);
 	const bySection = new Map();
+	const entryLine = (e) => `- [${e.title}](${SITE_URL}${e.mdSibling})${e.description ? `: ${e.description}` : ''}`;
+	const start = manifest.find((e) => e.id === AGENT_START_ID);
+	if (start) lines.push('## Start here', '', entryLine(start), '');
 	for (const e of manifest) {
+		if (e === start) continue;
 		const sec = sectionFor(e.id);
 		if (!bySection.has(sec)) bySection.set(sec, []);
 		bySection.get(sec).push(e);
@@ -202,7 +210,7 @@ function llmsIndex(manifest) {
 		if (!entries || !entries.length) continue;
 		lines.push(`## ${label}`, '');
 		for (const e of entries.sort((a, b) => a.route.localeCompare(b.route))) {
-			lines.push(`- [${e.title}](${SITE_URL}${e.mdSibling})${e.description ? `: ${e.description}` : ''}`);
+			lines.push(entryLine(e));
 		}
 		lines.push('');
 	}
