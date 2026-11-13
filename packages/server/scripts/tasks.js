@@ -54,6 +54,7 @@ const {
 	getSymName,
 	getImportName,
 	exists,
+	readFile,
 	readJson,
 	writeJson,
 	mkdir,
@@ -217,6 +218,18 @@ async function findPrebuilt(sources, localHash, localVcpkgVersion, task) {
 // State Management
 // =============================================================================
 
+/**
+ * Whether CMakeCache.txt still records the vcpkg toolchain file. We always
+ * configure with one (getVcpkgCmakeArgs), so a cache without it was rebuilt
+ * by CMake on its own: a compiler mismatch makes CMake wipe the cache and
+ * regenerate it during the build with none of our -D flags.
+ */
+async function cacheHasToolchain() {
+	const cmakeCache = path.join(BUILD_ROOT, 'CMakeCache.txt');
+	if (!(await exists(cmakeCache))) return false;
+	return /^CMAKE_TOOLCHAIN_FILE:\w+=[ \t]*\S/m.test(await readFile(cmakeCache, 'utf8'));
+}
+
 async function isConfigured(cmakeConfig) {
 	const configured = await getState('server.configured');
 	if (configured !== true) return false;
@@ -224,9 +237,8 @@ async function isConfigured(cmakeConfig) {
 	// Check whether CMAKE_BUILD_TYPE has been changed
 	if (cmakeConfig && (await getState('server.buildType')) !== cmakeConfig) return false;
 
-	// Check CMakeCache.txt exists
-	const cmakeCache = path.join(BUILD_ROOT, 'CMakeCache.txt');
-	if (!(await exists(cmakeCache))) return false;
+	// Check CMakeCache.txt exists and still carries the vcpkg toolchain
+	if (!(await cacheHasToolchain())) return false;
 
 	// Check vcpkg packages are installed (manifest or classic path)
 	const vcpkgInstalled = await vcpkg.getVcpkgInstalledDir();
@@ -635,7 +647,9 @@ function makeConfigureServerAction(options = {}) {
 
 			await mkdir(BUILD_ROOT);
 
-			const cached = await cmake.getCachedGeneratorArgs(BUILD_ROOT);
+			// A cache that lost its toolchain must go too: CMake only reads the
+			// toolchain file on a fresh configure, so passing it again is ignored
+			const cached = (await cacheHasToolchain()) && (await cmake.getCachedGeneratorArgs(BUILD_ROOT));
 			taskDebug('configure generator source:', cached ? 'cached (CMakeCache.txt)' : 'state (compiler-windows)');
 			if (!cached) {
 				await removeFiles(BUILD_ROOT, ['CMakeCache.txt', 'cmake_install.cmake']);
