@@ -1489,11 +1489,9 @@ def test_only_an_ungated_engine_registers_the_noindex_middleware(
     web_server, shell_root, monkeypatch, request, fixture, registered
 ):
     # Decided at init, so a gated engine (production) runs no extra middleware.
-    import ai.modules.shell as shell_pkg
-
     request.getfixturevalue(fixture)
     lines = []
-    monkeypatch.setattr(shell_pkg, 'warning', lines.append)
+    monkeypatch.setattr(shell_mod, 'warning', lines.append)
     _start_engine(web_server, monkeypatch)
     dispatches = [m.kwargs.get('dispatch') for m in web_server.app.user_middleware]
     assert (shell_mod.ungated_noindex in dispatches) is registered

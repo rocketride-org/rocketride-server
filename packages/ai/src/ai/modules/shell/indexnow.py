@@ -35,7 +35,9 @@ A page's content is its manifest entry (every declared field, but not its
 production version, build path or binding time, which change with each
 publish of its app) plus the sha256 of its snapshot. A version's build
 output never changes, so a snapshot is read again only when its page moves
-to another version; a read that fails counts as a change. A page without a
+to another version; a read that fails with a storage error counts as a change,
+while an unexpected error skips that build's submission rather than being
+counted as a change. A page without a
 production version has no snapshot to read, so it shows none.
 
 Changes are measured against the last real build this process read in
@@ -79,8 +81,7 @@ from . import public_pages
 from .contract import MAX_SNAPSHOT_BYTES, Page
 from .pages import snapshot_path
 from .public_pages import Aggregate
-from .settings import indexnow_key
-from .shell import app_url
+from .settings import app_url, indexnow_key
 
 ENDPOINT = 'https://api.indexnow.org/indexnow'
 TIMEOUT_SECONDS = 5.0
@@ -314,7 +315,9 @@ async def _drain() -> None:
         try:
             done = await _process(aggregate)
         except Exception as exc:
-            warning(f'[indexnow] could not diff the new build: {exc}')
+            warning(
+                f'[indexnow] could not diff the new build, so none of its URLs are submitted: {type(exc).__name__}: {exc!r}'
+            )
             done = True
         if done:
             waits = _backoff()
