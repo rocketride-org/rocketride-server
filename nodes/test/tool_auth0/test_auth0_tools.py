@@ -74,6 +74,11 @@ def dispatched_tool(tool, monkeypatch):
         'search_logs',
         'get_brute_force_settings',
         'get_ip_throttling_settings',
+        'list_roles',
+        'get_user_roles',
+        'get_user_permissions',
+        'list_organizations',
+        'get_organization_members',
     ],
 )
 @pytest.mark.parametrize('payload', ['not-json', '[]', 'null', [], 1, None, {'input': []}, {'unexpected': 1}])
@@ -120,6 +125,11 @@ def test_dispatch_accepts_model_input(dispatched_tool):
         ('search_logs', {}),
         ('get_brute_force_settings', {}),
         ('get_ip_throttling_settings', {}),
+        ('list_roles', {}),
+        ('get_user_roles', {'user_id': 'id'}),
+        ('get_user_permissions', {'user_id': 'id'}),
+        ('list_organizations', {}),
+        ('get_organization_members', {'organization_id': 'org_1'}),
     ],
 )
 def test_dispatch_rejects_extra_fields(dispatched_tool, method, args):
@@ -146,6 +156,11 @@ def test_registered_schemas(tool):
         'search_logs',
         'get_brute_force_settings',
         'get_ip_throttling_settings',
+        'list_roles',
+        'get_user_roles',
+        'get_user_permissions',
+        'list_organizations',
+        'get_organization_members',
     }
     registered = {name for name in dir(instance) if hasattr(getattr(instance, name), '__tool_meta__')}
     assert registered == names

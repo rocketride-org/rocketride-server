@@ -212,6 +212,11 @@ class Auth0Client:
             'get_connection': ('GET', '/connections/{id}'),
             'get_connection_clients': ('GET', '/connections/{id}/clients'),
             'list_connections': ('GET', '/connections'),
+            'list_roles': ('GET', '/roles'),
+            'get_user_roles': ('GET', '/users/{id}/roles'),
+            'get_user_permissions': ('GET', '/users/{id}/permissions'),
+            'list_organizations': ('GET', '/organizations'),
+            'get_organization_members': ('GET', '/organizations/{id}/members'),
             'unblock_user': ('DELETE', '/user-blocks/{id}'),
         }
         if operation not in routes:
@@ -272,18 +277,27 @@ class Auth0Client:
             if status == 404:
                 raise Auth0Error(
                     'USER_NOT_FOUND'
-                    if operation in ('get_user', 'get_user_logs', 'get_user_blocks', 'unblock_user')
+                    if operation
+                    in (
+                        'get_user',
+                        'get_user_logs',
+                        'get_user_blocks',
+                        'get_user_roles',
+                        'get_user_permissions',
+                        'unblock_user',
+                    )
                     else 'RESOURCE_NOT_FOUND',
                     'The requested Auth0 resource was not found.',
                 )
             if status == 403:
                 try:
                     body = response.json()
-                    missing_scope = isinstance(body, dict) and (
-                        body.get('error') == 'insufficient_scope' or body.get('errorCode') == 'insufficient_scope'
-                    )
+                    codes = {body.get('error'), body.get('errorCode')} if isinstance(body, dict) else set()
                 except ValueError:
-                    missing_scope = False
-                if missing_scope:
+                    codes = set()
+                if 'insufficient_scope' in codes:
                     raise Auth0Error('MISSING_SCOPE', 'The Auth0 application lacks a required permission.')
+                # Tenants without the plan entitlement (for example, Organizations) are rejected with 403.
+                if codes & {'operation_not_supported', 'feature_not_enabled'}:
+                    raise Auth0Error('FEATURE_UNAVAILABLE', 'The Auth0 tenant is not entitled to this feature.')
             raise Auth0Error('API_ERROR', 'Auth0 rejected the request.')

@@ -267,6 +267,11 @@ def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
         'search_logs',
         'get_brute_force_settings',
         'get_ip_throttling_settings',
+        'list_roles',
+        'get_user_roles',
+        'get_user_permissions',
+        'list_organizations',
+        'get_organization_members',
         'unblock_user',
     ],
 )
@@ -289,11 +294,14 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         'search_logs',
         'get_brute_force_settings',
         'get_ip_throttling_settings',
+        'list_roles',
+        'list_organizations',
     ):
         key = {
             'get_log_event': 'log_id',
             'get_connection': 'connection_id',
             'get_connection_clients': 'connection_id',
+            'get_organization_members': 'organization_id',
         }.get(operation, 'user_id')
         args[key] = 'id'
     result = getattr(instance, operation)(args)
@@ -315,6 +323,9 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
             'search_logs',
             'get_brute_force_settings',
             'get_ip_throttling_settings',
+            'list_roles',
+            'list_organizations',
+            'get_organization_members',
         )
         else 'USER_NOT_FOUND'
     )
@@ -346,6 +357,11 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         ('search_logs', {}, [], '/logs'),
         ('get_brute_force_settings', {}, {'enabled': True}, '/attack-protection/brute-force-protection'),
         ('get_ip_throttling_settings', {}, {'enabled': True}, '/attack-protection/suspicious-ip-throttling'),
+        ('list_roles', {}, [], '/roles'),
+        ('get_user_roles', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/roles'),
+        ('get_user_permissions', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/permissions'),
+        ('list_organizations', {}, {'organizations': []}, '/organizations'),
+        ('get_organization_members', {'organization_id': 'org/1'}, {'members': []}, '/organizations/org%2F1/members'),
     ],
 )
 def test_read_tools_use_approved_http_routes_and_read_token(client, node, operation, argument, payload, path):

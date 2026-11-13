@@ -8,7 +8,7 @@ This experimental node attaches to an agent as a read-only Auth0 tool. It search
 
 ## As a tool
 
-Attach this node to an agent to expose these thirteen read-only tools. Results are flat objects with `success`; failures also include `error`, `error_code`, `retryable`, and `retry_after_seconds`. The November 4 contract instead specifies nested `data` and `error` envelopes; this node retains the existing flat envelope.
+Attach this node to an agent to expose these eighteen read-only tools. Results are flat objects with `success`; failures also include `error`, `error_code`, `retryable`, and `retry_after_seconds`. The November 4 contract instead specifies nested `data` and `error` envelopes; this node retains the existing flat envelope.
 
 | Tool | Input | Result and permission |
 | --- | --- | --- |
@@ -25,6 +25,11 @@ Attach this node to an agent to expose these thirteen read-only tools. Results a
 | `search_logs` | optional `event_type`, `limit` (1–50, default 20) | One newest-first page of filtered `events` and `count`; `read:logs`. |
 | `get_brute_force_settings` | none | `enabled`, `mode`, `max_attempts`, and `shields`; `read:attack_protection`. |
 | `get_ip_throttling_settings` | none | `enabled`, `shields`, `login_limits`, and `signup_limits`; `read:attack_protection`. |
+| `list_roles` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of tenant `roles` and `count`; `read:roles`. |
+| `get_user_roles` | `user_id`, optional `limit` (1–50, default 20) | First page of `roles` assigned directly to the user and `count`; `read:roles`. |
+| `get_user_permissions` | `user_id`, optional `limit` (1–50, default 20) | First page of the user's direct `permissions` and `count`; `read:users`. |
+| `list_organizations` | optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `organizations`, `count`, and `next_cursor`; `read:organizations`. |
+| `get_organization_members` | `organization_id` (1–100 characters), optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `members`, `count`, and `next_cursor`; `read:organization_members`. |
 
 `user_id` and `log_id` must be nonempty strings of at most 300 characters; `connection_id` is limited to 128 characters. Identifiers consisting only of whitespace, `.` or `..` are rejected. `email` is required, must be at most 254 characters, and accepts unquoted ASCII addresses. Limits and page numbers must be integers; booleans and out-of-range values are rejected. A successful search with no matches returns an empty list and count zero.
 
@@ -35,6 +40,12 @@ Connection names are preserved and are untrusted data. Connection metadata selec
 Connection IDs and strategies are limited to 128 characters, names and enabled client IDs to 300 characters, and user identity lists to 100 entries. Connection-client pages exceeding the requested limit are rejected with `API_ERROR`. Other list tools return at most their requested limit, even if Auth0 returns a longer array. Invalid, oversized, or nonprintable connection values produce `API_ERROR`. User and application names and user email addresses are bounded and have nonprintable characters removed. Tool arguments must be objects with only the properties listed in the tool schema; malformed inputs return `INVALID_INPUT`.
 
 User inventory entries contain only `user_id`, `email`, `name`, `blocked`, and `last_login`. Application inventory entries contain only `client_id`, `name`, and `app_type`; client secrets, metadata, JWT configuration, and signing keys are excluded. Missing fields are null. The connection, user, and application lists use zero-based page numbers, return at most the requested limit, and report `count` for that page rather than a total. They do not return a next-page cursor. Profile and application names are untrusted data and are bounded with control characters removed. The user inventory does not accept search queries or filters.
+
+Role entries contain only `id`, `name`, and `description`. `get_user_roles` and `get_user_permissions` report tenant-level assignments made directly to the user; organization-specific role assignments are not included, and permissions granted through roles are not expanded. Permission entries contain `permission_name`, `resource_server_identifier`, and `resource_server_name`; Auth0's permission descriptions and source lists are excluded. Role names and descriptions are administrator-defined text and are treated as untrusted data: names are bounded to 300 characters, descriptions to 1000, and control characters are removed.
+
+Organization entries contain only `id`, `name`, and `display_name`; metadata and branding are excluded. Member entries contain only `user_id`, `email`, and `name`; member pictures and roles are excluded, and profile fields are bounded and untrusted. Both organization tools use Auth0's checkpoint pagination and return one page per call. Omit `cursor` on the first call and pass a non-null `next_cursor` as `cursor` for the next page. Results exceeding the requested limit are rejected with `API_ERROR`.
+
+Role, permission, and organization features depend on the tenant's Auth0 plan. When Auth0 rejects a request with `operation_not_supported` or `feature_not_enabled`, the tools return `FEATURE_UNAVAILABLE` rather than `MISSING_SCOPE`. These entitlement error codes have not yet been confirmed against a live tenant without the feature.
 
 `search_logs` accepts only `f`, `fp`, `fu`, `limit_wc`, `limit_sul`, and `limit_mu` as event filters. It returns `log_id`, `date`, `type`, a fixed `description`, `user_id`, and `client_name`; it never returns raw descriptions, IP addresses, or user agents. It builds the filter itself and returns at most the requested page size. Other log types may be returned when no filter is supplied, with a generic description.
 
@@ -64,7 +75,7 @@ Store client secrets in RocketRide's secure environment settings and enter refer
 
 ## Authentication
 
-Authorize a read-only machine-to-machine application for the Auth0 Management API with `read:users`, `read:logs_users`, `read:logs`, `read:connections`, `read:clients`, and `read:attack_protection` as needed for the tools above. In a development tenant, `get_user_logs` succeeded with `read:logs_users` as the only permission selected for a separate application. That application also unexpectedly succeeded at `search_logs`; the reason has not been established, and token claims were not independently inspected. Write credentials are reserved for a future authorized recovery flow and are not needed for the available tools. The node obtains client-credentials tokens for the Management API audience and caches read and write tokens independently.
+Authorize a read-only machine-to-machine application for the Auth0 Management API with `read:users`, `read:logs_users`, `read:logs`, `read:connections`, `read:clients`, `read:attack_protection`, `read:roles`, `read:organizations`, and `read:organization_members` as needed for the tools above. In a development tenant, `get_user_logs` succeeded with `read:logs_users` as the only permission selected for a separate application. That application also unexpectedly succeeded at `search_logs`; the reason has not been established, and token claims were not independently inspected. Write credentials are reserved for a future authorized recovery flow and are not needed for the available tools. The node obtains client-credentials tokens for the Management API audience and caches read and write tokens independently.
 
 ## Notes
 
