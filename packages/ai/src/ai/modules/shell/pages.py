@@ -483,7 +483,8 @@ def image_url(value: str, owner: Optional[Page]) -> str:
 
     Args:
         value: The declared ``image`` (a page's or ``site.image``).
-        owner: The page declaring it, whose build output a relative path names; None for ``site.image``.
+        owner: The page whose build output a relative path names: the declaring page, or for
+            ``site.image`` the page that owns ``/``. A relative path with no owner is not made absolute.
 
     Returns:
         The absolute URL, or '' for an empty value or a value that cannot be made absolute.

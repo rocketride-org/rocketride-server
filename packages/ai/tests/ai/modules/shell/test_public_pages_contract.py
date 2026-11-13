@@ -676,9 +676,13 @@ def test_a_feed_path_collides_with_no_page_redirect_live_route_or_their_twins():
         _, _, errors = _feeds({**FEED, 'path': '/old.xml'}, redirects=[source])
         assert errors == [f"site.feeds[0].path '/old.xml': {which}is a site.redirects source; choose another path"]
     for route in ('/live.xml', '/live.xml/'):
-        _, _, errors = _feeds(
-            {**FEED, 'path': '/live.xml'}, live_conflict=lambda p, r=route: 'GET /x' if p == r else None
-        )
+
+        def live_conflict(candidate, route=route):
+            if candidate == route:
+                return 'GET /x'
+            return None
+
+        _, _, errors = _feeds({**FEED, 'path': '/live.xml'}, live_conflict=live_conflict)
         assert len(errors) == 1 and 'collides with the live server route GET /x' in errors[0], route
 
 
