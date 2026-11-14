@@ -999,8 +999,19 @@ function makeSetupTestDepsAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 			const buildReq = path.join(SERVER_DIR, 'build-requirements.txt');
+			// The node packages' shared baseline too: the root `nodes` package no
+			// longer installs it at import (a validator import resolves no pip), the
+			// engine installs it on its run path, and the test harness imports nodes
+			// without that path
+			const nodesReq = path.join(PACKAGES_DIR, '..', 'nodes', 'src', 'nodes', 'requirements.txt');
 			task.output = 'Installing test/runtime deps via depends...';
-			await execCommand(enginePath, ['-c', `from depends import depends; depends(${JSON.stringify(buildReq)})`], {
+			const installBoth =
+				'from depends import depends; ' +
+				`depends(${JSON.stringify(buildReq)}); depends(${JSON.stringify(nodesReq)})`;
+			await execCommand(
+				enginePath,
+				['-c', installBoth],
+				{
 				task,
 				cwd: DIST_DIR,
 			});

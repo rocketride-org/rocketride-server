@@ -793,13 +793,31 @@ Error IServices::applyParam(ServiceContext &context, json::Value &field) {
                      context.def.definitionPath, "is not allowed inside",
                      context.nestedIn);
 
-    // ... and is a scalar: a plain field or an enum selector
+    // ... and is a scalar: a plain field or a plain enum
     const auto type = field.lookup<Text>("type");
     if ((field.isMember("properties") && !field.isMember("enum")) ||
         type == "array")
         return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
                      context.def.definitionPath,
-                     "is only allowed on a plain field or an enum selector");
+                     "is only allowed on a plain field or a plain enum");
+
+    // ... and never a SELECTOR (an enum with property sets): its branches are
+    // resolved once when the engine's config is flattened and are part of the
+    // content key, while params overlay the flattened config per call, so a
+    // per-call selector value could neither be applied nor hashed (plan 5.1,
+    // P12). A plain enum, one with no property sets, is fine
+    if (field.isMember("enum") && field["enum"].isObject()) {
+        const auto &options = field["enum"];
+        for (const auto &value : options.getMemberNames()) {
+            const auto &branch = options[value];
+            if (branch.isObject() && branch.isMember("properties"))
+                return APERR(Ec::InvalidParam, "\"param\" on property", name,
+                             "in", context.def.definitionPath,
+                             "is not allowed on a selector (an enum with "
+                             "property sets); a caller who needs the other "
+                             "branch publishes a second pipeline");
+        }
+    }
 
     // ... and is never fixed or credential-shaped
     if (type == "constant" || type == "oauth2" || type == "upload")

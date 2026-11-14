@@ -29,12 +29,11 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 from typing import Any, Dict, Optional
-from ai.common.reader import ReaderBase
 from ai.web.metrics import metrics
 from rocketlib import debug
 
 
-class Parser(ReaderBase):
+class Parser:
     # Configuration variables
     _parse_mode: Optional[str] = None
     _lvm_model: Optional[str] = None
@@ -49,7 +48,6 @@ class Parser(ReaderBase):
         Initialize the LlamaParse parser with the given provider, connection configuration, and bag.
         """
         # Init the base
-        super().__init__(provider, connConfig, bag)
 
         # Store the bag explicitly
         self.bag = bag
@@ -74,7 +72,7 @@ class Parser(ReaderBase):
         """
         Read and parse document data using LlamaParse.
 
-        This method is required by ReaderBase.
+        The reader hook the node calls.
 
         Args:
             file: Document data in bytes

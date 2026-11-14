@@ -21,12 +21,12 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Any, Optional
 from rocketlib import IGlobalBase
-from ai.common.embedding import EmbeddingBase
 
 
 class IGlobal(IGlobalBase):
-    embedding: EmbeddingBase | None = None
+    embedding: Optional[Any] = None
 
     def beginGlobal(self):
         """Load the sentence-transformers model named by the resolved config.

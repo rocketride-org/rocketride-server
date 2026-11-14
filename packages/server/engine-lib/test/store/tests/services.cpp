@@ -328,7 +328,8 @@ TEST_CASE("store::Services::paramErrors") {
         "fx.login": { "type": "oauth2", "title": "Login", "param": true },
         "fx.file": { "type": "upload", "title": "File", "param": true },
         "fx.group": { "name": "group", "properties": ["fx.plain"], "param": true },
-        "fx.plain": { "type": "string", "title": "Plain" }
+        "fx.plain": { "type": "string", "title": "Plain" },
+        "fx.choice": { "type": "string", "title": "Choice", "default": "x", "enum": ["x", "y"] }
     })"_json;
 
     SECTION("inside an enum branch, naming the property") {
@@ -388,13 +389,13 @@ TEST_CASE("store::Services::paramErrors") {
     SECTION("on a group or an array") {
         auto group = resolveFixture(fixture(definitions, R"(["fx.group"])"_json));
         REQUIRE_ERROR(group, Ec::InvalidParam,
-                      "is only allowed on a plain field or an enum selector");
+                      "is only allowed on a plain field or a plain enum");
 
         auto list = resolveFixture(fixture(
             definitions,
             R"([{ "name": "list", "type": "array", "item": "fx.plain", "param": true }])"_json));
         REQUIRE_ERROR(list, Ec::InvalidParam,
-                      "is only allowed on a plain field or an enum selector");
+                      "is only allowed on a plain field or a plain enum");
     }
 
     SECTION("a non-boolean flag") {
@@ -403,15 +404,23 @@ TEST_CASE("store::Services::paramErrors") {
         REQUIRE_ERROR(schema, Ec::InvalidParam, "must be a boolean");
     }
 
-    SECTION("a selector may itself be a param") {
+    SECTION("a selector (an enum with property sets) is refused, naming the property") {
         auto schema = resolveFixture(fixture(
             definitions,
             R"([{ "base": "fx.mode", "param": true, "enum": {
                 "a": { "title": "A", "properties": ["fx.plain"] },
                 "b": { "title": "B", "properties": ["fx.plain"] } } }])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam, "\"param\" on property mode in");
+        REQUIRE(schema.ccode().message().contains(
+            "is not allowed on a selector"));
+    }
+
+    SECTION("a plain enum (no property sets) may be a param") {
+        auto schema = resolveFixture(fixture(
+            definitions, R"([{ "base": "fx.choice", "param": true }])"_json));
         REQUIRE_NO_ERROR(schema);
         REQUIRE((*schema)["params"].size() == 1u);
-        REQUIRE((*schema)["params"][0]["field"] == "mode");
+        REQUIRE((*schema)["params"][0]["field"] == "choice");
         REQUIRE((*schema)["params"][0]["enum"].size() == 2u);
     }
 }

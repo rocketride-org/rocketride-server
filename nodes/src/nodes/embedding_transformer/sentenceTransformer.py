@@ -43,14 +43,13 @@ monitorStatus('Loading transformers')
 # Load all the heavy weight stuff
 from numpy import ndarray
 from ai.common.models import SentenceTransformer
-from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
 
 # Output monitor status to show loading finished
 monitorStatus('Loading transformers complete')
 
 
-class Embedding(EmbeddingBase):
+class Embedding:
     """The embedding class controls the conversion of a piece of text into a vector.
 
     This can be a query or a set of document chunks.
@@ -76,7 +75,6 @@ class Embedding(EmbeddingBase):
             bag: The endpoint bag.
         """
         # Init the base
-        super().__init__(provider, config, bag)
 
         # Get the model from our section
         self._model = config['model']
