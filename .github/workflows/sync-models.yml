@@ -147,7 +147,13 @@ jobs:
         run: |
           python tools/sync_models/src/sync_models.py ${{ steps.partition.outputs.without_key }} --enable-discovery --allow-fallback-discovery --apply --pr-body | tee /tmp/body-fallback.md
 
-      # Combine the two PR bodies and write a single SYNC_OUTPUT to GITHUB_ENV.
+      - name: Enrich catalogues outside the sync registry
+        id: stamp_catalogues
+        if: always()
+        shell: bash
+        run: python tools/sync_models/src/stamp_reasoning.py | tee "$RUNNER_TEMP/body-stamp.md"
+
+      # Combine the PR bodies and write a single SYNC_OUTPUT to GITHUB_ENV.
       # This overrides whatever each --pr-body step appended individually.
       - name: Compose combined PR body
         if: always()
@@ -167,6 +173,12 @@ jobs:
               echo "_Providers below were synced without their native API key configured. Discovery used OpenRouter/LiteLLM as a fallback. Verify each newly added model ID against the provider's docs before merging — some may be OpenRouter routing aliases that do not work via the native SDK._"
               echo
               cat /tmp/body-fallback.md
+            fi
+            if [ -s "$RUNNER_TEMP/body-stamp.md" ]; then
+              echo
+              echo "## Catalogue enrichment"
+              echo
+              cat "$RUNNER_TEMP/body-stamp.md"
             fi
             echo 'SYNC_EOF'
           } >> "$GITHUB_ENV"
@@ -201,7 +213,7 @@ jobs:
       # The PR is opened first (above) so findings reach a human even on a bad run;
       # the job is failed here so the run is visibly red rather than silently green.
       - name: Fail if a sync step reported findings
-        if: always() && (steps.sync_with_key.outcome == 'failure' || steps.sync_without_key.outcome == 'failure')
+        if: always() && (steps.sync_with_key.outcome == 'failure' || steps.sync_without_key.outcome == 'failure' || steps.stamp_catalogues.outcome == 'failure')
         shell: bash
         run: |
           echo "::error::A sync step exited non-zero — a provider failed to sync, or the catalogue gate found a profile sending its context window as max_tokens. See the step logs and the PR body."
