@@ -142,6 +142,11 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
     'tool_notion': {'apikey': 'secret_mock-notion-placeholder-for-tests'},
     'tool_tenki': {'apikey': 'tk_mock-tenki-placeholder-for-tests'},
+    'tool_jira': {
+        'siteUrl': 'https://mock-jira.atlassian.net',
+        'email': 'mock@example.com',
+        'apiToken': 'mock-jira-placeholder-for-tests',
+    },
 }
 
 

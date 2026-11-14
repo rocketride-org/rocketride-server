@@ -1,0 +1,165 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Jira",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_jira://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		All six tools ran against a live Jira Cloud Free site (nodes/test/tool_jira/test_jira_live.py),
+	//		so the node ships without "experimental".
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_jira",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "jira",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "jira.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_jira",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Jira Cloud (search, issues, comments) as agent tools.", "Search issues with JQL, read an issue with its comments, list projects, create issues and add comments, using an Atlassian API token. Read-only by default, and limited to a project allowlist when one is set."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Jira",
+				"siteUrl": "",
+				"email": "",
+				"apiToken": "",
+				"readOnly": true,
+				"projects": "",
+				"maxResults": 25,
+				"createdLabel": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_jira.siteUrl": {
+			"type": "string",
+			"title": "Site URL",
+			"description": "Your Jira Cloud site, e.g. https://your-site.atlassian.net. Falls back to ROCKETRIDE_JIRA_SITE_URL.",
+			"default": ""
+		},
+		"tool_jira.email": {
+			"type": "string",
+			"title": "Account email",
+			"description": "The email of the Atlassian account the API token belongs to. Falls back to ROCKETRIDE_JIRA_EMAIL.",
+			"default": ""
+		},
+		"tool_jira.apiToken": {
+			"type": "string",
+			"title": "API token",
+			"description": "An API token without scopes, from https://id.atlassian.com/manage-profile/security/api-tokens. Falls back to ROCKETRIDE_JIRA_API_TOKEN.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_jira.readOnly": {
+			"type": "boolean",
+			"title": "Read-only mode",
+			"default": true,
+			"description": "When ON, jira_issue_create and jira_comment_add are refused.",
+			"enum": [
+				[true, "Yes — read only"],
+				[false, "No — allow writes"]
+			]
+		},
+		"tool_jira.projects": {
+			"type": "string",
+			"title": "Project allowlist",
+			"description": "Comma-separated project keys the node may use, e.g. PROJ,OPS. Empty means every project the account can see.",
+			"default": "",
+			"optional": true
+		},
+		"tool_jira.maxResults": {
+			"type": "integer",
+			"title": "Results per page",
+			"description": "Default number of issues a search returns per page, from 1 to 100.",
+			"default": 25,
+			"minimum": 1,
+			"maximum": 100,
+			"optional": true
+		},
+		"tool_jira.createdLabel": {
+			"type": "string",
+			"title": "Label for created issues",
+			"description": "A label added to every issue this node creates, so you can find them later. Empty adds none.",
+			"default": "",
+			"optional": true
+		}
+	},
+	//
+	//	Test configuration for automated node testing. The mock credentials in
+	//	nodes/test/framework/pipeline.py fill the profile; the live calls are in
+	//	nodes/test/tool_jira/test_jira_live.py.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Jira",
+			"properties": ["type", "tool_jira.siteUrl", "tool_jira.email", "tool_jira.apiToken", "tool_jira.readOnly", "tool_jira.projects", "tool_jira.maxResults", "tool_jira.createdLabel"]
+		}
+	]
+}
