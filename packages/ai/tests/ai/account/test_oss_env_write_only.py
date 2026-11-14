@@ -253,6 +253,50 @@ def test_a_name_the_environment_cannot_hold_writes_nothing(env_file, monkeypatch
     assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
 
 
+def test_a_stored_name_the_rule_no_longer_takes_can_be_deleted(env_file, monkeypatch):
+    """A name stored under the plain prefix: deleting it is the way out."""
+    monkeypatch.setenv('ROCKETRIDE_MY KEY', 'legacy')
+    monkeypatch.setenv('ROCKETRIDE_A', 'a')
+
+    resp = _call('update_env', delete=['ROCKETRIDE_MY KEY'])
+
+    assert resp == {'ok': True, 'body': {'updated': True}}
+    assert 'ROCKETRIDE_MY KEY' not in os.environ
+    assert _env_file_dict(env_file) == {'ROCKETRIDE_A': 'a'}
+
+
+def test_a_stored_name_the_rule_no_longer_takes_survives_the_mask_round_trip(env_file, monkeypatch):
+    """An editor sends back every listed name with its mask; the write still goes through."""
+    monkeypatch.setenv('ROCKETRIDE_MY KEY', 'legacy')
+    monkeypatch.setenv('ROCKETRIDE_A', 'a')
+
+    names = _call('get_env')['body']['env']
+    names['ROCKETRIDE_A'] = 'new-a'
+    resp = _call('update_env', env=names)
+
+    assert resp['ok'] is True
+    assert os.environ['ROCKETRIDE_MY KEY'] == 'legacy' and os.environ['ROCKETRIDE_A'] == 'new-a'
+
+
+def test_a_name_both_set_and_deleted_writes_nothing(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+
+    resp = _call('update_env', env={'ROCKETRIDE_A': 'new'}, delete=['ROCKETRIDE_A'])
+
+    assert resp['ok'] is False and 'ROCKETRIDE_A' in resp['message'] and 'nothing was saved' in resp['message']
+    assert 'new' not in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
+
+
+def test_a_delete_outside_the_prefix_writes_nothing(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+
+    resp = _call('update_env', delete=['OPENAI_API_KEY'])
+
+    assert resp['ok'] is False and 'OPENAI_API_KEY' in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
+
+
 @pytest.mark.parametrize('value', ['a\nROCKETRIDE_INJECTED=1', 'a\rb', 'a\0b', 'x${HOME}y'])
 def test_a_value_that_ends_a_env_line_writes_nothing(env_file, monkeypatch, value):
     monkeypatch.setenv('ROCKETRIDE_A', 'kept')
@@ -345,6 +389,29 @@ def test_a_name_sent_in_another_case_addresses_the_upper_cased_stored_one(monkey
 
     assert error is None
     assert env == {'ROCKETRIDE_B': 'sk-two'}
+
+
+@pytest.mark.parametrize('second', [None, 'other', ENV_MASK])
+def test_one_stored_variable_sent_under_two_cases_writes_nothing(monkeypatch, second):
+    """Windows: 'ROCKETRIDE_A' and 'ROCKETRIDE_a' are one variable; the second must not silently win."""
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+    monkeypatch.setenv('ROCKETRIDE_A', 'stored')
+
+    env, error = _merged_env({'ROCKETRIDE_A': 'new', 'ROCKETRIDE_a': second}, fold_case=True)
+
+    assert env == {} and 'ROCKETRIDE_A, ROCKETRIDE_a' in error and 'nothing was saved' in error
+    assert 'new' not in error and 'stored' not in error
+
+
+def test_one_new_variable_sent_under_two_cases_writes_nothing(monkeypatch):
+    """Windows: nothing stored yet, and 'ROCKETRIDE_A' and 'ROCKETRIDE_a' would still be one variable."""
+    for key in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+        monkeypatch.delenv(key)
+
+    env, error = _merged_env({'ROCKETRIDE_A': 'first', 'ROCKETRIDE_a': 'second'}, fold_case=True)
+
+    assert env == {} and 'ROCKETRIDE_A, ROCKETRIDE_a' in error and 'nothing was saved' in error
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='Windows upper-cases environment names')
