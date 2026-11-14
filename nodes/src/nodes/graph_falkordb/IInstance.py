@@ -53,6 +53,9 @@ class IInstance(GraphInstanceBase):
     def _db_dialect(self) -> str:
         return 'falkordb'
 
+    def _read_tools_hint(self) -> str:
+        return 'use get_data, which takes the question in plain language, or query to run Cypher you have written'
+
     # ------------------------------------------------------------------
     # FalkorDB-specific tools
     # ------------------------------------------------------------------

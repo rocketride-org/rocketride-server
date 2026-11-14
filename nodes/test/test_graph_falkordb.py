@@ -459,6 +459,36 @@ def test_execute_tool_is_disabled_unless_allowed():
         inst.execute({'query': 'CREATE (n:Person)'})
 
 
+def test_disabled_execute_error_names_the_read_tools():
+    # An agent that tried execute for a read must learn which tool to use instead.
+    inst = _instance(_FakeGlobal(_FakeGraph()))
+    with pytest.raises(ValueError) as excinfo:
+        inst.execute({'query': 'MATCH (n) RETURN n'})
+    message = str(excinfo.value)
+    assert message.startswith('execute tool is disabled for this node (set allow_execute=true)')
+    assert 'get_data' in message
+    assert 'query to run Cypher' in message
+
+
+def test_execute_description_says_whether_execute_can_be_used():
+    glb = _FakeGlobal(_FakeGraph())
+    disabled = _instance(glb)._execute_description()
+    assert 'Disabled on this node' in disabled
+    assert 'get_data' in disabled and 'query to run Cypher' in disabled
+
+    glb.allow_execute = True
+    enabled = _instance(glb)._execute_description()
+    assert 'Disabled' not in enabled
+    assert 'Use it for writes' in enabled and 'get_data' in enabled
+
+
+def test_base_read_tools_hint_names_only_get_data():
+    # Neo4j and RocketRide Graph have no query tool, so the base hint must not offer one.
+    hint = graph_base.GraphInstanceBase._read_tools_hint(object())
+    assert 'get_data' in hint
+    assert 'query to run' not in hint
+
+
 @pytest.mark.parametrize(
     'args',
     [
