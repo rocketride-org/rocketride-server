@@ -42,36 +42,21 @@ IPythonInstanceBase::IPythonInstanceBase(const FactoryArgs &args) noexcept
         py::object pyBaseClass = pyRocketRide.attr("IInstanceBase");
 
         // Import the node's <path>.IInstance submodule and get the class -
-        // both will throw if not there
+        // both will throw if not there. The CLASS is kept: an instance is
+        // constructed per binding, on the first touch (beginBinding)
         const Text moduleName = _ts(m_global.m_modulePath, ".IInstance");
         py::object pyInstanceModule = python::loadModule(moduleName);
         py::object pyInstanceClass = pyInstanceModule.attr("IInstance");
+        m_pyInstanceClass = pyInstanceClass;
 
-        // Create a new instance
-        m_pyInstance = pyInstanceClass();
-
-        // Save the phython part of the endpoint
-        m_pyInstance.attr("IEndpoint") = m_global.m_pyEndpoint;
-
-        // We may not have an IGlobal
-        if (m_global.m_pyGlobal)
-            m_pyInstance.attr("IGlobal") = m_global.m_pyGlobal;
-
-        // Save the ptr to our functions
-        m_pyInstance.attr("instance") = this;
-
-        // <deprecated>
-        //		This is for compatability but it is ambiguous
-        m_pyInstance.attr("endpoint") = m_global.m_pyEndpoint;
-        // <deprecated>
-
-        // Determine if a function is supported or not
+        // Determine if a function is supported or not - probed on the
+        // class once, never per instance
         auto bindMethod =
             localfcn(PythonMethod pyMethod, const char *pyMethodName) {
             // If this doesn't have it at all, it is not bound - happens if the
             // function is not defined in the IInstance class and it is not
             // derived from IInstanceBase
-            if (!py::hasattr(m_pyInstance, pyMethodName)) return;
+            if (!py::hasattr(pyInstanceClass, pyMethodName)) return;
 
             // If it isn't in the base class then someone forgot to update
             // the defintion in rocketride python interface
@@ -142,29 +127,74 @@ IPythonInstanceBase::~IPythonInstanceBase() {
         engine::python::LockPython lock;
 
         m_pyInstance = {};
+        m_pyInstanceClass = {};
     }
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Allocates the instance data. We set up the following on the users
-///		IInstance object
+///		The node's IInstance for the current binding. The first call under
+///		a binding constructs it (bindToGeneration -> beginBinding); later
+///		calls return the same object until putPipe() ends the binding.
+///		Called with the GIL held, from inside a callPython lambda or a
+///		pybind getter: a bind failure is thrown as the Error it is
+//-------------------------------------------------------------------------
+py::object &IPythonInstanceBase::boundInstance() {
+    if (m_boundError) throw m_boundError;
+
+    if (auto ccode = bindToGeneration()) throw ccode;
+
+    if (!m_pyInstance)
+        throw APERR(Ec::InvalidCommand, "The node instance is not bound",
+                    pipeType.id);
+
+    return m_pyInstance;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Per-binding constructor (plan 4.1 rule 2). Builds the node's
+///		IInstance and sets up the following on it
 ///
 ///			IEndpoint		contains an object of the users IEndpoint class
 ///			IGlobal			contains an object of the users IGlobal class
 ///			instance		this IPythonInstanceBase class which allows
 ///							access to instance functions
+///			_caller			the binding's caller context from the pipe,
+///							when the opener set one
 ///
 ///			endpoint		<deprecated> - use IEndpoint.endpoint
 ///
+///		then calls beginInstance() when the node defines it. The caller
+///		context is in place before the node's first line of code runs
 //-------------------------------------------------------------------------
-Error IPythonInstanceBase::beginFilterInstance() noexcept {
+Error IPythonInstanceBase::beginBinding() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
 
-    // Calls the begin instance on the python filter
     const auto python = localfcn()->Error {
+        // Create a new instance
+        m_pyInstance = m_pyInstanceClass();
+
+        // Save the python part of the endpoint
+        m_pyInstance.attr("IEndpoint") = m_global.m_pyEndpoint;
+
+        // We may not have an IGlobal
+        if (m_global.m_pyGlobal)
+            m_pyInstance.attr("IGlobal") = m_global.m_pyGlobal;
+
+        // Save the ptr to our functions
+        m_pyInstance.attr("instance") = this;
+
+        // <deprecated>
+        //		This is for compatability but it is ambiguous
+        m_pyInstance.attr("endpoint") = m_global.m_pyEndpoint;
+        // <deprecated>
+
+        // The binding's caller context, when the opener stamped one
+        if (pipe && pipe->caller) m_pyInstance.attr("_caller") = pipe->caller;
+
         // If it has a begin instance, call it
         if (m_pyMethods & PythonMethod::BeginInstance)
             m_pyInstance.attr("beginInstance")();
@@ -173,33 +203,68 @@ Error IPythonInstanceBase::beginFilterInstance() noexcept {
 
     auto ccode = callPython(python);
 
-    return checkCallParent(ccode) ? Parent::beginFilterInstance() : ccode;
+    // A constructor that failed half way leaves no instance: the binding
+    // stays recorded (putPipe ends it), the node is simply not there
+    if (ccode) {
+        engine::python::LockPython lock;
+
+        m_pyInstance = {};
+    }
+
+    return ccode;
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Releases the instance data
+///		Per-binding destructor (plan 4.1 rule 2): endInstance() when the
+///		node defines it, then the instance is dropped. The handle is
+///		taken off this filter BEFORE endInstance runs, so a node that
+///		fails on its way out still leaves nothing behind
+//-------------------------------------------------------------------------
+Error IPythonInstanceBase::endBinding() noexcept {
+    LOGPIPE();
+
+    const auto python = localfcn()->Error {
+        if (!m_pyInstance) return {};
+
+        auto instance = _mv(m_pyInstance);
+        m_pyInstance = {};
+
+        if (m_pyMethods & PythonMethod::EndInstance)
+            instance.attr("endInstance")();
+        return {};
+    };
+
+    return callPython(python);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Begins the filter for its slot. Per-binding state is beginBinding's
+//-------------------------------------------------------------------------
+Error IPythonInstanceBase::beginFilterInstance() noexcept {
+    LOGPIPE();
+
+    if (m_boundError) return m_boundError;
+
+    // The node's instance is NOT built here: it is constructed per
+    // binding on the first touch (beginBinding). The filter object itself
+    // stays with the slot
+    return Parent::beginFilterInstance();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Ends the filter for its slot
 //-------------------------------------------------------------------------
 Error IPythonInstanceBase::endFilterInstance() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
 
-    // End the instance filter
-    const auto python = localfcn()->Error {
-        // If we have an instance
-        if (m_pyInstance) {
-            // If it has an end instance method, call it
-            if (m_pyMethods & PythonMethod::EndInstance)
-                m_pyInstance.attr("endInstance")();
-
-            // Clear it
-            m_pyInstance = {};
-        }
-        return {};
-    };
-
-    auto ccode = callPython(python);
+    // A binding still in progress (the endpoint closing under an open
+    // pipe) is ended with the filter
+    auto ccode = releaseBinding();
 
     return checkCallParent(ccode) ? Parent::endFilterInstance() : ccode;
 }

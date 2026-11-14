@@ -37,7 +37,6 @@ import tempfile
 import time
 import socket
 import hashlib
-import itertools
 import secrets
 import shlex
 import shutil
@@ -91,7 +90,7 @@ from rocketride import (
 from .dbg_stdio import DbgStdio
 from .engine_key import CONST_CATALOG_NODE_PREFIX
 from .pipeline import references_env, resolve_pipeline_env
-from .types import LAUNCH_TYPE, TaskError
+from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
@@ -459,24 +458,6 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
 register_channel_command('spend.check', _check_spend)
 
 
-# ==== Trace epochs ===========================================================
-
-#: The trace epochs this server process hands out, one per engine launch
-#: (plan 7.4): the engine seeds the high 16 bits of its traceId counter from
-#: it, so the ids of two engines one connection holds never collide.
-_trace_epochs = itertools.count(1)
-
-
-def next_trace_epoch() -> int:
-    """
-    The next launch's trace epoch: monotonic per server process, 1..65535, then wraps.
-
-    Returns:
-        A 16-bit epoch, never 0 (0 means "no epoch" to the engine).
-    """
-    return (next(_trace_epochs) - 1) % 0xFFFF + 1
-
-
 # ==== Engine identity: the catalog facts behind the content key =============
 
 
@@ -501,8 +482,9 @@ def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, An
 
     Raises:
         Exception: The service is unknown or the config does not fit its
-            schema; the key then holds the stored config and the engine stays
-            private (the engine itself reports the config error at start).
+            schema. ``engine_content`` lets it through: a spec that cannot be
+            keyed is refused at start (``TaskServer._engine_shape``), never
+            run under a private key over its raw config.
     """
     from rocketlib import getServiceDefinition
 
@@ -712,7 +694,7 @@ class TaskEngine(DAPBase):
                 start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
-            trigger: What fired the run ('' | 'manual' | 'schedule' | 'process');
+            trigger: What fired the run ('' | 'manual' | 'schedule' | 'submit');
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
@@ -723,6 +705,7 @@ class TaskEngine(DAPBase):
         self.project_id = project_id
         self.source = source
         self.engine_key = engine_key
+        self.engine_id = 0  # This launch's id, minted by the server at every start (plan 7.4); 0 = never started
         self.address = address
         self.client_id = client_id
         self.team_id = team_id
@@ -755,10 +738,11 @@ class TaskEngine(DAPBase):
         # of them starts a new engine under the same key (plan 7.2)
         self.dormant_reason: Optional[str] = None
 
-        # True once this run confirmed running: the pipeline reported its
-        # service up (apaevt_status_state with service true), the same signal
-        # wait_for_running() waits for. Only a crash after it restarts
-        self.reached_running = False
+        # The lifecycle state the engine owns (plan 7.2): NEW until start_task,
+        # STARTING until the pipeline reports its service up (the signal
+        # wait_for_running() waits for), then RUNNING; STOPPING on a requested
+        # stop; STOPPED or FAILED once the process is gone
+        self.state = EngineState.NEW
 
         # Have the final events been sent yet
         self._final_events_sent = False
@@ -811,7 +795,6 @@ class TaskEngine(DAPBase):
 
         # Lifecycle state
         self._tmpfile = None
-        self._stop_requested = False
         # Bumped by every stop_task, so a restart can tell whether a stop arrived
         # while it loaded, even on a task whose last run was already stopped
         self._stop_count = 0
@@ -881,7 +864,7 @@ class TaskEngine(DAPBase):
         # run: only the trusted dispatch stamps manual/schedule/process.)
         if run_kind not in ('dev', 'deploy'):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
-        if trigger not in ('', 'manual', 'schedule', 'process'):
+        if trigger not in ('', 'manual', 'schedule', 'submit'):
             raise ValueError(f'invalid trigger: {trigger!r}')
         # owner_kind picks the storage/run-log tree exactly like run_kind picks
         # the continuum: any value outside the closed vocabulary ('Team',
@@ -901,9 +884,6 @@ class TaskEngine(DAPBase):
         self._debug_subprocess = False
 
         # Termination management
-        self._is_restarting = False
-        # One restart at a time: two would share _restart_env and _is_restarting
-        self._restart_in_progress = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -923,7 +903,6 @@ class TaskEngine(DAPBase):
         self._env_source = env_source
 
         # Values a restart loaded before stopping the old process, for the next start only
-        self._restart_env: Optional[Dict[str, str]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
@@ -937,12 +916,9 @@ class TaskEngine(DAPBase):
     async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """Replace ``${KEY}`` placeholders using freshly loaded environment values.
 
-        Uses the values a restart already loaded, if any. Delegates to
-        :func:`pipeline.resolve_pipeline_env`.
+        Delegates to :func:`pipeline.resolve_pipeline_env`.
         """
-        env, self._restart_env = self._restart_env, None
-        if env is None:
-            env = await self._load_env(pipeline)
+        env = await self._load_env(pipeline)
         return resolve_pipeline_env(pipeline, env)
 
     # Reason handed to the node subprocess when this engine has no database
@@ -1245,9 +1221,6 @@ class TaskEngine(DAPBase):
             # The engine DEFAULT level, for work outside any binding; the
             # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
-            # This launch's trace epoch: the engine seeds the high 16 bits of
-            # its traceId counter from it (plan 7.4, P31)
-            'traceEpoch': next_trace_epoch(),
         }
 
         # Trusted identity for in-process tools (surfaced to nodes as
@@ -1680,7 +1653,30 @@ class TaskEngine(DAPBase):
                 raise OutOfCreditsError(response.get('message'))
             raise RuntimeError(response.get('message', 'Data request failed'))
 
+        # An open answers with the binding's bare trace counter; the caller
+        # gets the wire traceId (plan 7.4) - the same string its events carry
+        body = response.get('body')
+        if isinstance(body, dict) and isinstance(body.get('traceId'), int):
+            body['traceId'] = self.trace_ref(body['traceId'])
         return response
+
+    def trace_ref(self, trace_id: int) -> str:
+        """
+        The wire form of one of this launch's trace ids: ``{nodeId}.{engineId}.{traceId}``.
+
+        The engine mints a bare counter per launch and knows nothing of servers
+        or launches; the prefix makes the id unique across every engine and
+        server a client may hold, exact in every language, and tells a stale
+        launch's id from a live one (plan 7.4, 2026-11-13). Clients treat the
+        string as opaque.
+
+        Args:
+            trace_id: The engine's bare trace counter.
+
+        Returns:
+            str: The wire traceId.
+        """
+        return f'{self._server.node_id}.{self.engine_id}.{trace_id}'
 
     async def _process_exit_code(self) -> Optional[int]:
         """The subprocess exit code, or None if it could not be reaped (see below).
@@ -1715,7 +1711,7 @@ class TaskEngine(DAPBase):
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
         """
-        if not self._exit_event_seen and not self._stop_requested:
+        if not self._exit_event_seen and self._stop_reason is None:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
 
@@ -1752,6 +1748,12 @@ class TaskEngine(DAPBase):
         # Block new operations (e.g. data requests) during teardown
         self._is_terminating = True
 
+        # What the run was before it ended decides what it becomes: a crash
+        # after RUNNING leaves holders dormant, an end before it is a start
+        # failure (plan 7.2)
+        was_running = self.state is EngineState.RUNNING
+        self.state = EngineState.STOPPING
+
         # Update status to stopping
         self._status.status = 'Stopping'
         self._status.state = TASK_STATE.STOPPING.value
@@ -1763,10 +1765,8 @@ class TaskEngine(DAPBase):
 
         self._apply_process_exit_code(exit_code)
 
-        # If we are not restarting
-        if not self._is_restarting:
-            self._status.completed = True
-            self._status.endTime = time.time()
+        self._status.completed = True
+        self._status.endTime = time.time()
 
         # NOTE: the final zeroed status and the run-log close happen at the
         # END of teardown (after metrics stop + terminal state assignment) —
@@ -1883,18 +1883,15 @@ class TaskEngine(DAPBase):
             self.debug_message(f'Error cleaning up debugger termination: {e}')
 
         # Set final state
-        if self._stop_requested:
-            if self._is_restarting:
-                self._status.status = 'Restarting'
-                self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('restarted by user request')
-            else:
-                self._status.status = 'Stopped'
-                self._status.state = TASK_STATE.CANCELLED.value
-                self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+        if self._stop_reason is not None:
+            self._status.status = 'Stopped'
+            self._status.state = TASK_STATE.CANCELLED.value
+            self.state = EngineState.STOPPED
+            self.debug_task_message('stopped', reason=self._stop_reason)
         elif self._status.exitCode == 0:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
+            self.state = EngineState.STOPPED
             self.debug_task_message('completed successfully')
         else:
             self._status.status = 'Stopped'
@@ -1905,8 +1902,10 @@ class TaskEngine(DAPBase):
             # dormant: the next request through any of them starts the engine
             # again under the same key (plan 7.2). Set in the same step as the
             # terminal state, so no request sees a finished engine that is not
-            # yet dormant. A run that never confirmed running is not retried.
-            if self.reached_running and not self._is_restarting:
+            # yet dormant. A run that never confirmed running FAILED and is
+            # not retried.
+            self.state = EngineState.STOPPED if was_running else EngineState.FAILED
+            if was_running:
                 self.dormant_reason = 'crash'
                 try:
                     self._server.engine_crashed(self)
@@ -1923,21 +1922,18 @@ class TaskEngine(DAPBase):
         # it — a later broadcast becomes the new "last known" reading and
         # silently undoes the zero (that bug shipped once). body['final']
         # marks it so the run-log sampler always records it.
-        if self._is_restarting:
-            await self._send_status_update()
-        else:
-            try:
-                self._status.metrics.cpu_percent = 0.0
-                self._status.metrics.cpu_memory_mb = 0.0
-                self._status.metrics.gpu_memory_mb = 0.0
-                final_body = self._status.model_dump()
-                final_body['final'] = True
-                await self._forward_task_event(
-                    EVENT_TYPE.SUMMARY,
-                    self.build_event('apaevt_status_update', id=self.id, body=final_body),
-                )
-            except Exception as e:
-                self.debug_message(f'Final zeroed status emit failed: {e}')
+        try:
+            self._status.metrics.cpu_percent = 0.0
+            self._status.metrics.cpu_memory_mb = 0.0
+            self._status.metrics.gpu_memory_mb = 0.0
+            final_body = self._status.model_dump()
+            final_body['final'] = True
+            await self._forward_task_event(
+                EVENT_TYPE.SUMMARY,
+                self.build_event('apaevt_status_update', id=self.id, body=final_body),
+            )
+        except Exception as e:
+            self.debug_message(f'Final zeroed status emit failed: {e}')
 
         # Send out the final events - last you will every here from us...
         if not self._final_events_sent:
@@ -1959,52 +1955,51 @@ class TaskEngine(DAPBase):
             )
 
             # If we are not restarting, send the final events
-            if not self._is_restarting:
-                # Broadcast termination event
-                terminated_event = self.build_event(
-                    'terminated',
-                    id=self.id,
-                )
+            # Broadcast termination event
+            terminated_event = self.build_event(
+                'terminated',
+                id=self.id,
+            )
 
-                await self._forward_task_event(
-                    EVENT_TYPE.DEBUGGER,
-                    terminated_event,
-                )
+            await self._forward_task_event(
+                EVENT_TYPE.DEBUGGER,
+                terminated_event,
+            )
 
-                # Send out an end task message
-                task_message = self.build_event(
-                    'apaevt_task',
-                    body={
-                        'action': 'end',
-                        'name': self._status.name,
-                        'projectId': self.project_id,
-                        'source': self.source,
-                        **({'reason': self._stop_reason} if self._stop_reason else {}),
-                    },
-                    id=self.id,
-                )
-                await self._forward_task_event(
-                    EVENT_TYPE.TASK,
-                    task_message,
-                )
+            # Send out an end task message
+            task_message = self.build_event(
+                'apaevt_task',
+                body={
+                    'action': 'end',
+                    'name': self._status.name,
+                    'projectId': self.project_id,
+                    'source': self.source,
+                    **({'reason': self._stop_reason} if self._stop_reason else {}),
+                },
+                id=self.id,
+            )
+            await self._forward_task_event(
+                EVENT_TYPE.TASK,
+                task_message,
+            )
 
-                # Notify dashboard of task errors (non-zero exit)
-                if self._status.exitCode and self._status.exitCode != 0:
-                    task_user_id = self.client_id or None
-                    await self._server.broadcast_server_event(
-                        EVENT_TYPE.DASHBOARD,
-                        {
-                            'event': 'apaevt_dashboard',
-                            'body': {
-                                'action': 'task_error',
-                                'timestamp': time.time(),
-                                'taskId': self.id,
-                                'exitCode': self._status.exitCode,
-                                'exitMessage': self._status.exitMessage or None,
-                            },
+            # Notify dashboard of task errors (non-zero exit)
+            if self._status.exitCode and self._status.exitCode != 0:
+                task_user_id = self.client_id or None
+                await self._server.broadcast_server_event(
+                    EVENT_TYPE.DASHBOARD,
+                    {
+                        'event': 'apaevt_dashboard',
+                        'body': {
+                            'action': 'task_error',
+                            'timestamp': time.time(),
+                            'taskId': self.id,
+                            'exitCode': self._status.exitCode,
+                            'exitMessage': self._status.exitMessage or None,
                         },
-                        user_id=task_user_id,
-                    )
+                    },
+                    user_id=task_user_id,
+                )
 
         # Close out (or annotate) the run-log continuum LAST — after the
         # final zeroed status AND every terminal task event (exited /
@@ -2017,20 +2012,17 @@ class TaskEngine(DAPBase):
         # outcome. Best-effort — never blocks or breaks teardown.
         if self._run_log is not None:
             try:
-                if self._is_restarting:
-                    self._run_log.note_restart()
+                # A ttl-window expiry is SUCCESS: the run stayed up
+                # exactly as configured, then shut down. Only a real
+                # stop (or abnormal exit) reads as cancelled.
+                if self._status.state == TASK_STATE.CANCELLED.value:
+                    outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+                elif self._status.exitCode == 0:
+                    outcome = 'ok'
                 else:
-                    # A ttl-window expiry is SUCCESS: the run stayed up
-                    # exactly as configured, then shut down. Only a real
-                    # stop (or abnormal exit) reads as cancelled.
-                    if self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
-                    elif self._status.exitCode == 0:
-                        outcome = 'ok'
-                    else:
-                        outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
-                    self._run_log = None
+                    outcome = 'error'
+                await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                self._run_log = None
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
 
@@ -2233,6 +2225,11 @@ class TaskEngine(DAPBase):
         # its engineKey; the controlId is stamped per holder below
         if isinstance(body, dict):
             body['engineKey'] = self.engine_key
+
+            # The engine's bare trace counter becomes the wire traceId here,
+            # the one place its events leave the task process (plan 7.4)
+            if isinstance(body.get('traceId'), int):
+                body['traceId'] = self.trace_ref(body['traceId'])
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -2567,7 +2564,8 @@ class TaskEngine(DAPBase):
         failed start is not retried.
         """
         self._status.state = TASK_STATE.RUNNING.value
-        self.reached_running = True
+        if self.state in (EngineState.NEW, EngineState.STARTING):
+            self.state = EngineState.RUNNING
 
     def send_scheduled_updates(self):
         """Mark status as updated for next broadcast cycle."""
@@ -2586,12 +2584,23 @@ class TaskEngine(DAPBase):
 
     def is_task_complete(self) -> bool:
         """
-        Check if task has reached terminal state.
+        Whether the engine has reached a terminal state (``STOPPED`` or ``FAILED``).
 
         Returns:
-            True if completed or cancelled, False if still active
+            True once the process is gone, False while it is new, starting,
+            running or stopping.
         """
-        return self._status.state in [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
+        return self.state in (EngineState.STOPPED, EngineState.FAILED)
+
+    @property
+    def is_live(self) -> bool:
+        """True while the engine can serve: starting or running (not yet asked to stop)."""
+        return self.state in (EngineState.STARTING, EngineState.RUNNING)
+
+    @property
+    def accepting_holds(self) -> bool:
+        """True while a control may take a hold: built, starting or running; never once a stop began."""
+        return self.state in (EngineState.NEW, EngineState.STARTING, EngineState.RUNNING)
 
     def is_attached(self, conn: TaskConn) -> bool:
         """
@@ -2933,105 +2942,6 @@ class TaskEngine(DAPBase):
         self._status_trace = []
         self.info = {}
 
-    async def restart_task(
-        self,
-        pipeline: Dict[str, Any],
-        project_id: str,
-        source: str,
-        provider: str,
-    ) -> None:
-        """
-        Restart the task with new pipeline configuration.
-
-        Uses stop_task() for full cleanup and start_task() for full initialization,
-        preserving statistics across the restart cycle.
-
-        Args:
-            pipeline: New pipeline configuration
-            project_id: Project identifier (must match existing)
-            source: Source identifier (must match existing)
-            provider: Provider name (may be updated)
-
-        Raises:
-            RuntimeError: If debugger attached or restart fails
-
-        Process:
-        1. Check debugger not attached
-        2. Update configuration
-        3. Stop task (full cleanup via _terminated)
-        4. Wait for termination to complete
-        5. Reset all status from the previous run
-        6. Start task (full initialization)
-        """
-        # Checked and set before the first await, so a concurrent restart is refused
-        # instead of starting with the other restart's values
-        if self._restart_in_progress:
-            raise RuntimeError('Failed to restart task: a restart is already in progress')
-        self._restart_in_progress = True
-
-        try:
-            self._server.debug_message(f'Task "{self.id}" restart initiated...')
-
-            # Check if debugger is attached - fail if so
-            if self.has_attached_debugger():
-                raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
-
-            # Load the new run's values while the old process still runs and
-            # nothing has changed yet: a failed load leaves the task as it was
-            stops_before = self._stop_count
-            self._restart_env = await self._load_env(pipeline)
-
-            # A stop that arrived while the values loaded wins: nothing has
-            # changed yet, so the task stays stopped instead of starting again
-            if self._stop_count != stops_before:
-                raise RuntimeError('the task was stopped while the restart loaded its values')
-
-            # Set the restart flag to inhibit termination/start events
-            self._is_restarting = True
-
-            # Update internal task configuration
-            self._pipeline = pipeline
-            self._pipeline['source'] = source
-            self._pipeline['project_id'] = project_id
-            self.project_id = project_id
-            self.source = source
-            self._provider = provider
-            self._status.project_id = project_id
-            self._status.source = source
-
-            self._server.debug_message(f'Task "{self.id}" configuration updated, stopping...')
-
-            # Stop the task (triggers full cleanup via _terminated)
-            await self.stop_task()
-
-            # Wait for termination to complete
-            while not self.is_task_complete():
-                await asyncio.sleep(0.1)
-
-            self._server.debug_message(f'Task "{self.id}" stopped, resetting state for restart...')
-
-            # Reset all status from the previous run
-            self._reset_status()
-
-            self._server.debug_message(f'Task "{self.id}" starting with new configuration...')
-
-            # Start fresh (full initialization)
-            await self.start_task()
-
-            self._server.debug_message(
-                f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
-            )
-
-        except Exception as e:
-            self._server.debug_message(f'Task "{self.id}" restart failed: {str(e)}')
-            raise RuntimeError(f'Failed to restart task: {str(e)}')
-
-        finally:
-            # Always reset these
-            self._is_restarting = False
-            self._restart_env = None
-            self._restart_in_progress = False
-
     async def start_task(self) -> None:
         """
         Launch subprocess and initialize communication interfaces.
@@ -3066,15 +2976,18 @@ class TaskEngine(DAPBase):
             self._exit_event_seen = False
             self._service_up_notes = []
             self._service_down_notes = []
-            self._stop_requested = False
             self._stop_reason = None
             self.dormant_reason = None
-            self.reached_running = False
+
+            # Every start is a new launch: a new engineId, so the trace ids
+            # of a dormant restart never alias the previous launch's (plan 7.4)
+            self.engine_id = self._server.next_engine_id()
             self._is_terminating = False
             self._reset_channel_state()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
+            self.state = EngineState.STARTING
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
@@ -3084,8 +2997,7 @@ class TaskEngine(DAPBase):
             self._check_pipeline(resolved)
 
             # Mark the start time
-            if not self._is_restarting:
-                self._status.startTime = time.time()
+            self._status.startTime = time.time()
 
             # The cloud databases to authorize and the public-endpoint flag
             # come from what runs, not self._pipeline: ${...} expansion can
@@ -3197,7 +3109,7 @@ class TaskEngine(DAPBase):
             # A stop that arrived during the awaits above (loading the
             # placeholder values, writing the task file) found no process to
             # end: honour it here instead of starting one
-            if self._stop_requested:
+            if self._stop_reason is not None:
                 raise RuntimeError('the task was stopped before it started')
 
             self._engine_process = await asyncio.create_subprocess_exec(
@@ -3312,45 +3224,27 @@ class TaskEngine(DAPBase):
             # Create the periodic status update task
             self._status_update_task = asyncio.create_task(self._status_update_loop())
 
-            # If we are not restarting, notify of task action
-            if not self._is_restarting:
-                # Send out a begin message
-                task_message = self.build_event(
-                    'apaevt_task',
-                    body={
-                        'action': 'begin',
-                        'name': self._status.name,
-                        'projectId': self.project_id,
-                        'source': self.source,
-                        # The run's CHAPTER identity: the run-begin marker's
-                        # seq (the writer opened just above). Lets clients
-                        # synthesize the chapter locally with the exact key
-                        # the server's chapter list will carry.
-                        'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
-                    },
-                    id=self.id,
-                )
-                await self._forward_task_event(
-                    EVENT_TYPE.TASK,
-                    task_message,
-                )
-            else:
-                # Send out a restart message
-                task_message = self.build_event(
-                    'apaevt_task',
-                    body={
-                        'action': 'restart',
-                        'name': self._status.name,
-                        'projectId': self.project_id,
-                        'source': self.source,
-                    },
-                    id=self.id,
-                )
-                await self._forward_task_event(
-                    EVENT_TYPE.TASK,
-                    task_message,
-                )
-
+            # Notify of task action
+            # Send out a begin message
+            task_message = self.build_event(
+                'apaevt_task',
+                body={
+                    'action': 'begin',
+                    'name': self._status.name,
+                    'projectId': self.project_id,
+                    'source': self.source,
+                    # The run's CHAPTER identity: the run-begin marker's
+                    # seq (the writer opened just above). Lets clients
+                    # synthesize the chapter locally with the exact key
+                    # the server's chapter list will carry.
+                    'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
+                },
+                id=self.id,
+            )
+            await self._forward_task_event(
+                EVENT_TYPE.TASK,
+                task_message,
+            )
             # Broadcast a status change
             await self._send_status_update()
 
@@ -3358,11 +3252,7 @@ class TaskEngine(DAPBase):
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:
-            # A start that fails ends the run, restart or not. Left set, the
-            # flag makes _terminated report "Restarting" for a dead task and
-            # skip the end event and the run log's end. restart_task's
-            # finally clears it too.
-            self._is_restarting = False
+            # A start that fails ends the run
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
             raise
@@ -3382,8 +3272,9 @@ class TaskEngine(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as a requested stop and block new operations.
-                self._stop_requested = True
+                # Mark as a requested stop and block new operations
+                if self.is_live:
+                    self.state = EngineState.STOPPING
                 self._stop_count += 1
                 self._stop_reason = reason
                 self._is_terminating = True

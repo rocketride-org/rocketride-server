@@ -72,6 +72,60 @@ IServiceFilterInstance::~IServiceFilterInstance() {
 Error IServiceFilterInstance::beginFilterInstance() noexcept { return {}; }
 
 //-------------------------------------------------------------------------
+/// @details
+///		First touch of a binding: bind this instance to the pipe's current
+///		generation. Already bound to it: nothing to do. Bound to an older
+///		generation (a putPipe() that never ran): that binding is ended
+///		first. The generation is recorded BEFORE beginBinding() runs, so a
+///		binding whose constructor failed half way is still ended by
+///		putPipe() and nothing is left behind for the next holder
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IServiceFilterInstance::bindToGeneration() noexcept {
+    if (!pipe)
+        return APERR(Ec::InvalidCommand, "The instance is not on a pipe");
+
+    if (m_endingBinding)
+        return APERR(Ec::InvalidCommand,
+                     "The instance is ending its binding; nothing can be bound "
+                     "from inside endInstance");
+
+    const auto generation = pipe->generation;
+    if (m_boundGeneration == generation) return {};
+
+    if (m_boundGeneration)
+        if (auto ccode = releaseBinding()) return ccode;
+
+    m_boundGeneration = generation;
+    return beginBinding();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		End the binding this instance holds, if any
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IServiceFilterInstance::releaseBinding() noexcept {
+    if (!m_boundGeneration) return {};
+
+    m_boundGeneration = 0;
+    m_endingBinding = true;
+    auto ccode = endBinding();
+    m_endingBinding = false;
+    return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Whether this instance is bound to the pipe's current generation
+//-------------------------------------------------------------------------
+bool IServiceFilterInstance::isBound() const noexcept {
+    return pipe && m_boundGeneration && m_boundGeneration == pipe->generation;
+}
+
+//-------------------------------------------------------------------------
 /// @brief End use of a filter
 /// @details
 ///     Cleans up allocated buffers and resets internal pointers.

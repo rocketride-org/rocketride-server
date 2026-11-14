@@ -127,11 +127,11 @@ export interface PipelineConfig {
 }
 
 /**
- * What `process()` returns: the pipe `close` body plus the resolution stamps.
+ * What `submit()` returns: the pipe `close` body plus the resolution stamps.
  *
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.
  */
-export interface PROCESS_RESULT {
+export interface SUBMIT_RESULT {
 	/** The address that answered: `developerId.pipelineId.source` */
 	token: string;
 

@@ -35,6 +35,7 @@ async def test_a_second_open_for_one_correlation_id_returns_the_same_binding():
     conn = DataConn(server=MagicMock(), transport=MagicMock())
     try:
         conn._pipe_map[3] = DataConnPipe(pipe_id=3, is_open=True, trace_id=0x2A0001, correlation_id='req-1')
+        conn._open_by_correlation['req-1'] = 3
         conn._ensure_pipe_sem = AsyncMock(side_effect=AssertionError('a second pipe was requested'))
         request = {'command': 'rrext_process', 'seq': 7, 'arguments': {}}
 
@@ -54,6 +55,7 @@ async def test_another_correlation_id_takes_its_own_pipe():
     conn = DataConn(server=MagicMock(), transport=MagicMock())
     try:
         conn._pipe_map[3] = DataConnPipe(pipe_id=3, is_open=True, trace_id=1, correlation_id='req-1')
+        conn._open_by_correlation['req-1'] = 3
         conn._ensure_pipe_sem = AsyncMock(side_effect=RuntimeError('took the pipe path'))
 
         with pytest.raises(RuntimeError, match='took the pipe path'):

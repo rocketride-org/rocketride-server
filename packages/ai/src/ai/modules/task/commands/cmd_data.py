@@ -34,7 +34,7 @@ This module works in conjunction with TaskServer to:
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
-from .engine_access import engine_for
+from .engine_access import engine_for, wait_running
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -140,8 +140,24 @@ class DataCommands(DAPConn):
             if isinstance(arguments, dict):
                 arguments.pop('correlationId', None)
 
-            # Locate the caller's control using authentication and token
-            control = self.get_control(request, 'task.data')
+            # The caller's control for the address. An OPEN resolves the way
+            # submit() does: the live run on the first rung that answers, or
+            # the publication started from its artifact (plan 3.2, one resolver
+            # for every verb). The frames of an open pipe (write/close/tool)
+            # ATTACH only: they must land on the control the open found, never
+            # start a publication a colder rung could not. C.8's open-pipe
+            # record pins each slot to the engine it opened on (plan 3.1 P2).
+            subcommand = arguments.get('subcommand') if isinstance(arguments, dict) else None
+            if subcommand == 'open':
+                control = await self.resolve_control_or_start(request, 'task.data')
+            else:
+                control = self.get_control(request, 'task.data')
+
+            # Per-call params on an open are admitted by public name against
+            # the control's parameters map (plan 5.4 item 5): an unknown name
+            # is refused here, never dropped; C.8 adds the descriptor filter
+            if isinstance(arguments, dict) and arguments.get('subcommand') == 'open' and 'params' in arguments:
+                arguments['params'] = control.check_params(arguments.get('params'))
 
             # The engine this request runs on: one that stopped on its
             # inactivity timer starts again under the same key (plan 7.2),
@@ -155,9 +171,9 @@ class DataCommands(DAPConn):
             # of the engine keeps aging
             control.begin_request()
             try:
-                # Ensure the task is ready to process data (blocks until running)
-                # This is critical as tasks may be in startup, initialization, or other states
-                await task.wait_for_running()
+                # Ensure the task is ready to process data (blocks until running);
+                # a start that never confirms is engine_start_failed
+                await wait_running(task)
 
                 # Forward the data processing request to the task instance and
                 # get the raw response from the subprocess

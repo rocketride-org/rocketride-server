@@ -106,12 +106,12 @@ async def start_server_task_as_team(
       - The deployment the run resolved through (``deployment``) rides
         the same trusted channel: the publisher's disable/remove releases
         the run's hold.
-      - ``rung`` stamps the published rung a ``process(name)`` start
+      - ``rung`` stamps the published rung a ``submit(name)`` start
         answered on (``'me'``, ``'team'`` or ``'public'``); empty derives it
         from the owner. ``developer_id`` is the address namespace when it is
         not ``org_id``'s own: a ``@public`` run is billed to the caller's org
         while its address stays the publisher's.
-      - ``version`` is the artifact version a ``process(name)`` start
+      - ``version`` is the artifact version a ``submit(name)`` start
         resolved; ``team_context`` the team whose environment the control
         runs with (plan 6.2; default: the deploying team ``team_id``).
 
@@ -218,6 +218,15 @@ class _InProcessConn(TaskConn):
 
     def __init__(self, server: 'TaskServer'):
         super().__init__(server._next_connection_id(), server, _InProcessTransport())
+        # The exception behind the last error response, so the in-process
+        # caller gets it itself: a TaskError keeps its code and fields
+        # (engine_start_failed, not_found ...) instead of a flattened message
+        self._last_exception: Optional[BaseException] = None
+
+    def build_exception(self, message: Dict[str, Any], exc: BaseException) -> Dict[str, Any]:
+        """Record the handler's exception beside the error response it becomes."""
+        self._last_exception = exc
+        return super().build_exception(message, exc)
 
     async def request(
         self,
@@ -228,9 +237,12 @@ class _InProcessConn(TaskConn):
         data: Union[bytes, str] = None,
     ) -> Dict[str, Any]:
         request = self.build_request(command, token=token, arguments=arguments, data=data)
+        self._last_exception = None
         await self.on_receive(request)
         response = self._transport.get_response()
         if not response or not response.get('success'):
+            if self._last_exception is not None:
+                raise self._last_exception
             reason = (response.get('message') or 'no reason') if response else 'no response'
             raise RuntimeError(f'{command} failed: {reason}')
         return response

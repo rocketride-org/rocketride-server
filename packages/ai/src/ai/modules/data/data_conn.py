@@ -181,6 +181,10 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
+        # The server-minted correlationId of each open pipe -> its pipe id, so
+        # an open repeated for one request finds its binding in O(1) (ALB seam 7)
+        self._open_by_correlation: Dict[str, int] = {}
+
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
@@ -386,7 +390,7 @@ class DataConn(DAPConn):
         # Clean up any remaining pipes
         for pipe_id in list(self._pipe_map.keys()):
             self.debug_message(f'Cleaning up remaining pipe {pipe_id} during disconnect')
-            conn_pipe = self._pipe_map.pop(pipe_id, None)
+            conn_pipe = self._pop_binding(pipe_id)
             if conn_pipe:
                 conn_pipe.has_failed = True  # Mark as failed for monitoring
                 await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
@@ -544,6 +548,27 @@ class DataConn(DAPConn):
             # Other lanes don't need framing
             pass
 
+    def _pop_binding(self, pipe_id: int) -> Optional[DataConnPipe]:
+        """
+        Remove a binding from the pipe map and from the request-id index, in one step.
+
+        Runs on the event loop with nothing in between, while the binding still
+        holds its slot: no replacement for the same request id can exist yet, so
+        the index entry retired here is necessarily this binding's. The old
+        ``_cleanup_pipe`` comparison by slot id could outlive a replacement that
+        reused the slot and delete the replacement's entry.
+
+        Args:
+            pipe_id: The slot of the binding to remove.
+
+        Returns:
+            The binding, or None when the slot was not open.
+        """
+        conn_pipe = self._pipe_map.pop(pipe_id, None)
+        if conn_pipe is not None and conn_pipe.correlation_id:
+            self._open_by_correlation.pop(conn_pipe.correlation_id, None)
+        return conn_pipe
+
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
         Execute synchronous pipe cleanup (runs in thread, no async semaphore operations).
@@ -635,7 +660,7 @@ class DataConn(DAPConn):
                     self.debug_message(
                         f'Cleaning up zombie pipe {pipe_id} after {inactive_time:.1f}s of inactivity (timeout: {self._pipe_timeout}s)'
                     )
-                    conn_pipe = self._pipe_map.pop(pipe_id, None)
+                    conn_pipe = self._pop_binding(pipe_id)
                     if conn_pipe:
                         conn_pipe.has_failed = True  # Mark as failed for monitoring
                         await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
@@ -733,11 +758,9 @@ class DataConn(DAPConn):
         # An open already served for this request: hand back the same binding
         correlation_id = args.get('correlationId') or None
         if correlation_id is not None:
-            for conn_pipe in list(self._pipe_map.values()):
-                if conn_pipe.correlation_id == correlation_id and conn_pipe.is_open:
-                    return self.build_response(
-                        request, body={'pipe_id': conn_pipe.pipe_id, 'traceId': conn_pipe.trace_id}
-                    )
+            served = self._pipe_map.get(self._open_by_correlation.get(correlation_id, -1))
+            if served is not None and served.correlation_id == correlation_id and served.is_open:
+                return self.build_response(request, body={'pipe_id': served.pipe_id, 'traceId': served.trace_id})
 
         # Waits for the source to bind `state.target`, then sizes the semaphore
         # from its threadCount config; see `_ensure_pipe_sem`.
@@ -793,8 +816,10 @@ class DataConn(DAPConn):
                     # Begin the pipe
                     self._begin(conn_pipe)
 
-                    # Store in pipe map
+                    # Store in pipe map (and by its request id, for the idempotent open)
                     self._pipe_map[pipe_id] = conn_pipe
+                    if correlation_id is not None:
+                        self._open_by_correlation[correlation_id] = pipe_id
 
                     self.debug_message(
                         f'Successfully opened pipe {pipe_id} with lane {lane}, zombie timeout: {self._pipe_timeout}s'
@@ -975,7 +1000,7 @@ class DataConn(DAPConn):
             raise ValueError('No pipe_id specified')
 
         # Retrieve and remove the DataConnPipe instance from our mapping immediately
-        conn_pipe = self._pipe_map.pop(pipe_id, None)
+        conn_pipe = self._pop_binding(pipe_id)
         if not conn_pipe:
             raise ValueError(f'Close pipe with id {pipe_id} not found')
 
@@ -1060,7 +1085,7 @@ class DataConn(DAPConn):
         Emit one ``>DBG`` trace event for a tool invocation.
 
         Routed through ``monitorOther('DBG', ...)`` — the SAME monitor channel
-        the C++ Debugger uses for data-lane trace ops — so the supervisor's
+        the pipe's C++ trace emitter uses for data-lane trace ops — so the supervisor's
         stdio transport parses it into an ``apaevt_trace`` event and
         everything downstream follows for free: the derived ``apaevt_flow``
         events, the live Trace/Flow panes, the run-log continuum, and replay.

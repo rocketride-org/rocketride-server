@@ -38,7 +38,7 @@ Error IPythonInstanceBase::writeDocuments(
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
         // Call it
-        m_pyInstance.attr("writeDocuments")(documents);
+        boundInstance().attr("writeDocuments")(documents);
         return {};
     };
 

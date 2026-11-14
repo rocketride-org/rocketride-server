@@ -23,10 +23,10 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-13T03:48:06.185Z
-// Source commit: 47c642bfdb1392dbbc0438aa78b0cd24bc762a92
+// Generated:     2026-11-13T15:37:25.972Z
+// Source commit: 88fbda7951fca467f53c363991c28d567066ec57
 // Generator:     dts-bundle-generator@9.5.1
-// Produced by:   ./builder shell:remint
+// Produced by:   ./builder shell:freeze
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
@@ -1215,11 +1215,11 @@ export interface PipelineConfig {
     editorMode?: string;
 }
 /**
- * What `process()` returns: the pipe `close` body plus the resolution stamps.
+ * What `submit()` returns: the pipe `close` body plus the resolution stamps.
  *
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.
  */
-export interface PROCESS_RESULT {
+export interface SUBMIT_RESULT {
     /** The address that answered: `developerId.pipelineId.source` */
     token: string;
     /** The rung that answered */
@@ -3505,17 +3505,17 @@ export declare const CONST_DEFAULT_SERVICE = "https://api.rocketride.ai";
  */
 export declare const CONST_SOCKET_TIMEOUT = 180;
 /**
- * process() data up to this many bytes travels inline in ONE request; larger
+ * submit() data up to this many bytes travels inline in ONE request; larger
  * payloads (and every call with onSSE) stream through pipe open/write/close.
  * One shared constant with the server and the Python SDK (1 MiB).
  */
 /**
- * Seconds the TRANSPORT deadline of a process() request outlives the caller's
+ * Seconds the TRANSPORT deadline of a submit() request outlives the caller's
  * `timeout` (which the server enforces, pipe open to close): the server's own
  * timeout error, never the transport's, is what the caller sees.
  */
-export declare const PROCESS_TRANSPORT_MARGIN = 60;
-export declare const PROCESS_INLINE_MAX: number;
+export declare const SUBMIT_TRANSPORT_MARGIN = 60;
+export declare const SUBMIT_INLINE_MAX: number;
 /**
  * WebSocket ping interval in seconds.
  * Ping frames are sent at this interval to detect dead connections.
@@ -5088,10 +5088,12 @@ export declare class DataPipe {
      * @param onSSE - Optional async callback invoked for each SSE event emitted by
      *                the pipeline node for this specific pipe
      * @param team - Resolve the address through this one of your teams on every
-     *               request of the pipe (what process() passes on from the team
+     *               request of the pipe (what submit() passes on from the team
      *               that answered it)
+     * @param params - Per-call parameter values by public name; they ride the open,
+     *                 the one door every per-call value enters by
      */
-    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string);
+    constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
     /**
      * Give the pipe up without waiting for the server: the caller's operation is over
      * (its timeout expired). The SSE subscription is dropped at once, the server-side
@@ -5514,7 +5516,7 @@ export declare class RocketRideClient extends DAPClient {
      *
      * The pipeline stays up after the call and expires on its idle ttl.
      * `threads`/`args`/`env`/`ttl` apply to spec calls only; a name call ignores
-     * them and lists them in `ignored`. Data up to `PROCESS_INLINE_MAX` bytes
+     * them and lists them in `ignored`. Data up to `SUBMIT_INLINE_MAX` bytes
      * travels inline in the one request; larger data, and every call with
      * `onSSE`, streams through a pipe to the address the server answered with.
      *
@@ -5536,15 +5538,15 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.timeout - Seconds for the request (pipe open to close)
      * @param options.team - Answer `@team` from this one of your teams
      * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
-     * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `process`
+     * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
      *
      * @example
      * ```typescript
-     * const result = await client.process({ name: 'acme.docBrain', data: 'What is in this file?' });
+     * const result = await client.submit({ name: 'acme.docBrain', data: 'What is in this file?' });
      * console.log(result.resolved, result.answers);
      * ```
      */
-    process(options?: {
+    submit(options?: {
         name?: string;
         pipeline?: PipelineConfig;
         filepath?: string;
@@ -5562,7 +5564,7 @@ export declare class RocketRideClient extends DAPClient {
         onChange?: "error" | "keep" | "auto";
         timeout?: number;
         team?: string;
-    }): Promise<PROCESS_RESULT>;
+    }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
      */
@@ -5638,11 +5640,11 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Create a data pipe for streaming operations.
      */
-    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<DataPipe>;
+    pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
      */
-    send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<PIPELINE_RESULT | undefined>;
+    send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<PIPELINE_RESULT | undefined>;
     /**
      * Upload multiple files to a pipeline with progress tracking and parallel execution.
      *

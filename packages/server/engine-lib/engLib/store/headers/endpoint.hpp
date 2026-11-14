@@ -268,12 +268,6 @@ public:
                                          uint64_t traceId = 0) noexcept;
     virtual ErrorOr<ServicePipe> getPipe() noexcept;
 
-    // Seeds the high 16 bits of the process-wide traceId counter from the
-    // launch's traceEpoch (the task file's config.traceEpoch), so trace ids
-    // stay unique across the engines one connection may hold. 0 leaves the
-    // counter as it is; an epoch already in effect is not re-seeded.
-    static void seedTraceEpoch(uint32_t epoch) noexcept;
-
     // Runs before getPipe() hands out a pipe; an error refuses it
     static inline std::function<Error()> pipeGate;
     virtual Error putPipe(ServicePipe &pipe) noexcept;

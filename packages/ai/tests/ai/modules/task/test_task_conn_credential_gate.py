@@ -38,6 +38,7 @@ is what replaces the ``pk_``.)
 
 from __future__ import annotations
 
+import itertools
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -67,7 +68,7 @@ ALLOWED = [
     'rrext_ping',
     'rrext_identify',
     'rrext_process',
-    'process',
+    'rrext_submit',
     'rrext_monitor',
     'rrext_get_task_status',
     'rrext_get_pipeline',
@@ -413,7 +414,9 @@ async def _monitor_conn(identity):
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
     server._deployment_revoked = {}
-    server._control_starts = {}
+    server._engine_ids = itertools.count(1)
+    server._node_id = 1
+    server._launched = {}
     server._engine_restarts = {}
     server._restart_tasks = set()
     server._control_expiry = []
@@ -560,7 +563,9 @@ def _session_conn(identity):
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
     server._deployment_revoked = {}
-    server._control_starts = {}
+    server._engine_ids = itertools.count(1)
+    server._node_id = 1
+    server._launched = {}
     server._engine_restarts = {}
     server._restart_tasks = set()
     server._control_expiry = []

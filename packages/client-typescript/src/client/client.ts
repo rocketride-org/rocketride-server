@@ -28,8 +28,8 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PROCESS_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, PROCESS_INLINE_MAX, PROCESS_TRANSPORT_MARGIN } from './constants.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX, SUBMIT_TRANSPORT_MARGIN } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
@@ -73,6 +73,7 @@ export class DataPipe {
 	private _closed = false;
 	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
 	private _team?: string;
+	private _params?: Record<string, unknown>;
 
 	/**
 	 * Creates a new DataPipe instance.
@@ -85,10 +86,12 @@ export class DataPipe {
 	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
 	 *                the pipeline node for this specific pipe
 	 * @param team - Resolve the address through this one of your teams on every
-	 *               request of the pipe (what process() passes on from the team
+	 *               request of the pipe (what submit() passes on from the team
 	 *               that answered it)
+	 * @param params - Per-call parameter values by public name; they ride the open,
+	 *                 the one door every per-call value enters by
 	 */
-	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string) {
+	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
@@ -96,6 +99,7 @@ export class DataPipe {
 		this._provider = provider;
 		this._onSSE = onSSE;
 		this._team = team;
+		this._params = params && Object.keys(params).length > 0 ? { ...params } : undefined;
 	}
 
 	/** The request arguments, with the pipe's team when it has one. */
@@ -176,6 +180,7 @@ export class DataPipe {
 				object: this._objinfo,
 				mimeType: this._mimeType,
 				provider: this._provider,
+				...(this._params ? { params: this._params } : {}),
 			}),
 			token: this._token,
 		});
@@ -1594,7 +1599,7 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * The pipeline stays up after the call and expires on its idle ttl.
 	 * `threads`/`args`/`env`/`ttl` apply to spec calls only; a name call ignores
-	 * them and lists them in `ignored`. Data up to `PROCESS_INLINE_MAX` bytes
+	 * them and lists them in `ignored`. Data up to `SUBMIT_INLINE_MAX` bytes
 	 * travels inline in the one request; larger data, and every call with
 	 * `onSSE`, streams through a pipe to the address the server answered with.
 	 *
@@ -1616,15 +1621,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.timeout - Seconds for the request (pipe open to close)
 	 * @param options.team - Answer `@team` from this one of your teams
 	 * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
-	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `process`
+	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
 	 *
 	 * @example
 	 * ```typescript
-	 * const result = await client.process({ name: 'acme.docBrain', data: 'What is in this file?' });
+	 * const result = await client.submit({ name: 'acme.docBrain', data: 'What is in this file?' });
 	 * console.log(result.resolved, result.answers);
 	 * ```
 	 */
-	async process(
+	async submit(
 		options: {
 			name?: string;
 			pipeline?: PipelineConfig;
@@ -1644,7 +1649,7 @@ export class RocketRideClient extends DAPClient {
 			timeout?: number;
 			team?: string;
 		} = {}
-	): Promise<PROCESS_RESULT> {
+	): Promise<SUBMIT_RESULT> {
 		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel, onChange, timeout, team } = options;
 
 		// Step 1: exactly one of name / pipeline / filepath
@@ -1688,21 +1693,21 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Step 3: inline in one request, unless the SDK must stream
-		const inline = data !== undefined && onSSE === undefined && data.length <= PROCESS_INLINE_MAX;
+		const inline = data !== undefined && onSSE === undefined && data.length <= SUBMIT_INLINE_MAX;
 		if (inline) {
 			arguments_.data = data;
 		}
 		// ``timeout`` is a SERVER argument (seconds, pipe open to close); the
 		// transport deadline is separate and outlives it, so the server's own
 		// timeout error is what the caller sees.
-		let stamps: PROCESS_RESULT;
+		let stamps: SUBMIT_RESULT;
 		try {
-			const transport = timeout === undefined ? undefined : { timeout: (timeout + PROCESS_TRANSPORT_MARGIN) * 1000 };
-			stamps = (await this.call('process', arguments_, transport)) as PROCESS_RESULT;
+			const transport = timeout === undefined ? undefined : { timeout: (timeout + SUBMIT_TRANSPORT_MARGIN) * 1000 };
+			stamps = (await this.call('rrext_submit', arguments_, transport)) as SUBMIT_RESULT;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			if (message.startsWith('Unsupported command: process')) {
-				throw new Error('This server does not support process(); upgrade the server');
+			if (message.startsWith('Unsupported command: rrext_submit')) {
+				throw new Error('This server does not support submit(); upgrade the server');
 			}
 			throw err;
 		}
@@ -1716,7 +1721,7 @@ export class RocketRideClient extends DAPClient {
 		// timeout can give it up: the SSE subscription goes at once, the
 		// server-side pipe is closed in the background, and a write that was
 		// pending finds the pipe closed afterwards and does not finalize it.
-		const pipe = await this.pipe(stamps.token, this._objinfoWithSize(objinfo ?? {}, data.length), mimetype, undefined, onSSE, stamps.team);
+		const pipe = await this.pipe(stamps.token, this._objinfoWithSize(objinfo ?? {}, data.length), mimetype, undefined, onSSE, stamps.team, params);
 		const run = (async () => {
 			await pipe.open();
 			await pipe.write(data);
@@ -1727,7 +1732,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			const expired = new Promise<never>((_, reject) => {
 				if (timeout !== undefined) {
-					timer = setTimeout(() => reject(new Error(`process() exceeded its timeout of ${timeout}s`)), timeout * 1000);
+					timer = setTimeout(() => reject(new Error(`submit() exceeded its timeout of ${timeout}s`)), timeout * 1000);
 				}
 			});
 			const result = timeout === undefined ? await run : await Promise.race([run, expired]);
@@ -1867,14 +1872,14 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Create a data pipe for streaming operations.
 	 */
-	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team);
+	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe> {
+		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team, params);
 	}
 
 	/**
 	 * Send data to a running pipeline.
 	 */
-	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string): Promise<PIPELINE_RESULT | undefined> {
+	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<PIPELINE_RESULT | undefined> {
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
 		if (typeof data === 'string') {
@@ -1886,7 +1891,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE, team);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE, team, params);
 
 		try {
 			await pipe.open();

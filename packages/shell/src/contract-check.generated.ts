@@ -847,8 +847,8 @@ import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v11';
 import type { ConsentApi as Current_ConsentApi } from './api';
 import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v11';
 import type { SdkLike as Current_SdkLike } from './api';
-import type { PROCESS_RESULT as Frozen_PROCESS_RESULT } from '../contract/versions/v12';
-import type { PROCESS_RESULT as Current_PROCESS_RESULT } from './api';
+import type { SUBMIT_RESULT as Frozen_SUBMIT_RESULT } from '../contract/versions/v12';
+import type { SUBMIT_RESULT as Current_SUBMIT_RESULT } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1701,5 +1701,5 @@ const _t_ConsentApi: Frozen_ConsentApi = {} as Current_ConsentApi;
 void _t_ConsentApi;
 const _t_SdkLike: Frozen_SdkLike = {} as Current_SdkLike;
 void _t_SdkLike;
-const _t_PROCESS_RESULT: Frozen_PROCESS_RESULT = {} as Current_PROCESS_RESULT;
-void _t_PROCESS_RESULT;
+const _t_SUBMIT_RESULT: Frozen_SUBMIT_RESULT = {} as Current_SUBMIT_RESULT;
+void _t_SUBMIT_RESULT;

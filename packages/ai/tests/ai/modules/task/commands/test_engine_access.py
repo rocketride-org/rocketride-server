@@ -32,7 +32,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai.modules.task.commands.engine_access import engine_for
+from ai.modules.task.commands.engine_access import engine_for, wait_running
+from ai.modules.task.types import TaskError
 
 
 def _conn(*, denied=False):
@@ -77,3 +78,23 @@ async def test_a_live_control_is_served_without_the_team_check():
     assert await engine_for(conn, control, 'task.data') == 'engine'
 
     conn.verify_team_permission.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_never_confirms_running_is_engine_start_failed():
+    """wait_for_running's bare TimeoutError becomes the plan 3.8 error, carrying the engine key."""
+    engine = SimpleNamespace(engine_key='hash-1:user-a', wait_for_running=AsyncMock(side_effect=TimeoutError('silent')))
+
+    with pytest.raises(TaskError) as err:
+        await wait_running(engine)
+    assert (err.value.code, err.value.engineKey) == (TaskError.ENGINE_START_FAILED, 'hash-1:user-a')
+
+
+@pytest.mark.asyncio
+async def test_a_running_engine_passes_wait_running():
+    """No conversion on the happy path."""
+    engine = SimpleNamespace(engine_key='k', wait_for_running=AsyncMock())
+
+    await wait_running(engine)
+
+    engine.wait_for_running.assert_awaited_once_with()

@@ -178,21 +178,21 @@ def test_instance_getpipe_joins_its_own_trace(endpoint):
         endpoint.putPipe(pipe)
 
 
-def test_instance_getpipe_stamps_and_clears_the_caller(endpoint):
-    """The opener's ``_caller`` rides down the sub-pipe's chain and is cleared at putPipe."""
+def test_instance_getpipe_sets_the_caller_on_the_sub_pipe(endpoint):
+    """The opener's ``_caller`` is set on the sub-pipe, reaches its instances at construction, and dies at putPipe."""
     pipe = endpoint.getPipe('none')
     node = _Node(pipe.next, endpoint)
     node._caller = {'userId': 'u-1', 'params': {}}
     try:
         sub = node.getPipe()
         try:
-            stamped = [n.pyInstance for n in _chain(sub) if n.pyInstance is not None]
-            assert stamped, 'the response node is a Python instance'
-            assert all(inst._caller == node._caller for inst in stamped)
-            assert all(inst._settings is None for inst in stamped)
+            assert sub.caller == node._caller
+            built = [n.pyInstance for n in _chain(sub) if n.pyInstance is not None]
+            assert built, 'the response node is a Python instance'
+            assert all(inst._caller == node._caller for inst in built)
         finally:
             node.putPipe(sub)
-        assert all(inst._caller is None for inst in stamped)
+        assert sub.caller is None
     finally:
         endpoint.putPipe(pipe)
 
@@ -239,3 +239,272 @@ def _chain(pipe):
     while node is not None:
         yield node
         node = node.next
+
+
+# ---------------------------------------------------------------------------
+# Per-binding instances (plan 4.1 rule 2, C.1b): the slot is pooled, the
+# node's IInstance is not
+# ---------------------------------------------------------------------------
+
+
+def _node(pipe, component_id):
+    """The filter of one component on a pipe's chain."""
+    for node in _chain(pipe):
+        if node.pipeType.id == component_id:
+            return node
+    raise AssertionError(f'{component_id} is not on the chain')
+
+
+def _response_class():
+    """The response node's IInstance class, the one object the engine constructs instances from."""
+    import importlib
+
+    return importlib.import_module('nodes.response.IInstance').IInstance
+
+
+def test_two_bindings_of_one_slot_get_distinct_instances(endpoint):
+    """What binding A put on its instance is not there for binding B of the same slot."""
+    first = endpoint.getPipe('none')
+    try:
+        a = _node(first, 'response_1').pyInstance
+        a.left_behind = 'from binding A'
+        assert _node(first, 'response_1').pyInstance is a, 'one instance for the whole binding'
+    finally:
+        endpoint.putPipe(first)
+
+    second = endpoint.getPipe('none')
+    try:
+        assert second.pipeId == first.pipeId, 'the slot is reused'
+        b = _node(second, 'response_1').pyInstance
+        assert b is not a
+        assert not hasattr(b, 'left_behind')
+    finally:
+        endpoint.putPipe(second)
+
+
+def test_components_are_constructed_on_first_touch_only(monkeypatch):
+    """A component the binding never calls into is never constructed; the first touch constructs it once."""
+    built = []
+    cls = _response_class()
+    original_init = cls.__init__
+
+    def counting_init(self, *args, **kwargs):
+        built.append(1)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(cls, '__init__', counting_init)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+
+        # A binding that never reaches the node builds nothing
+        pipe = endpoint.getPipe('none')
+        node = _node(pipe, 'response_1')
+        assert not node.bound
+        endpoint.putPipe(pipe)
+        assert built == []
+
+        # The first touch builds it, once for the whole binding
+        pipe = endpoint.getPipe('none')
+        try:
+            assert not node.bound
+            node.pyInstance
+            node.pyInstance
+            assert node.bound
+            assert built == [1]
+        finally:
+            endpoint.putPipe(pipe)
+        assert not node.bound, 'putPipe ended the binding'
+    finally:
+        loader.endLoad()
+
+
+def test_the_caller_is_in_place_before_begin_instance(monkeypatch):
+    """``_caller`` is set from the pipe before the node's beginInstance runs; putPipe clears the pipe's."""
+    seen = []
+    monkeypatch.setattr(_response_class(), 'beginInstance', lambda self: seen.append(dict(self._caller)))
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        try:
+            pipe.caller = {'userId': 'u-1', 'params': {}}
+            instance = _node(pipe, 'response_1').pyInstance
+            assert instance._caller == {'userId': 'u-1', 'params': {}}
+            assert seen == [{'userId': 'u-1', 'params': {}}]
+        finally:
+            endpoint.putPipe(pipe)
+        assert pipe.caller is None
+    finally:
+        loader.endLoad()
+
+
+def test_end_instance_runs_at_putpipe_for_every_instance_the_binding_built(monkeypatch):
+    """The put ends the instance the binding built, once, before the slot is handed out again."""
+    ended = []
+    monkeypatch.setattr(_response_class(), 'endInstance', lambda self: ended.append(id(self)))
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        first = id(_node(pipe, 'response_1').pyInstance)
+        endpoint.putPipe(pipe)
+        assert ended == [first]
+
+        # A binding that never touched the node has nothing to end
+        pipe = endpoint.getPipe('none')
+        endpoint.putPipe(pipe)
+        assert ended == [first]
+
+        # The endpoint closing under an open pipe runs the same release through
+        # endFilterInstance; ILoader.endLoad() only drops its reference, so that
+        # path is the engine's task teardown, not this harness
+    finally:
+        loader.endLoad()
+
+
+def test_a_failing_begin_instance_is_the_calls_error_and_the_next_binding_starts_clean(monkeypatch):
+    """A constructor that raises surfaces on the touch; the half-built instance is dropped, not reused."""
+    attempts = []
+
+    def boom(self):
+        attempts.append(1)
+        raise RuntimeError('no room')
+
+    monkeypatch.setattr(_response_class(), 'beginInstance', boom)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        try:
+            with pytest.raises(Exception, match='no room'):
+                _node(pipe, 'response_1').pyInstance
+        finally:
+            endpoint.putPipe(pipe)
+
+        pipe = endpoint.getPipe('none')
+        try:
+            with pytest.raises(Exception, match='no room'):
+                _node(pipe, 'response_1').pyInstance
+        finally:
+            endpoint.putPipe(pipe)
+        assert attempts == [1, 1], 'one construction attempt per binding'
+    finally:
+        loader.endLoad()
+
+
+def test_10000_bindings_on_one_slot_leave_no_instance_behind(endpoint):
+    """Nothing holds a binding's instance once putPipe has run."""
+    import gc
+    import weakref
+
+    refs = []
+    for _ in range(10000):
+        pipe = endpoint.getPipe('none')
+        try:
+            refs.append(weakref.ref(_node(pipe, 'response_1').pyInstance))
+        finally:
+            endpoint.putPipe(pipe)
+    gc.collect()
+
+    assert sum(1 for ref in refs if ref() is not None) == 0
+
+
+def test_binding_construction_stays_cheap(endpoint):
+    """Constructing a node's instance for a binding costs under 50 us on the C++ path."""
+    import time
+
+    pipe = endpoint.getPipe('none')
+    node = _node(pipe, 'response_1')
+    endpoint.putPipe(pipe)
+
+    def cycle(touch, n=2000):
+        started = time.perf_counter()
+        for _ in range(n):
+            pipe = endpoint.getPipe('none')
+            if touch:
+                node.pyInstance
+            endpoint.putPipe(pipe)
+        return (time.perf_counter() - started) / n
+
+    # Warm up, then measure the difference the construction makes
+    cycle(True, 200)
+    without = cycle(False)
+    with_instance = cycle(True)
+
+    assert with_instance - without < 50e-6, f'{(with_instance - without) * 1e6:.1f} us per instance'
+
+
+def test_a_failing_end_instance_is_the_puts_error_and_the_slot_is_still_free(monkeypatch):
+    """An endInstance that raises surfaces on putPipe; the binding is ended all the same and the slot is reusable."""
+
+    def boom(self):
+        raise RuntimeError('cannot let go')
+
+    monkeypatch.setattr(_response_class(), 'endInstance', boom)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        node = _node(pipe, 'response_1')
+        node.pyInstance
+        with pytest.raises(Exception, match='cannot let go'):
+            endpoint.putPipe(pipe)
+        assert not node.bound
+
+        again = endpoint.getPipe('none')
+        try:
+            assert again.pipeId == pipe.pipeId, 'the slot came back despite the failed teardown'
+            assert not node.bound
+        finally:
+            # No touch this time: nothing to end, the put succeeds
+            endpoint.putPipe(again)
+    finally:
+        loader.endLoad()
+
+
+def test_a_touch_from_inside_end_instance_cannot_rebind(monkeypatch):
+    """Reaching for the instance during teardown is refused: no new binding is built or recorded."""
+    cls = _response_class()
+    built = []
+    original_init = cls.__init__
+
+    def counting_init(self, *args, **kwargs):
+        built.append(1)
+        original_init(self, *args, **kwargs)
+
+    seen = []
+
+    def nosy_end(self):
+        try:
+            self.instance.pyInstance
+        except Exception as exc:  # noqa: BLE001 - the refusal is what this test records
+            seen.append(str(exc))
+
+    monkeypatch.setattr(cls, '__init__', counting_init)
+    monkeypatch.setattr(cls, 'endInstance', nosy_end)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        node = _node(pipe, 'response_1')
+        node.pyInstance
+        endpoint.putPipe(pipe)
+
+        assert built == [1], 'the teardown built nothing'
+        assert len(seen) == 1 and 'ending its binding' in seen[0]
+        assert not node.bound
+    finally:
+        loader.endLoad()

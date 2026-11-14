@@ -84,7 +84,7 @@ from .pipeline import (
     PipelineControlConnection,
     PipelineComponent,
     PipelineConfig,
-    PROCESS_RESULT,
+    SUBMIT_RESULT,
 )
 
 # Task types: runtime status, state machine values, execution flow flags,
@@ -247,7 +247,7 @@ __all__ = [
     'PipelineControlConnection',
     'PipelineComponent',
     'PipelineConfig',
-    'PROCESS_RESULT',
+    'SUBMIT_RESULT',
     # Task types
     'TASK_STATUS_COMPONENT_STAT',
     'TASK_STATUS_SLOWEST_DOC',

@@ -34,33 +34,16 @@ class IInstance(IInstanceBase):
         """Initialize the prompt node instance state."""
         super().__init__()
         self.has_output = False
-        self._reset()
-
-    def _reset(self):
-        """
-        A fresh question for a fresh turn.
-
-        THE INSTANCE OUTLIVES THE TURN. A resident task keeps this object between
-        turns, so a question that is merged but never replaced accumulates: every
-        `addContext` from every turn stays on it, and `closing` re-adds the
-        configured instructions on top of the ones it added last time. Left alone
-        it grows without bound - and because a chat is not part of a task's
-        identity, the turns it gathers are not even all from the same conversation.
-
-        That is worse than noise. Context carries what the person said, so a
-        request they made and that was answered turns ago is still sitting there
-        in the imperative, indistinguishable from the one they just made. The
-        agent reads it as live and does it again.
-
-        Only the question: `has_output` is the turn's RESULT, and `closing` runs
-        this on its way out, after setting it.
-        """
+        # A fresh question for a fresh turn: the instance lives exactly one
+        # binding (plan 4.1 rule 2), so nothing from an earlier turn can be here
         self.question = Question()
 
     def open(self, entry: Entry):
-        # The turn starts here, so the question does too.
+        # The turn starts here. One binding may open several objects before it
+        # is returned (a source pipe does), so the question is per OBJECT: what
+        # an earlier object collected must not ride the next one
         self.has_output = False
-        self._reset()
+        self.question = Question()
 
     # The engine forwards a handler's raw input unless preventDefault() raises, so
     # each collector ends with it, after the input is stored. Only the merged
@@ -156,8 +139,3 @@ class IInstance(IInstanceBase):
             # named — a bare message reads the same for a missing config key as
             # for a broken collaborator.
             error(f'prompt node dropped a turn: {type(e).__name__}: {e}')
-        finally:
-            # Belt and braces with `open`: the next turn starts clean even if this
-            # one raised on its way out, and even if the node is driven to close
-            # without a matching open.
-            self._reset()

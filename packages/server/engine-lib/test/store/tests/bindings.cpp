@@ -88,21 +88,13 @@ TEST_CASE("store::bindings") {
         REQUIRE(endpoint->getPipeCount() == 1);
     }
 
-    SECTION("the launch's trace epoch seeds the high 16 bits of every id") {
-        IServiceEndpoint::seedTraceEpoch(0x7A5Eu);
+    SECTION("the counter is a bare per-launch id from 1: nothing seeds it") {
+        // The launch is named outside the engine (EaaS prefixes nodeId and
+        // engineId on the wire, plan 7.4); in here the id is the counter alone
         auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
         REQUIRE_NO_ERROR(pipe);
-        REQUIRE(((*pipe)->traceId >> 48) == 0x7A5Eu);
-        auto id = (*pipe)->traceId;
+        REQUIRE(((*pipe)->traceId >> 48) == 0);
         REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
-
-        // The epoch in effect is not re-seeded: the counter keeps counting
-        IServiceEndpoint::seedTraceEpoch(0x7A5Eu);
-        auto next = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
-        REQUIRE_NO_ERROR(next);
-        REQUIRE((*next)->traceId > id);
-        REQUIRE(((*next)->traceId >> 48) == 0x7A5Eu);
-        REQUIRE_NO_ERROR(endpoint->putPipe(*next));
     }
 
     SECTION("a new tree gets a minted id and carries the requested level") {

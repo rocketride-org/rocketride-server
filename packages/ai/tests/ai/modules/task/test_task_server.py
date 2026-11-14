@@ -20,6 +20,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import itertools
 import errno
 import socket
 import sys
@@ -58,7 +59,9 @@ def _make_server(*, config=None, web_server=None):
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
     ts._deployment_revoked = {}
-    ts._control_starts = {}
+    ts._engine_ids = itertools.count(1)
+    ts._node_id = 1
+    ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
     ts._connections = {}
@@ -106,6 +109,9 @@ def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None, ttl
         ttl=ttl,
         dormant=False,
         origin=None,
+        deployment=None,
+        registered_at=0.0,
+        launch_owner=None,
         task=task or MagicMock(),
     )
 
@@ -891,7 +897,8 @@ async def test_remove_task_calls_stop_and_broadcasts():
     task = MagicMock()
     task.stop_task = AsyncMock()
     task.is_task_complete.return_value = False
-    task._stop_requested = False
+    task.is_live = True
+    task.release.return_value = 0
     control = SimpleNamespace(
         id='acme.proj-1.src-1',
         key='dev.user-1.acme.proj-1.rm',
@@ -906,6 +913,9 @@ async def test_remove_task_calls_stop_and_broadcasts():
         project_id='proj-1',
         source='src-1',
         apikey='ak_x',
+        deployment=None,
+        registered_at=0.0,
+        launch_owner=None,
     )
     ts._task_control['dev.user-1.acme.proj-1.rm'] = control
 
@@ -1231,7 +1241,8 @@ def _launch_pipeline():
         'source': 'src',
         'components': [
             {'id': 'src', 'provider': 'webhook', 'config': {}},
-            {'id': 'llm', 'provider': 'llm_openai', 'config': {}},
+            # apikey: the resolver requires it, and a spec that cannot be keyed is refused at start
+            {'id': 'llm', 'provider': 'llm_openai', 'config': {'apikey': 'sk-test'}},
         ],
     }
 
@@ -1255,6 +1266,9 @@ def _seed_running_task(ts):
         id=LAUNCH_ADDRESS,
         key=LAUNCH_KEY,
         address=LAUNCH_ADDRESS,
+        deployment=None,
+        registered_at=0.0,
+        launch_owner=None,
         developer_id='acme',
         project_id='project-1',
         source='src',

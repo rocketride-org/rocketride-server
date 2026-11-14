@@ -59,7 +59,6 @@ attaches to a live control or starts one from the pinned artifact.
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
-from rocketlib import debug
 
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
 from ai.account.models import team_order
@@ -280,12 +279,10 @@ async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequen
     Returns:
         The rows found, in ``slots`` order (a slot may yield one row per table).
     """
-    # Step 1: the registry entries: each row's kind and review state
-    try:
-        versions = {int(v.get('version')): v for v in await account.deployments_versions(org_id, project_id)}
-    except Exception as exc:
-        debug(f'[pipe_deploy] deployments_versions {project_id} failed: {exc}')
-        return []
+    # Step 1: the registry entries: each row's kind and review state. A
+    # failing store raises: a name is never reported 'not found' because the
+    # database was down (audit 2026-11-12)
+    versions = {int(v.get('version')): v for v in await account.deployments_versions(org_id, project_id)}
 
     def _row(slot: str, version: Any, state: Any, artifact_state: Any, billing: Any) -> Optional[PublishRow]:
         """One table row in the row source's shape, or None when it points nowhere."""
@@ -307,22 +304,14 @@ async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequen
     for slot in slots:
         # Step 2: published_pipes: a team or personal slot (never public)
         if slot != PUBLIC_AUDIENCE_KEY:
-            try:
-                dep = await account.deployments_get(org_id, slot, project_id)
-            except Exception as exc:
-                debug(f'[pipe_deploy] deployments_get {slot}/{project_id} failed: {exc}')
-                dep = None
+            dep = await account.deployments_get(org_id, slot, project_id)
             if dep:
                 row = _row(slot, dep.get('version'), dep.get('state'), '', dep.get('billingTeamId'))
                 if row is not None:
                     rows.append(row)
 
         # Step 3: published_apps: the audience row of the slot
-        try:
-            pub = await account.publish_get(org_id, 'app', project_id, _audience_of(slot))
-        except Exception as exc:
-            debug(f'[pipe_deploy] publish_get {project_id} {slot} failed: {exc}')
-            pub = None
+        pub = await account.publish_get(org_id, 'app', project_id, _audience_of(slot))
         if pub:
             row = _row(slot, pub.get('version'), pub.get('state'), pub.get('artifactState'), pub.get('billingTeamId'))
             if row is not None:

@@ -39,13 +39,13 @@ held engine, so the many ``control.task.<...>`` call sites read as "the engine
 this control holds".
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
-from rocketride import TASK_STATE
 
-from .types import LAUNCH_TYPE
+from .types import EngineState, LAUNCH_TYPE, TaskError
 
 if TYPE_CHECKING:
     from .task_conn import TaskConn
@@ -213,7 +213,7 @@ class TaskControl:
         owner_kind: ``'user'`` or ``'team'``: who owns the run.
         rung: ``'dev'``, ``'me'``, ``'team'`` or ``'public'``.
         trigger: What fired a deployment run (``''``, ``'manual'``, ``'schedule'``, or
-            ``'process'`` for a name call started from a published artifact).
+            ``'submit'`` for a name call started from a published artifact).
         launch_owner / launch_type: The connection that launched it and how.
         project_id / source / provider: The pipeline's short id, entry
             component and that component's provider.
@@ -295,6 +295,12 @@ class TaskControl:
     inflight: int = 0
     registered_at: float = 0.0
 
+    # One engine transition (repoint) at a time per control, readiness and
+    # rollback included, so a later restart can never be undone by an earlier
+    # one's failure handler (the engine-key start locks do not cover two
+    # replacements with different keys)
+    transition_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
@@ -342,6 +348,50 @@ class TaskControl:
         if self.task is not None:
             self.task.note_activity(now)
 
+    def check_params(self, params: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        """
+        Admit per-call ``params`` by PUBLIC NAME against this control's ``parameters`` map.
+
+        The map half of plan 5.4 item 5: a name the pipeline does not expose
+        is refused here, never silently dropped, before anything reaches the
+        engine. The descriptor half (type, bounds, never a selector or a
+        secret) is the data path's allow-list (C.8).
+
+        Args:
+            params: The caller's ``params`` (public name -> value), or None.
+
+        Returns:
+            The admitted params, a copy; empty when none were given.
+
+        Raises:
+            TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``
+                for every unknown name, and for a value that is not scalar.
+        """
+        if not params:
+            return {}
+        if not isinstance(params, Mapping):
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                'params must be a mapping of public name to value',
+                address=self.address,
+                errors=[{'name': '', 'reason': 'params is not a mapping'}],
+            )
+        errors = []
+        for name, value in params.items():
+            if name not in self.parameters:
+                errors.append({'name': str(name), 'reason': 'not a parameter of this pipeline'})
+            elif isinstance(value, (dict, list, tuple, set)):
+                errors.append({'name': str(name), 'reason': 'a parameter value is a scalar'})
+        if errors:
+            names = ', '.join(e['name'] for e in errors)
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                f'params rejected on {self.address!r}: {names}',
+                address=self.address,
+                errors=errors,
+            )
+        return dict(params)
+
     def begin_request(self) -> None:
         """
         A request starts running through this control: activity, and the idle clock is held.
@@ -369,12 +419,12 @@ class TaskControl:
         the next request through it starts the engine again
         (``TaskServer.ensure_engine``).
         """
-        return self.task is not None and self.task.dormant_reason is not None and self.task.is_task_complete()
+        return self.task is not None and self.task.dormant_reason is not None and self.task.state is EngineState.STOPPED
 
     @property
     def live(self) -> bool:
         """True while the control can serve: its engine runs, or it is dormant."""
-        return self.task is not None and (not self.task.is_task_complete() or self.dormant)
+        return self.task is not None and (self.task.is_live or self.dormant)
 
     @property
     def engine_state(self) -> str:
@@ -391,21 +441,19 @@ class TaskControl:
         TODO(plan 7.5, C.9): carried in ``apaevt_status`` as
         ``body.engine.availability``.
         """
-        # Step 1: a restart through this control is in the start gate
+        # A restart through this control is in the start gate
         engine = self.task
         if engine is None:
             return 'stopped'
         if self.engine_starting:
             return 'starting'
 
-        # Step 2: stopped, stopping, or past its running confirmation
-        if engine.is_task_complete() or engine._stop_requested:
-            return 'stopped'
-        if engine.get_status().state == TASK_STATE.STOPPING.value:
-            return 'stopped'
-        if engine.reached_running:
+        # Otherwise the engine's own state, projected (plan 7.5)
+        if engine.state is EngineState.RUNNING:
             return 'running'
-        return 'starting'
+        if engine.state in (EngineState.NEW, EngineState.STARTING):
+            return 'starting'
+        return 'stopped'
 
     def idle_seconds(self, now: Optional[float] = None) -> float:
         """

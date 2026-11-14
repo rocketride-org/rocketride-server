@@ -21,9 +21,9 @@
 # SOFTWARE.
 
 """
-ProcessCommands: the DAP ``process`` command (plan section 3).
+SubmitCommands: the DAP ``submit`` command (plan section 3).
 
-``process()`` is ``use()`` plus one request, sharing one resolver:
+``submit()`` is ``use()`` plus one request, sharing one resolver:
 
 1. resolve to a control: a NAME walks the rungs (``@dev`` attach-only, then
    ``@me``, ``@team`` in the caller's team order, ``@public``) and starts a
@@ -31,7 +31,7 @@ ProcessCommands: the DAP ``process`` command (plan section 3).
    the caller's own ``@dev`` presence, created when absent and otherwise
    reused, refused or REPOINTED per ``onChange`` (plan 3.4);
 2. hold the control's engine (started again if it stopped);
-3. with ``data`` (at most ``CONST_PROCESS_INLINE_MAX`` bytes): open a pipe,
+3. with ``data`` (at most ``CONST_SUBMIT_INLINE_MAX`` bytes): open a pipe,
    write, close it, all in process through the engine's data path, and
    return the close body; without ``data`` return the address so the SDK
    streams through the ordinary pipe open/write/close (a large payload, or
@@ -55,8 +55,8 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ai.common.dap import DAPConn, TransportBase
-from .engine_access import engine_for
-from ai.constants import CONST_PROCESS_CLOSE_SECONDS, CONST_PROCESS_INLINE_MAX
+from .engine_access import engine_for, wait_running
+from ai.constants import CONST_SUBMIT_CLOSE_SECONDS, CONST_SUBMIT_INLINE_MAX
 
 from ..address import build_address, parse_address
 from ..task_control import control_key
@@ -73,9 +73,9 @@ if TYPE_CHECKING:
 SERVER_CONTROLLED = ('threads', 'args', 'env', 'ttl')
 
 
-class ProcessCommands(DAPConn):
+class SubmitCommands(DAPConn):
     """
-    DAP handler for ``process``: resolve, hold, deliver one request.
+    DAP handler for ``submit``: resolve, hold, deliver one request.
 
     The data path is the engine's own (``TaskEngine._send_data``), reached in
     process: the request never goes back through the client socket.
@@ -93,9 +93,9 @@ class ProcessCommands(DAPConn):
 
     # ==== The command ============================================================
 
-    async def on_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_submit(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle ``process``: one request to a named or inline pipeline.
+        Handle ``submit``: one request to a named or inline pipeline.
 
         Args:
             request: The DAP request. ``arguments`` carry exactly one of
@@ -132,11 +132,11 @@ class ProcessCommands(DAPConn):
         data = args.get('data')
         if isinstance(data, str):
             data = data.encode('utf-8')
-        if data is not None and len(data) > CONST_PROCESS_INLINE_MAX:
+        if data is not None and len(data) > CONST_SUBMIT_INLINE_MAX:
             raise TaskError(
                 TaskError.PAYLOAD_TOO_LARGE,
-                f'Inline process() data is limited to {CONST_PROCESS_INLINE_MAX} bytes; stream it instead',
-                limit=CONST_PROCESS_INLINE_MAX,
+                f'Inline submit() data is limited to {CONST_SUBMIT_INLINE_MAX} bytes; stream it instead',
+                limit=CONST_SUBMIT_INLINE_MAX,
             )
 
         # Step 3: resolve to a control
@@ -145,10 +145,16 @@ class ProcessCommands(DAPConn):
         else:
             control, stamps = await self._resolve_spec(request, args)
 
+        # Step 3b: per-call params, admitted by public name against the
+        # control's parameters map (plan 5.4 item 5; a name the pipeline does
+        # not expose is refused, never dropped). They ride the inline open;
+        # the streaming fallback carries them on the SDK's own open.
+        params = control.check_params(args.get('params'))
+
         # Step 4: deliver inline, or hand the address back for streaming
         body: Dict[str, Any] = {}
         if data is not None:
-            body = await self._deliver(control, args, data, stamps['converged'])
+            body = await self._deliver(control, args, data, stamps['converged'], params)
         body.update(stamps)
         return self.build_response(request, body=body)
 
@@ -211,7 +217,7 @@ class ProcessCommands(DAPConn):
         ignored: Optional[List[str]] = None,
         warnings: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """The ``PROCESS_RESULT`` stamps of plan 3.1 for ``control``."""
+        """The ``SUBMIT_RESULT`` stamps of plan 3.1 for ``control``."""
         stamps: Dict[str, Any] = {
             'token': control.address,
             'resolved': f'@{control.rung}',
@@ -231,10 +237,18 @@ class ProcessCommands(DAPConn):
     # ==== Delivery ===============================================================
 
     async def _deliver(
-        self, control: 'TaskControl', args: Dict[str, Any], data: bytes, converged: str
+        self,
+        control: 'TaskControl',
+        args: Dict[str, Any],
+        data: bytes,
+        converged: str,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Open a pipe, write ``data``, close it, in process; the close body.
+
+        ``params`` (already admitted by the control) ride the open, the one
+        door every per-call value enters by (plan 3.1).
 
         The clock of ``timeout`` starts at the open and stops at the close.
         The open carries a server-minted ``correlationId`` (idempotent open,
@@ -248,20 +262,19 @@ class ProcessCommands(DAPConn):
         # until it returns, so its ttl cannot expire it mid-flight
         task = await engine_for(self, control, 'task.data')
         control.begin_request()
-        await task.wait_for_running()
+        await wait_running(task)
 
         async def _round_trip() -> Dict[str, Any]:
             """Open, write and close through the engine data path."""
-            opened = await task._send_data(
-                self._data_request(
-                    {
-                        'subcommand': 'open',
-                        'object': self._objinfo(args.get('objinfo'), len(data)),
-                        'mimeType': args.get('mimetype') or 'application/octet-stream',
-                        'correlationId': uuid.uuid4().hex,
-                    }
-                )
-            )
+            open_arguments: Dict[str, Any] = {
+                'subcommand': 'open',
+                'object': self._objinfo(args.get('objinfo'), len(data)),
+                'mimeType': args.get('mimetype') or 'application/octet-stream',
+                'correlationId': uuid.uuid4().hex,
+            }
+            if params:
+                open_arguments['params'] = params
+            opened = await task._send_data(self._data_request(open_arguments))
             pipe_id = (opened.get('body') or {}).get('pipe_id')
             try:
                 await task._send_data(self._data_request({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
@@ -280,7 +293,7 @@ class ProcessCommands(DAPConn):
         except asyncio.TimeoutError:
             raise TaskError(
                 TaskError.TIMEOUT,
-                f'process() on {control.address!r} exceeded its timeout of {timeout}s',
+                f'submit() on {control.address!r} exceeded its timeout of {timeout}s',
                 address=control.address,
                 converged=converged,
             ) from None
@@ -293,14 +306,14 @@ class ProcessCommands(DAPConn):
 
         The failure that got here (a timeout cancelling the write, a refused
         write) is what the caller sees; the close is cleanup and gets
-        ``CONST_PROCESS_CLOSE_SECONDS`` at most, so a cancelled request is
+        ``CONST_SUBMIT_CLOSE_SECONDS`` at most, so a cancelled request is
         never held open by an engine that does not answer the close.
         """
         close = self._data_request({'subcommand': 'close', 'pipe_id': pipe_id})
         try:
-            await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_PROCESS_CLOSE_SECONDS)
+            await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_SUBMIT_CLOSE_SECONDS)
         except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure
-            self.debug_message(f'process(): closing pipe {pipe_id} after a failed write did not complete: {exc!r}')
+            self.debug_message(f'submit(): closing pipe {pipe_id} after a failed write did not complete: {exc!r}')
 
     def _data_request(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """One ``rrext_process`` request for the engine's data path."""

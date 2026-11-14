@@ -49,7 +49,9 @@ uint32_t IPythonInstanceBase::getThreadCount(
         auto pythonObject = py::cast(currentThreadCount);
 
         // Call it
-        auto res = m_pyInstance.attr("getThreadCount")(pythonObject);
+        auto res = const_cast<IPythonInstanceBase *>(this)
+                       ->boundInstance()
+                       .attr("getThreadCount")(pythonObject);
         if (res.is_none()) return {};
 
         value = res.cast<uint32_t>();
@@ -90,7 +92,7 @@ Error IPythonInstanceBase::checkChanged(Entry &object) noexcept {
         auto pythonObject = py::cast(&object);
 
         // Call it
-        m_pyInstance.attr("checkChanged")(pythonObject);
+        boundInstance().attr("checkChanged")(pythonObject);
         return {};
     };
 
@@ -111,7 +113,7 @@ Error IPythonInstanceBase::removeObject(Entry &object) noexcept {
     // Remove the object
     const auto python = localfcn()->Error {
         // Check it first
-        if (!py::hasattr(m_pyInstance, "removeObject"))
+        if (!py::hasattr(m_pyInstanceClass, "removeObject"))
             return APERR(Ec::InvalidCommand,
                          "The node does not support the removeObject");
 
@@ -119,7 +121,7 @@ Error IPythonInstanceBase::removeObject(Entry &object) noexcept {
         auto pythonObject = py::cast(&object);
 
         // Call it
-        m_pyInstance.attr("removeObject")(pythonObject);
+        boundInstance().attr("removeObject")(pythonObject);
         return {};
     };
 
@@ -145,7 +147,7 @@ ErrorOr<bool> IPythonInstanceBase::stat(Entry &object) noexcept {
     // Stat the object
     const auto python = localfcn()->Error {
         // Check it first
-        if (!py::hasattr(m_pyInstance, "stat"))
+        if (!py::hasattr(m_pyInstanceClass, "stat"))
             return APERR(Ec::InvalidCommand,
                          "The node does not support the stat interface");
 
@@ -153,7 +155,7 @@ ErrorOr<bool> IPythonInstanceBase::stat(Entry &object) noexcept {
         auto pythonObject = py::cast(&object);
 
         // Call it
-        auto statResObj = m_pyInstance.attr("stat")(pythonObject);
+        auto statResObj = boundInstance().attr("stat")(pythonObject);
         statRes = py::str(statResObj).is(py::str(Py_True));
         return {};
     };
@@ -195,7 +197,7 @@ Error IPythonInstanceBase::renderObject(ServicePipe &target,
     // Check if the entry has changed
     const auto python = localfcn()->Error {
         // Check it
-        if (!py::hasattr(m_pyInstance, "renderObject"))
+        if (!py::hasattr(m_pyInstanceClass, "renderObject"))
             return APERR(
                 Ec::InvalidCommand,
                 "The node does not support the renderObject interface");
@@ -203,7 +205,7 @@ Error IPythonInstanceBase::renderObject(ServicePipe &target,
         // Bind the object
         auto pythonObject = py::cast(&object);
 
-        m_pyInstance.attr("renderObject")(pythonObject);
+        boundInstance().attr("renderObject")(pythonObject);
         return {};
     };
 

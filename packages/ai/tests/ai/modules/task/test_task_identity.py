@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import itertools
 import pytest
 
 from ai.modules.task.address import build_address
@@ -83,7 +84,9 @@ def _server(*controls) -> TaskServer:
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
     server._deployment_revoked = {}
-    server._control_starts = {}
+    server._engine_ids = itertools.count(1)
+    server._node_id = 1
+    server._launched = {}
     server._engine_restarts = {}
     server._restart_tasks = set()
     server._control_expiry = []

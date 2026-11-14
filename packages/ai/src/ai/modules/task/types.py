@@ -48,6 +48,32 @@ from enum import Enum
 from typing import Any
 
 
+class EngineState(Enum):
+    """
+    The lifecycle state of a TaskEngine (the process), owned by the engine (plan 7.2).
+
+    One variable answers every "is it safe to attach / stop / roll back to this
+    engine" question that was spread over flags before:
+
+    - ``NEW``: built, not yet started.
+    - ``STARTING``: launched; the pipeline has not reported its service up.
+    - ``RUNNING``: confirmed running; takes requests and holds.
+    - ``STOPPING``: a stop was requested; takes no new holds.
+    - ``STOPPED``: the process is gone after it had run (a clean exit, the
+      inactivity timer, an operator, a crash); a control's next request may
+      start the key again.
+    - ``FAILED``: the process ended before it ever confirmed running; a start
+      that is not retried (``engine_start_failed``).
+    """
+
+    NEW = 'new'
+    STARTING = 'starting'
+    RUNNING = 'running'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
+    FAILED = 'failed'
+
+
 class LAUNCH_TYPE(Enum):
     """
     Task launch type enumeration defining execution modes and debugging capabilities.
@@ -117,13 +143,19 @@ class TaskError(RuntimeError):
       live sources and no default; ``sources`` lists them
     - TASK_SPEC_CHANGED: a spec call with ``onChange='error'`` met a live
       presence running other content; ``currentHash`` and ``newHash``
-    - TASK_TIMEOUT: a ``process()`` request exceeded the caller's
+    - TASK_TIMEOUT: a ``submit()`` request exceeded the caller's
       ``timeout`` (open to close); ``address`` and ``converged``
-    - TASK_PAYLOAD_TOO_LARGE: inline ``process()`` data over
-      ``CONST_PROCESS_INLINE_MAX``; ``limit``
+    - TASK_PAYLOAD_TOO_LARGE: inline ``submit()`` data over
+      ``CONST_SUBMIT_INLINE_MAX``; ``limit``
     - TASK_ENGINE_UNAVAILABLE: the engine under the caller's hold was stopped
       by an operator; ``engineKey`` and ``reason`` say which and why. Told
       once per control: the next call re-resolves
+    - TASK_ENGINE_START_FAILED: an engine never confirmed running (plan 3.8,
+      7.2): no event from the subprocess for ``CONST_MAX_READY_TIME``, a
+      spec that cannot be keyed; ``engineKey``
+    - TASK_PARAM_REJECTED: per-call ``params`` named a public name the
+      pipeline's ``parameters`` map does not expose (plan 5.4 item 5);
+      ``errors`` lists ``{name, reason}`` per rejected key
 
     Extra keyword fields (``field``, ``address``, ``sources``, …) become
     attributes so a caller can classify on more than the code.
@@ -138,6 +170,8 @@ class TaskError(RuntimeError):
     SPEC_CHANGED = 'TASK_SPEC_CHANGED'
     TIMEOUT = 'TASK_TIMEOUT'
     PAYLOAD_TOO_LARGE = 'TASK_PAYLOAD_TOO_LARGE'
+    ENGINE_START_FAILED = 'TASK_ENGINE_START_FAILED'
+    PARAM_REJECTED = 'TASK_PARAM_REJECTED'
 
     def __init__(self, code: str, message: str, **fields: Any):
         super().__init__(message)

@@ -603,22 +603,6 @@ class TestContinuum:
         assert state2['floor_calls'] and state2['floor_calls'][0] == run1_last + 1
         assert int(control['lastSeq']) > run1_last
 
-    @pytest.mark.asyncio
-    async def test_restart_marker_does_not_open_new_chapter(self, istore, spool_root):
-        stamp, raise_floor, _ = make_stamp()
-        writer = await open_writer(istore, spool_root, stamp, raise_floor)
-        writer.note_restart()
-        await writer.end_run('ok')
-
-        control = writer._control
-        assert len(control['chapters']) == 1
-        actions = [
-            ln['body']['action']
-            for ln in await read_stream_lines(istore, spool_root)
-            if ln['event'] == 'apaevt_log_lifecycle'
-        ]
-        assert actions == ['run-begin', 'restart', 'run-end']
-
 
 # =============================================================================
 # RETENTION (RING + AGE) AND HORIZON

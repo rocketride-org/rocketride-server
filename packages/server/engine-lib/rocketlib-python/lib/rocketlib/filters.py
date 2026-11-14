@@ -1050,12 +1050,13 @@ class IInstanceBase:
 
     _iglobal: IGlobalBase = None  #: The real IGlobal the engine assigned (behind the facade).
 
-    # Invalidation contract: whoever stamps _caller (data_conn at getPipe(),
-    # rocketlib's getPipe wrapper for sub-pipes) sets _settings = None in the
-    # same place; putPipe() clears _caller only, so a spawned worker thread
-    # keeps the cached view.
+    # An instance lives exactly ONE binding (plan 4.1 rule 2): the engine
+    # constructs it on the binding's first touch, copies the pipe's caller
+    # context in before beginInstance(), and drops it at putPipe(). _caller
+    # therefore never changes on a live instance and the settings view is
+    # computed once; a worker thread keeps the instance it captured.
     _caller: Optional[Dict[str, Any]] = None  #: Server-set caller context; None = no caller.
-    _settings: Optional[ConfigView] = None  #: Cached settings view for the current stamp.
+    _settings: Optional[ConfigView] = None  #: The settings view, built on first read.
 
     """
     These are all the overrides to provide
@@ -1097,8 +1098,9 @@ class IInstanceBase:
 
         The sub-pipe joins this binding's tree: it reports the same ``traceId``
         and inherits its trace level, so its trace and SSE reach the same control as
-        the request that caused them. The caller context (``_caller``) is stamped
-        down the sub-pipe's chain so its nodes read this call's ``settings``.
+        the request that caused them. The caller context (``_caller``) is set on the
+        sub-pipe, and the engine copies it into each of its instances as it
+        constructs them, so its nodes read this call's ``settings``.
 
         Args:
             traceLevel: Ignored when inside a binding (the joined pipe inherits);
@@ -1108,24 +1110,12 @@ class IInstanceBase:
             IServiceFilterPipe: The bound pipe; return it with ``putPipe``.
         """
         pipe = self.IEndpoint.endpoint.getPipe(traceLevel, self.traceId)
-        self._stamp_caller(pipe, self._caller)
+        pipe.caller = self._caller
         return pipe
 
     def putPipe(self, pipe: IServiceFilterPipe) -> None:
-        """Return a sub-pipe taken with ``getPipe`` and clear the caller stamp from its chain."""
-        self._stamp_caller(pipe, None)
+        """Return a sub-pipe taken with ``getPipe``; the engine ends its instances and clears the caller."""
         self.IEndpoint.endpoint.putPipe(pipe)
-
-    @staticmethod
-    def _stamp_caller(pipe: IServiceFilterPipe, caller: Optional[Dict[str, Any]]) -> None:
-        """Set ``_caller`` on every Python instance of the pipe's chain, invalidating cached settings."""
-        node = pipe
-        while node is not None:
-            py_instance = node.pyInstance
-            if py_instance is not None:
-                py_instance._caller = caller
-                py_instance._settings = None
-            node = node.next
 
     def logger(self) -> 'BindingLogger':
         """

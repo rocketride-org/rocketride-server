@@ -23,7 +23,7 @@
 """
 Engine access shared by the commands that run a request through a control.
 
-One rule for the data path, the profiler and ``process()``: a request through
+One rule for the data path, the profiler and ``submit()``: a request through
 a DORMANT control (its engine stopped on the inactivity timer, or crashed after
 it confirmed running) starts the engine again with the team's CURRENT secrets,
 so the restart re-checks the caller's access to the team the way the explicit
@@ -33,6 +33,8 @@ is asked.
 """
 
 from typing import TYPE_CHECKING
+
+from ..types import EngineState, TaskError
 
 if TYPE_CHECKING:
     from ..task_control import TaskControl
@@ -62,3 +64,39 @@ async def engine_for(conn, control: 'TaskControl', perm: str) -> 'TaskEngine':
 
     # Step 2: the live engine, or the one started again under the same key (plan 7.2)
     return await conn._server.ensure_engine(control)
+
+
+async def wait_running(engine: 'TaskEngine') -> None:
+    """
+    Wait until ``engine`` confirmed running; a start that never confirms is ``engine_start_failed``.
+
+    ``wait_for_running`` gives up when the subprocess has emitted nothing for
+    ``CONST_MAX_READY_TIME`` (a liveness detector, not a deadline, plan 3.1)
+    and raises a bare ``TimeoutError``; callers get the structured error of
+    plan 3.8 instead, with the engine key.
+
+    Args:
+        engine: The engine a request is about to run on.
+
+    Raises:
+        TaskError: TASK_ENGINE_START_FAILED with ``engineKey``.
+    """
+    try:
+        await engine.wait_for_running()
+    except TimeoutError as exc:
+        raise TaskError(
+            TaskError.ENGINE_START_FAILED,
+            f'The engine {engine.engine_key!r} did not confirm running: {exc}',
+            engineKey=engine.engine_key,
+        ) from exc
+    except TaskError as exc:
+        # A subprocess that completed or was stopped BEFORE it ever confirmed
+        # running never started: that is the start failure too. An engine that
+        # ran and then ended keeps its terminal code
+        if exc.code in (TaskError.COMPLETED, TaskError.STOPPED) and engine.state is EngineState.FAILED:
+            raise TaskError(
+                TaskError.ENGINE_START_FAILED,
+                f'The engine {engine.engine_key!r} ended before it confirmed running: {exc}',
+                engineKey=engine.engine_key,
+            ) from exc
+        raise
