@@ -2804,10 +2804,15 @@ class TaskServer(DAPBase):
                 warnings=warnings,
             )
 
-        # Step 3: repoint onto the new spec's engine
-        await self._repoint(existing, incoming.pipeline, launch_args=launch_args, env=env, env_source=env_source)
-        if wait_for_running:
-            await existing.task.wait_for_running()
+        # Step 3: repoint onto the new spec's engine (readiness inside the rollback)
+        await self._repoint(
+            existing,
+            incoming.pipeline,
+            launch_args=launch_args,
+            env=env,
+            env_source=env_source,
+            wait_running=wait_for_running,
+        )
         return results(
             existing,
             reused=True,
@@ -2824,9 +2829,15 @@ class TaskServer(DAPBase):
         launch_args: Dict[str, Any],
         env: Optional[Dict[str, str]],
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
+        wait_running: bool = False,
     ) -> TaskEngine:
         """
         Move ``control``'s ONE hold onto the engine of ``pipeline`` (plan 7.3).
+
+        With ``wait_running`` the new engine must CONFIRM running before the
+        move is final: a replacement that fails before readiness is stopped
+        and the control is put back on its previous engine, which is still
+        running because it is stopped only after readiness succeeds.
 
         The control's identity, ttl and subscriptions stay; its spec becomes
         ``pipeline``. The new engine is acquired through the start gate
@@ -2865,13 +2876,22 @@ class TaskServer(DAPBase):
                 ),
                 _move,
             )
+            # Readiness is part of the move: start_task returns at launch,
+            # before the pipeline reports RUNNING, so a failure before
+            # readiness is caught here, while the old engine still runs
+            if wait_running and engine is not old_engine:
+                await engine.wait_for_running()
         except Exception:
             # A failed start leaves the control on its old engine and spec
             failed = control.task
             if failed is not old_engine and failed is not None:
                 failed.release(control.key)
-                old_engine.acquire(control.key, control.ttl)
+                if old_engine is not None:
+                    old_engine.acquire(control.key, control.ttl)
                 control.task = old_engine
+                # The replacement nobody holds does not linger (plan 7.2)
+                if not failed.holds and not failed.is_task_complete() and not failed._stop_requested:
+                    await self._stop_engine_now(failed, 'repoint failed')
             control.pipeline = old_pipeline
             raise
 
@@ -3177,11 +3197,10 @@ class TaskServer(DAPBase):
                     launch_args=args,
                     env=None,
                     env_source=None if old_engine.shared else old_engine._env_source,
+                    wait_running=wait_for_running,
                 )
                 # The control now admits the accepted pipeline's parameters
                 control.parameters = dict(control.pipeline.get('parameters') or {})
-                if wait_for_running:
-                    await control.task.wait_for_running()
                 self._note_launch_owner(control, conn)
                 # Unchanged content on a shared engine moves nothing: the
                 # engine keeps serving its holders and nothing was reset, which

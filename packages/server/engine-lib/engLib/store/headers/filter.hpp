@@ -507,6 +507,14 @@ protected:
 
     //-----------------------------------------------------------------
     /// @details
+    ///		True while endBinding() runs: a touch from inside the teardown
+    ///		(a node's endInstance reaching for its instance) must not
+    ///		construct a new binding
+    //-----------------------------------------------------------------
+    bool m_endingBinding = false;
+
+    //-----------------------------------------------------------------
+    /// @details
     ///		Built in tag buffer allocated only when needed via the
     ///		allocateTagBuffer member
     //-----------------------------------------------------------------

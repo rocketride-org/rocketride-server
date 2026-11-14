@@ -471,3 +471,40 @@ def test_a_failing_end_instance_is_the_puts_error_and_the_slot_is_still_free(mon
             endpoint.putPipe(again)
     finally:
         loader.endLoad()
+
+
+def test_a_touch_from_inside_end_instance_cannot_rebind(monkeypatch):
+    """Reaching for the instance during teardown is refused: no new binding is built or recorded."""
+    cls = _response_class()
+    built = []
+    original_init = cls.__init__
+
+    def counting_init(self, *args, **kwargs):
+        built.append(1)
+        original_init(self, *args, **kwargs)
+
+    seen = []
+
+    def nosy_end(self):
+        try:
+            self.instance.pyInstance
+        except Exception as exc:  # noqa: BLE001 - the refusal is what this test records
+            seen.append(str(exc))
+
+    monkeypatch.setattr(cls, '__init__', counting_init)
+    monkeypatch.setattr(cls, 'endInstance', nosy_end)
+
+    loader = engLib.ILoader()
+    loader.beginLoad(PIPELINE)
+    try:
+        endpoint = loader.target
+        pipe = endpoint.getPipe('none')
+        node = _node(pipe, 'response_1')
+        node.pyInstance
+        endpoint.putPipe(pipe)
+
+        assert built == [1], 'the teardown built nothing'
+        assert len(seen) == 1 and 'ending its binding' in seen[0]
+        assert not node.bound
+    finally:
+        loader.endLoad()

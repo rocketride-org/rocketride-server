@@ -1200,6 +1200,34 @@ async def test_a_spec_that_cannot_be_keyed_is_refused_at_start(catalog, engines)
 
 
 @pytest.mark.asyncio
+async def test_a_repoint_whose_engine_never_confirms_running_is_rolled_back(catalog, engines, monkeypatch):
+    """Readiness is inside the rollback: the control stays on its still-running old engine; the replacement is stopped."""
+    catalog.discard('prompt')
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    dev = await _start(ts, _pipeline(), user='user-a')
+    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    old_engine = dev.task
+    old_pipeline = dev.pipeline
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TimeoutError):
+        await ts.restart_task(
+            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
+            conn=conn,
+            wait_for_running=True,
+        )
+
+    assert dev.task is old_engine and deployed.task is old_engine
+    assert old_engine.holds == {dev.key: 0, deployed.key: 0} or set(old_engine.holds) == {dev.key, deployed.key}
+    assert dev.pipeline == old_pipeline
+    assert [reason for engine, reason in engines if engine is not old_engine] == ['repoint failed']
+    assert all(engine is not old_engine for engine, _ in engines), 'the old engine was never stopped'
+
+
+@pytest.mark.asyncio
 async def test_a_restart_on_a_shared_engine_repoints_the_control(catalog, engines):
     """The other holder keeps its engine unchanged; this control moves to the new spec's engine (plan 3.4)."""
     catalog.discard('prompt')  # per-owner engine: the owner's dev run and @me deploy share it

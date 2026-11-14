@@ -86,6 +86,11 @@ Error IServiceFilterInstance::bindToGeneration() noexcept {
     if (!pipe)
         return APERR(Ec::InvalidCommand, "The instance is not on a pipe");
 
+    if (m_endingBinding)
+        return APERR(Ec::InvalidCommand,
+                     "The instance is ending its binding; nothing can be bound "
+                     "from inside endInstance");
+
     const auto generation = pipe->generation;
     if (m_boundGeneration == generation) return {};
 
@@ -106,7 +111,10 @@ Error IServiceFilterInstance::releaseBinding() noexcept {
     if (!m_boundGeneration) return {};
 
     m_boundGeneration = 0;
-    return endBinding();
+    m_endingBinding = true;
+    auto ccode = endBinding();
+    m_endingBinding = false;
+    return ccode;
 }
 
 //-------------------------------------------------------------------------
