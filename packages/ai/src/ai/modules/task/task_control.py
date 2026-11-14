@@ -39,13 +39,13 @@ held engine, so the many ``control.task.<...>`` call sites read as "the engine
 this control holds".
 """
 
+import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
-from rocketride import TASK_STATE
 
-from .types import LAUNCH_TYPE, TaskError
+from .types import EngineState, LAUNCH_TYPE, TaskError
 
 if TYPE_CHECKING:
     from .task_conn import TaskConn
@@ -295,6 +295,12 @@ class TaskControl:
     inflight: int = 0
     registered_at: float = 0.0
 
+    # One engine transition (repoint) at a time per control, readiness and
+    # rollback included, so a later restart can never be undone by an earlier
+    # one's failure handler (the engine-key start locks do not cover two
+    # replacements with different keys)
+    transition_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
+
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
@@ -413,12 +419,12 @@ class TaskControl:
         the next request through it starts the engine again
         (``TaskServer.ensure_engine``).
         """
-        return self.task is not None and self.task.dormant_reason is not None and self.task.is_task_complete()
+        return self.task is not None and self.task.dormant_reason is not None and self.task.state is EngineState.STOPPED
 
     @property
     def live(self) -> bool:
         """True while the control can serve: its engine runs, or it is dormant."""
-        return self.task is not None and (not self.task.is_task_complete() or self.dormant)
+        return self.task is not None and (self.task.is_live or self.dormant)
 
     @property
     def engine_state(self) -> str:
@@ -435,21 +441,19 @@ class TaskControl:
         TODO(plan 7.5, C.9): carried in ``apaevt_status`` as
         ``body.engine.availability``.
         """
-        # Step 1: a restart through this control is in the start gate
+        # A restart through this control is in the start gate
         engine = self.task
         if engine is None:
             return 'stopped'
         if self.engine_starting:
             return 'starting'
 
-        # Step 2: stopped, stopping, or past its running confirmation
-        if engine.is_task_complete() or engine._stop_requested:
-            return 'stopped'
-        if engine.get_status().state == TASK_STATE.STOPPING.value:
-            return 'stopped'
-        if engine.reached_running:
+        # Otherwise the engine's own state, projected (plan 7.5)
+        if engine.state is EngineState.RUNNING:
             return 'running'
-        return 'starting'
+        if engine.state in (EngineState.NEW, EngineState.STARTING):
+            return 'starting'
+        return 'stopped'
 
     def idle_seconds(self, now: Optional[float] = None) -> float:
         """

@@ -61,7 +61,7 @@ from ai.modules.task.task_control import DeploymentRef, TaskControl, TeamContext
 from ai.modules.task.engine_key import engine_content, qualified_key
 from ai.modules.task.task_engine import MULTITENANT_BIT, TaskEngine, component_facts
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
-from ai.modules.task.types import TaskError
+from ai.modules.task.types import EngineState, TaskError
 
 
 # =============================================================================
@@ -106,11 +106,13 @@ def engines(monkeypatch):
 
     async def start(self):
         # The subprocess reports its service up at once
+        self.state = EngineState.STARTING
         self._confirm_running()
 
     async def stop(self, reason='user'):
         stopped.append((self, reason))
-        self._stop_requested = True
+        self._stop_reason = reason
+        self.state = EngineState.STOPPED
         self._status.state = 6  # CANCELLED
 
     async def terminated(self):
@@ -927,7 +929,7 @@ async def test_a_crash_after_running_leaves_the_controls_dormant_and_restarts(ca
     a = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     b = await _start(ts, _pipeline(), user='user-b', ttl=3600)
     crashed = a.task
-    assert crashed.reached_running
+    assert crashed.state is EngineState.RUNNING
 
     await _crash(crashed)
 
@@ -966,7 +968,7 @@ async def test_a_crash_before_running_is_not_retried(catalog, engines, monkeypat
     await _crash(failed, exit_code=1)
 
     # Not dormant, not live: a finished run, removed by the cleanup pass
-    assert failed.dormant_reason is None and not failed.reached_running
+    assert failed.dormant_reason is None and failed.state is EngineState.FAILED
     assert not control.dormant and not control.live
     assert control.engine_state == 'stopped'
     assert await ts.ensure_engine(control) is failed
@@ -1225,6 +1227,84 @@ async def test_a_repoint_whose_engine_never_confirms_running_is_rolled_back(cata
     assert dev.pipeline == old_pipeline
     assert [reason for engine, reason in engines if engine is not old_engine] == ['repoint failed']
     assert all(engine is not old_engine for engine, _ in engines), 'the old engine was never stopped'
+
+
+@pytest.mark.asyncio
+async def test_the_old_engine_survives_another_holder_leaving_during_readiness(catalog, engines, monkeypatch):
+    """The repointing control keeps its old hold through readiness: the other holder's terminate cannot stop the engine a rollback returns to."""
+    catalog.discard('prompt')
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    dev = await _start(ts, _pipeline(), user='user-a')
+    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    old_engine = dev.task
+
+    async def leave_then_fail(self):
+        # The other holder terminates while the replacement is confirming
+        await ts.remove_task(deployed.key)
+        raise TimeoutError('silent')
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', leave_then_fail)
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TimeoutError):
+        await ts.restart_task(
+            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
+            conn=conn,
+            wait_for_running=True,
+        )
+
+    assert dev.task is old_engine
+    assert set(old_engine.holds) == {dev.key}, 'the repointing control never let go of its old hold'
+    assert all(engine is not old_engine for engine, _ in engines), 'the old engine kept running'
+    assert [reason for engine, reason in engines if engine is not old_engine] == ['repoint failed']
+
+
+@pytest.mark.asyncio
+async def test_repoints_of_one_control_are_serialized_through_readiness(catalog, engines, monkeypatch):
+    """A second restart of the same control waits for the first transition, rollback included."""
+    catalog.discard('prompt')
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    order: List[str] = []
+    gate = asyncio.Event()
+
+    async def slow_readiness(self):
+        order.append('first:in')
+        await gate.wait()
+        order.append('first:out')
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', slow_readiness)
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+
+    first = asyncio.create_task(
+        ts.restart_task(
+            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
+            conn=conn,
+            wait_for_running=True,
+        )
+    )
+    await asyncio.sleep(0)
+    assert order == ['first:in']
+
+    # The second restart cannot enter until the first transition is final
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=lambda: order.append('second:ran')))
+    second = asyncio.create_task(
+        ts.restart_task(
+            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='third draft')}},
+            conn=conn,
+            wait_for_running=True,
+        )
+    )
+    await asyncio.sleep(0)
+    assert order == ['first:in'], 'the second restart is waiting on the transition lock'
+
+    gate.set()
+    first_result, second_result = await asyncio.gather(first, second)
+    assert order == ['first:in', 'first:out', 'second:ran']
+    assert dev.pipeline['components'][1]['config']['instructions'] == 'third draft'
 
 
 @pytest.mark.asyncio

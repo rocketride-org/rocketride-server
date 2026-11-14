@@ -1233,17 +1233,6 @@ class RunLogWriter:
         # Deregister as the stream's live writer.
         WRITERS.pop(writer_key(self._scope_id, self._stream), None)
 
-    def note_restart(self) -> None:
-        """
-        Record a mid-run engine restart in the stream.
-
-        A restart is NOT a new run: the chapter continues and the seq base is
-        already re-anchored by the task's in-memory counter — this marker
-        just makes the restart visible on replay.
-        """
-        if self._open:
-            self._append_event(self._stamp(_lifecycle_event('restart')))
-
     # =========================================================================
     # CONTROL FILE
     # =========================================================================

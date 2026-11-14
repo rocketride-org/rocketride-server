@@ -48,6 +48,32 @@ from enum import Enum
 from typing import Any
 
 
+class EngineState(Enum):
+    """
+    The lifecycle state of a TaskEngine (the process), owned by the engine (plan 7.2).
+
+    One variable answers every "is it safe to attach / stop / roll back to this
+    engine" question that was spread over flags before:
+
+    - ``NEW``: built, not yet started.
+    - ``STARTING``: launched; the pipeline has not reported its service up.
+    - ``RUNNING``: confirmed running; takes requests and holds.
+    - ``STOPPING``: a stop was requested; takes no new holds.
+    - ``STOPPED``: the process is gone after it had run (a clean exit, the
+      inactivity timer, an operator, a crash); a control's next request may
+      start the key again.
+    - ``FAILED``: the process ended before it ever confirmed running; a start
+      that is not retried (``engine_start_failed``).
+    """
+
+    NEW = 'new'
+    STARTING = 'starting'
+    RUNNING = 'running'
+    STOPPING = 'stopping'
+    STOPPED = 'stopped'
+    FAILED = 'failed'
+
+
 class LAUNCH_TYPE(Enum):
     """
     Task launch type enumeration defining execution modes and debugging capabilities.

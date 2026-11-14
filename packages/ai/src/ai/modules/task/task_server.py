@@ -481,6 +481,100 @@ class ControlRegistry(MutableMapping):
         return sorted(self._sources.get((developer_id, pipe_id), {}))
 
 
+class _EngineTransition:
+    """
+    One control's move from its engine to the engine of a new pipeline (plan 7.3).
+
+    The steps are the whole protocol; ``_repoint`` runs them in order under the
+    control's transition lock:
+
+    - ``begin``: the control's spec becomes the new pipeline and its hold is
+      taken on the new content's engine (started through the start gate when
+      none is live). The hold on the OLD engine is kept, so another holder
+      leaving meanwhile can never stop the engine an abort returns to.
+    - ``confirm``: the new engine reports running (``start_task`` returns at
+      launch, before that).
+    - ``commit``: the old hold goes through the hold rule; the old engine stops
+      when that was its last hold.
+    - ``abort``: the control is put back on its old pipeline and engine BEFORE
+      any await, then the new hold goes through the hold rule (a replacement
+      nobody holds does not linger).
+    """
+
+    def __init__(
+        self,
+        server: 'TaskServer',
+        control: TaskControl,
+        pipeline: Dict[str, Any],
+        launch_args: Dict[str, Any],
+        env: Optional[Dict[str, str]],
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
+    ) -> None:
+        self._server = server
+        self._control = control
+        self._pipeline = pipeline
+        self._launch_args = launch_args
+        self._env = env
+        self._env_source = env_source
+        self.old_engine: Optional[TaskEngine] = control.task
+        self.old_pipeline = control.pipeline
+        self.engine: Optional[TaskEngine] = None
+
+    @property
+    def moved(self) -> bool:
+        """Whether the control is on a different engine than it started on."""
+        return self.engine is not None and self.engine is not self.old_engine
+
+    async def begin(self) -> None:
+        """Take the hold on the new content's engine; the old hold stays."""
+        control, server = self._control, self._server
+        control.pipeline = self._pipeline
+        key, shared, threads = server._engine_shape(control, self._launch_args)
+
+        def _hold(engine: TaskEngine) -> None:
+            if control.task is engine:
+                return
+            engine.acquire(control.key, control.ttl)
+            control.task = engine
+
+        self.engine = await server._acquire_engine(
+            key,
+            lambda: server._new_engine(
+                control,
+                key=key,
+                shared=shared,
+                threads=threads,
+                launch_args=self._launch_args,
+                env={} if shared else (self._env or {}),
+                env_source=None if shared else self._env_source,
+            ),
+            _hold,
+        )
+
+    async def confirm(self) -> None:
+        """Wait until the new engine confirmed running (nothing to confirm when it did not move)."""
+        if self.moved:
+            await self.engine.wait_for_running()
+
+    async def commit(self) -> None:
+        """The move is final: the old hold goes, and the old engine with it when that was its last."""
+        if self.moved and self.old_engine is not None:
+            await self._server.release_hold(self.old_engine, self._control.key, 'repointed')
+        self._server.debug_message(
+            f'Task "{self._control.id}" {"repointed to" if self.moved else "stays on"} engine '
+            f'"{self.engine.engine_key if self.engine else "?"}"'
+        )
+
+    async def abort(self) -> None:
+        """Undo: the control is back on its old pipeline and engine before anything is awaited."""
+        control = self._control
+        control.pipeline = self.old_pipeline
+        failed = control.task
+        control.task = self.old_engine
+        if failed is not None and failed is not self.old_engine:
+            await self._server.release_hold(failed, control.key, 'repoint failed')
+
+
 class TaskServer(DAPBase):
     """
     Central task management server orchestrating computational task lifecycles.
@@ -811,7 +905,7 @@ class TaskServer(DAPBase):
             popped += 1
 
             # Stale: rescheduled, stopping or finished
-            if engine._expiry_gen != gen or engine._stop_requested or engine.is_task_complete():
+            if engine._expiry_gen != gen or not engine.is_live:
                 continue
 
             # A ttl-0 holder (a listener source) keeps it from aging: looked
@@ -982,10 +1076,7 @@ class TaskServer(DAPBase):
             if control is None or control.launch_type != LAUNCH_TYPE.LAUNCH or control.launch_owner is not conn:
                 continue
             try:
-                if self._shares_engine(control):
-                    await self.remove_task(control.key)
-                else:
-                    await self._stop_engine_now(control.task, 'user')
+                await self.remove_task(control.key)
                 self.debug_message(f'Auto-terminated launched task "{control.id}" after client disconnect')
             except Exception as e:
                 # Log cleanup errors but continue processing other tasks
@@ -1850,12 +1941,17 @@ class TaskServer(DAPBase):
         """True when another control also holds the engine ``control`` holds."""
         return control.task is not None and any(key != control.key for key in control.task.holds)
 
-    def _unregister_control(self, control: TaskControl) -> None:
+    def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False) -> None:
         """
-        Take a control out of the registry and release its hold; its subscriptions stay.
+        Take a control out of the registry; its subscriptions stay.
+
+        The control's hold goes with it unless ``keep_hold`` is set, for a
+        caller that releases it through ``release_hold`` (the rule that stops
+        the engine when the last hold drops).
 
         Args:
             control: The control to unregister.
+            keep_hold: Leave the hold to the caller.
         """
         # Out of the registry, unless a replacement already took the key
         if self._task_control.get(control.key) is control:
@@ -1864,20 +1960,40 @@ class TaskServer(DAPBase):
             self._forget_launch_owner(control)
 
         # The control's one hold
-        if control.task is not None:
+        if control.task is not None and not keep_hold:
             control.task.release(control.key)
 
-    def _forget_control(self, control: TaskControl) -> None:
+    async def release_hold(self, engine: Optional[TaskEngine], control_key: str, reason: str) -> None:
+        """
+        Drop a control's hold on ``engine``: the ONE place the last hold stops an engine (plan 7.2).
+
+        An engine nobody holds does not linger: when this was its last hold
+        and it is live, it stops now. An engine already stopping, stopped or
+        failed is left as it is. Every path that lets go of a hold (terminate,
+        a repoint's commit or rollback, a failed start) comes through here.
+
+        Args:
+            engine: The engine, or None.
+            control_key: The releasing control's registry key.
+            reason: Why the engine stops, when it does.
+        """
+        if engine is None:
+            return
+        if engine.release(control_key) == 0 and engine.is_live:
+            await self._stop_engine_now(engine, reason)
+
+    def _forget_control(self, control: TaskControl, *, keep_hold: bool = False) -> None:
         """
         Drop a control: out of the registry, its subscriptions gone, its hold released.
 
-        Never stops the engine: whether the engine stops is the caller's call
-        (it does only when this was the last hold).
+        Never stops the engine itself: a caller that may have to (the last
+        hold) keeps the hold and releases it through ``release_hold``.
 
         Args:
             control: The control to drop.
+            keep_hold: Leave the hold to the caller.
         """
-        self._unregister_control(control)
+        self._unregister_control(control, keep_hold=keep_hold)
 
         # Remove monitor subscriptions that reference this control from all
         # connections — keys are owner-scoped, so build from the control.
@@ -1931,16 +2047,12 @@ class TaskServer(DAPBase):
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
         engine = control.task
-        last_hold = not self._shares_engine(control)
 
-        # Subscriptions go first and the hold with them: a subscription a
-        # client installs for a replacement run during the await below must
-        # survive
-        self._forget_control(control)
-
-        # The last hold dropped: the engine stops now, unless it already has
-        if engine is not None and last_hold and not engine.is_task_complete() and not engine._stop_requested:
-            await self._stop_engine_now(engine, reason)
+        # Subscriptions go first: a subscription a client installs for a
+        # replacement run during the await below must survive. Then the hold,
+        # through the one rule that stops the engine when it was the last
+        self._forget_control(control, keep_hold=True)
+        await self.release_hold(engine, control.key, reason)
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -2635,23 +2747,15 @@ class TaskServer(DAPBase):
             # terminates before the task reaches RUNNING, the exception
             # propagates here but the task was NOT a creation failure.
             engine = control.task
-            last_hold = not self._shares_engine(control)
             if engine is not None:
-                self._unregister_control(control)
-            if engine is not None and engine._stop_requested:
-                self.debug_message(f'Task stopped during startup: {control.id}...')
-            elif engine is not None and last_hold:
-                self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
-                # Kill the subprocess so it doesn't linger as an orphan
-                # consuming resources and reporting stale metrics. An engine
-                # other controls hold is theirs and keeps running.
-                self._drop_engine(engine)
-                try:
-                    await asyncio.wait_for(engine.stop_task(), timeout=30)
-                except asyncio.TimeoutError:
-                    self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
-                except Exception:
-                    self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
+                self._unregister_control(control, keep_hold=True)
+                if not engine.is_live:
+                    self.debug_message(f'Task stopped during startup: {control.id}...')
+                else:
+                    self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
+                # The hold rule: an orphan nobody holds stops, an engine other
+                # controls hold is theirs and keeps running
+                await self.release_hold(engine, control.key, 'user')
             raise
 
     # ==== Spec calls: shape, convergence, collision, storm =======================
@@ -2834,73 +2938,28 @@ class TaskServer(DAPBase):
         """
         Move ``control``'s ONE hold onto the engine of ``pipeline`` (plan 7.3).
 
-        With ``wait_running`` the new engine must CONFIRM running before the
-        move is final: a replacement that fails before readiness is stopped
-        and the control is put back on its previous engine, which is still
-        running because it is stopped only after readiness succeeds.
-
         The control's identity, ttl and subscriptions stay; its spec becomes
-        ``pipeline``. The new engine is acquired through the start gate
-        (attached when another control already runs that content). The old
-        engine loses this hold only; it stops at once when that was its last
-        hold (no linger, plan 7.2), and otherwise keeps serving its holders.
+        ``pipeline``. The transition is one object (``_EngineTransition``):
+        begin (hold the new engine, the old hold kept), confirm (the new
+        engine reports running), commit (the old hold goes through the hold
+        rule, which stops the old engine when that was its last); a failure
+        anywhere aborts (the new hold goes through the same rule, the old
+        pipeline comes back). One transition per control at a time.
 
         Returns:
             The engine the control now holds.
         """
-        old_engine, old_pipeline = control.task, control.pipeline
-
-        def _move(engine: TaskEngine) -> None:
-            if control.task is engine:
-                return
-            if control.task is not None:
-                control.task.release(control.key)
-            engine.acquire(control.key, control.ttl)
-            control.task = engine
-
-        try:
-            # The spec and its shape are inside the rollback: a spec that
-            # cannot be keyed leaves the control on its old pipeline too
-            control.pipeline = pipeline
-            key, shared, threads = self._engine_shape(control, launch_args)
-            engine = await self._acquire_engine(
-                key,
-                lambda: self._new_engine(
-                    control,
-                    key=key,
-                    shared=shared,
-                    threads=threads,
-                    launch_args=launch_args,
-                    env={} if shared else (env or {}),
-                    env_source=None if shared else env_source,
-                ),
-                _move,
-            )
-            # Readiness is part of the move: start_task returns at launch,
-            # before the pipeline reports RUNNING, so a failure before
-            # readiness is caught here, while the old engine still runs
-            if wait_running and engine is not old_engine:
-                await engine.wait_for_running()
-        except Exception:
-            # A failed start leaves the control on its old engine and spec
-            failed = control.task
-            if failed is not old_engine and failed is not None:
-                failed.release(control.key)
-                if old_engine is not None:
-                    old_engine.acquire(control.key, control.ttl)
-                control.task = old_engine
-                # The replacement nobody holds does not linger (plan 7.2)
-                if not failed.holds and not failed.is_task_complete() and not failed._stop_requested:
-                    await self._stop_engine_now(failed, 'repoint failed')
-            control.pipeline = old_pipeline
-            raise
-
-        # The old engine's last hold went with this repoint: it stops now
-        if old_engine is not None and old_engine is not engine and not old_engine.holds:
-            if not old_engine.is_task_complete() and not old_engine._stop_requested:
-                await self._stop_engine_now(old_engine, 'repointed')
-        self.debug_message(f'Task "{control.id}" repointed to engine "{engine.engine_key}"')
-        return engine
+        async with control.transition_lock:
+            transition = _EngineTransition(self, control, pipeline, launch_args, env, env_source)
+            try:
+                await transition.begin()
+                if wait_running:
+                    await transition.confirm()
+            except Exception:
+                await transition.abort()
+                raise
+            await transition.commit()
+            return transition.engine
 
     def _new_engine(
         self,
@@ -2983,7 +3042,7 @@ class TaskServer(DAPBase):
         async with self._engines.start_lock(key):
             # Step 2: the live engine of the key, if any
             engine = self._engines.get(key)
-            if engine is not None and (engine.is_task_complete() or engine._stop_requested):
+            if engine is not None and not engine.accepting_holds:
                 engine = None
 
             # Step 3: hold it, building one when none is live
@@ -3069,14 +3128,9 @@ class TaskServer(DAPBase):
             # engine, so the next request tries again
             failed = control.task
             if failed is not stopped:
-                failed.release(control.key)
                 stopped.acquire(control.key, control.ttl)
                 control.task = stopped
-                if not failed.holds:
-                    try:
-                        await asyncio.wait_for(failed.stop_task(), timeout=30)
-                    except Exception:
-                        self.debug_message(f'Warning: failed to stop a failed engine start: {control.id}')
+                await self.release_hold(failed, control.key, 'repoint failed')
             raise
 
         finally:
@@ -3087,79 +3141,40 @@ class TaskServer(DAPBase):
         self,
         request: Dict[str, Any],
         conn: TaskConn = None,
-        *,
         wait_for_running=False,
     ) -> Dict[str, Any]:
         """
-        Restart an existing task with a new pipeline configuration.
+        Restart a control on a new pipeline: a repoint onto the new content's engine (plan 7.3).
 
-        This method restarts the underlying engine process with updated configuration
-        while preserving the task's identity, statistics, monitoring connections,
-        and registry entry. The task must exist and not have a debugger attached.
-
-        CRITICAL: The project_id and source in the new pipeline MUST match the existing
-        task's project_id and source. These define the task's identity and cannot be
-        changed during restart. Only the pipeline configuration and provider can be updated.
+        There is ONE restart path. The control keeps its identity (address,
+        project, source), its ttl and its subscriptions; it moves to the engine
+        of the new spec, started if none is live, and the old engine loses this
+        hold only: it stops when that was its last hold and keeps serving any
+        other holder unchanged. Unchanged content moves nothing and says so
+        (``converged: 'none'``). A restart is a new launch (a new engineId),
+        with fresh metrics, as plan 7.2 says every engine start is.
 
         Args:
-            apikey (str): API key for authentication (must match task's apikey)
-            request (Dict[str, Any]): Restart request containing:
-                - arguments: Task configuration including:
-                    - token: Task token to restart (required)
-                    - pipeline: New pipeline configuration (required)
-            conn (TaskConn, optional): Connection requesting restart (must match launch_owner)
-            wait_for_running (bool): If True, wait for task to reach running state
+            request: DAP request (``token`` = the address, ``pipeline``).
+            conn: The requesting connection (its account resolves the control).
+            wait_for_running: Wait until the engine confirmed running.
 
         Returns:
-            Dict[str, Any]: Task information including:
-                - id: Task identifier (unchanged)
-                - token: Task token (unchanged)
-                - projectId / source / provider (unchanged)
-                - projectId: Project identifier (unchanged - must match existing)
-                - source: Source identifier (unchanged - must match existing)
-                - provider: Provider name (may be updated)
+            ``{id, token (the address), projectId, source, provider, engineKey, converged}``.
 
         Raises:
-            ValueError: If pipeline invalid, source not found,
-                    project_id/source don't match existing values, or token not provided
-            TaskError: Code TASK_NOT_REGISTERED if the token names no live task
-            RuntimeError: If pipeline configuration missing, debugger attached,
-                        apikey mismatch, or connection is not the launch owner
-
-        Restart Process:
-        1. Parse and validate request parameters
-        2. Validate task existence
-        3. Verify connection is the launch owner
-        4. Verify apikey matches
-        5. Check that no debugger is attached
-        6. Extract and validate new pipeline configuration
-        7. Verify project_id and source match existing (cannot change)
-        8. Validate source component exists in new pipeline
-        9. Update TaskControl with new configuration (pipeline, provider)
-        10. Call task.restart_task() to restart engine process
-        11. Optionally wait for running state
-        12. Transfer launch ownership to the caller (only once 10-11 succeeded)
-        13. Return task information
-
-        Note:
-        - Task identity (address, project_id, source) remains unchanged
-        - Task statistics are preserved across restart
-        - Monitoring connections remain active
-        - Registry entry is updated but not recreated
-        - Peak/total metrics are not modified (not a new task)
-        - Debugger must be detached before restart
-        - Only the original launch owner can restart the task
+            ValueError: A missing address or pipeline, or a source change.
+            RuntimeError: A debugger is attached.
+            TaskError: The spec cannot be keyed (engine_start_failed), or the
+                control is not the caller's.
         """
         try:
-            # Parse request arguments
             args = request.get('arguments', {})
 
-            # Extract the address from the token slot
             address = args.get('token', None)
             if not address:
                 raise ValueError('Task address is required for restart')
 
-            # Extract pipeline from request
             pipeline = args.get('pipeline', None)
             if not pipeline:
                 raise ValueError('Missing pipeline configuration in restart request')
@@ -3168,148 +3183,55 @@ class TaskServer(DAPBase):
             # a user-owned run restarts only for its owner)
             account_info = getattr(conn, '_account_info', None) if conn else None
             control = self.resolve_control(address, account_info, 'task.control')
-
             self.debug_message(f'Restart requested for task "{control.id}"')
 
-            # Check if debugger is attached - fail if so
             if control.task.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
 
-            # A restart replaces the engine's content in place only for the
-            # sole holder of a private engine. An engine other controls hold
-            # keeps serving them unchanged: this control is REPOINTED onto the
-            # new spec's engine instead (plan 3.4, 7.3), exactly like
-            # submit(spec) with onChange 'auto'; nothing is stopped for anyone else.
-            if self._shares_engine(control) or control.task.shared:
-                # The source is checked on the REQUEST, before normalisation
-                # stamps the control's source onto it
-                requested_source = pipeline.get('source')
-                if requested_source and requested_source != control.source:
-                    raise ValueError(
-                        f"The source is part of the task's identity and cannot change on a restart "
-                        f'({control.source!r} -> {requested_source!r})'
-                    )
-                repointed = _apply_source_defaults(pipeline, control.source)
-                old_engine = control.task
-                await self._repoint(
-                    control,
-                    repointed,
-                    launch_args=args,
-                    env=None,
-                    env_source=None if old_engine.shared else old_engine._env_source,
-                    wait_running=wait_for_running,
-                )
-                # The control now admits the accepted pipeline's parameters
-                control.parameters = dict(control.pipeline.get('parameters') or {})
-                self._note_launch_owner(control, conn)
-                # Unchanged content on a shared engine moves nothing: the
-                # engine keeps serving its holders and nothing was reset, which
-                # the stamp says (plan 7.3: a shared engine is never restarted
-                # for one holder)
-                converged = 'repointed' if control.task is not old_engine else 'none'
-                self.debug_message(f'Task "{control.id}" restart: {converged} ("{control.task.engine_key}")')
-                return {
-                    'token': control.address,
-                    'projectId': control.project_id,
-                    'source': control.source,
-                    'provider': control.provider,
-                    'engineKey': control.task.engine_key,
-                    'converged': converged,
-                }
-
-            # Find and validate the provider from new pipeline
-            components = pipeline.get('components', [])
-            if type(components) is not list:
-                raise ValueError('Invalid components in pipeline')
-
-            # The source is part of the task's identity and a restart cannot change
-            # it. _apply_source_defaults stamps control.source onto the pipeline, so
-            # a different explicit source would be overwritten without a word —
-            # refuse it instead, which is what the docstring above promises.
+            # The source is part of the task's identity: checked on the REQUEST,
+            # before normalisation stamps the control's source onto it
             requested_source = pipeline.get('source')
             if requested_source and requested_source != control.source:
                 raise ValueError(
-                    f'Cannot change the source on restart: task "{control.id}" runs '
-                    f'"{control.source}", the request asks for "{requested_source}"'
+                    f"The source is part of the task's identity and cannot change on a restart "
+                    f'({control.source!r} -> {requested_source!r})'
                 )
 
             # The address grammar holds on restart too: a restarted pipeline
-            # must not smuggle in a dotted component id.
+            # must not smuggle in a dotted component id
             validate_component_ids(pipeline)
-
-            # Normalise BEFORE anything is stopped. This is also the validation: it
-            # raises when the source component is missing, and doing that after the
-            # restart would leave the task stopped, the new pipeline already stored
-            # by Task.restart_task, and control.pipeline still naming the old one.
             pipeline = _apply_source_defaults(pipeline, control.source)
 
-            # The restarted engine runs different content, so it takes the new
-            # content's key (the task file's taskId is written at the start).
-            # When another engine already serves that key this one stays out of
-            # the pool and serves only its own holder until it stops.
-            engine = control.task
-            try:
-                new_key = engine_content(pipeline, control.source, component_facts).key(
-                    shared=False, owner_id=control.owner_id
-                )
-            except Exception as exc:
-                # A spec that cannot be keyed is refused, never run under a
-                # private key over its raw config (audit 2026-11-12)
-                raise TaskError(
-                    TaskError.ENGINE_START_FAILED,
-                    f'The pipeline cannot restart: {exc}',
-                    address=control.address,
-                    engineKey=control.task.engine_key,
-                ) from exc
-            self._engines.unregister(engine)
-            engine.engine_key = new_key
-            if new_key not in self._engines:
-                self._engines.register(new_key, engine)
-
-            # Call the engine's restart method to restart the engine process
-            # This preserves all statistics and monitoring while restarting the subprocess
-            await engine.restart_task(
-                pipeline=pipeline,
-                project_id=control.project_id,
-                source=control.source,
-                provider=control.provider,
+            old_engine = control.task
+            engine = await self._repoint(
+                control,
+                pipeline,
+                launch_args=args,
+                env=None,
+                env_source=None if old_engine.shared else old_engine._env_source,
+                wait_running=wait_for_running,
             )
 
-            # The restarted engine ages from now; a dormant one had no entry left
-            self._schedule_engine(engine)
+            # The control admits the accepted pipeline's parameters now
+            control.parameters = dict(control.pipeline.get('parameters') or {})
 
-            # The control now describes the pipeline that is running: without this the
-            # record still holds whatever was launched originally, so a later
-            # useExisting compares against a configuration that was replaced here.
-            control.pipeline = pipeline
-            control.parameters = dict(pipeline.get('parameters') or {})
-
-            # Wait for running state if requested
-            if wait_for_running:
-                await control.task.wait_for_running()
-
-            # Ownership transfers ONLY once the restart has actually SUCCEEDED:
-            # a rejected authorization, a malformed pipeline, a failed
-            # restart_task() or a wait that never reaches running must not leave
-            # this conn as launch_owner, or its later disconnect would stop a
-            # LAUNCH task it never owned. Until then the previous owner keeps
-            # the task, which is the state the caller failed to take over.
+            # Ownership transfers ONLY once the restart has succeeded: until
+            # then the previous owner keeps the task
             self._note_launch_owner(control, conn)
 
-            # Log successful restart
-            self.debug_message(f'Task "{control.id}" restarted successfully')
-
-            # Return task information, the address in the token slot
+            converged = 'repointed' if engine is not old_engine else 'none'
+            self.debug_message(f'Task "{control.id}" restart: {converged} ("{engine.engine_key}")')
             return {
                 'id': control.id,
                 'token': control.address,
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
+                'engineKey': engine.engine_key,
+                'converged': converged,
             }
 
         except Exception as e:
-            # Log restart failure with context
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
@@ -3346,17 +3268,11 @@ class TaskServer(DAPBase):
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
                 engine = control.task
 
-                # Other controls hold the engine: release only this hold and
-                # drop the control; the engine keeps serving them
-                if self._shares_engine(control):
+                # Other controls hold the engine (it keeps serving them), or
+                # the engine already stopped: the control goes, that is all
+                if self._shares_engine(control) or control.dormant:
                     await self.remove_task(control.key, reason=reason)
                     self.debug_message(f'Task "{control.id}" released its engine (reason: {reason})')
-                    return
-
-                # A dormant control: its engine already stopped, the control goes
-                if control.dormant:
-                    await self.remove_task(control.key, reason=reason)
-                    self.debug_message(f'Task "{control.id}" released its stopped engine (reason: {reason})')
                     return
 
                 # The last hold: the engine stops with it, at once

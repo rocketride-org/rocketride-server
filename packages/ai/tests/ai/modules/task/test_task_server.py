@@ -897,7 +897,8 @@ async def test_remove_task_calls_stop_and_broadcasts():
     task = MagicMock()
     task.stop_task = AsyncMock()
     task.is_task_complete.return_value = False
-    task._stop_requested = False
+    task.is_live = True
+    task.release.return_value = 0
     control = SimpleNamespace(
         id='acme.proj-1.src-1',
         key='dev.user-1.acme.proj-1.rm',

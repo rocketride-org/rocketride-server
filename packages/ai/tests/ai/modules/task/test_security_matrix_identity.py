@@ -300,6 +300,8 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
 def _finish(control: TaskControl) -> TaskControl:
     """Mark ``control`` as a stopped run still waiting for the cleanup pass."""
     control.task.is_task_complete.return_value = True
+    control.task.is_live = False
+    control.task.accepting_holds = False
     return control
 
 
@@ -533,7 +535,8 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
         task = task_cls.return_value
         task.start_task = AsyncMock()
         task.wait_for_running = AsyncMock()
-        task._stop_requested = False
+        task.is_live = True
+        task.release.return_value = 0
         result = await ts.start_task(
             _launch_request(_pipeline('parsePDF')),
             conn=MagicMock(),
@@ -556,7 +559,8 @@ async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_i
         task.start_task = AsyncMock()
         task.wait_for_running = AsyncMock()
         task.is_task_complete.return_value = False
-        task._stop_requested = False
+        task.is_live = True
+        task.release.return_value = 0
         task.dormant_reason = None
         return await ts.start_task(
             request,

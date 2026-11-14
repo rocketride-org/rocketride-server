@@ -47,6 +47,7 @@ from ai.modules.task.task_engine import (
     resolve_parameter_tokens,
     saas_pipeline_violation,
 )
+from ai.modules.task.types import EngineState
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +83,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # One hold: the control that started it
     t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
     t.dormant_reason = None
-    t.reached_running = False
+    t.state = EngineState.STARTING
     t.address = 'acme.proj-test.src-id'
     t._data_token = 'dt_test'
     t.client_id = 'user-1'
@@ -374,22 +375,22 @@ def test_get_attach_subprocesses_swallows_unexpected_errors(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    'state, expected',
+    'state, complete, live',
     [
-        (0, False),  # NONE
-        (1, False),  # STARTING
-        (2, False),  # INITIALIZING
-        (3, False),  # RUNNING
-        (4, False),  # STOPPING
-        (5, True),  # COMPLETED
-        (6, True),  # CANCELLED
+        (EngineState.NEW, False, False),
+        (EngineState.STARTING, False, True),
+        (EngineState.RUNNING, False, True),
+        (EngineState.STOPPING, False, False),
+        (EngineState.STOPPED, True, False),
+        (EngineState.FAILED, True, False),
     ],
 )
-def test_is_task_complete(state, expected):
-    """Only COMPLETED (5) and CANCELLED (6) are treated as terminal states."""
-    status = SimpleNamespace(state=state, name='', exitMessage='')
-    t = _task(status=status)
-    assert TaskEngine.is_task_complete(t) is expected
+def test_is_task_complete(state, complete, live):
+    """STOPPED and FAILED are terminal; STARTING and RUNNING are live; STOPPING is neither."""
+    t = _task()
+    t.state = state
+    assert TaskEngine.is_task_complete(t) is complete
+    assert TaskEngine.is_live.fget(t) is live
 
 
 def test_is_attached_returns_true_for_matching_connection():
@@ -1268,7 +1269,6 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     t._env_source = AsyncMock(return_value=env)
     t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = False
     t._launch_args = {}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
@@ -1328,7 +1328,6 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     t._env_source = AsyncMock(return_value={})
     t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = False
     t._launch_args = {'args': user}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
@@ -1781,116 +1780,6 @@ async def test_task_loads_nothing_for_a_pipeline_without_placeholders():
 
 
 @pytest.mark.asyncio
-async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_fails():
-    """A restart loads its values while the old process still runs. If the load
-    fails, nothing is stopped or changed; if it works, the next start uses
-    those values once instead of loading again.
-    """
-    from unittest.mock import MagicMock
-
-    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
-    new = {'components': [], 'config': '${ROCKETRIDE_KEY}!'}
-    task = TaskEngine(
-        server=MagicMock(),
-        id='t-1',
-        project_id='p-1',
-        source='s-1',
-        engine_key='enginehash:u-1',
-        address='acme.p-1.s-1',
-        pipeline=old,
-        env_source=AsyncMock(side_effect=RuntimeError('db down')),
-    )
-    task.has_attached_debugger = lambda: False
-    task.stop_task = AsyncMock()
-    task.start_task = AsyncMock()
-
-    with pytest.raises(RuntimeError, match='db down'):
-        await task.restart_task(new, 'p-1', 's-1', 'tools')
-    task.stop_task.assert_not_awaited()
-    assert task._pipeline is old
-    assert task._restart_env is None
-
-    source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v2'})
-    task._env_source = source
-    task.is_task_complete = lambda: True
-    task._reset_status = lambda: None
-    seen = []
-
-    async def start():
-        seen.append(await task._resolve_pipeline(task._pipeline))
-
-    task.start_task = start
-    await task.restart_task(new, 'p-1', 's-1', 'tools')
-
-    assert seen[0]['config'] == 'v2!'
-    assert source.await_count == 1
-    assert task._restart_env is None
-
-
-@pytest.mark.asyncio
-async def test_a_stop_during_the_restart_load_wins():
-    """A stop that lands while a restart loads its values is kept: the restart
-    is refused, nothing is stopped again or started, and the pipeline is unchanged.
-    """
-    old = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
-    task = TaskEngine(
-        server=MagicMock(),
-        id='t-1',
-        project_id='p-1',
-        source='s-1',
-        engine_key='enginehash:u-1',
-        address='acme.p-1.s-1',
-        pipeline=old,
-    )
-
-    async def load_while_stopping():
-        task._stop_requested = True  # what stop_task sets
-        task._stop_count += 1
-        return {'ROCKETRIDE_KEY': 'v'}
-
-    task._env_source = load_while_stopping
-    task.has_attached_debugger = lambda: False
-    task.stop_task = AsyncMock()
-    task.start_task = AsyncMock()
-
-    with pytest.raises(RuntimeError, match='stopped while the restart'):
-        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}!'}, 'p-1', 's-1', 'tools')
-    task.stop_task.assert_not_awaited()
-    task.start_task.assert_not_awaited()
-    assert task._pipeline is old and task._stop_requested
-
-
-@pytest.mark.asyncio
-async def test_a_stop_during_the_restart_load_wins_on_an_already_stopped_task():
-    """A task whose last run was stopped still has _stop_requested set; a new
-    stop during the restart's load is still seen (counted, not just flagged).
-    """
-    task = TaskEngine(
-        server=MagicMock(),
-        id='t-1',
-        project_id='p-1',
-        source='s-1',
-        engine_key='enginehash:u-1',
-        address='acme.p-1.s-1',
-        pipeline={},
-    )
-    task._stop_requested = True  # the previous run was stopped
-
-    async def load_while_stopping():
-        task._stop_count += 1  # a second stop_task arrives during the load
-        return {}
-
-    task._env_source = load_while_stopping
-    task.has_attached_debugger = lambda: False
-    task.stop_task = AsyncMock()
-    task.start_task = AsyncMock()
-
-    with pytest.raises(RuntimeError, match='stopped while the restart'):
-        await task.restart_task({'components': [], 'config': '${ROCKETRIDE_KEY}'}, 'p-1', 's-1', 'tools')
-    task.start_task.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
     """A stop that lands while start_task loads the placeholder values finds no
     process yet; the start then ends through _terminated() instead of
@@ -1903,13 +1792,11 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
     t.source = 'src'
 
     async def load_while_stopping():
-        t._stop_requested = True  # what stop_task sets when it arrives now
+        t._stop_reason = 'user'  # what stop_task records when it arrives now
         return {'ROCKETRIDE_KEY': 'v'}
 
     t._env_source = load_while_stopping
-    t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = False
     t._launch_args = {}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
@@ -1923,98 +1810,6 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
         await TaskEngine.start_task(t)
     spawn.assert_not_awaited()
     t._terminated.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
-    """A stop that lands during a restart's start fails that start. The task
-    is dead, so _terminated() must see _is_restarting cleared and report it
-    stopped, not "Restarting".
-    """
-    import ai.modules.task.task_engine as engine
-
-    _fake_db_account(monkeypatch)
-    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
-    t.source = 'src'
-    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
-    t._restart_env = {'ROCKETRIDE_KEY': 'v'}  # loaded by restart_task before it stopped the old run
-    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = True
-    t._launch_args = {}
-    t._server = MagicMock(_config={})
-    t._is_debugging = lambda: False
-
-    async def write_while_stopping(*_):
-        t._stop_requested = True  # what stop_task sets when it arrives now
-        return '/tmp/task.json'
-
-    t._write_task_file = write_while_stopping
-    t._send_status_update = AsyncMock()
-    seen = []
-
-    async def terminated():
-        seen.append(t._is_restarting)
-
-    t._terminated = terminated
-    spawn = AsyncMock()
-    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
-
-    with pytest.raises(RuntimeError, match='stopped before it started'):
-        await TaskEngine.start_task(t)
-    spawn.assert_not_awaited()
-    assert seen == [False]
-
-
-@pytest.mark.asyncio
-async def test_a_second_restart_while_one_runs_is_refused():
-    """Two restarts of one task would share _restart_env: the second is refused
-    before it loads anything, the first starts with its own values, and a later
-    restart works again.
-    """
-    pipeline = {'components': [], 'config': '${ROCKETRIDE_KEY}'}
-    task = TaskEngine(
-        server=MagicMock(),
-        id='t-1',
-        project_id='p-1',
-        source='s-1',
-        engine_key='enginehash:u-1',
-        address='acme.p-1.s-1',
-        pipeline=pipeline,
-        env_source=AsyncMock(return_value={'ROCKETRIDE_KEY': 'first'}),
-    )
-    task.has_attached_debugger = lambda: False
-    task.is_task_complete = lambda: True
-    task._reset_status = lambda: None
-    stopping = asyncio.Event()
-    release = asyncio.Event()
-
-    async def stop():
-        stopping.set()
-        await release.wait()
-
-    seen = []
-
-    async def start():
-        seen.append(await task._resolve_pipeline(task._pipeline))
-
-    task.stop_task = stop
-    task.start_task = start
-
-    first = asyncio.ensure_future(task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools'))
-    await stopping.wait()
-    second_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'second'})
-    task._env_source = second_source
-    with pytest.raises(RuntimeError, match='already in progress'):
-        await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
-    second_source.assert_not_awaited()
-
-    release.set()
-    await first
-    assert [run['config'] for run in seen] == ['first']
-
-    await task.restart_task(dict(pipeline), 'p-1', 's-1', 'tools')
-    assert [run['config'] for run in seen] == ['first', 'second']
-    assert task._restart_in_progress is False
 
 
 @pytest.mark.asyncio
@@ -2176,7 +1971,6 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._status.exitCode = None
     t._status.exitMessage = ''
     t._status.state = 0
-    t._is_restarting = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2193,7 +1987,6 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._status.exitCode = None
     t._status.exitMessage = ''
     t._status.state = 0
-    t._is_restarting = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2419,7 +2212,7 @@ def _exit_task(exit_event_seen=False):
 
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
-    t._stop_requested = False
+    t._stop_reason = None
     return t
 
 
@@ -2441,7 +2234,7 @@ def test_exit_event_wins_over_process_exit_code():
 def test_requested_stop_keeps_its_exit_code():
     """The kill signal of a user stop is not a task failure (no dashboard task_error)."""
     t = _exit_task()
-    t._stop_requested = True
+    t._stop_reason = 'user'
     TaskEngine._apply_process_exit_code(t, -9)
     assert t._status.exitCode == 0
 
@@ -2599,7 +2392,6 @@ def _startable_task(monkeypatch):
 
     t = _task()
     t._status = SimpleNamespace(state=TASK_STATE.NONE.value, completed=False, startTime=None)
-    t._is_restarting = False
     t._launch_args = {}
     t._resolve_pipeline = AsyncMock(return_value={'components': []})
     t._check_pipeline = MagicMock()

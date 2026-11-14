@@ -34,7 +34,7 @@ is asked.
 
 from typing import TYPE_CHECKING
 
-from ..types import TaskError
+from ..types import EngineState, TaskError
 
 if TYPE_CHECKING:
     from ..task_control import TaskControl
@@ -93,7 +93,7 @@ async def wait_running(engine: 'TaskEngine') -> None:
         # A subprocess that completed or was stopped BEFORE it ever confirmed
         # running never started: that is the start failure too. An engine that
         # ran and then ended keeps its terminal code
-        if exc.code in (TaskError.COMPLETED, TaskError.STOPPED) and not getattr(engine, 'reached_running', False):
+        if exc.code in (TaskError.COMPLETED, TaskError.STOPPED) and engine.state is EngineState.FAILED:
             raise TaskError(
                 TaskError.ENGINE_START_FAILED,
                 f'The engine {engine.engine_key!r} ended before it confirmed running: {exc}',

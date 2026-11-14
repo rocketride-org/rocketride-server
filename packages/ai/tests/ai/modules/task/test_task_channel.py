@@ -19,6 +19,7 @@ import tenacity
 
 from ai.modules.task import task_engine
 from ai.modules.task.task_engine import TaskEngine
+from ai.modules.task.types import EngineState
 
 
 def _engine(client=None):
@@ -35,6 +36,7 @@ def _engine(client=None):
     t._task_metrics = None
     t._service_up_notes = []
     t._status = SimpleNamespace(serviceUp=False, state=0, notes=None)
+    t.state = EngineState.STARTING
     t.debug_message = MagicMock()
     t._last_pipeline_event = 0.0
     t._forward_task_event = AsyncMock()
