@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-11-04
 
 ### Added
+- **nodes**: add experimental `tool_redis` with seven namespaced Redis/Valkey utilities, read-only defaults, bounded results and hosted TLS/public-host guards.
 - **ai, client-python, client-typescript**: native tool calling. A `Question` with a non-empty `messages` list, and optional `tools`, is sent to the model as real provider turns, and `Answer.fromResult` returns the model's message, its tool calls and a stop reason. The Anthropic, OpenAI and OpenAI-Compatible API nodes support it, and any other LLM node answers with `tools_unsupported` before calling its model. Tool names keep their dots: the engine maps them to names each provider accepts and maps calls back. The prompt node keeps a turn's conversation and tools, and the guardrails node checks a turn's last user message and the arguments of its tool calls. A `Question` without `messages` works as before (#2838)
 - **client-python**: `rocketride --version` prints the installed package version
 - **mcp**: every HTTP MCP tool now declares explicit `readOnlyHint`, `destructiveHint` and `openWorldHint` annotations, the server sends `instructions`, the four core workflow tools ask Claude Code to load them upfront (`anthropic/alwaysLoad`), and the engine serves OpenAI's plugin domain-verification token at `/.well-known/openai-apps-challenge` from `MCP_OPENAI_APPS_CHALLENGE_TOKEN` (404 while unset) (#2997)

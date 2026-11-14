@@ -1,0 +1,183 @@
+{
+	"title": "Redis",
+	"protocol": "tool_redis://",
+	"classType": [
+		"tool"
+	],
+	"capabilities": [
+		"invoke",
+		"experimental"
+	],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_redis",
+	"prefix": "redis",
+	"icon": "redis.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_redis",
+	"description": [
+		"Namespaced Redis and Valkey GET, SET, TTL, EXPIRE, INCR, SCAN and DELETE tools. Read-only by default; bounded UTF-8 data and explicit expiry."
+	],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Redis",
+				"host": "localhost",
+				"port": 6379,
+				"db": 0,
+				"username": "",
+				"password": "",
+				"use_tls": false,
+				"key_prefix": "rr:",
+				"allow_writes": false,
+				"default_ttl_seconds": 3600,
+				"socket_connect_timeout": 3.0,
+				"socket_timeout": 5.0,
+				"max_connections": 10,
+				"max_value_bytes": 65536
+			}
+		}
+	},
+	"fields": {
+		"tool_redis.host": {
+			"type": "string",
+			"title": "Host",
+			"default": "localhost",
+			"description": "Redis host reachable from the engine, or rediss://host:port for TLS. Cloud requires TLS and exclusively public addresses; local engines allow localhost."
+		},
+		"tool_redis.port": {
+			"type": "integer",
+			"title": "Port",
+			"default": 6379,
+			"description": "Redis endpoint port.",
+			"minimum": 1,
+			"maximum": 65535
+		},
+		"tool_redis.db": {
+			"type": "integer",
+			"title": "Database",
+			"default": 0,
+			"description": "Standalone logical database index; must exist on the server.",
+			"minimum": 0
+		},
+		"tool_redis.username": {
+			"type": "string",
+			"title": "Username",
+			"default": "",
+			"description": "Optional Redis ACL username.",
+			"optional": true
+		},
+		"tool_redis.password": {
+			"type": "string",
+			"title": "Password",
+			"default": "",
+			"description": "Redis password or a RocketRide secret reference. Stored as a secure credential field.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			},
+			"optional": true
+		},
+		"tool_redis.use_tls": {
+			"type": "boolean",
+			"title": "Use TLS",
+			"default": false,
+			"description": "Enable TLS with required certificate and hostname verification."
+		},
+		"tool_redis.key_prefix": {
+			"type": "string",
+			"title": "Key prefix",
+			"default": "rr:",
+			"description": "Required literal app/environment namespace using letters, digits, colon, underscore or hyphen. Always prepended; not per-user authorization.",
+			"minLength": 1,
+			"maxLength": 128,
+			"pattern": "^[A-Za-z0-9:_-]+$"
+		},
+		"tool_redis.allow_writes": {
+			"type": "boolean",
+			"title": "Allow writes",
+			"default": false,
+			"description": "Enable SET, EXPIRE, INCR and DELETE. Read-only by default; every mutation checks this setting."
+		},
+		"tool_redis.default_ttl_seconds": {
+			"type": "integer",
+			"title": "Default TTL (seconds)",
+			"default": 3600,
+			"description": "Expiry when SET omits ttl_seconds; 0 means persistent. SET replaces an existing expiry.",
+			"minimum": 0,
+			"maximum": 2147483647
+		},
+		"tool_redis.socket_connect_timeout": {
+			"type": "number",
+			"title": "Connect timeout (seconds)",
+			"default": 3.0,
+			"description": "Maximum time for a connection attempt.",
+			"exclusiveMinimum": 0,
+			"maximum": 120
+		},
+		"tool_redis.socket_timeout": {
+			"type": "number",
+			"title": "Socket timeout (seconds)",
+			"default": 5.0,
+			"description": "Maximum socket wait per command. No automatic command retries.",
+			"exclusiveMinimum": 0,
+			"maximum": 120
+		},
+		"tool_redis.max_connections": {
+			"type": "integer",
+			"title": "Maximum connections",
+			"default": 10,
+			"description": "Finite pool size per node/pipeline; exhausted pools return an error rather than waiting indefinitely.",
+			"minimum": 1,
+			"maximum": 100
+		},
+		"tool_redis.max_value_bytes": {
+			"type": "integer",
+			"title": "Maximum value bytes",
+			"default": 65536,
+			"description": "UTF-8 payload cap, at most 64 KiB. Serialized results are additionally capped at 128 KiB.",
+			"minimum": 1,
+			"maximum": 65536
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Redis",
+			"properties": [
+				"tool_redis.host",
+				"tool_redis.port",
+				"tool_redis.db",
+				"tool_redis.username",
+				"tool_redis.password",
+				"tool_redis.use_tls",
+				"tool_redis.key_prefix",
+				"tool_redis.allow_writes",
+				"tool_redis.default_ttl_seconds",
+				"tool_redis.socket_connect_timeout",
+				"tool_redis.socket_timeout",
+				"tool_redis.max_connections",
+				"tool_redis.max_value_bytes"
+			]
+		}
+	],
+	"test": {
+		"config": {
+			"port": 6381
+		},
+		"requires": [
+			"ROCKETRIDE_REDIS_HOST"
+		],
+		"profiles": [
+			"default"
+		],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "connectivity",
+				"text": "config validation"
+			}
+		]
+	}
+}
