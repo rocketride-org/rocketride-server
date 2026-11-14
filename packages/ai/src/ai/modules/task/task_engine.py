@@ -321,7 +321,7 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
 # token key would let pipeline code mint any run's private token.
-CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV})
+CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV, 'RR_PARAM_TOKEN_SECRET'})
 
 
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:

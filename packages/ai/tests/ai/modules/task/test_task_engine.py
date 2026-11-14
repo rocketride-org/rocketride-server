@@ -1460,6 +1460,9 @@ def test_param_token_secret_stays_out_of_subprocess():
     """The child never gets the secret, which is why the engine decodes for it."""
     env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
     assert env == {'PATH': '/usr/bin'}
+    assert CONST_PARAM_TOKEN_SECRET_ENV not in filter_subprocess_env(
+        {'RR_SUBPROCESS_ENV': '*', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'}
+    )
 
 
 def test_filter_subprocess_env_matches_names_case_insensitively():
