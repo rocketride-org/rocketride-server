@@ -76,12 +76,19 @@ def _env_changes(args: Dict[str, Any]) -> Tuple[Dict[str, Optional[str]], Option
 
     Returns:
         The changes (a name to its value, None to delete) and None, or an
-        empty dict and the error text when a name or value is refused.
+        empty dict and the error text when a name or value is refused. The
+        engine-owned database names are left out of the changes.
     """
+    from ai.common.rocketride_db import is_engine_db_env
+
     try:
         changes = env_changes(args)
     except ValueError as e:
         return {}, str(e)
+    # The engine-owned database names (the broker credential, the DSN delivery
+    # variables) are the operator's: a client's value, mask or delete for one
+    # is ignored
+    changes = {k: v for k, v in changes.items() if not is_engine_db_env(k)}
     # A .env line ends at a line break, the environment at a NUL, and
     # load_dotenv expands '${', quoted or not
     if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
@@ -104,9 +111,11 @@ def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dic
         The merged names and values and None, or an empty dict and the error
         text when the mask names nothing stored, one variable is sent under
         two names that differ only in case (fold_case), or the locale cannot
-        hold a name or value.
+        hold a name or value. The engine-owned database names are not part of it.
     """
-    env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+    from ai.common.rocketride_db import is_engine_db_env
+
+    env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)}
     if fold_case:
         folded: Dict[str, List[str]] = {}
         for k in changes:
@@ -516,8 +525,14 @@ class Account(AccountBase):
         sub = args.get('subcommand', '')
 
         if command == 'rrext_account_me':
+            # The engine-owned database names (the broker credential, the DSN
+            # delivery variables) live in ROCKETRIDE_* but are not the
+            # client's: they are never listed, read, created, changed or
+            # deleted here.
+            from ai.common.rocketride_db import is_engine_db_env
+
             if sub == 'get_env':
-                env = {k: ENV_MASK for k in os.environ if k.startswith('ROCKETRIDE_')}
+                env = {k: ENV_MASK for k in os.environ if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)}
                 return conn.build_response(request, body={'env': env})
 
             # The SDKs send update_env, which a server with the old full-replacement
@@ -543,13 +558,14 @@ class Account(AccountBase):
 
                 # Step 2: Replace the ROCKETRIDE_* keys in os.environ, so deleted
                 # keys don't linger and get_env reflects the change without a restart.
-                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+                # The engine-owned database names are not the client's to replace.
+                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k)]:
                     del os.environ[k]
                 os.environ.update(env)
                 return conn.build_response(request, body={'updated': True})
 
             if sub == 'env_keys':
-                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
+                keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_') and not is_engine_db_env(k))
                 return conn.build_response(request, body={'keys': keys})
 
         raise NotImplementedError('Account management requires SaaS mode')
@@ -560,12 +576,16 @@ class Account(AccountBase):
         Merge ROCKETRIDE_* entries into a .env file.
 
         Preserves non-ROCKETRIDE lines and comments. Replaces existing
-        ROCKETRIDE_* lines and appends new ones.
+        ROCKETRIDE_* lines and appends new ones. The engine-owned database
+        names are the operator's: their lines stay as they are, and ``env``
+        never adds one.
 
         Args:
             path: Absolute path to the .env file.
             env:  Key-value dict to write.
         """
+        from ai.common.rocketride_db import is_engine_db_env
+
         lines: List[str] = []
         written_keys: set = set()
         try:
@@ -574,7 +594,7 @@ class Account(AccountBase):
                     stripped = line.strip()
                     if stripped and not stripped.startswith('#') and '=' in stripped:
                         key = stripped.split('=', 1)[0].strip()
-                        if key.startswith('ROCKETRIDE_'):
+                        if key.startswith('ROCKETRIDE_') and not is_engine_db_env(key):
                             if key in env:
                                 lines.append(_env_line(key, env[key]))
                                 written_keys.add(key)
@@ -584,7 +604,7 @@ class Account(AccountBase):
             pass
 
         for k, v in sorted(env.items()):
-            if k not in written_keys:
+            if k not in written_keys and not is_engine_db_env(k):
                 lines.append(_env_line(k, v))
 
         # A symlinked .env is swapped at its target, so the link survives
