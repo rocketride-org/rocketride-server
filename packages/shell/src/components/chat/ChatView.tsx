@@ -45,13 +45,15 @@ const styles = {
  * @param props - {@link IChatViewProps}. The composer is disabled whenever
  *   `isConnected` is false; `emptyTitle` / `emptyDescription` configure the
  *   EmptyState for new conversations; `leadingInputSlot` is rendered before the
- *   input (reserved for future attachments).
+ *   input (reserved for future attachments); `turn` adds Stop (and Esc) while
+ *   a turn runs and Edit and Remove on queued messages; `onCardAction` handles
+ *   the links and buttons of a row's card.
  * @returns The chat view element.
  */
-export const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, emptySlot, leadingInputSlot }) => (
+export const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, emptySlot, leadingInputSlot, turn, onCardAction }) => (
 	<div style={styles.root}>
-		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} emptySlot={emptySlot} />
-		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} leadingInputSlot={leadingInputSlot} />
+		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} emptySlot={emptySlot} turn={turn} onCardAction={onCardAction} />
+		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} leadingInputSlot={leadingInputSlot} turn={turn} />
 	</div>
 );
 

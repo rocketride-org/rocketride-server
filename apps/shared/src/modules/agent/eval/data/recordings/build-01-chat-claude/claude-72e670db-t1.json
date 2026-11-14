@@ -1,0 +1,239 @@
+{
+	"format": 3,
+	"scenario": "build-01-chat-claude",
+	"set": "claude-72e670db",
+	"trial": 1,
+	"source": {
+		"head": "72e670db734a273d547cb5a3f44d7356452af704",
+		"model": "anthropic:claude-sonnet-5",
+		"recordedAt": "2026-10-28T04:28:49.886Z"
+	},
+	"turns": [
+		{
+			"request": "Build a pipeline called support-chat where I can chat with Claude Sonnet 4.6. My Anthropic key is already in Variables.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "```json\n{\"thought\": \"Get oriented on the workspace first, then read pipeline guides before building support-chat.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chatting with Claude Sonnet 4.6 using existing Anthropic key variable.\", \"tool_calls\": [{\"tool\": \"list_workspace\", \"args\": {}}, {\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}]}\n```"
+				},
+				{
+					"wave": 1,
+					"reply": "```json\n{\"thought\": \"Read the pipelines guide and component reference to learn the correct provider/config for a chat pipeline using Claude.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chatting with Claude Sonnet 4.6 using existing Anthropic key variable. Workspace is empty (no apps/nodes/pipelines yet). Need to read ROCKETRIDE_PIPELINES.md and ROCKETRIDE_COMPONENT_REFERENCE.md next.\", \"tool_calls\": [\n  {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},\n  {\"tool\": \"read_file\", \"args\": {\"path\": \".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}}\n]}\n```"
+				},
+				{
+					"wave": 2,
+					"reply": "```json\n{\"thought\": \"Look up the actual catalog for chat source and anthropic LLM provider names/config before writing the pipeline.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chat with Claude Sonnet 4.6 using existing Anthropic key variable. Need provider names from services-catalog.json (likely 'chat' source, 'llm_anthropic', 'response_answers'). Next: search catalog.\", \"tool_calls\": [{\"tool\": \"search_files\", \"pattern\": \"anthropic\", \"path\": \".rocketride/services-catalog.json\"}, {\"tool\": \"search_files\", \"pattern\": \"\\\"name\\\": \\\"chat\\\"\", \"path\": \".rocketride/services-catalog.json\"}]}\n```"
+				},
+				{
+					"wave": 3,
+					"reply": "```json\n{\"thought\": \"The services-catalog.json search found 0 files - need to locate the actual file path first.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chat with Claude Sonnet 4.6 using existing Anthropic key variable. Need provider names from services-catalog.json. search_files with path pointing directly at file found 0 files searched - maybe path wrong or file is large/binary-like. Try list_directory on .rocketride and read the catalog file directly.\", \"tool_calls\": [{\"tool\": \"list_directory\", \"path\": \".rocketride\"}, {\"tool\": \"search_files\", \"pattern\": \"anthropic\", \"isRegex\": false}]}\n```"
+				},
+				{
+					"wave": 4,
+					"reply": "```json\n{\"thought\": \"No local services-catalog.json exists; I need to query the live catalog via rocketride_client instead. Check the TS API guide for the method name.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chat with Claude Sonnet 4.6, using existing Anthropic key Variable. .rocketride only has docs/ dir, no services-catalog.json locally - must use rocketride_client to call getServices/getService.\", \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_typescript_API.md\"}]}\n```"
+				},
+				{
+					"wave": 5,
+					"reply": "```json\n{\"thought\": \"Query the live catalog for chat/LLM components since local services-catalog.json isn't present, to find the Anthropic provider name and chat pipeline pattern.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chat with Claude Sonnet 4.6 using existing Anthropic Variable. Need getServices() to find provider names (likely llm_anthropic, chat source, response_answers). No local catalog file exists; must use rocketride_client.\", \"tool_calls\": [{\"tool\": \"rocketride_client\", \"args\": {\"method\": \"getServices\"}}]}\n```"
+				},
+				{
+					"wave": 6,
+					"reply": "```json\n{\"thought\": \"Peek the remaining services to find the anthropic LLM provider and response component names.\", \"scratch\": \"Goal: create pipelines/support-chat.pipe for chat with Claude Sonnet 4.6 using existing Anthropic Variable. Found catalog has 187 services, only saw 68. Need to find llm_anthropic (or similar) and response_answers/chat lanes.\", \"tool_calls\": [{\"tool\": \"memory.peek\", \"key\": \"wave-5.r0\", \"path\": \"services\"}]}\n```"
+				},
+				{
+					"wave": 7,
+					"reply": "```json\n{\"thought\": \"Found llm_anthropic; now fetch detailed schemas for chat, llm_anthropic, and response_answers to build the pipeline correctly.\", \"scratch\": \"Goal: pipelines/support-chat.pipe chatting with Claude Sonnet 4.6 via llm_anthropic, using chat source + response_answers (per example pattern: chat -> questions -> ... -> llm -> answers -> response_answers). Need config schema for llm_anthropic (model field, api key var name) and chat/response_answers lane names.\", \"remove\": [\"wave-5.r0\",\"wave-6.r0\"], \"tool_calls\": [\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"params\": [\"llm_anthropic\"]},\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"params\": [\"chat\"]},\n  {\"tool\": \"rocketride_client\", \"method\": \"getService\", \"params\": [\"response_answers\"]}\n]}\n```"
+				},
+				{
+					"wave": 8,
+					"reply": "```json\n{\"thought\": \"Search the pipelines guide for a concrete chat/llm example pipeline snippet to get exact config shape.\", \"scratch\": \"Goal: pipelines/support-chat.pipe chatting with Claude Sonnet 4.6 via llm_anthropic.\\nKnown providers:\\n- chat (source): lanes _source->questions; config fields under Pipe.source.parameters, properties include hideForm, type, source.mode (probably like webhook: {hideForm:true, mode:\\\"Source\\\", parameters:{}, type:\\\"chat\\\"})\\n- llm_anthropic (filter): lanes questions->answers; config: {parameters:{llm_anthropic:{profile:\\\"claude-sonnet-4-6\\\"}}} roughly; preconfig.profiles.claude-sonnet-4-6 has fields model, modelTotalTokens, apikey etc. Need apikey as ${ROCKETRIDE_ANTHROPIC_KEY} or similar var name already in Variables - need to find exact variable name used.\\n- response_answers (filter): lanes answers->[]; config {laneName:\\\"answers\\\"}\\nNeed to find exact config JSON pattern for chat source and llm_anthropic filter from docs examples.\", \"tool_calls\": [\n  {\"tool\": \"search_files\", \"pattern\": \"llm_anthropic\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"},\n  {\"tool\": \"search_files\", \"pattern\": \"\\\"provider\\\": \\\"chat\\\"\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\"},\n  {\"tool\": \"search_files\", \"pattern\": \"ROCKETRIDE_ANTHROPIC\", \"isRegex\": false}\n]}\n```"
+				},
+				{
+					"wave": 9,
+					"reply": "```json\n{\"thought\": \"Read the concrete example pipeline near line 1114 in the pipelines guide to get exact chat+llm_anthropic config syntax, and check the apikey field details for claude-sonnet-4-6 profile.\", \"scratch\": \"Goal: pipelines/support-chat.pipe chatting with Claude Sonnet 4.6 via llm_anthropic.\\nKnown providers:\\n- chat (source): lanes _source->questions; config fields: Pipe.source.parameters section with properties [hideForm, type, source.mode, ...]\\n- llm_anthropic (filter): lanes questions->answers; config under parameters.llm_anthropic.profile='claude-sonnet-4-6'; apikey field under preconfig.profiles.claude-sonnet-4-6 (need exact structure) - fields.anthropic.profile etc suggest config path is parameters.anthropic.profile maybe, with section 'Pipe' title 'Anthropic' properties ['anthropic.profile']. Need real example from docs line ~1114 for full JSON incl apikey variable.\\n- response_answers (filter): lanes answers->[]; config {laneName:'answers'}\\nNeed to see full example around line 1114 and surrounding llm_anthropic usage example around line 255.\", \"tool_calls\": [{\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 1080, \"limit\": 140}, {\"tool\": \"read_file\", \"path\": \".rocketride/docs/ROCKETRIDE_PIPELINES.md\", \"offset\": 220, \"limit\": 80}]}\n```"
+				},
+				{
+					"wave": 10,
+					"reply": "```json\n{\"thought\": \"Check which Anthropic key variable name already exists in the environment before wiring the pipeline.\", \"scratch\": \"Goal pipeline: chat -> llm_anthropic (profile claude-sonnet-4-6, apikey ${ROCKETRIDE_ANTHROPIC_KEY}) -> response_answers. Need project_id GUID. Verify env var name via account.getEnvironmentKeys().\", \"tool_calls\": [{\"tool\": \"rocketride_client\", \"method\": \"getEnvironmentKeys\", \"args\": {\"method\": \"account.getEnvironmentKeys\"}}]}\n```"
+				},
+				{
+					"wave": 11,
+					"reply": "```json\n{\"thought\": \"Create the support-chat pipeline (chat -> llm_anthropic -> response_answers) using the confirmed env var name, then validate it.\", \"scratch\": \"Confirmed: chat lanes _source:[questions]; llm_anthropic lanes questions:[answers], profile claude-sonnet-4-6, apikey field under claude-sonnet-4-6.apikey; response_answers lanes answers:[] config laneName. getEnvironmentKeys not supported in eval engine but docs confirm ROCKETRIDE_ANTHROPIC_KEY is the standard var name for this provider/profile, and user said key is already in Variables, so proceeding with that name.\", \"tool_calls\": [{\"tool\": \"write_file\", \"path\": \"pipelines/support-chat.pipe\", \"content\": \"{\\n\\t\\\"components\\\": [\\n\\t\\t{ \\\"id\\\": \\\"chat_1\\\", \\\"provider\\\": \\\"chat\\\",\\n\\t\\t  \\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"chat\\\" } },\\n\\t\\t{ \\\"id\\\": \\\"llm_anthropic_1\\\", \\\"provider\\\": \\\"llm_anthropic\\\",\\n\\t\\t  \\\"config\\\": { \\\"profile\\\": \\\"claude-sonnet-4-6\\\", \\\"claude-sonnet-4-6\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_ANTHROPIC_KEY}\\\" }, \\\"parameters\\\": {} },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"questions\\\", \\\"from\\\": \\\"chat_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"response_answers_1\\\", \\\"provider\\\": \\\"response_answers\\\", \\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"llm_anthropic_1\\\" }] }\\n\\t],\\n\\t\\\"project_id\\\": \\\"7b3f0c5a-2d8e-4f61-9a2c-5e6b1d4a8f93\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\"}]}\n```"
+				},
+				{
+					"wave": 12,
+					"reply": "```json\n{\"thought\": \"The pipeline file was written and validated OK, which completes the goal.\", \"scratch\": \"support-chat.pipe created with chat -> llm_anthropic (claude-sonnet-4-6, apikey ${ROCKETRIDE_ANTHROPIC_KEY}) -> response_answers; validate returned OK.\", \"remove\": [\"wave-0.r0\",\"wave-0.r1\",\"wave-1.r0\",\"wave-1.r1\",\"wave-2.r0\",\"wave-2.r1\",\"wave-3.r0\",\"wave-3.r1\",\"wave-4.r0\",\"wave-7.r0\",\"wave-7.r1\",\"wave-7.r2\",\"wave-8.r0\",\"wave-8.r1\",\"wave-8.r2\",\"wave-9.r0\",\"wave-9.r1\",\"wave-10.r0\"], \"done\": true, \"answer\": \"I built pipelines/support-chat.pipe: a `chat` source feeds `questions` into `llm_anthropic` (profile `claude-sonnet-4-6`, using your Anthropic key via `${ROCKETRIDE_ANTHROPIC_KEY}`), whose `answers` go to `response_answers` so the chat UI gets replies back. The pipeline validated successfully against the server. Since the app ↔ pipeline integration wasn't part of this task, you can run/test it directly with `client.use()`/`client.chat()`, or let me know if you'd like it wired into an app as well.\"}\n```"
+				}
+			],
+			"ended": {
+				"outcome": "done",
+				"reason": "done"
+			},
+			"calls": [
+				{
+					"wave": 0,
+					"tool": "list_workspace",
+					"ok": true,
+					"args": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+					"result": "e3ed6351ceb4c2a2a68f65b4ca45df32ea27b2c8995517c5f9ff2c23c3f23865"
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "6d9609e0dbd8369ea38c0ec07f407191f0a7531cf9f5d349b37f5c1c052e4632",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "320b62804840e10b9547220b78d88fca46122c34cde682d96b9a828383097e33",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "d7eb3c2084841f49aff0ab42f05222f28a742df003dc0004f342b329fe6d24a3",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "search_files",
+					"ok": true,
+					"args": "d2acc48075cf84306b3158a49b46e254317e06124fd24c1dd8f626a9692e3523",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "search_files",
+					"ok": true,
+					"args": "72b01700ab11ede4a27adc8e729a471325a2f1abe594e8094a825956772cbaac",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "list_directory",
+					"ok": true,
+					"args": "7bf7db8a1bc029dfdae5a1e8bc0769537de06851f14df5285d0508a3518041c8",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "search_files",
+					"ok": true,
+					"args": "4144d5bf3e062863715ab8060d81e9eff54b3a6972b1b73f3bd08bd822aa943b",
+					"result": "146aa7dc7ab96ae68794ccce0330611cd438b04cc24a49a5de005f942acad4eb"
+				},
+				{
+					"wave": 4,
+					"tool": "read_file",
+					"ok": true,
+					"args": "e04477f608697f248a92341d32457b467b687fcbab6a43ca7849515564d69bf7",
+					"result": ""
+				},
+				{
+					"wave": 5,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "65db211fc84fa4e2bab0c00b5674d83199e33b40f7078b5e6074fcd1dab7d816",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "dd71dee23562647608cc2232a4c930936a55d7973f9274fe9bebd3529f248940",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "64f68d981528ef9af596ed478cb23ebe2684cb6ffc7fd49f383b8c1b7b0d1b85",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "14021bf389846fafcd9fb0dcc69aab55c80b0c8d17d5f5be7e78121e51cadbf6",
+					"result": ""
+				},
+				{
+					"wave": 8,
+					"tool": "search_files",
+					"ok": true,
+					"args": "a2db01ef1dca1058a324fcc7c45eb6986683c9a0592851ef4e115052358aa419",
+					"result": ""
+				},
+				{
+					"wave": 8,
+					"tool": "search_files",
+					"ok": true,
+					"args": "f8d7696c1b96b8aed137d916e01686fda5b1288ab6cc551c8ced64170a95b2de",
+					"result": ""
+				},
+				{
+					"wave": 8,
+					"tool": "search_files",
+					"ok": true,
+					"args": "4655377e061d0351c2ebf991a99109ea13bf6b4502073501ca5a3895a7cf6672",
+					"result": "a7ccb6e6429b269dcc31f87fd9ec093c1e8adea065bad5d1c0d58823f2a31e1e"
+				},
+				{
+					"wave": 9,
+					"tool": "read_file",
+					"ok": true,
+					"args": "fcbabf5c25a3ef45bed86708132261587ef7aa147944ec6180788fcc4a12957b",
+					"result": ""
+				},
+				{
+					"wave": 9,
+					"tool": "read_file",
+					"ok": true,
+					"args": "2ef6883fabc22a34b1ccd4852402098e27993edb5d6aa43508bdaebf5e2d4c99",
+					"result": ""
+				},
+				{
+					"wave": 10,
+					"tool": "rocketride_client",
+					"ok": false,
+					"args": "796884678254b64507313dda9e962d3f0551dc1d91adc48d7d5511e2c82547d6",
+					"result": "7dcc0687ff3fde8254bf74c7df17a4667cd59c6dddf134d968e627f4aa7a771e"
+				},
+				{
+					"wave": 11,
+					"tool": "write_file",
+					"ok": true,
+					"args": "95f57c6b91c5fce9509af44323b48f595de3864938df62555fcd4e154c453363",
+					"result": "661e6ce8a4501fef21f04ee6260aaa5e6d2903d29981d9527d24e1e2615f8f49"
+				}
+			]
+		}
+	],
+	"limits": {
+		"steps": 60,
+		"costUsd": 2
+	},
+	"expected": {
+		"status": "pass",
+		"checks": {
+			"outcome": "pass",
+			"scope": "pass",
+			"no-leak": "pass",
+			"static-valid": "pass",
+			"engine-valid": "not_in_layer",
+			"placeholders": "pass",
+			"providers": "pass",
+			"model": "pass",
+			"key": "pass",
+			"path": "pass",
+			"runs": "not_in_layer"
+		}
+	},
+	"finalFiles": {
+		"pipelines/support-chat.pipe": "330b6cd7efb56de4caeeee014b2ddaba7c8369fad1244a5d403eccce6824d34e"
+	}
+}

@@ -100,7 +100,7 @@ class FilesystemStore(IStore):
                 raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
-            lock_path = full_path.parent / f'.{full_path.name}.lock'
+            lock_path = self._lock_path(full_path)
 
             # Ensure parent directory exists
             full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,7 +139,7 @@ class FilesystemStore(IStore):
                 raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
-            lock_path = full_path.parent / f'.{full_path.name}.lock'
+            lock_path = self._lock_path(full_path)
 
             # Ensure parent directory exists
             full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +182,7 @@ class FilesystemStore(IStore):
             full_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Create lock file for this resource
-            lock_path = full_path.parent / f'.{full_path.name}.lock'
+            lock_path = self._lock_path(full_path)
 
             # Open/create lock file
             lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
@@ -204,8 +204,10 @@ class FilesystemStore(IStore):
                             actual_version=current_mtime,
                         )
 
-                # Write file while holding lock
-                async with aiofiles.open(full_path, 'w', encoding='utf-8') as f:
+                # Write file while holding lock. newline='' writes the text as
+                # given: the default turns '\n' into '\r\n' on Windows, and a
+                # caller that hashes what it wrote would never match again.
+                async with aiofiles.open(full_path, 'w', encoding='utf-8', newline='') as f:
                     await f.write(data)
 
                 # Return new modification time as version
@@ -234,7 +236,7 @@ class FilesystemStore(IStore):
                 raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
-            lock_path = full_path.parent / f'.{full_path.name}.lock'
+            lock_path = self._lock_path(full_path)
 
             # Open/create lock file
             lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
@@ -525,6 +527,17 @@ class FilesystemStore(IStore):
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
 
         await asyncio.get_event_loop().run_in_executor(None, _unlock)
+
+    def _lock_path(self, full_path: Path) -> Path:
+        """The lock file for ``full_path``, kept under the root's ``.locks`` folder.
+
+        A lock file next to the file would show in a listing of the file's own
+        folder, which for a workspace file is the user's file tree. Mirroring
+        the relative path keeps one lock per file, case rules included.
+        """
+        lock_path = self._root_path / '.locks' / f'{full_path.relative_to(self._root_path)}.lock'
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        return lock_path
 
     def _get_full_path(self, path: str) -> Path:
         """Convert relative path to full filesystem path (canonical spelling)."""

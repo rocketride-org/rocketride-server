@@ -88,6 +88,7 @@ class StoreCommands(DAPConn):
             'fs_read_many': self._store_fs_read_many,
             'fs_put_json': self._store_fs_put_json,
             'fs_get_json': self._store_fs_get_json,
+            'fs_put_if_unchanged': self._store_fs_put_if_unchanged,
         }
 
     # =========================================================================
@@ -368,6 +369,39 @@ class StoreCommands(DAPConn):
             return self.build_error(request, 'put_json requires a "value"')
         written = await fs.put_json(path, args['value'])
         return self.build_response(request, body={'bytesWritten': written})
+
+    async def _store_fs_put_if_unchanged(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Write a text file in ONE operation, only while it is still the copy the writer read.
+
+        A client that checks the file and then writes it loses any save that
+        another connection lands between the two messages. Here the store
+        compares and writes in one step.
+
+        Args:
+            request: Original DAP request.
+            args:    Must contain ``path`` and ``text`` (a string). ``base_hash``
+                     is the SHA-256 (hex) of the text the writer read; null or
+                     absent means the writer saw no file.
+
+        Returns:
+            DAP response with body.written, and body.bytesWritten when written.
+            written is false when the file changed (or now exists), and then
+            nothing was written.
+        """
+        path = args.get('path')
+        if not isinstance(path, str) or not path:
+            return self.build_error(request, 'put_if_unchanged requires a non-empty "path" string')
+        text = args.get('text')
+        if not isinstance(text, str):
+            return self.build_error(request, 'put_if_unchanged requires a "text" string')
+        base_hash = args.get('base_hash')
+        if base_hash is not None and not isinstance(base_hash, str):
+            return self.build_error(request, 'put_if_unchanged "base_hash" must be a string or null')
+        written = await self._get_file_store().put_text_if_unchanged(path, text, base_hash)
+        if written is None:
+            return self.build_response(request, body={'written': False})
+        return self.build_response(request, body={'written': True, 'bytesWritten': written})
 
     async def _store_fs_get_json(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """

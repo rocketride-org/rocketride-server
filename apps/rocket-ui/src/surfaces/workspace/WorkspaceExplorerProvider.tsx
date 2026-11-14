@@ -25,8 +25,9 @@
 // =============================================================================
 //
 // VS Code's Explorer, over the staged workspace view: the WHOLE tree as it
-// is on disk-equivalent (the three mounts and every file under them — no
-// per-mode curation), with source-control decorations (M/A/D letters and
+// is on disk-equivalent (the top-level folders, the read-only .rocketride/
+// included, and every file under them — no per-mode curation), with
+// source-control decorations (M/A/D letters and
 // tinted names from changedPaths()) and the unsaved-edit dot (dirtyPaths()).
 // Staged (uncommitted) files list exactly like committed ones because every
 // read goes through the view.
@@ -40,7 +41,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Explorer, NOOP_VFS, ConfirmDialog } from 'shell';
 import type { ExplorerEntry, ExplorerConfig } from 'shell';
 import { getWorkspaceVfs, getStagedWorkspace } from './vfs/workspace';
-import { openWorkspaceFile } from './vfs/openWorkspaceFile';
+import { openWorkspaceFile, renameWithTabs } from './vfs/openWorkspaceFile';
 import { getDocs } from '../../docs';
 import type { ChangeKind } from 'shared/modules/vfs/stagedFileSystem';
 
@@ -127,13 +128,8 @@ const WorkspaceExplorerProvider: React.FC = () => {
 		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
 			const view = getWorkspaceVfs();
 			try {
-				// step: refuse creates outside the three mounts BEFORE staging —
-				// a staged entry at the root passes silently here but fails every
-				// later "Commit all" until the user finds and discards it
-				if ((action === 'createFolder' || action === 'createFile') && !/^(apps|nodes|pipelines)\//.test(path)) {
-					setNotice('Files live inside apps/, nodes/, or pipelines/ — select one of those folders first.');
-					return;
-				}
+				// The view refuses changes to .rocketride/ and outside the roots before anything stages,
+				// so rename and create need no check; delete checks the same rule before its confirm.
 				switch (action) {
 					case 'rename': {
 						// `newName` is the full new leaf (no extension magic here —
@@ -142,24 +138,12 @@ const WorkspaceExplorerProvider: React.FC = () => {
 						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 						const newPath = dir ? `${dir}/${newName}` : newName;
 						if (newPath === path) break;
-						await view.rename(path, newPath);
-						// Re-home any open editor tab (pipeline docs key on
-						// mount-relative paths).
-						if (path.startsWith('pipelines/')) {
-							const docs = getDocs();
-							const docPath = path.slice('pipelines/'.length);
-							if (docs) {
-								const st = docs.getState();
-								const editorIds = Object.entries(st.editors)
-									.filter(([, ed]) => ed.documentUri === docPath)
-									.map(([id]) => id);
-								for (const eid of editorIds) docs.closeEditor(eid);
-								if (editorIds.length > 0) await docs.openDocument(newPath.slice('pipelines/'.length));
-							}
-						}
+						await renameWithTabs(view, getDocs(), path, newPath);
 						break;
 					}
 					case 'delete': {
+						// step: a refused delete shows its notice, never the confirm first
+						getStagedWorkspace().assertWritable(path);
 						const leaf = path.split('/').pop() ?? path;
 						const confirmed = await showConfirm('Delete', `Are you sure you want to delete "${leaf}"?`);
 						if (!confirmed) break;

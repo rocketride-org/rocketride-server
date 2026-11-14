@@ -82,6 +82,12 @@ export class CachedVfs implements IVirtualFileSystem {
 	private readonly listeners = new Set<() => void>();
 	/** Whether refresh() has completed at least once. */
 	private treeLoaded = false;
+	/** How many content changes there have been (see fill()). */
+	private changes = 0;
+	/** The change count at each path's last change. */
+	private readonly changedAt = new Map<string, number>();
+	/** The change count when the whole cache was last dropped. */
+	private clearedAt = 0;
 
 	/**
 	 * @param backend - The backing VFS every miss and write goes through.
@@ -171,6 +177,7 @@ export class CachedVfs implements IVirtualFileSystem {
 
 	/** Drops a path (and, for directories, its whole subtree) everywhere. */
 	private evict(path: string): void {
+		this.markChanged(path);
 		const prefix = `${path}/`;
 		for (const map of [this.entries, this.contents] as Array<Map<string, unknown>>) {
 			map.delete(path);
@@ -194,6 +201,7 @@ export class CachedVfs implements IVirtualFileSystem {
 	 */
 	prime(path: string, content: unknown): void {
 		this.ensureEntry(path, 'file');
+		this.markChanged(path);
 		this.contents.set(path, content);
 	}
 
@@ -204,8 +212,32 @@ export class CachedVfs implements IVirtualFileSystem {
 	 * @param path - The relative file path (omit for all).
 	 */
 	invalidate(path?: string): void {
-		if (path === undefined) this.contents.clear();
-		else this.contents.delete(path);
+		if (path === undefined) {
+			this.clearedAt = ++this.changes;
+			this.contents.clear();
+		} else {
+			this.markChanged(path);
+			this.contents.delete(path);
+		}
+	}
+
+	/** Records a change to a path's cached content (see fill()). */
+	private markChanged(path: string): void {
+		this.changedAt.set(path, ++this.changes);
+	}
+
+	/**
+	 * Caches what a backend read returned, unless the path, a directory above it, or the whole cache
+	 * changed after the read started: the read may then be older than a write, invalidate, delete or
+	 * rename that landed meanwhile.
+	 * @param since - The change count when the read started.
+	 */
+	private fill(path: string, content: unknown, since: number): void {
+		if (this.clearedAt > since) return;
+		for (let at = path; at; at = at.substring(0, Math.max(0, at.lastIndexOf('/')))) {
+			if ((this.changedAt.get(at) ?? 0) > since) return;
+		}
+		this.contents.set(path, content);
 	}
 
 	/**
@@ -326,8 +358,9 @@ export class CachedVfs implements IVirtualFileSystem {
 		const overlay = this.overlays.get(path);
 		if (overlay?.isDirty()) return overlay.getContent();
 		if (this.contents.has(path)) return this.contents.get(path);
+		const since = this.changes;
 		const content = await this.backend.read(path);
-		this.contents.set(path, content);
+		this.fill(path, content, since);
 		return content;
 	}
 
@@ -350,9 +383,10 @@ export class CachedVfs implements IVirtualFileSystem {
 			misses.push(path);
 		}
 		if (misses.length === 0) return out;
+		const since = this.changes;
 		if (this.backend.readMany) {
 			for (const [path, content] of Object.entries(await this.backend.readMany(misses))) {
-				this.contents.set(path, content);
+				this.fill(path, content, since);
 				out[path] = content;
 			}
 			return out;
@@ -360,7 +394,7 @@ export class CachedVfs implements IVirtualFileSystem {
 		await Promise.all(misses.map(async (path) => {
 			try {
 				const content = await this.backend.read(path);
-				this.contents.set(path, content);
+				this.fill(path, content, since);
 				out[path] = content;
 			} catch { /* unreadable — omitted by contract */ }
 		}));
@@ -376,7 +410,28 @@ export class CachedVfs implements IVirtualFileSystem {
 	 */
 	async write(path: string, content: unknown, origin?: string): Promise<void> {
 		await this.backend.write(path, content, origin);
+		this.cacheWritten(path, content);
+	}
+
+	/**
+	 * Writes one file only while the stored copy still hashes to `baseHash`
+	 * (null: still absent), then updates the caches like write().
+	 *
+	 * @param path - Relative file path.
+	 * @param content - The content to persist.
+	 * @param baseHash - SHA-256 (hex) of the text the writer read, or null when it saw no file.
+	 * @param origin - The writer's identity, forwarded to the backend.
+	 * @throws StaleWriteError (from the backend) when the file changed.
+	 */
+	async writeIfUnchanged(path: string, content: unknown, baseHash: string | null, origin?: string): Promise<void> {
+		if (!this.backend.writeIfUnchanged) throw new Error('This file system has no conditional write.');
+		await this.backend.writeIfUnchanged(path, content, baseHash, origin);
+		this.cacheWritten(path, content);
+	}
+
+	private cacheWritten(path: string, content: unknown): void {
 		this.ensureEntry(path, 'file');
+		this.markChanged(path);
 		this.contents.set(path, content);
 		this.notify();
 	}
