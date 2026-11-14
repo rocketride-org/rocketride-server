@@ -43,10 +43,17 @@ inherit the engine's full environment, only an allowlist:
   holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
-  `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
+  `RR_STORE_SECRET_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
   `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
   the API-key fallbacks individual node pages document (such as
   `OPENAI_API_KEY`)
+
+`RR_SIGNING_KEY` is never in a task's environment, even through
+`RR_SUBPROCESS_ENV`: the engine signs the download URLs a task asks for. Tasks
+run as the engine's OS user, so on a shared or multi-user engine set the key in
+the engine's process environment rather than in the `.env` next to the binary,
+and set `RR_PROC_PRIVATE=1` (Linux only) so tasks cannot read the engine's
+environment from `/proc`.
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.

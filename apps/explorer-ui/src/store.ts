@@ -42,8 +42,8 @@ import type { IExplorerFs } from './fs';
 // LOAD ERROR SENTINEL
 // =============================================================================
 //
-// When a blob-mode read fails (e.g. RR_SIGNING_KEY unset -> fsGetUrl throws,
-// or the presigned fetch returns non-2xx) we cannot produce a blob: URL.
+// When a blob-mode read fails (e.g. fsGetUrl throws, or the presigned fetch
+// returns non-2xx, as an expired URL does) we cannot produce a blob: URL.
 // Rather than returning null — which is indistinguishable from "still loading"
 // once it reaches the viewer — read() returns this typed sentinel carrying the
 // failure message.  FilePane detects it (via isFileLoadError) and hands the

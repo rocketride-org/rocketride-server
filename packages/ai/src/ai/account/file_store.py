@@ -24,6 +24,8 @@ Usage:
 """
 
 import json
+import os
+import secrets
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -53,6 +55,26 @@ MAX_HANDLES_PER_CONNECTION = 64
 # at every upgrade — BUMP THIS whenever a claim's meaning changes, and the
 # handler will refuse the older generation instead of misreading it.
 FETCH_CLAIM_VERSION = 2
+
+# Fallback for RR_SIGNING_KEY, the /task/fetch claim key, when the operator
+# leaves it unset: random per process, so URLs verify until the engine restarts.
+# Never a value written down anywhere (#1070) — anyone holding the key can sign
+# a claim for any path under the store root.
+# Assumes one web worker per engine: a second worker process would draw its own key.
+_PROCESS_FETCH_SIGNING_KEY = secrets.token_urlsafe(32)
+
+
+def fetch_signing_key() -> str:
+    """The key the engine signs and verifies /task/fetch claims with.
+
+    Engine process only: a task process does not have RR_SIGNING_KEY, and its
+    FileStore.get_url asks the engine to sign over the task channel.
+
+    Returns:
+        RR_SIGNING_KEY, or this process's random key when it is unset.
+    """
+    return os.environ.get('RR_SIGNING_KEY', '') or _PROCESS_FETCH_SIGNING_KEY
+
 
 # Characters forbidden inside any single path segment. ':' blocks Windows
 # drive-letter syntax (C:\...) from leaking through after the '\\' -> '/'
@@ -94,19 +116,14 @@ def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, 
         ValueError:   If ``expires_in`` is not positive.
         RuntimeError: If ``RR_BASE_URL`` is not configured.
     """
-    import os
     import time
 
     import jwt
 
-    from ai.constants import CONST_DEFAULT_SIGNING_KEY
-
     if expires_in <= 0:
         raise ValueError('expires_in must be positive')
 
-    # Unset falls back to the self-describing development default so a fresh
-    # install works out of the box; production replaces it via .env/.config.
-    signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
+    signing_key = fetch_signing_key()
 
     # Directory claim: `dir` (not `path`) so the fetch handler knows the
     # capability covers a subtree, gated by the same claim generation.
@@ -601,6 +618,9 @@ class FileStore:
         self._client_id = client_id
         self._ctx = ctx
         self._root = root
+        # Set by Store.engine_file_store: this view belongs to a task process,
+        # which must never sign a fetch URL itself (#1070).
+        self._task_process = False
 
     # Shared single-process guards live on the owning Store so every
     # FileStore instance — regardless of which user or identity constructed
@@ -1282,16 +1302,28 @@ class FileStore:
         if url is not None:
             return url
 
-        # Local filesystem backend — generate a JWT-signed fetch URL
+        # Local filesystem backend — a JWT-signed fetch URL. A task process
+        # runs pipeline code, so it never holds the signing key (#1070): the
+        # engine signs, resolving the path again under the task's own identity.
+        from ai.modules.data.channel import task_channel
+
+        if task_channel.available:
+            import asyncio
+
+            arguments = {'path': path, 'expires_in': expires_in, 'download_name': download_name}
+            reply = await asyncio.to_thread(task_channel.request_sync, 'store.url', arguments)
+            return reply.body['url']
+        if self._task_process:
+            # A task with no channel (no --data_port) would sign with its own
+            # random key: a URL the engine refuses. Say so instead. The flag was
+            # set when the view was built, so worker threads never read the
+            # engine's current-task slot (main task thread only, task.cpp).
+            raise RuntimeError('a fetch URL needs the engine, and this task has no channel to it')
+
         import time
         import jwt
 
-        from ai.constants import CONST_DEFAULT_SIGNING_KEY
-
-        # Unset falls back to the self-describing development default so a
-        # fresh install works out of the box; production replaces it via
-        # .env/.config.
-        signing_key = os.environ.get('RR_SIGNING_KEY', '') or CONST_DEFAULT_SIGNING_KEY
+        signing_key = fetch_signing_key()
 
         # The claim carries the RESOLVED physical store path, not the wire
         # spelling: authorization already ran above (_full_path under THIS
