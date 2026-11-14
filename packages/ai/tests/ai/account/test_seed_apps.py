@@ -295,3 +295,11 @@ async def test_without_a_local_bundle_there_is_nothing_to_reseed_from(static_app
     registry = _Registry([_seed_row('0' * 64)])
 
     assert await bundle_changed(registry, 'org', ENTRY) is False
+
+
+def test_seed_artifact_fallback_name_uses_the_derivation():
+    """#1022: with no moduleId in apps.json, a seeded app gets the same derived
+    container name as a deployed one ('-' maps to '_' too).
+    """
+    assert seed_apps.seed_artifact_of({'id': 'rocketride.my-app'})['moduleId'] == 'rocketride_my_app'
+    assert seed_apps.seed_artifact_of({'id': 'rocketride.x', 'moduleId': 'rocketride_x'})['moduleId'] == 'rocketride_x'

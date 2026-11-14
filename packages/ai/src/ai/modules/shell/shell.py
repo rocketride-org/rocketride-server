@@ -558,6 +558,53 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
+
+# A version's dist/ is THIRD-PARTY code served on the MAIN origin (#1022).
+# The shell loads only subresources from it (JS, CSS, JSON, fonts, images,
+# wasm); anything a browser would render as a document when its URL is opened
+# directly (HTML, SVG, XML, PDF, an unknown type) would run the developer's
+# script with the shell's origin and the signed-in user's storage. Those are
+# served as a download inside an opaque-origin sandbox. The type keeps its
+# real value, so an <img> (which ignores both headers) still shows an SVG icon.
+# Only the listed subresource types serve inline, and they get no sandbox
+# policy: a worker started from a dist script takes its CSP from the script's
+# response, and a sandbox there would break it.
+_INLINE_BUNDLE_TYPES = frozenset(
+    {
+        'text/javascript',
+        'application/javascript',
+        'application/x-javascript',
+        'text/css',
+        'application/json',
+        'application/wasm',
+        'text/plain',
+    }
+)
+_INLINE_BUNDLE_PREFIXES = ('font/', 'audio/', 'video/', 'image/')
+_DOCUMENT_HEADERS = {'Content-Security-Policy': 'sandbox', 'Content-Disposition': 'attachment'}
+# Scripts are never stored: a service-worker registration with
+# updateViaCache: 'all' may be answered from the HTTP cache, and a script
+# cached from an ordinary fetch would then skip _serve_versioned's
+# Service-Worker refusal. Vary: Service-Worker on every response keeps any
+# cache that does store a bundle from mixing the two kinds of fetch.
+_SCRIPT_BUNDLE_TYPES = frozenset({'text/javascript', 'application/javascript', 'application/x-javascript'})
+
+
+def _bundle_headers(media_type: str) -> dict:
+    """Response headers for one dist file of the given type (see above)."""
+    headers = {
+        'Cache-Control': 'no-store' if media_type in _SCRIPT_BUNDLE_TYPES else _BUNDLE_CACHE,
+        'Vary': 'Service-Worker',
+        'X-Content-Type-Options': 'nosniff',
+    }
+    inline = media_type in _INLINE_BUNDLE_TYPES or (
+        media_type.startswith(_INLINE_BUNDLE_PREFIXES) and 'svg' not in media_type and 'xml' not in media_type
+    )
+    if not inline:
+        headers.update(_DOCUMENT_HEADERS)
+    return headers
+
+
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
 # sliding window); every deploy change also drops the app's entries
@@ -670,6 +717,12 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     # Path discipline: these segments become STORE paths.
     if not _APP_ID_SEG.match(app_id):
         raise HTTPException(status_code=404, detail='Not found')
+    # Never a service worker: the browser marks a registration fetch with
+    # `Service-Worker: script`. A dist script registered as one would sit on
+    # the MAIN origin and intercept the app's later requests even after the
+    # app is pulled or revoked (#1022). Same oracle-free 404 as a miss.
+    if 'service-worker' in request.headers:
+        raise HTTPException(status_code=404, detail='Not found')
     for seg in rest:
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')
@@ -686,7 +739,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
+    return Response(content=data, media_type=media_type, headers=_bundle_headers(media_type))
 
 
 async def apps_session(request: Request):
