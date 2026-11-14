@@ -105,6 +105,13 @@ def test_literal_scope_on_every_operation(store, client, key):
     client.ttl.assert_called_with('rr:test:' + key)
     store.set(key, 'ok')
     assert client.set.call_args.args[0] == 'rr:test:' + key
+    store.expire(key, 1)
+    client.expire.assert_called_with('rr:test:' + key, 1)
+    store.incr(key)
+    client.incrby.assert_called_with('rr:test:' + key, 1)
+    # Glob characters are literal: DEL must accept every key SET can create.
+    store.delete([key])
+    client.delete.assert_called_with('rr:test:' + key)
 
 
 @pytest.mark.parametrize(

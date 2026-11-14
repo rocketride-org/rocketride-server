@@ -204,12 +204,19 @@ def test_new_writes_report_unknown_and_are_not_retried(store, operation, args):
         '::1',
         'fc00::1',
         '::ffff:127.0.0.1',
+        '64:ff9b::a9fe:a9fe',
     ],
 )
 def test_host_rejects_non_global_dns(monkeypatch, address):
     monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', (address, 6379))])
     with pytest.raises(RedisNodeError):
         validate_public_host('test', 6379)
+
+
+def test_host_unwraps_nat64_without_rejecting_the_prefix(monkeypatch):
+    """64:ff9b::/96 hides an IPv4 address: judge the wrapped address, not the prefix."""
+    monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', ('64:ff9b::808:808', 6379))])
+    assert validate_public_host('test', 6379) == ['64:ff9b::808:808']
 
 
 def test_host_rejects_mixed_dns_and_unresolved(monkeypatch):
