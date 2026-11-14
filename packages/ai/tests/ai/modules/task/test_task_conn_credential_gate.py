@@ -623,20 +623,6 @@ async def test_an_open_in_flight_at_deauth_does_not_keep_its_handle(store_backen
     store_backend.close_read.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_deauth_detaches_the_debugger_from_its_tasks():
-    """Every task the connection debugs is told to detach it on deauth."""
-    conn = _session_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
-    run = _team_run(ADDRESS, 'task-in')
-    run.task.detach_task = AsyncMock()
-    conn._server._task_control = ControlRegistry({run.key: run})
-
-    await _dispatch(conn, 'deauth')
-
-    assert conn._authenticated is False
-    run.task.detach_task.assert_awaited_once_with(conn)
-
-
 # =============================================================================
 # An auth that replaces the identity of a live connection ends the previous
 # session exactly as deauth does, and session transitions are serialised: the
@@ -661,11 +647,8 @@ async def _auth(conn, credential, seq=2):
 
 @pytest.mark.asyncio
 async def test_reauth_as_another_user_ends_the_first_session(store_backend):
-    """Handles, monitors and debugger attachments of the first identity do not pass to the second."""
+    """Handles and monitors of the first identity do not pass to the second."""
     conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
-    run = _team_run(ADDRESS, 'task-in')
-    run.task.detach_task = AsyncMock()
-    conn._server._task_control = ControlRegistry({run.key: run})
     conn._monitors = {'*': object()}
     opened = await conn._store_fs_open({}, {'path': 'notes.txt'})
     handle = opened['body']['handle']
@@ -679,7 +662,6 @@ async def test_reauth_as_another_user_ends_the_first_session(store_backend):
     assert conn._session_epoch == epoch + 1
     # ...and nothing of the first one survived
     assert conn._monitors == {}
-    run.task.detach_task.assert_awaited_once_with(conn)
     assert _open_handles() == []
     store_backend.close_read.assert_awaited_once()
     with pytest.raises(StorageError, match='Invalid handle'):
@@ -729,17 +711,17 @@ async def test_an_open_in_flight_at_reauth_does_not_keep_its_handle(store_backen
 async def test_an_open_racing_the_cleanup_never_leaves_a_handle(store_backend):
     """Opens issued while the session is being ended are refused or closed; none stays registered."""
     conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
-    run = _team_run(ADDRESS, 'task-in')
     in_cleanup = asyncio.Event()
     release = asyncio.Event()
+    close_handles = conn._server.store.close_all_handles
 
-    async def slow_detach(_conn):
+    async def slow_close(connection_id):
         # Hold the cleanup open after the identity was cleared
         in_cleanup.set()
         await release.wait()
+        await close_handles(connection_id)
 
-    run.task.detach_task = slow_detach
-    conn._server._task_control = ControlRegistry({run.key: run})
+    conn._server.store.close_all_handles = slow_close
 
     # An open already awaiting the backend when the deauth begins
     backend_entered = asyncio.Event()
@@ -788,16 +770,16 @@ async def test_a_request_during_a_replacing_auth_is_told_to_retry_and_creates_no
     conn = _reauth_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
     conn._monitors = {'*': object()}
 
-    run = _team_run(ADDRESS, 'task-in')
     in_cleanup = asyncio.Event()
     release = asyncio.Event()
+    close_handles = conn._server.store.close_all_handles
 
-    async def slow_detach(_conn):
+    async def slow_close(connection_id):
         in_cleanup.set()
         await release.wait()
+        await close_handles(connection_id)
 
-    run.task.detach_task = slow_detach
-    conn._server._task_control = ControlRegistry({run.key: run})
+    conn._server.store.close_all_handles = slow_close
 
     auth = asyncio.create_task(_auth(conn, 'rr_other', seq=3))
     await in_cleanup.wait()
@@ -826,18 +808,18 @@ async def test_an_auth_during_cleanup_waits_and_starts_on_a_clean_session(store_
     handle = opened['body']['handle']
     conn._monitors = {'*': object()}
 
-    run = _team_run(ADDRESS, 'task-in')
     in_cleanup = asyncio.Event()
     release = asyncio.Event()
     order = []
+    close_handles = conn._server.store.close_all_handles
 
-    async def slow_detach(_conn):
+    async def slow_close(connection_id):
         in_cleanup.set()
         await release.wait()
-        order.append('detached')
+        await close_handles(connection_id)
+        order.append('closed')
 
-    run.task.detach_task = slow_detach
-    conn._server._task_control = ControlRegistry({run.key: run})
+    conn._server.store.close_all_handles = slow_close
 
     authenticate = conn._server._server.authenticate_credential
 
@@ -862,7 +844,7 @@ async def test_an_auth_during_cleanup_waits_and_starts_on_a_clean_session(store_
     await auth
 
     # Cleanup finished (handles closed) before the new identity was validated
-    assert order == ['detached', 'authenticate']
+    assert order == ['closed', 'authenticate']
     assert conn._authenticated is True
     assert conn._account_info.auth == 'rr_other'
     assert conn._monitors == {}

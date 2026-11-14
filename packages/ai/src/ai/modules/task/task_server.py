@@ -1060,14 +1060,6 @@ class TaskServer(DAPBase):
             user_id=conn_user_id,
         )
 
-        # Detach this connection from every engine (a debugger attachment is
-        # per engine, not per control)
-        for engine in list(self._engines.values()):
-            try:
-                await engine.detach_task(conn)
-            except Exception as e:
-                self.debug_message(f'Error detaching connection {connection_id} from engine "{engine.id}": {e}')
-
         # Auto-terminate the tasks THIS connection launched: that ends each
         # control's hold; an engine other controls hold keeps serving them.
         # By the launch index, never a walk of the registry.
@@ -1092,86 +1084,6 @@ class TaskServer(DAPBase):
 
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
-
-    def get_task_control_by_project(
-        self,
-        project_id: str,
-        source: str,
-        account_info: AccountInfo,
-        require: Optional[str] = None,
-        team_id: str = '',
-        run_kind: str = '',
-    ) -> TaskControl:
-        """
-        Retrieve task control structure by its owner-scoped identity.
-
-        ``team_id`` set addresses the team's (team-OWNED) DEPLOY run of
-        ``project_id``/``source``. ``team_id`` absent addresses the
-        caller's OWN run (owner = ``account_info.userId``), where
-        ``run_kind`` picks the continuum: ''/'dev' is the dev run;
-        'deploy' is the caller's personal @me deploy run — deploy-kind but
-        user-owned, the one case teamId-presence cannot express. All are
-        unique by construction — task identity is
-        {runKind}.{owner}.{project}.{source}. There is no account-less
-        scan: every lookup is scoped to the caller.
-
-        Args:
-            project_id (str): Project identity of the run
-            source (str): Source component id of the run
-            account_info (AccountInfo): Caller identity for scoping and
-                permission checks (required)
-            require (Optional[str]): Permission that must be granted on the
-                run's team (e.g. 'task.monitor')
-            team_id (str): Owner team — addresses that team's team-owned
-                deploy run; empty addresses the caller's own run
-            run_kind (str): Teamless continuum selector: ''/'dev' = the
-                caller's dev run, 'deploy' = the caller's @me deploy run.
-                Ignored when team_id is set.
-
-        Raises:
-            TaskError: Code TASK_NOT_REGISTERED if no matching task exists
-            PermissionError: If the caller is unauthenticated or the
-                permission check fails
-        """
-        if account_info is None:
-            raise PermissionError('Not authenticated')
-
-        def _verify(control: TaskControl) -> TaskControl:
-            """Run-scoped permission check (owner-private for user-owned runs)."""
-            return self._verify_control(control, account_info, require)
-
-        # Team scope: the team's TEAM-OWNED deploy run. owner_kind must be
-        # checked: an @me deploy carries the SAME billing teamId, and
-        # matching it here would let any teammate reach a personal run
-        # through team permissions.
-        if team_id:
-            for control in self._task_control.for_owner(team_id):
-                if (
-                    control.run_kind == 'deploy'
-                    and control.owner_kind != 'user'
-                    and control.teamId == team_id
-                    and control.project_id == project_id
-                    and control.source == source
-                ):
-                    return _verify(control)
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
-
-        # Own scope: the caller's run in the selected continuum (dev by
-        # default; the caller's @me deploy when run_kind says so) — unique
-        # per user per continuum by construction.
-        # A @public control is user-owned and deploy-kind too: it is never
-        # the caller's @me deploy.
-        wanted_kind = run_kind or 'dev'
-        for control in self._task_control.for_owner(account_info.userId):
-            if (
-                control.run_kind == wanted_kind
-                and control.rung != 'public'
-                and control.owner_id == account_info.userId
-                and control.project_id == project_id
-                and control.source == source
-            ):
-                return _verify(control)
-        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     @staticmethod
     def _verify_control(control: TaskControl, account_info: AccountInfo, require: Optional[str]) -> TaskControl:
@@ -3185,9 +3097,6 @@ class TaskServer(DAPBase):
             control = self.resolve_control(address, account_info, 'task.control')
             self.debug_message(f'Restart requested for task "{control.id}"')
 
-            if control.task.has_attached_debugger():
-                raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
-
             # The source is part of the task's identity: checked on the REQUEST,
             # before normalisation stamps the control's source onto it
             requested_source = pipeline.get('source')
@@ -3303,63 +3212,6 @@ class TaskServer(DAPBase):
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
             self.debug_message(f'Task stop request handled (may have been already stopped): {e}')
-
-    async def detach_task(self, request: Dict[str, Any], conn: TaskConn):
-        """
-        Detach a DAP connection from a task with optional termination.
-
-        This method safely disconnects a client from a task while preserving
-        the task state for other connected clients. It optionally terminates
-        the task if requested by the detaching client.
-
-        Args:
-            request (Dict[str, Any]): Detach request containing:
-                - arguments: Optional parameters including:
-                    - token: The task address to detach from
-                    - terminateDebuggee: Boolean flag to terminate task on detach
-            conn (TaskConn): Connection to detach from the task
-
-        Detachment Process:
-        1. Extract detachment parameters including termination flag
-        2. Locate and validate task (with graceful error handling)
-        3. Detach connection from task's debugging interface
-        4. Remove monitoring subscription for this connection
-        5. Optionally terminate task if requested
-
-        Error Handling:
-        - Missing tasks or authentication failures are handled gracefully
-        - Detachment operations are best-effort and don't propagate errors
-        - Task may have been auto-cleaned up between request and processing
-        """
-        # Extract task identification and termination preference
-        args = request.get('arguments', {})
-        address = args.get('token', 'not-specified')
-        terminate_task = args.get('terminateDebuggee', False)
-
-        try:
-            # Resolve under the connection's account (ownership validated inside)
-            control = self.resolve_control(address, getattr(conn, '_account_info', None) if conn else None)
-
-            # Detach connection from task's debugging interface
-            await control.task.detach_task(conn)
-
-            # Remove monitoring subscription for this connection
-            if conn:
-                await conn.set_monitor(
-                    token=control.address,
-                    type=EVENT_TYPE.NONE,
-                )
-
-            # Terminate task if requested by client
-            if terminate_task:
-                await self.stop_task(control.key)
-
-            # Log successful detachment
-            self.debug_message(f'Connection detached from task "{control.id}"')
-
-        except Exception as e:
-            # Handle errors gracefully - task may not exist or be accessible
-            self.debug_message(f'Task detachment handled (task may be gone): "{address}": {e}')
 
     def get_connection_count(self) -> int:
         """

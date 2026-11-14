@@ -200,7 +200,8 @@ Establish a connection to the RocketRide server. Optionally pass a `credential` 
 **The identity payload is the discovery call** — org, teams, and developer id all arrive on connect; nothing needs a follow-up request. The fields that drive deploy/publish decisions (attribute access, same names on the wire):
 
 - `userId` / `displayName` / `email` — who authenticated
-- `devTeam` — id of the team used by default when an operation names no team; dev-mode runs bill to it
+- `devTeam` — the HOME team: the first of `teamOrder`; dev-mode runs bill to it and its environment layer applies
+- `teamOrder` — the team ids `@team` resolution walks, first to last (`account.set_team_order()` reorders it)
 - `organization` — `None` without an org membership, else: `id`, `name`, `permissions` (ORG-level grants, e.g. `'org.admin'`), `developerId` (the org's publisher slug — first segment of every app id; `None` until the org registers as a developer, always absent on OSS), and `teams` — the user's team MEMBERSHIPS as `{id, name, permissions}` with team-scoped permissions (`'team.admin'`, `'task.control'`, `'task.data'`, `'task.monitor'`, `'task.store'`). There is **no top-level teams list** — memberships live here, under the org.
 - `capabilities` — `['oss']` or `['saas']`; `apps` — the user's desktop app entries
 
@@ -961,7 +962,8 @@ Account management: profile, API keys, organization, members, teams, and server-
 
 - `async get_profile() -> AccountProfile` — fetch the current user's profile.
 - `async update_profile(**fields: str) -> None` — persist profile fields (`displayName`, `givenName`, etc.; all values strings, empty string = no change).
-- `async set_dev_team(team_id: str) -> None` — set the user's DEV team: dev-mode runs bill to it and its environment layer applies.
+- `async set_team_order(order: list[str]) -> None` — set the user's team order in the active org: the first team publishing a name answers `@team` calls; the first team overall is the HOME team (dev-mode runs bill to it, its environment layer applies) and must carry `task.control`. Teams left out follow in membership order.
+- `async set_dev_team(team_id: str) -> None` — make a team the HOME team: move it to the front of the team order.
 - `async delete_account() -> None` — permanently delete the current user's account.
 
 **Organization:**
@@ -972,13 +974,13 @@ Account management: profile, API keys, organization, members, teams, and server-
 **API keys:**
 
 - `async list_keys() -> list[ApiKeyRecord]`
-- `async create_key(*, name: str, permissions: list[str] | None = None, expires_at: str | None = None, team_id: str | None = None) -> CreateKeyResult` — create a personal access token; returns `{'key': '<raw key>'}` (shown once — store it). With `team_id=None` the key inherits the user's teams and permissions; with `team_id` set, `permissions` must be provided and the key is scoped to that team. Effective permissions are always intersected with the user's at auth time.
+- `async create_key(*, name: str, permissions: list[str] | None = None, expires_at: str | None = None, team_id: str | None = None, endpoints: list[str] | None = None) -> CreateKeyResult` — create a personal access token; returns `{'key': '<raw key>'}` (shown once — store it). With `team_id=None` the key inherits the user's teams and permissions; with `team_id` set, `permissions` must be provided and the key is scoped to that team. `endpoints` scopes the key to task addresses (`developerId.pipelineId.source`, or `developerId.pipelineId.*` for any source of that pipe); a key created with a scoped key inherits that scope and team and may only narrow them. Effective permissions are always intersected with the user's at auth time.
 - `async revoke_key(key_id: str) -> None`
 
 **Members:**
 
 - `async list_members(org_id: str) -> list[MemberRecord]`
-- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
+- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId, teamOrder}` (`devTeamId` is the invitee's HOME team, the first of their team order). `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
 - `async update_member_role(org_id: str, user_id: str, role: str) -> None`
 - `async remove_member(org_id: str, user_id: str) -> None`
 
@@ -1006,7 +1008,7 @@ await client.account.set_env('team', {'ROCKETRIDE_OPENAI_KEY': 'sk-...'}, scope_
 
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
-- **Any org member**: their own profile (`get_profile`, `update_profile`, `set_dev_team`, `set_default_org`); their OWN API keys (`list_keys`, `create_key`, revoking their own); reading the org (`get_org`); listing members and teams and reading a team's detail; USER-scope environment (`get_env('user')` / `set_env('user')`) and the merged key names (`get_environment_keys`); billing reads (`get_details`, `get_credit_balance`, `get_product_prices`) and promo codes (`validate_promo_code`, `redeem_promo_code`).
+- **Any org member**: their own profile (`get_profile`, `update_profile`, `set_team_order`, `set_dev_team`, `set_default_org`); their OWN API keys (`list_keys`, `create_key`, revoking their own); reading the org (`get_org`); listing members and teams and reading a team's detail; USER-scope environment (`get_env('user')` / `set_env('user')`) and the merged key names (`get_environment_keys`); billing reads (`get_details`, `get_credit_balance`, `get_product_prices`) and promo codes (`validate_promo_code`, `redeem_promo_code`).
 - **Org admin only**: renaming the org (`update_org_name`); member management (`invite`, `invite_member`, `update_member_role`, `remove_member`); revoking ANOTHER member's key (own-org keys only); creating teams (`create_team`); ORG-scope environment — both `get_env('org', ...)` and `set_env('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `get_usage_by_user`/`get_usage_by_team`, `get_transactions`, `get_transaction_distinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `delete_team`, `add_team_member`, `update_team_member_perms`, `remove_team_member`, and TEAM-scope `get_env`/`set_env` — both read and write.
 

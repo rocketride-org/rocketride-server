@@ -58,6 +58,9 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
+from ai.account.app_deploy import _developer_id_of
+from ai.modules.task.address import build_address
+from ai.modules.task.types import TaskError
 
 
 # Only import for type checking to avoid circular import errors
@@ -537,11 +540,11 @@ class MonitorCommands(DAPConn):
         elif project_id and source:
             # A team-scoped (deploy-run) subscription requires task.monitor on
             # THAT team, checked HERE. Subscribe-before-launch must not register
-            # under a foreign team's key: the get_task_control_by_project check
-            # below only fires when a run is LIVE; for a not-running foreign
-            # scope it raises RuntimeError, which the except-Exception swallow
-            # would let through, leaving the subscription registered under the
-            # foreign key. (OSS-safe: the synthetic 'local' team grants monitor.)
+            # under a foreign team's key: the resolver below only fires when a
+            # run is LIVE; for a not-running foreign scope it raises, which the
+            # except-Exception swallow would let through, leaving the
+            # subscription registered under the foreign key. (OSS-safe: the
+            # synthetic 'local' team grants monitor.)
             if team_id and 'task.monitor' not in resolve_task_permissions(self._account_info, team_id):
                 raise PermissionError('Access denied: no permissions for this team')
 
@@ -567,11 +570,17 @@ class MonitorCommands(DAPConn):
             key_kind = 'deploy' if team_id else (run_kind or 'dev')
             event_key = owner_key(key_kind, owner_id, project_id, source)
 
-            # If is ok if the task doesn't exist at this point in time...
+            # It is ok if the task doesn't exist at this point in time (a
+            # subscription before the launch). When it does, ONE resolver
+            # names it (plan 3.2): the caller's developer id, the pipe and the
+            # source; a key's endpoints scope is enforced inside it
+            developer_id = _developer_id_of(self)
+            address = build_address(developer_id, project_id, source) if developer_id else ''
             try:
-                # Get the task (owner scoping + permission check inside)
-                control = self._server.get_task_control_by_project(
-                    project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
+                if not address:
+                    raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
+                control = self._server.resolve_control(
+                    address, self._account_info, 'task.monitor', team=team_id or None
                 )
 
                 # The task is running, we can fill it in
@@ -583,7 +592,7 @@ class MonitorCommands(DAPConn):
 
             except Exception:
                 event_id = None
-                filter_name = f'<Project:{project_id[:8]}.{source}>'
+                filter_name = f'<Project:{address or project_id + "." + source}>'
 
         else:
             # Invalid

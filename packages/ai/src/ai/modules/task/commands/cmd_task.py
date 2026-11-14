@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
+from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
 from ..task_control import TeamContext
@@ -562,11 +563,9 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
-                    - teamId (str, optional): Address the team's DEPLOY run;
-                      absent addresses the caller's own run
-                    - runKind (str, optional): Teamless continuum selector —
-                      absent/'dev' = the caller's dev run, 'deploy' = the
-                      caller's personal @me deploy run
+                    - teamId (str, optional): Resolve through this team of
+                      the caller's (the ``team=`` override of plan 3.2);
+                      absent walks the caller's rungs
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -580,20 +579,25 @@ class TaskCommands(DAPConn):
             project_id = args.get('projectId', None)
             source = args.get('source', None)
             team_id = args.get('teamId') or ''
-            run_kind = args.get('runKind') or ''
+            if not project_id or not source:
+                raise ValueError('projectId and source are required')
 
             # Verify permission against the requested scope: the named team
-            # for a deploy lookup, the caller's default context otherwise
+            # for a team lookup, the caller's default context otherwise
             # (prior art: cmd_log._verify_log_access).
             if team_id:
                 self.verify_team_permission(team_id, 'task.monitor')
             else:
                 self.verify_permission('task.monitor')
 
-            # Get the task control (owner scoping + permission check inside)
-            control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
-            )
+            # ONE resolver (plan 3.2): the address is the caller's developer
+            # id, the short pipe id and the source; the rungs decide whose
+            # control answers, and a key's endpoints scope is enforced inside
+            developer_id = _developer_id_of(self)
+            if not developer_id:
+                raise ValueError('Your organization has no developer id yet; an address cannot be formed')
+            address = build_address(developer_id, project_id, source)
+            control = self._server.resolve_control(address, self._account_info, 'task.monitor', team=team_id or None)
 
             # Return the address in the token slot
             return self.build_response(

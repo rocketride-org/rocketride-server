@@ -20,7 +20,7 @@ import '../shared/theme.css';
 interface DropperInfo {
 	upload_url: string;
 	dropper_url: string;
-	task_token: string;
+	address: string;
 }
 
 interface DataResult {

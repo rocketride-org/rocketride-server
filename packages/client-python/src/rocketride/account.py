@@ -95,13 +95,28 @@ class AccountApi:
         """
         await self._client.call('rrext_account_me', subcommand='update', **fields)
 
-    async def set_dev_team(self, team_id: str) -> None:
+    async def set_team_order(self, order: list[str]) -> None:
         """
-        Set the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
+        Set the user's TEAM ORDER in the active organization: the teams ``@team`` resolution walks.
+
+        The first team in the order that publishes a name answers for it; the
+        FIRST team overall is the HOME team — dev-mode runs bill to it and its
+        environment (ROCKETRIDE_*) layer applies. Teams left out of ``order``
+        follow in membership order.
 
         Args:
-            team_id: The team ID to set as the dev team — dev-run billing and
-                the environment (ROCKETRIDE_*) layer both resolve against it.
+            order: Team IDs, the home team first. The home team must carry
+                ``task.control``.
+        """
+        await self._client.call('rrext_account_me', subcommand='set_team_order', teamOrder=list(order))
+
+    async def set_dev_team(self, team_id: str) -> None:
+        """
+        Make a team the user's HOME team: move it to the front of their team order.
+
+        Args:
+            team_id: The team ID to put first — dev-run billing and the
+                environment (ROCKETRIDE_*) layer both resolve against it.
         """
         await self._client.call('rrext_account_me', subcommand='set_dev_team', teamId=team_id)
 
@@ -213,6 +228,7 @@ class AccountApi:
         permissions: list[str] | None = None,
         expires_at: str | None = None,
         team_id: str | None = None,
+        endpoints: list[str] | None = None,
     ) -> CreateKeyResult:
         """
         Create a new API key (PAT) and return the raw key string.
@@ -221,6 +237,8 @@ class AccountApi:
         permissions from the user. When team_id is set, the key is scoped
         to that team and permissions must be provided. Effective permissions
         are always intersected with the user's actual permissions at auth time.
+        A key created with a scoped key inherits that key's ``endpoints`` and
+        team and may only narrow them.
 
         Args:
             name: Human-readable label for the key.
@@ -228,6 +246,10 @@ class AccountApi:
                 None means inherit all from the user.
             expires_at: Optional ISO timestamp for key expiration. None means no expiry.
             team_id: Optional team UUID to scope this key to.
+            endpoints: Optional task-address scope: exact
+                ``developerId.pipelineId.source`` entries or
+                ``developerId.pipelineId.*`` for any source of that pipe. None
+                means every address the account may reach.
 
         Returns:
             Dict containing the raw key string under the ``key`` field.
@@ -242,6 +264,8 @@ class AccountApi:
             kwargs['expiresAt'] = expires_at
         if team_id is not None:
             kwargs['teamId'] = team_id
+        if endpoints is not None:
+            kwargs['endpoints'] = list(endpoints)
 
         body = await self._client.call('rrext_account_keys', **kwargs)
         return {'key': body['key']}
@@ -295,7 +319,7 @@ class AccountApi:
             family_name: Last / family name of the invitee.
             role: Organization-level role to assign (e.g. "admin" or "member").
             team_assignments: Optional teams to add the invitee to.
-            dev_team_id: Optional development team for the invitee. It must be one
+            dev_team_id: Optional HOME team for the invitee (first in their team order). It must be one
                 of the ``team_assignments`` teams with ``task.control`` (any org
                 team when ``role`` is "admin"). When omitted the server picks one
                 if only one team qualifies.

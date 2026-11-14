@@ -99,8 +99,8 @@ function render(rows: TaskRow[]): void {
 		stop.onclick = async () => {
 			stop.disabled = true;
 			try {
-				// terminate's schema requires task_token (see execution.py _TERMINATE_SCHEMA).
-				const result = await app.callServerTool({ name: 'terminate', arguments: { task_token: row.token } });
+				// terminate's schema takes the task address (see execution.py _TERMINATE_SCHEMA).
+				const result = await app.callServerTool({ name: 'terminate', arguments: { address: row.token } });
 				// callServerTool resolves with isError set on a server-side tool
 				// failure instead of rejecting — treat that as a failure too, or
 				// the row would stay visible with its button dead.

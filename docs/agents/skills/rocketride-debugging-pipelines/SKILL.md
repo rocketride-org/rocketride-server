@@ -10,7 +10,7 @@ fix to the right phase. No re-running until the cause is identified and the fix 
 
 ## Procedure
 
-1. **Read the status.** MCP: `monitor(task_token)` → quote `state_label`, `errors[]`,
+1. **Read the status.** MCP: `monitor(address)` → quote `state_label`, `errors[]`,
    `warnings[]`, `counts` verbatim. SDK: `get_task_status(token)` → `state`, `errors[]`,
    `warnings[]`, `exitCode`, `exitMessage`, `failedCount`. Don't paraphrase error messages.
 2. **Read the trace.** MCP — the run-log (DVR) tools work for past *and* live runs, keyed by the

@@ -63,7 +63,6 @@ else:
 account: Account = Account()
 
 # Re-export supporting subsystems so callers only need one import.
-from .keystore import KeyStore
 from .report import Reporter
 from .store import (
     Store,
@@ -81,7 +80,6 @@ __all__ = [
     'AccountInfo',
     'resolve_team_permissions',
     'account',
-    'KeyStore',
     'Reporter',
     'Store',
     'RequestContext',

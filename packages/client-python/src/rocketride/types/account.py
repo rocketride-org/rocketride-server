@@ -113,7 +113,8 @@ class AccountProfile(TypedDict, total=False):
         phoneNumber: Primary phone number in E.164 format.
         phoneNumberVerified: Whether the phone number has been verified.
         locale: Locale / language preference (e.g. "en").
-        devTeam: The ID of the user's dev team context.
+        devTeam: The ID of the user's HOME team (the first of teamOrder).
+        teamOrder: The user's team order in the active org, home team first.
         organization: The organization the user belongs to, or None.
     """
 
@@ -128,6 +129,7 @@ class AccountProfile(TypedDict, total=False):
     phoneNumberVerified: bool
     locale: str
     devTeam: str
+    teamOrder: list[str]
     organization: AccountOrganization
 
 
@@ -322,12 +324,15 @@ class CreateKeyParams(TypedDict, total=False):
         teamId: The team this key is scoped to.
         permissions: Array of permission strings to grant to this key.
         expiresAt: Optional ISO timestamp for key expiration. Omit for no expiry.
+        endpoints: Optional task-address scope (``developerId.pipelineId.source``
+            or ``developerId.pipelineId.*`` entries). Omit for every address.
     """
 
     name: str
     teamId: str
     permissions: list[str]
     expiresAt: str
+    endpoints: list[str]
 
 
 CreateKeyResult = TypedDict('CreateKeyResult', {'key': str})
@@ -357,7 +362,7 @@ class InviteMemberParams(TypedDict):
         familyName: Last / family name of the invitee.
         role: Organization-level role to assign (e.g. "admin" or "member").
         teamAssignments: Optional teams to add the invitee to.
-        devTeamId: Optional development team for the invitee. It must be one of
+        devTeamId: Optional HOME team for the invitee (first in their team order). It must be one of
             the ``teamAssignments`` teams with ``task.control`` (any org team
             when ``role`` is "admin"). When omitted the server picks one if only
             one team qualifies.
@@ -382,8 +387,9 @@ class InvitedMember(TypedDict):
         role: The organization-level role assigned.
         status: "pending" until the invitee sets a password, "active" if their
             account already existed.
-        devTeamId: The team recorded as the invitee's development team, or
-            None when none was recorded.
+        devTeamId: The invitee's HOME team (first in their team order), or
+            None when they were assigned no team.
+        teamOrder: The invitee's team order as recorded.
     """
 
     userId: str
@@ -392,6 +398,7 @@ class InvitedMember(TypedDict):
     role: str
     status: str
     devTeamId: str | None
+    teamOrder: list[str]
 
 
 class TeamMemberParams(TypedDict):

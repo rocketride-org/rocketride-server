@@ -113,12 +113,17 @@ class AccountInfo(BaseModel):
     phoneNumberVerified: bool = False
     locale: str = ''
 
-    # The session's DEVELOPMENT team (pre-resolved server-side): the team a
-    # dev-mode run is billed to and whose environment layer applies. Carries
-    # NO authorization meaning — permission checks resolve the union of
-    # memberships (has_permission) or the addressed team
+    # The session's HOME team (the first of ``teamOrder``, pre-resolved
+    # server-side): the team a dev-mode run is billed to and whose environment
+    # layer applies. Carries NO authorization meaning — permission checks
+    # resolve the union of memberships (has_permission) or the addressed team
     # (verify_team_permission), never this field.
     devTeam: str = ''
+    #: The caller's TEAM ORDER in the selected org (``org_members.team_order``,
+    #: B39): the teams ``@team`` resolution walks, first to last; the first is
+    #: the HOME team. Empty when the backend carries no stored order (the
+    #: order is then derived from the membership list, ``team_order``).
+    teamOrder: list[str] = []
 
     # Single org/team/permissions structure — all permission checks resolve through this.
     # None when the user has no org membership (e.g. freshly invited, not yet provisioned).
@@ -368,10 +373,6 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     both (resolved here for user-owned runs, inside
     ``resolve_task_permissions`` for team-owned ones).
 
-    Anonymous/legacy controls with no owner id (OSS single-user runs)
-    fall through to the team resolution so the synthetic local grants
-    keep working.
-
     The key's ``endpoints`` scope is NOT applied here — it binds a
     credential to ADDRESSES, which the resolver checks once the address is
     known (``address.check_endpoint_scope``), and which every path that
@@ -387,13 +388,10 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
         Effective permission list, or empty list if the caller may not
         reach the run.
     """
-    # Owner scope: explicit stamp wins; fall back to the run_kind default
-    # for controls built before owner_kind existed.
-    owner_kind = getattr(control, 'owner_kind', '') or (
-        'team' if getattr(control, 'run_kind', '') == 'deploy' else 'user'
-    )
-    owner_id = getattr(control, 'owner_id', '') or ''
-    if owner_kind == 'user' and owner_id:
+    # Every control carries its owner (plan 1): the kind decides the rule
+    owner_kind = control.owner_kind
+    owner_id = control.owner_id
+    if owner_kind == 'user':
         sys_perms = getattr(account_info, 'sysPermissions', []) or []
         if 'sys.admin' in sys_perms or 'internal' in sys_perms:
             return list(_FULL_TEAM_PERMISSIONS)
@@ -467,11 +465,12 @@ def team_order(account_info: AccountInfo) -> list[str]:
     ``@dev``, ``@me`` and a cross-org ``@public`` run, and the team every
     ledger row is attributed to.
 
-    Source of the order: the session's member teams in their membership order
-    with the development team moved first, which is how
-    ``org_members.team_order`` is seeded from ``dev_team_id`` (the stored,
-    user-editable order lands with the C.6 follow-up and replaces this
-    derivation on ``AccountInfo``).
+    Source of the order: the STORED order on the membership
+    (``org_members.team_order``, carried as ``AccountInfo.teamOrder``), with
+    the teams the caller joined since appended in membership order. Every
+    backend carries one (the saas account stores it per membership, the OSS
+    account's is the single ``local`` team, a team-owned deploy identity's is
+    its one team); an empty stored order falls back to membership order.
 
     A key with an ``endpoints`` scope resolves through its FROZEN team only
     (plan 2.4): hydration narrows the session's teams to the key's pinned
@@ -492,12 +491,10 @@ def team_order(account_info: AccountInfo) -> list[str]:
     if getattr(account_info, 'endpoints', None) is not None:
         return teams if len(teams) == 1 else []
 
-    # The seeded order: the development team first, then membership order
-    first = getattr(account_info, 'devTeam', '') or ''
-    if first in teams:
-        teams.remove(first)
-        teams.insert(0, first)
-    return teams
+    # The STORED order (org_members.team_order, B39): the teams of it the
+    # caller still belongs to, in that order, then any team joined since
+    stored = [str(t) for t in (getattr(account_info, 'teamOrder', None) or []) if str(t) in teams]
+    return stored + [t for t in teams if t not in stored]
 
 
 def home_team(account_info: AccountInfo) -> str:

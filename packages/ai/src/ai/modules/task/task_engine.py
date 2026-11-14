@@ -524,7 +524,6 @@ class TaskEngine(DAPBase):
         _server (TaskServer): Central orchestration server
         _status (TASK_STATUS): Task state and statistics
         _engine_process (Optional[Process]): Subprocess handle
-        _debugger (Optional[TaskConn]): Primary debugging connection
         _debug_stdio (Optional[DbgStdio]): stdio interface
         _data_client (Optional[DAPClient]): Data communication client
         _data_port (Optional[int]): Data communication port
@@ -804,7 +803,6 @@ class TaskEngine(DAPBase):
         self._stop_reason: 'str | None' = None
 
         # Client connections
-        self._debugger: Optional[TaskConn] = None
         self._monitors: Dict[TaskConn, EVENT_TYPE] = {}
 
         # Debug interfaces
@@ -1871,17 +1869,6 @@ class TaskEngine(DAPBase):
         except Exception as e:
             self.debug_message(f'Error cleaning up update task: {e}')
 
-        try:
-            # Clean up attached debugger
-            if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
-                await self._debugger._transport.disconnect()
-
-                self._debugger = None
-                self._status.debuggerAttached = False
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debugger termination: {e}')
-
         # Set final state
         if self._stop_reason is not None:
             self._status.status = 'Stopped'
@@ -2240,37 +2227,19 @@ class TaskEngine(DAPBase):
             except Exception as e:
                 self.debug_message(f'Run-log append failed: {e}')
 
-        # Route debug events to debugger
-        if type & EVENT_TYPE.DEBUGGER:
-            # If we have an attach debugger
-            if self._debugger is not None:
-                try:
-                    event = message.get('event', '')
-                    body = message.get('body', {})
-
-                    await self._debugger.send_event(
-                        event=event,
-                        id=self.id,
-                        body=body,
-                    )
-
-                except Exception as e:
-                    self.debug_message(f'Failed to send event to debugger: {e}')
-
-        else:
-            # Route through server broadcast system, once per holding control.
-            # TODO(plan 7.5, C.9): route pipe-tagged events by traceId to the
-            # owning control only; until then every holder sees the engine's
-            # events (the engine status projected per control).
-            # Each holder's copy carries its own controlId (the control's key
-            # string, ALB seam 3); the body is copied, never shared across holders.
-            for key in list(self._holds):
-                event = {**message, 'body': {**body, 'controlId': key}} if isinstance(body, dict) else message
-                await self._server.broadcast_task_event(
-                    event_type=type,
-                    key=key,
-                    event=event,
-                )
+        # Route through server broadcast system, once per holding control.
+        # TODO(plan 7.5, C.9): route pipe-tagged events by traceId to the
+        # owning control only; until then every holder sees the engine's
+        # events (the engine status projected per control).
+        # Each holder's copy carries its own controlId (the control's key
+        # string, ALB seam 3); the body is copied, never shared across holders.
+        for key in list(self._holds):
+            event = {**message, 'body': {**body, 'controlId': key}} if isinstance(body, dict) else message
+            await self._server.broadcast_task_event(
+                event_type=type,
+                key=key,
+                event=event,
+            )
 
     def _update_status(self, message: Dict[str, Any]) -> None:
         """
@@ -2602,36 +2571,6 @@ class TaskEngine(DAPBase):
         """True while a control may take a hold: built, starting or running; never once a stop began."""
         return self.state in (EngineState.NEW, EngineState.STARTING, EngineState.RUNNING)
 
-    def is_attached(self, conn: TaskConn) -> bool:
-        """
-        Check if connection is attached as primary debugger.
-
-        Args:
-            conn: Connection to check
-
-        Returns:
-            True if connection is attached debugger, False otherwise
-        """
-        return self._debugger is not None and self._debugger == conn
-
-    def has_attached_debugger(self) -> bool:
-        """
-        Check if debugging client is attached.
-
-        Returns:
-            True if debugger attached, False otherwise
-        """
-        return self._debugger is not None
-
-    def get_connection_count(self) -> int:
-        """
-        Get number of active debugging connections.
-
-        Returns:
-            Number of active debugging connections (0 or 1)
-        """
-        return 1 if self._debugger is not None else 0
-
     async def wait_for_running(self) -> None:
         """
         Wait until task reaches RUNNING state with sliding timeout.
@@ -2780,21 +2719,6 @@ class TaskEngine(DAPBase):
         lifetime = int(time.time() - self._status.startTime) if self._status.startTime else 0
         details = f'reason: {reason}, ' if reason else ''
         self.debug_message(f'Task {title} ({details}run: {run}, lifetime: {lifetime}s)')
-
-    async def detach_task(self, conn: TaskConn) -> Dict[str, Any]:
-        """
-        Detach debugging client with cleanup.
-
-        Args:
-            conn: Connection to detach
-        """
-        if self._debugger != conn:
-            return
-
-        self._debugger = None
-        self._status.debuggerAttached = False
-
-        self.debug_message('Debugger detached from task')
 
     def _accumulate_analytics(
         self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]

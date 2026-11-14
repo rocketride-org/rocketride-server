@@ -76,8 +76,8 @@ async def test_deployed_engine_refuses_send_files_by_name_without_touching_the_e
 
     server = build_mcp_server(lambda: fake_engine, local_engine=False)
     async with Client(server) as client:
-        hit = await client.call_tool('send_files', {'task_token': 'tok-1', 'files': [str(existing)]})
-        miss = await client.call_tool('send_files', {'task_token': 'tok-1', 'files': [str(missing)]})
+        hit = await client.call_tool('send_files', {'address': 'tok-1', 'files': [str(existing)]})
+        miss = await client.call_tool('send_files', {'address': 'tok-1', 'files': [str(missing)]})
 
     assert hit.is_error is True
     body = _payload(hit)
@@ -100,7 +100,7 @@ async def test_local_engine_lists_and_runs_send_files(fake_engine):
     server = build_mcp_server(lambda: fake_engine, local_engine=True)
     async with Client(server) as client:
         names = {t.name for t in (await client.list_tools()).tools}
-        result = await client.call_tool('send_files', {'task_token': 'tok-1', 'files': ['/tmp/a.pdf']})
+        result = await client.call_tool('send_files', {'address': 'tok-1', 'files': ['/tmp/a.pdf']})
 
     assert 'send_files' in names
     assert result.is_error is False

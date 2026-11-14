@@ -156,6 +156,7 @@ async def start_server_task_as_team(
         displayName='',
         email='',
         devTeam=team_id,
+        teamOrder=[team_id],
         organization={
             'id': org_id,
             'name': '',

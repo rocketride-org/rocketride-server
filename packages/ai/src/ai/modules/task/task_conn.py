@@ -517,9 +517,8 @@ class TaskConn(
 
         Everything the session acquired on the socket is owned by the
         connection rather than the identity, so whatever is left behind would
-        be usable by whoever authenticates next: every monitor is dropped, the
-        connection is detached from any task it debugs, and its open
-        file-store handles are closed.
+        be usable by whoever authenticates next: every monitor is dropped and
+        its open file-store handles are closed.
 
         The caller holds ``_session_lock``, so no new session can start until
         this cleanup has finished.
@@ -544,15 +543,7 @@ class TaskConn(
         # event (no account left to scope it)
         self._monitors.clear()
 
-        # Step 3: detach from every task this connection debugs, so an
-        # attached debugger stops getting its task's debug events
-        for control in list(self._server._task_control.values()):
-            try:
-                await control.task.detach_task(self)
-            except Exception as e:
-                self.debug_message(f'Error detaching from task "{control.id}" on session end: {e}')
-
-        # Step 4: close the session's file-store handles, as disconnect does
+        # Step 3: close the session's file-store handles, as disconnect does
         try:
             await self._server.store.close_all_handles(self._connection_id)
         except Exception as e:

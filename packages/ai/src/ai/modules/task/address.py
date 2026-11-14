@@ -221,9 +221,14 @@ def check_endpoint_scope(endpoints: Optional[Iterable[str]], address: str) -> No
     ``developerId.pipelineId.*`` any source of that pipe — nothing broader.
     An empty list allows nothing.
 
+    A TWO-segment address (``developerId.pipelineId``, no source yet) is
+    admitted when the scope names SOME source of that pipe; the source the
+    server picks is checked again once it is known.
+
     Args:
         endpoints: The key's scope as loaded onto ``AccountInfo.endpoints``.
-        address: The FULL three-segment address the request resolved to.
+        address: The address the request resolved to (three segments, or two
+            while the source is still open).
 
     Raises:
         PermissionError: The scope excludes the address.
@@ -235,7 +240,7 @@ def check_endpoint_scope(endpoints: Optional[Iterable[str]], address: str) -> No
         parts = str(entry).split('.')
         if len(parts) != 3 or parts[0] != developer_id or parts[1] != pipe_id:
             continue
-        if parts[2] == ENDPOINT_ANY_SOURCE or parts[2] == source:
+        if source is None or parts[2] == ENDPOINT_ANY_SOURCE or parts[2] == source:
             return
     raise PermissionError(f'This API key is scoped to other endpoints; {address!r} is not among them')
 
@@ -265,6 +270,48 @@ def in_endpoint_scope(endpoints: Optional[Iterable[str]], address: str) -> bool:
     except (PermissionError, TaskError):
         return False
     return True
+
+
+def narrow_endpoint_scope(parent: Optional[Iterable[str]], child: Optional[Iterable[str]]) -> Optional[list[str]]:
+    """
+    The ``endpoints`` scope of a key minted BY another key (plan 2.4, P14).
+
+    An unscoped parent (``None``) imposes nothing: the child's own list (or
+    ``None``) is returned as given. A scoped parent is inherited when the child
+    names no scope, and otherwise may only be NARROWED: every child entry must
+    be covered by some parent entry — ``developerId.pipelineId.*`` covers that
+    pipe's exact addresses and its own wildcard; an exact address covers only
+    itself. The result is validated by ``validate_endpoint_patterns`` either
+    way, so the caller stores exactly what the grammar accepts.
+
+    Args:
+        parent: The minting credential's scope (``AccountInfo.endpoints``).
+        child: The requested scope for the new key, or ``None``.
+
+    Returns:
+        The new key's scope: ``None`` only when both are unscoped.
+
+    Raises:
+        PermissionError: A child entry lies outside the parent's scope.
+        TaskError: ``TASK_INVALID_ARGUMENT`` for a malformed entry.
+    """
+    if parent is None:
+        return validate_endpoint_patterns(child)
+    parent_list = validate_endpoint_patterns(parent) or []
+    if child is None:
+        return list(parent_list)
+    child_list = validate_endpoint_patterns(child) or []
+    for entry in child_list:
+        developer_id, pipe_id, source = entry.split('.')
+        covered = any(
+            p.split('.')[0] == developer_id
+            and p.split('.')[1] == pipe_id
+            and (p.split('.')[2] == ENDPOINT_ANY_SOURCE or p.split('.')[2] == source)
+            for p in parent_list
+        )
+        if not covered:
+            raise PermissionError(f'A scoped key may only narrow its own endpoints; {entry!r} is outside its scope')
+    return child_list
 
 
 def validate_endpoint_patterns(endpoints: Optional[Iterable[str]]) -> Optional[list[str]]:

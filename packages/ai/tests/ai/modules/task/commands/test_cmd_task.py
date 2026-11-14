@@ -104,7 +104,9 @@ def _account_info(*, user_id='user-1', auth='ak_x', dev_team='team-1', organizat
         auth=auth,
         userToken='token-' + user_id,
         devTeam=dev_team,
-        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': dev_team}]},
+        organization=organization
+        if organization is not None
+        else {'id': 'org-1', 'teams': [{'id': dev_team}], 'developerId': 'acme'},
         sysPermissions=[],
     )
 
@@ -603,35 +605,45 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_get_token_returns_token_from_server():
-    """The handler queries the server with project_id + source and returns the address."""
+async def test_on_rrext_get_token_resolves_the_address_through_the_one_resolver():
+    """The handler forms the address from the caller's developer id and resolves it like every verb."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(address='acme.pipe.found'))
+    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1'))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
-    assert response == {'type': 'response', 'body': {'token': 'acme.pipe.found'}}
-    server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='', run_kind=''
-    )
+    assert response == {'type': 'response', 'body': {'token': 'acme.proj-1.src-1'}}
+    server.resolve_control.assert_called_once_with('acme.proj-1.src-1', conn._account_info, 'task.monitor', team=None)
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
-    """A teamId argument scopes the lookup (and permission check) to that team."""
+async def test_on_rrext_get_token_team_scope_is_the_resolvers_team_override():
+    """A teamId argument scopes the permission check and the resolution to that team."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(address='acme.pipe.deploy'))
+    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1'))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.verify_team_permission = MagicMock()
     response = await TaskCommands.on_rrext_get_token(
         conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1'}}
     )
-    assert response == {'type': 'response', 'body': {'token': 'acme.pipe.deploy'}}
+    assert response == {'type': 'response', 'body': {'token': 'acme.proj-1.src-1'}}
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
-    server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1', run_kind=''
+    server.resolve_control.assert_called_once_with(
+        'acme.proj-1.src-1', conn._account_info, 'task.monitor', team='team-1'
     )
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_get_token_without_a_developer_id_cannot_form_an_address():
+    """No developer id, no address: the handler says so instead of resolving a malformed one."""
+    server = MagicMock()
+    conn = _make_conn(
+        account_info=_account_info(organization={'id': 'org-1', 'teams': [{'id': 'team-1'}]}), server=server
+    )
+    with pytest.raises(ValueError, match='developer id'):
+        await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
+    server.resolve_control.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

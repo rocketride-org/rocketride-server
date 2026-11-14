@@ -920,7 +920,6 @@ class MiscCommands(DAPConn):
                         'status': getattr(task_status, 'status', None) if not completed else None,
                         'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
                         'endTime': end if completed else None,
-                        'connections': control.task.get_connection_count(),
                         'state': getattr(task_status, 'state', 0),
                         # The CONTROL's idle time: each holder ages on its own
                         'idleTime': int(control.idle_seconds()),
@@ -984,7 +983,7 @@ class MiscCommands(DAPConn):
         if len(parts) < 3:
             return 'Task monitor'
         project_id = parts[2]
-        project_label = project_names.get(project_id, project_id[:8])
+        project_label = project_names.get(project_id, project_id)
 
         if len(parts) == 3 or parts[3] == '*':
             return f'{project_label}.*'

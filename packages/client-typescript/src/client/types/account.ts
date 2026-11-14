@@ -241,6 +241,14 @@ export interface CreateKeyParams {
 
 	/** Optional team UUID to scope this key to. Omit for all teams. */
 	teamId?: string;
+
+	/**
+	 * Optional task-address scope: exact `developerId.pipelineId.source` entries or
+	 * `developerId.pipelineId.*` for any source of that pipe. Omit for every address
+	 * the account may reach. A key created with a scoped key inherits that key's
+	 * scope and may only narrow it.
+	 */
+	endpoints?: string[];
 }
 
 /** Parameters for inviting a new member to an organization. */
@@ -264,9 +272,9 @@ export interface InviteMemberParams {
 	teamAssignments?: Array<{ teamId: string; permissions: string[] }>;
 
 	/**
-	 * Optional development team for the invitee. It must be one of the
-	 * `teamAssignments` teams with `task.control` (any org team when `role`
-	 * is "admin"). When omitted the server picks one if only one team qualifies.
+	 * Optional HOME team for the invitee (first in their team order). It must be
+	 * one of the `teamAssignments` teams with `task.control` (any org team when
+	 * `role` is "admin"). When omitted the server picks one if only one team qualifies.
 	 */
 	devTeamId?: string;
 }
@@ -288,8 +296,11 @@ export interface InvitedMember {
 	/** "pending" until the invitee sets a password, "active" if their account already existed. */
 	status: string;
 
-	/** The team recorded as the invitee's development team, or null when none was recorded. */
+	/** The invitee's HOME team (first in their team order), or null when they were assigned no team. */
 	devTeamId: string | null;
+
+	/** The invitee's team order as recorded. */
+	teamOrder: string[];
 }
 
 /** Parameters for adding or updating a team member. */

@@ -1685,6 +1685,7 @@ def _caller(
         auth='rr_key',
         userId=user_id,
         devTeam=dev_team,
+        teamOrder=[dev_team],
         organization={
             'id': org,
             'name': '',

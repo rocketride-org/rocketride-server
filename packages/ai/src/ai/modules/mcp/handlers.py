@@ -50,13 +50,13 @@ except PackageNotFoundError:
 SERVER_INSTRUCTIONS = (
     'RocketRide pipelines: build, validate, run and observe data and AI pipelines, manage team deployments '
     "and cron schedules, and read the caller's file store and run logs. Search these tools when the user "
-    'mentions RocketRide, a .pipe file or pipeline definition, pipeline components or nodes, task tokens, '
+    'mentions RocketRide, a .pipe file or pipeline definition, pipeline components or nodes, task addresses, '
     'deployments or schedules, or run traces and logs.\n\n'
     'Core sequence: list_components (what is ready to use now), then describe_component (config schema), '
-    'then validate_pipeline, then run_pipeline, which returns task_token, projectId and source. '
+    'then validate_pipeline, then run_pipeline, which returns the task address, projectId and source. '
     'With inputs, run_pipeline also sends them and returns the result in the same call, with no polling '
     'needed. Without inputs, send_data feeds input and monitor waits for completion. '
-    'list_running_pipelines finds tokens; terminate stops a task. Pipeline definitions are always inline '
+    'list_running_pipelines finds addresses; terminate stops a task. Pipeline definitions are always inline '
     'JSON objects; no tool reads a pipeline from a file path. Store tools take store-relative paths. To '
     'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url and a '
     "dropper_url; send_files (local engines only) uploads files from the engine host's own disk into a "

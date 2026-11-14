@@ -31,17 +31,17 @@ the MCP `is_error` flag mirrors it, and `structured_content` mirrors the text JS
 
 | Tool | Input | Result / semantics |
 |---|---|---|
-| `run_pipeline` | `{pipeline, inputs?, ttl?, use_existing?, source?, threads?, pipelineTraceLevel?}` | `{ok, task_token, projectId, source, result?}`. Inline pipeline **only** (no filepath). With `inputs` it is a **one-shot**: the string is sent, `result` comes back inline, and the token is finished — don't poll it. **Keep `projectId` + `source`**: they key the log tools. `pipelineTraceLevel?`: `none\|metadata\|summary\|full`, server default `summary`. |
-| `run_dropper_pipe` | like `run_pipeline` (incl. `pipelineTraceLevel?`), minus `inputs` | `{ok, task_token, upload_url, dropper_url, projectId, source}`. Out-of-band file ingress: multipart-POST files to `upload_url`, or hand the user `dropper_url` (browser drag-drop). URLs carry only the public `pk_` key — never the control token. |
-| `send_data` | `{task_token, input}` | Sends to a running task; result inline. `input` is a **string** — serialize JSON; there is no chat operation (chat pipelines → SDK fallback). |
-| `send_files` | `{task_token, files: [path]}` | **Local (loopback-bound) engines only** — paths on the engine host's filesystem. Deployed engines don't list it and refuse it (`Unavailable`); use `run_dropper_pipe`. |
-| `terminate` | `{task_token}` | Stops the task. |
+| `run_pipeline` | `{pipeline, inputs?, ttl?, use_existing?, source?, threads?, pipelineTraceLevel?}` | `{ok, address, projectId, source, result?}`. Inline pipeline **only** (no filepath). With `inputs` it is a **one-shot**: the string is sent, `result` comes back inline, and the token is finished — don't poll it. **Keep `projectId` + `source`**: they key the log tools. `pipelineTraceLevel?`: `none\|metadata\|summary\|full`, server default `summary`. |
+| `run_dropper_pipe` | like `run_pipeline` (incl. `pipelineTraceLevel?`), minus `inputs` | `{ok, address, upload_url, dropper_url, projectId, source}`. Out-of-band file ingress: multipart-POST files to `upload_url`, or hand the user `dropper_url` (browser drag-drop). URLs carry only the public `pk_` key — never the control token. |
+| `send_data` | `{address, input}` | Sends to a running task; result inline. `input` is a **string** — serialize JSON; there is no chat operation (chat pipelines → SDK fallback). |
+| `send_files` | `{address, files: [path]}` | **Local (loopback-bound) engines only** — paths on the engine host's filesystem. Deployed engines don't list it and refuse it (`Unavailable`); use `run_dropper_pipe`. |
+| `terminate` | `{address}` | Stops the task. |
 
 ## Visibility
 
 | Tool | Input | Result |
 |---|---|---|
-| `monitor` | `{task_token, timeout? ≤300, interval?}` | Bounded poll, returns a snapshot: `{ok, state, state_label, completed, terminal, status, counts: {completedCount, failedCount, totalCount}, errors, warnings, polls, poll_timed_out?}`. `terminal: true` means done; `poll_timed_out: true` means the *poll* hung, not the task. |
+| `monitor` | `{address, timeout? ≤300, interval?}` | Bounded poll, returns a snapshot: `{ok, state, state_label, completed, terminal, status, counts: {completedCount, failedCount, totalCount}, errors, warnings, polls, poll_timed_out?}`. `terminal: true` means done; `poll_timed_out: true` means the *poll* hung, not the task. |
 | `list_running_pipelines` | — | `{ok, tasks, count}`. |
 
 ## Run logs (DVR — the debugging evidence)

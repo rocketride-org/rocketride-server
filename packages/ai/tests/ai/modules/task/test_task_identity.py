@@ -27,9 +27,10 @@ run is its user, the owner of a deploy run is its team. These tests pin:
 
 - the registry KEY ``runKind.ownerId.address`` (dev vs deploy owner, the
   @me run_kind segment), which is what makes the "Pipeline is already
-  running" collision guard scope correctly; and
-- ``get_task_control_by_project``'s owner-scoped resolution (team scope and
-  caller-dev scope; there is no account-less scan).
+  running" collision guard scope correctly.
+
+Resolution itself (team scope, the caller's own dev run, owner-match access)
+is ``TaskServer.resolve_control``'s and is pinned by the security matrix.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import itertools
-import pytest
 
 from ai.modules.task.address import build_address
 from ai.modules.task.task_control import TaskControl
@@ -160,75 +160,3 @@ def test_owner_key_grammar():
     # The @me case: same owner as dev, distinct key via the segment.
     assert owner_key('deploy', 'user-1', 'proj-1', 'src-1') == 'p.deploy.user-1.proj-1.src-1'
     assert owner_key('deploy', 'user-1', 'proj-1', 'src-1') != owner_key('dev', 'user-1', 'proj-1', 'src-1')
-
-
-# ---------------------------------------------------------------------------
-# get_task_control_by_project — owner-scoped resolution
-# ---------------------------------------------------------------------------
-
-
-def test_team_scope_resolves_only_the_team_deploy_run():
-    """team_id addresses the team's deploy run, never a dev run of the pair."""
-    dev = _control(run_kind='dev')
-    deploy = _control(run_kind='deploy')
-    server = _server(dev, deploy)
-    found = TaskServer.get_task_control_by_project(
-        server, 'proj-1', 'src-1', _account(), require='task.monitor', team_id='team-1'
-    )
-    assert found is deploy
-
-
-def test_dev_scope_resolves_only_the_callers_run():
-    """Without team_id the caller's OWN dev run resolves — not a teammate's."""
-    mine = _control(run_kind='dev', user_id='user-1')
-    theirs = _control(run_kind='dev', user_id='user-2')
-    server = _server(theirs, mine)
-    found = TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', _account(user_id='user-1'))
-    assert found is mine
-
-
-def test_dev_scope_does_not_resolve_the_deploy_run():
-    """A dev-scoped lookup never lands on the deploy run of the same pair."""
-    deploy = _control(run_kind='deploy')
-    server = _server(deploy)
-    with pytest.raises(RuntimeError, match='not running'):
-        TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', _account())
-
-
-def test_team_scope_requires_an_identity():
-    """A team scope without account_info is never legitimate."""
-    server = _server(_control(run_kind='deploy'))
-    with pytest.raises(PermissionError, match='Not authenticated'):
-        TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', None, team_id='team-1')
-
-
-# ---------------------------------------------------------------------------
-# Owner-match access (B3/B4) — a user-owned run follows its owner's identity,
-# so it survives an org switch (its team becomes foreign) yet stays reachable.
-# ---------------------------------------------------------------------------
-
-
-def test_owner_reaches_own_dev_run_when_its_team_is_foreign():
-    """After an org switch the caller's active team differs from the run's team,
-    but the owner still resolves their own dev run by identity — no permission
-    on the (now foreign) run team is required.
-    """
-    mine = _control(run_kind='dev', user_id='user-1', team_id='old-team')
-    server = _server(mine)
-    # Caller is now in a different team and holds NO grant on 'old-team'.
-    caller = _account(user_id='user-1', team_id='new-team')
-    found = TaskServer.get_task_control_by_project(server, 'proj-1', 'src-1', caller, require='task.control')
-    assert found is mine
-
-
-def test_owner_match_does_not_apply_to_a_team_deploy_run():
-    """A team deploy run (owner_id == teamId) never matches the caller's userId,
-    so a non-member is still denied — the owner short-circuit is user-only.
-    """
-    deploy = _control(run_kind='deploy', team_id='team-x')
-    server = _server(deploy)
-    caller = _account(user_id='user-1', team_id='team-y')  # not a member of team-x
-    with pytest.raises(PermissionError):
-        TaskServer.get_task_control_by_project(
-            server, 'proj-1', 'src-1', caller, require='task.monitor', team_id='team-x'
-        )

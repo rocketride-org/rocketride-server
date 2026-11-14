@@ -199,11 +199,8 @@ def test_s1_control_carries_no_token_fields():
 
 
 def test_s4_unscoped_lookup_no_longer_exists():
-    """get_task_control_by_project has no account-less branch: the account is required."""
-    ts = _server()
-    _control(ts)
-    with pytest.raises(TypeError):
-        ts.get_task_control_by_project('docBrain', 'parsePDF')  # type: ignore[call-arg]
+    """There is ONE resolver: the project/source lookup beside it is gone (plan 3.2, C.6b)."""
+    assert not hasattr(TaskServer, 'get_task_control_by_project')
 
 
 def test_s4_user_b_never_resolves_user_a_dev_control():
@@ -255,8 +252,8 @@ def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
 
 def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
     """The address carries no owner, so two teams can each run it. A member of
-    both reaches the run of the FIRST team in their team order that runs it
-    (the development team first, then membership order); teams running nothing
+    both reaches the run of the FIRST team in their STORED team order that runs
+    it (teams joined since follow in membership order); teams running nothing
     are skipped, ``team=`` overrides the order for one call, and there is no
     ambiguity error: the order is total.
     """
@@ -270,6 +267,7 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
             auth='rr_key',
             userId='user-a',
             devTeam=dev_team,
+            teamOrder=[dev_team],
             organization={
                 'id': 'org-1',
                 'name': 'Acme',

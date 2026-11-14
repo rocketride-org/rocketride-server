@@ -344,7 +344,8 @@ class ConnectResult(TypedDict, total=False):
         phoneNumber (str): Primary phone number in E.164 format.
         phoneNumberVerified (bool): True when the phone number has been verified.
         locale (str): BCP-47 locale tag (e.g. "en-US").
-        devTeam (str): The user's DEV team — dev-mode runs bill to it and use its environment layer.
+        devTeam (str): The user's HOME team (the first of ``teamOrder``) — dev-mode runs bill to it and use its environment layer.
+        teamOrder (list[str]): The user's team order in the active org: ``@team`` resolution walks it first to last.
         organization (OrgInfo | None): The organisation the user belongs to, or None.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
         serverVersion (str): Version string of the server that handled the handshake; newer servers only.
@@ -366,6 +367,7 @@ class ConnectResult(TypedDict, total=False):
     phoneNumberVerified: bool
     locale: str
     devTeam: str
+    teamOrder: list[str]
     organization: OrgInfo
     capabilities: list[str]
     serverVersion: str

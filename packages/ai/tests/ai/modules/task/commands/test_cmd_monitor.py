@@ -62,6 +62,7 @@ def _account_info(*, user_id='user-1', team_id='team-1'):
         userToken='token-' + user_id,
         organization={
             'id': 'org-1',
+            'developerId': 'acme',
             'permissions': [],
             'teams': [
                 {
@@ -548,7 +549,7 @@ async def test_send_task_event_dev_vs_deploy_keys_never_alias():
 async def test_set_monitor_project_scope_binds_caller_as_owner():
     """A project/source subscription without team_id binds the CALLER's userId."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control())
+    server.resolve_control = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
     await MonitorCommands.set_monitor(conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY)
@@ -559,16 +560,16 @@ async def test_set_monitor_project_scope_binds_caller_as_owner():
 async def test_set_monitor_team_scope_binds_team_as_owner():
     """A project/source subscription WITH team_id builds the team-scoped key."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(
         conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY, team_id='team-1'
     )
     assert 'p.deploy.team-1.proj-1.src-1' in conn._monitors
-    # The lookup was scoped to the team as well.
-    _, kwargs = server.get_task_control_by_project.call_args
-    assert kwargs.get('team_id') == 'team-1'
+    # The lookup went through the ONE resolver, scoped to the team as well.
+    args, kwargs = server.resolve_control.call_args
+    assert args[0] == 'acme.proj-1.src-1' and kwargs.get('team') == 'team-1'
 
 
 @pytest.mark.asyncio
@@ -586,7 +587,7 @@ async def test_set_monitor_token_for_deploy_run_builds_team_key():
 async def test_on_rrext_monitor_passes_team_id_through():
     """The wire teamId argument reaches set_monitor's team scope."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.get_task_address = MagicMock(return_value='')
@@ -605,14 +606,14 @@ async def test_on_rrext_monitor_passes_team_id_through():
 @pytest.mark.asyncio
 async def test_set_monitor_foreign_team_scope_denied_even_when_not_running():
     """Subscribing to another team's deploy scope is rejected up front -- even
-    when no run exists yet. Regression: get_task_control_by_project raises a
-    RuntimeError (not a PermissionError) on the not-running path, which the
+    when no run exists yet. Regression: the resolver raises a not-registered
+    error (not a PermissionError) on the not-running path, which the
     except-Exception branch swallows; without the membership check the foreign
     subscription would still be registered under p.<foreignTeam>.<proj>.<src>.
     """
     server = MagicMock()
     # Subscribe-before-launch: no live run -> RuntimeError, NOT PermissionError.
-    server.get_task_control_by_project = MagicMock(side_effect=RuntimeError('Your pipeline is not running'))
+    server.resolve_control = MagicMock(side_effect=RuntimeError('Your pipeline is not running'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(team_id='team-1'), server=server)
 
@@ -625,7 +626,7 @@ async def test_set_monitor_foreign_team_scope_denied_even_when_not_running():
     # reached (the membership check fires first).
     assert 'p.deploy.team-other.proj-1.src-1' not in conn._monitors
     assert conn._monitors == {}
-    server.get_task_control_by_project.assert_not_called()
+    server.resolve_control.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -634,7 +635,7 @@ async def test_set_monitor_own_team_scope_allowed_before_a_run_exists():
     not-running RuntimeError is tolerated once membership is established.
     """
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(side_effect=RuntimeError('not running'))
+    server.resolve_control = MagicMock(side_effect=RuntimeError('not running'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(team_id='team-1'), server=server)
 
