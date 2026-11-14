@@ -30,7 +30,7 @@ Every row has the same columns:
 - `source`: the source name, or the per-URL `name`
 - `platform`
 - `url`: absolute
-- `url_hash`: `sha256(url.strip().lower())`
+- `url_hash`: sha256 of the trimmed URL with the scheme and host lower-cased (path and query keep their case)
 - `title`
 - `author`
 - `published_at`: ISO-8601 in UTC
@@ -52,7 +52,7 @@ The Web Scraper service exposes four tools. Each tool's name is prefixed with th
 | `fetch_feed` | Read an RSS 2.0, RSS 1.0 or Atom feed. Required: `url`. Optional: `limit`. Returns `{url, items: [{title, url, author, published_at, body}]}`. |
 | `fetch_json` | Call a public JSON API with GET or POST. Required: `url`. Optional: `method`, `body_json`, `headers`, `items_path` (dot path to the item list), `fields` (output name → dot path in each item), `limit`, `max_chars`. Without `items_path` it returns the raw `data` (truncated to `max_chars` as text if large). |
 
-A blocked or failed request raises an error that names the reason: a non-public host, a URL not on the allow-list, an HTTP error status, or too many redirects.
+A blocked or failed request raises an error that names the reason: a non-public host, a URL not on the allow-list, an HTTP error status, too many redirects, or a JSON response cut off at the size limit. `fetch_page` and `extract` accept HTML and plain-text responses only; a PDF, image or other binary type fails with `unsupported content type`.
 
 ## Configuration
 
@@ -126,7 +126,7 @@ Leave the defaults for general page reading. Add allow-list patterns when an age
 
 ### Network safety
 
-Only public hosts can be reached. For every request, and every redirect hop, the host is resolved once and every address must be public. Private, loopback, link-local, CGNAT, and IPv6 forms that embed a private IPv4 address are rejected, as is anything that does not resolve. The connection then goes only to those validated addresses, so a second DNS answer cannot point it somewhere else (no DNS rebinding). Environment proxies are ignored. Redirects are followed manually so that each `Location` is re-checked against the validator and the allow-list; after five redirects the request fails. A redirect to a different origin (scheme, host, or port) drops every request header except `User-Agent`, `Accept`, and `Accept-Language`, so credentials in `headers` never leave the host they were meant for. A `Host` header in `headers` is refused, because it would send the request to a different virtual host than the one validated. Error messages and logs show URLs without their query string, so API keys placed in a query are not logged. Only GET and POST are supported. Feeds whose DTD declares entities are refused before parsing; a bare `<!DOCTYPE>` (such as RSS 0.91's) is fine. An invalid CSS selector fails the URL with a clear error instead of crashing the source.
+Only public hosts can be reached. For every request, and every redirect hop, the host is resolved once and every address must be public. Private, loopback, link-local, CGNAT, and IPv6 forms that embed a private IPv4 address are rejected, as is anything that does not resolve. The connection then goes only to those validated addresses, so a second DNS answer cannot point it somewhere else (no DNS rebinding). Environment proxies are ignored. Redirects are followed manually so that each `Location` is re-checked against the validator and the allow-list; after five redirects the request fails. A redirect to a different origin (scheme, host, or port) drops every request header except `User-Agent`, `Accept`, and `Accept-Language`, so credentials in `headers` never leave the host they were meant for. A `307` or `308` redirect of a POST to a different origin is refused, because it would resend the body (which may hold a key) to that origin. A `Host` header in `headers` is refused, because it would send the request to a different virtual host than the one validated. Error messages and logs show URLs without their query string, so API keys placed in a query are not logged. Only GET and POST are supported. Feeds whose DTD declares entities are refused before parsing; a bare `<!DOCTYPE>` (such as RSS 0.91's) is fine. An invalid CSS selector fails the URL with a clear error instead of crashing the source.
 
 ### What it does not do
 

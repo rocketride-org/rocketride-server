@@ -45,7 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
 try:
     from .scrape_extract import extract_html_items, extract_json_items, html_to_text, parse_feed
@@ -252,7 +252,14 @@ def expand_template(value: Any, now: datetime, per_url: int, max_items: int) -> 
 
 
 def hash_url(url: str) -> str:
-    return hashlib.sha256(url.strip().lower().encode('utf-8')).hexdigest()
+    """Dedup key for a row: sha256 of the trimmed URL with only scheme and host lower-cased.
+
+    Paths and query strings are case-sensitive on most servers (two YouTube
+    video ids differ only in case), so they are hashed as given.
+    """
+    parts = urlsplit(url.strip())
+    canonical = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, parts.fragment))
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
 def parse_date(value: Any) -> Optional[str]:

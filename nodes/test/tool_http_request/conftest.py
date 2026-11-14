@@ -16,6 +16,17 @@ from unittest.mock import Mock
 import pytest
 
 NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'
+URL_POLICY_PATH = (
+    Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'url_policy.py'
+)
+
+
+def load_url_policy():
+    """Load the real shared allow-list checker standalone (it has no engine imports)."""
+    spec = importlib.util.spec_from_file_location('_tool_http_request_test_url_policy', URL_POLICY_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -44,6 +55,7 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
     utils_module.config_int = Mock(side_effect=lambda _cfg, _key, default, **_kwargs: default)
+    utils_module.url_matches_pattern = load_url_policy().url_matches_pattern
     monkeypatch.setitem(sys.modules, 'ai', types.ModuleType('ai'))
     monkeypatch.setitem(sys.modules, 'ai.common', types.ModuleType('ai.common'))
     monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)

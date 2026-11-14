@@ -52,6 +52,7 @@ from ai.common.utils import config_int
 from rocketlib import IEndpointBase, warning
 
 from .IGlobal import DEFAULT_MAX_BODY_CHARS, build_fetcher
+from .scrape_fetch import Fetcher
 from .scrape_sources import (
     DEFAULT_MAX_ITEMS,
     SourceSpec,
@@ -68,6 +69,8 @@ class IEndpoint(IEndpointBase):
 
     _specs: Dict[str, SourceSpec]
     _columns: List[str]
+    # One fetcher for the whole scan, so request pacing holds per host across sources.
+    _fetcher: Fetcher
 
     def _params(self) -> Dict[str, Any]:
         try:
@@ -92,6 +95,7 @@ class IEndpoint(IEndpointBase):
         specs = self._load_specs()
         self._specs = {s.name: s for s in specs}
         self._columns = row_columns(specs)
+        self._fetcher = build_fetcher(self._params())
         for spec in specs:
             # A non-zero return means the engine wants the scan stopped.
             if scanCallback({'name': spec.name, 'size': len(spec.urls)}):
@@ -114,7 +118,7 @@ class IEndpoint(IEndpointBase):
                 raise ValueError(f'Web Scraper source: unknown source {name!r}')
 
             params = self._params()
-            fetcher = build_fetcher(params)
+            fetcher = getattr(self, '_fetcher', None) or build_fetcher(params)
             max_body = config_int(params, 'maxBodyChars', DEFAULT_MAX_BODY_CHARS, min_value=200)
             result = run_source(spec, fetcher, max_body_chars=max_body)
 

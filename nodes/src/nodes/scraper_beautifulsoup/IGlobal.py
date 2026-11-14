@@ -27,8 +27,9 @@ scraper_beautifulsoup — global (shared) state.
 Builds the guarded :class:`Fetcher` from the node configuration. Both
 variants share the network-policy fields (timeout, size cap, request pacing,
 user agent, URL allow-list); the tool variant keeps its fetcher here, the
-source variant's ``IEndpoint`` builds its own from the source parameters via
-:func:`build_fetcher`.
+source variant's ``IEndpoint`` builds one per scan from the source parameters
+via :func:`build_fetcher` and shares it across sources, so pacing holds per
+host for the whole run.
 """
 
 from __future__ import annotations
@@ -62,6 +63,20 @@ def allow_patterns(cfg: Dict[str, Any]) -> List[re.Pattern]:
     return patterns
 
 
+def request_interval_ms(cfg: Dict[str, Any]) -> int:
+    """The per-host pacing gap in ms; an explicit 0 disables pacing.
+
+    ``config_int`` reads 0 as "unset" and returns the default, but this
+    setting documents 0 as "no pacing".
+    """
+    try:
+        if float(cfg.get('requestIntervalMs')) == 0:
+            return 0
+    except (TypeError, ValueError):
+        pass
+    return config_int(cfg, 'requestIntervalMs', DEFAULT_INTERVAL_MS, min_value=0, max_value=60000)
+
+
 def build_fetcher(cfg: Dict[str, Any]) -> Fetcher:
     """Create a Fetcher from a (prefix-stripped) node config dict."""
     return Fetcher(
@@ -69,7 +84,7 @@ def build_fetcher(cfg: Dict[str, Any]) -> Fetcher:
         open_session=pinned_session,
         timeout=float(config_int(cfg, 'timeout', DEFAULT_TIMEOUT_S, min_value=1, max_value=120)),
         max_bytes=config_int(cfg, 'maxResponseKB', DEFAULT_MAX_BYTES_KB, min_value=16, max_value=50 * 1024) * 1024,
-        min_interval=config_int(cfg, 'requestIntervalMs', DEFAULT_INTERVAL_MS, min_value=0, max_value=60000) / 1000.0,
+        min_interval=request_interval_ms(cfg) / 1000.0,
         user_agent=str(cfg.get('userAgent') or '').strip() or DEFAULT_USER_AGENT,
         allow_patterns=allow_patterns(cfg),
         allow_match=url_matches_pattern,

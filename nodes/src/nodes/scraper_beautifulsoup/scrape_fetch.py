@@ -105,6 +105,9 @@ class FetchResult:
             return self.content.decode('utf-8', errors='replace')
 
     def json(self) -> Any:
+        if self.truncated:
+            # Parsing half a document would report a syntax error, hiding the size limit.
+            raise ValueError('the response is larger than "Max response size" and was cut off')
         return json.loads(self.text())
 
 
@@ -219,6 +222,9 @@ class Fetcher:
                 if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
                     target = urljoin(current, resp.headers['location'])
                     if _origin(target) != _origin(current):
+                        if json_body is not None and resp.status_code in (307, 308):
+                            # 307/308 resend the body, which can carry a key: never to another origin.
+                            raise FetchError('Refusing to forward a request body to a different origin')
                         # Caller headers may carry credentials (Authorization,
                         # API keys): never forward them to another origin.
                         send_headers = {k: v for k, v in send_headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}

@@ -174,9 +174,14 @@ class TestHelpers:
     def test_parse_date(self, value, expected):
         assert parse_date(value) == expected
 
-    def test_hash_matches_pulsar(self):
-        # Same canonicalisation as Pulsar's scraper dedup: sha256(trim + lowercase).
-        assert hash_url(' https://Example.com/A ') == hashlib.sha256(b'https://example.com/a').hexdigest()
+    def test_hash_lowercases_scheme_and_host_only(self):
+        assert hash_url(' HTTPS://Example.com/A?q=B ') == hashlib.sha256(b'https://example.com/A?q=B').hexdigest()
+
+    def test_hash_keeps_path_and_query_case(self):
+        assert hash_url('https://www.youtube.com/watch?v=aBcDeFgHiJk') != hash_url(
+            'https://www.youtube.com/watch?v=ABCDEFGHIJK'
+        )
+        assert hash_url('https://example.com/Post') != hash_url('https://example.com/post')
 
 
 class TestNormalizeRow:

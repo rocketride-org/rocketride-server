@@ -63,6 +63,9 @@ from .scrape_extract import (
 from .scrape_fetch import FetchError
 from .scrape_sources import normalize_row
 
+# Content types fetch_page and extract parse as a page ('' = the server sent none).
+PAGE_CONTENT_TYPES = frozenset({'text/html', 'application/xhtml+xml', 'text/plain', ''})
+
 DEFAULT_MAX_CHARS = 20000
 MAX_CHARS = 1_000_000
 DEFAULT_LIMIT = 50
@@ -107,6 +110,13 @@ class IInstance(IInstanceBase):
         except FetchError as e:
             raise ValueError(str(e)) from e
 
+    def _fetch_page(self, url: Any):
+        """Fetch a URL that will be parsed as a page; binary types fail instead of becoming garbage text."""
+        result = self._fetch(url)
+        if result.content_type not in PAGE_CONTENT_TYPES:
+            raise ValueError(f'{result.url}: unsupported content type {result.content_type}')
+        return result
+
     @tool_function(
         input_schema={
             'type': 'object',
@@ -148,7 +158,7 @@ class IInstance(IInstanceBase):
         if fmt not in ('markdown', 'text', 'html', 'links'):
             raise ValueError('`format` must be markdown, text, html or links')
         max_chars = int_arg(args, 'max_chars', default=DEFAULT_MAX_CHARS, lo=1, hi=MAX_CHARS, tool_name='scraper')
-        result = self._fetch(args.get('url'))
+        result = self._fetch_page(args.get('url'))
         out: Dict[str, Any] = {'url': result.url, 'status': result.status, 'truncated': result.truncated}
 
         if fmt == 'links':
@@ -204,7 +214,7 @@ class IInstance(IInstanceBase):
         if not isinstance(fields, dict) or not fields:
             raise ValueError('`fields` must be a non-empty object of name -> selector')
         limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
-        result = self._fetch(args.get('url'))
+        result = self._fetch_page(args.get('url'))
         items = extract_html_items(result.content, result.url, str(args.get('item_selector') or ''), fields)
         return {'url': result.url, 'items': items[:limit]}
 

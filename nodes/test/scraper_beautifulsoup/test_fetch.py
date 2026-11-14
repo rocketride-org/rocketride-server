@@ -61,6 +61,10 @@ url_policy = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(url_policy)
 
 
+# Every POST any test server received: (server port, path, decoded JSON body).
+RECEIVED_POSTS = []
+
+
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # silence test output
         pass
@@ -119,8 +123,13 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length') or 0)
         payload = json.loads(self.rfile.read(length) or b'null')
+        RECEIVED_POSTS.append((self.server.server_address[1], urlparse(self.path).path, payload))
         if self.path == '/post-303':
             self._send(303, headers={'Location': '/json'})
+        elif self.path.startswith('/post-30'):
+            # /post-307?to=<url> and /post-308?to=<url>: redirect that resends the body.
+            status = int(urlparse(self.path).path.rsplit('-', 1)[1])
+            self._send(status, headers={'Location': parse_qs(urlparse(self.path).query)['to'][0]})
         else:
             self._send(200, json.dumps({'got': payload}).encode(), {'Content-Type': 'application/json'})
 
@@ -343,6 +352,26 @@ def test_post_json_and_303(server):
     assert data == {'got': {'q': 1}}
     # 303 converts POST to GET on the redirect target.
     assert 'ua' in make().fetch(f'{server}/post-303', method='POST', json_body={}).json()
+
+
+@pytest.mark.parametrize('status', [307, 308])
+def test_cross_origin_body_redirect_refused(server, other_server, status):
+    other_port = int(other_server.rsplit(':', 1)[1])
+    with pytest.raises(FetchError, match='request body to a different origin'):
+        make().fetch(f'{server}/post-{status}?to={other_server}/echo', method='POST', json_body={'key': 'secret'})
+    assert not [post for post in RECEIVED_POSTS if post[0] == other_port], 'the second origin received the body'
+
+
+def test_same_origin_307_keeps_body(server):
+    data = make().fetch(f'{server}/post-307?to=/echo', method='POST', json_body={'q': 2}).json()
+    assert data == {'got': {'q': 2}}
+
+
+def test_truncated_json_names_the_size_limit(server):
+    result = make(max_bytes=4).fetch(f'{server}/json')
+    assert result.truncated
+    with pytest.raises(ValueError, match='Max response size'):
+        result.json()
 
 
 def test_unsupported_method(server):
