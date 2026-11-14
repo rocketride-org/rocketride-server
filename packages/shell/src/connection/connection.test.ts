@@ -1200,6 +1200,92 @@ test('onConnected ignores stale callbacks, accepts the active connection, and pr
 	}
 });
 
+test('a background reconnect refreshes workspace and account data before connected observers', async (t) => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { origin: 'https://shell.example.test' }, addEventListener: () => {} },
+	});
+	t.after(() => {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	});
+	t.mock.method(RocketRideClient.prototype, 'attach', async () => {});
+	t.mock.method(RocketRideClient.prototype, 'isAttached', () => true);
+	t.mock.method(RocketRideClient.prototype, 'isAuthenticated', () => true);
+
+	const { manager, emitted } = createTestManager();
+	manager.initialize();
+	assert.ok(hasConnectedCallback(manager.client));
+	manager.lifecycleOwner = {
+		key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: false,
+	};
+	manager.accountInfo = {
+		...authenticatedResult,
+		organization: { id: 'old', name: 'Old', permissions: [], teams: [] },
+	};
+	const updated: ConnectResult = {
+		...authenticatedResult,
+		organization: { id: 'current', name: 'Current', permissions: [], teams: [] },
+	};
+	const account = t.mock.method(manager.client, 'getAccountInfo', () => updated);
+	manager.refreshServices = async () => {};
+	const billingEvents = () => emitted.filter(({ event }) => event === 'shell:accountUpdate' || event === 'shell:connected');
+
+	await manager.client._callerOnConnected();
+
+	assert.equal(manager.accountInfo, updated);
+	assert.deepEqual(billingEvents(), [
+		{ event: 'shell:accountUpdate', payload: updated },
+		{ event: 'shell:connected', payload: {} },
+	]);
+
+	const refreshed = { ...updated, displayName: 'Refreshed account' };
+	account.mock.mockImplementation(() => refreshed);
+	manager.lifecycleOwner.connectedPublished = false;
+	emitted.length = 0;
+	await manager.client._callerOnConnected();
+
+	assert.equal(manager.accountInfo, refreshed);
+	assert.deepEqual(billingEvents(), [
+		{ event: 'shell:accountUpdate', payload: refreshed },
+		{ event: 'shell:connected', payload: {} },
+	]);
+});
+
+test('an inbound account update refreshes the manager identity before notifying listeners', async (t) => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { origin: 'https://shell.example.test' }, addEventListener: () => {} },
+	});
+	t.after(() => {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	});
+	t.mock.method(RocketRideClient.prototype, 'attach', async () => {});
+
+	const { manager } = createTestManager();
+	manager.initialize();
+	assert.ok(manager.client instanceof RocketRideClient);
+	manager.lifecycleOwner = {
+		key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: false,
+	};
+	manager.accountInfo = authenticatedResult;
+	const updated = { ...authenticatedResult, displayName: 'Updated Account' };
+	const identitiesSeenByListeners: Array<ConnectResult | undefined> = [];
+	manager.emit = (event) => {
+		if (event === 'shell:accountUpdate') identitiesSeenByListeners.push(manager.accountInfo);
+	};
+
+	await manager.client.onEvent({ type: 'event', seq: 1, event: 'apaext_account', body: updated });
+	manager.connectionGeneration++;
+	await manager.client.onEvent({ type: 'event', seq: 2, event: 'apaext_account', body: { ...authenticatedResult } });
+
+	assert.deepEqual(identitiesSeenByListeners, [updated]);
+	assert.equal(manager.accountInfo, updated);
+});
+
 test('onConnectError latches a session-expired auth failure when a background re-login is rejected', async () => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;

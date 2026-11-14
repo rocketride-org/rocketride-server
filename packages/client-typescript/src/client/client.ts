@@ -363,6 +363,7 @@ interface LoginLifecycleOperation {
 	reject: (error: unknown) => void;
 	transport?: TransportWebSocket;
 	authRequestSent: boolean;
+	accountUpdate?: ConnectResult;
 	cancellationReason?: LoginAttemptCancellationReason;
 	unexpectedDisconnectError?: ConnectionException;
 	outcome?: { result: ConnectResult } | { error: unknown };
@@ -867,17 +868,19 @@ export class RocketRideClient extends DAPClient {
 			await this._resubscribeAllMonitors(operation);
 			this._assertCurrentOperation(operation);
 
+			// A newer account push can arrive while monitor restoration is waiting.
+			const account = operation.accountUpdate ?? result;
 			this._uri = operation.endpoint;
-			this._connectResult = result;
+			this._connectResult = account;
 			this._authenticated = true;
 			this._desiredState = 'authenticated';
-			this._apikey = result.userToken || operation.credentialKey;
+			this._apikey = account.userToken || operation.credentialKey;
 			operation.accepted = true;
 			if (operation.priority === 'foreground') this._currentReconnectDelay = 250;
 
 			await this._publishConnected(operation);
 			this._assertCurrentOperation(operation);
-			this._resolveLifecycleOperation(operation, result);
+			this._resolveLifecycleOperation(operation, account);
 		} catch (caught) {
 			const error = this._operationTerminalError(operation, caught);
 			if (this._isCurrentOperation(operation) && !operation.cancellationReason) {
@@ -2004,9 +2007,15 @@ export class RocketRideClient extends DAPClient {
 
 		// Update cached ConnectResult when the server pushes a full account refresh
 		if (eventType === 'apaext_account') {
-			this._connectResult = eventBody as unknown as ConnectResult;
-			if (this._connectResult?.userToken) {
-				this._apikey = this._connectResult.userToken;
+			const account = eventBody as unknown as ConnectResult;
+			const operation = this._lifecycleOperation;
+			if (operation?.authRequestSent && !operation.accepted && this._isCurrentOperation(operation) &&
+				typeof account.userId === 'string' && typeof account.userToken === 'string') {
+				operation.accountUpdate = account;
+			}
+			this._connectResult = account;
+			if (account.userToken) {
+				this._apikey = account.userToken;
 			}
 		}
 

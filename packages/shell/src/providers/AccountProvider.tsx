@@ -38,11 +38,12 @@
 
 import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
+import { parsePlanChangeOutcome, parsePlanChangePreview } from '../modules/billing/components/planChange';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
-import { ConnectionManager } from '../connection/connection';
+import { canManageOrganizationBilling, ConnectionManager, getAccountTransition } from '../connection/connection';
 import { useOptionalWorkspace } from '../components/workspace/WorkspaceContext';
 
 // =============================================================================
@@ -113,15 +114,20 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	const authUser = ctxUser ?? mirrorUser;
 
 	// ── Billing data ────────────────────────────────────────────────────────
-	const [subscriptions, setSubscriptions] = useState<BillingDetail[]>([]);
-	const [billingLoading, setBillingLoading] = useState(true);
-	const [billingError, setBillingError] = useState<string | null>(null);
-	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>((authUser as { credits?: CreditBalance })?.credits ?? null);
+	type BillingScope = { client: NonNullable<typeof client>; orgId: string; userId: string };
+	const [subscriptionSnapshot, setSubscriptionSnapshot] = useState<(BillingScope & {
+		rows: BillingDetail[];
+		error: string | null;
+	}) | null>(null);
+	const [dashboardSnapshot, setDashboardSnapshot] = useState<(BillingScope & {
+		balance: CreditBalance | null;
+		transactions: TransactionsResult | null;
+		usageByUser: UsageRollup[];
+		usageByTeam: UsageRollup[];
+	}) | null>(null);
+	const billingLoadSequence = useRef(0);
+	const subscriptionLoadSequence = useRef(0);
 	const [allPlans, setAllPlans] = useState<any[]>([]);
-	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
-	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
-	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
-	const [dashboardLoading, setDashboardLoading] = useState(false);
 
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
@@ -146,6 +152,11 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	/** Derives the orgId from the auth user's organization. */
 	const orgId = authUser?.organization?.id ?? '';
+	const userId = authUser?.userId ?? '';
+	const subscriptions = subscriptionSnapshot?.client === client && subscriptionSnapshot.orgId === orgId &&
+		subscriptionSnapshot.userId === userId ? subscriptionSnapshot : null;
+	const dashboard = dashboardSnapshot?.client === client && dashboardSnapshot.orgId === orgId &&
+		dashboardSnapshot.userId === userId ? dashboardSnapshot : null;
 
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -237,47 +248,54 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	// ── Load billing data ───────────────────────────────────────────────────
 
+	const isCurrentBillingScope = useCallback(() => {
+		const manager = ConnectionManager.getInstance();
+		const account = manager.getAccountInfo();
+		const transition = getAccountTransition(manager);
+		return !transition.changingWorkspace && !transition.disconnecting &&
+			manager.getClient() === client && account?.organization?.id === orgId && account.userId === userId;
+	}, [client, orgId, userId]);
+
 	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
-		if (!client || !orgId) {
-			setBillingLoading(false);
-			return;
-		}
-		setBillingError(null);
-		try {
-			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
-				client.billing.getDetails(orgId).catch((err: any) => {
-					setBillingError(err.message ?? 'Failed to load subscriptions');
-					return [] as BillingDetail[];
-				}),
-				client.billing.getCreditBalance(orgId).catch(() => null),
-				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => [] as any[]),
-				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
-				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
-				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
-			]);
-			setSubscriptions(subs);
-			setCreditBalance(balance);
-			setAllPlans(plans);
-			setTransactions(tx);
-			setUsageByUser(byUser);
-			setUsageByTeam(byTeam);
-		} finally {
-			setBillingLoading(false);
-			setDashboardLoading(false);
-		}
-	}, [client, orgId]);
+		if (!client || !orgId || !isCurrentBillingScope()) return;
+		const sequence = ++billingLoadSequence.current;
+		const subscriptionSequence = ++subscriptionLoadSequence.current;
+		const isCurrentLoad = () => sequence === billingLoadSequence.current && isCurrentBillingScope();
+		const publishSubscriptions = (rows: BillingDetail[], error: string | null) => {
+			if (subscriptionSequence === subscriptionLoadSequence.current && isCurrentLoad()) {
+				setSubscriptionSnapshot({ client, orgId, userId, rows, error });
+			}
+		};
+		const [, , balance, transactions, usageByUser, usageByTeam] = await Promise.all([
+			client.billing.getDetails(orgId).then(
+				(rows) => publishSubscriptions(rows, null),
+				(error: unknown) => publishSubscriptions([], errMsg(error) || 'Failed to load subscriptions'),
+			),
+			client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []).then((plans) => {
+				if (isCurrentLoad()) setAllPlans(plans);
+			}),
+			client.billing.getCreditBalance(orgId).catch(() => null),
+			client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
+			client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
+			client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
+		]);
+		if (!isCurrentLoad()) return;
+		setDashboardSnapshot({ client, orgId, userId, balance, transactions, usageByUser, usageByTeam });
+	}, [client, orgId, userId, isCurrentBillingScope]);
 
 	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(
 		async (page: number) => {
 			if (!client || !orgId) return;
 			const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
-			if (tx) {
-				setTransactions(tx);
+			if (tx && isCurrentBillingScope()) {
+				setDashboardSnapshot((current) => current?.client === client && current.orgId === orgId && current.userId === userId
+					? { ...current, transactions: tx }
+					: current);
 			}
 		},
-		[client, orgId]
+		[client, orgId, userId, isCurrentBillingScope]
 	);
 
 	/**
@@ -327,15 +345,70 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		[client, orgId, loadBilling]
 	);
 
-	/** Upgrade or downgrade an existing subscription to a new plan. */
-	const handleUpgradeSubscription = useCallback(
-		async (appId: string, newPriceId: string) => {
-			if (!client || !orgId) throw new Error('Not connected');
-			await client.billing.upgradeSubscription(orgId, appId, newPriceId);
-			// Re-fetch billing data to reflect the updated subscription
-			loadBilling();
+	const requirePlanChangeClient = useCallback(() => {
+		const manager = ConnectionManager.getInstance();
+		if (!client || !orgId || !manager.isConnected()) throw new Error('Not connected');
+		if (!isCurrentBillingScope()) {
+			throw new Error('The active organization or connection changed. Reopen the plan change.');
+		}
+		if (!canManageOrganizationBilling(manager.getAccountInfo())) {
+			throw new Error('Workspace admin permission is required to change plans.');
+		}
+		return client;
+	}, [client, orgId, isCurrentBillingScope]);
+
+	const handlePreviewSubscriptionChange = useCallback(
+		async (appId: string, newPriceId: string, expectedPriceId: string) => {
+			const billingClient = requirePlanChangeClient();
+			try {
+				const preview = await billingClient.call<unknown>('rrext_account_billing', {
+					subcommand: 'preview_upgrade', orgId, appId, newPriceId, expectedPriceId,
+				});
+				requirePlanChangeClient();
+				return parsePlanChangePreview(preview);
+			} catch (error) {
+				requirePlanChangeClient();
+				// Older servers can still apply plan changes. Only the explicit
+				// unsupported-command response can fall back to a neutral dialog.
+				if (error instanceof Error && error.message === "Unknown billing subcommand: 'preview_upgrade'") return null;
+				throw error;
+			}
 		},
-		[client, orgId, loadBilling]
+		[requirePlanChangeClient, orgId]
+	);
+
+	const handleUpgradeSubscription = useCallback(
+		async (appId: string, newPriceId: string, attemptId?: string, expectedPriceId?: string) => {
+			const manager = ConnectionManager.getInstance();
+			const transition = getAccountTransition(manager);
+			const response = await requirePlanChangeClient().call<unknown>('rrext_account_billing', {
+				subcommand: 'upgrade',
+				orgId,
+				appId,
+				newPriceId,
+				...(attemptId ? { attemptId } : {}),
+				...(expectedPriceId ? { expectedPriceId } : {}),
+			});
+			requirePlanChangeClient();
+			const result = parsePlanChangeOutcome(response);
+			if (result.status === 'requires_action') {
+				return {
+					...result,
+					assertPaymentScope: () => {
+						requirePlanChangeClient();
+						if (transition !== getAccountTransition(manager)) {
+							throw new Error('The billing connection changed. Try the plan change again.');
+						}
+					},
+				};
+			}
+			if (result.status === 'upgraded' || result.status === 'applied' || result.status === 'scheduled' ||
+				result.status === 'downgrade_scheduled' || result.status === 'unchanged') {
+				loadBilling();
+			}
+			return result;
+		},
+		[requirePlanChangeClient, orgId, loadBilling]
 	);
 
 	// ── Load data upfront on connect ─────────────────────────────────────────
@@ -367,7 +440,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		loadMembers();
 		loadTeams();
 		loadBilling();
-	}, [client, orgId, embeddedSection]);
+	}, [client, orgId, userId, embeddedSection]);
 
 	// ── Subscribe to billing events when billing tab is active ──────────────
 	useEffect(() => {
@@ -386,7 +459,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			client.removeMonitor({ token: '*' }, ['billing']).catch(() => {});
 			unsub();
 		};
-	}, [section, client]);
+	}, [section, client, loadBilling]);
 
 	// ── Reload current section on refresh signal ─────────────────────────────
 	useEffect(() => {
@@ -711,12 +784,21 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 */
 	const handleCancelSubscription = useCallback(
 		async (appId: string) => {
-			if (!client || !orgId) return;
-			await client.billing.cancelSubscription(orgId, appId);
-			const updated = await client.billing.getDetails(orgId);
-			setSubscriptions(updated);
+			if (!client || !orgId || !isCurrentBillingScope()) return;
+			let sequence: number | undefined;
+			try {
+				await client.billing.cancelSubscription(orgId, appId);
+				if (!isCurrentBillingScope()) return;
+				sequence = ++subscriptionLoadSequence.current;
+				const updated = await client.billing.getDetails(orgId);
+				if (sequence === subscriptionLoadSequence.current && isCurrentBillingScope()) {
+					setSubscriptionSnapshot({ client, orgId, userId, rows: updated, error: null });
+				}
+			} catch (error) {
+				if (isCurrentBillingScope() && (sequence === undefined || sequence === subscriptionLoadSequence.current)) throw error;
+			}
 		},
-		[client, orgId]
+		[client, orgId, userId, isCurrentBillingScope]
 	);
 
 	/** Opens the Stripe customer portal for payment method management.
@@ -743,23 +825,24 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				members={members}
 				teams={teams}
 				teamDetail={teamDetail}
-				subscriptions={subscriptions}
-				billingLoading={billingLoading}
-				billingError={billingError}
-				creditBalance={creditBalance}
+				subscriptions={subscriptions?.rows ?? []}
+				billingLoading={Boolean(client && orgId && !subscriptions)}
+				billingError={subscriptions?.error ?? null}
+				creditBalance={dashboard ? dashboard.balance : (authUser as { credits?: CreditBalance })?.credits ?? null}
 				apps={appManifest}
 				onCancelSubscription={handleCancelSubscription}
 				onOpenPortal={handleOpenPortal}
 				onSubscribe={onSubscribe}
-				transactions={transactions}
-				usageByUser={usageByUser}
-				usageByTeam={usageByTeam}
+				transactions={dashboard?.transactions ?? null}
+				usageByUser={dashboard?.usageByUser ?? []}
+				usageByTeam={dashboard?.usageByTeam ?? []}
 				activeTasks={[]}
 				topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
 				allPlans={allPlans}
 				onPurchaseTopup={handlePurchaseTopup}
-				onUpgradeSubscription={handleUpgradeSubscription}
-				dashboardLoading={dashboardLoading}
+				onUpgradeSubscription={subscriptions ? handleUpgradeSubscription : undefined}
+				onPreviewSubscriptionChange={subscriptions ? handlePreviewSubscriptionChange : undefined}
+				dashboardLoading={Boolean(client && orgId && !dashboard)}
 				onTransactionPage={handleTransactionPage}
 				fetchTransactions={fetchTransactions}
 				fetchTransactionDistinct={fetchTransactionDistinct}

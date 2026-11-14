@@ -174,6 +174,32 @@ function isConnectResult(body: unknown): body is ConnectResult {
 	);
 }
 
+type AccountTransition = Readonly<{ changingWorkspace: boolean; disconnecting: boolean }>;
+const idleAccountTransition: AccountTransition = { changingWorkspace: false, disconnecting: false };
+// Federated modules can load independent copies of this file and share one manager.
+const accountTransitionKey = Symbol.for('rocketride.connectionManager.accountTransition');
+
+/** Internal snapshot used to invalidate billing actions before event observers run. */
+export function getAccountTransition(manager: ConnectionManager): AccountTransition {
+	const transition: AccountTransition | undefined = Reflect.get(manager, accountTransitionKey);
+	return transition ?? idleAccountTransition;
+}
+
+function advanceAccountTransition(manager: ConnectionManager, change: Partial<AccountTransition> = {}): void {
+	Reflect.set(manager, accountTransitionKey, { ...getAccountTransition(manager), ...change });
+}
+
+/** Current account permission used by plan changes in the shared billing host. */
+export function canManageOrganizationBilling(account?: ConnectResult | null): boolean {
+	const permissions = account?.organization?.permissions;
+	return Array.isArray(permissions) && permissions.includes('org.admin');
+}
+
+function isSameAccountScope(previous: ConnectResult, next: ConnectResult): boolean {
+	return previous.userId === next.userId && previous.organization?.id === next.organization?.id &&
+		canManageOrganizationBilling(previous) === canManageOrganizationBilling(next);
+}
+
 function isVersionResponse(body: unknown): boolean {
 	// The reachability probe only proves THIS backend is up if the page origin
 	// answers with the server's own /version contract ({ status: 'OK', with a
@@ -260,6 +286,7 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	private constructor() {
+		Reflect.set(this, accountTransitionKey, idleAccountTransition);
 		this.installMirrorSubscriptions();
 	}
 
@@ -390,6 +417,7 @@ export class ConnectionManager implements IConnectionManager {
 				// duplicate handling downstream. The guard narrows the untyped
 				// push body to a ConnectResult without a cast.
 				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
+					this.cacheAccountInfo(message.body);
 					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
@@ -443,6 +471,11 @@ export class ConnectionManager implements IConnectionManager {
 			onConnected: async () => {
 				if (!this.hasCurrentLifecycleOwner()) return;
 				if (!this.client?.isAttached() || !this.client.isAuthenticated()) return;
+				const account = this.client.getAccountInfo();
+				if (this.accountInfo && isConnectResult(account) && this.accountInfo !== account) {
+					this.cacheAccountInfo(account);
+					this.emit('shell:accountUpdate', account);
+				}
 				this.publishConnected(this.lifecycleOwner!);
 			},
 
@@ -1147,7 +1180,7 @@ export class ConnectionManager implements IConnectionManager {
 		if (!operation) {
 			if (result.userToken) this.saveToken(result.userToken);
 			this.clearLatchedFailure();
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			this.emit('shell:login', { user: result });
 		}
 
@@ -1287,7 +1320,10 @@ export class ConnectionManager implements IConnectionManager {
 		const key = `${RocketRideClient.normalizeUri(this.serverUri)}\u0000${connectionCredentialKey(credential)}`;
 		if (this.connectionOperation?.key === key) return this.connectionOperation.promise;
 
-		if (this.lifecycleOwner) this.lifecycleOwner.cancellationReason = 'superseded';
+		if (this.lifecycleOwner) {
+			if (this.lifecycleOwner.key !== key) advanceAccountTransition(this, { disconnecting: true });
+			this.lifecycleOwner.cancellationReason = 'superseded';
+		}
 		const operation: ShellConnectionOperation = {
 			key,
 			generation: ++this.connectionGeneration,
@@ -1337,7 +1373,7 @@ export class ConnectionManager implements IConnectionManager {
 			this.assertCurrentOperation(operation);
 			this.updateConnectionStatus({ lastFailure: undefined });
 			this.assertCurrentOperation(operation);
-			this.accountInfo = result;
+			this.cacheAccountInfo(result);
 			// Identity established — this is the only signal that retires an
 			// auth latch (publishConnected deliberately no longer does).
 			this.clearLatchedFailure();
@@ -1390,6 +1426,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * Safe to call when already disconnected.
 	 */
 	public async disconnect(): Promise<void> {
+		advanceAccountTransition(this, { disconnecting: true });
 		this.invalidateLifecycle('detached');
 		const generation = this.connectionGeneration;
 		const manager = this.manager;
@@ -1619,9 +1656,14 @@ export class ConnectionManager implements IConnectionManager {
 		return { ...this.connectionStatus };
 	}
 
-	/** Returns the cached ConnectResult from the most recent successful connect. */
+	/** Returns the latest cached ConnectResult for this connection. */
 	public getAccountInfo(): ConnectResult | undefined {
 		return this.accountInfo ?? this.client?.getAccountInfo() as ConnectResult | undefined;
+	}
+
+	private cacheAccountInfo(result: ConnectResult): void {
+		if (this.accountInfo && !isSameAccountScope(this.accountInfo, result)) advanceAccountTransition(this);
+		this.accountInfo = result;
 	}
 
 	/** Returns the resolved server HTTP URL. */
@@ -1904,6 +1946,15 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param payload - The payload matching the event's type.
 	 */
 	public emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void {
+		if (event === 'shell:workspaceWillChange') advanceAccountTransition(this, { changingWorkspace: true });
+		else if (event === 'shell:workspaceChanged') advanceAccountTransition(this, { changingWorkspace: false });
+		else if (event === 'shell:disconnected' || event === 'shell:logout') advanceAccountTransition(this, { disconnecting: true });
+		else if (event === 'shell:connected' && getAccountTransition(this).disconnecting) {
+			advanceAccountTransition(this, { disconnecting: false });
+		} else if (event === 'shell:orgChanged') {
+			advanceAccountTransition(this);
+		}
+
 		// Push into debug log
 		this.logDebug(event as string, payload);
 
@@ -2245,9 +2296,10 @@ export class ConnectionManager implements IConnectionManager {
 		});
 		this.subscribe('shell:account', (snapshot) => {
 			if (!snapshot) return;
-			this.accountInfo = snapshot as ConnectResult;
+			const account = snapshot as ConnectResult;
+			this.cacheAccountInfo(account);
 			this.seedMirrorClient();
-			this.emit('shell:accountUpdate', this.accountInfo);
+			this.emit('shell:accountUpdate', account);
 		});
 		this.subscribe('shell:services', (snapshot) => {
 			const services = snapshot as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | undefined;
