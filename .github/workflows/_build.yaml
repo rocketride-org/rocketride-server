@@ -326,6 +326,12 @@ jobs:
 
       - name: Test
         if: inputs.codeql == false && inputs.test
+        # A hung step fails here, before the job's 90-minute limit cancels the job,
+        # so the log and artifact steps below still run. A Windows runner whose tests
+        # hang can drop off GitHub about 48 minutes into this step, before any later
+        # step starts, so Windows stops at 30 minutes (its Test step ends within 20).
+        # Ubuntu and macOS take up to about 28 minutes and keep 45.
+        timeout-minutes: ${{ matrix.platform == 'windows' && 30 || 45 }}
         # Integration tests boot a local server on :5565 and connect a test
         # client. Both sides need the same shared secret to authenticate;
         # without ROCKETRIDE_APIKEY the server raises AuthenticationException
@@ -351,6 +357,12 @@ jobs:
           # test time. On Windows a hardlink over an already-loaded native .pyd
           # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.
           UV_LINK_MODE: copy
+          # Every task child process of the test servers writes periodic Python
+          # stack dumps here (scripts/lib/stackdumps.js), uploaded below on every finished run.
+          # One dump a minute keeps the hook light; on Windows scripts/lib/stackwatch.js
+          # also writes native_<pid>.txt for a child frozen in startup.
+          ROCKETRIDE_TEST_STACK_DUMPS: ${{ github.workspace }}/dist/server/test-logs/stack-dumps
+          ROCKETRIDE_TEST_STACK_DUMPS_SECS: '60'
         run: ${{ matrix.builder_cmd }} ${{ inputs.test_targets }} --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
 
       # rocketride_graph applies different Cypher rules on AGE 1.5.0 and 1.6.0,
@@ -378,6 +390,18 @@ jobs:
             echo "::$stop::"
             echo "::endgroup::"
           done
+
+      # The same logs and the stack dumps of the task child processes
+      # (test-logs/stack-dumps/stacks_<pid>.txt), for a child that stalls.
+      # A child can stall while every test still passes, so passing runs upload too.
+      - name: Upload test server logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-server-logs-${{ matrix.platform }}-${{ github.run_attempt }}
+          retention-days: 3
+          path: ${{ github.workspace }}/dist/server/test-logs/
+          if-no-files-found: ignore
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
