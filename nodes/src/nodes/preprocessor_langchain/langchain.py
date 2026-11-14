@@ -35,10 +35,8 @@ import langchain_text_splitters
 from langchain_text_splitters import TextSplitter
 from rocketlib import monitorStatus
 
-from ai.common.preprocessor import PreProcessorBase
 
-
-class PreProcessor(PreProcessorBase):
+class PreProcessor:
     """
     The preprocessor class cleans and splits text.
     """
@@ -255,7 +253,6 @@ class PreProcessor(PreProcessorBase):
             bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, config, bag)
 
         # The measuring mode decides which size setting applies
         self._mode = config['mode']

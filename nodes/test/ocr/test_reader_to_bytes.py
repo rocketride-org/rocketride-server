@@ -36,7 +36,6 @@ _STUB_NAMES = (
     'ai.common',
     'ai.common.config',
     'ai.common.models',
-    'ai.common.reader',
     'numpy',
     'PIL',
     'PIL.Image',
@@ -49,13 +48,6 @@ PNG_2X2 = (
     b'\xc0\xc4\xc0\xc0\xc0\xc0\xc0\x00\x00\r\x1d\x01\x03j\xc2\x9b\xe9\x00\x00\x00'
     b'\x00IEND\xaeB`\x82'
 )
-
-
-class _ReaderBase:
-    """Stand-in for ``ai.common.reader.ReaderBase`` — only the name needs to exist."""
-
-    def __init__(self, *_a: object, **_kw: object) -> None:
-        pass
 
 
 class _Config:
@@ -104,7 +96,6 @@ def _install_min_stubs() -> None:
     sys.modules['ai.common'] = ai_common
 
     _mk('ai.common.config', Config=_Config)
-    _mk('ai.common.reader', ReaderBase=_ReaderBase)
     _mk('ai.common.models', EasyOCR=_Engine, DocTR=_Engine, Surya=_Engine, TrOCR=_Engine)
     _mk('numpy', ndarray=_NDArray)
 

@@ -24,8 +24,8 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
+from typing import Any, Optional
 from rocketlib import IGlobalBase
-from ai.common.embedding import EmbeddingBase
 
 from .OpenAIEmbeddingWrapper import OpenAIEmbeddingWrapper
 
@@ -34,7 +34,7 @@ from .OpenAIEmbeddingWrapper import OpenAIEmbeddingWrapper
 # Define the IGlobal C++ will call
 # ----------------------------------
 class IGlobal(IGlobalBase):
-    embedding: EmbeddingBase | None = None
+    embedding: Optional[Any] = None
 
     # ----------------------------------
     # Common methods

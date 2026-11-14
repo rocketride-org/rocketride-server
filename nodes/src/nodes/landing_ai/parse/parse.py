@@ -24,19 +24,17 @@
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
-from ai.common.reader import ReaderBase
 from ai.common.utils import guess_filename
 from rocketlib import debug, warning, error
 
 from ..landing_ai_base import build_client, resolve_api_key
 
 
-class Parser(ReaderBase):
+class Parser:
     """Wraps the ADE ``parse`` API: document bytes -> (Markdown text, tables)."""
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """Build the parser from the node config (api_key, model, region)."""
-        super().__init__(provider, connConfig, bag)
         self.bag = bag
 
         # The resolved node config: model and region are schema enums with defaults
@@ -51,7 +49,7 @@ class Parser(ReaderBase):
         )
 
     def read(self, file_data: bytes) -> str:
-        """Return only the Markdown text (ReaderBase hook)."""
+        """Return only the Markdown text (the reader hook the node calls)."""
         text, _tables = self.parse(file_data)
         return text
 
