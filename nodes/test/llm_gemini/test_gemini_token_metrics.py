@@ -114,12 +114,14 @@ def _make_chat(response: _Response):
     """A Chat whose client returns the given response, with no __init__ plumbing."""
 
     class _Models:
-        def generate_content(self, model: str, contents: str) -> _Response:
+        def generate_content(self, model: str, contents: str, config: Any = None) -> _Response:
+            """Answer every call with the given response."""
             return response
 
     chat = _node.Chat.__new__(_node.Chat)
     chat._client = type('_Client', (), {'models': _Models()})()
     chat._model = _MODEL
+    chat._modelOutputTokens = 8192
     return chat
 
 
@@ -240,7 +242,8 @@ def test_a_text_free_response_is_asked_once_not_retried():
     blocked = _Response(_Usage(prompt=30, candidates=0), text=None, candidates=[_Candidate(finish_reason='SAFETY')])
 
     class _Models:
-        def generate_content(self, model: str, contents: str) -> _Response:
+        def generate_content(self, model: str, contents: str, config: Any = None) -> _Response:
+            """Count the call and answer with the blocked response."""
             calls.append(contents)
             return blocked
 
