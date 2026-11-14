@@ -53,7 +53,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
-from .. import services_catalog
+from .. import node_store, services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
@@ -174,7 +174,7 @@ def _service_profile_names(provider: str) -> frozenset:
         unavailable, which leaves the caller reporting the key rather than hiding it.
     """
     try:
-        service = getServiceDefinition(provider)
+        service = getServiceDefinition(provider) or node_store.served(provider)
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()
@@ -377,7 +377,9 @@ class MiscCommands(DAPConn):
             if 'component' in pipeline and 'components' not in pipeline:
                 # This payload is the validator's root, where it writes its own
                 # errors and warnings, so ones the caller sent are not passed in.
-                data = validatePipeline({k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS})
+                data = validatePipeline(
+                    {k: v for k, v in pipeline.items() if k not in _DIAGNOSTICS}, node_store.custom()
+                )
                 # When anything was substituted, the reply is rebuilt from the
                 # caller's own input so it returns the config as submitted: the
                 # echoed component comes from a second pass over it (the
@@ -389,7 +391,7 @@ class MiscCommands(DAPConn):
                     echo = {'version': submitted.get('version', 1), 'components': [original]}
                     echoed = original
                     if _can_validate_echo(echo):
-                        echoed = validatePipeline({'pipeline': echo})['pipeline']['components'][0]
+                        echoed = validatePipeline({'pipeline': echo}, node_store.custom())['pipeline']['components'][0]
                     ids = _submitted_ids([pipeline['component']], [original])
                     root = {k: v for k, v in submitted.items() if k not in _DIAGNOSTICS}
                     data = {**root, 'component': echoed, **_restored_diagnostics(data, substituted, ids)}
@@ -412,7 +414,7 @@ class MiscCommands(DAPConn):
 
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
-                data = validatePipeline({'pipeline': inner})
+                data = validatePipeline({'pipeline': inner}, node_store.custom())
                 # Rebuilt from the caller's own input, as above
                 if substituted:
                     echo = {**submitted, 'version': submitted.get('version', 1)}
@@ -421,7 +423,11 @@ class MiscCommands(DAPConn):
                         echo_source = resolve_implied_source(submitted)
                     if echo_source:
                         echo['source'] = echo_source
-                    echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
+                    echoed = (
+                        validatePipeline({'pipeline': echo}, node_store.custom())['pipeline']
+                        if _can_validate_echo(echo)
+                        else echo
+                    )
                     ids = _submitted_ids(pipeline.get('components'), submitted.get('components'))
                     data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
 
@@ -484,7 +490,7 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config)
+            resolved = Config.getNodeConfig(provider, config, node_store.served(provider))
             profile = config.get('profile')
 
             # Report the keys the resolver discarded rather than leaving the author
