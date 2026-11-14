@@ -992,10 +992,11 @@ def _fake_db_account(monkeypatch, deny=None, owner=None):
     import ai.account
     from ai.account.base import DbDecision
 
-    calls = {'authorize': [], 'resolve': []}
+    calls = {'authorize': [], 'credentials': [], 'resolve': []}
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         calls['authorize'].append((identity, target))
+        calls['credentials'].append(credential)
         reason = deny(target) if deny else None
         if reason:
             return DbDecision(False, reason, True)
@@ -1153,7 +1154,7 @@ async def test_authorize_raising_fails_task_start_and_issues_no_dsn(monkeypatch)
 
     calls = _fake_db_account(monkeypatch)
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         raise RuntimeError('membership lookup failed')
 
     monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
@@ -1768,7 +1769,7 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
     task._reset_status = lambda: None
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.start_task = start
@@ -1946,7 +1947,7 @@ async def test_a_second_restart_while_one_runs_is_refused():
 
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.stop_task = stop

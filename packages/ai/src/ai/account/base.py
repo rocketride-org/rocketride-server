@@ -453,7 +453,9 @@ class AccountBase(ABC):
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
 
-    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
+    async def authorize_db_target(
+        self, identity: dict, target: dict | None = None, *, credential: str | None = None
+    ) -> DbDecision:
         """
         Decide whether a run (or caller) may receive a cloud database DSN.
 
@@ -469,6 +471,15 @@ class AccountBase(ABC):
                 public_endpoint, path, task_id}``. Unused here.
             target: ``{scope, team_id, user_id}``, or None for the org
                 database.
+            credential: The ``AccountInfo.auth`` of the connection that started
+                or restarted the run: the one that supplied the pipeline, so a
+                restart carries the restarter's, not the original starter's.
+                ``''`` is the trusted in-process deploy dispatch, which holds
+                none. ``None`` means the engine had no connection identity to
+                read (or a caller that predates this argument). An
+                implementation may use it only to look up what that credential
+                is allowed to reach, per call. It is never stored, logged, or
+                added to ``identity``. Unused here.
 
         Returns:
             DbDecision(allowed, reason, audit, owner_id). A denial is falsy;

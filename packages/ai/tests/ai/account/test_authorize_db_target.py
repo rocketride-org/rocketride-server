@@ -66,3 +66,12 @@ def test_an_allow_names_the_database_it_approved():
     decision = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'org'}))
     assert (decision.allowed, decision.owner_id) == (True, '')
     assert asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'team', 'team_id': 't1'})).owner_id == ''
+
+
+def test_the_credential_is_accepted_and_changes_nothing():
+    # The engine passes the presenting connection's credential; the single-tenant
+    # default has nothing to narrow, so every value, None included, decides alike.
+    for credential in (None, '', 'rr_session', 'rr_scoped'):
+        assert asyncio.run(_Minimal().authorize_db_target(IDENTITY, credential=credential)).allowed
+        refused = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'team'}, credential=credential))
+        assert (refused.allowed, refused.reason) == (False, 'scope_needs_rocketride_cloud')
