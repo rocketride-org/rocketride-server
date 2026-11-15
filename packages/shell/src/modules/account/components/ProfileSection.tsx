@@ -13,8 +13,9 @@
  *   - the WORKSPACE card, whose picker is the section's MASTER CONTROL:
  *     switching commits immediately (setDefaultOrg → org-changed push → the
  *     whole product rescopes; no staged state), and everything beneath it —
- *     your dev team, the people, the teams — belongs to the selected
- *     workspace by construction,
+ *     your team order (B39: drag to reorder, row one is your home team),
+ *     the people, the teams — belongs to the selected workspace by
+ *     construction,
  *   - "Manage workspaces…" opens the standard right record-drawer: per-row
  *     Rename (admins, the old Organization tab), plus Leave / Delete / New
  *     workspace — each action renders only when its callback prop is wired
@@ -32,7 +33,7 @@ import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import type { ConnectResult, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from '../types';
-import { ProfilePanel } from './ProfilePanel';
+import { ProfilePanel, TeamOrderCard } from './ProfilePanel';
 import { MembersPanel } from './MembersPanel';
 import { TeamsPanel } from './TeamsPanel';
 import { Badge, Avatar } from './shared';
@@ -45,7 +46,6 @@ const styles = {
 	stack: { display: 'flex', flexDirection: 'column', gap: 16 } as CSSProperties,
 	headRow: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1 } as CSSProperties,
 	hint: { fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5, margin: '0 0 12px' } as CSSProperties,
-	fieldLabel: { ...commonStyles.labelUppercase, marginBottom: 6, display: 'block' } as CSSProperties,
 	subStack: { display: 'flex', flexDirection: 'column', gap: 14, padding: '0 16px 16px' } as CSSProperties,
 	teamNote: { fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5, padding: '2px 2px 0' } as CSSProperties,
 	drawerRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
@@ -82,7 +82,8 @@ export interface IProfileSectionProps {
 	onActiveTeamIdChange: (id: string | null) => void;
 	onLoadTeamDetail: (teamId: string) => void;
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-	onSetDevTeam: (teamId: string) => Promise<void>;
+	/** Persists the user's team order in the active workspace (home team first). */
+	onSetTeamOrder: (order: string[]) => Promise<void>;
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/** Renames ANY workspace the user administers (drawer per-row rename). */
 	onRenameWorkspace: (orgId: string, name: string) => Promise<void>;
@@ -107,7 +108,7 @@ export interface IProfileSectionProps {
 
 /** The invite callback's shape (kept structural — matches MembersPanel). */
 type IParamsOf<T extends 'invite'> = T extends 'invite'
-	? (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => Promise<void>
+	? (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }>; devTeamId?: string }) => Promise<void>
 	: never;
 
 // =============================================================================
@@ -288,7 +289,7 @@ const ManageWorkspacesDrawer: React.FC<{
  * The collapsed Profile pane: identity + the workspace master card.
  */
 export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
-	const { profile, authUser, members, teams, teamDetail, activeTeamId, isOrgAdmin, isActiveTeamAdmin, onActiveTeamIdChange, onLoadTeamDetail, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember } = props;
+	const { profile, authUser, members, teams, teamDetail, activeTeamId, isOrgAdmin, isActiveTeamAdmin, onActiveTeamIdChange, onLoadTeamDetail, onSaveProfile, onSetTeamOrder, onSetDefaultOrg, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember } = props;
 
 	const [manageOpen, setManageOpen] = useState(false);
 
@@ -297,16 +298,14 @@ export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 	const active = useMemo(() => memberships.find((o) => o.id === defaultOrgId) ?? org, [memberships, defaultOrgId, org]);
 	const activeTeams = active?.teams ?? [];
-	// A stored devTeam can name a team from ANOTHER workspace after a switch;
-	// treating it as unset keeps the placeholder visible so the first team
-	// stays selectable (a foreign id matches no option and fires no onChange).
-	const rawDevTeamId = profile?.devTeam || authUser?.devTeam || '';
-	const devTeamId = activeTeams.some((t) => t.id === rawDevTeamId) ? rawDevTeamId : '';
+	// The member's team order in the active workspace (the server pushes it
+	// beside `organization.teams`, which it already lists in that order).
+	const teamOrder = profile?.teamOrder ?? authUser?.teamOrder ?? [];
 
 	return (
 		<section style={styles.stack}>
 			{/* ── Identity (same card + edit flow as before, memberships hidden) ── */}
-			<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={(id) => void onSetDevTeam(id)} onSetDefaultOrg={(id) => void onSetDefaultOrg(id)} identityOnly />
+			<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetTeamOrder={onSetTeamOrder} onSetDefaultOrg={(id) => void onSetDefaultOrg(id)} identityOnly />
 
 			{/* ── THE workspace card — the picker is the section's master control ── */}
 			<Card
@@ -338,26 +337,13 @@ export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
 					<p style={styles.hint}>
 						You belong to {memberships.length} workspace{memberships.length === 1 ? '' : 's'}. Everything below — and everything in the product: pipelines, apps, billing — belongs to the one selected here. Switching rescopes it all and is remembered for your next sign-in.
 					</p>
-					<span style={styles.fieldLabel}>Your development team</span>
-					<select
-						style={{ ...commonStyles.inputField, width: 'auto', minWidth: 210 }}
-						aria-label="Development team"
-						value={devTeamId}
-						onChange={(e) => { if (e.target.value) void onSetDevTeam(e.target.value); }}
-					>
-						{!devTeamId && <option value="">Select a team…</option>}
-						{activeTeams.map((t) => (
-							<option key={t.id} value={t.id}>{t.name}</option>
-						))}
-					</select>
-					<p style={{ ...styles.hint, margin: '6px 0 0' }}>
-						New pipelines, dev runs, and app previews are shared with this team. Deploying to other teams is an explicit step in the Pipelines tool.
-					</p>
 				</div>
 
-				{/* People + Teams live INSIDE the card the picker heads — switching
-				    workspaces can never show another org's people by surprise. */}
+				{/* Team order, People and Teams live INSIDE the card the picker
+				    heads — switching workspaces can never show another org's
+				    people (or order) by surprise. */}
 				<div style={styles.subStack}>
+					{activeTeams.length > 0 && <TeamOrderCard teams={activeTeams} order={teamOrder} onSetTeamOrder={onSetTeamOrder} />}
 					<MembersPanel members={members} teams={teams} profile={profile} isOrgAdmin={isOrgAdmin} onInviteMember={onInviteMember} onUpdateMemberRole={onUpdateMemberRole} onRemoveMember={onRemoveMember} onResendInvite={onResendInvite} />
 					<TeamsPanel teams={teams} teamDetail={teamDetail} activeTeamId={activeTeamId} onActiveTeamIdChange={onActiveTeamIdChange} onLoadTeamDetail={onLoadTeamDetail} members={members} profile={profile} onCreateTeam={onCreateTeam} onDeleteTeam={onDeleteTeam} onAddTeamMember={onAddTeamMember} onEditTeamMemberPerms={onEditTeamMemberPerms} onRemoveTeamMember={onRemoveTeamMember} isOrgAdmin={isOrgAdmin} isActiveTeamAdmin={isActiveTeamAdmin} />
 					<div style={styles.teamNote}>

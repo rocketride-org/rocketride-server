@@ -298,8 +298,8 @@ export interface MembersPanelProps {
 	profile: ConnectResult | null;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
-	/** Sends an invitation to a new organization member. */
-	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => Promise<void>;
+	/** Sends an invitation to a new organization member (`devTeamId` = their home team, B39). */
+	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }>; devTeamId?: string }) => Promise<void>;
 	/** Updates an organization member's role. */
 	onUpdateMemberRole: (userId: string, role: string) => Promise<void>;
 	/** Removes an organization member. */
@@ -415,6 +415,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	const [formRole, setFormRole] = useState('member');
 	// Team access assignments: teamId -> selected permission keys.
 	const [formTeams, setFormTeams] = useState<TeamAssignments>({});
+	// The invitee's HOME team (first of their team order, B39), or '' to let
+	// the server choose (one eligible team, else the org's development team).
+	const [formHomeTeamId, setFormHomeTeamId] = useState('');
 	// Snapshot of the assignments seeded on open (the org's default development
 	// team pre-checked); the dirty flag compares against it, not against {}.
 	const [initialFormTeams, setInitialFormTeams] = useState<TeamAssignments>({});
@@ -460,7 +463,18 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	// default (team access compares against the seeded snapshot, so the
 	// pre-checked default development team alone does not dirty the form).
 	// Drives the materializing [Send Invite] and the discard guard.
-	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || !sameAssignments(formTeams, initialFormTeams));
+	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || formHomeTeamId !== '' || !sameAssignments(formTeams, initialFormTeams));
+
+	// Teams eligible to be the invitee's HOME team — the server's rule
+	// (set_team_order): a checked team granting task.control, or every team
+	// of the org when the invitee is an admin (implicit full permissions).
+	const homeTeamOptions = useMemo(() => (formRole === 'admin' ? teams : teams.filter((t) => (formTeams[t.id] ?? []).includes('task.control'))), [formRole, teams, formTeams]);
+
+	// A staged home team that lost its eligibility (unchecked, task.control
+	// removed, role changed) falls back to the server's choice.
+	useEffect(() => {
+		if (formHomeTeamId && !homeTeamOptions.some((t) => t.id === formHomeTeamId)) setFormHomeTeamId('');
+	}, [formHomeTeamId, homeTeamOptions]);
 
 	// Teams and the profile load independently, so an admin can open the
 	// invite panel before the team list (or the default dev team id) arrives
@@ -575,6 +589,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		setFormGivenName('');
 		setFormFamilyName('');
 		setFormRole('member');
+		setFormHomeTeamId('');
 		// Pre-check the org's default development team (if any) with default
 		// perms and snapshot it so the untouched form is not dirty.
 		const seeded = seedTeamAssignments(teams, defaultDevTeamId);
@@ -650,6 +665,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 				familyName: formFamilyName.trim(),
 				role: formRole,
 				teamAssignments,
+				...(formHomeTeamId ? { devTeamId: formHomeTeamId } : {}),
 			});
 			closePanel();
 		} catch (e) {
@@ -958,6 +974,24 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 							    it has one (pre-selected, still uncheckable), else what Run
 							    access means. */}
 							<div style={styles.teamHint}>{defaultDevTeam ? `${defaultDevTeam.name} is this organization's development team and is pre-selected. Uncheck it to invite without it.` : 'Teams with Run access can run pipelines billed to this organization.'}</div>
+						</div>
+					)}
+					{/* Home team (B39): first in the invitee's team order — their
+					    usage counts under it and their own runs use its environment.
+					    Eligible = a checked team granting Run, or any team for an
+					    admin. Empty lets the server choose. */}
+					{homeTeamOptions.length > 0 && (
+						<div style={S.field}>
+							<div style={S.fieldLabel}>Home Team</div>
+							<select value={formHomeTeamId} onChange={(e) => setFormHomeTeamId(e.target.value)} style={styles.select} aria-label="Home team">
+								<option value="">{homeTeamOptions.length === 1 ? `${homeTeamOptions[0]?.name ?? ''} (only eligible team)` : defaultDevTeam && homeTeamOptions.some((t) => t.id === defaultDevTeam.id) ? `${defaultDevTeam.name} (organization default)` : 'Choose later'}</option>
+								{homeTeamOptions.map((t) => (
+									<option key={t.id} value={t.id}>
+										{t.name}
+									</option>
+								))}
+							</select>
+							<div style={styles.teamHint}>The first team in the new member's team order: their usage counts under it and their own runs use its environment. They can reorder their teams on their Profile.</div>
 						</div>
 					)}
 				</DetailPanel>

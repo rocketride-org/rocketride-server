@@ -6,9 +6,10 @@
 /**
  * ProfilePanel — the Profile tab within AccountView.
  *
- * Displays the user's avatar card with identity information, organization
- * and team memberships with development-team assignment, and the Edit Profile
- * record panel — an edit-only form DetailPanel per the interaction standard
+ * Displays the user's avatar card with identity information, the TEAMS card
+ * (the member's team order, B39: drag to reorder, row one is the home team,
+ * the order is the `@team` resolution order), the organization memberships,
+ * and the Edit Profile record panel — an edit-only form DetailPanel per the interaction standard
  * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
  * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
  * stock "Discard changes?" confirm (the DetailPanel owns the X / Escape
@@ -20,7 +21,7 @@
  * Cards. All server interactions are delegated to the host via callback props.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
@@ -28,8 +29,11 @@ import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import { Button } from '../../../components/button/Button';
-import type { ConnectResult, ProfileUpdate } from '../types';
+import { StatusBadge } from '../../../components/status-badge/StatusBadge';
+import { GripVertical } from 'lucide-react';
+import type { ConnectResult, ProfileUpdate, TeamInfo } from '../types';
 import { S, Badge, Avatar, initials, avatarColor } from './shared';
+import { moveItem, orderTeams, ordinal } from './teamOrder';
 
 // =============================================================================
 // STYLES
@@ -134,67 +138,80 @@ const styles = {
 	 * Membership org row: dimmed when the org is not the active one.
 	 *
 	 * @param active - Whether the org is the user's active organization.
+	 * @param last   - Whether this is the last row (no divider).
 	 */
-	orgRow: (active: boolean): CSSProperties => ({
+	orgRow: (active: boolean, last: boolean): CSSProperties => ({
 		...S.rowItem,
-		borderBottom: 'none',
+		borderBottom: last ? 'none' : S.rowItem.borderBottom,
 		opacity: active ? 1 : 0.45,
 	}),
 
-	/** Green check label for the active org / development team. */
+	/** Green check label for the active org. */
 	activeLabel: {
 		fontSize: 11,
 		color: 'var(--rr-color-success)',
 		fontWeight: 600,
 	} as CSSProperties,
 
-	/** Indented "Teams" caption above the active org's team rows. */
-	teamsCaption: {
-		paddingLeft: 40,
-		paddingTop: 4,
-		paddingBottom: 4,
-	} as CSSProperties,
-
-	/** Small caption text for the "Teams" label. */
-	teamsCaptionText: {
-		...commonStyles.labelUppercase,
-		fontSize: 9,
+	/** Muted hint beside the Teams card title ("drag to order ..."). */
+	cardHint: {
+		...commonStyles.textMuted,
+		fontWeight: 400,
+		marginLeft: 10,
 	} as CSSProperties,
 
 	/**
-	 * Team row under the active org: indented, tight vertical padding, and a
-	 * divider only after the last team when another org row follows.
+	 * One team row of the Teams card: grip + chip + name + position + marker.
+	 * The home row (first) carries the alt surface; the row under a drag
+	 * carries the info-colored top edge as the drop indicator.
 	 *
-	 * @param isLast    - Whether this is the last team in the org.
-	 * @param needsRule - Whether a divider should follow (another org is next).
+	 * @param home     - Whether this is row one (the home team).
+	 * @param over     - Whether a dragged row is hovering this row.
+	 * @param ghost    - Whether this row is the one being dragged.
+	 * @param grabbable - Whether the rows can be dragged (more than one team, no save in flight).
+	 * @param last     - Whether this is the last row (no divider; the footer follows).
 	 */
-	teamRow: (isLast: boolean, needsRule: boolean): CSSProperties => ({
+	teamOrderRow: (home: boolean, over: boolean, ghost: boolean, grabbable: boolean, last: boolean): CSSProperties => ({
 		...S.rowItem,
-		paddingLeft: 40,
-		paddingRight: 60,
-		paddingTop: 2,
-		paddingBottom: isLast ? 12 : 2,
-		borderBottom: isLast && needsRule ? '1px solid var(--rr-border)' : 'none',
+		gap: 12,
+		paddingTop: 10,
+		paddingBottom: 10,
+		cursor: grabbable ? 'grab' : 'default',
+		background: home ? 'var(--rr-bg-surface-alt)' : 'transparent',
+		opacity: ghost ? 0.4 : 1,
+		boxShadow: over ? 'inset 0 2px 0 0 var(--rr-color-info)' : 'none',
+		borderBottom: last ? 'none' : S.rowItem.borderBottom,
+		userSelect: 'none',
 	}),
 
-	/**
-	 * Small square team chip with a deterministic color background.
-	 *
-	 * @param name - Team name seeding the color.
-	 */
-	teamChip: (name: string): CSSProperties => ({
-		width: 20,
-		height: 20,
-		borderRadius: 5,
-		background: avatarColor(name),
+	/** Drag grip icon slot at the left of a team row (fixed width so rows align without it). */
+	grip: {
+		width: 14,
 		display: 'flex',
 		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 10,
-		fontWeight: 700,
-		color: 'var(--rr-fg-button)',
+		color: 'var(--rr-text-disabled)',
 		flexShrink: 0,
-	}),
+	} as CSSProperties,
+
+	/** Ordinal position caption after the team name ("1st", "2nd", ...). */
+	position: {
+		...commonStyles.textMuted,
+		marginLeft: 8,
+	} as CSSProperties,
+
+	/** Footer sentence of the Teams card: what the order decides. */
+	teamOrderFoot: {
+		...commonStyles.textMuted,
+		padding: '10px 18px',
+		background: 'var(--rr-bg-surface-alt)',
+		borderTop: '1px solid var(--rr-border)',
+		lineHeight: 1.5,
+	} as CSSProperties,
+
+	/** Spacing wrapper for the Teams card's error Banner. */
+	teamOrderError: {
+		padding: '12px 18px 0',
+	} as CSSProperties,
 
 	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
 	errorBanner: {
@@ -221,15 +238,168 @@ export interface ProfilePanelProps {
 	authUser: ConnectResult | null;
 	/** Async handler that persists a ProfileUpdate and resolves on success. */
 	onSave: (fields: ProfileUpdate) => Promise<void>;
-	/** Assigns the team the user's development runs execute under, by its ID. */
-	onSetDevTeam: (teamId: string) => void;
+	/**
+	 * Persists the user's TEAM ORDER in the active organization (B39): the
+	 * `@team` resolution order, the first entry being the HOME team. Resolves
+	 * on success; a rejection is shown in the Teams card.
+	 */
+	onSetTeamOrder: (order: string[]) => Promise<void>;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
 	/** Render ONLY the identity card (+ its edit panel) — the collapsed
 	 *  Profile section (ProfileSection) renders the workspace machinery
-	 *  itself, so the legacy memberships card would be a duplicate. */
+	 *  itself, so the Teams and memberships cards would be duplicates. */
 	identityOnly?: boolean;
 }
+
+// =============================================================================
+// TEAM ORDER
+// =============================================================================
+
+/** The sentence under the Teams card: what the order decides (B39, §3.2, §6.2, §8.3). */
+const TEAM_ORDER_FOOT = "When you call a pipeline or open an app, the first team in this order that has published it answers, and the run uses that team's environment. Your usage always counts under your home team. Your own unpublished runs use your home team's environment too.";
+
+/** Drag payload type for a Teams card row (scoped so a foreign drag is ignored). */
+const TEAM_ORDER_DND_MIME = 'application/x-rocketride-team-order';
+
+/** Props accepted by the TeamOrderCard component. */
+export interface TeamOrderCardProps {
+	/** The active organization's teams (the server lists them in team order). */
+	teams: TeamInfo[];
+	/** The member's team order; empty falls back to the listing order. */
+	order: readonly string[];
+	/** Persists a new order; rejects with the server's message. */
+	onSetTeamOrder: (order: string[]) => Promise<void>;
+}
+
+/**
+ * The TEAMS card (B39, mockup `account-team-order-mockup.html`): one row per
+ * team of the active organization, draggable to reorder. Row one is the HOME
+ * team and carries the Home marker; every row shows its position. A drop
+ * commits immediately through `onSetTeamOrder` — there is no staged state
+ * and no separate development-team setting. While the server answers, the
+ * card shows the dropped order; a refusal (for example a home team without
+ * `task.control`) restores the server's order and banners the message.
+ */
+export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSetTeamOrder }) => {
+	const ordered = useMemo(() => orderTeams(teams, order), [teams, order]);
+	// The order shown while a drop is in flight (null = the server's order).
+	const [pending, setPending] = useState<TeamInfo[] | null>(null);
+	// The row being dragged and the row it hovers, by team id.
+	const [draggingId, setDraggingId] = useState<string | null>(null);
+	const [overId, setOverId] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const rows = pending ?? ordered;
+	const canReorder = rows.length > 1 && pending == null;
+
+	// The server's answer to a saved order arrives as a pushed `order`; that
+	// push (not the resolved call) retires the in-flight rows, so the card
+	// never snaps back to the old order between the two.
+	useEffect(() => {
+		setPending(null);
+	}, [order]);
+
+	/** Starts a row drag: records the team id in the transfer data and locally. */
+	const handleDragStart = (e: React.DragEvent, teamId: string): void => {
+		if (!canReorder) {
+			e.preventDefault();
+			return;
+		}
+		e.dataTransfer.setData(TEAM_ORDER_DND_MIME, teamId);
+		e.dataTransfer.effectAllowed = 'move';
+		setDraggingId(teamId);
+		setError(null);
+	};
+
+	/** Marks the hovered row as the drop target (rows accept only our drag). */
+	const handleDragOver = (e: React.DragEvent, teamId: string): void => {
+		if (!draggingId || !e.dataTransfer.types.includes(TEAM_ORDER_DND_MIME)) return;
+		e.preventDefault();
+		e.dataTransfer.dropEffect = 'move';
+		if (overId !== teamId) setOverId(teamId);
+	};
+
+	/** Clears the drag visuals (drop or cancel). */
+	const handleDragEnd = (): void => {
+		setDraggingId(null);
+		setOverId(null);
+	};
+
+	/**
+	 * Drops the dragged row on `teamId`: computes the new order, shows it at
+	 * once, and persists it. The server pushes the stored order back through
+	 * the account update, which replaces the in-flight rows.
+	 */
+	const handleDrop = async (e: React.DragEvent, teamId: string): Promise<void> => {
+		e.preventDefault();
+		const from = rows.findIndex((t) => t.id === draggingId);
+		const to = rows.findIndex((t) => t.id === teamId);
+		handleDragEnd();
+		if (from < 0 || to < 0 || from === to) return;
+		const next = moveItem(rows, from, to);
+		setPending(next);
+		try {
+			await onSetTeamOrder(next.map((t) => t.id));
+		} catch (err) {
+			// A refusal restores the server's order and names the reason.
+			setError(err instanceof Error ? err.message : 'Could not save the team order');
+			setPending(null);
+		}
+	};
+
+	return (
+		<Card
+			noBodyPadding
+			header={
+				<>
+					Teams
+					<span style={styles.cardHint}>{rows.length > 1 ? 'drag to order · the first team is your home team' : 'your home team'}</span>
+				</>
+			}
+		>
+			{error && (
+				<div style={styles.teamOrderError}>
+					<Banner variant="error">{error}</Banner>
+				</div>
+			)}
+			<div style={S.rowList} role="list" aria-label="Team order">
+				{rows.map((t, i) => {
+					const home = i === 0;
+					const last = i === rows.length - 1;
+					return (
+						<div
+							key={t.id}
+							role="listitem"
+							aria-label={`${t.name}, ${ordinal(i + 1)}${home ? ', home team' : ''}`}
+							draggable={canReorder}
+							onDragStart={(e) => handleDragStart(e, t.id)}
+							onDragOver={(e) => handleDragOver(e, t.id)}
+							onDragLeave={() => {
+								if (overId === t.id) setOverId(null);
+							}}
+							onDrop={(e) => void handleDrop(e, t.id)}
+							onDragEnd={handleDragEnd}
+							style={styles.teamOrderRow(home, overId === t.id && draggingId !== t.id, draggingId === t.id, canReorder, last)}
+						>
+							<span style={styles.grip} aria-hidden="true">
+								{canReorder && <GripVertical size={14} />}
+							</span>
+							<Avatar name={t.name} size={20} square />
+							<div style={S.rowInfo}>
+								<div style={S.rowName}>
+									{t.name}
+									<span style={styles.position}>{ordinal(i + 1)}</span>
+								</div>
+							</div>
+							{home && <StatusBadge variant="success">Home</StatusBadge>}
+						</div>
+					);
+				})}
+			</div>
+			<div style={styles.teamOrderFoot}>{TEAM_ORDER_FOOT}</div>
+		</Card>
+	);
+};
 
 // =============================================================================
 // VERIFIED BADGE
@@ -245,11 +415,11 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
 /**
  * The Profile tab panel.
  *
- * Displays a large avatar card with the user's identity information,
- * a list of their organizations and team memberships with a development-team
- * assignment action per team, and an inline Edit Profile modal.
+ * Displays a large avatar card with the user's identity information, the
+ * Teams card (the member's team order in the active organization), a list of
+ * their organizations, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg, identityOnly }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetTeamOrder, onSetDefaultOrg, identityOnly }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
@@ -330,6 +500,11 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	const org = profile?.organization ?? authUser?.organization ?? null;
 	const memberships = profile?.memberships ?? (org ? [org] : []);
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
+	// The active org's teams and the member's order in it. The server lists
+	// `organization.teams` in team order and pushes `teamOrder` beside it.
+	const activeOrg = memberships.find((o) => o.id === defaultOrgId) ?? org;
+	const activeTeams = activeOrg?.teams ?? [];
+	const teamOrder = profile?.teamOrder ?? authUser?.teamOrder ?? [];
 
 	return (
 		<section style={styles.stack}>
@@ -366,57 +541,30 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</div>
 			</Card>
 
-			{/* Organizations / workspaces card with team memberships. */}
+			{/* Teams card — the member's team order in the active org (B39). */}
+			{!identityOnly && activeTeams.length > 0 && <TeamOrderCard teams={activeTeams} order={teamOrder} onSetTeamOrder={onSetTeamOrder} />}
+
+			{/* Organizations / workspaces card. */}
 			{!identityOnly && memberships.length > 0 && (
 				<Card header="Organizations / Workspaces" noBodyPadding>
 					<div style={S.rowList}>
 						{memberships.map((o, oi) => {
 							const isActive = o.id === defaultOrgId;
 							return (
-								<React.Fragment key={o.id}>
-									{/* Org row */}
-									<div style={styles.orgRow(isActive)}>
-										<Avatar name={o.name} size={24} square />
-										<div style={S.rowInfo}>
-											<div style={S.rowName}>{o.name}</div>
-										</div>
-										{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
-										{isActive ? (
-											<span style={styles.activeLabel}>{'✓'} Active</span>
-										) : (
-											<Button variant="ghost" small onClick={() => onSetDefaultOrg(o.id)}>
-												Switch to
-											</Button>
-										)}
+								<div key={o.id} style={styles.orgRow(isActive, oi === memberships.length - 1)}>
+									<Avatar name={o.name} size={24} square />
+									<div style={S.rowInfo}>
+										<div style={S.rowName}>{o.name}</div>
 									</div>
-									{/* Teams — only shown for the active org */}
-									{isActive && o.teams.length > 0 && (
-										<>
-											<div style={styles.teamsCaption}>
-												<span style={styles.teamsCaptionText}>Teams</span>
-											</div>
-											{o.teams.map((t, i) => {
-												const isDevTeam = authUser?.devTeam === t.id;
-												const isLast = i === o.teams.length - 1;
-												return (
-													<div key={t.id} style={styles.teamRow(isLast, oi < memberships.length - 1)}>
-														<div style={styles.teamChip(t.name)}>{t.name[0]}</div>
-														<div style={S.rowInfo}>
-															<div style={S.rowName}>{t.name}</div>
-														</div>
-														{isDevTeam ? (
-															<span style={styles.activeLabel}>{'✓'} Development team</span>
-														) : (
-															<Button variant="ghost" small onClick={() => onSetDevTeam(t.id)}>
-																Set as development team
-															</Button>
-														)}
-													</div>
-												);
-											})}
-										</>
+									{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
+									{isActive ? (
+										<span style={styles.activeLabel}>{'✓'} Active</span>
+									) : (
+										<Button variant="ghost" small onClick={() => onSetDefaultOrg(o.id)}>
+											Switch to
+										</Button>
 									)}
-								</React.Fragment>
+								</div>
 							);
 						})}
 					</div>

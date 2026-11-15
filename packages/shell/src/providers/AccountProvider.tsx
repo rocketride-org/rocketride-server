@@ -434,11 +434,13 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		[client]
 	);
 
-	/** Sets the user's dev team (dev-run billing + env layer). */
-	const handleSetDevTeam = useCallback(
-		async (teamId: string) => {
+	/** Persists the user's team order in the active org (B39): the `@team`
+	 *  resolution order, home team first. The server pushes the stored order
+	 *  back through shell:accountUpdate. */
+	const handleSetTeamOrder = useCallback(
+		async (order: string[]) => {
 			if (!client) return;
-			await client.account.setDevTeam(teamId);
+			await client.account.setTeamOrder(order);
 		},
 		[client]
 	);
@@ -606,7 +608,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	/** Sends an invitation to a new organization member. */
 	const handleInviteMember = useCallback(
-		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
+		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }>; devTeamId?: string }) => {
 			if (!client || !orgId) return;
 			await client.account.inviteMember(orgId, params);
 			await loadMembers();
@@ -775,7 +777,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				onDeleteWorkspace={handleDeleteWorkspace}
 				onDeleteWorkspacePrecheck={handleDeleteWorkspacePrecheck}
 				onSaveProfile={handleSaveProfile}
-				onSetDevTeam={handleSetDevTeam}
+				onSetTeamOrder={handleSetTeamOrder}
 				onSetDefaultOrg={handleSetDefaultOrg}
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}
