@@ -103,10 +103,12 @@ node on the connected engine are listed.
 
 ### validate_pipeline
 
-Validate an inline pipeline with the engine's own validator — the same rules
-`use()` applies — plus one client-side addition, a catalog check the engine's
-pipeline path does not cover: every component must name a provider the engine
-has a service for.
+Validate an inline pipeline with the engine's validator. It checks what `use()`
+checks, then checks the pipeline against the services it names: every provider
+is a service on this engine, every control entry names a class of the node it
+calls, and every input lane is one the upstream node produces and this node
+takes. `use()` does not run those last checks, so a pipeline that fails them
+can still start.
 
 The single-component form `{version, component}` that the node editor sends is
 accepted too. It is not static: the engine instantiates the provider and runs
