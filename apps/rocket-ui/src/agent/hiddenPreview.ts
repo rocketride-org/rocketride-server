@@ -55,7 +55,8 @@ const OFFSCREEN_STYLE = 'position:fixed;left:-20000px;top:0;width:1200px;height:
  */
 export function bootHiddenPreview(client: RocketRideClient, app: { id: string; folder: string; name: string }, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<{ session: WebDevSession; dispose(): void }> {
 	const { signal, timeoutMs = BOOT_TIMEOUT_MS } = opts;
-	const session = new WebDevSession(client, app.id, app.folder, app.name);
+	// step: hidden, so findDevSession never hands an agent's preview to the user's lookups or to another conversation's check
+	const session = new WebDevSession(client, app.id, app.folder, app.name, { hidden: true });
 	const frame = document.createElement('iframe');
 	frame.style.cssText = OFFSCREEN_STYLE;
 	frame.setAttribute('aria-hidden', 'true');
