@@ -37,38 +37,34 @@
  *   `${ROCKETRIDE_*}` names against the run's Variables, as the engine does, and
  *   refuses a second start of a running pipeline. Pipelines never run, and
  *   `send` says so.
- * - `chat` on the stand-in model pipeline's token, which asks the trial's
- *   model: a replay (L1) or a live provider (L2).
+ * - `chat` on the model pipeline's token. It refuses a turn that breaks a rule
+ *   a provider enforces, as the engine refuses one it reads, and otherwise
+ *   asks the trial's model: a replay (L1) or the pipeline on a real engine (L2).
  *
  * Any other client method throws a message naming it, so a gap shows up in the
  * tool result instead of as a silent pass.
  */
 
 import { RocketRideClient } from 'rocketride';
+import type { PIPELINE_RESULT, Question } from 'rocketride';
 
 import { PROVIDER_IDS } from '../model';
+import { turnProblems } from '../wave/scripted';
 import { catalog } from './catalog';
-import { staticErrors } from './score';
+import { sha256, staticErrors } from './score';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** What the stand-in's chat hands the model: the client's Question, as an object. */
-export type ModelQuestion = Record<string, unknown>;
-
-/** What a model answers: the text, and token counts when it has them. */
-export interface ModelAnswer {
-	text: string;
-	usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-}
+/** The model behind the model pipeline: the product's Question and the pipeline it started, answered with the pipeline's result. */
+export type StandinModel = (question: Question, pipeline: Record<string, unknown>) => Promise<PIPELINE_RESULT>;
 
 /** Options for a fake engine. */
 export interface FakeEngineOptions {
 	/** The run's Variables, name to value. Values never leave the engine. */
 	variables: Record<string, string>;
-	/** The model behind the stand-in pipeline. */
-	model: (question: ModelQuestion) => Promise<ModelAnswer>;
+	model: StandinModel;
 }
 
 interface Task {
@@ -76,7 +72,8 @@ interface Task {
 	projectId: string;
 	source: string;
 	startTime: number;
-	standin: boolean;
+	/** The model pipeline as the product started it; unset for any other pipeline. */
+	standin?: Record<string, unknown>;
 	state: 'running' | 'stopped';
 }
 
@@ -184,7 +181,7 @@ class FakeEngine {
 			throw new Error('Pipeline execution failed: Pipeline is already running');
 		}
 		const token = `${standin ? 'standin' : 'task'}-${this.next++}`;
-		this.tasks.set(token, { token, projectId, source, startTime: Date.now(), standin, state: 'running' });
+		this.tasks.set(token, { token, projectId, source, startTime: Date.now(), ...(standin ? { standin: pipeline } : {}), state: 'running' });
 		return { token, projectId, reused: false };
 	}
 
@@ -210,12 +207,17 @@ class FakeEngine {
 		t.state = 'stopped';
 	}
 
-	/** The stand-in's chat asks the trial's model; no other pipeline answers questions here. */
-	async chat(options: { token: string; question: unknown }): Promise<Record<string, unknown>> {
+	/**
+	 * The model pipeline's chat; no other pipeline answers questions here. A turn that breaks a provider's
+	 * rule gets the engine's `invalid_request`, so L1 catches a loop that would make a provider refuse it.
+	 */
+	async chat(options: { token: string; question: Question }): Promise<PIPELINE_RESULT> {
 		const t = this.tasks.get(String(options?.token));
 		if (!t?.standin || t.state !== 'running') throw new Error(`Task ${String(options?.token)} is not a running model pipeline`);
-		const answer = await this.o.model(JSON.parse(JSON.stringify(options.question)) as ModelQuestion);
-		return { answers: [answer.text], name: t.source, path: '', result_types: { answers: 'answers' }, objectId: `eval-${this.next++}`, ...(answer.usage ? { usage: answer.usage } : {}) };
+		const { question } = options;
+		const broken = question.messages.length ? turnProblems(question) : [];
+		if (broken.length) return { name: t.source, path: '', objectId: `eval-${this.next++}`, result_types: { answers: 'answers' }, answers: [{ error: { code: 'invalid_request', message: `the eval engine refused a turn a provider would: ${broken.join('; ')}` } }] };
+		return this.o.model(question, t.standin);
 	}
 
 	/** The model pipeline (modelEngine.ts modelPipeline): webhook, one LLM, answers, and `<conversation id>-<provider>-<model>` as project. */
@@ -269,6 +271,14 @@ class FakeEngine {
 
 	async fsWriteString(path: string, text: string): Promise<void> {
 		this.files.set(norm(path), new TextEncoder().encode(String(text)));
+	}
+
+	/** Writes only while the file is still the copy that hashes to baseHash (null: no file), as fs_put_if_unchanged does. */
+	async fsWriteStringIfUnchanged(path: string, text: string, baseHash: string | null): Promise<boolean> {
+		const current = this.files.get(norm(path));
+		if ((current ? sha256(new TextDecoder().decode(current)) : null) !== baseHash) return false;
+		await this.fsWriteString(path, text);
+		return true;
 	}
 
 	async fsReadJson(path: string): Promise<unknown> {

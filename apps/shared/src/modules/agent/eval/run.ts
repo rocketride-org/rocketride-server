@@ -29,7 +29,7 @@
  *
  *   node --import tsx src/modules/agent/eval/run.ts validate
  *   node --import tsx src/modules/agent/eval/run.ts run --layer L1 [--scenarios a,b] [--set <name>] [--jobs 4] [--limits recorded|default|off]
- *   node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic] [--model claude-sonnet-5] [--trials 1] [--limits default|off]
+ *   node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic --model claude-sonnet-5-5] [--adapter native|text] [--engine http://127.0.0.1:5565] [--trials 1] [--limits default|off]
  *   node --import tsx src/modules/agent/eval/run.ts run --layer L3 --scenarios build-01-chat-claude [--trials 1] [--limits default|off]
  *   node --import tsx src/modules/agent/eval/run.ts record --from <an L2 run's output folder> --set <name> [--head <commit>]
  *
@@ -38,12 +38,17 @@
  * --out (default .verify/eval/<layer>-<time>/ in the checkout): report.md,
  * results.json, and one record and log per trial.
  *
- * Keys follow the verify skill's rules: the caller's environment, else
- * tokenstash (in EVAL_KEYS_DIR, or RR_VERIFY_KEYS_DIR, or the checkout) when
- * it is installed. L1 needs none. L2 gives the provider key to the trial,
- * whose model calls use it. L3 gives the keys to the engine only, through the
- * skill's launcher; trials run with every key unset, and get the engine's API
+ * No trial holds a provider key. L1 needs none. L2 runs the product's model
+ * pipeline on a local engine that is already running (--engine, a build of
+ * this branch) and holds the keys as its ROCKETRIDE_* Variables; start it
+ * under tokenstash so they arrive by name. L3 gives the keys to the
+ * engine through the verify skill's launcher (tokenstash in EVAL_KEYS_DIR, or
+ * RR_VERIFY_KEYS_DIR, or the checkout). L2 and L3 trials get the engine's API
  * key (RR_VERIFY_APIKEY) in their environment. No value is printed or written.
+ *
+ * --adapter text (L2) answers every native turn `tools_unsupported` before
+ * the engine sees it, so the product's own fallback runs the text adapter on
+ * the real model.
  *
  * --limits sets the agent's step and cost limits for each turn: `recorded`
  * (L1's default) replays a trial under the limits it was recorded with;
@@ -58,7 +63,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { DEFAULT_MODEL } from '../model';
+import { DEFAULT_MODEL, modelSetting, parseModelChoice, PROVIDER_IDS, type ModelChoice } from '../model';
 import { fingerprint, type Fingerprint } from './canary';
 import { EVAL_DIR, REPO_ROOT } from './catalog';
 import { fromTrial, loadRecordings, RECORDINGS_DIR, validateRecording, type Recording } from './recordings';
@@ -114,23 +119,11 @@ function checkout(): Provenance['checkout'] {
 	return { path: REPO_ROOT, commit: git('rev-parse', 'HEAD'), branch: git('rev-parse', '--abbrev-ref', 'HEAD'), dirtyFiles: status === 'unknown' || !status ? 0 : status.split('\n').length, base };
 }
 
-/** Whether a command is on the PATH. */
-function has(cmd: string): boolean {
-	return spawnSync('sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' }).status === 0;
-}
-
 /** The environment with every model key removed. */
 function keyless(): NodeJS.ProcessEnv {
 	const env = { ...proc.env };
 	for (const k of KEY_NAMES) delete env[k];
 	return env;
-}
-
-/** Where a key comes from for L2, without reading it. */
-function keySource(provider: string): 'environment' | 'tokenstash' | 'none' {
-	const names = provider === 'openai' ? ['OPENAI_API_KEY', 'ROCKETRIDE_OPENAI_KEY'] : ['ANTHROPIC_API_KEY', 'ROCKETRIDE_ANTHROPIC_KEY'];
-	if (names.some((n) => proc.env[n])) return 'environment';
-	return has('tokenstash') ? 'tokenstash' : 'none';
 }
 
 function keysDir(): string {
@@ -188,19 +181,17 @@ interface Spawned {
  *
  * @param cfg - The trial's config.
  * @param env - Its environment.
- * @param wrap - A command to run it under (tokenstash), or none.
  * @returns The record it wrote.
  */
-function spawnTrial(cfg: TrialConfig, env: NodeJS.ProcessEnv, wrap: string[] = []): Promise<Spawned> {
+function spawnTrial(cfg: TrialConfig, env: NodeJS.ProcessEnv): Promise<Spawned> {
 	const configPath = cfg.out.replace(/\.json$/, '.config.json');
 	const logPath = cfg.out.replace(/\.json$/, '.log');
 	fs.mkdirSync(path.dirname(cfg.out), { recursive: true });
 	fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
-	const node = [proc.execPath, '--require', './scripts/stub-css.cjs', '--require', path.join(EVAL_DIR, 'shell-stub.cjs'), '--import', 'tsx', path.join(EVAL_DIR, 'trial.ts'), '--config', configPath];
-	const argv = wrap.length ? [...wrap, 'env', '-C', SHARED_DIR, ...node] : node;
+	const argv = [proc.execPath, '--require', './scripts/stub-css.cjs', '--require', path.join(EVAL_DIR, 'shell-stub.cjs'), '--import', 'tsx', path.join(EVAL_DIR, 'trial.ts'), '--config', configPath];
 	const out = fs.openSync(logPath, 'w');
 	return new Promise((resolve) => {
-		const child = spawn(argv[0], argv.slice(1), { cwd: wrap.length ? keysDir() : SHARED_DIR, env, stdio: ['ignore', out, out] });
+		const child = spawn(argv[0], argv.slice(1), { cwd: SHARED_DIR, env, stdio: ['ignore', out, out] });
 		const limit = setTimeout(() => child.kill('SIGTERM'), (cfg.maxMinutes * 6 + 10) * 60_000);
 		child.on('close', (code) => {
 			clearTimeout(limit);
@@ -249,9 +240,10 @@ interface RunOptions {
 	trials: number;
 	jobs: number;
 	set?: string;
-	provider: 'anthropic' | 'openai';
-	model: string;
-	maxTokens: number;
+	model: ModelChoice;
+	adapter: 'native' | 'text';
+	/** L2: the engine the model pipeline runs on. */
+	engine: string;
 	maxWaves: number;
 	maxMinutes: number;
 	maxFollowups?: number;
@@ -269,14 +261,17 @@ function limitsFor(o: RunOptions, recording?: Recording): TrialConfig['limits'] 
 function limitsSetting(o: RunOptions): string {
 	if (o.limits === 'off') return 'off';
 	if (o.limits === 'recorded') return "each recording's own";
-	return 'the product default (60 steps, $2 estimated)';
+	return 'the product default (60 steps, $2)';
 }
 
 function runOptions(a: Record<string, string>): RunOptions {
 	const layer = (a.layer ?? 'L1').toUpperCase() as Layer;
 	if (!['L1', 'L2', 'L3'].includes(layer)) throw new Error(`--layer must be L1, L2 or L3 (got ${a.layer})`);
 	const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-	const provider = (a.provider ?? 'anthropic') as 'anthropic' | 'openai';
+	const model = a.provider || a.model ? parseModelChoice({ provider: a.provider ?? DEFAULT_MODEL.provider, model: a.model }) : DEFAULT_MODEL;
+	if (!model) throw new Error(`--provider must be one of ${PROVIDER_IDS.join(', ')}, with --model naming one of its node's profiles`);
+	const adapter = a.adapter ?? 'native';
+	if (adapter !== 'native' && adapter !== 'text') throw new Error(`--adapter must be native or text (got ${adapter})`);
 	return {
 		layer,
 		scenarios: a.scenarios ? a.scenarios.split(',').filter(Boolean) : scenarioIds(),
@@ -284,9 +279,9 @@ function runOptions(a: Record<string, string>): RunOptions {
 		trials: Number(a.trials ?? 1),
 		jobs: Number(a.jobs ?? (layer === 'L1' ? 4 : 1)),
 		set: a.set,
-		provider,
-		model: a.model ?? (provider === 'anthropic' ? defaultModel() : 'gpt-5-5'),
-		maxTokens: Number(a['max-tokens'] ?? 64000),
+		model,
+		adapter,
+		engine: a.engine ?? ENGINE_URI,
 		maxWaves: Number(a['max-waves'] ?? 60),
 		maxMinutes: Number(a['max-minutes'] ?? 15),
 		maxFollowups: a['max-followups'] ? Number(a['max-followups']) : undefined,
@@ -299,13 +294,6 @@ function limitsOption(given: string | undefined, layer: Layer): RunOptions['limi
 	if (limits !== 'recorded' && limits !== 'default' && limits !== 'off') throw new Error(`--limits must be recorded, default or off (got ${limits})`);
 	if (limits === 'recorded' && layer !== 'L1') throw new Error('--limits recorded is for L1 replays; L2 and L3 take default or off');
 	return limits;
-}
-
-/** The model id behind the product's default profile (model.ts DEFAULT_MODEL), read from the branch. */
-function defaultModel(): string {
-	const profile = DEFAULT_MODEL.model;
-	const services = fs.readFileSync(path.join(REPO_ROOT, 'nodes/src/nodes/llm_anthropic/services.json'), 'utf8');
-	return new RegExp(`"${profile}":\\s*\\{[^}]*?"model":\\s*"([^"]+)"`).exec(services)?.[1] ?? profile;
 }
 
 /** Scores one trial record. */
@@ -331,7 +319,7 @@ export async function cmdRun(a: Record<string, string>): Promise<number> {
 	const records = path.join(o.out, 'records');
 
 	if (o.layer === 'L1') {
-		prov.model = 'replay of recorded replies';
+		prov.model = 'replay of recorded engine answers';
 		prov.settings = { maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), set: o.set ?? 'all' };
 		prov.engine = 'the eval fake engine (engine.ts): in-memory store, static validate, no pipeline runs';
 		prov.keys = 'none (L1 needs no key)';
@@ -355,20 +343,24 @@ export async function cmdRun(a: Record<string, string>): Promise<number> {
 			if (!prov.guides) prov.guides = s.record.settings.guides;
 		});
 	} else if (o.layer === 'L2') {
-		const source = keySource(o.provider);
-		if (source === 'none') throw new Error(`L2 needs a ${o.provider} key: set it in the environment, or install tokenstash`);
-		prov.model = `${o.provider}:${o.model} direct, behind the fake engine's stand-in`;
-		prov.settings = { maxTokens: o.maxTokens, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials, thinking: 'not set (the engine sets none on this path)' };
-		prov.engine = 'the eval fake engine (engine.ts): in-memory store, static validate, no pipeline runs';
-		prov.keys = source === 'tokenstash' ? `tokenstash in ${keysDir()}, names only` : 'the caller environment, names only';
-		const wrap = source === 'tokenstash' ? ['tokenstash', 'run', '--retries', '0', '--'] : [];
+		const version = await fetch(`${o.engine}/version`).then(
+			(r) => r.json() as Promise<unknown>,
+			(err: unknown) => {
+				throw new Error(`L2 runs the model pipeline on a local engine, and none answers at ${o.engine} (${String(err)}). Start a build of this branch with the provider keys as its Variables, then pass --engine.`);
+			}
+		);
+		const name = modelSetting(o.model);
+		prov.model = `${name} through the product's model pipeline on ${o.engine}, ${o.adapter} adapter`;
+		prov.settings = { adapter: o.adapter, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials };
+		prov.engine = { store: 'the eval fake engine (engine.ts): in-memory store, static validate, no pipeline runs', model: { uri: o.engine, version } };
+		prov.keys = 'none in the trials; the model engine holds them as its Variables';
 		for (const id of o.scenarios) {
 			const scenario = loadScenario(id);
 			for (let t = 1; t <= o.trials; t++) {
-				const cfg: TrialConfig = { layer: 'L2', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), model: { provider: o.provider, model: o.model, maxTokens: o.maxTokens }, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups, limits: limitsFor(o) };
-				log(`L2 ${id} trial ${t} (${o.provider}:${o.model})`);
-				const s = await spawnTrial(cfg, source === 'tokenstash' ? keyless() : proc.env, wrap);
-				if (!s.record) results.push(crashed(scenario, 'L2', t, o.model, s));
+				const cfg: TrialConfig = { layer: 'L2', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), model: o.model, modelEngine: o.engine, adapter: o.adapter, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups, limits: limitsFor(o) };
+				log(`L2 ${id} trial ${t} (${name}, ${o.adapter})`);
+				const s = await spawnTrial(cfg, { ...keyless(), RR_VERIFY_APIKEY: ENGINE_AUTH });
+				if (!s.record) results.push(crashed(scenario, 'L2', t, name, s));
 				else {
 					results.push(score(scenario, 'L2', s, o.out));
 					prov.guides ??= s.record.settings.guides;
@@ -488,7 +480,7 @@ function cmdRecord(a: Record<string, string>): number {
 		fs.mkdirSync(path.dirname(out), { recursive: true });
 		fs.writeFileSync(out, JSON.stringify(r, null, '\t') + '\n');
 		wrote++;
-		log(`wrote ${path.relative(REPO_ROOT, out)} (${r.turns.length} turns, ${r.turns.reduce((n, t) => n + t.events.length, 0)} replies, ${r.expected.status})`);
+		log(`wrote ${path.relative(REPO_ROOT, out)} (${r.turns.length} turns, ${r.turns.reduce((n, t) => n + t.answers.length, 0)} answers, ${r.expected.status})`);
 	}
 	console.log(`${wrote} recordings written to ${RECORDINGS_DIR}`);
 	return 0;

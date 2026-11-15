@@ -1,0 +1,624 @@
+{
+	"format": 4,
+	"scenario": "build-04-extract-invoice",
+	"set": "claude-88b86501",
+	"trial": 1,
+	"source": {
+		"head": "88b86501a",
+		"model": "anthropic/claude-sonnet-5-5",
+		"recordedAt": "2026-11-15T23:28:47.642Z"
+	},
+	"turns": [
+		{
+			"request": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+			"answers": [
+				{
+					"wave": 0,
+					"asked": "turn",
+					"answering": [],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"path": ".rocketride/docs/ROCKETRIDE_CONCEPTS.md"
+									},
+									"id": "toolu_013HZ5Y34Yc3AS2BwaLntWxt",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01QFFhXTnhMJ9QaVux8YEKkT",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {},
+									"id": "toolu_01AgohVbGyMrwGM5gACb9CRa",
+									"name": "list_workspace",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 149,
+							"cache_read": 9968,
+							"input": 4,
+							"model": "claude-sonnet-5-5",
+							"output": 169
+						}
+					}
+				},
+				{
+					"wave": 1,
+					"asked": "turn",
+					"answering": [
+						"toolu_013HZ5Y34Yc3AS2BwaLntWxt",
+						"toolu_01QFFhXTnhMJ9QaVux8YEKkT",
+						"toolu_01AgohVbGyMrwGM5gACb9CRa"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"limit": 135,
+										"offset": 31,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01D8LNCE9EpBUpgpzCaU3KqC",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"limit": 36,
+										"offset": 1007,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01Txu91sq4yDWzKvXSKBAhwe",
+									"name": "read_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 2301,
+							"cache_read": 10117,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 232
+						}
+					}
+				},
+				{
+					"wave": 2,
+					"asked": "turn",
+					"answering": [
+						"toolu_01D8LNCE9EpBUpgpzCaU3KqC",
+						"toolu_01Txu91sq4yDWzKvXSKBAhwe"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQStQYKEAgTGAI4AUIIdGhpbmtpbmcSDIsc/tfUIeaieDTOdBoM7t9hHc1pRcgynXWHIjDz2FFusCAITSALpqEhXu+qghQEpDeWkW9UZdEKcCFa2L/pqgpGdCB2PmROjwm6SrEq0gXkh2ChTMMJxAMfAwaOgA1eCzyspOsGYKoaZXddpTt3/rcb6UlguIsLw73RQczbAs7oE3yk28EkUR+HFjQsblgsehO5+MagDY7fxz8wktBX39F5fg49PmreOpwpoQoluJXyUrLWGAXwt/6XC5TzMqvkMPWaar66i1KVtrMxmlGG8mAvu8HSLe/vVF93DtCxYIFXipraodspANAhGl1omjJgSQW+bOs3xiO6j/NT3NIjf47GA3nYs6p58/3wBJiW2MKoRT6VODqRixGqfPdDOwYKSI4NkPwZJYYvGMLceWT+f3q5PHzPnb3yZamdstGLZ2mkUsqBdW5dBih9X7KfqgChVRpKwkcBsV8u1svVG7W0F3v3ucPTiXzoH3ihVae5uooi5JaaHixG/V6dk7hPDVuVGY81+jiV40Ff1CZ6WCnOmx0KUwnk6VXk2UQsFNC9mX+0Q8ev75ulu8wnUZlKZRMshFMafpWyiNKzRjfEUltQ6dMsYYsHGv//srTMbWym1BSrcxfQLB39Jm4dwWAsjJGwTlxLWKi+QLyR/cw7N3o3B3w1rTv9kmB686lpI227wKXI1vGKPqc+AfjKkLQKlgizA4m35F/zoURp6NO5+J5iBZkk3Qo+uUDmqUrYZQgT4c5Du8+XZ8UDa+3n2wJqooJXm86oDiVpnBeODAPNIDyfCEiPg1R1TDcpvgHvnWVCqIB20l64Y0u8/+1bnfg5b4xogCevS4htyzyIyjQGlsl++3SydpDXGcC4eneUVqv3mKhnELV3Fa8KNZZeG2WhBzvLjNQNc02OaKOH1Px0VY197nSFTAdekt67hGS2+6UKy+Ici3apuMx5oeX8zGHbGrnYYZ9SVq62JsPWt+I+seqDUWaGf2+RJgzdoQUEIkBNFg+bnDa8Vdhqz6Wxdz9nheJ0LqxrXlmKnqJ2qaFRA3uPIEj7BkrJz68v2UydhWakk0rTkxgB",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"limit": 180,
+										"offset": 143,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01TPhUYRqdLxkA6VSBKTxJbu",
+									"name": "read_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 3161,
+							"cache_read": 12418,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 177
+						}
+					}
+				},
+				{
+					"wave": 3,
+					"asked": "turn",
+					"answering": [
+						"toolu_01TPhUYRqdLxkA6VSBKTxJbu"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"limit": 75,
+										"offset": 230,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01CueJY23BCiWs6Ky6adWf7m",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"limit": 70,
+										"offset": 301,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01LQR8UkBsMrvw5pr3QcyjaW",
+									"name": "read_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 1963,
+							"cache_read": 15579,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 231
+						}
+					}
+				},
+				{
+					"wave": 4,
+					"asked": "turn",
+					"answering": [
+						"toolu_01CueJY23BCiWs6Ky6adWf7m",
+						"toolu_01LQR8UkBsMrvw5pr3QcyjaW"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSowcKEAgTGAI4AUIIdGhpbmtpbmcSDHJ5eeNRj7CNxIZPGBoMcYJiSlsYxCpKDAEzIjA2KTeXWNAau4nttCS3+PK8Bl1RuPMxVEASpEJd17xxhXP3SOuljg2yBHNCFDkai4YqwAbuYb2DkPEEsF5TTNQSIMWa4S3xDmBI+io/vt5PgMQzLRbPMiDyNSrlVLv7ZDCZSKBasYIxCay2UeITlduf15k2NEK6F5KhXWX2rtHCvWprmKhlICOdT3Ipx11B77Kx9NCrrq+/g36Wrf/VC8W633cALy7cD+6A78nZeKX94q8EFZbHzo60yjAGl08P2aNTgcEyygUfeuWaWoedlXnvYwegjyqaqKk1EZS+lHin7umJJlOgEj3UG9st6Dn5+5qyGI5H13czmKruuW0+tmtfb69lLV5AUaR//YOJGwL/zNvbLDchdp9aVeSmLlpZAmaZRYZXgFYwMccMZKDiYJCW9HxvyUL6h9qAPtb+ij1wnotc0gXocO56ekH7l533Sd6MYVgs0pZ9tPjr6mHCipXpV7HisBNdMESPvYkp4q5Wtdjxte/RfjuiKxtuIQ7dXgVzSOp+b9+YPWUpAC180ESTcn72x4SVUkfKNRdudtBhgQG4LYuBhvSfR9L+uMGB/VVJeAvpsNKRF5yMG/Cl+rXB6hQeFznivehnmrvzmk7ZhS94Lt/oNKLBn2a7Xvm4zddHv9mwQWCQnFNS/s76qAydae07bIelJ/u6cWZR02Ig6gG8X+l934bvx4j+XXwXIAqcpbSc3NCKsBqhBsShm7UKEhMGmkyIVxDeCn2cpS0eLVIHcvMQ8FT5qU/l9egk2Y1V6tLE5qEr8RbwRxlrA92zC4SB4vU3jNJo/KSmQtAzc4QA/GFhKA5/qt2YHON1yE3gGRPfGPSUCT2zqEFzS5pVfvz9WK6fY+W6joZTRUe7lJJdw57iGVo8zL9u7DhNVFyArjnAuv/f2qEhG4Ar6ExOjcryyxvTHh3R7AHI6zaIZkY48bPUZKLakJAClKSr+gq36nOowj6ZdJULzEprMzJFC7T1yqToY2cbZ9qVms3miV0WFcmXnPcV2TcORcxPkpMeCltrNu1m2YAxq9cOwQicTWesKn7gjNU0RaqYft8EwnEnwGw2kTGXw+8ddIAVelf8WJF+YQNOf3thOO0/lRfn9uQ8N5k4mXjYp3LHTMpIfXXwzoTvRD4qi8P/ab+9NUEEgCBe1CcLzNjAY/WfwTCNdvK9GAE=",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"extract_data"
+										]
+									},
+									"id": "toolu_014YSsfN55HXMAME1bpAViTc",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"webhook"
+										]
+									},
+									"id": "toolu_01YXxHUEPf3nVM8Nkk6UPV7g",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"parse"
+										]
+									},
+									"id": "toolu_0124PFiuf5ChM2c2eEniZBGw",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 3730,
+							"cache_read": 17542,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 287
+						}
+					}
+				},
+				{
+					"wave": 5,
+					"asked": "turn",
+					"answering": [
+						"toolu_014YSsfN55HXMAME1bpAViTc",
+						"toolu_01YXxHUEPf3nVM8Nkk6UPV7g",
+						"toolu_0124PFiuf5ChM2c2eEniZBGw"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSnAcKEAgTGAI4AUIIdGhpbmtpbmcSDFRCL9bCQkYUtkFgbBoMCE8HZYowzHn7OortIjDRy3eAxFbJkk6Zr90qyQnrgSsIQw750ImoTii5UlQ9knY6JQ/k96EVhqj4ItrzvCwquQbRNUX/5jlrUrw7rPjb+8A8rxBr5JdqteSuA5eF4BRz9vm7DLJIkMKu4AyZ3Dfzq9Gb11g3lI7/RgaXVHc5KkbsrNWXUCuuM2wc33I3E45o+LvBZPOzK5slOX3mgxRqnx2IzpPJgsQ5KKK3ycB7m+y/c1KErRy6pO5h9o/comUqDvd1EhUUJ54grBV8dHQggMaGp4h2C6j5Bs0QKFl0mQO5obGff096v9ba5hNigxtcRZkoVU46dmQ/lIv4bgi4XJIGYxtEcKDhyEqT9txYRePpbg/aR0km/vGLwy9Ppmk4F8QAiW28KPdzfYJvAtBOqrW9/L7y5eyFO7YFNFfxcikq+IOVMJIoVsmsudxh8rho1jPm9LBU7Ip7KxuGjc/EPoxecT0d3zfdKYqzgaX8UMCcG80i0e6ZenchXiEcB11MZ7JxUOYvurlJGh/DCCHq5BQcCYjZxrony7QddaNGtRK+/8afFCrnoKIJE133f4uOTvGJkeNkW+gqT+rKtnAe7Hf1+eLz4stkCWMhjweHGBxHSMVDRrhYw7MJySLE2WVCTkHF1BpL2rRuLfXUUM58ucegavt9qy4E1t29fC6kd7k3HrYWdpxycOBWlRf6JmpGaGZkwkl2OWkBsncWdgWlrYZsJ7UevbJAJVADMJ0fliVOFEJHcCzBusSw920VvetuPAR27ne+A5M8+3ipbz3DcjH2Cio4eW6v7vPayWuK+LCPG263wF7xn97ruL4gT/AOjTkP0rZDgXseGjrvk8s66PKowx9u5h4i37aqoiNfTwG0ks0LGpG8sbuGfaB/H4PwSBZyY1dCYjVRQQm4wyaENMia7wwLlza9sz7GvHh+uew+aAoKVjlY7BvYMD6hv60M/XtSVTnHkmmKn9439eQnHTQjzGuBTYnd+/Dhj/Q+pAHl9ky8vRUBxn1va6aLALfYOcPykQJyuQmHn1pojrvfS0voBoWHdZmUl884Ffwtb1MptZrdJTThrLJwoxDDEP7ysDBXjvdCk/pXQILg/B3k1uoXqlqf6/YnaUbKJM2z1vCjbqaOGqor07ipSx/iFoxmO4C4D9MV4yDOoz0jZa3JlrfBtBTvKv1qXHgYAQ==",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"content": "{\n\t\"components\": [\n\t\t{\n\t\t\t\"id\": \"webhook_1\",\n\t\t\t\"provider\": \"webhook\",\n\t\t\t\"config\": { \"hideForm\": true, \"mode\": \"Source\", \"parameters\": {}, \"type\": \"webhook\" }\n\t\t},\n\t\t{\n\t\t\t\"id\": \"parse_1\",\n\t\t\t\"provider\": \"parse\",\n\t\t\t\"config\": {},\n\t\t\t\"input\": [{ \"lane\": \"tags\", \"from\": \"webhook_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"extract_data_1\",\n\t\t\t\"provider\": \"extract_data\",\n\t\t\t\"config\": {\n\t\t\t\t\"profile\": \"default\",\n\t\t\t\t\"default\": {\n\t\t\t\t\t\"fields\": [\n\t\t\t\t\t\t{ \"column\": \"invoice_number\", \"type\": \"text\", \"defval\": \"\" },\n\t\t\t\t\t\t{ \"column\": \"vendor\", \"type\": \"text\", \"defval\": \"\" },\n\t\t\t\t\t\t{ \"column\": \"total\", \"type\": \"decimal\", \"defval\": \"\" },\n\t\t\t\t\t\t{ \"column\": \"due_date\", \"type\": \"date\", \"defval\": \"\" }\n\t\t\t\t\t]\n\t\t\t\t},\n\t\t\t\t\"parameters\": {}\n\t\t\t},\n\t\t\t\"input\": [{ \"lane\": \"text\", \"from\": \"parse_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"llm_openai_1\",\n\t\t\t\"provider\": \"llm_openai\",\n\t\t\t\"config\": {\n\t\t\t\t\"profile\": \"openai-5-4-mini\",\n\t\t\t\t\"openai-5-4-mini\": { \"apikey\": \"${ROCKETRIDE_OPENAI_KEY}\" },\n\t\t\t\t\"parameters\": {}\n\t\t\t},\n\t\t\t\"control\": [{ \"classType\": \"llm\", \"from\": \"extract_data_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"response_answers_1\",\n\t\t\t\"provider\": \"response_answers\",\n\t\t\t\"config\": {},\n\t\t\t\"input\": [{ \"lane\": \"answers\", \"from\": \"extract_data_1\" }]\n\t\t}\n\t],\n\t\"project_id\": \"3f6c1b9e-7a42-4d8b-9c15-e2a07b5d4f31\",\n\t\"viewport\": { \"x\": 0, \"y\": 0, \"zoom\": 1 },\n\t\"version\": 1\n}\n",
+										"path": "pipelines/invoice-fields.pipe"
+									},
+									"id": "toolu_01NV9WrdzTKs3q8w6KQ26i9J",
+									"name": "write_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 2289,
+							"cache_read": 21272,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 762
+						}
+					}
+				},
+				{
+					"wave": 6,
+					"asked": "turn",
+					"answering": [
+						"toolu_01NV9WrdzTKs3q8w6KQ26i9J"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQS8wYKEAgTGAI4AUIIdGhpbmtpbmcSDNO58TAeNRCx1M4j3xoMNztfCZJwank/zR5GIjAj8fI5RAYMtHb/eQsRsILLd76BMVrr2xsdAMJpuaDANQ+CZhr6YJDE/A4tjJuuUYkqkAbbXog3iyt8CyC/HUvKooK505whdB66oo31VTeac36sTkw9u0Lqpkpc4Tw09oDMGC6o8gqg+Fz91h5cq3fnJURXwC2NRmfAn7yiYa8K7TthvBAdIxsDjXP+icmPNwCGwAFgcq36smg0FM1bZX3iIkG76Xc6D3gY9XsCWW2y8SX02+LDjFQMHBsdQziuzxpDh39iRyPOmMo4lxwpnEkkPd008EJiUAPNa+YW/u3Z2QId7swguu+u94OakyMryjWGJvN6/fG1obSddW+hu6DsJrKJQnBMW0BFAAhnLLZqVKERSRuLMbMNssdEX+1LCJwaZrZETeCli68Xd5Frn9dYd2rDIlmQ3yGBkMht7UkU0Rrw9g+IsHBqUvAOrgWaH1SnDQ4pLp0F0mm6DdxiKYQnPpXEGbO8rQLcQXdng4pN0+DFR5gnbWsarsQ6SRmYfnLHwfDwnPMyEGt3SMmw8XuGKfLyxzy44HSYhYfVG9oM1BfY295yUC3I0i7yCmSfLKlx5+sxDiaA/0azri9Nk4x0BYtKkRGKk5W0KTnTzOf+RM98JVnTWp9TtOZecgYWnsQdk6YbRw3erpP3mycOFks2O6LQSU1d66PsG4NWXJooErKG6/QwoN2RY8PeeqUYJ9W8vwkPD1RhsBcV6AJ5Jtxqinug2dPXunEzKuXNRHTEXwtDIhUl8Y4HJ8xC4espv1wErTib4Ht0NUyL6Nb6awNAPL/v2lD4uf/Bd3msNNR0YOzf97Qi/WRfKopgun8abcvILJj3r064zT9aGHAsPP1pAgjoIj07CEvzDfqwhwW9QoF6erLT127qdwyI67ML7iixE+1iGGJ5wKPssuj0vm3dfEOAnloB8QkhdB5ZV4JoNY+fau48NLWGSu3i2VkVRrBAN7p2j2aDNyy0bWJewdi6yb/5UyjEqt7xFGA/GLZBtA4k/zBQ+WfV+HZugmBonPmmBCAfHij9YX3a8+UJ7ygGFBgrLBBFXXnQnw7RVB965IdfSj5q+krX48WIM96c1xL/llbz7aMWT+9UqpaJUJN+eyMJGAE=",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"method": "account.getEnvironmentKeys"
+									},
+									"id": "toolu_018yLdSbU1HFVud6WiCL18J7",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "validate",
+										"params": [
+											{
+												"filepath": "pipelines/invoice-fields.pipe"
+											}
+										]
+									},
+									"id": "toolu_01BQCj4dydro1XE8ZUJjr9d9",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 831,
+							"cache_read": 23561,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 187
+						}
+					}
+				},
+				{
+					"wave": 7,
+					"asked": "turn",
+					"answering": [
+						"toolu_018yLdSbU1HFVud6WiCL18J7",
+						"toolu_01BQCj4dydro1XE8ZUJjr9d9"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSngcKEAgTGAI4AUIIdGhpbmtpbmcSDP7M/7SnA0vRFAgj5hoMFdApar0x+56KZ+WaIjAJwvfmoQ7A4rDne5w6jN5S2LaMgtUbtmOawxzs9GB9H3rZiXI+UdPX1uzzpauCpcQquwY0b5wE4KWkS51O2YxD1KFI+i8/og31UNC0+X10xqZBWkdHy+WiiLkEMYJfNu+MUJL6VAwb5MucuSmD/WDGon0b2pO8Ew2R+XYcWqxm+dVyLMv5jI1ruBKwI6vzgnCV5cWLa2zSV/nkMCH9dR9YD+bTAjaxw7lCJqR4gRYAHw4BNLXx5Jc2uK80xCfWSDapC96Bvy9kELT7Dvj8mtOYEDo5np2LkYFbCxkeLdQuOwF7mjFljF6F1dnw7sPbY5Q/etKAbO/wp+SDmkrMSRZum0ijqvHD9v3zr4a3nbW4kI8dMTh5p2nS/On5O17EY8qdv2ppNsEm2Vew2cQkUcvXp1kvXqQ1W0Dxb2OMswgYtZv9J/+sK+zzhud6/62rm0a9MUUtbfnSycLUwOJ7cG0WbHEuFjQn90pBucxA6b+Uhze9+voeNQLBuj3H0LBl5MmCSRFHbcsdLFQJzAavHzljFiCih9n3V339bcLQCTsNFwc6sjJCDHeM9uKZfLOitr4Dc124DToaqnq/4cYJV8tt57Uwupel630o+RUMXs5lcMtLhZ8EdQzHunfOV/SHeCZL4vLdyOJrrEbQg3Q/Wmjkxy6EHrQ1EfEbw95vp2CSPpsy1V+5/aOhnhaG+c9iqIckUgCE7QIHzIX4gwSizJBOvSnkVfnFyTeAue87dtONtYYI/Oinyk+K3Q5yegC93Clu6qSbTNBCdEY5YYYqB9btPHx1zm/89HlxxPKUhgR/m2AE/+tQHms0AaDoLkZwayho3RrLsGedBJfntXyP/4G4DSHq7vH1TPJ2qM3NY8d8rB2zsdhWwL4OHaF2JH7X1koG/oFs4HmJwP7HBeRQT8dNGx2CF7qeBprmua5MjlR+cogzRF7+lDVCE8t+tFa1Nz7Mr0nfam5RR7PKTNOlDJ9wmjZJmgl8bt26D6AgTVIM1T5FPBAbjDaZ+zuyYeOqvjYpfXZRYRl6Z/XK6yZhwlvyg13O24YoI3cADLAcYGZ3mMhZ/G7slqI4Z1UqgdJjlyi1NQgjlQmupm3ZO9FPAAdJa17axGWdJYJ0m2+2kxLsc1wRXbr/JvCr46qxU2pqqR0iNLMU60ggtXab4tDTvxgB",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"method": "use",
+										"params": [
+											{
+												"filepath": "pipelines/invoice-fields.pipe"
+											}
+										]
+									},
+									"id": "toolu_0141wctxGNor8467XavbeVCF",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 361,
+							"cache_read": 24392,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 143
+						}
+					}
+				},
+				{
+					"wave": 8,
+					"asked": "turn",
+					"answering": [
+						"toolu_0141wctxGNor8467XavbeVCF"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"method": "getTaskStatus",
+										"params": [
+											"{{memory.ref:wave-7.r0:text:token}}"
+										]
+									},
+									"id": "toolu_011Ki93mWufGLWsyYnrNYQDd",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 233,
+							"cache_read": 24753,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 100
+						}
+					}
+				},
+				{
+					"wave": 9,
+					"asked": "turn",
+					"answering": [
+						"toolu_011Ki93mWufGLWsyYnrNYQDd"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQS/QYKEAgTGAI4AUIIdGhpbmtpbmcSDEDJ+hbAtbGtx7RjwhoMc4XFia02qc61wBXXIjD5w8ziFWePUX111GYXEgMQOUs5ElKo15HJv/4N0pPC3mmbvdMX5LUypKfMmylK2BYqmga1SNdaAIj7rSZAHxjJDu0PHdEl9J0WTI8RHmv5uKP6WHaPtT6pDqPgk22h0VAaSgyAzaXiBlwcg8cq0SGYA0MrbKd9GevI1lUvcdUNzGp8fJyiHtSJyhKIW9LYjYt1Z204WrxNYoJ8lM5HvB7WSCO4tlq+2H1FHATKZzzIYDteDuFEWkXkxILMAJbu2yq8xpkaBns0fpJYtuyfXSo8vhOeAV0V7IU4WHHFN5HWfw5HywqjgJAlpNfTGvrmmWWyresfCabejDVD6XgyAWO+ZQxrAK57+4pUYXqHc4NmdDiGl1ycLlEHVnG/dThqNgKdbUOwBDWNJqnqJJu70Ce3lCUkYsPgZaYOR553MxXZaSMOB5SVm+zOOI+3ZZHFOj2Jj60ZBpu70AMQYj1Ia/0pa9h74MvF8Kh11eVMqWPCfSVfBu6aDMrn5pK/K+rGbqz7Tg3bsZ7ic1C4cBEdhAo30pswA2uneXFZ0CdXqWyM0SfcFEfKStCq5zW/kBgqfF7oWlwxaBBKKbO+N/x/ypnu2iFRlLrsYnJfkNNFhNfOHc8CI3t2HxgXk3bZg42vGhKwEAupT+8GmTeYsMMO7ATttw+v9v6wnigBSlSEcduqdKTbnX6rxXK5Z2cSUDbXrhS130qfrh3hv0W1YT49qZVz/1wcKtNeDdEwTNqabLQZQcdKWOEid25bYWpd9ue+ZtpE+pjj5E0HZaa2GOl7VBHDB7bEdc/DZ2sAcpc66VWzHbp+Yx/I/rpbd/+Lfi+fyFUG8Bek40pYNV30f7E1+yNvyDsIigwQVwl7kuBdH62o4Q8b1zz0rwsxDWfhqKN6nGD4nyhnWVHJSlrJ9fkf4FTYYackdVw3e9p6UyePx3oaTBh6dHFIFFpRoBntUNwv0lnRrdtuYcRD2Iq+VmqdLh/FtIn2jxhHVNxUIsVuueIbYTtt8OwvsGADuVp4ztYedEZ1PE6ht8d9VzEAjrd5eMSlcj3j5rYS2Kn5tg+djjsBy4hwP+DWnKm2nfQHINwRWzfn1e9q+XwiwTwlDc2PxU0APJuN2Nr2AoNKUUacXBgB",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"text": "I created `pipelines/invoice-fields.pipe`. It validates with no errors or warnings, but I haven't run it on an invoice, so the extraction itself is untested.\n\n**How it works**\n1. `webhook` receives the invoice file.\n2. `parse` turns the PDF or plain text into text.\n3. `extract_data` asks OpenAI (`llm_openai`, profile `openai-5-4-mini`) for four fields:\n   - `invoice_number` as text\n   - `vendor` as text\n   - `total` as a decimal number\n   - `due_date` as a date\n4. `response_answers` returns those fields as the webhook response.\n\n**What you need to do:** add a Variable named `ROCKETRIDE_OPENAI_KEY` holding your OpenAI key. The pipeline reads it only through that placeholder. I couldn't check whether it already exists, because the key-listing call isn't available in this environment.\n\n**Not tested:** I started the pipeline with `use`. I couldn't send a file to it or read its status, because the task token is redacted in my tools. I don't know whether `total` and `due_date` come back typed as a number and a date. I also haven't checked that a missing field returns an empty value.\n\nTo change the model, edit the profile name in `llm_openai_1`. For example, `openai-5-4` is the larger model.",
+									"type": "text"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "end_turn",
+						"tokens": {
+							"cache_creation": 154,
+							"cache_read": 24986,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 464
+						}
+					}
+				}
+			],
+			"ended": {
+				"outcome": "done",
+				"reason": "done"
+			},
+			"calls": [
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "6d9609e0dbd8369ea38c0ec07f407191f0a7531cf9f5d349b37f5c1c052e4632",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "320b62804840e10b9547220b78d88fca46122c34cde682d96b9a828383097e33",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "list_workspace",
+					"ok": true,
+					"args": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+					"result": "e3ed6351ceb4c2a2a68f65b4ca45df32ea27b2c8995517c5f9ff2c23c3f23865"
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "817e2d842a825036bafd39b9caa9182f6492b864d61681554369898e96aad18e",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "173cdf38761d29ecc88da012ba04e1643e58c19e52a3776c8318356100b3ae94",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "read_file",
+					"ok": true,
+					"args": "cb1aaadf614d053d606b8191c14d5e4284bddd2861cfda3c440584c47bcca211",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "read_file",
+					"ok": true,
+					"args": "f190e6a78f8eb7e12c32158b8f4c04187d0da8e1199ab9152a0fc2717ca0f8e9",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "read_file",
+					"ok": true,
+					"args": "07d57f38f9a52675e47fcde12e53c20588142d86d9bfdee250205052ee4a1446",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "9d660143554e862bd0e9334ad6c55b3fa451e81593de2c45118764d08fab020e",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "5840a01cb65fdb8e72e07e006180f811f36a6e8b7a0a87b4afeffbcaa76d590c",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "89e421702178b9718154242950b5747ad4df27447ffdc31eafc1afc131234b89",
+					"result": ""
+				},
+				{
+					"wave": 5,
+					"tool": "write_file",
+					"ok": true,
+					"args": "274f86955ad5b055d0f25c87a172d8c3ea6e8cc317fc7f5369d5d86579d4c981",
+					"result": "330cd999d9eb53b6bfd17394c3fa84e34575575608c27c91d2f5edc04382bcd8"
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": false,
+					"args": "796884678254b64507313dda9e962d3f0551dc1d91adc48d7d5511e2c82547d6",
+					"result": "7dcc0687ff3fde8254bf74c7df17a4667cd59c6dddf134d968e627f4aa7a771e"
+				},
+				{
+					"wave": 6,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "fa8888997b08c52083a5a7ea2752ad62febe20ebc3236997eff0605962dfa9dc",
+					"result": "92f2982cf448d6473ae58182bdfba1f8cb6bcad37a1dffec4e5f6010a29a0c6d"
+				},
+				{
+					"wave": 7,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "4bad324d57e991919724336e42a152ec1b2624215a3bff6888eb8c9b0ba662f4",
+					"result": "5bb76a005d5f10ef82ba1406fe7a43534dbe451de2d671de378576bd7b5f32c6"
+				},
+				{
+					"wave": 8,
+					"tool": "rocketride_client",
+					"ok": false,
+					"args": "602d1722479b8489332d543311742540f2453e37fa604194302211872dd3f390",
+					"result": "c583d87e11e4293171045d564ea06f637b5146b0c60327dd3e06ad43bae62651"
+				}
+			]
+		}
+	],
+	"limits": {
+		"steps": 60,
+		"costUsd": 2
+	},
+	"expected": {
+		"status": "pass",
+		"checks": {
+			"outcome": "pass",
+			"scope": "pass",
+			"no-leak": "pass",
+			"static-valid": "pass",
+			"engine-valid": "not_in_layer",
+			"placeholders": "pass",
+			"providers": "pass",
+			"llm-control": "pass",
+			"fields": "pass",
+			"runs": "not_in_layer"
+		}
+	},
+	"finalFiles": {
+		"pipelines/invoice-fields.pipe": "da4ddb5d505da59118853cf0079f3d21486b9c8e35dabf3c7947d0de79df2f77"
+	}
+}

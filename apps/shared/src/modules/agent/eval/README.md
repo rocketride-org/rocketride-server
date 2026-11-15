@@ -24,32 +24,32 @@ Output goes to `.verify/eval/<layer>-<time>/` in the checkout, or `--out`: `repo
 
 | Layer | Model                                                        | Engine                                            | Keys                           |
 | ----- | ------------------------------------------------------------ | ------------------------------------------------- | ------------------------------ |
-| L1    | recorded replies, replayed                                   | fake (`engine.ts`)                                | none                           |
-| L2    | Anthropic's Messages API or OpenAI's Responses API, by fetch | fake                                              | the provider key, to the trial |
+| L1    | recorded engine answers, replayed                            | fake (`engine.ts`)                                | none                           |
+| L2    | the product's model pipeline on a local engine               | fake, with the model pipeline on a local engine   | to the local engine only       |
 | L3    | the stand-in model pipeline on the engine                    | the branch-built engine, through the verify skill | to the engine only             |
 
 Every layer runs the same trial (`trial.ts`) through the product's own path: the shell's `TurnController` (rows, Stop, the "Needs your OK" cards), `AgentSession` and its session storage, `agent()` with its stand-in model pipeline, `runAgent`, the Wave loop, every toolkit, the approval list, and the rocket-ui workspace with its read-only `.rocketride/` guides. Only the client behind it changes. Cards are answered no.
 
 - **L1** replays the recordings in `data/recordings/` on the fake engine. It needs no key and takes a few seconds. A scenario with no recording is `pending`, never `pass`, and L1 exits 1 unless every scenario has a recording that reproduces.
-- **L2** asks a live model through the fake engine's stand-in `chat`. It renders each question the way the engine does (the Python client's `Question.getPrompt`), marks the stable start for prompt caching, and repeats the engine's JSON check and its three tries for a question that asks for JSON. The default model is the one behind the product's stand-in profile (`claude-sonnet-5`). Each trial keeps the model's replies, so an L2 run can become recordings.
+- **L2** sends the product's own model pipeline and Question from the fake engine's `chat` to a local engine that is already running (`--engine`, default `http://127.0.0.1:5565`, its API key in `RR_VERIFY_APIKEY`, default `local-test`). That engine must be a build of this branch, and holds the provider keys as its `ROCKETRIDE_ANTHROPIC_KEY` / `ROCKETRIDE_OPENAI_KEY` Variables; the trials hold none. The model is `--provider` and `--model` (a profile of the provider's node), default the product's (`model.ts` DEFAULT_MODEL). `--adapter text` answers every native turn `tools_unsupported` before the engine sees it, so the product's own fallback runs the text adapter on the real model. Each trial keeps the engine's answers, so an L2 run can become recordings.
 - **L3** takes `/tmp/rr-verify-5565.lock`, starts the branch-built engine with `rr-verify-agent launch --engine source --engine-only`, runs each trial with every model key unset and the engine's API key in `RR_VERIFY_APIKEY` (never in a file), and stops the engine with `rr-verify-agent cleanup`, also when starting it failed part way. When launch refuses because this checkout's engine already runs, L3 leaves that engine alone. The engine's provenance is the skill's `engine.json`. Neither the skill nor verify-rocketride's launcher (#2870) is on this branch yet, so L3 refuses to start and names the missing skill.
 
 The fake engine serves the file store in memory, the catalog from `nodes/src/nodes/*/services*.json`, `validate` by the static pipeline rules, and `use`, `getTaskStatus`, `send` and `terminate`. A start checks `${ROCKETRIDE_*}` names against the run's Variables and refuses a second start of a running pipeline, as the engine does. Pipelines never run, and `send` says so. Any other client method throws a message that names it.
 
 ## L1 in CI
 
-`replay.test.ts` runs L1 inside `./builder shared:test`, which CI's build runs on every pull request to develop or main. It fails unless every scenario has a recording, and every replay reproduces: its status and every check match the live trial it was recorded from, its final files are the same, each turn's TurnResult has the same outcome and reason, every tool call has the same wave, tool, outcome, arguments and result, and it used every recorded reply. Anything else means the agent's loop, its tools, what they read or the scoring changed how the recorded replies play out.
+`replay.test.ts` runs L1 inside `./builder shared:test`, which CI's build runs on every pull request to develop or main. It fails unless every scenario has a recording, and every replay reproduces: its status and every check match the live trial it was recorded from, its final files are the same, each turn's TurnResult has the same outcome and reason, every tool call has the same wave, tool, outcome, arguments and result, and it used every recorded answer, each asked as the same kind of question (a native turn or a text question) answering the same call ids. Anything else means the agent's loop, its tools, what they read or the scoring changed how the recorded answers play out. Every native turn a replay sends is also checked against the rules a provider enforces (roles alternate, the last message is the user's, every call answered once); a turn that breaks one gets the engine's `invalid_request`.
 
 Arguments and results are compared by sha256, after `NONDETERMINISTIC` in `recordings.ts` replaces what differs between a live trial and its replay (UUIDs, the fake engine's run tokens and start times, the synthetic Variable values). A read of the guides under `.rocketride/` (served from `docs/agents/context/`) or of the node catalog (`getServices`, `getService`, from `nodes/src/nodes/*/services*.json`) keeps its outcome and arguments but not its result (`SERVED_READS`), so editing a guide or a services file does not fail the replay. Every other result counts.
 
 When a change is meant to do that, delete the old set from `data/recordings/` (a run refuses to start while any recording is invalid, and a second recording of the same scenario and trial is invalid) and record again:
 
 ```bash
-EVAL_ARGS="run --layer L2 --out ../../.verify/eval/record" ./builder shared:eval
+EVAL_ARGS="run --layer L2 --engine http://127.0.0.1:<port> --out ../../.verify/eval/record" ./builder shared:eval
 node --import tsx src/modules/agent/eval/run.ts record --from ../../.verify/eval/record --set claude-<commit>
 ```
 
-A recording holds each turn's request, the model's replies in order, the turn's TurnResult outcome and reason, each tool call's wave, tool and outcome with the sha256 of its arguments and of its result (empty for a guide or catalog read), the limits the trial ran under, how it scored and the sha256 of its final files.
+A recording (format 4) holds each turn's request, the engine's answer entry to each question in order (its message, stop reason and tokens, its error, or its text) with what was asked and which call ids it answered, the model as `provider/model`, the turn's TurnResult outcome and reason, each tool call's wave, tool and outcome with the sha256 of its arguments and of its result (empty for a guide or catalog read), the limits the trial ran under, how it scored and the sha256 of its final files.
 
 ## Scenarios and data
 
