@@ -185,7 +185,7 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert '<img src="/apps/rocketride.home/v3/seo-assets/logo.svg" alt="RocketRide">' in crawler.text
     assert '<title>Pricing | RocketRide</title>' in crawler.text and '<title>snap</title>' not in crawler.text
     assert '<meta name="description" content="Plans and prices.">' in crawler.text
-    assert crawler.headers['cache-control'] == 'private, max-age=3600'
+    assert crawler.headers['cache-control'] == 'public, max-age=3600'
     assert crawler.headers['vary'] == 'User-Agent'
     human = client.get('/pricing', headers={'User-Agent': BROWSER})
     assert SHELL_BODY in human.text and 'Pricing plans' not in human.text
@@ -279,7 +279,33 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     clock[0] += pages._STORAGE_BACKOFF_SECONDS
     resp = _crawl(client)
-    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'private, max-age=3600'
+    assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'public, max-age=3600'
+
+
+def test_every_page_response_carries_vary_user_agent(shell_root, monkeypatch):
+    # Plan section 7: a rendered snapshot is public, so every answer for the same
+    # URL must say it varies by User-Agent, or a shared cache in front could
+    # hand people a crawler's snapshot (D7).
+    _seed()
+    _serve(_page(), _page('/plain', snapshot=''), _page('/hidden', listed=False))
+    client = _client()
+    answers = [
+        _crawl(client),  # the rendered snapshot
+        client.get('/pricing', headers={'User-Agent': BROWSER}),  # the shell for people
+        client.head('/pricing', headers={'User-Agent': GOOGLEBOT}),
+        _crawl(client, '/plain'),  # no snapshot: the shell for crawlers too
+        _crawl(client, '/hidden'),
+    ]
+
+    async def down(path):
+        raise StorageError('store down')
+
+    monkeypatch.setattr(pp, 'artifact_file_info', down)
+    pages._snapshot_cache.clear()
+    pages._render_cache.clear()
+    answers.append(_crawl(client))  # a storage fallback
+    for resp in answers:
+        assert resp.status_code == 200 and 'User-Agent' in resp.headers['vary'].split(', '), resp.request.url
 
 
 def test_a_raw_provider_error_on_the_stat_backs_off_like_a_storage_error(shell_root, monkeypatch, warned):

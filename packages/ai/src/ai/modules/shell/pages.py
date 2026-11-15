@@ -48,10 +48,11 @@ build output, rendered by the restricted template engine (``template.py``)
 with ``assets``, the version's URL base. A page without a snapshot, or with
 one that cannot be read or rendered, serves crawlers the shell document too.
 Either way the page's head metadata (title, description, canonical URL,
-robots) is injected. No page response may sit in a shared cache: one that
-ignores ``Vary: User-Agent`` (CloudFront does) would hand people a crawler's
-snapshot. A rendered snapshot is ``private, max-age=3600``; the shell
+robots) is injected. Every page response carries ``Vary: User-Agent``. A
+rendered snapshot is ``public, max-age=3600`` (plan section 7); the shell
 document names the current build's bundles, so it is ``private, no-cache``.
+A shared cache put in front would have to honor that ``Vary`` (CloudFront
+ignores it by default), or it would hand people a crawler's snapshot.
 
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; snapshot bytes, immutable per version, are
@@ -101,10 +102,11 @@ FALLBACK_PATH = '/{public_page_path:path}'
 # manifest data that can change, and an unbounded 301 is cached indefinitely.
 _REDIRECT_CACHE_CONTROL = 'public, max-age=86400'
 
-# A crawler may keep a rendered snapshot for an hour, but no shared cache may:
-# one that ignores Vary: User-Agent (CloudFront does) would serve it to people.
-# The render cache already spares the server the re-render.
-_SNAPSHOT_CACHE_CONTROL = 'private, max-age=3600'
+# Rod's plan section 7: public, max-age=3600, and every page response carries
+# Vary: User-Agent. CloudFront ignores Vary by default: if a shared cache is ever
+# put in front, make snapshots private or key that cache on User-Agent, or it
+# serves crawler pages to people (D7). Today the engine serves them directly.
+_SNAPSHOT_CACHE_CONTROL = 'public, max-age=3600'
 
 
 def set_web_server(server: WebServer) -> None:
