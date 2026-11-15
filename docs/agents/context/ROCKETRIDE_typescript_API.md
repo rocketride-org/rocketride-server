@@ -486,7 +486,7 @@ A stream-like interface over one server-side data pipe.
 - `write(buffer: Uint8Array): Promise<void>` — write one chunk; call repeatedly to stream large datasets
 - `close(): Promise<PIPELINE_RESULT | undefined>` — close the pipe and get the processing result; a closed pipe cannot be reopened
 - `tool<T>(tool: string, nodeId?: string, input?: Record<string, unknown>): Promise<T>` — invoke a `@tool_function` on a pipeline node **through this open pipe**, reusing its pipeline instance (no pool borrow). An empty `nodeId` broadcasts to all tool-lane nodes; the first owner of the tool handles it
-- Properties: `isOpened: boolean` (true between a successful `open()` and `close()`), `pipeId: number | undefined` (server-assigned by `open()`)
+- Properties: `isOpened: boolean` (true between a successful `open()` and `close()`), `pipeId: number | undefined` (the server-assigned SLOT, reused across bindings), `traceId: string | undefined` (the request tree the pipe started, `nodeId.engineId.n`; never reused, opaque; what every event of the request carries)
 
 ```typescript
 const pipe = await client.pipe('task-token', { name: 'data.json' }, 'application/json');

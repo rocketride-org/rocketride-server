@@ -160,8 +160,12 @@ async def seed_rich(istore, spool_root, monkeypatch):
 
 
 def sse_event(pid, message):
-    """A node-authored SSE narration message on a pipe slot (unstamped)."""
-    return {'type': 'event', 'event': 'apaevt_sse', 'body': {'pipe_id': pid, 'message': message}}
+    """A node-authored SSE narration message on a pipe slot (unstamped); the tree matches flow_op's."""
+    return {
+        'type': 'event',
+        'event': 'apaevt_sse',
+        'body': {'pipeId': pid, 'traceId': f'1.1.{pid}', 'message': message},
+    }
 
 
 def golden_trace_windows(golden):
@@ -175,7 +179,7 @@ def golden_trace_windows(golden):
         for later in golden[i:]:
             body = later.get('body') or {}
             is_flow = later.get('event') == 'apaevt_flow' and body.get('id') == slot
-            is_sse = later.get('event') == 'apaevt_sse' and body.get('pipe_id') == slot
+            is_sse = later.get('event') == 'apaevt_sse' and body.get('pipeId') == slot
             if not is_flow and not is_sse:
                 continue
             window.append(later)

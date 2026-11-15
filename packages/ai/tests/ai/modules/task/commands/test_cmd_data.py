@@ -69,7 +69,7 @@ def engine_log(monkeypatch) -> List[Dict[str, Any]]:
         sent.append({'engine': self, **request['arguments']})
         if request['arguments'].get('subcommand') == 'open':
             opened['count'] += 1
-            return {'body': {'pipe_id': opened['count'], 'traceId': f'1.1.{6 + opened["count"]}'}}
+            return {'body': {'pipeId': opened['count'], 'traceId': f'1.1.{6 + opened["count"]}'}}
         return {'body': {'ok': True}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
@@ -86,7 +86,7 @@ async def _frame(conn, **arguments):
 async def _opened(ts, conn, **arguments):
     """Open a pipe on ``conn``'s control; the slot the engine answered."""
     body = await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain', **arguments)
-    return body['pipe_id']
+    return body['pipeId']
 
 
 # =============================================================================
@@ -113,15 +113,15 @@ async def test_a_repoint_with_open_pipes_keeps_the_control_on_the_old_engine_unt
     # Every frame of the control, a new open included, still lands on the old engine
     engine_log.clear()
     second = await _opened(ts, conn)
-    await _frame(conn, subcommand='write', pipe_id=slot, data=b'x')
+    await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
     assert second != slot and [entry['engine'] for entry in engine_log] == [old, old]
 
     # The first close leaves the other binding open: the old engine stays held
-    await _frame(conn, subcommand='close', pipe_id=slot)
+    await _frame(conn, subcommand='close', pipeId=slot)
     assert control.draining is old and set(control.open_pipes) == {second} and old.is_live
 
     # The LAST close drains it: the hold goes and, as its last, stops the old engine
-    await _frame(conn, subcommand='close', pipe_id=second)
+    await _frame(conn, subcommand='close', pipeId=second)
     assert control.draining is None and control.open_pipes == {}
     assert (old, 'repointed') in engines
     engine_log.clear()
@@ -147,7 +147,7 @@ async def test_a_repoint_back_onto_the_draining_engine_makes_it_current_again(ca
     # The engine the control passed through lost its only hold
     assert (second, 'repointed') in engines
 
-    await _frame(conn, subcommand='close', pipe_id=slot)
+    await _frame(conn, subcommand='close', pipeId=slot)
     assert first.is_live and control.task is first and (first, 'repointed') not in engines
 
 
@@ -167,7 +167,7 @@ async def test_an_open_still_in_flight_keeps_the_old_engine_through_a_repoint(ca
         sent.append({'engine': self, **request['arguments']})
         if request['arguments'].get('subcommand') == 'open':
             await gate.wait()
-            return {'body': {'pipe_id': 1, 'traceId': '1.1.7'}}
+            return {'body': {'pipeId': 1, 'traceId': '1.1.7'}}
         return {'body': {'ok': True}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
@@ -186,7 +186,7 @@ async def test_an_open_still_in_flight_keeps_the_old_engine_through_a_repoint(ca
     gate.set()
     slot = await opening
     assert control.open_pipes[slot].engine is old and control.pending_opens == {}
-    await _frame(conn, subcommand='close', pipe_id=slot)
+    await _frame(conn, subcommand='close', pipeId=slot)
     assert control.draining is None and (old, 'repointed') in engines
 
 
@@ -207,7 +207,7 @@ async def test_a_client_sent_caller_never_reaches_the_engine(catalog, engines, e
     if subcommand == 'open':
         arguments.update(object={'name': 'x', '_caller': smuggled}, mimeType='text/plain')
     else:
-        arguments['pipe_id'] = await _opened(ts, conn)
+        arguments['pipeId'] = await _opened(ts, conn)
         engine_log.clear()
     if subcommand == 'tool':
         arguments['tool'] = 'ask'
@@ -278,12 +278,12 @@ async def test_a_frame_on_a_slot_not_open_on_the_callers_control_is_refused_befo
     conn = _data_conn(ts, control)
 
     with pytest.raises(PermissionError):
-        await _frame(conn, subcommand='write', pipe_id=1, data=b'x')
+        await _frame(conn, subcommand='write', pipeId=1, data=b'x')
     assert engine_log == []
 
     # Opened by THIS control: the write goes through, under the open's request id
     slot = await _opened(ts, conn)
-    await _frame(conn, subcommand='write', pipe_id=slot, data=b'x')
+    await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
     assert engine_log[1]['_caller']['correlationId'] == engine_log[0]['correlationId']
 
 
@@ -301,8 +301,8 @@ async def test_frames_of_an_open_pipe_stay_on_the_engine_it_opened_on(catalog, e
     # The control moves to another engine (what a repoint does)
     control.task = MagicMock(name='new-engine')
 
-    await _frame(conn, subcommand='write', pipe_id=slot, data=b'x')
-    await _frame(conn, subcommand='close', pipe_id=slot)
+    await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
+    await _frame(conn, subcommand='close', pipeId=slot)
 
     assert [f['engine'] for f in engine_log] == [opened_on, opened_on, opened_on]
     # The close retired the record
@@ -319,7 +319,7 @@ async def test_a_close_retires_the_record_even_when_the_engine_fails(catalog, en
     monkeypatch.setattr(TaskEngine, '_send_data', AsyncMock(side_effect=RuntimeError('engine gone')))
 
     with pytest.raises(RuntimeError):
-        await _frame(conn, subcommand='close', pipe_id=slot)
+        await _frame(conn, subcommand='close', pipeId=slot)
     assert control.open_pipes == {}
 
 
@@ -438,7 +438,7 @@ def test_the_stamp_and_record_cost_microseconds():
     control = MagicMock(address='acme.docBrain.webhook_1', rung='dev', orgId='org-1', env={}, trace_level=None)
     control.team_context.team_id = 'team-1'
     conn = MagicMock(_account_info=_caller(), request_context=None)
-    arguments = {'subcommand': 'write', 'pipe_id': 1, 'data': b'x' * 65536, '_caller': {'userId': 'x'}}
+    arguments = {'subcommand': 'write', 'pipeId': 1, 'data': b'x' * 65536, '_caller': {'userId': 'x'}}
     rounds = 2000
 
     started = time.perf_counter()

@@ -120,8 +120,8 @@ def flow_event(data=None):
 
 
 def flow_op(op, pid=1, component='x', data=None, pipes=None):
-    """A flow event with an explicit op/component/data (unstamped)."""
-    body = {'id': pid, 'op': op, 'component': component, 'pipes': pipes or ['base', component]}
+    """A flow event with an explicit op/component/data (unstamped); its request tree is derived from the slot."""
+    body = {'id': pid, 'op': op, 'component': component, 'pipes': pipes or ['base', component], 'traceId': f'1.1.{pid}'}
     if op in ('enter', 'leave'):
         body['trace'] = {'lane': 'open', 'data': data}
     else:

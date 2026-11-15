@@ -493,8 +493,8 @@ async def test_write_text_joins_a_character_split_across_two_writes(monkeypatch)
     data = 'Привет, мир'.encode('utf-8')
 
     # 'П' is two bytes; the first write ends after its first byte
-    await conn._write({}, {'pipe_id': 1, 'data': data[:1]})
-    await conn._write({}, {'pipe_id': 1, 'data': data[1:]})
+    await conn._write({}, {'pipeId': 1, 'data': data[:1]})
+    await conn._write({}, {'pipeId': 1, 'data': data[1:]})
 
     assert _written_text(conn_pipe) == 'Привет, мир'
     assert not conn_pipe.has_failed
@@ -506,7 +506,7 @@ async def test_write_text_one_byte_at_a_time_sends_no_empty_text(monkeypatch):
     conn, conn_pipe = _make_text_conn(monkeypatch)
 
     for byte in 'あいう'.encode('utf-8'):
-        await conn._write({}, {'pipe_id': 1, 'data': bytes([byte])})
+        await conn._write({}, {'pipeId': 1, 'data': bytes([byte])})
 
     assert _written_text(conn_pipe) == 'あいう'
     assert all(call.args[0] for call in conn_pipe.pipe.writeText.call_args_list)
@@ -518,7 +518,7 @@ async def test_write_text_still_rejects_bytes_that_are_not_utf8(monkeypatch):
     conn, conn_pipe = _make_text_conn(monkeypatch)
 
     with pytest.raises(UnicodeDecodeError):
-        await conn._write({}, {'pipe_id': 1, 'data': b'ok \xff'})
+        await conn._write({}, {'pipeId': 1, 'data': b'ok \xff'})
 
     assert conn_pipe.has_failed
 
@@ -548,9 +548,9 @@ async def test_a_frame_for_another_request_never_reaches_a_reused_slot(monkeypat
 async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
     """A text that ends on a character boundary closes normally."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'Привет'.encode('utf-8')})
+    await conn._write({}, {'pipeId': 1, 'data': 'Привет'.encode('utf-8')})
 
-    result = await conn._close({}, {'pipe_id': 1})
+    result = await conn._close({}, {'pipeId': 1})
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
@@ -561,10 +561,10 @@ async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
 async def test_close_fails_text_that_ends_inside_a_character(monkeypatch):
     """A body cut inside its last character fails the close; the pipe still goes back."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'ok П'.encode('utf-8')[:-1]})
+    await conn._write({}, {'pipeId': 1, 'data': 'ok П'.encode('utf-8')[:-1]})
 
     with pytest.raises(UnicodeDecodeError):
-        await conn._close({}, {'pipe_id': 1})
+        await conn._close({}, {'pipeId': 1})
 
     assert conn_pipe.has_failed
     conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
@@ -574,11 +574,11 @@ async def test_close_fails_text_that_ends_inside_a_character(monkeypatch):
 async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypatch):
     """A pipe whose write already failed closes as before, without a new decode error."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'П'.encode('utf-8')[:1]})
+    await conn._write({}, {'pipeId': 1, 'data': 'П'.encode('utf-8')[:1]})
     with pytest.raises(UnicodeDecodeError):
-        await conn._write({}, {'pipe_id': 1, 'data': b'\xff'})
+        await conn._write({}, {'pipeId': 1, 'data': b'\xff'})
 
-    result = await conn._close({}, {'pipe_id': 1})
+    result = await conn._close({}, {'pipeId': 1})
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
@@ -667,7 +667,7 @@ async def test_open_stamps_the_caller_on_the_pipe_at_its_trace_level(monkeypatch
         {'object': {'name': 'x'}, 'mimeType': 'application/octet-stream', '_caller': dict(caller)},
     )
 
-    assert body == {'pipe_id': 7, 'traceId': 3}
+    assert body == {'pipeId': 7, 'traceId': 3}
     target.getPipe.assert_called_once_with('full')
     assert pipe.caller == caller
     record = conn._pipe_map[7]

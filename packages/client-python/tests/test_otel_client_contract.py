@@ -244,7 +244,7 @@ class TestBridgeAgainstRealClient:
         # through a fake's hand-rolled emit().
         await client.on_event(event_envelope('apaevt_flow', {'id': 0, 'op': 'begin'}, seq=1))
         await client.on_event(event_envelope('apaevt_task', {'action': 'running'}, seq=2))
-        await client.on_event(event_envelope('apaevt_sse', {'pipe_id': 0, 'type': 'thinking'}, seq=3))
+        await client.on_event(event_envelope('apaevt_sse', {'pipeId': 0, 'type': 'thinking'}, seq=3))
         await client.on_event(event_envelope('apaevt_status_update', {'state': 3}, seq=4))
         # An event the bridge does not consume must not reach either mapper.
         await client.on_event(event_envelope('apaevt_status_upload', {'action': 'write'}, seq=5))

@@ -1984,7 +1984,7 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
     t._run_logs = {}
     t._run_log_open_lock = asyncio.Lock()
     t._run_log_failed = set()
-    message = {'event': 'apaevt_sse', 'body': {'pipe_id': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
+    message = {'event': 'apaevt_sse', 'body': {'pipeId': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
 
     await TaskEngine.on_event(t, message)
 

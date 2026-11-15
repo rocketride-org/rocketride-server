@@ -279,7 +279,7 @@ class TestRunBridge:
 
         await client.emit('apaevt_task', {'action': 'begin', 'projectId': 'p', 'source': 's'})
         await client.emit('apaevt_flow', {'id': 0, 'op': 'begin', 'pipes': ['x'], 'component': 'x'})
-        await client.emit('apaevt_sse', {'pipe_id': 1, 'type': 'thinking'})
+        await client.emit('apaevt_sse', {'pipeId': 1, 'type': 'thinking'})
         await client.emit('apaevt_status_update', {'state': 3})
         await client.emit('apaevt_unrelated', {'ignored': True})
 

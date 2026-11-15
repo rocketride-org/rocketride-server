@@ -384,6 +384,9 @@ export class LogEventStream {
 		laterSegIds: number[],
 	): Promise<LogTraceDetail> {
 		const slot = beginBody.id;
+		// The request tree the begin belongs to: SSE lines correlate by it (a
+		// slot is reused by the next request; a traceId never is)
+		const tree = beginBody.traceId;
 		const events: LogEvent[] = [];
 		let ended = false;
 		let endTime: number | undefined;
@@ -395,9 +398,9 @@ export class LogEventStream {
 				const body = ev.body as Record<string, unknown> | undefined;
 				if (!body) continue;
 				// The trace's events: its flow ops (slot = body.id) and the
-				// node's SSE narration on the same slot (body.pipe_id).
+				// node's SSE narration in the same request tree (body.traceId)
 				const isFlow = ev.event === 'apaevt_flow' && body.id === slot;
-				const isSse = ev.event === 'apaevt_sse' && body.pipe_id === slot;
+				const isSse = ev.event === 'apaevt_sse' && tree !== undefined && body.traceId === tree;
 				if (!isFlow && !isSse) continue;
 				// Seq-dedupe across sources (a tail copy may duplicate disk).
 				if (events.length > 0 && events[events.length - 1].body.logSeq >= ev.body.logSeq) continue;

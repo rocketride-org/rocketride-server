@@ -70,7 +70,7 @@ def data_path(monkeypatch):
         arguments = request['arguments']
         calls.append((self, arguments['subcommand'], dict(arguments)))
         if arguments['subcommand'] == 'open':
-            return {'body': {'pipe_id': 1, 'traceId': 99}}
+            return {'body': {'pipeId': 1, 'traceId': 99}}
         if arguments['subcommand'] == 'close':
             return {'body': {'objects': 1, 'answer': 'ok'}}
         return {'body': {}}
@@ -243,8 +243,8 @@ async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, m
         if sub == 'write':
             await asyncio.sleep(10)
         if sub == 'close':
-            closed.append(request['arguments']['pipe_id'])
-        return {'body': {'pipe_id': 1}}
+            closed.append(request['arguments']['pipeId'])
+        return {'body': {'pipeId': 1}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     with pytest.raises(TaskError) as err:
@@ -264,7 +264,7 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
     async def send(self, request):
         if request['arguments']['subcommand'] in ('write', 'close'):
             await asyncio.sleep(10)
-        return {'body': {'pipe_id': 1}}
+        return {'body': {'pipeId': 1}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     started = time.monotonic()

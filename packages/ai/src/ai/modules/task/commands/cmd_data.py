@@ -168,7 +168,7 @@ class DataCommands(DAPConn):
             if not isinstance(arguments, dict):
                 raise ValueError('arguments must be an object')
             subcommand = arguments.get('subcommand')
-            pipe_id = arguments.get('pipe_id')
+            pipe_id = arguments.get('pipeId')
 
             # Step 1: the caller's control for the address
             control = await self._control_for(request, subcommand)
@@ -368,10 +368,10 @@ class DataCommands(DAPConn):
             frame: The binding the open started.
             body: The engine's open response (``pipe_id``, wire ``traceId``).
         """
-        if not isinstance(body, dict) or body.get('pipe_id') is None:
+        if not isinstance(body, dict) or body.get('pipeId') is None:
             return
         trace_id = str(body.get('traceId') or '')
-        control.open_pipes[body['pipe_id']] = OpenPipe(
+        control.open_pipes[body['pipeId']] = OpenPipe(
             engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
         )
         control.stats.totalCount += 1

@@ -69,6 +69,7 @@ export class DataPipe {
 	private _mimeType: string;
 	private _provider?: string;
 	private _pipeId?: number;
+	private _traceId?: string;
 	private _opened = false;
 	private _closed = false;
 	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
@@ -131,7 +132,7 @@ export class DataPipe {
 			void this._client.setEvents(this._token, [], pipeId).catch(() => undefined);
 		}
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({ subcommand: 'close', pipe_id: pipeId }),
+			arguments: this._arguments({ subcommand: 'close', pipeId: pipeId }),
 			token: this._token,
 		});
 		void this._client.request(request).catch(() => undefined);
@@ -156,6 +157,18 @@ export class DataPipe {
 	 */
 	get pipeId(): number | undefined {
 		return this._pipeId;
+	}
+
+	/**
+	 * The request tree this pipe started, as the wire names it (`nodeId.engineId.n`).
+	 *
+	 * Never reused: every event of this request (flow, SSE) carries it. Opaque
+	 * to callers.
+	 *
+	 * @returns The wire traceId, or undefined before open()
+	 */
+	get traceId(): string | undefined {
+		return this._traceId;
 	}
 
 	/**
@@ -195,7 +208,8 @@ export class DataPipe {
 			throw new PipeException({ ...response, message: response.message || 'Failed to open a data pipe.', hint });
 		}
 
-		this._pipeId = response.body?.pipe_id as number | undefined;
+		this._pipeId = response.body?.pipeId as number | undefined;
+		this._traceId = response.body?.traceId as string | undefined;
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
@@ -247,7 +261,7 @@ export class DataPipe {
 		const request = this._client.buildRequest('rrext_process', {
 			arguments: this._arguments({
 				subcommand: 'write',
-				pipe_id: this._pipeId,
+				pipeId: this._pipeId,
 				data: buffer,
 			}),
 			token: this._token,
@@ -272,7 +286,7 @@ export class DataPipe {
 	 * @throws PipeException if the server reports a failure while finalizing the pipe
 	 */
 	async close(): Promise<PIPELINE_RESULT | undefined> {
-		// Allow closing after a failed open() path where the server assigned a pipe_id
+		// Allow closing after a failed open() path where the server assigned a pipeId
 		// but we never flipped _opened=true (e.g., SSE subscription failure).
 		if (this._closed || (this._pipeId === undefined && !this._opened)) {
 			return;
@@ -282,7 +296,7 @@ export class DataPipe {
 			const request = this._client.buildRequest('rrext_process', {
 				arguments: this._arguments({
 					subcommand: 'close',
-					pipe_id: this._pipeId,
+					pipeId: this._pipeId,
 				}),
 				token: this._token,
 			});
@@ -335,7 +349,7 @@ export class DataPipe {
 				tool,
 				nodeId,
 				input,
-				pipe_id: this._pipeId,
+				pipeId: this._pipeId,
 			}),
 			token: this._token,
 		});
@@ -425,7 +439,13 @@ export class RocketRideClient extends DAPClient {
 	private _dapAttempted = false;
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
-	/** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
+	/** SSE callbacks by the request tree's wire traceId (a pipe slot is reused; a traceId never is). */
+	/**
+	 * SSE callbacks by pipe SLOT. A slot is reused by the next binding once a
+	 * pipe closes, so dispatch by the never-reused `traceId` (which every SSE
+	 * body now carries) is the right key; it lands with the 2.0 surface, since
+	 * this member's type is part of the frozen 1.x class contract.
+	 */
 	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Desired state model — replaces old flag soup
@@ -2208,7 +2228,7 @@ export class RocketRideClient extends DAPClient {
 
 		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
 		if (eventType === 'apaevt_sse') {
-			const pipeId = (eventBody as Record<string, unknown>)?.pipe_id as number | undefined;
+			const pipeId = (eventBody as Record<string, unknown>)?.pipeId as number | undefined;
 			if (pipeId !== undefined) {
 				const cb = this._ssePipeCallbacks.get(pipeId);
 				if (cb) {

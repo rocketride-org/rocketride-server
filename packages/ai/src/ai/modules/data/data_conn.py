@@ -835,7 +835,7 @@ class DataConn(DAPConn):
         if correlation_id is not None:
             served = self._pipe_map.get(self._open_by_correlation.get(correlation_id, -1))
             if served is not None and served.correlation_id == correlation_id and served.is_open:
-                return self.build_response(request, body={'pipe_id': served.pipe_id, 'traceId': served.trace_id})
+                return self.build_response(request, body={'pipeId': served.pipe_id, 'traceId': served.trace_id})
 
         # Waits for the source to bind `state.target`, then sizes the semaphore
         # from its threadCount config; see `_ensure_pipe_sem`.
@@ -926,7 +926,7 @@ class DataConn(DAPConn):
 
             # Return success response: the slot (pipe_id stays until the Step 3
             # wire rename moves the clients to pipeId) and the request tree
-            return self.build_response(request, body={'pipe_id': pipe_id, 'traceId': trace_id})
+            return self.build_response(request, body={'pipeId': pipe_id, 'traceId': trace_id})
 
         except Exception as e:
             # Release semaphore on any error during open
@@ -942,7 +942,7 @@ class DataConn(DAPConn):
         considered a zombie for another 60 seconds.
         """
         # Resolve conn_pipe in the async scope so we can set in_use before dispatching
-        pipe_id = args.get('pipe_id', None)
+        pipe_id = args.get('pipeId', None)
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
@@ -1077,7 +1077,7 @@ class DataConn(DAPConn):
 
         The semaphore acquired in _open() is released here.
         """
-        pipe_id = args.get('pipe_id', None)
+        pipe_id = args.get('pipeId', None)
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
@@ -1238,7 +1238,7 @@ class DataConn(DAPConn):
 
         node_id = args.get('nodeId', '')
         tool_input = args.get('input', {})
-        pipe_id = args.get('pipe_id', None)
+        pipe_id = args.get('pipeId', None)
         caller = args.pop('_caller', None)
 
         # Resolve conn_pipe in async scope so we can set in_use before

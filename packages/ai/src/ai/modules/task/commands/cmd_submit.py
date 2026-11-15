@@ -285,7 +285,7 @@ class SubmitCommands(DAPConn):
             }
             opened = await task._send_data(_stamped(open_arguments))
             opened_body = opened.get('body') or {}
-            pipe_id = opened_body.get('pipe_id')
+            pipe_id = opened_body.get('pipeId')
             # The request tree is this control's from the open to the close
             # (plan 7.5), as a streamed open's is: its flow and SSE route to
             # this control, this connection first, and its lines land in this
@@ -297,11 +297,11 @@ class SubmitCommands(DAPConn):
             succeeded = False
             try:
                 try:
-                    await task._send_data(_stamped({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
+                    await task._send_data(_stamped({'subcommand': 'write', 'pipeId': pipe_id, 'data': data}))
                 except BaseException:
-                    await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
+                    await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipeId': pipe_id}))
                     raise
-                closed = await task._send_data(_stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
+                closed = await task._send_data(_stamped({'subcommand': 'close', 'pipeId': pipe_id}))
                 closed_body = dict(closed.get('body') or {})
                 # A close answers normally for an object the pipeline failed:
                 # its error rides the body, and the binding counts as failed
@@ -341,7 +341,7 @@ class SubmitCommands(DAPConn):
         ``CONST_SUBMIT_CLOSE_SECONDS`` at most, so a cancelled request is
         never held open by an engine that does not answer the close.
         """
-        pipe_id = (close.get('arguments') or {}).get('pipe_id')
+        pipe_id = (close.get('arguments') or {}).get('pipeId')
         try:
             await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_SUBMIT_CLOSE_SECONDS)
         except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure

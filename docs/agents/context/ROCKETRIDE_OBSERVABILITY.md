@@ -345,18 +345,33 @@ subscription time.
 This is the data that lets you reconstruct _why_ a pipeline produced what it
 produced: each component entry/exit with its lane data and any error.
 
+### 5.3b `apaevt_ops`: engine-level output of a SHARED engine (subscribe to `OPS`, `sys.admin` only)
+
+On an engine shared across users, counts, errors, warnings, downloads, exit
+codes, bare `print` output and the debugger channel belong to no single caller.
+They leave the server as `apaevt_ops` with body `{ engineKey, kind, ... }`
+(`kind` = the original event name), on the `*` wildcard subscription, bit
+`OPS` (`1 << 10`). `ALL` does NOT include `OPS`: an operator opts in, and the
+subscription is refused without `sys.admin`. On a private engine the same
+output reaches the owner's own controls as before.
+
 ### 5.4 `apaevt_sse`: node-to-UI passthrough (subscribe to `SSE`)
 
-Nodes can call `monitorSSE(pipe_id, type, data)` to broadcast custom updates
-("thinking", "tool_call", progress, etc.). Body shape:
+Nodes call `self.sendSSE(type, **data)` (rocketlib) to broadcast custom
+updates ("thinking", "tool_call", progress, etc.). Body shape:
 
 ```ts
 {
-  pipe_id: number,
+  pipeId: number,      // the pipe SLOT (reused across bindings)
+  traceId: string,     // the request tree, `nodeId.engineId.n` (never reused; opaque)
   type: string,        // node-defined event type
   data: object         // node-defined payload
 }
 ```
+
+Correlate by `traceId`, never by `pipeId`: a slot is handed to the next
+request as soon as a binding closes. (The SDKs' `on_sse` / `onSSE` callbacks
+still dispatch by slot on the 1.x surface and move to `traceId` with 2.0.)
 
 Schema is intentionally open: interpret per node type.
 

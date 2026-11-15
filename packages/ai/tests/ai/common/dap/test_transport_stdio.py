@@ -439,7 +439,7 @@ async def test_exit_message_too_short_dispatches_incomplete_event_and_disconnect
 @pytest.mark.asyncio
 async def test_sse_message_parses_json_payload():
     """SSE yields apaevt_sse with the decoded JSON body."""
-    payload = {'pipe_id': 1, 'traceId': 7, 'message': 'hello', 'data': {}}
+    payload = {'pipeId': 1, 'traceId': 7, 'message': 'hello', 'data': {}}
     events, _ = await _drive('>SSE*' + json.dumps(payload))
     event = _single_event(events)
     assert event['event'] == 'apaevt_sse'

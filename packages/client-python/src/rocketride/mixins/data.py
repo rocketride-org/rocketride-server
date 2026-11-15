@@ -173,6 +173,7 @@ class DataMixin(DAPClient):
             self._mime_type = mime_type or 'application/octet-stream'
             self._provider = provider
             self._pipe_id = None
+            self._trace_id = None
             self._opened = False
             self._closed = False
             self._on_sse = on_sse
@@ -184,8 +185,18 @@ class DataMixin(DAPClient):
 
         @property
         def pipe_id(self) -> Optional[int]:
-            """Get the unique ID assigned to this pipe by the server."""
+            """Get the slot the server assigned to this pipe (reused across bindings)."""
             return self._pipe_id
+
+        @property
+        def trace_id(self) -> Optional[str]:
+            """
+            The request tree this pipe started, as the wire names it (``nodeId.engineId.n``).
+
+            Never reused: every event of this request (flow, SSE) carries it.
+            Opaque to callers.
+            """
+            return self._trace_id
 
         async def open(self) -> 'DataMixin.DataPipe':
             """
@@ -264,7 +275,9 @@ class DataMixin(DAPClient):
                 )
                 raise PipeException(response)
 
-            self._pipe_id = response.get('body', {}).get('pipe_id')
+            body = response.get('body', {})
+            self._pipe_id = body.get('pipeId')
+            self._trace_id = body.get('traceId')
             self._opened = True
 
             # If an SSE callback was provided, subscribe and register for this pipe
@@ -305,7 +318,7 @@ class DataMixin(DAPClient):
                 arguments=self._arguments(
                     {
                         'subcommand': 'write',
-                        'pipe_id': self._pipe_id,
+                        'pipeId': self._pipe_id,
                         'data': buffer,
                     }
                 ),
@@ -349,7 +362,7 @@ class DataMixin(DAPClient):
                     arguments=self._arguments(
                         {
                             'subcommand': 'close',
-                            'pipe_id': self._pipe_id,
+                            'pipeId': self._pipe_id,
                         }
                     ),
                     token=self._token,
@@ -406,7 +419,7 @@ class DataMixin(DAPClient):
                         'tool': tool,
                         'nodeId': node_id,
                         'input': input or {},
-                        'pipe_id': self._pipe_id,
+                        'pipeId': self._pipe_id,
                     }
                 ),
                 token=self._token,
