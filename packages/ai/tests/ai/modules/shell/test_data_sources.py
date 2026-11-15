@@ -414,7 +414,7 @@ def test_failed_binding_is_served_but_not_cached(acct, shell_root, warned, entry
     acct.fail = False
     resp = _crawl(client)
     assert ('Builder' in resp.text or 'Brandy' in resp.text) and _jsonld(resp.text)
-    assert resp.headers['cache-control'] == 'private, max-age=300' and len(pages._render_cache) == 1
+    assert resp.headers['cache-control'] == 'public, max-age=300' and len(pages._render_cache) == 1
 
 
 def test_a_binding_that_does_not_answer_in_time_is_served_without_data(acct, shell_root, warned, monkeypatch):
@@ -561,15 +561,15 @@ def test_caches_keep_a_bound_response_only_as_long_as_the_engine_would(acct, she
     _seed()
     _serve(_page('/pricing', ['plans:acme.brandy']), _page('/about', []))
     client = _client()
-    assert _crawl(client).headers['cache-control'] == 'private, max-age=300'
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=300'
     # A hit carries what is left of the entry's lifetime, so the crawler's
     # cache never holds the data past the TTL counted from the render.
     clock[0] += 120.5
-    assert _crawl(client).headers['cache-control'] == 'private, max-age=180'
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=180'
     clock[0] += 179.5
-    assert _crawl(client).headers['cache-control'] == 'private, max-age=300'  # expired: rendered again
+    assert _crawl(client).headers['cache-control'] == 'public, max-age=300'  # expired: rendered again
     # Data-free crawler responses and people's responses are unchanged.
-    assert _crawl(client, '/about').headers['cache-control'] == 'private, max-age=3600'
+    assert _crawl(client, '/about').headers['cache-control'] == 'public, max-age=3600'
     assert client.get('/pricing', headers={'User-Agent': BROWSER}).headers['cache-control'] == 'private, no-cache'
 
 
@@ -579,7 +579,7 @@ def test_a_fresh_bound_response_never_advertises_more_than_the_ttl(acct, shell_r
     monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: 524202.9789498676))
     _seed()
     _serve(_page('/pricing', ['plans:acme.brandy']))
-    assert _crawl(_client()).headers['cache-control'] == 'private, max-age=300'
+    assert _crawl(_client()).headers['cache-control'] == 'public, max-age=300'
 
 
 def test_a_failing_invalidation_listener_is_a_warning(monkeypatch):

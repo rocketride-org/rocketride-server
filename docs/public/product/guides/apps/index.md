@@ -361,11 +361,11 @@ number (ASCII digits) and whose currency is a three-letter ISO 4217 code. A
 price change (`invalidate('plans')` from the billing layer) or a deployment
 change of an app a page names takes effect on the next crawl; other servers
 pick it up within five minutes. A crawler response that carries this data is
-sent `private` with a `max-age` of what remains of those five minutes, so no
-shared cache keeps it and the crawler keeps it no longer; one rendered while
-that data changed is sent `private, no-cache`. Other rendered snapshots keep
-`max-age=3600`. When the data cannot be read, crawlers get the page without
-it.
+sent `public` with a `max-age` of what remains of those five minutes, so no
+cache keeps it longer; one rendered while that data changed is sent
+`private, no-cache`. Other rendered snapshots are `public, max-age=3600`, and
+every page response carries `Vary: User-Agent`. When the data cannot be read,
+crawlers get the page without it.
 
 `/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
 its heading, blurb and docs link from `site`; redirects never appear in

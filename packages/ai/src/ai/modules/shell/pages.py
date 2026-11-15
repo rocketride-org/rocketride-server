@@ -60,9 +60,9 @@ crawler's snapshot.
 Rendered responses are cached per (path, UA class) under a byte budget and
 dropped on every aggregate swap; a crawler response bound to a data source is
 also dropped when that source is invalidated, and expires after
-``data_sources.TTL_SECONDS``. Such a response is ``private``: only the
-crawler's own cache may keep it, and only for what is left of that time, so
-the TTL bounds staleness end to end. A render overtaken by a swap or an
+``data_sources.TTL_SECONDS``. Such a response is ``public`` with a
+``max-age`` of what is left of that time, so no cache keeps it longer than
+this server would and the TTL bounds staleness end to end. A render overtaken by a swap or an
 invalidation is served ``private, no-cache``. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
@@ -863,12 +863,11 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
             _render_cache.put(key, cached, len(cached.body))
     headers = dict(cached.headers)
     if cached.sources and headers['Cache-Control'] == _SNAPSHOT_CACHE_CONTROL:
-        # Only the crawler's own cache may keep bound data, and no longer than
-        # this server would. min() caps it at the TTL: (now + TTL) - now can
-        # come out a hair over it in floating point, and ceil would round that
-        # up a whole second.
+        # No cache may keep bound data longer than this server would. min()
+        # caps it at the TTL: (now + TTL) - now can come out a hair over it in
+        # floating point, and ceil would round that up a whole second.
         max_age = math.ceil(min(cached.expires - now, data_sources.TTL_SECONDS))
-        headers['Cache-Control'] = f'private, max-age={max_age}'
+        headers['Cache-Control'] = f'public, max-age={max_age}'
     return HTMLResponse(cached.body, headers=headers)
 
 
