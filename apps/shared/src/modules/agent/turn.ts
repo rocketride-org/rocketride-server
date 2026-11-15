@@ -272,7 +272,7 @@ export function turnCard(turn: TurnResult): ChatCard {
 		}
 		case 'needs_input':
 			if (turn.reason === 'limited' || turn.reason === 'cost_limit') {
-				const spent = turn.reason === 'cost_limit' && turn.usage.cost ? [`${costText(turn.usage.cost.usd)} so far.`] : [];
+				const spent = turn.reason === 'cost_limit' && turn.usage.cost ? [`${costText(turn.usage.cost.usd, turn.usage.cost.estimated)} so far.`] : [];
 				return withFiles({ tone: 'info', title: turn.request?.question ?? 'Paused', lines: [...spent, FRESH_BUDGET], ...requestParts(turn.request) });
 			}
 			return withFiles({ tone: 'info', title: 'Needs you', ...requestParts(turn.request) });
@@ -282,10 +282,12 @@ export function turnCard(turn: TurnResult): ChatCard {
 /**
  * What a turn shows in its row's meta line: the model that answered first, so a change shows row by row, then what it used.
  *
- * @returns "claude-sonnet-5-5 · ~$0.42 est., not counting thinking", or the tokens for a model with no price; '' when nothing was counted.
+ * @returns "claude-sonnet-5-5 · $0.42" from the provider's counts, which include thinking, or "· ~$0.42 est., not counting thinking"
+ *   from character counts; the tokens for a model with no price; '' when nothing was counted.
  */
 export function usageMeta({ model, usage }: TurnResult): string {
-	const used = usage.cost ? `${costText(usage.cost.usd)}, not counting thinking` : usage.tokens ? tokensText(usage.tokens.input + usage.tokens.output) : '';
+	const { cost, tokens } = usage;
+	const used = cost ? `${costText(cost.usd, cost.estimated)}${cost.estimated ? ', not counting thinking' : ''}` : tokens ? tokensText(tokens.input + tokens.output, tokens.estimated) : '';
 	return used && model ? `${model} · ${used}` : used;
 }
 

@@ -40,16 +40,15 @@ import type { AppPrompts, CorePrompt } from './wave/plan';
 // WAVE MECHANICS — planner.py, verbatim
 // =============================================================================
 
-/** How run memory works: Wave's "Memory" instruction (planner.py:252-295). */
-const WAVE_MEMORY = `Every tool result is automatically stored in memory. All prior results appear in
-"Previous tool results" below, keyed by memory key. Each entry shows the arguments
-of the call that produced it and a structural summary — field names, array lengths,
-and sample values — so you can understand the data shape without loading it.
+/** How run memory works: Wave's "Memory" instruction (planner.py:252-295), without scratch. */
+const WAVE_MEMORY = `Every tool result is automatically stored in memory. Each result shows its memory
+key and a structural summary — field names, array lengths, and sample values — so
+you can understand the data shape without loading it.
 
 There are three ways to use stored results. Use the right one:
 
 - memory.peek (tool call)
-Use during a wave to extract specific scalar values into scratch.
+Use during a wave to extract specific scalar values.
   {"tool": "memory.peek", "args": {"key": "<key>", "path": "results[0].name"}}
   {"tool": "memory.peek", "args": {"key": "<key>", "path": "rows[0:5].city"}}
   {"tool": "memory.peek", "args": {"key": "<key>", "path": "postcodes[2]"}}
@@ -73,7 +72,7 @@ substitutes it at render time — no tool call, no context limit, no truncation.
   {{memory.ref:wave-1.r0:csv:rows}}
 
 If the structural summary confirms the data exists and looks complete, write
-done=true and embed it with {{memory.ref:key:format}} directly — do not peek it first.
+your answer and embed it with {{memory.ref:key:format}} directly — do not peek it first.
 
 Available formats: markdown_table, html_table, csv, json, text
 
@@ -86,17 +85,23 @@ running.
   {"tool": "<name>", "args": {"data": "{{memory.ref:wave-1.r0}}"}}
   {"tool": "<name>", "args": {"content": "{{memory.ref:wave-1.r0:text:content}}"}}`;
 
-/** The two reply shapes and their fields: Wave's "Response Format" instruction (planner.py:317-352). */
-const WAVE_RESPONSE_FORMAT = `Respond with one of these shapes (valid fenced JSON only):
+/** How to write the final answer, in both adapters' reply formats. */
+const ANSWER_GUIDANCE = `Write this as if speaking directly to the user — present the result clearly and naturally. Do not include planning notes, memory key references, or descriptions of what you intend to do. Write scalar values (numbers, names, computed results) directly. Bulk or tabular data you have not read in full must be referenced with {{memory.ref:key:format}} or {{memory.ref:key:format:path}} — the system will fetch, extract, and format it before delivering the answer.`;
+
+/**
+ * The text adapter's two reply shapes and their fields: Wave's "Response Format" instruction
+ * (planner.py:317-352) without scratch and remove.
+ */
+export const TEXT_RESPONSE_FORMAT = `Respond with one of these shapes (valid fenced JSON only):
 
 Invoke tools:
 \`\`\`json
-{"thought": "...", "scratch": "...", "remove": ["<key>"], "tool_calls": [{"tool": "<name>", "args": {...}}, ...]}
+{"thought": "...", "tool_calls": [{"tool": "<name>", "args": {...}}, ...]}
 \`\`\`
 
 Final answer:
 \`\`\`json
-{"thought": "...", "scratch": "...", "remove": ["<key>"], "done": true, "answer": "..."}
+{"thought": "...", "done": true, "answer": "..."}
 \`\`\`
 
 Every response must either invoke at least one tool OR set done=true with an
@@ -104,40 +109,29 @@ answer. An empty tool_calls list with no done/answer is never valid.
 
 Fields:
 - thought: one sentence — what you are doing this turn and why
-- scratch: working notes that persist across steps — store key names, intermediate
-  calculations, observations. Keep it concise; it is not a data store.
-  If a value is written in scratch, treat it as known — do not fetch it again.
-- remove: array of Previous tool result keys whose data has been fully extracted and will
-  not be referenced again. The system clears them from memory and removes them from future
-  context. Remove peek results (tool=memory.peek) as soon as their data is captured in
-  scratch. Remove primary results once their data is no longer needed.
 - tool_calls: list of tool calls to execute in parallel
-- answer: the user-facing response to their question. Write this as if speaking
-  directly to the user — present the result clearly and naturally. Do not include
-  planning notes, memory key references, or descriptions of what you intend to do.
-  Scalar values (numbers, names, computed results) come from scratch — write them
-  directly. Bulk or tabular data that was never loaded into scratch must be
-  referenced with {{memory.ref:key:format}} or {{memory.ref:key:format:path}} —
-  the system will fetch, extract, and format it before delivering the answer.`;
+- answer: the user-facing response to their question. ${ANSWER_GUIDANCE}`;
+
+/** The native adapter's reply guidance: the tools arrive as the provider's own tool definitions. */
+export const NATIVE_RESPONSE_FORMAT = `- You can call several tools in one reply; they run in parallel.
+- Beside your tool calls, write one sentence: what you are doing this turn and why.
+- When the goal is met, reply with your answer and no tool calls. ${ANSWER_GUIDANCE}`;
 
 /** The loop rules: Wave's "Rules" instruction (planner.py:373-389) with its check rule (_CHECK_RULE) naming no tool, since each toolkit names its own check. */
 const WAVE_RULES = `- Think things through thoroughly. Plan accordingly. Prefer the simplest
 approach that answers the question — do not over-analyze.
 - After you change anything, run the check that covers it, and fix every problem it
-reports before you set done=true. Its result is the proof that the work is finished:
+reports before you finish. Its result is the proof that the work is finished:
 never report success it has not confirmed.
-- Once all the information needed to complete the goal is available in scratch or
-previous results, write the answer now and set done=true. Presenting the answer is
-not a future plan step — it happens in the same response where you recognize the
-data is ready.
-- Only use the tools listed in Available Tools. Do not invent or modify tool names.
-- Check before fetching: Before any tool call — including memory.peek — check scratch and
-the result previews first. If the values you need are already there, do not fetch them.
+- Once all the information needed to complete the goal is available in previous
+results, write the answer now. Presenting the answer is not a future plan step — it
+happens in the same response where you recognize the data is ready.
+- Only use the tools you are given. Do not invent or modify tool names.
+- Check before fetching: Before any tool call — including memory.peek — check the
+result previews first. If the values you need are already there, do not fetch them.
 Missing secondary fields (units, labels, timestamps) are not blockers; if the primary
-values are known, set done=true. A plan unchanged from the previous response means you
-are not making progress — stop or change approach.
-- Remove peek results in the same response you capture their data in scratch. Do not
-carry transient peek results forward into subsequent steps.`;
+values are known, write the answer. A plan unchanged from the previous response means you
+are not making progress — stop or change approach.`;
 
 // =============================================================================
 // SECTIONS — spec section 5, in order
@@ -153,12 +147,9 @@ const ENVIRONMENT = `- You run in the user's browser tab with no terminal, so yo
 - The user can write to you while you work. Their messages show in the context as "Messages from the user during this run". They come after the request and change it where they differ, so act on them in your next plan and say in your answer how you handled them.
 - The user can stop a run. An earlier answer that starts "Stopped by you" ended before the work was done. Its list says what ran, and a call it names as still running may have finished since, so look before you redo work.`;
 
-/** 3. Wave's mechanics, under the titles Wave gives them. */
+/** 3. Wave's mechanics, under the titles Wave gives them. Each adapter adds its own Response Format section. */
 const LOOP = `Memory:
 ${WAVE_MEMORY}
-
-Response Format:
-${WAVE_RESPONSE_FORMAT}
 
 Rules:
 ${WAVE_RULES}`;

@@ -80,13 +80,6 @@ export class RunMemory {
 		return this.values.has(key);
 	}
 
-	/**
-	 * Drops results. Keys that hold nothing are ignored.
-	 */
-	clear(keys: string[]): void {
-		for (const key of keys) this.values.delete(key);
-	}
-
 	/** The stored keys, in the order they were first put. */
 	keys(): string[] {
 		return [...this.values.keys()];
@@ -266,7 +259,7 @@ export function peek(memory: RunMemory, args: Record<string, unknown>): string {
 /** memory.peek's descriptor: it runs in the loop, not through a toolkit, so it is not an AgentTool. */
 export const MEMORY_PEEK_TOOL: { name: 'memory.peek'; description: string; parameters: Record<string, unknown> } = {
 	name: 'memory.peek',
-	description: 'Extract data from a stored result using a path (field names, [n], [a:b], [*]), or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.',
+	description: 'Extract data from a stored result using a path (field names, [n], [a:b], [*]), or page through a large value in text chunks. Use the structural summary in the tool result to identify the path you need.',
 	parameters: {
 		type: 'object',
 		required: ['key'],

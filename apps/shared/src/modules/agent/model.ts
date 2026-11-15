@@ -25,11 +25,15 @@
 // =============================================================================
 
 /**
- * What the run's retry and meter policy knows about a model. Nothing here knows tokens, pipelines,
- * nodes or how Variables are stored: that is modelEngine.ts, and the only part client.process()
- * replaces. This file has no runtime imports, so settings code in any realm can read its defaults.
+ * What the run's retry and meter policy knows about a model. Nothing here knows pipelines, nodes or
+ * how Variables are stored: that is modelEngine.ts, and the only part client.process() replaces.
+ * This file has no runtime imports, so settings code in any realm can read its defaults; the
+ * client's turn types come in as types only.
  */
 
+import type { AssistantMessage, Message, StopReason, Tool } from 'rocketride';
+
+import type { Tokens } from './usage';
 import type { QuestionSpec } from './wave/plan';
 
 // =============================================================================
@@ -93,7 +97,7 @@ export interface KeyTrouble {
 }
 
 /**
- * Why a model did not answer. It tells the policy in createChatModel what it may do, not what
+ * Why a model did not answer. It tells the session's send policy what it may do, not what
  * happened: the message is for the user, and the causes stay with the implementation.
  */
 export class ModelFailure extends Error {
@@ -102,29 +106,58 @@ export class ModelFailure extends Error {
 	/** The provider may have charged for it, so the meter keeps the reservation. */
 	readonly billed: boolean;
 	readonly key?: KeyTrouble;
+	/** What a failed native turn still billed, when the engine reported it; the meter settles at that. */
+	readonly tokens?: Tokens;
 
-	constructor(message: string, o: { retryable: boolean; billed: boolean; key?: KeyTrouble }) {
+	constructor(message: string, o: { retryable: boolean; billed: boolean; key?: KeyTrouble; tokens?: Tokens }) {
 		super(message);
 		this.name = 'ModelFailure';
 		this.retryable = o.retryable;
 		this.billed = o.billed;
 		if (o.key) this.key = o.key;
+		if (o.tokens) this.tokens = o.tokens;
 	}
 }
 
 /**
- * Asks one question and resolves with the model's text, or rejects with a ModelFailure.
- * Any ModelCall fits this type, so test fakes need no adapter.
- *
- * @param o.fresh - Do not reuse whatever served the last ask. Passed only when retrying a retryable failure.
+ * What the session sends: the conversation with its tools (native tool calling), or one text
+ * question (the text adapter). Plain data; modelEngine.ts turns it into the client's Question.
  */
-export type ModelAsk = (q: QuestionSpec, o?: { fresh?: boolean }) => Promise<string>;
+export type ModelRequest =
+	| {
+			readonly kind: 'turn';
+			/** The system prompt, as Question.role and one addInstruction per section. */
+			readonly system: { readonly role: string; readonly instructions: ReadonlyArray<{ title: string; text: string }> };
+			/** Ends with a user message, as the client's turn rules require. */
+			readonly messages: readonly Message[];
+			readonly tools: readonly Tool[];
+	  }
+	| { readonly kind: 'text'; readonly spec: QuestionSpec };
 
-/** One turn's model. createChatModel knows nothing else about what is behind it. */
+/**
+ * What came back, read out of the client's Answer. Failures are not here: they throw ModelFailure,
+ * so the send policy reads one error type.
+ */
+export type ModelResponse =
+	/** A native turn: the message to send back as it is, why it stopped, and the provider's tokens when the engine gave them. */
+	| { readonly kind: 'turn'; readonly message: AssistantMessage; readonly stop: StopReason; readonly tokens?: Tokens }
+	/** A text question's answer. */
+	| { readonly kind: 'text'; readonly text: string }
+	/** The node has no native tool calling (`tools_unsupported`). The engine decides that before any provider call, so it is never billed. */
+	| { readonly kind: 'unsupported' };
+
+/**
+ * Sends one request and resolves with what came back, or rejects with a ModelFailure.
+ *
+ * @param o.fresh - Do not reuse whatever served the last send. Passed only when retrying a retryable failure.
+ */
+export type ModelSend = (request: ModelRequest, o?: { fresh?: boolean }) => Promise<ModelResponse>;
+
+/** One turn's model. The session knows nothing else about what is behind it. */
 export interface ChatModel {
 	/** As the price table and the turn's record name it, so the price can never describe another model than the one asked. */
 	readonly name: string;
-	readonly ask: ModelAsk;
+	readonly send: ModelSend;
 }
 
 // =============================================================================
