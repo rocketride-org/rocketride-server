@@ -48,7 +48,7 @@
 	padding: 0 !important;
 }
 
-/* Strip any border that MUI might add to direct children inside a node */
+/* Strip any border a child component might add to direct children inside a node */
 .react-flow__node > div {
 	border: none !important;
 }

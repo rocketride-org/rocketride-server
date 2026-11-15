@@ -23,7 +23,6 @@
 
 import { FunctionComponent } from 'react';
 import { IIconProps } from './types';
-import { grey } from '@mui/material/colors';
 
 /**
  * SVG icon component that renders a curved arrow pointing to the left (undo arrow).
@@ -32,7 +31,7 @@ import { grey } from '@mui/material/colors';
  *
  * @param props - Standard icon props for controlling color and style.
  */
-const CurveArrowIcon: FunctionComponent<IIconProps> = ({ color = grey[500], style }) => {
+const CurveArrowIcon: FunctionComponent<IIconProps> = ({ color = 'var(--rr-text-secondary)', style }) => {
 	return (
 		<svg
 			xmlns="http://www.w3.org/2000/svg"

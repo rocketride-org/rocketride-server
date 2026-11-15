@@ -310,10 +310,10 @@
 	     theme. --rr-palette-mode is the platform's CSS-visible light/dark
 	     signal ("light" | "dark", set on :root by applyTheme from every
 	     theme JSON and defaulted in rocketride-default.css) — the same token
-	     buildMuiTheme keys palette.mode on. The `light dark` fallback covers
-	     documents where the token is absent (e.g. the VS Code webview theme
-	     sheet, which computes mode at runtime instead): the browser then
-	     picks by OS preference — best available without the token.
+	     the Monaco theme and the sidebar key their mode on. The `light dark`
+	     fallback covers documents where the token is absent (e.g. the VS Code
+	     webview theme sheet): the browser then picks by OS preference — best
+	     available without the token.
 	   - accent-color brands the panel's selection highlights (today ring,
 	     selected date cell) in place of the UA default blue. */
 	color-scheme: var(--rr-palette-mode, light dark); /* native panel surface (theme mode token) */

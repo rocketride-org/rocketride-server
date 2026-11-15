@@ -26,7 +26,8 @@
 	/* Palette mode                                                        */
 	/* ================================================================== */
 
-	/* --rr-palette-mode is computed at runtime by getMuiTheme(). */
+	/* --rr-palette-mode comes from the shell theme contract (the theme JSON
+	   applied by the shell at runtime); nothing in the canvas computes it. */
 
 	/* ================================================================== */
 	/* Backgrounds                                                         */

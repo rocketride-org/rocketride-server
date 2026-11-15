@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 Aparavi Software AG Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,14 +28,66 @@
  * actions such as open, duplicate, delete, and documentation links.
  * Each menu item can display a label, optional keyboard shortcut chips,
  * and a disabled state. Special "border" label entries render as dividers.
+ * The popup is the shell's AnchoredPopup (outside-click / Escape dismissal,
+ * flip when out of room) over PopupRow items.
  */
 
-import React, { ReactElement, useState } from 'react';
-import { Menu, MenuItem, SxProps, Divider } from '@mui/material';
+import React, { CSSProperties, ReactElement, useRef, useState } from 'react';
 import { MoreVertical } from 'lucide-react';
+import { AnchoredPopup, PopupRow, commonStyles } from 'shell';
 
 import { Option } from 'shared/types/ui';
 import KeyboardChip from '../KeyboardChip';
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const styles = {
+	trigger: {
+		background: 'none',
+		border: 'none',
+		cursor: 'pointer',
+		padding: 0,
+		display: 'inline-flex',
+		alignItems: 'center',
+	} as CSSProperties,
+
+	// Popup chrome: the shell menu box; AnchoredPopup owns the positioning.
+	popup: {
+		...commonStyles.popupMenu,
+		position: undefined,
+		padding: 6,
+		minWidth: 180,
+	} as CSSProperties,
+
+	divider: {
+		...commonStyles.divider,
+		margin: '4px 0',
+	} as CSSProperties,
+
+	row: {
+		display: 'flex',
+		justifyContent: 'space-between',
+		alignItems: 'center',
+		gap: 16,
+		width: '100%',
+	} as CSSProperties,
+
+	label: {
+		fontWeight: 800,
+		fontSize: '0.75rem',
+	} as CSSProperties,
+
+	keys: {
+		fontSize: '0.725rem',
+	} as CSSProperties,
+
+	disabled: {
+		opacity: 0.45,
+		pointerEvents: 'none',
+	} as CSSProperties,
+};
 
 // =============================================================================
 // Types
@@ -49,71 +101,58 @@ interface IMoreMenuProps {
 	options: Option[];
 	/** When true the trigger icon button is disabled. */
 	isDisabled?: boolean;
-	/** Optional MUI sx overrides applied to the trigger IconButton. */
-	buttonSx?: SxProps;
+	/** Optional style overrides applied to the trigger button. */
+	buttonStyle?: CSSProperties;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function MoreMenu({ options, isDisabled, buttonSx }: IMoreMenuProps): ReactElement {
-	const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-	const isMenuOpen = Boolean(anchorEl);
+export default function MoreMenu({ options, isDisabled, buttonStyle }: IMoreMenuProps): ReactElement {
+	const anchorRef = useRef<HTMLButtonElement>(null);
+	const [open, setOpen] = useState(false);
 
 	/** Opens the menu, stopping propagation to prevent node selection/drag. */
 	const handleMenuClick = (event: React.MouseEvent<HTMLElement>) => {
 		event.stopPropagation();
-		setAnchorEl(event.currentTarget);
-	};
-
-	/** Closes the menu by clearing the anchor element. */
-	const handleMenuClose = () => {
-		setAnchorEl(null);
+		setOpen((prev) => !prev);
 	};
 
 	return (
 		<>
-			<button aria-label="More options" onMouseDown={(event) => event.stopPropagation()} onClick={handleMenuClick} disabled={isDisabled} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', ...(typeof buttonSx === 'object' && !Array.isArray(buttonSx) ? (buttonSx as React.CSSProperties) : {}) }}>
+			<button ref={anchorRef} aria-label="More options" aria-haspopup="menu" aria-expanded={open} onMouseDown={(event) => event.stopPropagation()} onClick={handleMenuClick} disabled={isDisabled} style={{ ...styles.trigger, ...buttonStyle }}>
 				<MoreVertical size={18} style={{ color: 'var(--rr-text-secondary)' }} />
 			</button>
 
-			<Menu
-				anchorEl={anchorEl}
-				open={isMenuOpen}
-				onClose={(event: React.MouseEvent<HTMLElement>, reason: 'backdropClick' | 'escapeKeyDown') => {
-					if (reason === 'backdropClick') event.stopPropagation();
-					handleMenuClose();
-				}}
-				MenuListProps={{
-					'aria-labelledby': 'more-options-button',
-					sx: { padding: '6px' },
-				}}
-			>
-				{options.map(({ handleClick, label, keys, disabled }, index) => {
-					// "border" entries render as horizontal dividers
-					if (label === 'border') {
-						return <Divider key={index} component="li" sx={{ margin: '0 !important' }} />;
-					}
+			<AnchoredPopup anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} align="end" style={styles.popup}>
+				<div role="menu" onMouseDown={(event) => event.stopPropagation()}>
+					{options.map(({ handleClick, label, keys, disabled }, index) => {
+						// "border" entries render as horizontal dividers
+						if (label === 'border') {
+							return <div key={index} style={styles.divider} role="separator" />;
+						}
 
-					return (
-						<MenuItem
-							key={index}
-							disabled={disabled}
-							onClick={(event) => {
-								event.stopPropagation();
-								if (!handleClick) return;
-								handleClick(event);
-								handleMenuClose();
-							}}
-							sx={{ display: 'flex', justifyContent: 'space-between' }}
-						>
-							<span style={{ fontWeight: 800, fontSize: '0.75rem' }}>{label} </span>
-							<span style={{ fontSize: '0.725rem' }}>{keys?.length ? keys.map((value: string, i: number) => <KeyboardChip key={i} text={value} />) : null}</span>
-						</MenuItem>
-					);
-				})}
-			</Menu>
+						return (
+							<div key={index} role="menuitem" aria-disabled={disabled || undefined} style={disabled ? styles.disabled : undefined}>
+								<PopupRow
+									onClick={(event) => {
+										event.stopPropagation();
+										if (!handleClick || disabled) return;
+										handleClick(event);
+										setOpen(false);
+									}}
+								>
+									<span style={styles.row}>
+										<span style={styles.label}>{label}</span>
+										<span style={styles.keys}>{keys?.length ? keys.map((value: string, i: number) => <KeyboardChip key={i} text={value} />) : null}</span>
+									</span>
+								</PopupRow>
+							</div>
+						);
+					})}
+				</div>
+			</AnchoredPopup>
 		</>
 	);
 }
