@@ -32,6 +32,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
+from starlette.routing import Route
 
 import ai.modules.shell.pages as pages_mod
 import ai.modules.shell.public_pages as pp
@@ -1054,6 +1055,22 @@ def test_the_shell_at_root_still_serves_with_its_own_query(web_server, shell_roo
     client = _start_engine(web_server, monkeypatch)
     resp = client.get('/?appId=rocketride.pipeBuilder', headers={**HTML, 'User-Agent': BROWSER})
     assert resp.status_code == 200 and '<div id="root">shell</div>' in resp.text
+
+
+def test_a_route_appended_past_the_catch_all_never_runs_unauthenticated(web_server, shell_root, monkeypatch):
+    # add_route and add_raw_route keep the catch-all last; FastAPI's own app.get
+    # or include_router append behind it. The auth predicate stops at the
+    # catch-all, which matches every path, so such a path is exempted. Taking
+    # every method, the catch-all answers it first and the route never runs; a
+    # GET-only catch-all would let it run for anonymous callers.
+    client = _start_engine(web_server, monkeypatch)  # anonymous
+
+    async def secret(request: Request):
+        return PlainTextResponse('real route')
+
+    web_server.app.router.routes.append(Route('/appended', secret, methods=['POST']))
+    resp = client.post('/appended')
+    assert resp.status_code == 405 and resp.text != 'real route'
 
 
 def test_router_outcomes_for_unclaimed_paths_are_preserved(web_server, shell_root, monkeypatch):
