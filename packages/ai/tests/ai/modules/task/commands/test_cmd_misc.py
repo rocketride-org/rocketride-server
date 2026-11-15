@@ -605,6 +605,45 @@ async def test_on_rrext_validate_maps_component_ids_back(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_keeps_messages_the_submitted_config_gives_too(monkeypatch):
+    """A message the pass over the submitted config gives too holds no resolved value, so it keeps its text.
+
+    A wiring error names only ids, providers and lanes. When one of those is a
+    reference, the two passes give different text and the message is masked.
+    """
+
+    def _validator(payload):
+        """Report one wiring error per component, as the engine words it."""
+        root = copy.deepcopy(payload)
+        root['errors'] = [
+            {
+                'id': c['id'],
+                'message': f'Component {c["id"]} input from chat_1 is on lane questions, which '
+                f'{c["provider"]} does not take',
+            }
+            for c in root['pipeline']['components']
+        ]
+        return root
+
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', _validator)
+    env = {**ENV, 'ROCKETRIDE_NODE_ID': 'node-7'}
+    conn = _validate_conn(monkeypatch, env=env)
+    pipeline = {'components': [_llm('llm_1', 'llm_openai'), _llm('${ROCKETRIDE_NODE_ID}', 'llm_openai')]}
+
+    reply = await _reply(conn, pipeline)
+
+    assert reply['errors'] == [
+        {
+            'id': 'llm_1',
+            'message': 'Component llm_1 input from chat_1 is on lane questions, which llm_openai does not take',
+        },
+        {'id': '${ROCKETRIDE_NODE_ID}', 'message': _template_message(env, 'error')},
+    ]
+    assert not _has_expanded_value(reply)
+    assert 'node-7' not in json.dumps(reply)
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch):
     """Errors and warnings in a {version, component} payload are not passed to the validator."""
     calls = []
