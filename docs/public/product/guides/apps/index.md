@@ -321,7 +321,10 @@ its heading, blurb and docs link from `site`; redirects never appear in
 either. `GET` and `HEAD` on a redirect's `from` answer `301` with
 `Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
 page (query kept). Any path that is neither a page, a redirect nor a server
-route answers `404`.
+route answers `404`. A browser or crawler (a `GET` or `HEAD` that accepts
+HTML) gets the server's not-found page with it, which links home and to
+sign-in; paths under `/api`, `/task`, `/mcp` and `/.well-known`, and API
+clients, get the plain `404`.
 
 ### Settings
 
