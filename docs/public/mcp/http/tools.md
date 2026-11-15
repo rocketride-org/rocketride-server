@@ -104,17 +104,19 @@ node on the connected engine are listed.
 ### validate_pipeline
 
 Validate an inline pipeline with the engine's validator. It checks what `use()`
-checks, then checks the pipeline against the services it names: every provider
-is a service on this engine, every control entry names a class of the node it
-calls, and every input lane is one the upstream node produces and this node
-takes. `use()` does not run those last checks, so a pipeline that fails them
-can still start.
+checks, then checks a whole pipeline against the services it names: every
+provider is a service on this engine, every control entry names a class of the
+node it calls, and every input lane is one the upstream node produces and this
+node takes. A node with no lanes, such as a tool, is not checked for the lanes it
+takes, and a `"*"` in a node's lanes matches any lane. `use()` does not run
+those last checks, so a pipeline that fails them can still start.
 
 The single-component form `{version, component}` that the node editor sends is
-accepted too. It is not static: the engine instantiates the provider and runs
-its configuration probe, which for LLM nodes sends a small completion request to
-the configured endpoint and for stores connects to the configured database. Validate
-whole pipelines unless you want that probe.
+accepted too. It checks the component's provider but skips the control and lane
+checks, which need the whole pipeline. It is not static: the engine instantiates
+the provider and runs its configuration probe, which for LLM nodes sends a small
+completion request to the configured endpoint and for stores connects to the
+configured database. Validate whole pipelines unless you want that probe.
 
 - **Parameters:** `pipeline` (object, required).
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
