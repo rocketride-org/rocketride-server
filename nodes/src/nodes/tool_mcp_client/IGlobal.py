@@ -33,10 +33,14 @@ Step 3: STDIO transport (no external MCP SDK dependency).
 - Re-reads the catalog on every discovery query and on every lookup miss
   (rate-limited), so tools added or renamed on a running server become
   callable without restarting the engine (issue #1402)
+- Passes configured environment variables to a stdio server, and exposes only
+  the allowed tools when an allow list is set
 """
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
 import threading
 import time
@@ -113,6 +117,8 @@ class IGlobal(IGlobalBase):
             return str(val).strip() if val else default
 
         try:
+            self._allowed_tools = parse_allowed_tools(cfg.get('allowedTools'))
+
             if self.transport == 'stdio':
                 # Preferred: parse a single command line string.
                 command_line = _get('commandLine')
@@ -131,7 +137,13 @@ class IGlobal(IGlobalBase):
                         raise Exception('mcp_client args must be a list of strings')
                     args = [str(a) for a in args]
 
-                self._client = McpStdioClient(command=command, args=args)
+                env = tcfg.get('env') or cfg.get('env') or None
+                if env is not None and not self._is_mapping(env):
+                    raise Exception('mcp_client env must be a dictionary of strings')
+                if env is not None:
+                    env = {str(k): str(v) for k, v in env.items()}
+
+                self._client = McpStdioClient(command=command, args=args, env=env)
 
             elif self.transport in ('sse', 'streamable-http'):
                 # Shared auth headers for HTTP transports
@@ -174,6 +186,13 @@ class IGlobal(IGlobalBase):
             self._client.start()
             tools = self._client.list_tools()
             self._cache_tools(tools)
+            if self._allowed_tools:
+                missing = sorted(self._allowed_tools - {t.name for t in tools})
+                if missing:
+                    warning(
+                        f"mcp_client '{self.serverName}': allowed tools not on the server: {missing}; "
+                        f'server tools: {sorted(t.name for t in tools)}'
+                    )
         except Exception as e:
             warning(str(e))
             raise
@@ -201,7 +220,17 @@ class IGlobal(IGlobalBase):
                     val = cfg.get(key)
                 return str(val).strip() if val else ''
 
+            try:
+                parse_allowed_tools(cfg.get('allowedTools'))
+            except ValueError as e:
+                warning(str(e))
+                return
+
             if transport == 'stdio':
+                env = tcfg.get('env') or cfg.get('env')
+                if env and not self._is_mapping(env):
+                    warning('env must be a dictionary of strings for stdio transport')
+                    return
                 command_line = _vget('commandLine')
                 if command_line:
                     try:
@@ -242,6 +271,7 @@ class IGlobal(IGlobalBase):
                 client.stop()
         finally:
             self._client = None
+            self._allowed_tools = None
             self._tools_by_original = {}
             self._tools_by_namespaced = {}
 
@@ -251,13 +281,18 @@ class IGlobal(IGlobalBase):
     def _cache_tools(self, tools: List[McpToolDef]) -> None:
         """Replace the cached catalog atomically.
 
-        Both maps are built locally and swapped in with plain attribute
-        assignment, so a reader iterating the previous maps never observes a
-        half-filled catalog.
+        When an allow list is set, tools outside it are left out, so the agent
+        never sees them and a call to one is refused as unknown. Both maps are
+        built locally and swapped in with plain attribute assignment, so a
+        reader iterating the previous maps never observes a half-filled
+        catalog.
         """
+        allowed = getattr(self, '_allowed_tools', None)
         by_original: Dict[str, McpToolDef] = {}
         by_namespaced: Dict[str, McpToolDef] = {}
         for t in tools:
+            if allowed and t.name not in allowed:
+                continue
             by_original[t.name] = t
             by_namespaced[f'{self.serverName}.{t.name}'] = t
         self._tools_by_original = by_original
@@ -332,3 +367,39 @@ class IGlobal(IGlobalBase):
                 f'(catalog refreshed; known tools: {known})'
             )
         return self._client.call_tool(name=tool_name, arguments=arguments or {})
+
+
+def parse_allowed_tools(raw: Any) -> Optional[set]:
+    """Read the allowed tool names from config.
+
+    Accepts the config panel's rows (``[{'toolName': ...}]``), a list of
+    names, or a string of names separated by commas or newlines. Returns
+    ``None`` when no names are set, which allows every tool.
+    """
+    if raw is None or raw == '':
+        return None
+    if not isinstance(raw, (str, list)):
+        # An engine JSON value (IJson) prints as its JSON text.
+        try:
+            raw = json.loads(str(raw))
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f'allowedTools is malformed and cannot be parsed: {e}') from e
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped.startswith(('[', '{')):
+            try:
+                raw = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError) as e:
+                raise ValueError(f'allowedTools is malformed and cannot be parsed: {e}') from e
+        else:
+            raw = re.split(r'[,\n]', stripped)
+    if not isinstance(raw, list):
+        raise ValueError('allowedTools must be a list of tool names')
+    names = set()
+    for item in raw:
+        if hasattr(item, 'get'):
+            item = item.get('toolName')
+        name = str(item or '').strip()
+        if name:
+            names.add(name)
+    return names or None
