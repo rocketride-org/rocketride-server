@@ -35,7 +35,9 @@ This module closes that gap:
   the URL's hostname. Proxies and environment settings are disabled.
 
 Resolve and open a new pinned session for every hop (including each
-redirect target). The pinning approach mirrors ``tool_http_request``.
+redirect target). ``tool_http_request`` and ``scraper_beautifulsoup`` both
+send their requests through this module, so the address rules and the
+pinned transport exist once.
 
 No engine imports: safe to load standalone in node unit tests.
 """
@@ -71,6 +73,31 @@ _MINIMUM_SAFE_IPADDRESS_PATCH = {
 }
 
 
+class HostResolutionError(ValueError):
+    """The URL's host did not resolve to usable addresses (DNS failure, empty or invalid answer).
+
+    A ``ValueError`` like every other rejection here; a caller that reports
+    transport failures differently from policy rejections catches this first.
+    """
+
+
+def has_safe_ipaddress_runtime(version_info: tuple) -> bool:
+    """Whether this CPython has the patched special-address tables ``is_public_address`` relies on.
+
+    Args:
+        version_info: A ``sys.version_info``-like tuple.
+
+    Returns:
+        False for 3.x below 3.10, and for 3.10-3.12 patch levels before the
+        ``ipaddress`` classification fixes.
+    """
+    major, minor, patch = version_info[:3]
+    if major != 3 or minor < 10:
+        return False
+    minimum_patch = _MINIMUM_SAFE_IPADDRESS_PATCH.get((major, minor))
+    return minimum_patch is None or patch >= minimum_patch
+
+
 def _check_runtime() -> None:
     """Fail closed when the installed stack lacks the hooks or fixes pinning relies on."""
     if not all(
@@ -85,9 +112,7 @@ def _check_runtime() -> None:
         and hasattr(HTTPSConnection, '_new_conn')
     ):
         raise RuntimeError('DNS-pinned HTTP requires the supported urllib3 connection hooks')
-    major, minor, patch = sys.version_info[:3]
-    minimum_patch = _MINIMUM_SAFE_IPADDRESS_PATCH.get((major, minor))
-    if major != 3 or minor < 10 or (minimum_patch is not None and patch < minimum_patch):
+    if not has_safe_ipaddress_runtime(sys.version_info):
         raise RuntimeError(
             'DNS-pinned HTTP requires a Python security patch level with corrected IP address classification: '
             'Python >=3.10.15, >=3.11.10, >=3.12.4, or >=3.13'
@@ -126,8 +151,9 @@ def resolve_addresses(
 ) -> Tuple[ResolvedAddress, ...]:
     """Resolve ``url``'s host once; every address must pass ``is_allowed``.
 
-    Raises ``ValueError`` for a malformed URL, userinfo in the URL, an
-    unresolvable host, or any disallowed address.
+    Raises ``ValueError`` for a malformed URL, userinfo in the URL, or any
+    disallowed address, and :class:`HostResolutionError` (a ``ValueError``)
+    when the host does not resolve to usable addresses.
     """
     parsed = urlsplit(url)
     scheme = parsed.scheme.lower()
@@ -150,16 +176,16 @@ def resolve_addresses(
             parsed.hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP
         )
     except socket.gaierror as e:
-        raise ValueError(f'Unresolved URL host: {parsed.hostname}') from e
+        raise HostResolutionError(f'Unresolved URL host: {parsed.hostname}') from e
     if not resolved:
-        raise ValueError(f'Unresolved URL host: {parsed.hostname}')
+        raise HostResolutionError(f'Unresolved URL host: {parsed.hostname}')
 
     validated = []
     for family, socktype, proto, _canonname, sockaddr in resolved:
         try:
             address = ipaddress.ip_address(sockaddr[0].split('%', 1)[0])
         except ValueError:
-            raise ValueError(f'URL host {parsed.hostname!r} resolved to an invalid address') from None
+            raise HostResolutionError(f'URL host {parsed.hostname!r} resolved to an invalid address') from None
         if not is_allowed(address):
             raise ValueError(f'Blocked non-public URL host: {parsed.hostname}')
         validated.append((family, socktype, proto, sockaddr))

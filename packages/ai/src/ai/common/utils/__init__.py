@@ -27,7 +27,8 @@ Public surface:
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
 - ``resolve_public_addresses``, ``pinned_session`` — DNS-pinned HTTP to
-  public hosts only (no rebinding gap).
+  public hosts only (no rebinding gap); ``HostResolutionError`` marks a host
+  that did not resolve.
 - ``url_matches_pattern``, ``check_allow_pattern`` — fail-closed URL
   allow-list regexes that must pin the scheme and host.
 - ``register_debugger_thread`` — register an engine render thread with pydevd.
@@ -56,7 +57,7 @@ from .image_utils import (
     source_quality,
 )
 from .debugger_utils import register_debugger_thread
-from .pinned_http import pinned_session, resolve_public_addresses
+from .pinned_http import HostResolutionError, pinned_session, resolve_public_addresses
 from .string_utils import safe_str
 from .tool_args import (
     int_arg,
@@ -76,6 +77,7 @@ from .url_policy import check_allow_pattern, url_matches_pattern
 from .url_utils import validate_public_url
 
 __all__ = [
+    'HostResolutionError',
     'check_allow_pattern',
     'colorize_depth',
     'check_hardware',
