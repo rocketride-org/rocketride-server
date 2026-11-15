@@ -146,6 +146,33 @@ def test_legacy_fallback_when_every_declared_page_is_invalid():
     assert agg.legacy
 
 
+def test_a_published_manifest_that_keeps_no_page_falls_back_with_a_warning(warnings):
+    # The publish gate refuses such a manifest; a seeded row or a page that
+    # collides with a live route can still get here. The fallback is a second
+    # safety net, so a broken home-ui manifest must never be silent.
+    bad = Published(
+        'rocketride.home', {'publicPages': [{'path': '/Bad', 'title': 'x'}, {'path': '/api', 'title': 'y'}]}
+    )
+    agg = build_aggregate([bad])
+    assert agg.legacy
+    fallback = [w for w in warnings if 'serving the legacy page list' in w]
+    assert fallback == [
+        '[public_pages] no published manifest kept a valid page (rocketride.home declared 2): serving the legacy page list'
+    ], warnings
+
+
+def test_no_published_manifest_falls_back_silently(warnings):
+    assert build_aggregate([]).legacy
+    assert warnings == []
+
+
+def test_a_partly_broken_manifest_keeps_its_valid_pages_without_falling_back(warnings):
+    home = Published('rocketride.home', {'publicPages': [{'path': '/', 'title': 'H'}, {'path': '/Bad', 'title': 'x'}]})
+    agg = build_aggregate([home])
+    assert not agg.legacy and list(agg.exact) == ['/']
+    assert not [w for w in warnings if 'legacy' in w], warnings
+
+
 def test_the_legacy_aggregate_is_the_shell_route_list_with_its_unlisted_pages():
     import ai.modules.shell.shell as shell_mod
 

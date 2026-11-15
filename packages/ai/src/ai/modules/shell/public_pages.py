@@ -120,6 +120,12 @@ def _claims(
     return exact, sites
 
 
+def _declared(pub: Published) -> int:
+    """How many pages ``pub``'s manifest declares (0 when ``publicPages`` is not a list)."""
+    pages = pub.manifest.get('publicPages')
+    return len(pages) if isinstance(pages, list) else 0
+
+
 def build_aggregate(
     published: List[Published], live_conflict: Optional[Callable[[str], Optional[str]]] = None
 ) -> Aggregate:
@@ -129,7 +135,9 @@ def build_aggregate(
     pages are kept; a page colliding with an earlier claim is dropped (first
     claim wins). ``site`` comes only from the app owning ``/``. When no page
     survives, the aggregate is the legacy page list (a broken manifest falls
-    back instead of removing every page).
+    back instead of removing every page), with a warning when a published
+    manifest was there to fall back from. A manifest that keeps any valid page
+    does not fall back: its broken pages are only skipped, each with a warning.
 
     Args:
         published: The production-rung manifests, as ``load_published`` read them.
@@ -141,6 +149,12 @@ def build_aggregate(
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
+        if published:
+            # A second safety net behind the publish gate: never silent, so a broken manifest is seen.
+            declared = ', '.join(f'{pub.app_id} declared {_declared(pub)}' for pub in published)
+            warning(
+                f'[public_pages] no published manifest kept a valid page ({declared}): serving the legacy page list'
+            )
         return legacy_aggregate(live_conflict)
     site: Dict[str, Any] = {}
     root = exact.get('/')
