@@ -432,8 +432,11 @@ def _not_found(request: Request, path: str) -> Response:
     Raises:
         HTTPException: 404, for a request that does not accept HTML or a reserved path.
     """
-    if 'text/html' not in request.headers.get('accept', '').lower() or reserved_error(path):
+    if reserved_error(path):
         raise HTTPException(status_code=404, detail='Not Found')
+    if 'text/html' not in request.headers.get('accept', '').lower():
+        # The same address answers HTML to a browser: say it varies by Accept.
+        raise HTTPException(status_code=404, detail='Not Found', headers={'Vary': 'Accept'})
     headers = {'Vary': 'Accept', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
     return HTMLResponse(NOT_FOUND_HTML, status_code=404, headers=headers)
 

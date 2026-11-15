@@ -1043,6 +1043,7 @@ def test_api_clients_reserved_prefixes_and_other_methods_keep_the_json_404(web_s
     for headers in ({}, {'Accept': 'application/json'}, {'Accept': '*/*'}):
         resp = client.get('/asdfgh', headers=headers)
         assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}, headers
+        assert 'Accept' in resp.headers['vary'].split(', '), headers
     resp = client.get('/.well-known/nothing', headers=HTML)
     assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}
     resp = client.post('/asdfgh', headers=HTML)

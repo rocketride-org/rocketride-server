@@ -62,8 +62,8 @@ NOT_FOUND_HTML = """<!DOCTYPE html>
                 --muted: #aab4bd;
                 --thought: #243040;
                 --code: #f0a35e;
-                --btn: #3b8fd0;
-                --btn-hover: #5aa5de;
+                --btn: #2a6db0;
+                --btn-hover: #1f5a91;
                 --btn-2: #4b5a69;
                 --btn-2-hover: #5d6d7e;
                 --shadow: rgba(0, 0, 0, 0.45);
