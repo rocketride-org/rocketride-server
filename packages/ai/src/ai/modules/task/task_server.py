@@ -100,6 +100,7 @@ from ai.constants import (
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
 )
+from ai.common.parameters import validate_parameters
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
@@ -306,6 +307,25 @@ class EngineRegistry(Mapping):
     def starting(self) -> frozenset:
         """The engine keys with a start in progress (or starters waiting)."""
         return frozenset(self._starts)
+
+
+def _require_valid_parameters(pipeline: Dict[str, Any]) -> None:
+    """
+    Refuse a pipeline whose ``parameters`` map is malformed (plan 5.4 item 1).
+
+    Args:
+        pipeline: The pipeline about to start.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT on ``parameters`` naming the first problem.
+    """
+    errors = validate_parameters(pipeline)
+    if errors:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            'parameters: ' + '; '.join(e['message'] for e in errors),
+            field='parameters',
+        )
 
 
 class ControlRegistry(MutableMapping):
@@ -2474,6 +2494,7 @@ class TaskServer(DAPBase):
         # The address grammar, enforced at execute: project id, source and
         # every component id are single dot-free segments.
         validate_component_ids(control.pipeline)
+        _require_valid_parameters(control.pipeline)
         control.address = build_address(control.developer_id, control.project_id, control.source)
         control.id = control.address
 
@@ -2507,7 +2528,7 @@ class TaskServer(DAPBase):
         control.trigger = trigger
         control.ttl = CONST_DEFAULT_TTL if ttl is None else int(ttl)
         control.trace_level = args.get('pipelineTraceLevel')
-        control.parameters = dict(control.pipeline.get('parameters') or {})
+        control.setup_declared_parameters()
         control.origin = args.get('origin')
         control.deployment = deployment
         control.version = version
@@ -3109,6 +3130,7 @@ class TaskServer(DAPBase):
             # The address grammar holds on restart too: a restarted pipeline
             # must not smuggle in a dotted component id
             validate_component_ids(pipeline)
+            _require_valid_parameters(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
 
             old_engine = control.task
@@ -3122,7 +3144,7 @@ class TaskServer(DAPBase):
             )
 
             # The control admits the accepted pipeline's parameters now
-            control.parameters = dict(control.pipeline.get('parameters') or {})
+            control.setup_declared_parameters()
 
             # Ownership transfers ONLY once the restart has succeeded: until
             # then the previous owner keeps the task

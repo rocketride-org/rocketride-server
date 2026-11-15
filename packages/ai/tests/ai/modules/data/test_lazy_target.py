@@ -553,7 +553,7 @@ async def test_tool_standalone_call_initializes_pipe_semaphore(monkeypatch):
 
     conn = DataConn(server=server_mock, transport=MagicMock())
     try:
-        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread('tool-result'))
+        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread(('tool-result', 0)))
         try:
             response = await conn._tool(
                 {'seq': 1, 'type': 'request', 'command': 'rrext_process'},
@@ -585,7 +585,7 @@ async def test_tool_standalone_call_releases_semaphore(monkeypatch):
 
     conn = DataConn(server=server_mock, transport=MagicMock())
     try:
-        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread('tool-result'))
+        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread(('tool-result', 0)))
         try:
             request = {'seq': 1, 'type': 'request', 'command': 'rrext_process'}
             await asyncio.wait_for(conn._tool(request, {'tool': 'my_tool'}), timeout=5)

@@ -232,14 +232,17 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
 async def test_params_ride_the_inline_open_and_an_unknown_name_is_refused(catalog, engines, deployments, data_path):
     """Per-call params enter by the open (one door); a name the map does not expose is param_rejected."""
     ts = _server()
-    exposed = {'tone': {'node': 'prompt_1', 'key': 'instructions'}}
+    exposed = {'tone': 'prompt_1.instructions'}
     deployments.deploy('team-1', pipeline=_pipeline(parameters=exposed))
     conn = _conn(ts, _caller())
 
     body = await _submit(conn, name=ADDRESS, data=b'x', params={'tone': 'dry'})
     assert body['answer'] == 'ok'
     opens = [arguments for _engine, sub, arguments in data_path if sub == 'open']
-    assert [o['params'] for o in opens] == [{'tone': 'dry'}]
+    assert [o['_caller']['params'] for o in opens] == [{'prompt_1': {'instructions': 'dry'}}]
+    assert all('params' not in o for o in opens)
+    # Every frame of the request carries the same server-minted request id
+    assert len({a['_caller']['correlationId'] for _e, _s, a in data_path}) == 1
 
     with pytest.raises(TaskError) as err:
         await _submit(conn, name=ADDRESS, data=b'x', params={'tone': 'dry', 'nope': 1})

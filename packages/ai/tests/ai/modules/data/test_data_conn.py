@@ -15,7 +15,9 @@ this test file focuses on the pure-logic and small-state methods:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import asyncio
 
 import pytest
 
@@ -359,6 +361,7 @@ def test_cleanup_pipe_returns_pipe_to_endpoint_on_success(monkeypatch):
     pipe = MagicMock()
     pipe_conn = SimpleNamespace(
         correlation_id=None,
+        hold_started=None,
         pipe=pipe,
         pipe_id='p-1',
         size=None,
@@ -387,6 +390,7 @@ def test_cleanup_pipe_calls_monitor_failed_on_error(monkeypatch):
     pipe = MagicMock()
     pipe_conn = SimpleNamespace(
         correlation_id=None,
+        hold_started=None,
         pipe=pipe,
         pipe_id='p-1',
         size=100,
@@ -410,6 +414,7 @@ def test_cleanup_pipe_swallows_target_errors(monkeypatch):
     conn = _make_conn()
     conn._target.putPipe = MagicMock(side_effect=RuntimeError('cannot return'))
     pipe_conn = SimpleNamespace(
+        hold_started=None,
         pipe=MagicMock(),
         pipe_id='p-1',
         size=None,
@@ -426,6 +431,7 @@ def test_cleanup_pipe_handles_missing_pipe_object():
     """If the conn_pipe has no actual pipe, putPipe is not called and no exception bubbles."""
     conn = _make_conn()
     pipe_conn = SimpleNamespace(
+        hold_started=None,
         pipe=None,
         pipe_id='p-1',
         size=None,
@@ -555,3 +561,132 @@ async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypa
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# _open / _tool / _cleanup_pipe — the caller rides the PIPE and the hold is booked
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_pipe_books_the_hold_and_flushes_a_snapshot(monkeypatch):
+    """PutPipe ends the hold: hold_time (ms) and bytes_in land in the metrics and a >MET* snapshot goes out."""
+    import time as _time
+
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConnPipe
+
+    monkeypatch.setattr(data_conn_mod, 'monitorCompleted', lambda s: None)
+    monkeypatch.setattr(data_conn_mod, 'monitorFailed', lambda s: None)
+    booked = []
+    counted = []
+    flushed = []
+    fake_metrics = MagicMock()
+    fake_metrics.add_time = lambda timers: booked.append(timers)
+    fake_metrics.counter = lambda name, value: counted.append((name, value))
+    fake_metrics.report = lambda: {'timers': {'hold_time': 1.0}, 'counters': {}, 'events': []}
+    monkeypatch.setattr(data_conn_mod, 'metrics', fake_metrics)
+    monkeypatch.setattr(data_conn_mod, 'monitorMetrics', lambda report: flushed.append(report))
+
+    conn = _make_conn()
+    target = MagicMock()
+    conn._server._target = target
+    conn_pipe = DataConnPipe(pipe_id=4, pipe=MagicMock(), written=120, hold_started=_time.perf_counter() - 0.05)
+
+    conn._cleanup_pipe(conn_pipe)
+
+    target.putPipe.assert_called_once_with(conn_pipe.pipe)
+    assert len(booked) == 1 and booked[0]['hold_time'] >= 50.0
+    assert counted == [('bytes_in', 120)]
+    assert flushed == [{'timers': {'hold_time': 1.0}, 'counters': {}, 'events': []}]
+
+
+def test_cleanup_pipe_without_a_hold_books_nothing(monkeypatch):
+    """A record that never took a pipe (an open that failed) has no hold to bill."""
+    from ai.modules.data import data_conn as data_conn_mod
+    from ai.modules.data.data_conn import DataConnPipe
+
+    monkeypatch.setattr(data_conn_mod, 'monitorCompleted', lambda s: None)
+    fake_metrics = MagicMock()
+    monkeypatch.setattr(data_conn_mod, 'metrics', fake_metrics)
+    conn = _make_conn()
+    conn._server._target = MagicMock()
+
+    conn._cleanup_pipe(DataConnPipe(pipe_id=5, pipe=MagicMock(), written=10))
+
+    fake_metrics.add_time.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_open_stamps_the_caller_on_the_pipe_at_its_trace_level(monkeypatch):
+    """_caller leaves the arguments and lands on the pipe right after getPipe; the binding binds at the caller's trace level."""
+    from ai.modules.data import data_conn as data_conn_mod
+
+    conn = _make_conn()
+    pipe = MagicMock(pipeId=7, traceId=3)
+    target = MagicMock()
+    target.getPipe.return_value = pipe
+    conn._server._target = target
+    conn._require_target = lambda: target
+    conn._pipe_sem = asyncio.Semaphore(2)
+    conn._thread_count = 2
+    conn._pipe_map = {}
+    conn._open_by_correlation = {}
+    conn._pipe_timeout = 60
+    conn._ensure_pipe_sem = AsyncMock(return_value=conn._pipe_sem)
+    conn._determine_lane = lambda mime, p: 'raw'
+    conn._warn_on_unconsumed_lane = lambda *a: None
+    conn._begin = lambda conn_pipe: None
+    conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
+    entry = MagicMock(hasSize=False)
+    monkeypatch.setattr(data_conn_mod, 'getObject', lambda obj: entry)
+    caller = {'userId': 'u1', 'params': {'prompt_1': {'instructions': 'dry'}}, 'traceLevel': 'full'}
+
+    body = await conn._open(
+        {'command': 'rrext_process', 'seq': 1, 'arguments': {}},
+        {'object': {'name': 'x'}, 'mimeType': 'application/octet-stream', '_caller': dict(caller)},
+    )
+
+    assert body == {'pipe_id': 7, 'traceId': 3}
+    target.getPipe.assert_called_once_with('full')
+    assert pipe.caller == caller
+    record = conn._pipe_map[7]
+    assert record.caller == caller and record.hold_started is not None
+    # The Entry never carries the context (nodes copy metadata into stored documents)
+    entry.fromDict.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_borrowed_tool_pipe_carries_the_caller_and_books_its_hold(monkeypatch):
+    """A standalone tool call borrows a pipe like an open: caller stamped, hold booked, traceId in the body."""
+    conn = _make_conn()
+    pipe = MagicMock(pipeId=2, traceId=11)
+    param_out = {'answer': 42}
+
+    def invoke(param):
+        param.output = param_out
+
+    # The borrowed pipe IS the chain head and the one tool node
+    pipe.pipeType.id = 'tool_1'
+    pipe.next = None
+    pipe.pyInstance.invoke = invoke
+    target = MagicMock()
+    target.getPipe.return_value = pipe
+    conn._server._target = target
+    conn._pipe_sem = asyncio.Semaphore(2)
+    conn._ensure_pipe_sem = AsyncMock(return_value=conn._pipe_sem)
+    conn._emit_tool_trace = lambda *a, **k: None
+    conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
+    holds = []
+    monkeypatch.setattr(conn, '_record_hold', lambda started, bytes_in: holds.append((started, bytes_in)))
+    caller = {'userId': 'u1', 'traceLevel': 'none'}
+
+    body = await conn._tool(
+        {'command': 'rrext_process', 'seq': 2, 'arguments': {}},
+        {'tool': 'ask', 'nodeId': 'tool_1', 'input': {'q': 1}, '_caller': dict(caller)},
+    )
+
+    assert body == {'result': param_out, 'traceId': 11}
+    target.getPipe.assert_called_once_with('none')
+    assert pipe.caller == caller
+    target.putPipe.assert_called_once_with(pipe)
+    assert len(holds) == 1 and holds[0][0] is not None and holds[0][1] == 0

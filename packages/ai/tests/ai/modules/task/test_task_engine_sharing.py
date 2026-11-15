@@ -53,6 +53,7 @@ import pytest
 import rocketlib
 
 from ai.account.models import AccountInfo
+from ai.common import node_config
 from ai.constants import CONST_ENGINE_IDLE_TTL
 from ai.modules.task import deploy_events, task_control, task_engine, task_server
 from ai.modules.task.commands.cmd_data import DataCommands
@@ -77,6 +78,36 @@ DEFAULTS: Dict[str, Dict[str, Any]] = {
     'local_tool': {'depth': 1},
 }
 PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'local_nodes.local_tool'}
+#: The keys each provider flags ``param`` (what a pipeline may expose per call).
+PARAMS = {'prompt': ('instructions',)}
+
+
+class _View:
+    """The slice of a resolved ConfigView the server reads: values, param keys, paths, overlay."""
+
+    def __init__(self, provider, config):
+        self._values = {**DEFAULTS[provider], **(config or {})}
+        self.param_keys = frozenset(PARAMS.get(provider, ()))
+
+    def to_dict(self):
+        return dict(self._values)
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __contains__(self, key):
+        return key in self._values
+
+    def path_of(self, key):
+        return key
+
+    def overlay(self, params):
+        for key, value in params.items():
+            if key not in self.param_keys:
+                raise rocketlib.ConfigError(f'"{key}" is not a parameter of this node')
+            if not isinstance(value, (str, list)):
+                raise rocketlib.ConfigError(f'"{key}" must be a string')
+        return self
 
 
 @pytest.fixture
@@ -87,13 +118,14 @@ def catalog(monkeypatch):
     def resolve(provider, config):
         if provider not in DEFAULTS:
             raise ValueError(f'The service {provider} was not found')
-        return SimpleNamespace(to_dict=lambda: {**DEFAULTS[provider], **(config or {})})
+        return _View(provider, config)
 
     def schema(provider):
         caps = MULTITENANT_BIT if provider in certified else 0
         return {'capabilities': caps} if provider in DEFAULTS else None
 
     monkeypatch.setattr(task_engine, 'resolve_node_config', resolve)
+    monkeypatch.setattr(node_config, 'resolve_node_config', resolve)
     monkeypatch.setattr(task_engine, 'node_schema', schema)
     monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: {'path': PATHS.get(provider, '')})
     return certified
@@ -250,7 +282,7 @@ def test_the_parameters_map_names_and_order_stay_out_of_the_key(catalog):
     reordered = _pipeline()
     reordered['components'].reverse()
     for other in (
-        _pipeline(parameters={'tone': {'node': 'prompt_1', 'key': 'instructions'}}),
+        _pipeline(parameters={'tone': 'prompt_1.instructions'}),
         _pipeline(project_id='renamed', name='Another name'),
         reordered,
     ):
@@ -349,11 +381,11 @@ async def test_two_users_identical_specs_one_engine_two_controls_two_bills(catal
 async def test_specs_differing_only_in_parameters_share_one_engine(catalog, engines):
     """The parameters map is per control: one engine, each control keeps its own map."""
     ts = _server()
-    a = await _start(ts, _pipeline(parameters={'tone': {'node': 'prompt_1', 'key': 'instructions'}}), user='user-a')
+    a = await _start(ts, _pipeline(parameters={'tone': 'prompt_1.instructions'}), user='user-a')
     b = await _start(ts, _pipeline(parameters={}), user='user-b')
 
     assert a.task is b.task
-    assert a.parameters == {'tone': {'node': 'prompt_1', 'key': 'instructions'}}
+    assert a.parameters == {'tone': 'prompt_1.instructions'}
     assert b.parameters == {}
 
 
@@ -689,14 +721,7 @@ async def test_a_data_request_is_activity_of_its_own_control_only(catalog, engin
     engine = caller.task
     engine.wait_for_running = AsyncMock()
     engine._send_data = AsyncMock(return_value={'body': {'ok': True}})
-    conn = SimpleNamespace(
-        _server=ts,
-        get_control=MagicMock(return_value=caller),
-        resolve_control_or_start=AsyncMock(return_value=caller),
-        build_response=lambda request, body: {'body': body},
-        debug_message=MagicMock(),
-        verify_team_permission=lambda team_id, perm: None,
-    )
+    conn = _data_conn(ts, caller)
 
     clock.advance(45)
     await DataCommands.on_rrext_process(conn, {'arguments': {'token': caller.address, 'subcommand': 'open'}})
@@ -723,15 +748,16 @@ async def _idle_out(ts, clock) -> None:
 
 
 def _data_conn(ts, control):
-    """A DataCommands stand-in resolving ``control``."""
-    return SimpleNamespace(
-        _server=ts,
-        get_control=MagicMock(return_value=control),
-        resolve_control_or_start=AsyncMock(return_value=control),
-        build_response=lambda request, body: {'body': body},
-        debug_message=MagicMock(),
-        verify_team_permission=lambda team_id, perm: None,
-    )
+    """A DataCommands whose resolution always lands on ``control`` (no transport, no auth)."""
+    conn = DataCommands.__new__(DataCommands)
+    conn._server = ts
+    conn._account_info = _caller()
+    conn.get_control = MagicMock(return_value=control)
+    conn.resolve_control_or_start = AsyncMock(return_value=control)
+    conn.build_response = lambda request, body: {'body': body}
+    conn.debug_message = MagicMock()
+    conn.verify_team_permission = lambda team_id, perm: None
+    return conn
 
 
 @pytest.fixture
@@ -1369,7 +1395,7 @@ async def test_the_control_start_gate_serializes_and_is_dropped_when_empty():
 async def test_a_data_open_with_an_unknown_param_is_refused_before_the_engine(catalog, engines, serving):
     """The data path admits params by public name like submit() does; nothing reaches the engine."""
     ts = _server()
-    control = await _start(ts, _pipeline(parameters={'tone': {'node': 'prompt_1', 'key': 'instructions'}}))
+    control = await _start(ts, _pipeline(parameters={'tone': 'prompt_1.instructions'}))
 
     with pytest.raises(TaskError) as err:
         await DataCommands.on_rrext_process(
@@ -1383,7 +1409,10 @@ async def test_a_data_open_with_an_unknown_param_is_refused_before_the_engine(ca
     )
     assert response == {'body': {'ok': True}}
     forwarded = TaskEngine._send_data.await_args.args[-1]
-    assert forwarded['arguments']['params'] == {'tone': 'dry'}
+    # The admitted params ride the server's _caller, per node and by schema
+    # path (plan 5.3); the public-name map never reaches the engine
+    assert 'params' not in forwarded['arguments']
+    assert forwarded['arguments']['_caller']['params'] == {'prompt_1': {'instructions': 'dry'}}
 
 
 # =============================================================================
@@ -1495,7 +1524,7 @@ def _engine(*, shared, pipeline, server=None):
 def test_build_task_round_trips_parameters_and_names_the_engine(monkeypatch, tmp_path):
     """The task file carries the parameters map and the engine key as taskId, never the address."""
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
-    parameters = {'tone': {'node': 'prompt_1', 'key': 'instructions'}}
+    parameters = {'tone': 'prompt_1.instructions'}
     pipeline = _pipeline(parameters=parameters)
     engine = _engine(shared=False, pipeline=pipeline)
 
@@ -1609,6 +1638,10 @@ class _Deployments:
         self.publics: Dict[tuple, Dict[str, Any]] = {}
         self.artifacts: Dict[tuple, Dict[str, Any]] = {}
         self.developer_orgs = {'acme': 'org-1'}
+
+    async def check_spend(self, org_id):
+        """No balance in memory: the org may always open a pipe."""
+        return None
 
     def deploy(
         self,

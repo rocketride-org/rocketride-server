@@ -55,6 +55,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ai.common.dap import DAPConn, TransportBase
+from .. import caller_stamp
 from .engine_access import engine_for, wait_running
 from ai.constants import CONST_SUBMIT_CLOSE_SECONDS, CONST_SUBMIT_INLINE_MAX
 
@@ -146,10 +147,11 @@ class SubmitCommands(DAPConn):
             control, stamps = await self._resolve_spec(request, args)
 
         # Step 3b: per-call params, admitted by public name against the
-        # control's parameters map (plan 5.4 item 5; a name the pipeline does
-        # not expose is refused, never dropped). They ride the inline open;
-        # the streaming fallback carries them on the SDK's own open.
-        params = control.check_params(args.get('params'))
+        # control's parameters map and by value against the node descriptors
+        # (plan 5.4 item 5; a name the pipeline does not expose is refused,
+        # never dropped). They ride the inline open's _caller; the streaming
+        # fallback carries them on the SDK's own open.
+        params = control.resolve_params(control.check_params(args.get('params')))
 
         # Step 4: deliver inline, or hand the address back for streaming
         body: Dict[str, Any] = {}
@@ -264,24 +266,31 @@ class SubmitCommands(DAPConn):
         control.begin_request()
         await wait_running(task)
 
+        # One server-minted request id for the whole round trip: the open is
+        # idempotent on it (ALB seam 7) and every frame's _caller carries it
+        correlation_id = uuid.uuid4().hex
+
+        def _stamped(arguments: Dict[str, Any]) -> Dict[str, Any]:
+            """One data request carrying the server's _caller (plan 5.3, one mint point)."""
+            prepared = caller_stamp.prepare(self, control, arguments, correlation_id=correlation_id, params=params)
+            return self._data_request(prepared)
+
         async def _round_trip() -> Dict[str, Any]:
             """Open, write and close through the engine data path."""
             open_arguments: Dict[str, Any] = {
                 'subcommand': 'open',
                 'object': self._objinfo(args.get('objinfo'), len(data)),
                 'mimeType': args.get('mimetype') or 'application/octet-stream',
-                'correlationId': uuid.uuid4().hex,
+                'correlationId': correlation_id,
             }
-            if params:
-                open_arguments['params'] = params
-            opened = await task._send_data(self._data_request(open_arguments))
+            opened = await task._send_data(_stamped(open_arguments))
             pipe_id = (opened.get('body') or {}).get('pipe_id')
             try:
-                await task._send_data(self._data_request({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
+                await task._send_data(_stamped({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
             except BaseException:
-                await self._close_quietly(task, pipe_id)
+                await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
                 raise
-            closed = await task._send_data(self._data_request({'subcommand': 'close', 'pipe_id': pipe_id}))
+            closed = await task._send_data(_stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
             return dict(closed.get('body') or {})
 
         # Step 2: the request, bounded only by the caller's timeout
@@ -300,7 +309,7 @@ class SubmitCommands(DAPConn):
         finally:
             control.end_request()
 
-    async def _close_quietly(self, task: Any, pipe_id: Any) -> None:
+    async def _close_quietly(self, task: Any, close: Dict[str, Any]) -> None:
         """
         Close a pipe after a failed write, bounded, never raising.
 
@@ -309,7 +318,7 @@ class SubmitCommands(DAPConn):
         ``CONST_SUBMIT_CLOSE_SECONDS`` at most, so a cancelled request is
         never held open by an engine that does not answer the close.
         """
-        close = self._data_request({'subcommand': 'close', 'pipe_id': pipe_id})
+        pipe_id = (close.get('arguments') or {}).get('pipe_id')
         try:
             await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_SUBMIT_CLOSE_SECONDS)
         except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure

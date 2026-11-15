@@ -44,6 +44,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from ai.common.parameters import resolve_call_params
+from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
 from .types import EngineState, LAUNCH_TYPE, TaskError
 
@@ -191,6 +193,32 @@ class TeamContext:
     kind: str = 'home'
 
 
+# ==== The open-pipe record =======================================================
+
+
+@dataclass
+class OpenPipe:
+    """
+    One pipe a control has open on an engine (plan 3.1, P1/P2).
+
+    The record is the OWNERSHIP check and the ENGINE PIN of the data path: a
+    ``write``/``close``/``tool`` naming a slot that is not on the caller's
+    control is refused before anything is forwarded (on a shared engine the
+    slot number alone must never reach the subprocess), and the later frames
+    of an open pipe go to the engine the pipe opened on, so a repoint never
+    redirects an in-flight request.
+
+    Attributes:
+        engine: The engine the pipe was opened on.
+        trace_id: The request tree's wire ``traceId`` (``nodeId.engineId.n``).
+        correlation_id: The server-minted request id the open carried.
+    """
+
+    engine: 'TaskEngine'
+    trace_id: str
+    correlation_id: str
+
+
 # ==== The control ==============================================================
 
 
@@ -287,6 +315,23 @@ class TaskControl:
     trace_level: Optional[str] = None
     ttl: int = 0
     origin: Optional[str] = None
+
+    # The ROCKETRIDE_* values this control's bindings run with, resolved once
+    # from the team context (plan 6.2; filled by C.10); rides _caller.env
+    env: Dict[str, str] = field(default_factory=dict)
+
+    # The pipes this control has open, by slot (plan 3.1 P1/P2)
+    open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
+
+    # The resolved config views of the components the parameters map targets,
+    # built on first use and dropped when the pipeline changes: the schema is
+    # resolved once per component for the control's life, not once per request
+    param_views: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    # When the paying unit last answered "allowed" (monotonic); a request within
+    # CONST_SPEND_ALLOW_SECONDS of it asks no question (the engine's own gate
+    # trusts an allow for the same window). A refusal is never cached.
+    credit_allowed_at: float = 0.0
 
     # The control's own idle clock and its idle-expiry heap entry: activity
     # through one control never keeps another alive (plan 7.1)
@@ -391,6 +436,62 @@ class TaskControl:
                 errors=errors,
             )
         return dict(params)
+
+    def resolve_params(self, admitted: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """
+        The per-node map of admitted params the engine applies (plan 5.4 item 5, the descriptor half).
+
+        Each value is validated against its leaf's descriptor through the
+        node's resolver; a target that is not a ``param``-flagged key is
+        refused. The result keys each node's values by the leaf's schema path,
+        which ``IInstanceBase.settings`` overlays.
+
+        Args:
+            admitted: Params already admitted by name (``check_params``).
+
+        Returns:
+            ``{nodeId: {path: value}}``; empty when none were given.
+
+        Raises:
+            TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``.
+        """
+        if not admitted:
+            return {}
+        per_node, errors = resolve_call_params(self.pipeline or {}, self.parameters, admitted, self.param_views)
+        if errors:
+            names = ', '.join(e['name'] for e in errors)
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                f'params rejected on {self.address!r}: {names}',
+                address=self.address,
+                errors=errors,
+            )
+        return per_node
+
+    def setup_declared_parameters(self) -> None:
+        """
+        Set up the per-call parameters the control's current pipeline DECLARES (its ``parameters`` map).
+
+        The map (public name -> ``nodeId.configKey``, plan 5.2) is the admission
+        list for per-call ``params``; the resolved node views cached for it are
+        dropped at the same time. Called wherever the control's pipeline is set
+        or replaced (a start, a repoint): the cached views describe components
+        of the pipeline they were resolved from, so they go with it.
+        """
+        self.parameters = dict((self.pipeline or {}).get('parameters') or {})
+        self.param_views.clear()
+
+    def credit_allowed(self, now: float) -> bool:
+        """
+        Whether a recent credit check already allowed this control's paying unit.
+
+        Args:
+            now: ``time.monotonic()``.
+
+        Returns:
+            True within ``CONST_SPEND_ALLOW_SECONDS`` of the last allow.
+        """
+        return now - self.credit_allowed_at < CONST_SPEND_ALLOW_SECONDS
 
     def begin_request(self) -> None:
         """

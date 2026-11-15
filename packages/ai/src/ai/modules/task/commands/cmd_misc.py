@@ -50,6 +50,7 @@ from rocketride import EVENT_TYPE
 from rocketlib import ConfigError, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.node_config import node_schema, resolve_node_config
+from ai.common.parameters import validate_parameters
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..address import in_endpoint_scope
@@ -442,6 +443,10 @@ class MiscCommands(DAPConn):
             # start, so what fails here is exactly what would fail the run: hard
             # errors, on the engine's own errors list.
             config_errors = _config_errors(components)
+            # The parameters map (plan 5.4 item 3): the same rules the start
+            # and publish doors enforce, on the same errors list
+            if 'components' in pipeline:
+                config_errors = config_errors + validate_parameters(pipeline)
             if config_errors:
                 if substituted:
                     # A resolver message may quote the resolved value, so under
