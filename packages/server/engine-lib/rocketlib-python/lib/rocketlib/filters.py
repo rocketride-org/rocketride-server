@@ -320,13 +320,18 @@ class IGlobalBase:
     #: a dict per global, created on first use so the class attribute is never shared
     _provider_clients: Optional[Dict[tuple, Any]] = None
     _provider_lock_value: Optional[Any] = None
+    #: Guards the creation of a global's own lock and cache: two worker threads
+    #: reaching provider_client first on one global must agree on ONE lock
+    _PROVIDER_INIT_LOCK = threading.Lock()
 
     @property
     def _provider_lock(self):
-        """The lock guarding this global's provider-client cache (created on first use, per global)."""
+        """The lock guarding this global's provider-client cache (created once, per global)."""
         if self._provider_lock_value is None:
-            self._provider_lock_value = threading.Lock()
-            self._provider_clients = {}
+            with IGlobalBase._PROVIDER_INIT_LOCK:
+                if self._provider_lock_value is None:
+                    self._provider_clients = {}
+                    self._provider_lock_value = threading.Lock()
         return self._provider_lock_value
 
     def preventDefault(self) -> None:

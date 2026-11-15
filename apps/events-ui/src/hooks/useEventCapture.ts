@@ -272,7 +272,9 @@ export function useEventCapture(): IUseEventCaptureResult {
 
 	/** Select every subscription category. */
 	const selectAllTypes = useCallback(() => {
-		setConfig((c) => ({ ...c, types: [...EVENT_TYPE_NAMES] }));
+		// Every category but OPS, as the SDK's ALL: the ops stream is an
+		// operator's opt-in on the wildcard and is refused on a task address
+		setConfig((c) => ({ ...c, types: EVENT_TYPE_NAMES.filter((name) => name !== 'OPS') }));
 	}, []);
 
 	/** Clear the subscription category selection. */

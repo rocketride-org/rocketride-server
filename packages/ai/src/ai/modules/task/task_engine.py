@@ -877,6 +877,9 @@ class TaskEngine(DAPBase):
         # could not open are not retried (the run continues unlogged there)
         self._run_logs: Dict[str, RunLogWriter] = {}
         self._run_log_failed: set = set()
+        # One open per control: two events forwarded together for a control
+        # without a writer must not open two (the displaced one would never close)
+        self._run_log_open_lock = asyncio.Lock()
         self._run_kind: str = run_kind
         # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
         # 'team' (a @team deploy). Decides where the run's working files and
@@ -2239,13 +2242,11 @@ class TaskEngine(DAPBase):
             type: Event category for routing.
             message: Event payload.
         """
-        # Step 1: the continuum stamps. Idempotent: events stamped at ingress
-        # or at their build site pass through unchanged
-        self.stamp_log_event(message)
-
-        # Step 2: the identity every task-scoped body carries (project_id +
+        # Step 1: the identity every task-scoped body carries (project_id +
         # source, the run classification) so clients filter uniformly by body
-        # fields; raw engine events arrive from the child without it
+        # fields; raw engine events arrive from the child without it. The
+        # engine's identity is the default; each receiving control stamps its
+        # own below
         body = message.get('body') if isinstance(message, dict) else None
         if isinstance(body, dict) and 'project_id' not in body:
             body['project_id'] = self.project_id
@@ -2262,30 +2263,72 @@ class TaskEngine(DAPBase):
             if isinstance(body.get('traceId'), int):
                 body['traceId'] = self.trace_ref(body['traceId'])
 
-        # Step 3: who receives it
+        # Step 2: who receives it
         event_name = message.get('event', '') if isinstance(message, dict) else ''
         targets = self._route(type, event_name, body if isinstance(body, dict) else {})
         if not targets:
+            self.stamp_log_event(message)
             await self._emit_ops(event_name, body)
             return
 
-        # Step 4: one copy per receiving control, carrying its controlId (the
-        # control's key string, ALB seam 3), appended to THAT control's run
-        # log and delivered opener first
+        # Step 3: the receiving controls' continua, opened BEFORE the event is
+        # numbered: opening a restored continuum lifts the engine's logSeq
+        # floor to its lastSeq + 1, so a seq assigned first could repeat one
+        # that continuum already recorded
+        writers = {key: await self._run_log_for(key) for key, _opener, _late in targets}
+
+        # Step 4: the continuum stamps. Idempotent: events stamped at ingress
+        # or at their build site pass through unchanged
+        self.stamp_log_event(message)
+
+        # Step 5: one copy per receiving control, carrying its controlId (the
+        # control's key string, ALB seam 3) and ITS identity, appended to THAT
+        # control's run log and delivered opener first
         for key, opener, late in targets:
             copy = {**body, 'controlId': key} if isinstance(body, dict) else body
-            if isinstance(copy, dict) and late:
-                copy['late'] = True
-            if isinstance(copy, dict) and event_name == 'apaevt_status_update':
-                copy = self._project_status(key, copy)
+            writer = writers.get(key)
+            if isinstance(copy, dict):
+                self._stamp_control_identity(key, copy)
+                if late:
+                    copy['late'] = True
+                if event_name == 'apaevt_status_update':
+                    copy = self._project_status(key, copy)
+                # The run's chapter is per continuum: the receiving control's
+                # run-begin marker, not the first holder's
+                if event_name == 'apaevt_task' and 'beginSeq' in copy and writer is not None:
+                    copy['beginSeq'] = writer.chapter_begin_seq
             event = {**message, 'body': copy}
-            writer = await self._run_log_for(key)
             if writer is not None:
                 try:
                     writer.append(event)
                 except Exception as e:
                     self.debug_message(f'Run-log append failed for {key}: {e}')
             await self._server.broadcast_task_event(event_type=type, key=key, event=event, opener=opener)
+
+    def _stamp_control_identity(self, key: str, body: Dict[str, Any]) -> None:
+        """
+        Stamp the receiving control's identity on its copy of an event.
+
+        Two controls can share one engine under different project ids (the
+        same graph, two names), so the engine's identity is only the default:
+        the copy a control receives names THAT control's project, source and
+        run classification, which is what its clients filter by.
+
+        Args:
+            key: The receiving control's registry key.
+            body: The control's copy of the body, updated in place.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return
+        body['project_id'] = control.project_id or body.get('project_id')
+        body['source'] = control.source or body.get('source')
+        body['runKind'] = control.run_kind or body.get('runKind')
+        if control.teamId:
+            body['teamId'] = control.teamId
+        if control.userId:
+            body['userId'] = control.userId
 
     def _route(self, type: EVENT_TYPE, event_name: str, body: Dict[str, Any]) -> List[tuple]:
         """
@@ -2363,9 +2406,12 @@ class TaskEngine(DAPBase):
         Returns:
             The writer, or None when it could not be opened (not retried).
         """
-        writer = self._run_logs.get(key)
-        if writer is None and key not in self._run_log_failed:
-            writer = await self._open_run_log(key)
+        # Under the lock, with the map re-read inside it: the first forward
+        # for a new control opens its writer, the ones that overlapped it reuse it
+        async with self._run_log_open_lock:
+            writer = self._run_logs.get(key)
+            if writer is None and key not in self._run_log_failed:
+                writer = await self._open_run_log(key)
         return writer
 
     def _chapter_begin_seq(self) -> Optional[int]:

@@ -44,6 +44,8 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from rocketride.types.task import TASK_METRICS, TASK_TOKENS
+
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
@@ -348,6 +350,11 @@ class TaskControl:
     # from the team context (plan 6.2; filled by C.10); rides _caller.env
     env: Dict[str, str] = field(default_factory=dict)
 
+    # After a repoint, the engine still serving this control's open pipes: the
+    # slot numbers a client names are that engine's, so the control opens on
+    # it until the last of them closes, then its hold goes (plan 7.2 P2)
+    draining: Optional['TaskEngine'] = None
+
     # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
     # bindings did so far (plan 7.5)
     open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
@@ -536,13 +543,16 @@ class TaskControl:
             currentObject='',
             currentSize=0,
         )
-        # Step 3: engine-level diagnostics belong to the ops stream
+        # Step 3: engine-level diagnostics and the engine's resource and token
+        # totals belong to the ops stream (a holder's own usage is C.13)
         for key, empty in (
             ('warnings', []),
             ('errors', []),
             ('notes', []),
             ('componentStats', {}),
             ('slowestDocs', []),
+            ('metrics', TASK_METRICS().model_dump()),
+            ('tokens', TASK_TOKENS().model_dump()),
         ):
             if key in body:
                 body[key] = empty

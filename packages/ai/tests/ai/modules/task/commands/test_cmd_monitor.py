@@ -47,7 +47,7 @@ ADDRESS = 'acme.proj-1.src-1'
 KEY = 'dev.user-1.acme.proj-1.src-1'
 
 
-def _account_info(*, user_id='user-1', team_id='team-1'):
+def _account_info(*, user_id='user-1', team_id='team-1', sys_permissions=()):
     """
     Build an AccountInfo stub with a single org/team membership.
 
@@ -56,10 +56,13 @@ def _account_info(*, user_id='user-1', team_id='team-1'):
         team_id: the team that the caller has ``task.monitor``/``task.data``/``task.control``
             permissions on. Any control whose ``teamId`` matches this value will be
             visible; controls with a different ``teamId`` are filtered out.
+        sys_permissions: platform permissions (``sys.admin`` makes the caller an
+            operator, who alone receives the DASHBOARD and OPS streams, B31).
     """
     return SimpleNamespace(
         userId=user_id,
         userToken='token-' + user_id,
+        sysPermissions=list(sys_permissions),
         organization={
             'id': 'org-1',
             'developerId': 'acme',
@@ -97,19 +100,28 @@ async def test_send_server_event_skipped_when_bit_not_subscribed():
 
 @pytest.mark.asyncio
 async def test_send_server_event_dispatches_when_subscribed():
-    """Matching '*' subscription + bit causes the event to be dispatched."""
+    """Matching '*' subscription + bit causes the event to be dispatched (to an operator, for DASHBOARD)."""
     conn = _make_conn(
         monitors={'*': EVENT_TYPE.DASHBOARD},
-        account_info=_account_info(),
+        account_info=_account_info(sys_permissions=['sys.admin']),
     )
     await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {'x': 1}})
     conn.send_event.assert_awaited_once_with('evt', body={'x': 1})
 
 
 @pytest.mark.asyncio
+async def test_a_retained_dashboard_subscription_is_masked_once_the_operator_permission_lapses():
+    """DASHBOARD, like OPS, is checked at DELIVERY: the subscription outlives the permission, the stream does not (B31)."""
+    conn = _make_conn(monitors={'*': EVENT_TYPE.DASHBOARD | EVENT_TYPE.OPS}, account_info=_account_info())
+    await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}})
+    await MonitorCommands.send_server_event(conn, EVENT_TYPE.OPS, {'event': 'apaevt_ops', 'body': {}})
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_server_event_filters_by_user_id_tenant_scoping():
     """A tenant-scoped event (user_id set) is filtered against the caller's userId."""
-    account = SimpleNamespace(userId='user-1', userToken='ak_mine')
+    account = SimpleNamespace(userId='user-1', userToken='ak_mine', sysPermissions=['sys.admin'])
     conn = _make_conn(monitors={'*': EVENT_TYPE.DASHBOARD}, account_info=account)
     # Mismatched user_id: should be filtered out.
     await MonitorCommands.send_server_event(

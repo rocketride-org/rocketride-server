@@ -284,14 +284,34 @@ class SubmitCommands(DAPConn):
                 'correlationId': correlation_id,
             }
             opened = await task._send_data(_stamped(open_arguments))
-            pipe_id = (opened.get('body') or {}).get('pipe_id')
+            opened_body = opened.get('body') or {}
+            pipe_id = opened_body.get('pipe_id')
+            # The request tree is this control's from the open to the close
+            # (plan 7.5), as a streamed open's is: its flow and SSE route to
+            # this control, this connection first, and its lines land in this
+            # control's run log; the binding counts in the control's own stats
+            trace_id = str(opened_body.get('traceId') or '')
+            owners = self._server.trace_owners
+            owners.claim(trace_id, control.key, self._connection_id)
+            control.stats.totalCount += 1
+            succeeded = False
             try:
-                await task._send_data(_stamped({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
-            except BaseException:
-                await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
-                raise
-            closed = await task._send_data(_stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
-            return dict(closed.get('body') or {})
+                try:
+                    await task._send_data(_stamped({'subcommand': 'write', 'pipe_id': pipe_id, 'data': data}))
+                except BaseException:
+                    await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
+                    raise
+                closed = await task._send_data(_stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
+                succeeded = True
+                return dict(closed.get('body') or {})
+            finally:
+                if succeeded:
+                    control.stats.completedCount += 1
+                    control.stats.completedSize += len(data)
+                else:
+                    control.stats.failedCount += 1
+                    control.stats.failedSize += len(data)
+                owners.release(trace_id)
 
         # Step 2: the request, bounded only by the caller's timeout
         timeout = args.get('timeout')

@@ -264,12 +264,12 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
     run_2 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-2')
     perms = ['task.control', 'task.data', 'task.monitor']
 
-    def member(dev_team: str) -> AccountInfo:
+    def member(dev_team: str, team_order: 'list[str] | None' = None) -> AccountInfo:
         return AccountInfo(
             auth='rr_key',
             userId='user-a',
             devTeam=dev_team,
-            teamOrder=[dev_team],
+            teamOrder=team_order if team_order is not None else [dev_team],
             organization={
                 'id': 'org-1',
                 'name': 'Acme',
@@ -288,8 +288,26 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
     # team-3 first holds nothing and is skipped: team-1 comes next in membership order
     assert ts.resolve_control(run_1.address, member('team-3'), 'task.monitor') is run_1
     assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-2') is run_2
+    # devTeam and the stored order disagree: the STORED order decides (team-2 first)
+    assert ts.resolve_control(run_1.address, member('team-1', ['team-2', 'team-1']), 'task.monitor') is run_2
     with pytest.raises(PermissionError):
         ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-9')
+
+
+def test_the_resolver_can_be_held_to_one_rung():
+    """A subscription keyed to the caller's dev run never reads their personal deploy of the address, nor the
+    reverse: ``rung=`` holds the walk to the continuum the key names (a live @dev would otherwise answer first).
+    """
+    ts = _server()
+    dev = _control(ts, run_kind='dev')
+    me = _control(ts, run_kind='deploy', owner_kind='user')
+    caller = _account(developer_id='acme')
+    assert ts.resolve_control(dev.address, caller, 'task.monitor') is dev
+    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='dev') is dev
+    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='me') is me
+    with pytest.raises(TaskError) as err:
+        ts.resolve_control(dev.address, caller, 'task.monitor', rung='team')
+    assert err.value.rungsTried == ['@team']
 
 
 # =============================================================================

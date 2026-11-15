@@ -308,7 +308,10 @@ class TestConfigView:
     def test_expand_env(self, view):
         expanded = view.expand_env({'ROCKETRIDE_DEPTH_APIKEY': 'sk-123'})
         assert expanded.apikey == 'sk-123'
-        assert expanded.env_keys == frozenset()
+        # Which keys the caller's environment decides is a fact of the spec: the
+        # per-call client caches (provider_client) key on it after expansion
+        assert expanded.env_keys == frozenset({'apikey'})
+        assert expanded.overlay({'maxEdge': 320}).env_keys == frozenset({'apikey'})
         assert view.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
 
     def test_expand_env_leaves_unknown_names(self, view):

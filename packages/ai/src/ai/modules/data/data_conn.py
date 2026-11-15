@@ -818,6 +818,7 @@ class DataConn(DAPConn):
             # Do the actual pipe operations in thread
             def open_sync():
                 pipe_instance = None
+                hold_started = None
 
                 try:
                     # Create an entry object from the provided object metadata
@@ -875,13 +876,16 @@ class DataConn(DAPConn):
                     return pipe_id, trace_id
 
                 except Exception:
-                    # Clean up pipe if allocated.
+                    # Clean up pipe if allocated. The pipe was HELD from getPipe
+                    # to here, so the failed open books its hold like any other
+                    # (plan 8.1); a failure before the pipe was taken bills nothing
                     if pipe_instance:
                         try:
                             self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
+                        self._record_hold(hold_started, 0)
                     raise
 
             # Execute sync operations in thread

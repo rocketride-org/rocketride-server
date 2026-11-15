@@ -912,6 +912,7 @@ async def test_remove_task_calls_stop_and_broadcasts():
         # Monitor-key cleanup builds the owner-scoped key from the control.
         owner_id='u1',
         task=task,
+        draining=None,
         project_id='proj-1',
         source='src-1',
         apikey='ak_x',

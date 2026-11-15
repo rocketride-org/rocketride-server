@@ -144,7 +144,9 @@ class EVENT_TYPE(Flag):
     Different clients can subscribe to different event types simultaneously:
     - Debugging clients: DEBUGGER + DETAIL for comprehensive debugging
     - Monitoring dashboards: SUMMARY for efficient status tracking
-    - Administrative tools: ALL for complete system visibility
+    - Administrative tools: ALL | OPS for complete system visibility (ALL
+      excludes the operator-only OPS stream, which carries a shared engine's
+      errors, crashes and other engine-level output)
     - Log viewers: OUTPUT for message monitoring
     - Pipeline managers: FLOW + TASK for execution tracking
 

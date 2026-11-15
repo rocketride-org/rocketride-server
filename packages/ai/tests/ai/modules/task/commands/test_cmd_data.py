@@ -87,6 +87,42 @@ async def _opened(ts, conn, **arguments):
 
 
 # =============================================================================
+# THE DRAINING ENGINE (plan 7.2 P2)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_repoint_with_open_pipes_keeps_the_control_on_the_old_engine_until_they_close(
+    catalog, engines, engine_log
+):
+    """The slots a client names are ONE engine's: while a pipe is open the control keeps opening on the
+    engine it repointed away from, and that engine's hold goes at the last close.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    old = control.task
+    slot = await _opened(ts, conn)
+
+    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
+    assert control.task is not old and control.draining is old and old.is_live
+
+    # Every frame of the control, a new open included, still lands on the old engine
+    engine_log.clear()
+    await _opened(ts, conn)
+    await _frame(conn, subcommand='write', pipe_id=slot, data=b'x')
+    assert [entry['engine'] for entry in engine_log] == [old, old]
+
+    # The last close drains it: the hold goes and, as its last, stops the old engine
+    await _frame(conn, subcommand='close', pipe_id=slot)
+    assert control.draining is None and control.open_pipes == {}
+    assert (old, 'repointed') in engines
+    engine_log.clear()
+    await _opened(ts, conn)
+    assert engine_log[-1]['engine'] is control.task
+
+
+# =============================================================================
 # STRIP THEN INJECT (S2)
 # =============================================================================
 

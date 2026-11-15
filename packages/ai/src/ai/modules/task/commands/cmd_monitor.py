@@ -59,7 +59,7 @@ from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
 from ai.account.app_deploy import _developer_id_of
-from ai.modules.task.address import build_address
+from ai.modules.task.address import ENDPOINT_ANY_SOURCE, build_address
 from ai.modules.task.types import TaskError
 
 
@@ -189,9 +189,10 @@ class MonitorCommands(DAPConn):
         # Step 3: bitmask must match
         if not (event_type & self._monitors['*']):
             return
-        # Step 3b: the ops stream is masked at DELIVERY too (plan 7.5): a
-        # permission that lapsed mid-session stops the stream at once
-        if event_type & EVENT_TYPE.OPS and not self._is_platform_operator():
+        # Step 3b: the platform-wide streams (OPS, DASHBOARD) are masked at
+        # DELIVERY too (plan 7.5, B31): a permission that lapsed mid-session
+        # stops them at once, whatever the retained subscription says
+        if event_type & (EVENT_TYPE.OPS | EVENT_TYPE.DASHBOARD) and not self._is_platform_operator():
             return
         # Step 4: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
@@ -606,14 +607,25 @@ class MonitorCommands(DAPConn):
             # It is ok if the task doesn't exist at this point in time (a
             # subscription before the launch). When it does, ONE resolver
             # names it (plan 3.2): the caller's developer id, the pipe and the
-            # source; a key's endpoints scope is enforced inside it
+            # source; a key's endpoints scope is enforced inside it. The
+            # resolver is held to the CONTINUUM the key names (a dev-keyed
+            # subscription never reads a personal deploy's status, nor the
+            # reverse), and the all-sources scope ('*') is no address at all
             developer_id = _developer_id_of(self)
-            address = build_address(developer_id, project_id, source) if developer_id else ''
+            address = (
+                build_address(developer_id, project_id, source)
+                if developer_id and source != ENDPOINT_ANY_SOURCE
+                else ''
+            )
             try:
                 if not address:
                     raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
                 control = self._server.resolve_control(
-                    address, self._account_info, 'task.monitor', team=team_id or None
+                    address,
+                    self._account_info,
+                    'task.monitor',
+                    team=team_id or None,
+                    rung='team' if team_id else ('me' if key_kind == 'deploy' else 'dev'),
                 )
 
                 # The task is running, we can fill it in

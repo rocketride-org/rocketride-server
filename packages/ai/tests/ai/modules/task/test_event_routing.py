@@ -248,6 +248,17 @@ def test_project_status_passes_a_private_engines_counts_through_with_the_availab
     assert body['completedCount'] == 5 and body['errors'] == ['e'] and 'availability' in body['engine']
 
 
+def test_project_status_scrubs_a_shared_engines_diagnostics_metrics_and_tokens():
+    """A holder of a shared engine sees its own counts; the engine's resource and token totals are platform signal."""
+    control = TaskControl()
+    control.task = SimpleNamespace(dormant_reason=None, state=None, is_live=True)
+    control.engine_starting = False
+    status = {'completedCount': 5, 'errors': ['e'], 'metrics': {'cpu_percent': 50.0}, 'tokens': {'total': 9.0}}
+    body = control.project_status(status, shared=True)
+    assert body['completedCount'] == 0 and body['errors'] == []
+    assert body['metrics']['cpu_percent'] == 0.0 and body['tokens']['total'] == 0.0
+
+
 # =============================================================================
 # OPENER FIRST AND THE OPS GATE
 # =============================================================================

@@ -184,16 +184,18 @@ have content.
 
 ### run_pipeline
 
-Start a pipeline from an inline definition, returning a `task_token`;
-optionally send data in the same call and get the result back synchronously.
+Start a pipeline from an inline definition, returning its `address`
+(`developerId.pipelineId.source`); optionally send data in the same call and
+get the result back synchronously.
 
 - **Parameters:** `pipeline` (object, required); `inputs` (string, optional —
   data to send immediately after start); plus the shared start parameters.
-- **Returns:** `{ok, task_token, projectId, source, result?}` — `result` only
+- **Returns:** `{ok, address, projectId, source, result?, terminated?}` —
+  `result` (and `terminated`, the one-shot run is ended once it answered) only
   when `inputs` was passed. Keep `projectId` and `source`: they key the
   [replay tools](#replay-past-runs).
 - **Notable:** if the initial send times out, the error hint still reports the
-  token so you can `monitor` the task instead of losing it.
+  address so you can `monitor` the task instead of losing it.
 
 ### run_dropper_pipe
 
@@ -202,27 +204,28 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
 
 - **Parameters:** `pipeline` (object, required); plus the shared start
   parameters (no `inputs`).
-- **Returns:** `{ok, task_token, upload_url, dropper_url, projectId, source}`.
-  `upload_url` accepts programmatic multipart POSTs; `dropper_url` is a
-  browser page where a person can drag and drop files into the running
-  pipeline.
-- **Notable:** the URLs embed only the task's public key (`pk_`); the control
-  token never appears in a URL. If the pipeline has no data-ingress source, the
-  task is cleaned up and the call fails with a `BadRequest` instead of leaving
-  an orphaned run. In MCP Apps hosts the result renders as the
+- **Returns:** `{ok, address, upload_url, dropper_url, projectId, source}`.
+  `upload_url` is the engine's `/task/data/{address}` door for programmatic
+  multipart POSTs (authenticated with the caller's `rr_` key in the
+  `Authorization` header); `dropper_url` opens the dropper app on that pipe
+  (`?appid=rocketride.dropper&pipe=<address>`), where a person signs in and
+  drags files into the running pipeline.
+- **Notable:** the URLs carry the task's address and no credential. If the
+  pipeline has no data-ingress source, the task is cleaned up and the call
+  fails with a `BadRequest` instead of leaving an orphaned run. In MCP Apps hosts the result renders as the
   [file-dropper widget](/connect/mcp/http/resources-and-widgets#widgets).
 
 ### send_data
 
 Send data to a running task and return its result.
 
-- **Parameters:** `task_token` (string, required); `input` (string, required).
+- **Parameters:** `address` (string, required); `input` (string, required).
 - **Returns:** `{ok, result}`.
 
 ### send_files
 
 Upload files from the engine host's local filesystem to a running task by
-token.
+address.
 
 - **Availability:** local engines only — the engine binds a loopback host
   (`localhost`, `127.0.0.1`, `::1`), so the engine host is your own machine.
@@ -230,16 +233,16 @@ token.
   `Unavailable` without looking at the paths. To get files into a pipeline on
   a deployed engine (including RocketRide Cloud), use `run_dropper_pipe` and
   its `upload_url`.
-- **Parameters:** `task_token` (string, required); `files` (array of paths on
+- **Parameters:** `address` (string, required); `files` (array of paths on
   the engine host's filesystem, at least one, required).
 - **Returns:** `{ok, result}` — per-file upload results (status, timing,
   processing results).
 
 ### terminate
 
-Terminate a running task by token — also the way to stop a runaway run.
+Terminate a running task by address — also the way to stop a runaway run.
 
-- **Parameters:** `task_token` (string, required).
+- **Parameters:** `address` (string, required).
 - **Returns:** `{ok, terminated}`.
 
 ## Watch what's running
@@ -250,10 +253,10 @@ Poll a task until it reaches a terminal state or the timeout elapses, then
 return a status snapshot. This is bounded polling, not an event stream — it
 always returns within the timeout.
 
-- **Parameters:** `task_token` (string, required); `timeout` (number, optional,
+- **Parameters:** `address` (string, required); `timeout` (number, optional,
   default 30, clamped to 0–300 seconds); `interval` (number, optional, default
   1, minimum 0.25 seconds).
-- **Returns:** `{ok, task_token, state, state_label, completed, terminal,
+- **Returns:** `{ok, address, state, state_label, completed, terminal,
   status, counts: {completedCount, failedCount, totalCount}, errors, warnings,
   polls, poll_timed_out?}`.
 - **Notable:** `state` is an integer enum (0 none, 1 starting,

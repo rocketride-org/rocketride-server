@@ -536,7 +536,12 @@ class _EngineTransition:
     - ``confirm``: the new engine reports running (``start_task`` returns at
       launch, before that).
     - ``commit``: the old hold goes through the hold rule; the old engine stops
-      when that was its last hold.
+      when that was its last hold. While the control still has pipes OPEN on
+      the old engine the hold is kept and the engine recorded as the control's
+      ``draining`` one: the pipe slots a client names are the engine's own
+      numbers, so a control's open pipes live on ONE engine at a time (the
+      data path keeps opening on the draining engine, plan 7.2 P2) and the
+      hold goes when the last of them closes.
     - ``abort``: the control is put back on its old pipeline and engine BEFORE
       any await, then the new hold goes through the hold rule (a replacement
       nobody holds does not linger).
@@ -598,9 +603,15 @@ class _EngineTransition:
             await self.engine.wait_for_running()
 
     async def commit(self) -> None:
-        """The move is final: the old hold goes, and the old engine with it when that was its last."""
+        """The move is final: the old hold goes (once its open pipes drained), and the old engine with it when that was its last."""
+        control = self._control
         if self.moved and self.old_engine is not None:
-            await self._server.release_hold(self.old_engine, self._control.key, 'repointed')
+            if any(record.engine is self.old_engine for record in control.open_pipes.values()):
+                # The in-flight requests finish where they started; the data
+                # path releases this hold at the last close (cmd_data)
+                control.draining = self.old_engine
+            else:
+                await self._server.release_hold(self.old_engine, control.key, 'repointed')
         self._server.debug_message(
             f'Task "{self._control.id}" {"repointed to" if self.moved else "stays on"} engine '
             f'"{self.engine.engine_key if self.engine else "?"}"'
@@ -1221,9 +1232,16 @@ class TaskServer(DAPBase):
         require: Optional[str] = None,
         *,
         team: Optional[str] = None,
+        rung: Optional[str] = None,
     ) -> TaskControl:
         """
         THE resolver over the registry: an address plus the request's account yields one control.
+
+        ``rung`` holds the walk to ONE rung (``'dev'``, ``'me'``, ``'team'``,
+        ``'public'``) for a caller that already knows which continuum it
+        means (a monitor subscription keyed to the caller's dev run must
+        never land on their personal deploy of the same address, nor the
+        reverse); the default walks them all.
 
         Walks the rungs in the fixed order and takes the first that answers
         (``@dev``: the caller's own presence, attach-only; ``@me``: the
@@ -1283,7 +1301,7 @@ class TaskServer(DAPBase):
 
         # Step 2: live controls first, then anything still registered
         for live_only in (True, False):
-            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team)
+            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team, only=rung)
             if control is not None:
                 return self._check_engine_available(control)
 
@@ -1385,6 +1403,7 @@ class TaskServer(DAPBase):
         live_only: bool,
         rungs: List[str],
         team: Optional[str] = None,
+        only: Optional[str] = None,
     ) -> Optional[TaskControl]:
         """
         One walk of the rungs over the registry indexes: the first hit, verified, or None.
@@ -1397,6 +1416,7 @@ class TaskServer(DAPBase):
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
             team: Per-call ``@team`` override.
+            only: Walk this one rung (``'dev'``/``'me'``/``'team'``/``'public'``) instead of all four.
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1440,46 +1460,53 @@ class TaskServer(DAPBase):
             found = [registry.lookup(control_key(rung, user_id, a)) for a in addresses]
             return _pick([c for c in found if _usable(c)])
 
+        def _wanted(rung: str) -> bool:
+            """Whether this walk visits ``rung`` (every rung unless one was asked for)."""
+            return only is None or only == rung
+
         # Step 2: @dev, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
-        if endpoints is None:
+        if endpoints is None and _wanted('dev'):
             rungs.append('@dev')
             control = _exact('dev')
             if control is not None:
                 return self._verify_control(control, account_info, require)
 
         # Step 3: @me, the caller's personal (user-owned) deployment run
-        rungs.append('@me')
-        control = _exact('me')
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
-
-        # Step 4: @team, the first team in the caller's team order (or the
-        # team= override, or a scoped key's frozen team) with a team-owned
-        # run of the address: one owner-index probe per team and address
-        rungs.append('@team')
-        for team_id in teams_to_probe(account_info, team):
-            runs = [
-                c
-                for a in addresses
-                for c in registry.owned(a, team_id)
-                if c.run_kind == 'deploy'
-                and c.owner_kind != 'user'
-                and _usable(c)
-                and resolve_run_permissions(account_info, c)
-            ]
-            control = _pick(runs)
+        if _wanted('me'):
+            rungs.append('@me')
+            control = _exact('me')
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
+        # Step 4: @team, the first team in the caller's team order (or the
+        # team= override, or a scoped key's frozen team) with a team-owned
+        # run of the address: one owner-index probe per team and address
+        if _wanted('team'):
+            rungs.append('@team')
+            for team_id in teams_to_probe(account_info, team):
+                runs = [
+                    c
+                    for a in addresses
+                    for c in registry.owned(a, team_id)
+                    if c.run_kind == 'deploy'
+                    and c.owner_kind != 'user'
+                    and _usable(c)
+                    and resolve_run_permissions(account_info, c)
+                ]
+                control = _pick(runs)
+                if control is not None:
+                    check_endpoint_scope(endpoints, control.address)
+                    return self._verify_control(control, account_info, require)
+
         # Step 5: @public, the caller's own control on a store publication
-        rungs.append('@public')
-        control = _exact('public')
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+        if _wanted('public'):
+            rungs.append('@public')
+            control = _exact('public')
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
         return None
 
     @staticmethod
@@ -1974,9 +2001,32 @@ class TaskServer(DAPBase):
             # Its request trees go with it (their records did)
             self.trace_owners.forget_control(control.key)
 
-        # The control's one hold
-        if control.task is not None and not keep_hold:
-            control.task.release(control.key)
+        # The control's one hold, and the one it still has on an engine
+        # draining its open pipes after a repoint
+        if not keep_hold:
+            if control.task is not None:
+                control.task.release(control.key)
+            if control.draining is not None:
+                control.draining.release(control.key)
+                control.draining = None
+
+    async def release_draining(self, control: TaskControl, reason: str) -> None:
+        """
+        Drop the hold a control kept on the engine draining its open pipes after a repoint, if any.
+
+        Through the hold rule, so the old engine stops when the control was
+        its last holder. Called by the data path at the last close and by
+        every path that drops the control.
+
+        Args:
+            control: The control.
+            reason: Why the engine stops, when it does.
+        """
+        draining = control.draining
+        if draining is None:
+            return
+        control.draining = None
+        await self.release_hold(draining, control.key, reason)
 
     async def release_hold(self, engine: Optional[TaskEngine], control_key: str, reason: str) -> None:
         """
@@ -2068,6 +2118,7 @@ class TaskServer(DAPBase):
         # through the one rule that stops the engine when it was the last
         self._forget_control(control, keep_hold=True)
         await self.release_hold(engine, control.key, reason)
+        await self.release_draining(control, reason)
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -2937,6 +2988,11 @@ class TaskServer(DAPBase):
             env_source=env_source,
             wait_running=wait_for_running,
         )
+        # The control admits the accepted spec's parameters and runs with its
+        # references: the incoming control resolved both for the same caller
+        # and team context (a failed repoint raised above and kept the old ones)
+        existing.setup_declared_parameters()
+        existing.env = dict(incoming.env)
         return results(
             existing,
             reused=True,
@@ -3234,7 +3290,12 @@ class TaskServer(DAPBase):
             # The control admits the accepted pipeline's parameters now, and
             # its environment follows the new spec's references
             control.setup_declared_parameters()
-            control.env = await self._resolve_control_env(control)
+            installed = control.pipeline
+            env = await self._resolve_control_env(control)
+            # A restart that overtook this one while the lookup awaited owns
+            # the control's pipeline now; its env is the one that matches it
+            if control.pipeline is installed:
+                control.env = env
 
             # Ownership transfers ONLY once the restart has succeeded: until
             # then the previous owner keeps the task

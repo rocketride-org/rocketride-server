@@ -109,6 +109,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # safety net (see TaskEngine.stamp_log_event): fresh-stream counter + no writer.
     t._log_seq_next = 1
     t._run_logs = {}
+    t._run_log_open_lock = asyncio.Lock()
     t._run_log_failed = set()
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
@@ -1981,6 +1982,7 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
     t._server.broadcast_task_event = AsyncMock()
     t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
     t._run_logs = {}
+    t._run_log_open_lock = asyncio.Lock()
     t._run_log_failed = set()
     message = {'event': 'apaevt_sse', 'body': {'pipe_id': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
 

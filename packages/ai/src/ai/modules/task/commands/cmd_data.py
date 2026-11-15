@@ -172,6 +172,7 @@ class DataCommands(DAPConn):
             finally:
                 if subcommand == 'close' and pipe_id is not None:
                     self._retire(control, pipe_id, succeeded)
+                    await self._settle_drain(control)
 
             # Step 4: a successful open is a binding the control now has open;
             # a standalone tool call was a binding that opened and closed
@@ -230,8 +231,13 @@ class DataCommands(DAPConn):
         """
         # Step 1: the engine under the control's hold, started again when it
         # stopped on its inactivity timer (plan 7.2) after the caller's team
-        # access is re-checked
+        # access is re-checked. A control whose pipes are still open on the
+        # engine it repointed away from keeps opening THERE: the slot numbers
+        # a client names are one engine's (plan 7.2 P2)
         engine = await engine_for(self, control, 'task.data')
+        draining = control.draining
+        if draining is not None and draining.is_live and any(r.engine is draining for r in control.open_pipes.values()):
+            engine = draining
 
         # Step 2: per-call params enter by the open: admitted by public name
         # against the control's parameters map, then by value against the
@@ -359,6 +365,18 @@ class DataCommands(DAPConn):
             control.stats.failedSize += record.bytes
         # Step 2: the tree is released; it lingers for the grace, then is forgotten
         self._server.trace_owners.release(record.trace_id)
+
+    async def _settle_drain(self, control: 'TaskControl') -> None:
+        """
+        After a close: the engine a repoint left draining goes once no pipe of the control is open on it.
+
+        Args:
+            control: The caller's control.
+        """
+        draining = control.draining
+        if draining is None or any(r.engine is draining for r in control.open_pipes.values()):
+            return
+        await self._server.release_draining(control, 'repointed')
 
     def _note_borrowed(self, control: 'TaskControl', body: Any) -> None:
         """

@@ -152,6 +152,29 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
 
 
 @pytest.mark.asyncio
+async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog, engines, deployments, data_path):
+    """The round trip's tree is the submitting control's, this connection first, and counts in its stats (plan 7.5)."""
+    ts = _server()
+    deployments.deploy('team-1')
+    conn = _conn(ts, _caller())
+    claims: List[tuple] = []
+    real_claim = ts.trace_owners.claim
+
+    def claim(trace_id, control_key, conn_id):
+        claims.append((trace_id, control_key, conn_id))
+        real_claim(trace_id, control_key, conn_id)
+
+    ts.trace_owners.claim = claim
+    await _submit(conn, name=ADDRESS, data=b'hello')
+    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    assert claims == [('99', control.key, conn._connection_id)]
+    # Released at the close: the owner lingers for the grace, stamped late
+    owner = ts.trace_owners.owner('99')
+    assert owner is not None and owner.control_key == control.key and owner.late is True
+    assert (control.stats.totalCount, control.stats.completedCount, control.stats.completedSize) == (1, 1, 5)
+
+
+@pytest.mark.asyncio
 async def test_without_data_the_call_returns_the_address_for_streaming(catalog, engines, deployments, data_path):
     """No inline data (on_sse, or a large payload): stamps and the address, nothing delivered."""
     ts = _server()
