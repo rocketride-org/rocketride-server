@@ -350,11 +350,11 @@ be read keeps the pages of its last readable build while the server runs;
 after a restart it has none until its storage can be read again. Kept pages
 still compete with other apps' claims under the same first-claim rule.
 
-A server without `RR_APP_URL` is not the public site: every response carries
-`X-Robots-Tag: noindex, nofollow`, so a host found through links stays out of
-search indexes. Its `/robots.txt` disallows all crawling, unless it serves
-published pages (a staging deployment): then it allows crawling, so crawlers
-fetch the pages and read the noindex.
+A server without `RR_APP_URL` is not the public site: its `/robots.txt`
+disallows all crawling and `/sitemap.xml` and `/llms.txt` answer `404`, so
+search engines do not index its pages. Set `RR_APP_URL` to the public origin
+to make published pages indexable; a server that serves published pages
+without it logs a warning once.
 
 The server answers `GET` and `HEAD` on each page with the shell's document
 (the route's prerendered capture when the shell build carries one, else

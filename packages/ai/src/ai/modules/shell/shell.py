@@ -47,12 +47,11 @@ manifests (``public_pages``), never from constants here.
 
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404,
-every response carries ``X-Robots-Tag: noindex, nofollow``
-(``ungated_noindex``), and /robots.txt disallows all crawling, unless the
-engine serves published pages (a staging deployment): then it allows
-crawling, so crawlers read that noindex. Absolute URLs are never derived
-from request headers.
+self-hosted, desktop and staging engines) /sitemap.xml and /llms.txt return
+404 and /robots.txt disallows all crawling, as before public pages (plan
+sections 4 and 8); an engine that serves published pages without it warns
+once (``warn_published_pages_without_app_url``). Absolute URLs are never
+derived from request headers.
 """
 
 import hashlib
@@ -696,44 +695,28 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
-async def ungated_noindex(request: Request, call_next):
-    """HTTP middleware: ``X-Robots-Tag: noindex, nofollow`` on every response of an engine without ``RR_APP_URL``.
-
-    Only registered when ``RR_APP_URL`` is empty at init (see
-    ``initModule``), so it does not check again per response.
-
-    Such an engine (OSS, self-hosted, desktop, a staging deployment) is not
-    the public site. robots.txt ``Disallow: /`` stops crawling, not
-    indexing: a disallowed URL found through links is still indexed by URL,
-    and the disallow keeps crawlers from ever reading a noindex in the page.
-    So an engine that serves published pages (staging, the linked one)
-    allows crawling in robots.txt (``robots_txt``). The header covers every
-    response (pages, shell assets, 404s, auth refusals); only auth or an IP
-    allowlist in front keeps a non-public host out entirely.
-    """
-    response = await call_next(request)
-    response.headers['X-Robots-Tag'] = 'noindex, nofollow'
-    return response
+_warned_unindexed = False
 
 
-_warned_noindex = False
+def warn_published_pages_without_app_url(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
+    """Swap listener: warn once that published pages go unindexed for lack of ``RR_APP_URL``.
 
-
-def warn_noindex_with_published_pages(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
-    """Swap listener: warn once that published pages are served with ``noindex`` for lack of ``RR_APP_URL``.
+    Without it robots.txt disallows all crawling and the sitemap and llms.txt
+    answer 404, which is right for OSS, desktop and staging engines and a
+    silent deindexing for a production engine that lost the setting.
 
     Args:
         old: The aggregate swapped out (unused).
         new: The aggregate swapped in; the legacy list and an empty map publish nothing.
     """
-    global _warned_noindex
-    if _warned_noindex or not new.serves_published_pages():
+    global _warned_unindexed
+    if _warned_unindexed or not new.serves_published_pages():
         return
-    _warned_noindex = True
+    _warned_unindexed = True
     warning(
-        '[shell] RR_APP_URL is not set but public pages are published: every response carries '
-        'X-Robots-Tag: noindex, nofollow, and robots.txt lets crawlers fetch pages to read it; '
-        'set RR_APP_URL on an engine that serves the public site'
+        '[shell] RR_APP_URL is not set but public pages are published: robots.txt disallows all '
+        'crawling and /sitemap.xml and /llms.txt answer 404, so search engines will not index them; '
+        'set RR_APP_URL to the public origin on an engine that serves the public site'
     )
 
 
@@ -821,13 +804,9 @@ async def robots_txt(request: Request):
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
     sitemap, with one named group per rostered crawler (the roster that
     also classifies requesters) plus ``*``; every group carries the same
-    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise every
-    response is ``noindex, nofollow`` (``ungated_noindex``). An engine that
-    serves published pages (staging, or production without its
-    ``RR_APP_URL``) is linked from elsewhere and indexed, so crawlers may
-    fetch its pages and read that noindex. Any other engine (OSS,
-    self-hosted, desktop) is not a marketing site: crawlers stay out
-    entirely.
+    rule (RFC 9309), so the policy equals ``*`` alone. Any other engine
+    (OSS, self-hosted, desktop, staging) is not the public site: all
+    crawling is disallowed, published pages or not (plan section 4).
 
     Args:
         request: Incoming HTTP request.
@@ -836,14 +815,11 @@ async def robots_txt(request: Request):
         PlainTextResponse with the robots policy.
     """
     from .crawlers import robots_groups
-    from .public_pages import current
 
     base_url = app_url()
 
     if base_url:
         content = f'{robots_groups("Allow: /")}Sitemap: {base_url}/sitemap.xml\n'
-    elif current().serves_published_pages():
-        content = 'User-agent: *\nDisallow:\n'
     else:
         content = 'User-agent: *\nDisallow: /\n'
 
