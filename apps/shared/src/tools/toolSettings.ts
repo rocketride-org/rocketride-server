@@ -44,9 +44,10 @@
 // VS Code resolves against the workspace folder.
 // =============================================================================
 
-import type { AppConfiguration } from 'shell/src/components/workspace/types';
+import type { AppConfiguration, SettingSchema } from 'shell/src/components/workspace/types';
 import type { SettingsContribution } from 'shell/src/components/workspace/settingsContributions';
 import { BUILTIN_PIN_PREFIX } from 'shell/src/workspace/devToolPins';
+import type { Grant } from '../modules/agent/host';
 import { DEFAULT_MODEL_SETTING } from '../modules/agent/model';
 
 /** The settings-nav group every DEV TOOL's section folds under. */
@@ -59,6 +60,35 @@ export const TOOL_SETTINGS_GROUP = { id: 'rocket-builder', label: 'Rocket Builde
  * already holds the product's prefs on both hosts (devToolPins et al.).
  */
 export const TOOL_SETTINGS_OWNER = 'rocketride.pipeBuilder';
+
+/**
+ * The setting behind each "Always allow" grant: its key, its place on the settings page, and what it
+ * says. Typed by Grant, so a new grant doesn't compile until it has a row, and the rows and the keys
+ * rocket-ui reads (APPROVAL_SETTING_KEYS) both come from here.
+ */
+const GRANT_SETTINGS: Readonly<Record<Grant, { readonly key: string; readonly order: number; readonly description: string }>> = {
+	schedules: {
+		key: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
+		order: 11,
+		description: 'Let the agent set, pause and resume deployment schedules without asking. Always allow on a card turns this on.',
+	},
+	deploymentToggles: {
+		key: 'rocketride.pipeBuilder.agentAllowDeploymentToggles',
+		order: 12,
+		description: 'Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks.',
+	},
+	appUse: {
+		key: 'rocketride.pipeBuilder.agentAllowAppUse',
+		order: 13,
+		description: 'Let the agent click and type in its own copy of your apps without asking. Always allow on a card turns this on.',
+	},
+};
+
+/** The keys of the agent's approval settings: the mode, and each grant's. rocket-ui's settings feed reads them by these. */
+export const APPROVAL_SETTING_KEYS: Readonly<Record<'mode' | Grant, string>> = {
+	mode: 'rocketride.pipeBuilder.agentApproval',
+	...(Object.fromEntries(Object.entries(GRANT_SETTINGS).map(([grant, row]) => [grant, row.key])) as Record<Grant, string>),
+};
 
 /** The pipelines tool's settings (section "Pipelines" under Rocket Builder). */
 export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
@@ -118,14 +148,14 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			description: 'Write saved changes straight to your workspace on the server. Turn this off to review, diff, and commit changes yourself - saves (yours and the agent\'s) stay local until you commit them. Cloud workspaces only.',
 		},
 		// The agent's settings: it runs in the cloud builder only (its tool's manifest `shells`).
-		'rocketride.pipeBuilder.agentApproval': {
+		[APPROVAL_SETTING_KEYS.mode]: {
 			type: 'string',
 			enum: ['ask', 'auto'],
-			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes, submits for review, changes a deployment or a schedule, or deletes a file.', "Don't ask: the agent does those without asking. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
+			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes, submits for review, changes a deployment or a schedule, deletes a file, or clicks or types in your app.', "Don't ask: the agent does those without asking. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
 			default: 'ask',
 			order: 8,
 			shells: ['saas', 'oss'],
-			description: 'Whether the agent asks before outward actions and deletes, in every agent chat. Account, team, member and billing changes are refused in both modes.',
+			description: 'Whether the agent asks before outward actions, deletes, and clicks or types in your apps, in every agent chat. Account, team, member and billing changes are refused in both modes.',
 		},
 		'rocketride.pipeBuilder.agentStepLimit': {
 			type: 'number',
@@ -141,24 +171,11 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			shells: ['saas', 'oss'],
 			description: "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price is counted at an assumed rate.",
 		},
-		'rocketride.pipeBuilder.agentAllowScheduleChanges': {
-			type: 'boolean',
-			default: false,
-			order: 11,
-			shells: ['saas', 'oss'],
-			description: 'Let the agent set, pause and resume deployment schedules without asking. Always allow on a card turns this on.',
-		},
-		'rocketride.pipeBuilder.agentAllowDeploymentToggles': {
-			type: 'boolean',
-			default: false,
-			order: 12,
-			shells: ['saas', 'oss'],
-			description: 'Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks.',
-		},
+		...Object.fromEntries(Object.values(GRANT_SETTINGS).map(({ key, order, description }): [string, SettingSchema] => [key, { type: 'boolean', default: false, order, shells: ['saas', 'oss'], description }])),
 		'rocketride.pipeBuilder.agentDefaultModel': {
 			type: 'string',
 			default: DEFAULT_MODEL_SETTING,
-			order: 13,
+			order: 14,
 			shells: ['saas', 'oss'],
 			description: 'The model a new agent chat starts with, as provider/model. The picker beside the chat box sets it for that chat and updates this. Existing chats keep their own model.',
 		},

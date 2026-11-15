@@ -316,8 +316,24 @@ export const DEFAULT_LIMITS: AgentLimits = { steps: 60, costUsd: 2 };
  */
 export type ApprovalMode = 'ask' | 'auto';
 
-/** The routine kinds a card can offer "Always allow" for. Publishing, submitting, removing a deployment and deleting a file are never among them. */
-export type Grant = 'schedules' | 'deploymentToggles';
+/**
+ * The routine kinds a card can offer "Always allow" for, as data, so code that reads or compares every
+ * grant loops over this list and a new kind needs no edit there. Publishing, submitting, removing a
+ * deployment and deleting a file are never among them.
+ */
+export const GRANTS = ['schedules', 'deploymentToggles', 'appUse'] as const;
+
+/** One of GRANTS. */
+export type Grant = (typeof GRANTS)[number];
+
+/**
+ * A value for every grant, built over GRANTS: the one place such a record is assembled.
+ *
+ * @param value - The value of each grant.
+ */
+export function grantsFrom(value: (grant: Grant) => boolean): Readonly<Record<Grant, boolean>> {
+	return Object.fromEntries(GRANTS.map((grant) => [grant, value(grant)])) as Record<Grant, boolean>;
+}
 
 /** The user's approval settings at one moment. */
 export interface ApprovalPrefs {

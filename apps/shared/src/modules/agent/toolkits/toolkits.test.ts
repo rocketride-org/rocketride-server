@@ -45,7 +45,7 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
+import { grantsFrom, PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
@@ -286,7 +286,7 @@ function fakeAsk(answers: ChatAskAnswer[]): { ask: (card: ChatAskCard) => ChatAs
 /** Approval settings in `mode`; every grant the run turns on is recorded. */
 function fakeSettings(mode: ApprovalPrefs['mode'] = 'ask'): ApprovalSettings & { granted: Grant[] } {
 	const granted: Grant[] = [];
-	return { read: () => ({ mode, grants: { schedules: false, deploymentToggles: false } }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
+	return { read: () => ({ mode, grants: grantsFrom(() => false) }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
 }
 
 /** One run's approvals over a client, in the ALPHA workspace; with no `ask`, every card is denied. */
@@ -1155,7 +1155,7 @@ test('use_app enforces its limits with the fix in each refusal: at most 20 actio
 	assert.deepEqual(waits.slice(0, 3), [30_000, 10_000, 1_000], 'wait_for is held to 30 s at most, 10 s by default and 1 s at least');
 });
 
-test('use_app asks before it acts on the page: a read or a wait runs free, a click asks with the use_app card, a declined card never reaches the page, and after a failed action the rest are not run', async () => {
+test('use_app asks before it acts on the page: a read or a wait runs free, a click asks with the use_app card, a declined card never reaches the page, after a failed action the rest are not run, Always allow turns on the appUse grant, and Auto asks nothing', async () => {
 	const page = fakePage(async (actions) => ({ outcomes: actions.length ? [{ status: 'failed', why: 'the first failed' }] : [], outline: [], problems: [] }));
 	const asked = fakeAsk(['approve', 'deny']);
 	const approvals = new Approvals({ client: () => null, vfs: new MemoryWorkspace(DAYBOOK), ask: asked.ask, signal: new AbortController().signal });
@@ -1192,6 +1192,20 @@ test('use_app asks before it acts on the page: a read or a wait runs free, a cli
 	await assert.rejects(use.execute({ app: 'daybook-ui', actions: [{ action: 'select', ref: 'e3', value: 'b' }] }));
 	assert.equal(asked.cards.length, 2, 'a select asks');
 	assert.equal(page.uses.length, 3, 'the declined call never reached the page');
+
+	const click = { app: 'daybook-ui', actions: [{ action: 'click', ref: 'e1' }] };
+	const usingWith = (ask: (card: ChatAskCard) => ChatAsking, settings: ApprovalSettings): ReturnType<typeof toolOf> =>
+		toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open })).toolkit, USE_APP_TOOL, new Approvals({ client: () => null, vfs: new MemoryWorkspace(DAYBOOK), ask, settings, signal: new AbortController().signal }));
+	const always = fakeAsk(['always']);
+	const settings = fakeSettings();
+	await usingWith(always.ask, settings).execute(click);
+	assert.ok(always.cards[0].alwaysLabel, 'the card offers Always allow');
+	assert.deepEqual(settings.granted, ['appUse'], 'Always allow turns on the appUse grant');
+
+	const auto = fakeAsk([]);
+	await usingWith(auto.ask, fakeSettings('auto')).execute(click);
+	assert.equal(auto.cards.length, 0, 'Auto shows no card');
+	assert.equal(page.uses.length, 5, 'both calls reached the page');
 });
 
 test('after the page leaves the app, the next use_app call opens a fresh copy, and calls racing to it share one', async () => {

@@ -42,7 +42,7 @@ import type { RocketRideClient } from 'rocketride';
 import type { ChatAskAnswer, ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
-import type { ApprovalPrefs, ApprovalSettings, Grant } from '../host';
+import { grantsFrom, type ApprovalPrefs, type ApprovalSettings, type Grant } from '../host';
 import { RefusedError, type ToolAct } from '../tools';
 import type { RunRecord } from '../turn';
 import { brief, isJsonObject, requireClient, type ClientGetter } from './common';
@@ -137,12 +137,13 @@ export interface ApprovalsOptions {
 // =============================================================================
 
 /** Ask mode, nothing granted: what a run without settings gets. */
-const DEFAULT_PREFS: ApprovalPrefs = { mode: 'ask', grants: { schedules: false, deploymentToggles: false } };
+const DEFAULT_PREFS: ApprovalPrefs = { mode: 'ask', grants: grantsFrom(() => false) };
 
 /** The "Always allow" button's label per grant. */
 const ALWAYS_LABELS: Readonly<Record<Grant, string>> = {
 	schedules: 'Always allow schedule changes',
 	deploymentToggles: 'Always allow turning deployments on and off',
+	appUse: 'Always allow using your apps',
 };
 
 /** The longest a card waits for one name lookup, in milliseconds. */
@@ -440,7 +441,7 @@ const TOOL_LIST: Readonly<Record<string, Rule>> = {
 	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' })),
 	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' })),
 	// a read, or only waiting for text, changes nothing on the page, so it is free; a click, type, select or press asks
-	use_app: ask(USE_APP_CARD, { freeWhen: ([, ...kinds]) => kinds.every((kind) => kind === 'wait_for') }),
+	use_app: ask(USE_APP_CARD, { grant: 'appUse', freeWhen: ([, ...kinds]) => kinds.every((kind) => kind === 'wait_for') }),
 };
 
 /** What a name the list lacks gets: ask, with a plain card. */

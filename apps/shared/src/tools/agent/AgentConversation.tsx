@@ -177,7 +177,7 @@ const CARD_HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 /** What the switch says in each mode, and what it explains on hover. Don't ask says plainly that nothing judges the risk instead of the user. */
 const MODES: Readonly<Record<ApprovalMode, { label: string; hint: string }>> = {
-	ask: { label: 'Ask first', hint: 'The agent waits for your OK before it publishes, changes a deployment or schedule, or deletes a file. Click to stop asking.' },
+	ask: { label: 'Ask first', hint: 'The agent waits for your OK before it publishes, changes a deployment or schedule, deletes a file, or clicks and types in your app. Click to stop asking.' },
 	auto: { label: "Don't ask (still blocks account and billing)", hint: "The agent does those without asking. Nothing checks them for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked. Click to ask first." },
 };
 

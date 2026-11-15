@@ -31,9 +31,10 @@
 
 import type { RocketRideClient } from 'shell';
 import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
-import { DEFAULT_LIMITS, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings, type Grant } from 'shared/modules/agent/host';
+import { DEFAULT_LIMITS, GRANTS, grantsFrom, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings } from 'shared/modules/agent/host';
 import { messageOf } from 'shared/modules/agent/toolkits/common';
 import type { FrameOptions } from 'shared/tools/appdev';
+import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
@@ -75,12 +76,8 @@ function agentDevSession(session: WebDevSession): AgentDevSession {
 // APPROVALS — the user's settings behind the agent's approvals
 // =============================================================================
 
-/** The settings behind the agent's approvals, as shared/tools/toolSettings.ts declares them. Typed by Grant, so a new kind doesn't compile until it has a key. */
-const APPROVAL_KEYS: Readonly<Record<'mode' | Grant, string>> = {
-	mode: 'rocketride.pipeBuilder.agentApproval',
-	schedules: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
-	deploymentToggles: 'rocketride.pipeBuilder.agentAllowDeploymentToggles',
-};
+/** The settings behind the agent's approvals, from shared/tools/toolSettings.ts, where their rows are declared, so a key can't drift from its row. */
+const APPROVAL_KEYS = APPROVAL_SETTING_KEYS;
 
 /** Writes one setting: the workspace's updateSetting. */
 type SettingWriter = (key: string, value: string | boolean) => void;
@@ -92,12 +89,13 @@ type SettingWriter = (key: string, value: string | boolean) => void;
 function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalPrefs {
 	return {
 		mode: settings[APPROVAL_KEYS.mode] === 'auto' ? 'auto' : 'ask',
-		grants: { schedules: settings[APPROVAL_KEYS.schedules] === true, deploymentToggles: settings[APPROVAL_KEYS.deploymentToggles] === true },
+		grants: grantsFrom((grant) => settings[APPROVAL_KEYS[grant]] === true),
 	};
 }
 
+/** Whether two settings agree on the mode and on every grant in GRANTS, so a new grant turned on is never missed as no change. */
 function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
-	return a.mode === b.mode && a.grants.schedules === b.grants.schedules && a.grants.deploymentToggles === b.grants.deploymentToggles;
+	return a.mode === b.mode && GRANTS.every((grant) => a.grants[grant] === b.grants[grant]);
 }
 
 /**
