@@ -66,7 +66,7 @@ import sys
 from functools import partial
 from pathlib import Path
 from time import monotonic
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple, TypeVar
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -86,6 +86,8 @@ from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
 from .shell import capture_candidate, shell_document_path, shell_static
 from .template import TemplateError, render
+
+_T = TypeVar('_T')
 
 # The web server whose route table the auth predicate and the live-route
 # collision check read (set by initModule).
@@ -477,15 +479,36 @@ async def _stored_snapshot(path: str) -> bytes:
 
     Raises:
         _SnapshotTooLarge: the stored file is over ``MAX_SNAPSHOT_BYTES``.
-        StorageError: a storage failure (``StorageNotFoundError`` included).
+        StorageError: a storage failure (``StorageNotFoundError`` included),
+            or any other error the store raised (``_from_store``).
     """
     async with _snapshot_read_slots:
-        size = (await public_pages.artifact_file_info(path))['size']
+        size = (await _from_store(public_pages.artifact_file_info, path))['size']
         if size > MAX_SNAPSHOT_BYTES:
             raise _SnapshotTooLarge(f'{size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit')
-        raw = await public_pages.read_artifact_file(path)
+        raw = await _from_store(public_pages.read_artifact_file, path)
     _snapshot_cache.put(path, raw, len(raw))
     return raw
+
+
+async def _from_store(call: Callable[[str], Awaitable[_T]], path: str) -> _T:
+    """``call(path)`` against the store, any error it raises a ``StorageError``.
+
+    So a snapshot the store cannot read always falls back to the shell,
+    uncached, with the backoff and its warning; never a 500. Only these two
+    store calls are wrapped: everything else stays narrow, so real bugs surface.
+
+    Raises:
+        StorageError: the store's own (``StorageNotFoundError`` included), or
+            any other error ``call`` raised, chained.
+    """
+    try:
+        return await call(path)
+    except StorageError:
+        raise
+    except Exception as exc:
+        # shortcut: develop drivers raise raw provider errors; remove when the storage PR lands
+        raise StorageError(f'the store failed reading {path}: {type(exc).__name__}: {exc}') from exc
 
 
 def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:

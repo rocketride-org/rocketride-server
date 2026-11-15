@@ -413,8 +413,9 @@ async def read_artifact_file(path: str) -> bytes:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure, a transport failure the
-            store stopped retrying included.
+        StorageError: any other storage failure the store reports as one.
+        Exception: the provider's own error where the store does not wrap it
+            (the S3 and Azure stores, once their retries run out).
     """
     from ai.account.store import Store
 
@@ -435,8 +436,9 @@ async def artifact_file_info(path: str) -> Dict[str, Any]:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure, a transport failure the
-            store stopped retrying included.
+        StorageError: any other storage failure the store reports as one.
+        Exception: the provider's own error where the store does not wrap it
+            (the S3 and Azure stores, once their retries run out).
     """
     from ai.account.store import Store
 

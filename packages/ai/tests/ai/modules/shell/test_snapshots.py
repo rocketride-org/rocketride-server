@@ -241,10 +241,20 @@ def test_a_page_without_a_snapshot_serves_crawlers_the_shell_document(shell_root
     assert reads == []
 
 
+class _ProviderError(Exception):
+    """A provider's own error, as develop's S3 store raises botocore's once its retries run out."""
+
+
 @pytest.mark.parametrize(
     'failure',
-    [StorageNotFoundError('File not found'), StorageError('store down')],
-    ids=['not-in-the-store', 'store-down'],
+    [
+        StorageNotFoundError('File not found'),
+        StorageError('store down'),
+        _ProviderError('Could not connect to the endpoint URL'),
+        ConnectionError('Connection reset by peer'),
+        UnicodeEncodeError('latin-1', 'caf\u0113', 3, 4, 'ordinal not in range(256)'),
+    ],
+    ids=['not-in-the-store', 'store-down', 'raw-provider-error', 'raw-connection-error', 'raw-encode-error'],
 )
 def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkeypatch, warned, failure):
     # No storage failure is final: a gated version's files may not be readable
@@ -270,6 +280,28 @@ def test_a_failed_snapshot_read_is_served_uncached_and_warned(shell_root, monkey
     clock[0] += pages._STORAGE_BACKOFF_SECONDS
     resp = _crawl(client)
     assert 'Pricing plans' in resp.text and resp.headers['cache-control'] == 'private, max-age=3600'
+
+
+def test_a_raw_provider_error_on_the_stat_backs_off_like_a_storage_error(shell_root, monkeypatch, warned):
+    # Never a 500: the crawler gets the shell, uncached, and the store is not asked again within the backoff.
+    _seed()
+    _serve(_page())
+    stats = []
+
+    async def down(path):
+        stats.append(path)
+        raise _ProviderError('Read timeout on endpoint URL')
+
+    clock = [1000.0]
+    monkeypatch.setattr(pp, 'artifact_file_info', down)
+    monkeypatch.setattr(pages, 'monotonic', lambda: clock[0])
+    client = _client()
+    for _ in range(2):
+        resp = _crawl(client)
+        assert resp.status_code == 200 and SHELL_BODY in resp.text
+        assert resp.headers['cache-control'] == 'private, no-cache'
+    assert stats == [snapshot_path(_page())] and len(pages._render_cache) == 0
+    assert len(warned) == 1 and 'Read timeout on endpoint URL' in warned[0]
 
 
 def test_a_storage_failure_warns_once_per_store_path_per_interval(shell_root, monkeypatch, warned):
