@@ -29,7 +29,10 @@ registration order, so every real route wins and only unmatched requests
 reach here. Pages answer GET and HEAD (405 otherwise). A redirect source
 (``site.redirects``) and a page's trailing-slash twin answer GET and HEAD
 with a 301 to the page; any other path the aggregate does not claim answers
-what the router answered before the catch-all existed: 405, 307 or 404.
+what the router answered before the catch-all existed: 405, 307 or 404. A
+GET or HEAD 404 that accepts HTML (a browser's or a crawler's) is the
+engine's not-found page (``not_found_page.py``), except under the reserved
+prefixes; ``/`` serves the shell if its page fails to render.
 
 Auth: the catch-all is not a public route, which would open every path,
 private API routes included, to anonymous callers. The web server consults
@@ -403,10 +406,12 @@ async def _unclaimed(request: Request, path: str) -> Response:
     """A GET or HEAD on a path no page claims: the shell on ``/``, else what the router answered before the catch-all.
 
     Returns:
-        The shell on ``/``, or the router's 307 to a served trailing-slash twin.
+        The shell on ``/``, the router's 307 to a served trailing-slash twin,
+        or the not-found page with status 404 (``_not_found``).
 
     Raises:
-        HTTPException: the router's 405 on a real route's path, else 404.
+        HTTPException: the router's 405 on a real route's path; 404 for a
+            request that does not accept HTML or a reserved path.
     """
     if path == '/':
         return await shell_static(request)
