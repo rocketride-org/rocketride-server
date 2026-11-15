@@ -3247,7 +3247,7 @@ class TaskEngine(DAPBase):
             # observability: a failure is logged and that control's run goes
             # unlogged rather than failing execution.
             for key in list(self._holds):
-                await self._open_run_log(key)
+                await self._run_log_for(key)
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
