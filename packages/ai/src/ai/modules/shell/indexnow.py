@@ -173,6 +173,10 @@ async def _content(page: Page, last: Optional[_Content], reads: asyncio.Semaphor
                 return _Content(entry, path, '')
             raw = await public_pages.read_artifact_file(path)
     except StorageError as exc:
+        # Narrow on purpose (Josh, #3140): any other error is a bug and fails the build's diff.
+        # shortcut: develop's S3 and Azure stores raise their provider's own error once their
+        # retries run out, so such an outage also skips this build's submissions until the next
+        # page map change; the storage PR makes those StorageError, then this is right as is.
         warning(f'[indexnow] {page.path}: snapshot {page.snapshot!r} unreadable, counted as changed: {exc}')
         return _Content(entry, '', None)
     return _Content(entry, path, hashlib.sha256(raw).hexdigest())

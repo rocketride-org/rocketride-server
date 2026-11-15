@@ -13,9 +13,8 @@ synchronous ``TestClient``:
     all absolute URLs exclusively from it (never from request headers);
   - served-vs-advertised is driven by each page's ``listed`` flag;
   - /robots.txt allows crawlers (one named group per rostered crawler) and
-    points at the sitemap on the hosted SaaS (RR_APP_URL set); otherwise
-    it allows crawling on an engine that serves published pages (so the
-    noindex on them is read) and disallows all crawling on any other;
+    points at the sitemap on the hosted SaaS (RR_APP_URL set); otherwise it
+    disallows all crawling, published pages or not (plan sections 4 and 8);
   - the catch-all registers last, real routes win, it never makes a private
     route public, and it keeps the router's own answers for unclaimed paths;
   - WebServer.add_route rejects duplicate (method, path) registrations.

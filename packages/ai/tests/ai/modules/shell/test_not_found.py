@@ -155,6 +155,16 @@ def test_a_person_gets_the_shell_index_with_status_404(monkeypatch, shell_root):
 
 
 @pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_site_not_found_wins_over_the_engines_page_for_a_navigation(monkeypatch, shell_root, ua):
+    # Browsers and crawlers send Accept: text/html, which alone would get the engine's
+    # not-found page: a declared site.notFound must still answer them.
+    accept = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    resp = _serve(monkeypatch).get('/nope', headers={'User-Agent': ua, 'Accept': accept})
+    _assert_branded(resp)
+    assert 'Woof! Page not found' not in resp.text and 'Page not found | RocketRide' in resp.text
+
+
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
 def test_head_answers_like_get(monkeypatch, shell_root, ua):
     resp = _serve(monkeypatch).head('/nope', headers={'User-Agent': ua})
     _assert_branded(resp)
