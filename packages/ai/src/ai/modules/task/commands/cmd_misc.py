@@ -929,8 +929,8 @@ class MiscCommands(DAPConn):
                         # The CONTROL's idle time: each holder ages on its own
                         'idleTime': int(control.idle_seconds()),
                         # Its engine: 'running', 'starting' or 'stopped' (a
-                        # dormant control reads 'stopped'; TODO(plan 7.5,
-                        # C.9): the full availability projection)
+                        # dormant control reads 'stopped'), the same value the
+                        # status body carries as engine.availability (plan 7.5)
                         'engineState': control.engine_state,
                         'ttl': getattr(control, 'ttl', 0),
                         'metrics': metrics_dict,

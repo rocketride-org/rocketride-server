@@ -592,7 +592,11 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
     task.get_status.return_value = status
 
     conn = _make_conn(account_info=_account_info())
-    conn.get_control = MagicMock(return_value=SimpleNamespace(task=task, engine_state='running'))
+    task.shared = False
+    # A private engine's status passes through the projection unchanged
+    conn.get_control = MagicMock(
+        return_value=SimpleNamespace(task=task, engine_state='running', project_status=lambda body, shared: body)
+    )
 
     response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'acme.pipe.x'}})
     conn.get_control.assert_called_once_with({'arguments': {'token': 'acme.pipe.x'}}, 'task.monitor')

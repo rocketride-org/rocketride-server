@@ -40,6 +40,7 @@ from types import SimpleNamespace
 import itertools
 
 from ai.modules.task.address import build_address
+from ai.modules.task.trace_owner import TraceOwners
 from ai.modules.task.task_control import TaskControl
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.commands.cmd_monitor import owner_key
@@ -83,6 +84,7 @@ def _server(*controls) -> TaskServer:
     server._task_control = ControlRegistry({c.key: c for c in controls})
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server.trace_owners = TraceOwners()
     server._deployment_revoked = {}
     server._engine_ids = itertools.count(1)
     server._node_id = 1

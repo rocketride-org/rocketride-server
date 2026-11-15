@@ -870,7 +870,12 @@ class TaskEngine(DAPBase):
         # team-owned deploy's files into the dispatcher's user tree.
         if owner_kind not in ('', 'user', 'team'):
             raise ValueError(f'invalid owner_kind: {owner_kind!r}')
-        self._run_log: Optional[RunLogWriter] = None
+        # One run-log continuum per holding CONTROL (plan 7.5): writers by
+        # control key, opened at start for the controls holding the engine and
+        # on first event for a holder that joined later; keys whose writer
+        # could not open are not retried (the run continues unlogged there)
+        self._run_logs: Dict[str, RunLogWriter] = {}
+        self._run_log_failed: set = set()
         self._run_kind: str = run_kind
         # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
         # 'team' (a @team deploy). Decides where the run's working files and
@@ -1997,21 +2002,23 @@ class TaskEngine(DAPBase):
         # is NOT a new run: the chapter continues and only a restart marker
         # is recorded; a real termination completes the chapter with its
         # outcome. Best-effort — never blocks or breaks teardown.
-        if self._run_log is not None:
-            try:
-                # A ttl-window expiry is SUCCESS: the run stayed up
-                # exactly as configured, then shut down. Only a real
-                # stop (or abnormal exit) reads as cancelled.
-                if self._status.state == TASK_STATE.CANCELLED.value:
-                    outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
-                elif self._status.exitCode == 0:
-                    outcome = 'ok'
-                else:
-                    outcome = 'error'
-                await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
-                self._run_log = None
-            except Exception as e:
-                self.debug_message(f'Run-log close failed: {e}')
+        if self._run_logs:
+            # A ttl-window expiry is SUCCESS: the run stayed up exactly as
+            # configured, then shut down. Only a real stop (or abnormal exit)
+            # reads as cancelled.
+            if self._status.state == TASK_STATE.CANCELLED.value:
+                outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+            elif self._status.exitCode == 0:
+                outcome = 'ok'
+            else:
+                outcome = 'error'
+            # Every holding control's continuum completes with the engine's outcome
+            for key, writer in list(self._run_logs.items()):
+                try:
+                    await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                except Exception as e:
+                    self.debug_message(f'Run-log close failed for {key}: {e}')
+            self._run_logs.clear()
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -2177,69 +2184,214 @@ class TaskEngine(DAPBase):
         message: Dict[str, Any] = None,
     ):
         """
-        Forward events to appropriate monitoring clients.
+        Deliver one engine event to the controls it belongs to (plan 7.5), or to the ops stream.
+
+        Pipe-tagged events (a flow trace, an ``>SSE``) carry the request tree's
+        ``traceId`` and go to the control that OWNS the tree, its opener
+        connection first. Engine-level events go to every holder of a private
+        engine (they are all the owner's) and to the ops stream of a shared one,
+        except the status and task-lifecycle events every holder is entitled
+        to, which each holder receives projected to its own view.
 
         Args:
-            event_type: Event category for routing
-            message: Event payload
+            type: Event category for routing.
+            message: Event payload.
         """
-        # Safety net: every broadcast event carries the continuum headers.
-        # Idempotent — events stamped at ingress or at their build site pass
-        # through unchanged; anything constructed on a path that missed a
-        # stamp (e.g. status updates built in _send_status_update) is stamped
-        # here, immediately before the one shared dict fans out to clients.
+        # Step 1: the continuum stamps. Idempotent: events stamped at ingress
+        # or at their build site pass through unchanged
         self.stamp_log_event(message)
 
-        # Safety net #2: every task-scoped event carries its identity in
-        # the body (project_id + source) so clients filter uniformly by
-        # body fields — raw engine events (output, SSE, granular status)
-        # arrive from the child without it. Idempotent: events that already
-        # carry project_id pass through untouched.
+        # Step 2: the identity every task-scoped body carries (project_id +
+        # source, the run classification) so clients filter uniformly by body
+        # fields; raw engine events arrive from the child without it
         body = message.get('body') if isinstance(message, dict) else None
         if isinstance(body, dict) and 'project_id' not in body:
             body['project_id'] = self.project_id
             body['source'] = self.source
-        # Concrete identity stamp: teamId/userId/runKind ride every event
-        # body so watchers can scope streams client-side (two teams or two
-        # devs running the SAME project no longer alias in a watch UI), and
-        # server-side subscription filters can match these fields verbatim
-        # when they land. Idempotent like the project_id stamp above.
         if isinstance(body, dict) and 'runKind' not in body:
             body['runKind'] = self._run_kind
             body['teamId'] = self.team_id
             body['userId'] = self.client_id
-        # The engine that emitted it (ALB seam 3): every event body carries
-        # its engineKey; the controlId is stamped per holder below
         if isinstance(body, dict):
+            # The engine that emitted it (ALB seam 3) and the wire traceId: the
+            # engine's bare counter becomes {nodeId}.{engineId}.{n} here, the
+            # one place its events leave the task process (plan 7.4)
             body['engineKey'] = self.engine_key
-
-            # The engine's bare trace counter becomes the wire traceId here,
-            # the one place its events leave the task process (plan 7.4)
             if isinstance(body.get('traceId'), int):
                 body['traceId'] = self.trace_ref(body['traceId'])
 
-        # Append to the run-log continuum: what clients see is what replay
-        # reproduces (the writer filters/samples/caps internally; never
-        # blocks on the store).
-        if self._run_log is not None:
-            try:
-                self._run_log.append(message)
-            except Exception as e:
-                self.debug_message(f'Run-log append failed: {e}')
+        # Step 3: who receives it
+        event_name = message.get('event', '') if isinstance(message, dict) else ''
+        targets = self._route(type, event_name, body if isinstance(body, dict) else {})
+        if not targets:
+            await self._emit_ops(event_name, body)
+            return
 
-        # Route through server broadcast system, once per holding control.
-        # TODO(plan 7.5, C.9): route pipe-tagged events by traceId to the
-        # owning control only; until then every holder sees the engine's
-        # events (the engine status projected per control).
-        # Each holder's copy carries its own controlId (the control's key
-        # string, ALB seam 3); the body is copied, never shared across holders.
-        for key in list(self._holds):
-            event = {**message, 'body': {**body, 'controlId': key}} if isinstance(body, dict) else message
-            await self._server.broadcast_task_event(
-                event_type=type,
-                key=key,
-                event=event,
+        # Step 4: one copy per receiving control, carrying its controlId (the
+        # control's key string, ALB seam 3), appended to THAT control's run
+        # log and delivered opener first
+        for key, opener, late in targets:
+            copy = {**body, 'controlId': key} if isinstance(body, dict) else body
+            if isinstance(copy, dict) and late:
+                copy['late'] = True
+            if isinstance(copy, dict) and event_name == 'apaevt_status_update':
+                copy = self._project_status(key, copy)
+            event = {**message, 'body': copy}
+            writer = await self._run_log_for(key)
+            if writer is not None:
+                try:
+                    writer.append(event)
+                except Exception as e:
+                    self.debug_message(f'Run-log append failed for {key}: {e}')
+            await self._server.broadcast_task_event(event_type=type, key=key, event=event, opener=opener)
+
+    def _route(self, type: EVENT_TYPE, event_name: str, body: Dict[str, Any]) -> List[tuple]:
+        """
+        The controls an event is delivered to, as ``(control_key, opener_conn_id, late)``.
+
+        Args:
+            type: The event category.
+            event_name: The DAP event name.
+            body: The event body (``traceId`` when pipe-tagged).
+
+        Returns:
+            Empty when the event belongs to the ops stream.
+        """
+        holders = [(key, None, False) for key in self._holds]
+        trace_id = body.get('traceId')
+        if isinstance(trace_id, str) and trace_id:
+            # Step 1: a pipe-tagged event goes to the tree's owner, the opener first
+            owner = self._server.trace_owners.owner(trace_id)
+            if owner is not None and owner.control_key in self._holds:
+                return [(owner.control_key, owner.conn_id, owner.late)]
+            # Step 2: an unknown or released tree: on a private engine every
+            # binding is the owner's (a scan source's own getPipe has no
+            # record); on a shared one it is nobody's and goes to ops
+            return holders if not self.shared else []
+        # Step 3: engine-level. A private engine's output is its owner's. On a
+        # shared engine only the status (projected per holder) and the task
+        # lifecycle reach the holders; counts, errors, bare output and the
+        # debugger channel are platform signal
+        if not self.shared or type & (EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK) or event_name == 'apaevt_status_update':
+            return holders
+        return []
+
+    async def _emit_ops(self, event_name: str, body: Any) -> None:
+        """
+        Put an engine-level event of a shared engine on the ops stream (``apaevt_ops``, plan 7.5).
+
+        Args:
+            event_name: The original DAP event name (``kind`` on the ops body).
+            body: The original body.
+        """
+        ops_body = {
+            **(body if isinstance(body, dict) else {'body': body}),
+            'engineKey': self.engine_key,
+            'kind': event_name,
+        }
+        try:
+            await self._server.broadcast_server_event(EVENT_TYPE.OPS, {'event': 'apaevt_ops', 'body': ops_body})
+        except Exception as e:
+            self.debug_message(f'Ops event delivery failed: {e}')
+
+    def _project_status(self, key: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The status body the control ``key`` may see (its own counts on a shared engine, the availability always).
+
+        Args:
+            key: The receiving control's registry key.
+            body: The engine's status body.
+
+        Returns:
+            The projected body (the engine's when the control cannot be resolved).
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return body
+        return control.project_status(body, self.shared)
+
+    async def _run_log_for(self, key: str) -> Optional[RunLogWriter]:
+        """
+        The run-log writer of the control ``key``, opened on first use.
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The writer, or None when it could not be opened (not retried).
+        """
+        writer = self._run_logs.get(key)
+        if writer is None and key not in self._run_log_failed:
+            writer = await self._open_run_log(key)
+        return writer
+
+    def _chapter_begin_seq(self) -> Optional[int]:
+        """The run-begin marker's seq of the first holder's continuum, or None when unlogged."""
+        for writer in self._run_logs.values():
+            return writer.chapter_begin_seq
+        return None
+
+    async def _open_run_log(self, key: str) -> Optional[RunLogWriter]:
+        """
+        Open the run-log continuum of the control ``key`` (plan 7.5: one continuum per control).
+
+        The writer is bound to the CONTROL's identity (its owner, project,
+        source and run kind), not the engine's: two controls on one engine are
+        two continua. The account-scoped FileStore handles path scoping and
+        refuses an empty client id (such a control runs unlogged and says so).
+        The run-log writer is the ONLY legal writer of .logs content (the
+        store's policy denies every user identity; internal-only entry).
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The opened writer, or None (recorded as failed; not retried).
+        """
+        try:
+            from ai.account import RequestContext, Store
+
+            control = self._server.control_by_key(key)
+            # The store view anchors at the control's OWNER namespace: the
+            # TEAM for a team-owned (@team) deploy, the USER for a user-owned
+            # run (an interactive .use or a personal @me deploy: private, so
+            # its continuum never lands in the billing team's tree)
+            owner_is_team = control.owner_kind == 'team'
+            writer = RunLogWriter(
+                Store.file_store(
+                    RequestContext.internal('run-log'),
+                    client_id=control.teamId if owner_is_team else control.userId,
+                ),
+                control.userId,
+                control.project_id or self.project_id,
+                control.source or self.source,
+                control.run_kind,
+                self.stamp_log_event,
+                self.raise_log_seq_floor,
+                # team_id is the run's BILLING team (provenance for the control
+                # record) for every owner kind; owner_kind decides where the
+                # logs physically live
+                team_id=control.teamId,
+                owner_kind=control.owner_kind or 'user',
+                org_id=control.orgId,
+                debug=self.debug_message,
             )
+            await writer.open(
+                trigger=control.trigger or self._run_trigger,
+                user=control.userId,
+                pipeline_hash=hashlib.sha256(
+                    json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                ).hexdigest()[:16],
+                # The control's own trace level is what its continuum records
+                trace_level=control.trace_level or self._pipelineTraceLevel,
+            )
+        except Exception as e:
+            self._run_log_failed.add(key)
+            self.debug_message(f'Run-log setup failed for {key} (its run continues unlogged): {e}')
+            return None
+        self._run_logs[key] = writer
+        return writer
 
     def _update_status(self, message: Dict[str, Any]) -> None:
         """
@@ -2427,7 +2579,7 @@ class TaskEngine(DAPBase):
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
-            pipe_index = body.get('pipeId', '')
+            pipe_id = body.get('pipeId', '')
             component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
@@ -2437,21 +2589,23 @@ class TaskEngine(DAPBase):
 
             # Update the per-pipe execution stack and get a stable snapshot chain.
             # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
-            # snapshot is copied (reentrant sub-invocations share one pipe_index and
+            # snapshot is copied (reentrant sub-invocations share one pipe_id and
             # interleave across threads).
-            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_index, operation, component_name)
+            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_id, operation, component_name)
 
             # Build the flow event. `component` names the component this op refers to
             # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
             # rather than assuming strict LIFO order — reentrant agent sub-invocations
-            # interleave under one pipe_index. `pipes` remains the current component stack.
+            # interleave under one pipe_id. `pipes` remains the current component stack.
             # Identity (project_id + source) is stamped centrally by
             # _forward_task_event — not duplicated here.
             body = {
-                'id': pipe_index,
+                'id': pipe_id,
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
+                # The request tree (routes the flow to its owner, plan 7.5)
+                'traceId': body.get('traceId'),
                 # Filled below only when tracing is on — the clamp
                 # serializes the whole trace, wasted work for a body that
                 # never leaves this method (synthetic tool-call traces
@@ -2461,42 +2615,21 @@ class TaskEngine(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-            # If this task is started with tracing.
-            #
-            # `'none'` IS A LEVEL, NOT AN ABSENCE. It is a non-empty string and
-            # so was truthy here, which meant a caller asking for no tracing got
-            # the payload suppressed on the engine side and every enter/leave
-            # still derived, seq-stamped, broadcast and written to the run log —
-            # a flow event carrying `trace: {}`. Roughly 379 bytes of identity
-            # and envelope for no signal, one pair per component per request.
-            #
-            # A settings stream that answers UI clicks and is deliberately kept
-            # out of the Runs timeline had accumulated 325 MB that way, 94% of
-            # it empty-payload flow. The level names are documented as
-            # none/metadata/summary/full, and `none` is documented as "no flow
-            # traces"; this is the code catching up with that.
-            if self._pipelineTraceLevel and self._pipelineTraceLevel != 'none':
-                # Clamp oversized payloads HERE, before the rebuilt body
-                # fans out to the broadcast, the derived flow, and the
-                # run-log continuum.
-                body['trace'] = cap_trace_payload(raw_trace) or {}
-                # Build the derived flow event only when it will actually be
-                # delivered — build_event assigns its continuum seq, and a
-                # built-but-unsent event would leave a gap. It inherits the
-                # source trace message's emission time.
-                flow = self.build_event(
-                    'apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime')
-                )
-
-                # Accumulate run analytics from the derived flow (its body
-                # carries the stamped eventTime, and for 'begin' its logSeq
-                # is the trace's permanent identity). Gated on tracing like
-                # the flow derivation itself — no traces, honest empties.
-                self._accumulate_analytics(operation, pipe_index, component_name, pipes, flow['body'])
-
-                # Forward off the event
-                await self._forward_task_event(EVENT_TYPE.FLOW, flow)
-
+            # A trace arrived because ITS binding asked for one: the engine emits
+            # >DBG per binding at the binding's own level (plan 7.4), so there
+            # is no engine-level gate here any more. Clamp oversized payloads
+            # before the rebuilt body fans out to the broadcast, the derived
+            # flow and the run-log continuum.
+            body['trace'] = cap_trace_payload(raw_trace) or {}
+            # Build the derived flow event; build_event assigns its continuum
+            # seq. It inherits the source trace message's time.
+            flow = self.build_event('apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime'))
+            # Accumulate run analytics from the derived flow (its body carries
+            # the stamped eventTime, and for 'begin' its logSeq is the trace's
+            # permanent identity).
+            self._accumulate_analytics(operation, pipe_id, component_name, pipes, flow['body'])
+            # Forward off the event
+            await self._forward_task_event(EVENT_TYPE.FLOW, flow)
         # Handle real-time node-to-UI SSE messages (pass-through, no status tracking)
         elif event_type == 'apaevt_sse':
             await self._forward_task_event(EVENT_TYPE.SSE, message)
@@ -2721,7 +2854,7 @@ class TaskEngine(DAPBase):
         self.debug_message(f'Task {title} ({details}run: {run}, lifetime: {lifetime}s)')
 
     def _accumulate_analytics(
-        self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
+        self, operation: str, pipe_id: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
     ) -> None:
         """
         Fold one trace operation into the status body's run analytics.
@@ -2733,7 +2866,7 @@ class TaskEngine(DAPBase):
 
         Args:
             operation: Trace op (begin / enter / leave / end).
-            pipe_index: The REAL pipe id the op runs on (correlation key).
+            pipe_id: The REAL pipe id the op runs on (correlation key).
             component_name: The component this op refers to.
             pipes: Current component stack (pipes[0] = the object name that
                 a begin carries).
@@ -2754,7 +2887,7 @@ class TaskEngine(DAPBase):
                 self._an_idle_since = 0.0
                 self._refresh_idle_status(event_time)
             # A pipe hosts one completion at a time — its end looks up THIS.
-            self._an_open_by_pipe[pipe_index] = {
+            self._an_open_by_pipe[pipe_id] = {
                 'name': str(pipes[0] if pipes else component_name)[:200],
                 'beginTime': event_time,
                 'beginSeq': flow_body.get('logSeq'),
@@ -2762,10 +2895,10 @@ class TaskEngine(DAPBase):
 
         elif operation == 'enter':
             # Reentrancy within one pipe stacks; key = (pipe, component).
-            self._an_component_open.setdefault((pipe_index, component_name), []).append(event_time)
+            self._an_component_open.setdefault((pipe_id, component_name), []).append(event_time)
 
         elif operation == 'leave':
-            stack = self._an_component_open.get((pipe_index, component_name))
+            stack = self._an_component_open.get((pipe_id, component_name))
             if stack:
                 delta = max(0.0, event_time - stack.pop())
                 stat = self._status.componentStats.get(component_name)
@@ -2777,7 +2910,7 @@ class TaskEngine(DAPBase):
                 stat.maxSeconds = max(stat.maxSeconds, round(delta, 2))
 
         elif operation == 'end':
-            begun = self._an_open_by_pipe.pop(pipe_index, None)
+            begun = self._an_open_by_pipe.pop(pipe_id, None)
             if begun is not None:
                 elapsed = round(max(0.0, event_time - begun['beginTime']), 2)
                 self._status.completionSeconds = round(self._status.completionSeconds + elapsed, 2)
@@ -3060,63 +3193,13 @@ class TaskEngine(DAPBase):
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
 
-            # Open the run-log continuum for this run. Logging is best-effort
-            # observability: any failure here is logged and the task runs
+            # Open the run-log continuum of every control holding the engine at
+            # start (plan 7.5: one continuum per control; a holder that joins
+            # later gets its writer on its first event). Logging is best-effort
+            # observability: a failure is logged and that control's run goes
             # unlogged rather than failing execution.
-            try:
-                # The account-scoped FileStore handles user path scoping (and
-                # REFUSES an empty client_id — such a task runs unlogged and
-                # says so, rather than writing into a collapsed users/ path).
-                # Internal identity: the run-log writer is the ONLY legal
-                # writer of .logs content (the store's policy denies every
-                # user identity — internal-only entry).
-                from ai.account import RequestContext, Store
-
-                # The store view anchors at the run's OWNER namespace: the
-                # TEAM for team-owned (@team) deploys — which carry no user
-                # identity, every path they write is '@/Team/=<id>/'-prefixed
-                # anyway — and the USER for user-owned runs (an interactive
-                # .use or a personal @me deploy: private, so its continuum
-                # must never land in the billing team's tree). An
-                # internal-context store REQUIRES a concrete anchor — an empty
-                # one raises, and the except below would silently disable the
-                # run log for the whole run.
-                owner_is_team = self._owner_kind == 'team'
-                self._run_log = RunLogWriter(
-                    Store.file_store(
-                        RequestContext.internal('run-log'),
-                        client_id=self.team_id if owner_is_team else self.client_id,
-                    ),
-                    self.client_id,
-                    self.project_id,
-                    self.source,
-                    self._run_kind,
-                    self.stamp_log_event,
-                    self.raise_log_seq_floor,
-                    # team_id is the run's real BILLING team (provenance for
-                    # the control record) for EVERY owner kind; owner_kind
-                    # decides where the logs physically live. Team-owned
-                    # deploys write the TEAM continuum (teams are the
-                    # environments — teammates watch/replay the same stream);
-                    # user-owned (@me) runs stay private in the owner's tree.
-                    # Passing team_id here for an @me run keeps its billing
-                    # provenance without leaking its logs into the team tree.
-                    team_id=self.team_id,
-                    owner_kind=self._owner_kind,
-                    org_id=self.org_id,
-                    debug=self.debug_message,
-                )
-                await self._run_log.open(
-                    trigger=self._run_trigger,
-                    user=self.client_id,
-                    pipeline_hash=hashlib.sha256(
-                        json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
-                    ).hexdigest()[:16],
-                    trace_level=self._pipelineTraceLevel,
-                )
-            except Exception as e:
-                self._run_log = None
-                self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+            for key in list(self._holds):
+                await self._open_run_log(key)
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
@@ -3161,7 +3244,7 @@ class TaskEngine(DAPBase):
                     # seq (the writer opened just above). Lets clients
                     # synthesize the chapter locally with the exact key
                     # the server's chapter list will carry.
-                    'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
+                    'beginSeq': self._chapter_begin_seq(),
                 },
                 id=self.id,
             )

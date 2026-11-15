@@ -454,17 +454,15 @@ class TaskCommands(DAPConn):
             # Resolve the caller's control
             control = self.get_control(request, 'task.monitor')
 
-            # Its status. TODO(plan 7.5, C.9): computed from the control's own
-            # bindings; until then the engine's status, projected per control.
-            status = control.task.get_status()
-
-            # Convert status to dictionary format for response
-            response = status.model_dump()
+            # The engine's status projected to THIS control (plan 7.5): the
+            # engine's availability always, and on a shared engine the
+            # control's own counts in place of the engine-wide ones
+            response = control.project_status(control.task.get_status().model_dump(), control.task.shared)
 
             # The engine behind the control: 'running', 'starting' (in the
             # start gate or not yet confirmed running) or 'stopped' (a dormant
-            # control reads 'stopped' until its next request starts it).
-            # TODO(plan 7.5, C.9): the full availability projection
+            # control reads 'stopped' until its next request starts it); the
+            # same value as engine.availability, kept for the task-list shape
             response['engineState'] = control.engine_state
 
             # Return successful response with status data

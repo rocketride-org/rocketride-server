@@ -189,6 +189,10 @@ class MonitorCommands(DAPConn):
         # Step 3: bitmask must match
         if not (event_type & self._monitors['*']):
             return
+        # Step 3b: the ops stream is masked at DELIVERY too (plan 7.5): a
+        # permission that lapsed mid-session stops the stream at once
+        if event_type & EVENT_TYPE.OPS and not self._is_platform_operator():
+            return
         # Step 4: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
             conn_org = ''
@@ -203,11 +207,22 @@ class MonitorCommands(DAPConn):
                 return
         await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
 
+    def _is_platform_operator(self) -> bool:
+        """
+        Whether this connection may see platform-wide streams (``OPS``, ``DASHBOARD`` on ``*``).
+
+        Returns:
+            True for ``sys.admin`` or the server's own ``internal`` identity.
+        """
+        perms = getattr(getattr(self, '_account_info', None), 'sysPermissions', None) or []
+        return 'sys.admin' in perms or 'internal' in perms
+
     async def send_task_event(
         self,
         event_type: EVENT_TYPE,
         key: str,
         event: Dict[str, Any] = None,
+        direct: bool = False,
     ) -> None:
         """
         Forward a task event to subscribed monitors based on their subscription preferences.
@@ -223,6 +238,9 @@ class MonitorCommands(DAPConn):
             event (Dict[str, Any]): The event payload containing:
                 - event: String identifier for the event type
                 - body: Event-specific data payload
+            direct (bool): This connection OPENED the event's binding (plan
+                7.5, opener first): the event is delivered without a
+                subscription, once the permission checks pass.
 
         Event Routing Logic:
         - Events are only sent to monitors subscribed to the run's owner-scoped key
@@ -272,6 +290,11 @@ class MonitorCommands(DAPConn):
         if not resolve_run_permissions(self._account_info, control):
             return
         if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
+            return
+
+        # The opener needs no subscription: the binding is its own request
+        if direct:
+            await _send_event(event_type)
             return
 
         # Build the base owner-scoped key: events land on the key of the
@@ -381,10 +404,11 @@ class MonitorCommands(DAPConn):
                     # Task is running: send current status, under the same
                     # permission as a live status update
                     if self._may_monitor():
+                        # The same projection the live status carries (plan 7.5)
                         await self.send_event(
                             event='apaevt_status_update',
                             id=control.id,
-                            body=control.task.get_status().model_dump(),
+                            body=control.project_status(control.task.get_status().model_dump(), control.task.shared),
                         )
                 elif project_id is not None and source is not None:
                     # Task is not running: send empty state so client shows "not running"
@@ -509,11 +533,20 @@ class MonitorCommands(DAPConn):
         """
         control = None
 
+        # OPS is engine-level and reachable only through the wildcard, by an
+        # operator (plan 7.5): a control-scoped subscription never carries it
+        if token != '*' and type & EVENT_TYPE.OPS:
+            raise PermissionError('OPS is subscribed on the wildcard, by sys.admin')
+
         # If we are supposed to monitor all tasks...
         if token == '*':
             # Only token can be specified
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
+            # Platform-wide bits on the wildcard are an operator's (plan 7.5):
+            # OPS is every shared engine's internals, DASHBOARD every connection
+            if type & (EVENT_TYPE.OPS | EVENT_TYPE.DASHBOARD) and not self._is_platform_operator():
+                raise PermissionError('OPS and DASHBOARD subscriptions require sys.admin')
 
             event_key = '*'
             event_id = None

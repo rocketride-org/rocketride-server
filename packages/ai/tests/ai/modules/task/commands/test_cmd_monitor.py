@@ -261,7 +261,9 @@ async def test_send_updates_summary_with_running_control():
     status.model_dump = MagicMock(return_value=status_dict)
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
-    control = SimpleNamespace(id='task-1', task=task)
+    task.shared = False
+    # A private engine's status passes through the projection unchanged
+    control = SimpleNamespace(id='task-1', task=task, project_status=lambda body, shared: body)
 
     conn = _make_conn()
     await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)

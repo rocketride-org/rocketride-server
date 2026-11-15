@@ -109,6 +109,7 @@ from ai.account.models import AccountInfo, home_team, resolve_run_permissions, r
 from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
+from .trace_owner import TraceOwners
 from .task_control import RUNGS, DeploymentRef, TaskControl, TeamContext, control_key, rung_of
 from .engine_key import engine_content
 from .node_id import node_id
@@ -671,6 +672,8 @@ class TaskServer(DAPBase):
         self._task_control = ControlRegistry()  # Control registry: <rung>.<ownerId>.<address>, indexed
         self._engines = EngineRegistry()  # Engine pool: content key -> engine, start lock inside
         self._engine_unavailable: Dict[str, Tuple[str, str]] = {}  # Control key -> (engineKey, reason)
+        # Which control each live request tree belongs to, by wire traceId (plan 7.5)
+        self.trace_owners = TraceOwners()
         # Deployments whose holds were released (disabled/removed), by the monotonic
         # time of the release: a control registered through a deployment that was
         # revoked after its state was read, or still holding one that was revoked
@@ -1828,7 +1831,9 @@ class TaskServer(DAPBase):
             except Exception as e:
                 self.debug_message(f'push_org_changed failed for conn {conn.get_connection_id()}: {e}')
 
-    async def broadcast_task_event(self, event_type: EVENT_TYPE, key: str, event: Dict[str, Any]) -> None:
+    async def broadcast_task_event(
+        self, event_type: EVENT_TYPE, key: str, event: Dict[str, Any], opener: Optional[int] = None
+    ) -> None:
         """
         Broadcast a task-scoped event to all connections that are subscribed to the given task.
 
@@ -1837,6 +1842,12 @@ class TaskServer(DAPBase):
         hold task.monitor on the run) and silently skipped. All other exceptions are
         logged but do not abort the broadcast to remaining connections.
 
+        OPENER FIRST (plan 7.5): when ``opener`` names the connection that opened
+        the binding the event belongs to, it is delivered there before the
+        subscription fan-out and skipped in it, so nothing arrives twice and an
+        ``>SSE`` emitted before the SDK's subscribe round trip is not lost
+        (``submit(on_sse=)`` relies on this).
+
         Args:
             event_type (EVENT_TYPE): Event type bitmask (e.g. SUMMARY, SSE) used by each
                 connection's send_task_event to decide whether it should receive the event.
@@ -1844,6 +1855,8 @@ class TaskServer(DAPBase):
                 resolves it to its subscription key independently.
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
+            opener (int, optional): The connection that opened the event's
+                binding: delivered first, directly, and skipped in the fan-out.
         """
         # If the task has already been removed from the registry (e.g.
         # cleanup raced with pending broadcasts), skip silently instead of
@@ -1851,10 +1864,23 @@ class TaskServer(DAPBase):
         if key not in self._task_control:
             return
 
-        # Snapshot to list() so a connection joining or dropping mid-broadcast
-        # does not raise RuntimeError on the next iteration; matches the
-        # pattern used by broadcast_server_event / push_account_update above.
+        # Step 1: the opener, directly (its own permission checks still run
+        # inside send_task_event; a connection that left is simply gone)
+        opener_conn = self._connections.get(opener) if opener is not None else None
+        if opener_conn is not None:
+            try:
+                await opener_conn.send_task_event(event_type, key=key, event=event, direct=True)
+            except PermissionError:
+                pass
+            except Exception as e:
+                self.debug_message(f'Failed to deliver event to its opener: {e}')
+
+        # Step 2: everyone else, by subscription. Snapshot to list() so a
+        # connection joining or dropping mid-broadcast does not raise
+        # RuntimeError on the next iteration; matches broadcast_server_event.
         for conn in list(self._connections.values()):
+            if conn is opener_conn:
+                continue
             try:
                 await conn.send_task_event(event_type, key=key, event=event)
 
@@ -1890,6 +1916,8 @@ class TaskServer(DAPBase):
             self._task_control.pop(control.key, None)
             self._engine_unavailable.pop(control.key, None)
             self._forget_launch_owner(control)
+            # Its request trees go with it (their records did)
+            self.trace_owners.forget_control(control.key)
 
         # The control's one hold
         if control.task is not None and not keep_hold:

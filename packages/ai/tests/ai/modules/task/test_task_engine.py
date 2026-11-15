@@ -46,6 +46,7 @@ from ai.modules.task.task_engine import (
     resolve_parameter_tokens,
     saas_pipeline_violation,
 )
+from ai.modules.task.trace_owner import TraceOwners
 from ai.modules.task.types import EngineState
 
 
@@ -74,7 +75,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
         Task: bare instance ready for method calls.
     """
     t = TaskEngine.__new__(TaskEngine)
-    t._server = SimpleNamespace(next_engine_id=lambda: 1, node_id=1)  # the server hands out engine ids
+    # the server hands out engine ids and records which control owns each request tree
+    t._server = SimpleNamespace(next_engine_id=lambda: 1, node_id=1, trace_owners=TraceOwners())
     t.id = 'task-test'
     t.engine_key = 'enginehash:user-1'
     t.engine_id = 1
@@ -106,7 +108,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # Run-log continuum state consulted by _forward_task_event's stamping
     # safety net (see TaskEngine.stamp_log_event): fresh-stream counter + no writer.
     t._log_seq_next = 1
-    t._run_log = None
+    t._run_logs = {}
+    t._run_log_failed = set()
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
@@ -1975,7 +1978,8 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
     t._forward_task_event = TaskEngine._forward_task_event.__get__(t)  # the real forwarder stamps the body
     t._server.broadcast_task_event = AsyncMock()
     t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
-    t._run_log = None
+    t._run_logs = {}
+    t._run_log_failed = set()
     message = {'event': 'apaevt_sse', 'body': {'pipe_id': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
 
     await TaskEngine.on_event(t, message)
@@ -1986,26 +1990,20 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
 
 
 @pytest.mark.asyncio
-async def test_the_none_level_emits_no_flow_at_all():
+@pytest.mark.parametrize('level', ['none', '', None])
+async def test_a_trace_derives_a_flow_whatever_the_engine_default_level(level):
     """
-    `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
-    Read as "tracing on with the payload suppressed", every enter/leave was
-    still derived, seq-stamped, broadcast and written to the run log: a flow
-    event carrying `trace: {}`, roughly 379 bytes of envelope for no signal,
-    one pair per component per request. A settings stream kept deliberately out
-    of the Runs timeline had accumulated 325 MB that way.
-
-    Nothing else about the event changes: the pipe stack is still tracked and
-    the status is still marked for update.
+    The engine emits >DBG per BINDING at the binding's own trace level (plan
+    7.4): a trace that arrives here was asked for by its binding, so the
+    engine's default level (`none` for a shared engine, absent on an old task
+    file) no longer gates the flow derivation. A holder tracing FULL on an
+    engine whose default is `none` sees its flow.
     """
-    t = _trace_task('none')
-
+    t = _trace_task(level)
     await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
-
-    t._forward_task_event.assert_not_awaited()
-    t._accumulate_analytics.assert_not_called()
-    t.build_event.assert_not_called()
-    # The parts that are NOT gated on the trace level.
+    t._forward_task_event.assert_awaited_once()
+    t._accumulate_analytics.assert_called_once()
+    assert t.build_event.call_args.kwargs['body']['trace'] == {'text': 'hello'}
     assert t._status_updated is True
     assert t._status.pipeflow.byPipe == {0: ['parse']}
 
@@ -2022,17 +2020,6 @@ async def test_a_trace_never_sets_the_engine_wide_pipe_count():
     await TaskEngine.on_event(t, {**_TRACE_MESSAGE, 'body': {**_TRACE_MESSAGE['body'], 'totalPipes': 5}})
 
     assert t._status.pipeflow.totalPipes == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('level', ['', None])
-async def test_an_absent_trace_level_still_emits_nothing(level):
-    """The original behaviour, unchanged: no level means no flow."""
-    t = _trace_task(level)
-
-    await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
-
-    t._forward_task_event.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

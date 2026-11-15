@@ -34,6 +34,7 @@ from ai.modules.task import task_server as task_server_module
 from ai.modules.task.task_control import TaskControl
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
+from ai.modules.task.trace_owner import TraceOwners
 
 # A registry key in the ``runKind.ownerId.address`` layout start_task builds.
 KEY = 'dev.user-1.acme.proj-1.src-1'
@@ -58,6 +59,7 @@ def _make_server(*, config=None, web_server=None):
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts.trace_owners = TraceOwners()
     ts._deployment_revoked = {}
     ts._engine_ids = itertools.count(1)
     ts._node_id = 1

@@ -63,6 +63,7 @@ from ai.modules.task.engine_key import engine_content, qualified_key
 from ai.modules.task.task_engine import MULTITENANT_BIT, TaskEngine, component_facts
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import EngineState, TaskError
+from ai.modules.task.trace_owner import TraceOwners
 
 
 # =============================================================================
@@ -188,6 +189,7 @@ def _server() -> TaskServer:
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts.trace_owners = TraceOwners()
     ts._deployment_revoked = {}
     ts._engine_ids = itertools.count(1)
     ts._node_id = 1
@@ -751,6 +753,7 @@ def _data_conn(ts, control):
     """A DataCommands whose resolution always lands on ``control`` (no transport, no auth)."""
     conn = DataCommands.__new__(DataCommands)
     conn._server = ts
+    conn._connection_id = 1
     conn._account_info = _caller()
     conn.get_control = MagicMock(return_value=control)
     conn.resolve_control_or_start = AsyncMock(return_value=control)

@@ -173,8 +173,12 @@ class EVENT_TYPE(Flag):
     DASHBOARD = 1 << 7  # Server-level events - connection added/removed, for admin dashboards
     BILLING = 1 << 8  # Billing ledger events - credit/debit updates, scoped by org
     DEPLOY = 1 << 9  # Deployment change events - pointer/state/schedule/run mutations, scoped by org
+    OPS = (
+        1 << 10
+    )  # Engine-level output of SHARED engines (counts, errors, bare prints, start/stop/crash) - sys.admin only
 
     # Convenience combination - ALL events except NONE for comprehensive monitoring
+    # ALL does NOT include OPS: an operator opts in explicitly, and existing ALL subscribers are unaffected
     ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY
 
 

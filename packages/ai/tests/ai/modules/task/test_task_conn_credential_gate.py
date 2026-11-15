@@ -50,6 +50,7 @@ from ai.account.file_store import StorageError
 from ai.account.models import AccountInfo
 from ai.account.store import Store
 from ai.modules.task.task_conn import SCOPED_KEY_COMMANDS, TaskConn
+from ai.modules.task.trace_owner import TraceOwners
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 
 from .test_task_conn import _make_account_info, _make_conn
@@ -402,7 +403,9 @@ def _team_run(address, task_id):
         deployment=None,
         registered_at=0.0,
         live=True,
-        task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False),
+        task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False, shared=False),
+        # A private engine's status passes through the projection unchanged
+        project_status=lambda body, shared: body,
     )
 
 
@@ -413,6 +416,7 @@ async def _monitor_conn(identity):
     server._task_control = ControlRegistry({run.key: run for run in runs})
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server.trace_owners = TraceOwners()
     server._deployment_revoked = {}
     server._engine_ids = itertools.count(1)
     server._node_id = 1
@@ -475,14 +479,25 @@ def _dashboard_event(action):
     return {'event': 'apaevt_dashboard', 'body': {'action': action, 'connectionId': 7}}
 
 
-async def _wildcard_conn(identity):
-    """A monitor connection subscribed to '*' for dashboard and summary events, transport cleared."""
+async def _wildcard_conn(identity, types=('SUMMARY',)):
+    """A monitor connection subscribed to '*' for ``types`` (SUMMARY by default), transport cleared.
+
+    DASHBOARD on the wildcard is an operator's (plan 7.5, B31): a test that
+    wants it passes a sys.admin identity and names the type.
+    """
     conn = await _monitor_conn(identity)
     conn._server._connections = {1: conn}
-    await _dispatch(conn, 'rrext_monitor', {'token': '*', 'types': ['DASHBOARD', 'SUMMARY']})
+    await _dispatch(conn, 'rrext_monitor', {'token': '*', 'types': list(types)})
     assert '*' in conn._monitors
     conn._transport.send.reset_mock()
     return conn
+
+
+def _operator_identity():
+    """The owner's full credential with the platform operator bit."""
+    identity = _make_account_info(auth=FULL_KEY, user_id='owner-1')
+    identity.sysPermissions = ['sys.admin']
+    return identity
 
 
 @pytest.mark.asyncio
@@ -515,9 +530,30 @@ async def test_scoped_wildcard_subscription_still_receives_task_events_in_scope(
 
 
 @pytest.mark.asyncio
-async def test_unscoped_wildcard_subscription_still_receives_server_events():
-    """The owner's own full credential keeps its dashboard feed."""
-    conn = await _wildcard_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+async def test_a_plain_full_credential_cannot_subscribe_the_dashboard_on_the_wildcard():
+    """DASHBOARD (and OPS) on '*' are platform-wide: without sys.admin the subscription is refused (B31)."""
+    conn = await _monitor_conn(_make_account_info(auth=FULL_KEY, user_id='owner-1'))
+    for types in (['DASHBOARD'], ['OPS'], ['DASHBOARD', 'SUMMARY']):
+        with pytest.raises(PermissionError):
+            await conn.set_monitor(token='*', type=EVENT_TYPE(_bits(types)))
+    assert conn._monitors == {}
+    # A control-scoped subscription never carries OPS either
+    with pytest.raises(PermissionError):
+        await conn.set_monitor(token=ADDRESS, type=EVENT_TYPE.OPS | EVENT_TYPE.SUMMARY)
+
+
+def _bits(names):
+    """OR the named EVENT_TYPE members."""
+    value = 0
+    for name in names:
+        value |= EVENT_TYPE[name].value
+    return value
+
+
+@pytest.mark.asyncio
+async def test_an_operators_wildcard_subscription_receives_server_events():
+    """An operator (sys.admin) keeps the dashboard feed on its full credential."""
+    conn = await _wildcard_conn(_operator_identity(), types=('DASHBOARD', 'SUMMARY'))
 
     await TaskServer.broadcast_server_event(
         conn._server, EVENT_TYPE.DASHBOARD, _dashboard_event('connection_added'), user_id='owner-1'
@@ -562,6 +598,7 @@ def _session_conn(identity):
     server._task_control = ControlRegistry()
     server._engines = EngineRegistry()
     server._engine_unavailable = {}
+    server.trace_owners = TraceOwners()
     server._deployment_revoked = {}
     server._engine_ids = itertools.count(1)
     server._node_id = 1

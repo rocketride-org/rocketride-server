@@ -53,6 +53,7 @@ from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
 from ai.modules.task.task_control import TaskControl, control_key, rung_of
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
+from ai.modules.task.trace_owner import TraceOwners
 
 
 # =============================================================================
@@ -66,6 +67,7 @@ def _server() -> TaskServer:
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts.trace_owners = TraceOwners()
     ts._deployment_revoked = {}
     ts._engine_ids = itertools.count(1)
     ts._node_id = 1

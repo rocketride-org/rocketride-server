@@ -69,6 +69,7 @@ class _Frame:
     engine: 'TaskEngine'
     correlation_id: str
     params: Optional[Dict[str, Dict[str, Any]]] = None
+    record: Optional[OpenPipe] = None
 
 
 class DataCommands(DAPConn):
@@ -164,15 +165,20 @@ class DataCommands(DAPConn):
 
             # Step 3: forward with the caller stamped, as activity of this control;
             # a close retires its record whatever the engine answered
+            succeeded = False
             try:
                 body = await self._forward(control, frame, request, arguments)
+                succeeded = True
             finally:
                 if subcommand == 'close' and pipe_id is not None:
-                    control.open_pipes.pop(pipe_id, None)
+                    self._retire(control, pipe_id, succeeded)
 
-            # Step 4: a successful open is a binding the control now has open
+            # Step 4: a successful open is a binding the control now has open;
+            # a standalone tool call was a binding that opened and closed
             if subcommand == 'open':
                 self._record_open(control, frame, body)
+            elif subcommand == 'tool' and pipe_id is None:
+                self._note_borrowed(control, body)
 
             # The envelope is keyed off the INBOUND request so the inbound
             # DAPConn correlates it to the originating client (_send_data
@@ -266,7 +272,7 @@ class DataCommands(DAPConn):
         record = control.open_pipes.get(pipe_id)
         if record is None:
             raise PermissionError(f'Pipe {pipe_id} is not open on your control for {control.address!r}')
-        return _Frame(engine=record.engine, correlation_id=record.correlation_id)
+        return _Frame(engine=record.engine, correlation_id=record.correlation_id, record=record)
 
     async def _forward(
         self, control: 'TaskControl', frame: '_Frame', request: Dict[str, Any], arguments: Dict[str, Any]
@@ -292,6 +298,9 @@ class DataCommands(DAPConn):
         # idempotent open keys on it (ALB seam 7)
         if arguments.get('subcommand') == 'open':
             stamped['correlationId'] = frame.correlation_id
+        # The bytes a write carries count toward this control's own totals
+        if arguments.get('subcommand') == 'write' and frame.record is not None:
+            frame.record.bytes += len(arguments.get('data') or b'')
         forwarded = dict(request)
         forwarded['arguments'] = stamped
 
@@ -308,20 +317,67 @@ class DataCommands(DAPConn):
             control.end_request()
         return response.get('body')
 
-    @staticmethod
-    def _record_open(control: 'TaskControl', frame: '_Frame', body: Any) -> None:
+    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any) -> None:
         """
         Record a successful open on the control: the slot, its engine and its request tree.
+
+        The tree is CLAIMED for the control (plan 7.5): its pipe-tagged events
+        route to this control only, the opener connection first.
 
         Args:
             control: The caller's control.
             frame: The binding the open started.
             body: The engine's open response (``pipe_id``, wire ``traceId``).
         """
-        if isinstance(body, dict) and body.get('pipe_id') is not None:
-            control.open_pipes[body['pipe_id']] = OpenPipe(
-                engine=frame.engine, trace_id=str(body.get('traceId') or ''), correlation_id=frame.correlation_id
-            )
+        if not isinstance(body, dict) or body.get('pipe_id') is None:
+            return
+        trace_id = str(body.get('traceId') or '')
+        control.open_pipes[body['pipe_id']] = OpenPipe(
+            engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
+        )
+        control.stats.totalCount += 1
+        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+
+    def _retire(self, control: 'TaskControl', pipe_id: Any, succeeded: bool) -> None:
+        """
+        A close went through (or failed): the slot's record is retired and the binding counted.
+
+        Args:
+            control: The caller's control.
+            pipe_id: The closed slot.
+            succeeded: Whether the engine accepted the close.
+        """
+        record = control.open_pipes.pop(pipe_id, None)
+        if record is None:
+            return
+        # Step 1: the control's own counts (plan 7.5): what its bindings did
+        if succeeded:
+            control.stats.completedCount += 1
+            control.stats.completedSize += record.bytes
+        else:
+            control.stats.failedCount += 1
+            control.stats.failedSize += record.bytes
+        # Step 2: the tree is released; it lingers for the grace, then is forgotten
+        self._server.trace_owners.release(record.trace_id)
+
+    def _note_borrowed(self, control: 'TaskControl', body: Any) -> None:
+        """
+        A standalone tool call opened and closed a binding in one frame: claim and release its tree.
+
+        Its events may still arrive within the grace, so the owner is recorded
+        for that long and nothing else.
+
+        Args:
+            control: The caller's control.
+            body: The tool response (``traceId`` of the borrowed pipe).
+        """
+        trace_id = str((body or {}).get('traceId') or '') if isinstance(body, dict) else ''
+        if not trace_id:
+            return
+        control.stats.totalCount += 1
+        control.stats.completedCount += 1
+        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+        self._server.trace_owners.release(trace_id)
 
     async def _require_credit(self, control: 'TaskControl') -> None:
         """

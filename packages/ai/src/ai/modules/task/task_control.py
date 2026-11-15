@@ -193,6 +193,33 @@ class TeamContext:
     kind: str = 'home'
 
 
+# ==== Per-control counts ===========================================================
+
+
+@dataclass
+class ControlStats:
+    """
+    What THIS control's own bindings did (plan 7.5): counts and bytes, summable, never rates.
+
+    On a shared engine the engine-wide counters are other holders' work too;
+    a holder's status carries these instead. Maintained by the data path as
+    pipes open and close through the control.
+
+    Attributes:
+        totalCount: Bindings opened.
+        completedCount: Bindings closed without failure.
+        failedCount: Bindings closed failed.
+        completedSize: Bytes written through bindings that completed.
+        failedSize: Bytes written through bindings that failed.
+    """
+
+    totalCount: int = 0
+    completedCount: int = 0
+    failedCount: int = 0
+    completedSize: int = 0
+    failedSize: int = 0
+
+
 # ==== The open-pipe record =======================================================
 
 
@@ -217,6 +244,7 @@ class OpenPipe:
     engine: 'TaskEngine'
     trace_id: str
     correlation_id: str
+    bytes: int = 0
 
 
 # ==== The control ==============================================================
@@ -320,8 +348,10 @@ class TaskControl:
     # from the team context (plan 6.2; filled by C.10); rides _caller.env
     env: Dict[str, str] = field(default_factory=dict)
 
-    # The pipes this control has open, by slot (plan 3.1 P1/P2)
+    # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
+    # bindings did so far (plan 7.5)
     open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
+    stats: ControlStats = field(default_factory=ControlStats)
 
     # The resolved config views of the components the parameters map targets,
     # built on first use and dropped when the pipeline changes: the schema is
@@ -468,6 +498,56 @@ class TaskControl:
             )
         return per_node
 
+    def project_status(self, status: Dict[str, Any], shared: bool) -> Dict[str, Any]:
+        """
+        The status body THIS control's holders may see (plan 7.5).
+
+        Every holder gets the engine's availability. On a private engine the
+        engine's counters are the owner's own work and pass through. On a
+        shared engine they are every holder's work: the counts become this
+        control's own, rates and engine-level diagnostics (warnings, errors,
+        component stats, slowest documents, metrics) are scrubbed, and no
+        holder count rides anywhere (``pipeflow.totalPipes`` stays 0).
+
+        Args:
+            status: The engine's ``TASK_STATUS`` as a dict (not modified).
+            shared: Whether the engine is shared across users.
+
+        Returns:
+            The projected status body.
+        """
+        body = dict(status)
+        # Step 1: the availability projection every holder is entitled to
+        body['engine'] = {'availability': self.engine_state}
+        if not shared:
+            return body
+        # Step 2: a shared engine's counters are replaced by this control's own
+        body.update(
+            totalCount=self.stats.totalCount,
+            completedCount=self.stats.completedCount,
+            failedCount=self.stats.failedCount,
+            completedSize=self.stats.completedSize,
+            failedSize=self.stats.failedSize,
+            totalSize=self.stats.completedSize + self.stats.failedSize,
+            rateCount=0,
+            rateSize=0,
+            wordsCount=0,
+            wordsSize=0,
+            currentObject='',
+            currentSize=0,
+        )
+        # Step 3: engine-level diagnostics belong to the ops stream
+        for key, empty in (
+            ('warnings', []),
+            ('errors', []),
+            ('notes', []),
+            ('componentStats', {}),
+            ('slowestDocs', []),
+        ):
+            if key in body:
+                body[key] = empty
+        return body
+
     def setup_declared_parameters(self) -> None:
         """
         Set up the per-call parameters the control's current pipeline DECLARES (its ``parameters`` map).
@@ -539,8 +619,8 @@ class TaskControl:
         - ``'stopped'``: no engine, a stopped or stopping one (a dormant
           control reads ``'stopped'`` until its next request).
 
-        TODO(plan 7.5, C.9): carried in ``apaevt_status`` as
-        ``body.engine.availability``.
+        Carried in every status body as ``engine.availability``
+        (``project_status``) and in task lists as ``engineState``.
         """
         # A restart through this control is in the start gate
         engine = self.task

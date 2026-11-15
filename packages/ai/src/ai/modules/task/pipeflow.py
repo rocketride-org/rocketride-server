@@ -11,7 +11,7 @@ from typing import Dict, List
 
 def apply_pipeflow_event(
     by_pipe: Dict[object, List[str]],
-    pipe_index: object,
+    pipe_id: object,
     operation: str,
     component_name: str,
 ) -> List[str]:
@@ -19,7 +19,7 @@ def apply_pipeflow_event(
 
     `by_pipe` maps a reusable pipe-slot index to the current stack of component
     names nested under it. Reentrant agent sub-invocations (e.g. an agent calling
-    qdrant -> transformer mid-run) share one `pipe_index` and their enter/leave
+    qdrant -> transformer mid-run) share one `pipe_id` and their enter/leave
     events can interleave across threads, so:
 
     - `leave` pops by identity (the leaving component carried in the DBG line),
@@ -31,10 +31,10 @@ def apply_pipeflow_event(
 
     Returns the point-in-time snapshot to attach to the emitted flow event.
     """
-    stack = by_pipe.setdefault(pipe_index, [])
+    stack = by_pipe.setdefault(pipe_id, [])
 
     if operation == 'begin':
-        stack = by_pipe[pipe_index] = [component_name]
+        stack = by_pipe[pipe_id] = [component_name]
     elif operation == 'enter':
         stack.append(component_name)
     elif operation == 'leave':
@@ -47,6 +47,6 @@ def apply_pipeflow_event(
             if stack:
                 stack.pop()
     elif operation == 'end':
-        stack = by_pipe[pipe_index] = []
+        stack = by_pipe[pipe_id] = []
 
     return list(stack)
