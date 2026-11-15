@@ -62,8 +62,8 @@ dropped on every aggregate swap; a crawler response bound to a data source is
 also dropped when that source is invalidated, and expires after
 ``data_sources.TTL_SECONDS``. Such a response is ``public`` with a
 ``max-age`` of what is left of that time, so no cache keeps it longer than
-this server would and the TTL bounds staleness end to end. A render overtaken by a swap or an
-invalidation is served ``private, no-cache``. Snapshot
+this server would and the TTL bounds staleness end to end. A render overtaken
+by a swap or an invalidation is served ``private, no-cache``. Snapshot
 bytes, immutable per version, are cached by store path under their own byte
 budget. A snapshot over ``MAX_SNAPSHOT_BYTES`` (sized by a stat) is never read.
 Concurrent misses on one snapshot share one store read, and after a storage
