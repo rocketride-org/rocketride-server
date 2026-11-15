@@ -531,9 +531,10 @@ export function holdNewTabs(win: Window): { said(): string[]; restore(): void } 
 /**
  * Waits until the document has had no DOM change for `quietMs`, at most `capMs`, through a MutationObserver
  * built from the frame's realm. Its callbacks are microtasks, so an offscreen frame's timer throttling
- * doesn't delay them; the timers are the builder's own for the same reason.
+ * doesn't delay them; the timers are the builder's own for the same reason. It watches from the call on,
+ * so call it before an action whose handlers may change the DOM as they run.
  *
- * @returns Whether anything changed while it waited.
+ * @returns Whether anything changed since the call.
  */
 export function untilQuiet(win: Window, opts: { quietMs: number; capMs: number; signal?: AbortSignal }): Promise<{ changed: boolean }> {
 	return new Promise((resolve) => {

@@ -255,9 +255,11 @@ class HostedPage implements AppPage {
 		const dialogsFrom = this.dialogs.mark();
 		const tabs = holdNewTabs(win);
 		try {
+			// step: watched from before the action, because a plain handler changes the DOM while the event runs
+			const quieting = untilQuiet(win, { quietMs: QUIET_MS, capMs: QUIET_CAP_MS, signal });
 			const refused = act(win, el, action);
 			if (refused) return { status: 'failed', target, why: refused };
-			const quiet = await untilQuiet(win, { quietMs: QUIET_MS, capMs: QUIET_CAP_MS, signal });
+			const quiet = await quieting;
 			// step: a plain link or a form post takes the frame off the app's page, and the dev hooks with it
 			if (this.leftApp()) return { status: 'failed', target, why: PAGE_TEXT.leftApp };
 			const notes = [...this.dialogs.take(dialogsFrom), ...tabs.said()];
