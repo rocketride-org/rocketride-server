@@ -994,6 +994,50 @@ def test_head_on_an_unclaimed_path_is_still_a_404(web_server, shell_root, monkey
     assert client.head('/nothing/here').status_code == 404
 
 
+# What a browser sends for a top-level navigation; Googlebot sends text/html too.
+HTML = {'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'}
+
+
+@pytest.mark.parametrize('ua', [BROWSER, GOOGLEBOT])
+def test_an_unknown_address_is_a_not_found_page_with_status_404(web_server, shell_root, monkeypatch, ua):
+    # Anonymous, as a visitor is: before the catch-all this was the 401 Access Denied page.
+    client = _start_engine(web_server, monkeypatch)
+    resp = client.get('/asdfgh', headers={**HTML, 'User-Agent': ua})
+    assert resp.status_code == 404 and resp.headers['content-type'].startswith('text/html')
+    body = resp.text
+    assert '<title>404 - Page Not Found</title>' in body and 'Page not found' in body
+    assert '<a class="btn" href="/">Go to the home page</a>' in body
+    assert '<a class="btn btn-secondary" href="/">Sign in</a>' in body
+    for refusal in ('401', 'Access Denied', 'credentials', 'log in', 'unauthorized'):
+        assert refusal.lower() not in body.lower(), refusal
+    assert '<meta name="robots" content="noindex">' in body and 'canonical' not in body
+    assert 'prefers-color-scheme: dark' in body and 'name="viewport"' in body
+    assert resp.headers['x-robots-tag'] == 'noindex'
+    assert resp.headers['cache-control'] == 'private, no-cache'
+    assert 'Accept' in resp.headers['vary'].split(', ')  # the gzip middleware adds Accept-Encoding
+    head = client.head('/asdfgh', headers=HTML)
+    assert head.status_code == 404 and head.content == b''
+
+
+def test_api_clients_reserved_prefixes_and_other_methods_keep_the_json_404(web_server, shell_root, monkeypatch):
+    client = _start_engine(web_server, monkeypatch)
+    for headers in ({}, {'Accept': 'application/json'}, {'Accept': '*/*'}):
+        resp = client.get('/asdfgh', headers=headers)
+        assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}, headers
+    resp = client.get('/.well-known/nothing', headers=HTML)
+    assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}
+    resp = client.post('/asdfgh', headers=HTML)
+    assert resp.status_code == 404 and resp.json() == {'detail': 'Not Found'}
+
+
+def test_the_shell_at_root_still_serves_with_its_own_query(web_server, shell_root, monkeypatch):
+    # The signed-in app lives at / (the open app is history state, never a path):
+    # there is no /app/... address for the 404 to break.
+    client = _start_engine(web_server, monkeypatch)
+    resp = client.get('/?appId=rocketride.pipeBuilder', headers={**HTML, 'User-Agent': BROWSER})
+    assert resp.status_code == 200 and '<div id="root">shell</div>' in resp.text
+
+
 def test_router_outcomes_for_unclaimed_paths_are_preserved(web_server, shell_root, monkeypatch):
     client = _start_engine(
         web_server,

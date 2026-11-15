@@ -58,8 +58,9 @@ from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
 from . import public_pages
-from .contract import Page, with_slash_twin
+from .contract import Page, reserved_error, with_slash_twin
 from .head import inject_head
+from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
 from .shell import capture_candidate, shell_document_path, shell_static
 
@@ -388,8 +389,25 @@ async def _unclaimed(request: Request, path: str) -> Response:
         return await shell_static(request)
     miss = _router_miss(request)
     if miss is None:
-        raise HTTPException(status_code=404, detail='Not Found')
+        return _not_found(request, path)
     return miss
+
+
+def _not_found(request: Request, path: str) -> Response:
+    """The 404 of a GET or HEAD nothing serves: a page for a browser or crawler, the JSON error for anything else.
+
+    A request that accepts HTML (a navigation; crawlers send it too) gets
+    ``NOT_FOUND_HTML``, which says the page is not there and links home, where
+    sign-in starts; never the Access Denied page. API clients, and every path
+    under a reserved prefix, keep the JSON error.
+
+    Raises:
+        HTTPException: 404, for a request that does not accept HTML or a reserved path.
+    """
+    if 'text/html' not in request.headers.get('accept', '').lower() or reserved_error(path):
+        raise HTTPException(status_code=404, detail='Not Found')
+    headers = {'Vary': 'Accept', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
+    return HTMLResponse(NOT_FOUND_HTML, status_code=404, headers=headers)
 
 
 async def _render_page(request: Request, path: str, page: Page) -> Response:
