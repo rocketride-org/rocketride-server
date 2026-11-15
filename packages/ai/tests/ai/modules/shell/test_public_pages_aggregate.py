@@ -163,6 +163,8 @@ def test_a_published_manifest_that_keeps_no_page_falls_back_with_a_warning(warni
 
 def test_no_published_manifest_falls_back_silently(warnings):
     assert build_aggregate([]).legacy
+    # A manifest that declares no page (an empty list) is not a broken one.
+    assert build_aggregate([Published('rocketride.home', {'publicPages': []})]).legacy
     assert warnings == []
 
 

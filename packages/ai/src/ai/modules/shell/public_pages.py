@@ -136,7 +136,7 @@ def build_aggregate(
     claim wins). ``site`` comes only from the app owning ``/``. When no page
     survives, the aggregate is the legacy page list (a broken manifest falls
     back instead of removing every page), with a warning when a published
-    manifest was there to fall back from. A manifest that keeps any valid page
+    manifest declared pages to fall back from. A manifest that keeps any valid page
     does not fall back: its broken pages are only skipped, each with a warning.
 
     Args:
@@ -149,7 +149,7 @@ def build_aggregate(
     """
     exact, sites = _claims(published, live_conflict)
     if not exact:
-        if published:
+        if any(_declared(pub) for pub in published):
             # A second safety net behind the publish gate: never silent, so a broken manifest is seen.
             declared = ', '.join(f'{pub.app_id} declared {_declared(pub)}' for pub in published)
             warning(
