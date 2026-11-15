@@ -700,6 +700,24 @@ def test_root_unclaimed_still_serves_the_shell(shell_root):
     assert resp.status_code == 200 and '<title>shell</title>' in resp.text
 
 
+def test_a_failing_render_of_root_serves_the_shell_and_logs_an_error(shell_root, monkeypatch):
+    # / keeps its dedicated route (plan 3.2): its page must never make it worse than the shell.
+    _use(Page('/', 'rocketride.home', 'Home'), Page('/pricing', 'rocketride.home', 'Pricing'))
+    errors = []
+    monkeypatch.setattr(pages_mod, 'error', errors.append)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError('render bug')
+
+    monkeypatch.setattr(pages_mod, '_render_page', broken)
+    resp = _client().get('/')
+    assert resp.status_code == 200 and '<title>shell</title>' in resp.text
+    assert len(errors) == 1 and 'render bug' in errors[0] and 'serving the shell' in errors[0]
+    # Only /: any other page's failure still surfaces.
+    with pytest.raises(RuntimeError, match='render bug'):
+        _client().get('/pricing')
+
+
 def test_unbuilt_shell_is_503(tmp_path, monkeypatch):
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path / 'not-built'))
     _use(Page('/pricing', 'rocketride.home', 'Pricing'))

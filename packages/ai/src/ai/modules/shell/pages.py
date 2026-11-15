@@ -57,6 +57,8 @@ from starlette.routing import Route, WebSocketRoute
 from ai.web import Request, WebServer
 from ai.web.middleware import route_path
 
+from rocketlib import error
+
 from . import public_pages
 from .contract import Page, reserved_error, with_slash_twin
 from .head import inject_head
@@ -343,7 +345,28 @@ async def public_page(request: Request) -> Response:
     page = aggregate.exact.get(path)
     if page is None:
         return await _unclaimed(request, path)
+    if path == '/':
+        return await _home_page(request, page)
     return await _render_page(request, path, page)
+
+
+async def _home_page(request: Request, page: Page) -> Response:
+    """``/`` from its page, or, when rendering it fails, the shell exactly as ``shell_static`` serves it.
+
+    ``/`` keeps its dedicated route (plan 3.2), so a bug in its page never
+    leaves it worse than the shell; the failure is logged as an error. Any
+    other page's failure still surfaces.
+
+    Raises:
+        HTTPException: as ``_render_page`` (503 when the shell is not built).
+    """
+    try:
+        return await _render_page(request, '/', page)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error(f'[public_pages] rendering / failed, serving the shell: {exc!r}')
+        return await shell_static(request)
 
 
 def _other_method(request: Request, path: str, aggregate: public_pages.Aggregate) -> Response:
