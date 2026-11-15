@@ -187,7 +187,7 @@ def test_parse_skill_md_reads_folded_yaml_description():
     assert meta['description'].strip() == 'first line second line'
 
 
-@pytest.mark.parametrize('front', ['name: [unclosed', '- just\n- a list'])
+@pytest.mark.parametrize('front', ['name: [unclosed', '- just\n- a list', 'updated: 2026-02-30'])
 def test_parse_skill_md_rejects_unusable_frontmatter(front):
     with pytest.raises(SkillError):
         catalog_mod.parse_skill_md(f'---\n{front}\n---\nbody')
@@ -244,10 +244,12 @@ def test_skills_from_config_skips_empty_rows_and_reports_bad_ones():
         {'skillInstructions': SKILL_MD.decode()},
         {'skillName': 'no-description', 'skillInstructions': 'body'},
         'not a row',
+        {'skillInstructions': '---\nname: bad-date\ndescription: d\nupdated: 2026-02-30\n---\nbody'},
     ]
     skills, problems = catalog_mod.skills_from_config(rows)
     assert [s.name for s in skills] == ['release-notes']
-    assert len(problems) == 1 and problems[0].startswith('config row 3:')
+    assert len(problems) == 2 and problems[0].startswith('config row 3:')
+    assert problems[1].startswith('config row 5:') and 'not valid YAML' in problems[1]
 
 
 @pytest.mark.parametrize(

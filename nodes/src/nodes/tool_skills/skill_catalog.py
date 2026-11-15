@@ -88,7 +88,9 @@ def parse_skill_md(text: str) -> Tuple[Dict[str, Any], str]:
         return {}, (text or '').strip()
     try:
         meta = yaml.safe_load(match.group(1))
-    except yaml.YAMLError as e:
+    except Exception as e:
+        # Besides YAMLError, building a value can raise: `updated: 2026-02-30`
+        # raises ValueError from datetime.
         raise SkillError(f'the SKILL.md frontmatter is not valid YAML: {e}') from e
     if meta is None:
         meta = {}

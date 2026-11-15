@@ -398,6 +398,10 @@ def parse_allowed_tools(raw: Any) -> Optional[set]:
     names = set()
     for item in raw:
         if hasattr(item, 'get'):
+            # A blank row is ignored, but a row naming its tool under another
+            # key must not leave the list empty and expose every tool.
+            if item and item.get('toolName') is None:
+                raise ValueError(f'allowedTools row {item!r} has no toolName')
             item = item.get('toolName')
         name = str(item or '').strip()
         if name:

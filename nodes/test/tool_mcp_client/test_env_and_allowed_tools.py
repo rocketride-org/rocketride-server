@@ -101,7 +101,7 @@ class _EngineJson:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('raw', [None, '', [], [{'toolName': ' '}], '  ,  '])
+@pytest.mark.parametrize('raw', [None, '', [], [{'toolName': ' '}], [{}], '  ,  '])
 def test_no_names_allows_every_tool(raw):
     assert parse_allowed_tools(raw) is None
 
@@ -121,7 +121,9 @@ def test_names_are_read_from_every_config_shape(raw):
     assert parse_allowed_tools(raw) == {'search', 'fetch'}
 
 
-@pytest.mark.parametrize('raw', ['[not json', '{"toolName": "search"}', 42])
+@pytest.mark.parametrize(
+    'raw', ['[not json', '{"toolName": "search"}', 42, [{'name': 'search'}], [{'toolName': 'a'}, {'tool': 'b'}]]
+)
 def test_malformed_allowed_tools_raise(raw):
     with pytest.raises(ValueError):
         parse_allowed_tools(raw)
