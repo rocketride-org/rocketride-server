@@ -375,6 +375,9 @@ function cleanPath(value: unknown): string[] {
  * The workspace paths a call changes, spelled as the file tools spell them (see `cleanPath`).
  * Reads and every tool that does not touch workspace files return `[]`, as does
  * a call whose path argument is missing or empty (the tool itself reports that).
+ * use_app writes no file but holds its app's folder, because it holds the app's page: it waits
+ * for an earlier edit of the app in the wave, a later edit waits for it instead of rebuilding
+ * the page under it, and two calls on one app run in planned order, before either one's clock starts.
  */
 function writePaths(call: ToolCall): string[] {
 	const { args } = call;
@@ -388,6 +391,9 @@ function writePaths(call: ToolCall): string[] {
 			return [...cleanPath(args.oldPath), ...cleanPath(args.newPath)];
 		case 'create_app':
 			return typeof args.appName === 'string' ? cleanPath(`apps/${args.appName}-ui`) : [];
+		// matched raw: use_app refuses anything but the app's folder, so the key always matches
+		case 'use_app':
+			return typeof args.app === 'string' ? cleanPath(`apps/${args.app}`) : [];
 		default:
 			return [];
 	}

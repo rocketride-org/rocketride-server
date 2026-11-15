@@ -426,10 +426,21 @@ const CLIENT_POLICY: ClientPolicy = {
 /** The list by plain name, for lookups at run time. */
 const CLIENT_RULES: Readonly<Record<string, Rule>> = CLIENT_POLICY;
 
+/** use_app's card text: the title names the app, the detail says what using it can do. */
+const USE_APP_TEXT = {
+	title: (app: string): string => `Use ${app}`,
+	detail: 'Rocket will click and type in its own copy of the app. Buttons run your real pipelines and can change your data.',
+} as const;
+
+/** use_app's card. Its params are `[appId, ...action kinds]`; a read has no kinds (appUse.ts actOf). */
+const USE_APP_CARD: CardBuilder = async ([appId], n) => ({ title: USE_APP_TEXT.title(await n.app(appId)), detail: USE_APP_TEXT.detail });
+
 /** The tool acts: tools rated by their own name, not by a client method (delete_file skips the client; deploy_app's deploy.add is free). Their params are their target. */
 const TOOL_LIST: Readonly<Record<string, Rule>> = {
 	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' })),
 	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' })),
+	// a read, or only waiting for text, changes nothing on the page, so it is free; a click, type, select or press asks
+	use_app: ask(USE_APP_CARD, { freeWhen: ([, ...kinds]) => kinds.every((kind) => kind === 'wait_for') }),
 };
 
 /** What a name the list lacks gets: ask, with a plain card. */

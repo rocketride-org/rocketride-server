@@ -46,6 +46,7 @@ import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, type
 import type { CheckReport, MarkerSource, SaveValidation } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
+import { AppUseToolkit } from './toolkits/appUse';
 import { AskUserToolkit } from './toolkits/askUser';
 import { redactDeep, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
 import { FilesystemTools, normalizePath, type FileTracker } from './toolkits/filesystem';
@@ -542,6 +543,9 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
 	// so each one, and the save hook above, hides the values the file tools hid before it cuts
 	const hide = (text: string): string => files.secrets.hideKnown(text);
+	// step: use_app's pages live for this turn: each closes when runEnded aborts (finish, Stop, or a
+	// team switch, which unmounts the chat and stops the turn), so the finally below closes them all
+	const appUse = new AppUseToolkit(host, { ended: runEnded.signal, conversationId: options.conversationId ?? '', hide });
 	const askUser = new AskUserToolkit(approvals.client);
 	const composed = composeToolkits([
 		files,
@@ -550,6 +554,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		// a scaffold writes files the Undo record does not hold, so a turn that creates an app cannot be undone
 		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path), onScaffold: () => files.undo.unavailable('this turn created an app') }),
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
+		appUse,
 		askUser,
 	]);
 	// step: cards and the answer hold text the loop never saw (a server's names, check_app's summaries),

@@ -76,7 +76,7 @@ const TEXT_MIN_CHARS = 20;
  * Ceiling on the finished summary. Keys, short fields, length notes and list
  * headers are paid for first and may take a summary past the budget, up to here.
  */
-const SUMMARY_HARD_CAP = 6000;
+export const SUMMARY_HARD_CAP = 6000;
 
 /** Appended when the cap cuts a summary the rooms could not bound, so the model peeks instead of assuming it saw everything. */
 const SUMMARY_TRUNCATED = '\n... (truncated, peek the key for the rest)';
