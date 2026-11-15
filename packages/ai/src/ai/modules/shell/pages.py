@@ -839,7 +839,7 @@ async def _render_page(request: Request, path: str, page: Page) -> Response:
     crawler's copy is the page's rendered snapshot (``_crawler_snapshot``). A
     render that falls back uncacheably is served, not cached; one that a swap
     or a data-source invalidation overtook is served ``private, no-cache``,
-    not cached. A crawler response bound to data is ``private``, with a
+    not cached. A crawler response bound to data is ``public``, with a
     ``max-age`` of what is left of its TTL.
 
     Returns:

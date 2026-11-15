@@ -53,8 +53,8 @@ after a price change; a deployment change of an app some page names calls
 ``invalidate('app')`` (``public_pages.app_changed``), which also covers
 ``plans`` (a named app's plans depend on its visibility).
 Those events are in-process, so bound responses also expire after
-``TTL_SECONDS`` on pods that miss one, and are sent ``private`` (no shared
-cache keeps them) with a ``max-age`` of what is left of that time.
+``TTL_SECONDS`` on pods that miss one, and are sent ``public`` with a
+``max-age`` of what is left of that time, so no cache keeps them longer.
 """
 
 import re
