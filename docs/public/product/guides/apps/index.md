@@ -486,7 +486,8 @@ on such a path (outside those prefixes) answers `404` with a page titled
 `Page not found | <site.title>`, `noindex`, no canonical URL and
 `Cache-Control: private, no-cache`: crawlers get the `site.notFound` snapshot,
 rendered like a page's (`{{assets}}` included), and people get the shell's
-`index.html`, so your app renders its own not-found view.
+`index.html`, so your app renders its own not-found view. Without
+`site.notFound`, the server's own not-found page serves instead.
 
 ### Settings
 
