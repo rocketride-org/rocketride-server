@@ -43,6 +43,7 @@ import { ConnectionManager } from 'shell';
 import type { RocketRideClient, PrefsStore } from 'shell';
 import { createBusAppBuilderHost, projectListing, applyListing, probePackage, runListingPreflight } from 'shared/tools/appdev';
 import type { IAppBuilderHost } from 'shared/tools/appdev';
+import { watchPlace } from '../../../agent/watch';
 import { getWorkspace } from '../../workspace/vfs/workspace';
 import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppPackage } from './appStore';
 import { packAppSource } from './pack';
@@ -109,6 +110,8 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 		subscribeErrors: session ? (listener) => session.subscribeErrors(listener) : undefined,
 		subscribeWatch: session ? (listener) => session.subscribeWatch(listener) : undefined,
 		reloadPreview: onReloadPreview,
+		// The agent's copy of this app while it uses it, over the Design preview: the same store as the chat's live view.
+		agentWatch: watchPlace({ kind: 'design', appId }),
 		getPreviewUrl: () => previewUrl,
 		// Inherit Auth (parity with the VS Code panel): presence of this
 		// member is what makes the shared DesignView render the checkbox.

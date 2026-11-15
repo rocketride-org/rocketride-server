@@ -28,11 +28,13 @@
  * One hidden preview the agent reads and acts on for a turn (AgentHost.openAppPage). The page jobs live
  * here and in pageDom.ts: waiting until the app shows the latest edit, taking turns (check_app borrows
  * the page through lend), the actions, the outline and its refs, the errors and dialogs the page raised,
- * and the pipelines the app started. The agent gets an AppPage and sees only domain results.
+ * the pipelines the app started, and the copy the user watches (watch.ts). The agent gets an AppPage and
+ * sees only domain results.
  *
  * Lifetime: the page closes itself when `lifetime` aborts, also when that happens mid-boot or right
- * after it, and when an action takes it off the app. Closing stops the pipelines the app started, then
- * disposes the preview. close() runs once, however many times it is asked.
+ * after it, and when an action takes it off the app. Closing takes the copy out of the user's view,
+ * stops the pipelines the app started, then disposes the preview. close() runs once, however many times
+ * it is asked.
  */
 
 import type { RocketRideClient } from 'shell';
@@ -44,6 +46,7 @@ import { agentDevSession } from './agentHost';
 import { bootHiddenPreview, type HiddenPreview } from './hiddenPreview';
 import { accessibleName, act, answerDialogs, fieldState, findText, holdNewTabs, readOutline, RefBook, untilQuiet, type ElementAction } from './pageDom';
 import { PAGE_TEXT } from './pageText';
+import { publishWatch, type WatchHandle } from './watch';
 
 // =============================================================================
 // CONSTANTS
@@ -90,7 +93,7 @@ export async function openAppPage(client: RocketRideClient, app: PreviewApp, opt
 	};
 	// step: an abort during the boot disposes the preview and rejects inside bootHiddenPreview
 	const hidden = await bootHiddenPreview(client, app, { signal: opts.lifetime, onDevReady });
-	const page = new HostedPage(client, hidden, runs, dialogs);
+	const page = new HostedPage(client, hidden, runs, dialogs, publishWatch({ conversationId: opts.conversationId, appId: app.id, appName: app.name, frame: hidden.frame }));
 	// step: the turn may have ended between the boot resolving and here
 	if (opts.lifetime.aborted) {
 		await page.close();
@@ -119,12 +122,14 @@ class HostedPage implements AppPage {
 	 * @param hidden - The booted preview.
 	 * @param runs - The pipelines the app started in it.
 	 * @param dialogs - What the page's dialogs said, answered for its whole life.
+	 * @param watch - The copy as the user watches it.
 	 */
 	constructor(
 		private readonly client: RocketRideClient,
 		private readonly hidden: HiddenPreview,
 		private readonly runs: RunRecorder,
-		private readonly dialogs: DialogLog
+		private readonly dialogs: DialogLog,
+		private readonly watch: WatchHandle
 	) {
 		this.home = addressOf(hidden.frame.contentWindow);
 	}
@@ -143,6 +148,8 @@ class HostedPage implements AppPage {
 			const win = this.window();
 			this.runs.watch(win);
 			this.dialogs.watch(win);
+			// step: this page is now the one its chat and its app's Design area show
+			this.watch.touch();
 			const feed = ProblemFeed.start(this.session);
 			try {
 				const before = await this.ready(win, signal);
@@ -182,9 +189,11 @@ class HostedPage implements AppPage {
 		return { ok: true, session: agentDevSession(this.session), release };
 	}
 
-	/** Stops the pipelines the app started, then takes the preview down. Runs once; later calls get the same promise. */
+	/** Takes the copy out of view, stops the pipelines the app started, then takes the preview down. Runs once; later calls get the same promise. */
 	close(): Promise<void> {
 		this.closing ??= (async () => {
+			// step: the user stops seeing it at once, before the pipelines are stopped
+			this.watch.retract();
 			try {
 				// step: before the frame goes, so the preview's own connection can stop what it started
 				await this.runs.stopAll(this.hidden.frame.contentWindow, this.client, STOP_RUNS_LIMIT_MS);
@@ -224,10 +233,19 @@ class HostedPage implements AppPage {
 		return outcomes;
 	}
 
-	/** One action: find its element, act with the page's new tabs held, then wait for quiet. It takes the notes of the dialogs raised meanwhile. */
+	/**
+	 * One action: find its element, outline it where the user watches, act with the page's new tabs held,
+	 * then wait for quiet. It takes the notes of the dialogs raised meanwhile.
+	 */
 	private async step(win: Window, action: PageAction, signal: AbortSignal): Promise<ActionOutcome> {
 		if (action.kind === 'wait_for') return this.waitFor(win, action.text, action.timeoutMs, signal);
-		const el = this.aim(win.document, action);
+		let el = this.aim(win.document, action);
+		// step: the user sees the target first, and the page can change meanwhile, so it is found again.
+		// A key with no ref goes to the focus, which is no target of its own
+		if (typeof el !== 'string' && action.ref) {
+			await this.watch.highlight(el);
+			el = this.aim(win.document, action);
+		}
 		if (typeof el === 'string') return { status: 'failed', why: el };
 		// step: named as it was before the action; a key with no ref has no element of its own to name
 		const target = action.ref ? accessibleName(el) || undefined : undefined;

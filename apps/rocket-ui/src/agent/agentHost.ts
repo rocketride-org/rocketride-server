@@ -43,6 +43,7 @@ import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspac
 import { openAppPage } from './appPage';
 import { editorControl } from './editorControls';
 import { bootHiddenPreview } from './hiddenPreview';
+import { watchPlace } from './watch';
 
 // =============================================================================
 // SCAFFOLD DEFAULTS
@@ -236,6 +237,8 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 		},
 		// step: always the agent's own hidden copy, in this host's team only
 		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
+		// step: the chat's live view of those copies; UI only, a run never reads it
+		watchFor: (conversationId) => watchPlace({ kind: 'chat', conversationId }),
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
 		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },

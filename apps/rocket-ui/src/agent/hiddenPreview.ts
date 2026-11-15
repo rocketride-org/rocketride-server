@@ -40,8 +40,11 @@ import { answerPreviewMessage } from '../surfaces/preview/session/previewHandsha
 /** How long boot plus the first build may take. Measured at 0.7 s locally; the rest is room for slow networks inside check_app's 60 s build wait. */
 const BOOT_TIMEOUT_MS = 30_000;
 
+/** The frame's layout size, in CSS pixels. The watch view scales the frame rather than resizing it, so the app never lays out again. */
+export const PREVIEW_SIZE = { width: 1200, height: 800 } as const;
+
 /** Offscreen at full size rather than display:none, so an app that measures itself lays out as it would in view. */
-export const OFFSCREEN_STYLE = 'position:fixed;left:-20000px;top:0;width:1200px;height:800px;border:none;';
+export const OFFSCREEN_STYLE = `position:fixed;left:-20000px;top:0;width:${PREVIEW_SIZE.width}px;height:${PREVIEW_SIZE.height}px;border:none;`;
 
 /** A booted hidden preview. */
 export interface HiddenPreview {

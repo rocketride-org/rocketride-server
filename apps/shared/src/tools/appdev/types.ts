@@ -274,6 +274,28 @@ export interface WatchStatus {
 	reason?: string;
 }
 
+/** What a place shows while the agent uses its own copy of an app. */
+export interface AgentWatching {
+	/** The app's display name. */
+	readonly appName: string;
+}
+
+/**
+ * One place in the builder that can show the agent's copy of an app while the agent uses it: the Design
+ * preview area of an app, or a chat's live view. The host decides what shows where; the place lends an
+ * element, draws its label, and takes the clicks (the copy drawn over it takes none).
+ */
+export interface AgentWatchPlace {
+	/** Hears every change to what this place shows. Returns unsubscribe. */
+	subscribe(listener: () => void): () => void;
+	/** What to show here now, or null for nothing. The same object while unchanged (useSyncExternalStore). */
+	watching(): AgentWatching | null;
+	/** Lends the element the copy is drawn over; the host follows its size and position. Returns unregister. */
+	register(el: HTMLElement): () => void;
+	/** "Back to your preview": stops showing the current copy here for the rest of the agent's turn. */
+	dismiss(): void;
+}
+
 /** One server build-status ticker word for a version ('' = clear). */
 export interface BuildStatusTick {
 	/** The registry version the word belongs to. */
@@ -337,6 +359,8 @@ export interface IAppBuilderHost {
 	subscribeDeployChanged?: (listener: () => void) => () => void;
 	/** Reload the preview surface. */
 	reloadPreview?: () => void;
+	/** The agent's copy of this app, shown over the Design preview while the agent uses it. Absent: nothing shows. */
+	agentWatch?: AgentWatchPlace;
 	/**
 	 * Toggle session inheritance for the preview (the "Inherit Auth"
 	 * checkbox). Inheriting hands the HOST's signed-in session to the

@@ -54,6 +54,7 @@ import { Button, ChatView, ConnectionManager, getClient, useChatMessages, useShe
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
 import type { ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
+import { AgentWatchSlot } from '../../components/agent-watch/AgentWatchSlot';
 import { AgentSession } from '../../modules/agent/agent';
 import type { AgentCallback } from '../../modules/agent/agent';
 import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
@@ -302,6 +303,8 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
 	// a host that serves no approval settings gets no switch
 	const approvals = findAgentHost()?.approvals?.controls;
+	// a host that opens no app pages gives no live view
+	const watch = useMemo(() => findAgentHost()?.watchFor?.(session.sessionId) ?? null, [session]);
 	// step: each turn's bot row with the card of how it ended; a turn that ends or a card press changes the session, not the rows, so `ends` redraws
 	const shown = useMemo(() => {
 		void ends;
@@ -389,6 +392,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 
 	return (
 		<div style={styles.root}>
+			{watch && <AgentWatchSlot place={watch} variant="strip" />}
 			<ChatView messages={shown} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={beforeComposer} turn={controls} onCardAction={handleCardAction} />
 		</div>
 	);

@@ -31,7 +31,7 @@
  * fake host built from the in-memory workspace.
  */
 
-import type { AppErrorRow, ConsoleRow, WatchStatus } from '../../tools/appdev/types';
+import type { AgentWatchPlace, AppErrorRow, ConsoleRow, WatchStatus } from '../../tools/appdev/types';
 import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
 import type { ModelChoice } from './model';
 
@@ -162,7 +162,8 @@ export interface PageUse {
 /**
  * The agent's own copy of an app, open for one turn. The host does every page job behind it:
  * waiting for the app to show the latest edit, finding elements by ref, sending events, waiting for
- * the page to go quiet, reading the outline and collecting errors.
+ * the page to go quiet, reading the outline, collecting errors, and showing the copy to the user with
+ * each target outlined first.
  */
 export interface AppPage {
 	/**
@@ -273,6 +274,11 @@ export interface AgentHost {
 	 * @throws When the preview could not start (the message says why) or the team changed.
 	 */
 	openAppPage?(app: PreviewApp, opts: { lifetime: AbortSignal; conversationId: string }): Promise<AppPage>;
+	/**
+	 * The chat's view of the agent's copies of apps, for the chat's UI. A run never reads it. Hosts that
+	 * open no app pages leave it out, and the chat shows no live view.
+	 */
+	watchFor?(conversationId: string): AgentWatchPlace;
 	/**
 	 * The user's approval mode and grants, live. Without it a run asks for
 	 * everything the approval list rates as asking, nothing is always allowed,
