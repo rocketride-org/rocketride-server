@@ -553,7 +553,8 @@ export async function runAgent(request: string, callback: (type: string, content
 		new RocketRideClientToolkit(approvals.client, vfs, hide, ledger),
 		// a scaffold writes files the Undo record does not hold, so a turn that creates an app cannot be undone
 		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path), onScaffold: () => files.undo.unavailable('this turn created an app') }),
-		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
+		// a check borrows this turn's use_app page of the app when the user has no preview open
+		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide, lease: appUse.leaseForCheck }),
 		appUse,
 		askUser,
 	]);

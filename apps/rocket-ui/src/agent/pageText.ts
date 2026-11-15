@@ -39,6 +39,8 @@ export const PAGE_TEXT = {
 	previewGone: 'the preview is gone',
 	leftApp: 'the page left the app; the next use_app call opens a fresh copy',
 	turnEndedWhileStarting: 'the turn ended while the preview was starting',
+	/** A check that waited for the page (behind a use_app call) until the run stopped. */
+	checkStopped: 'the run was stopped while the check waited for the app',
 	/** An action the call's deadline stopped, or never let start. */
 	outOfTime: 'the call ran out of time',
 	refGone: (ref: string): string => `${ref} is no longer on the page; read the page again`,

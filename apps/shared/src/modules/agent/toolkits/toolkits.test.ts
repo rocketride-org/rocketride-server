@@ -183,16 +183,22 @@ const lent = (session: AgentDevSession, release: () => void = () => undefined): 
 /** An agent host over `vfs`, whose previews never start; `extra` adds or replaces its parts. */
 const hostFor = (vfs: IWorkspaceFileSystem, extra: Partial<AgentHost> = {}): AgentHost => ({ vfs, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array([1, 2, 3]), devSession: () => null, leasePreview: async () => NO_PREVIEW, ...extra });
 
-/** An app page that answers each use from `script` and records what each use was given. */
-function fakePage(script: (actions: readonly PageAction[], signal: AbortSignal) => Promise<PageUse> = async () => ({ outcomes: [], outline: [], problems: [] })): AppPage & { uses: Array<{ actions: readonly PageAction[]; signal: AbortSignal }> } {
+/** An app page that answers each use from `script` and each lend with `lease`, and records what each use was given and how many lends it made. */
+function fakePage(script: (actions: readonly PageAction[], signal: AbortSignal) => Promise<PageUse> = async () => ({ outcomes: [], outline: [], problems: [] }), lease: PreviewLease = NO_PREVIEW): AppPage & { uses: Array<{ actions: readonly PageAction[]; signal: AbortSignal }>; lends: number } {
 	const uses: Array<{ actions: readonly PageAction[]; signal: AbortSignal }> = [];
-	return {
+	const page = {
 		uses,
-		use: (actions, signal) => {
+		lends: 0,
+		use: (actions: readonly PageAction[], signal: AbortSignal) => {
 			uses.push({ actions, signal });
 			return script(actions, signal);
 		},
+		lend: async () => {
+			page.lends += 1;
+			return lease;
+		},
 	};
+	return page;
 }
 
 /** A host's openAppPage that answers each open a tick later, so calls can race for it, with the next of `answers` (the last repeats), and keeps what each open was given. */
@@ -1042,7 +1048,7 @@ test("Auto stops the conversation's own run after a fresh status read, and refus
 
 // =============================================================================
 // USE_APP — one page per app for the turn, refused before any card where it can't run, a view within budget,
-// its limits, a card before it acts, and a fresh copy once a page leaves the app
+// its limits, a card before it acts, a fresh copy once a page leaves the app, and check_app borrowing the page
 // =============================================================================
 
 test('use_app opens one page per app for the turn: racing calls share one open, its lifetime is the turn, a failed open is tried again, and nothing opens once the turn ended', async () => {
@@ -1229,4 +1235,45 @@ test('after the page leaves the app, the next use_app call opens a fresh copy, a
 	await use.execute({ app: 'daybook-ui' });
 	assert.equal(opened.length, 2, 'later calls keep the fresh copy');
 	assert.equal(fresh.uses.length, 3);
+});
+
+test("check_app borrows this turn's use_app page when the user has no preview open, the user's own when they do, and boots its own otherwise", async () => {
+	const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => [], onChange: () => () => undefined };
+	const check = async (page: ReturnType<typeof fakePage>, opts: { attached?: boolean; used?: boolean }): Promise<{ text: string; hostLeases: number }> => {
+		let hostLeases = 0;
+		const host = hostFor(new MemoryWorkspace(DAYBOOK), {
+			devSession: () => (opts.attached ? devSession() : null),
+			leasePreview: async () => {
+				hostLeases += 1;
+				return lent(devSession());
+			},
+			openAppPage: opener(page).open,
+		});
+		const turn = appUseFor(host);
+		if (opts.used) await toolOf(turn.toolkit, USE_APP_TOOL).execute({ app: 'daybook-ui' });
+		const toolkit = new AppCheckToolkit(host, async () => source, () => undefined, { build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 }, lease: turn.toolkit.leaseForCheck });
+		return { text: await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' }), hostLeases };
+	};
+
+	let released = 0;
+	const page = fakePage(
+		undefined,
+		lent(devSession(), () => {
+			released += 1;
+		})
+	);
+	const borrowed = await check(page, { used: true });
+	assert.match(borrowed.text, /^CHECK PASSED: daybook\n/);
+	assert.deepEqual([page.lends, borrowed.hostLeases, released], [1, 0, 1], "the check built in the turn's page and handed it back");
+
+	const usersOwn = await check(page, { used: true, attached: true });
+	assert.deepEqual([page.lends, usersOwn.hostLeases], [1, 1], "with the user's preview open, the check uses it");
+
+	const noPage = await check(page, {});
+	assert.deepEqual([page.lends, noPage.hostLeases], [1, 1], 'with no page this turn, the host boots one for the check');
+
+	const gone = fakePage(undefined, { ok: false, why: 'the page left the app' });
+	const fallback = await check(gone, { used: true });
+	assert.match(fallback.text, /^CHECK PASSED: daybook\n/);
+	assert.deepEqual([gone.lends, fallback.hostLeases], [1, 1], 'a page that cannot lend leaves the check to the host');
 });

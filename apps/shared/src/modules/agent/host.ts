@@ -174,6 +174,14 @@ export interface AppPage {
 	 * @throws PageGoneError once the page has closed (its turn ended) or left the app; a fresh copy needs a new openAppPage.
 	 */
 	use(actions: readonly PageAction[], signal: AbortSignal): Promise<PageUse>;
+	/**
+	 * Lends the page's preview to one check (check_app), after any use under way; no use starts until
+	 * release(). The check rebuilds the app, so refs from before it may be gone.
+	 *
+	 * @param signal - Aborted when the user stops the run; a check still waiting for the page gives up.
+	 * @returns `{ ok: false }` when the run stopped first, or the page is gone (closed, or off the app).
+	 */
+	lend(signal?: AbortSignal): Promise<PreviewLease>;
 }
 
 /** Thrown by AppPage.use once the page is gone: it closed, or it left the app and closed itself. */

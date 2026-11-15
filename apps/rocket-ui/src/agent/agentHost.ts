@@ -58,8 +58,8 @@ const PAGE_TEAM_CHANGED = 'the team changed while the preview was starting';
 // DEV SESSIONS
 // =============================================================================
 
-/** Narrows a dev session to what the agent may use. */
-function agentDevSession(session: WebDevSession): AgentDevSession {
+/** Narrows a dev session to what the agent may use: the user's, a hidden one, or use_app's page lent to a check. */
+export function agentDevSession(session: WebDevSession): AgentDevSession {
 	return {
 		appId: session.appId,
 		get previewAttached() {

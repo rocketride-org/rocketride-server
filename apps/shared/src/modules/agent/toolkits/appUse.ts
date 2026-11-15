@@ -39,9 +39,10 @@
  *   once a page has left the app
  * - the call's own deadline, so a slow call ends as a result instead of clicking on as a late call
  * - the text the model reads, and its trim to the summary budget (the loop does not cap show())
+ * - check_app's preview when the user has none open: the turn's page of the app (leaseForCheck)
  */
 
-import { PageGoneError, type ActionOutcome, type AgentHost, type AppPage, type ElementRef, type OutlineLine, type PageAction, type PageActionKind, type PageProblem, type PageUse, type PreviewApp } from '../host';
+import { PageGoneError, type ActionOutcome, type AgentHost, type AppPage, type ElementRef, type OutlineLine, type PageAction, type PageActionKind, type PageProblem, type PageUse, type PreviewApp, type PreviewLease } from '../host';
 import { AgentTool, AgentToolkit, type ToolAct, type ToolStep } from '../tools';
 import { SUMMARY_BUDGET, SUMMARY_HARD_CAP } from '../wave/summary';
 import { brief, isJsonObject, numberArg, textArg } from './common';
@@ -192,6 +193,25 @@ export class AppUseToolkit extends AgentToolkit {
 		this.host = host;
 		this.opts = opts;
 	}
+
+	/**
+	 * check_app's lease (AppCheckOptions.lease), in this order: the user's attached preview; else this
+	 * turn's page of the app, once its boot and any use under way are done; else the host's own preview
+	 * for the check alone. Borrowing the page boots the app once for the turn, and checks the copy the
+	 * agent goes on using.
+	 */
+	readonly leaseForCheck = async (app: PreviewApp, signal?: AbortSignal): Promise<PreviewLease> => {
+		// step: devSession lists only the user's own previews, never an agent's page
+		if (this.host.devSession(app.id)?.previewAttached) return this.host.leasePreview(app, signal);
+		const opening = this.pages.get(app.id);
+		const page = opening ? await opening.catch(() => null) : null;
+		if (page) {
+			const lease = await page.lend(signal);
+			// step: a page that left the app has nothing to check, so the host boots one, unless the turn is over
+			if (lease.ok || this.opts.ended.aborted) return lease;
+		}
+		return this.host.leasePreview(app, signal);
+	};
 
 	tools(): AgentTool[] {
 		return [

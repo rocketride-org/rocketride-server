@@ -26,9 +26,9 @@
 
 /**
  * One hidden preview the agent reads and acts on for a turn (AgentHost.openAppPage). The page jobs live
- * here and in pageDom.ts: waiting until the app shows the latest edit, taking turns, the actions, the
- * outline and its refs, the errors the page raised, and the pipelines the app started. The agent gets
- * an AppPage and sees only domain results.
+ * here and in pageDom.ts: waiting until the app shows the latest edit, taking turns (check_app borrows
+ * the page through lend), the actions, the outline and its refs, the errors and dialogs the page raised,
+ * and the pipelines the app started. The agent gets an AppPage and sees only domain results.
  *
  * Lifetime: the page closes itself when `lifetime` aborts, also when that happens mid-boot or right
  * after it, and when an action takes it off the app. Closing stops the pipelines the app started, then
@@ -36,10 +36,11 @@
  */
 
 import type { RocketRideClient } from 'shell';
-import { PageGoneError, type ActionOutcome, type AppPage, type PageAction, type PageProblem, type PageUse, type PreviewApp } from 'shared/modules/agent/host';
+import { PageGoneError, type ActionOutcome, type AppPage, type PageAction, type PageProblem, type PageUse, type PreviewApp, type PreviewLease } from 'shared/modules/agent/host';
 import { BENIGN_ERROR } from 'shared/modules/agent/toolkits/appCheck';
 import { messageOf, sleep } from 'shared/modules/agent/toolkits/common';
 import type { WebDevSession } from '../surfaces/preview/session/devSession';
+import { agentDevSession } from './agentHost';
 import { bootHiddenPreview, type HiddenPreview } from './hiddenPreview';
 import { accessibleName, act, answerDialogs, fieldState, findText, holdNewTabs, readOutline, RefBook, untilQuiet, type ElementAction } from './pageDom';
 import { PAGE_TEXT } from './pageText';
@@ -105,7 +106,7 @@ export async function openAppPage(client: RocketRideClient, app: PreviewApp, opt
 
 /** The AppPage behind openAppPage. Not exported: the agent reaches it only through the interface. */
 class HostedPage implements AppPage {
-	/** Uses take turns, in arrival order. */
+	/** Uses, and checks the page is lent to, take turns in arrival order. */
 	private readonly lock = new PageLock();
 	/** Element refs for this page; they reset only with the page (the turn). */
 	private readonly refs = new RefBook();
@@ -154,7 +155,7 @@ class HostedPage implements AppPage {
 				const outline = left ? [] : readOutline(win, this.refs);
 				// step: console rows the preview posted during the last settle arrive a task later
 				await nextTask();
-				// step: a dialog no action raised (on load, or between actions or uses) is told here
+				// step: a dialog no action raised (on load, between actions or uses, during a check) is told here
 				const dialogs = this.dialogs.take().map((text): PageProblem => ({ kind: 'dialog', text }));
 				const use: PageUse = { outcomes, outline, problems: [...problems, ...feed.take(), ...dialogs] };
 				// step: a page off the app can't be used again; the next call opens a fresh copy
@@ -166,6 +167,19 @@ class HostedPage implements AppPage {
 		} finally {
 			release();
 		}
+	}
+
+	async lend(signal?: AbortSignal): Promise<PreviewLease> {
+		const release = await this.lock.acquire(signal);
+		if (!release) return { ok: false, why: PAGE_TEXT.checkStopped };
+		try {
+			// step: the same gone check as a use: a page that closed or left the app while the check waited has nothing to lend
+			this.window();
+		} catch (err) {
+			release();
+			return { ok: false, why: messageOf(err) };
+		}
+		return { ok: true, session: agentDevSession(this.session), release };
 	}
 
 	/** Stops the pipelines the app started, then takes the preview down. Runs once; later calls get the same promise. */
@@ -386,7 +400,7 @@ function nextTask(): Promise<void> {
 /**
  * The page's dialogs, answered for its whole life (pageDom answerDialogs), and what each said until it is
  * taken: an action takes the ones raised while it ran, and a use takes the rest as problems, including
- * those raised on load or between uses.
+ * those raised on load, between uses, or while a check held the page.
  */
 class DialogLog {
 	private readonly notes: string[] = [];
