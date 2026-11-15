@@ -1,162 +1,168 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 Aparavi Software AG Inc.
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 // =============================================================================
 
 /**
- * useOAuthCallbacks — Applies OAuth callback tokens from URL parameters
- * into form data, without depending on any React context.
+ * OAuth callback helpers for the node config panel.
  *
- * Uses `oauth2RootUrl` from FlowProjectContext to construct refresh URLs.
- * All callback helpers are pure data transforms — they read URL params,
- * merge tokens into the provided form data, and return the enriched result.
+ * The brokers return to the host with the grant in the page URL (web) or
+ * through the host's deep link (VS Code → `pendingOAuthTokens`). These helpers
+ * turn either into ONE grant string and write it to the node's `oauth2` leaf
+ * by PATH (plan §5.6.2): the leaf's own path takes the grant, and every
+ * selector on the leaf's branch chain is switched to the branch that holds
+ * it (Google / Microsoft: `authType` → `user`). Nothing lands at the config
+ * root any more — the nodes read the grant as the leaf's short name
+ * (`cfg.get('userAuth')`) off the resolver's flattened view.
  */
 
 import { useCallback } from 'react';
-import { getNativeQueryParam } from '../../util/query-helper';
+
+import { flattenLeaves, setAtPath } from 'shared/components/node-config';
+import type { IConfigTree, INodeSchema } from 'shared/components/node-config';
+
 import { useFlowProject } from '../../context/FlowProjectContext';
+import { getNativeQueryParam } from '../../util/query-helper';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/** A grant as the panel applies it. */
+export interface IOAuthGrant {
+	/** The JSON (or opaque token) stored on the `oauth2` leaf. */
+	token: string;
+	/** The broker that issued it, from the callback's `state`/`type` when known. */
+	provider: 'google' | 'microsoft' | 'slack';
+}
+
+// =============================================================================
+// Pure helpers
+// =============================================================================
+
+/**
+ * Writes a grant to the node's `oauth2` leaf by path. Prefers a leaf whose
+ * title names the provider; falls back to the node's only oauth2 leaf.
+ *
+ * @param schema - The node's resolved schema.
+ * @param config - The node's current config.
+ * @param grant - The grant.
+ * @returns The new config, or the input unchanged when the node has no oauth2 leaf.
+ */
+export function applyGrantToConfig(schema: INodeSchema | undefined, config: IConfigTree, grant: IOAuthGrant): IConfigTree {
+	const leaves = flattenLeaves(schema?.properties).filter(({ property }) => property.type === 'oauth2');
+	if (leaves.length === 0) return config;
+	const leaf = leaves.find(({ property }) => String(property.title ?? '').toLowerCase().includes(grant.provider)) ?? leaves[0];
+
+	let next = setAtPath(config, leaf.path, grant.token);
+	// The grant lives under a branch ("user"): select it, one key per selector
+	for (const [selectorPath, branch] of leaf.under) next = setAtPath(next, selectorPath, branch);
+	return next;
+}
+
+/**
+ * Builds the Google grant from the broker's raw `tokens` / `state` strings —
+ * shared by the URL path (web) and the host-message path (VS Code).
+ *
+ * @param tokensParam - JSON string of `{access_token, refresh_token, ...}`.
+ * @param stateParam - JSON string of `{type, node_id, ...}` (may be empty).
+ * @param oauth2RootUrl - The broker root, for the default refresh endpoint.
+ * @returns The grant, or null when the tokens are missing or malformed.
+ */
+export function buildGoogleGrant(tokensParam: string | null, stateParam: string | null, oauth2RootUrl: string): IOAuthGrant | null {
+	if (!tokensParam) return null;
+	let tokens: Record<string, unknown>;
+	try {
+		tokens = JSON.parse(tokensParam) as Record<string, unknown>;
+		if (stateParam) JSON.parse(stateParam);
+	} catch (error) {
+		// A malformed callback must not overwrite saved config
+		console.error('Error parsing Google OAuth callback data:', error);
+		return null;
+	}
+	const token = JSON.stringify({
+		access_token: tokens.access_token,
+		refresh_token: tokens.refresh_token,
+		scope: tokens.scope,
+		token_type: tokens.token_type || 'Bearer',
+		expiry_date: tokens.expiry_date,
+		oauth_server_url: tokens.oauth_server_url || `${oauth2RootUrl || ''}/refresh`,
+	});
+	return { token, provider: 'google' };
+}
+
+/** The node the broker's `state` names, when it does. */
+export function nodeIdFromState(stateParam: string | null | undefined): string | undefined {
+	try {
+		return (JSON.parse(stateParam || '{}') as { node_id?: string }).node_id;
+	} catch {
+		return undefined;
+	}
+}
 
 // =============================================================================
 // Hook
 // =============================================================================
 
+/**
+ * Reads the brokers' callbacks off the page URL.
+ *
+ * @returns `readGrantFromUrl` and `clearSecureParamsFromUrl`.
+ */
 export function useOAuthCallbacks() {
 	const { oauth2RootUrl } = useFlowProject();
 
 	/**
-	 * Merges Google OAuth tokens into form data. Pure transform over the raw
-	 * `tokens`/`state` strings produced by the OAuth broker — shared by the
-	 * URL-param path (web) and the host-message path (VS Code).
-	 *
-	 * Tokens are written to the form-data ROOT (`authType`, `userToken`): node
-	 * configs are flat — the engine reads cfg.get('authType')/cfg.get('userToken')
-	 * at the top level and the generated RJSF schema names dotted services.json
-	 * field ids by their last component, so root is the only location both see.
-	 *
-	 * @param formData The node's current form data.
-	 * @param tokensParam JSON string of `{access_token, refresh_token, ...}`.
-	 * @param stateParam JSON string of `{type, node_id, ...}` (may be empty).
-	 * @return The enriched form data, or the input unchanged when no tokens.
+	 * The grant carried by the current page URL, if any. Google returns
+	 * `tokens`+`state`; Microsoft `client_id`/`client_secret`/`refresh_token`;
+	 * Slack `access_token`. A provider's `oauth_error` is logged.
 	 */
-	const applyGoogleTokens = useCallback(
-		(formData: Record<string, unknown>, tokensParam: string | null, stateParam: string | null): Record<string, unknown> => {
-			if (!tokensParam) return formData;
-
-			let parsedState: Record<string, unknown> = {};
-			let tokens: Record<string, unknown> = {};
-			let authType = '';
-
-			try {
-				if (stateParam) {
-					parsedState = JSON.parse(stateParam);
-					authType = (parsedState?.type as string) || '';
-				}
-				tokens = JSON.parse(tokensParam);
-			} catch (error) {
-				console.error('Error parsing Google OAuth callback data:', error);
-				// A malformed callback must not overwrite saved config with a
-				// token object full of undefined fields.
-				return formData;
-			}
-
-			const oAuthServerUrl = tokens.oauth_server_url || `${oauth2RootUrl || ''}/refresh`;
-
-			const fullTokenObject = {
-				access_token: tokens.access_token,
-				refresh_token: tokens.refresh_token,
-				scope: tokens.scope,
-				token_type: tokens.token_type || 'Bearer',
-				expiry_date: tokens.expiry_date,
-				oauth_server_url: oAuthServerUrl,
-			};
-			const userTokenJson = JSON.stringify(fullTokenObject);
-
-			// A fresh user token with no/malformed state must still switch the
-			// node to user auth — 'service' would make the engine ignore it.
-			return {
-				...formData,
-				userToken: userTokenJson,
-				authType: authType || 'user',
-			};
-		},
-		[oauth2RootUrl]
-	);
-
-	/**
-	 * Applies Google OAuth callback tokens from the page URL into form data.
-	 * Web hosts return from the broker via a full-page redirect carrying the
-	 * `tokens`/`state` query params; this reads them and delegates to
-	 * {@link applyGoogleTokens}.
-	 */
-	const applyGoogleOAuth = useCallback((formData: Record<string, unknown>): Record<string, unknown> => applyGoogleTokens(formData, getNativeQueryParam('tokens'), getNativeQueryParam('state')), [applyGoogleTokens]);
-
-	/**
-	 * Applies Microsoft OAuth callback tokens from URL into form data.
-	 * Reads `name`, `type`, `client_id`, `client_secret`, `refresh_token`.
-	 */
-	const applyMicrosoftOAuth = useCallback((formData: Record<string, unknown>): Record<string, unknown> => {
+	const readGrantFromUrl = useCallback((): IOAuthGrant | null => {
 		const error = getNativeQueryParam('oauth_error');
-		if (error) console.error('Microsoft OAuth error:', error);
+		if (error) console.error('OAuth error:', error);
 
-		const name = getNativeQueryParam('name');
-		const authType = getNativeQueryParam('type');
+		const google = buildGoogleGrant(getNativeQueryParam('tokens'), getNativeQueryParam('state'), oauth2RootUrl);
+		if (google) return google;
+
 		const clientId = getNativeQueryParam('client_id');
 		const clientSecret = getNativeQueryParam('client_secret');
 		const refreshToken = getNativeQueryParam('refresh_token');
-
-		let result = { ...formData };
-		if (name) result = { ...result, name };
-		if (authType) {
-			result = { ...result, parameters: { ...((result.parameters as Record<string, unknown>) ?? {}), authType } };
-		}
 		if (clientId && clientSecret && refreshToken) {
-			result = { ...result, parameters: { ...((result.parameters as Record<string, unknown>) ?? {}), clientId, clientSecret, refreshToken } };
+			return { token: JSON.stringify({ client_id: clientId, client_secret: clientSecret, refresh_token: refreshToken }), provider: 'microsoft' };
 		}
-		return result;
-	}, []);
+
+		const slackToken = getNativeQueryParam('access_token');
+		if (slackToken) return { token: slackToken, provider: 'slack' };
+
+		return null;
+	}, [oauth2RootUrl]);
 
 	/**
-	 * Applies Slack OAuth callback token from URL into form data.
-	 * Reads `access_token` query param.
-	 */
-	const applySlackOAuth = useCallback((formData: Record<string, unknown>): Record<string, unknown> => {
-		const error = getNativeQueryParam('oauth_error');
-		if (error) console.error('Slack OAuth error:', error);
-
-		const userToken = getNativeQueryParam('access_token');
-		if (!userToken) return formData;
-
-		return {
-			...formData,
-			parameters: { ...((formData.parameters as Record<string, unknown>) ?? {}), userToken },
-		};
-	}, []);
-
-	/**
-	 * Applies all OAuth provider callbacks sequentially.
-	 * Each provider checks for its own URL params and merges if found.
-	 */
-	const applyOAuthCallbacks = useCallback(
-		(formData: Record<string, unknown>): Record<string, unknown> => {
-			let result = formData;
-			result = applyGoogleOAuth(result);
-			result = applyMicrosoftOAuth(result);
-			result = applySlackOAuth(result);
-			return result;
-		},
-		[applyGoogleOAuth, applyMicrosoftOAuth, applySlackOAuth]
-	);
-
-	/**
-	 * Strips all query parameters from the URL to remove sensitive tokens.
-	 * Uses replaceState so the token-bearing URL doesn't remain in history.
+	 * Strips every query parameter from the URL so the token-bearing URL does
+	 * not stay in history (replaceState, skipped in srcdoc frames).
 	 */
 	const clearSecureParamsFromUrl = useCallback(() => {
-		// Skip in srcdoc iframes — replaceState is not allowed when origin is "null"
 		if (window.location.origin === 'null' || window.location.protocol === 'about:') return;
-		const cleanUrl = window.location.origin + window.location.pathname;
-		window.history.replaceState({}, document.title, cleanUrl);
+		window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
 	}, []);
 
-	return { applyOAuthCallbacks, applyGoogleTokens, clearSecureParamsFromUrl };
+	return { readGrantFromUrl, clearSecureParamsFromUrl };
 }

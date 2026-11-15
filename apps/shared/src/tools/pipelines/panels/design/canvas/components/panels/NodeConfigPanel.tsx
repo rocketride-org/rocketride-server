@@ -1,6 +1,6 @@
 // =============================================================================
 // MIT License
-// Copyright (c) 2026 Aparavi Software AG Inc.
+// Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,41 +32,39 @@
  *
  * Body:
  *   1. **Details** — node name (or, for annotations, content + colours).
- *   2. **Configuration** — RJSF form from the service's Pipe schema.
+ *   2. **Configuration** — the shared NodeConfigForm over the service's
+ *      resolved `properties` (plan §5.6.5): ghost defaults, selector
+ *      recursion, inline descriptor validation, the expose chip.
+ *
+ * This panel OWNS the pipeline's `parameters` map on behalf of the form (plan
+ * §5.5): the chip's naming popup writes `publicName → nodeId.path` through the
+ * graph context, and the map rides the project document.
  *
  * On save:
- *   1. Merges auth tokens back into formData (RJSF drops hidden fields).
- *   2. Calls handleValidatePipeline for server-side validation.
- *   3. On success, writes config to node and notifies host.
+ *   1. The form validates with the server's rules; a failure stays in the form.
+ *   2. The config is written to the node and validated server-side
+ *      (single-component payload).
+ *   3. On success, the host is notified and the panel closes.
  *
- * OAuth fields are supported via the RJSF theme widgets. OAuth callback
- * tokens are applied on panel open via useOAuthCallbacks.
+ * OAuth grants arrive out-of-band (page URL on the web, `pendingOAuthTokens`
+ * in VS Code) and are written to the node's `oauth2` leaf by PATH.
  */
 
 import { ReactElement, useRef, useState, useEffect, useMemo, useCallback, CSSProperties } from 'react';
-import { RJSFValidationError } from '@rjsf/utils';
 
-import { IFormData } from '../../types';
-import { IServiceSchema } from '../../types';
+import { IService, IServiceCatalog, IValidatePipelinePayload, PIPELINE_SCHEMA_VERSION } from '../../types';
 import { Icon } from '../../util/Icon';
 
 import { useFlowGraph } from '../../context/FlowGraphContext';
 import type { FlowNode } from '../../context/FlowGraphContext';
 import { useFlowProject } from '../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../context/FlowPreferencesContext';
-import { IService, IServiceCatalog, IValidatePipelinePayload, PIPELINE_SCHEMA_VERSION } from '../../types';
 import { getComponentFromNode } from '../../util/graph';
 
-import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
-import { useOAuthCallbacks } from './useOAuthCallbacks';
-import NodeConfigForm, { validationProblemFromResponse } from 'shared/components/node-config';
-import type { INodeConfigFormHandle } from 'shared/components/node-config';
-import { OAuthEnvProvider } from 'shared/components/node-config';
-import { DetailPanel } from 'shell';
-import { Button } from 'shell';
-import { Banner } from 'shell';
-import { ConfirmDialog } from 'shell';
-import { commonStyles } from 'shell';
+import { applyGrantToConfig, buildGoogleGrant, nodeIdFromState, useOAuthCallbacks } from './useOAuthCallbacks';
+import NodeConfigForm, { OAuthEnvProvider, hasConfigurableSchema, validationProblemFromResponse } from 'shared/components/node-config';
+import type { IConfigProblem, IConfigTree, INodeConfigExposure, INodeConfigFormHandle, INodeSchema } from 'shared/components/node-config';
+import { Banner, Button, ConfirmDialog, DetailPanel, commonStyles } from 'shell';
 
 // =============================================================================
 // Constants
@@ -138,6 +136,11 @@ const styles = {
 		background: 'var(--rr-bg-input)',
 	} as CSSProperties,
 
+	// "Loading configuration…" while the full definition is fetched.
+	loading: {
+		...commonStyles.textMuted,
+		padding: '12px 0',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -165,12 +168,9 @@ interface INodeConfigPanelProps {
 export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps): ReactElement {
 	const formRef = useRef<INodeConfigFormHandle | null>(null);
 
-	// Persist auth tokens across RJSF re-renders (RJSF drops hidden fields)
-	const persistedAuthTokens = useRef<IAuthTokensRef>({});
-
 	// --- Context ------------------------------------------------------------
-	const { updateNode, onContentUpdated } = useFlowGraph();
-	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, pendingOAuthTokens, clearPendingOAuthTokens, envKeys = [], oauth2RootUrl, oauthReturnUrl, onOpenExternal, onOpenLink } = useFlowProject();
+	const { nodes, updateNode, onContentUpdated, parameters, setParameters } = useFlowGraph();
+	const { servicesJson, requestNodeSchema, handleValidatePipeline, pendingOAuthTokens, clearPendingOAuthTokens, envKeys = [], oauth2RootUrl, oauthReturnUrl, onOpenExternal, onOpenLink } = useFlowProject();
 
 	// The OAuth environment the form's consent-flow widgets consume — the
 	// canvas bridges its project context into the form's minimal contract.
@@ -186,21 +186,25 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const service: IService | undefined = (servicesJson as IServiceCatalog)?.[node.data.provider];
 
 	// --- OAuth callback helpers (context-free) ------------------------------
-	const { applyOAuthCallbacks, applyGoogleTokens, clearSecureParamsFromUrl } = useOAuthCallbacks();
+	const { readGrantFromUrl, clearSecureParamsFromUrl } = useOAuthCallbacks();
 
 	// --- Schema from the service catalog ------------------------------------
-	const schema = useMemo((): IServiceSchema | undefined => {
-		if (isAnnotation) return undefined;
-		const pipe = service?.Pipe;
-		if (!pipe) return undefined;
-		if (pipe.schema?.properties?.hideForm) return undefined;
-		if (Object.keys(pipe.schema?.properties ?? {}).length === 0) return undefined;
-		return pipe;
+	// The bulk catalog is summary-only: request the full definition and render
+	// the form once `properties` lands. A definition with nothing to edit
+	// renders no form at all.
+	const schema = useMemo((): INodeSchema | undefined => {
+		if (isAnnotation || !service?.properties) return undefined;
+		if (!hasConfigurableSchema(service)) return undefined;
+		return { properties: service.properties, params: service.params };
 	}, [service, isAnnotation]);
+	const schemaPending = !isAnnotation && Boolean(service) && !service?.properties;
+	useEffect(() => {
+		if (schemaPending) requestNodeSchema(node.data.provider);
+	}, [schemaPending, node.data.provider, requestNodeSchema]);
 
 	// --- Form state ---------------------------------------------------------
 	const [name, setName] = useState(node.data.name ?? '');
-	const [formValues, setFormValues] = useState<IFormData>(node.data.config ?? {});
+	const [config, setConfig] = useState<IConfigTree>(node.data.config ?? {});
 	const [isDirty, setIsDirty] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [validationError, setValidationError] = useState<string | null>(null);
@@ -216,98 +220,124 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const [bgColor, setBgColor] = useState<string>((node.data.config?.bgColor as string) || 'var(--rr-annotation-bg-default)');
 	const [fgColor, setFgColor] = useState<string>((node.data.config?.fgColor as string) || 'var(--rr-text-primary)');
 
+	// --- Persist an OAuth grant to the node and notify the host -------------
+	// The grant is written straight to the node (no Save step: the user just
+	// came back from the broker); onContentUpdated runs after React has flushed
+	// the node update so the serializer snapshots the new config.
+	const persistGrant = useCallback(
+		(enriched: IConfigTree) => {
+			setConfig(enriched);
+			updateNode(node.id, { config: enriched });
+			queueMicrotask(() => requestAnimationFrame(() => onContentUpdated()));
+		},
+		[node.id, updateNode, onContentUpdated]
+	);
+
 	// --- Initialise state when a different node is selected -----------------
 	useEffect(() => {
-		const config = node.data.config ?? {};
-
-		// Apply any OAuth tokens from URL callback parameters
-		const enrichedConfig = applyOAuthCallbacks(config);
-
-		// Persist tokens to ref so they survive RJSF re-renders
-		persistTokensFromFormData(enrichedConfig, persistedAuthTokens);
-
+		const stored = node.data.config ?? {};
 		setName(node.data.name ?? '');
-		setFormValues(enrichedConfig);
+		setConfig(stored);
 		setIsDirty(false);
 		setValidationError(null);
 
 		// Sync annotation-specific state
 		if (node.data.provider === 'annotation') {
-			const raw = (config.content ?? '') as string;
+			const raw = (stored.content ?? '') as string;
 			setAnnotationContent(raw.replace(/\\n/g, '\n'));
-			setBgColor((config.bgColor as string) || 'var(--rr-annotation-bg-default)');
-			setFgColor((config.fgColor as string) || 'var(--rr-text-primary)');
+			setBgColor((stored.bgColor as string) || 'var(--rr-annotation-bg-default)');
+			setFgColor((stored.fgColor as string) || 'var(--rr-text-primary)');
 		}
-
-		// If OAuth tokens are in the URL, persist to node and save immediately
-		const hasOAuthTokens = window.location.search.includes('tokens=');
-		if (hasOAuthTokens) {
-			persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onContentUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
-		} else if (enrichedConfig !== config) {
-			// OAuth helpers enriched the data — update node
-			updateNode(node.id, { config: enrichedConfig });
-		}
-
-		// Strip sensitive tokens from URL after processing
-		requestAnimationFrame(() => clearSecureParamsFromUrl());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [node.id]);
 
-	// --- Apply OAuth tokens delivered out-of-band by the host (VS Code) ------
+	// --- Apply a grant returned in the page URL (web hosts) ------------------
+	// Needs the schema (the grant is written by the oauth2 leaf's path), so it
+	// waits for the full definition when the panel opened on a summary.
+	const urlGrantApplied = useRef(false);
+	useEffect(() => {
+		if (urlGrantApplied.current || !schema) return;
+		const grant = readGrantFromUrl();
+		if (!grant) return;
+		urlGrantApplied.current = true;
+		persistGrant(applyGrantToConfig(schema, node.data.config ?? {}, grant));
+		// Strip the token-bearing query string once processed
+		requestAnimationFrame(() => clearSecureParamsFromUrl());
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [schema, node.id]);
+
+	// --- Apply a grant delivered out-of-band by the host (VS Code) ----------
 	// Web hosts return tokens in the page URL (handled above); VS Code can't
 	// receive a web redirect, so the host intercepts the broker's deep link and
 	// pushes the tokens down via `pendingOAuthTokens`. Apply them to the node
 	// that started the login, then clear so they aren't re-applied.
 	useEffect(() => {
-		if (!pendingOAuthTokens) return;
+		if (!pendingOAuthTokens || !schema) return;
 		const { tokens, state } = pendingOAuthTokens;
 
 		// Brokers echo the originating node_id in `state`; ignore tokens meant
 		// for another node. Malformed state falls through to the open panel.
-		let targetNodeId: string | undefined;
-		try {
-			targetNodeId = (JSON.parse(state || '{}') as { node_id?: string }).node_id;
-		} catch {
-			/* malformed state */
-		}
+		const targetNodeId = nodeIdFromState(state);
 		if (targetNodeId && targetNodeId !== node.id) return;
 
 		// updateNode silently no-ops on a locked graph — surface it and keep
 		// the tokens pending; unlocking re-runs this effect and applies them.
 		if (isLocked) {
-			setValidationError('The canvas is locked. Unlock it to apply the Google sign-in tokens.');
+			setValidationError('The canvas is locked. Unlock it to apply the sign-in tokens.');
 			return;
 		}
 		setValidationError(null);
 
-		const enrichedConfig = applyGoogleTokens(node.data.config ?? {}, tokens, state);
-		persistTokensFromFormData(enrichedConfig, persistedAuthTokens);
-		setFormValues(enrichedConfig);
-		persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onContentUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
-
+		const grant = buildGoogleGrant(tokens, state, oauth2RootUrl ?? '');
+		if (grant) persistGrant(applyGrantToConfig(schema, node.data.config ?? {}, grant));
 		clearPendingOAuthTokens?.();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pendingOAuthTokens, node.id, isLocked]);
+	}, [pendingOAuthTokens, node.id, isLocked, schema]);
 
 	// --- Form change handler --------------------------------------------------
-	const onChange = useCallback(
-		(formData: IFormData) => {
-			// Merge auth tokens back in (RJSF drops hidden fields)
-			const previousConfig = node.data.config ?? {};
-			const merged = mergeAuthTokensIntoFormData(formData, previousConfig, persistedAuthTokens);
-			setFormValues(merged);
-			setIsDirty(true);
-		},
-		[node.data.config]
-	);
+	const onChange = useCallback((next: IConfigTree) => {
+		setConfig(next);
+		setIsDirty(true);
+	}, []);
 
 	// --- Form error handler ----------------------------------------------------
 	const onError = useCallback(
-		(errors: RJSFValidationError[]) => {
-			updateNode(node.id, { formDataErrors: errors, formDataValid: false });
+		(problems: IConfigProblem[]) => {
+			updateNode(node.id, { formDataErrors: problems, formDataValid: false });
+			setValidationError(problems.length === 1 ? 'One field needs attention.' : `${problems.length} fields need attention.`);
 		},
 		[node.id, updateNode]
 	);
+
+	// --- Expose chip: this panel owns the parameters map (plan §5.5) -----------
+	const exposure = useMemo((): INodeConfigExposure | undefined => {
+		if (isAnnotation) return undefined;
+		const catalog = servicesJson as IServiceCatalog;
+		return {
+			nodeId: node.id,
+			nodeTitle: name || service?.title || node.data.provider,
+			parameters,
+			onExpose: (path, publicName) => {
+				const target = `${node.id}.${path}`;
+				// One name per target: drop the previous name of this target, then bind
+				const next = Object.fromEntries(Object.entries(parameters).filter(([, candidate]) => candidate !== target));
+				next[publicName] = target;
+				setParameters(next);
+				onContentUpdated();
+			},
+			onUnexpose: (path) => {
+				const target = `${node.id}.${path}`;
+				setParameters(Object.fromEntries(Object.entries(parameters).filter(([, candidate]) => candidate !== target)));
+				onContentUpdated();
+			},
+			describeTarget: (target) => {
+				const [targetNodeId, ...rest] = target.split('.');
+				const owner = nodes.find((candidate) => candidate.id === targetNodeId);
+				const ownerTitle = owner?.data.name || catalog?.[owner?.data.provider ?? '']?.title || targetNodeId;
+				return `${ownerTitle} · ${rest.join('.')}`;
+			},
+		};
+	}, [isAnnotation, node.id, node.data.provider, name, service, parameters, setParameters, onContentUpdated, nodes, servicesJson]);
 
 	// --- Save: details only (no schema) ------------------------------------
 	const handleSaveDetailsOnly = useCallback(() => {
@@ -333,18 +363,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Save: full form with server validation ----------------------------
 	const onSubmit = useCallback(
-		async (formData: IFormData) => {
+		async (next: IConfigTree) => {
 			setIsSubmitting(true);
 			try {
 				setValidationError(null);
 
-				// Merge auth tokens back in before saving
-				const previousConfig = node.data.config ?? {};
-				const merged = mergeAuthTokensIntoFormData(formData, previousConfig, persistedAuthTokens);
-
 				// Write to node
 				const updatedNode = updateNode(node.id, {
-					config: merged,
+					config: next,
 					formDataErrors: undefined,
 					formDataValid: true,
 					name: name || undefined,
@@ -375,12 +401,12 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				setIsSubmitting(false);
 			}
 		},
-		[node.id, node.data.config, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
+		[node.id, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
 	);
 
 	// --- Save / Cancel routing ----------------------------------------------
 
-	/** Footer [Save]: submit the RJSF form when there is a schema, else write details. */
+	/** Footer [Save]: submit the form when there is a schema, else write details. */
 	const handleSaveClick = useCallback(() => {
 		if (schema) {
 			formRef.current?.submit();
@@ -510,6 +536,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					</>
 				)}
 
+				{/* The full definition is still on its way from the host. */}
+				{schemaPending && <div style={styles.loading}>Loading configuration…</div>}
+
 				{/* Configuration form — the context-free core (also embeddable by
 				    other apps, e.g. sql-ui's connection editor). The OAuth env
 				    provider is the form's ONE host coupling: this panel feeds it
@@ -520,17 +549,17 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 						<NodeConfigForm
 							key={node.id}
 							ref={formRef}
-							provider={node.data.provider}
 							schema={schema}
-							formData={formValues}
+							config={config}
 							onChange={onChange}
-							onSubmit={(formData) => { void onSubmit(formData); }}
+							onSubmit={(next) => { void onSubmit(next); }}
 							onError={onError}
 							envKeys={envKeys}
+							disabled={isSubmitting || isLocked}
+							provider={node.data.provider}
 							nodeId={node.id}
-							formDataErrors={node.data.formDataErrors}
-							googlePickerDeveloperKey={googlePickerDeveloperKey}
-							googlePickerClientId={googlePickerClientId}
+							nodeName={name || undefined}
+							exposure={exposure}
 						/>
 					</OAuthEnvProvider>
 				)}

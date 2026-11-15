@@ -12,7 +12,6 @@
  */
 
 import { ReactElement, useMemo, useState, useEffect, useRef } from 'react';
-import { TextField, InputAdornment } from '@mui/material';
 import { Search } from 'lucide-react';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
@@ -22,7 +21,7 @@ import { CATEGORY_TITLES } from '../create-node/categoryTitles';
 import { getOutputLaneDisplayValues, renameInvokeType } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { Icon } from '../../../util/Icon';
-import { commonStyles } from 'shell';
+import { InputField, commonStyles } from 'shell';
 
 // =============================================================================
 // Positioning
@@ -116,6 +115,25 @@ const styles = {
 	searchBox: {
 		padding: '6px',
 		borderBottom: '1px solid var(--rr-border)',
+		position: 'relative' as const,
+	},
+	searchGlyph: {
+		position: 'absolute' as const,
+		left: 14,
+		top: '50%',
+		transform: 'translateY(-50%)',
+		display: 'inline-flex',
+		pointerEvents: 'none' as const,
+		color: 'var(--rr-text-disabled)',
+	},
+	searchInput: {
+		height: 24,
+		fontSize: '12px',
+		fontFamily: 'inherit',
+		color: 'inherit',
+		paddingLeft: 26,
+		paddingRight: 8,
+		borderRadius: 5,
 	},
 	scrollArea: {
 		flex: 1,
@@ -182,13 +200,14 @@ export default function QuickAddPopup(): ReactElement | null {
 	const { servicesJson, inventory } = useFlowProject();
 
 	const [search, setSearch] = useState('');
-	const searchRef = useRef<HTMLInputElement>(null);
+	// The shell InputField forwards no ref: the search box wrapper is the anchor
+	const searchRef = useRef<HTMLDivElement>(null);
 
 	// Focus search field when popup opens
 	useEffect(() => {
 		if (quickAddState) {
 			setSearch('');
-			setTimeout(() => searchRef.current?.focus(), 0);
+			setTimeout(() => searchRef.current?.querySelector('input')?.focus(), 0);
 		}
 	}, [quickAddState]);
 
@@ -404,27 +423,15 @@ export default function QuickAddPopup(): ReactElement | null {
 				}}
 			>
 				{/* Search */}
-				<div style={styles.searchBox}>
-					<TextField
-						inputRef={searchRef}
-						size="small"
-						fullWidth
+				<div ref={searchRef} style={styles.searchBox}>
+					<span style={styles.searchGlyph}>
+						<Search size={14} />
+					</span>
+					<InputField
+						style={styles.searchInput}
 						placeholder={mode === 'invoke' ? (isSource ? `Add ${renameInvokeType(invokeKey ?? 'invoke')} provider...` : 'Add invoker...') : `Add ${laneType} node...`}
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
-						InputProps={{
-							startAdornment: (
-								<InputAdornment position="start">
-									<Search size={14} style={{ color: 'var(--rr-text-disabled)' }} />
-								</InputAdornment>
-							),
-							sx: {
-								fontSize: '12px',
-								fontFamily: 'inherit',
-								color: 'inherit',
-								height: '24px',
-							},
-						}}
 					/>
 				</div>
 
