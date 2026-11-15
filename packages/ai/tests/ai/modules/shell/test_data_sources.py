@@ -168,12 +168,12 @@ def _seed(text=SNAPSHOT, name='pages/pricing.html'):
 async def test_named_plans_bind_named_app(acct):
     acct.plans['rocketride.home'] = [{'name': 'Home', 'price': '1'}]
     acct.plans['acme.brandy'] = PLANS
-    named = await ds.bind(_page('/pricing', ['plans:acme.brandy']), f'{APP_URL}/pricing')
+    named = await ds.bind(_page('/pricing', ['plans:acme.brandy']))
     assert list(named) == ['plans'] and [p['name'] for p in named['plans']] == ['Builder', 'Pro']
-    own = await ds.bind(_page('/pricing', ['plans']), f'{APP_URL}/pricing')
+    own = await ds.bind(_page('/pricing', ['plans']))
     assert [p['name'] for p in own['plans']] == ['Home']
     # Each entry binds its source name, whatever its argument.
-    both = await ds.bind(_page('/', ['app:acme.brandy', 'plans:acme.brandy']), f'{APP_URL}/')
+    both = await ds.bind(_page('/', ['app:acme.brandy', 'plans:acme.brandy']))
     assert set(both) == {'app', 'plans'} and both['app']['name'] == 'Brandy'
 
 
@@ -182,7 +182,7 @@ async def test_private_named_app_yields_nothing(acct):
     del acct.artifacts[('org-acme', 'acme.unlisted', 1)]
     for app_id in HIDDEN:
         acct.plans[app_id] = [{'name': f'{app_id} plan', 'price': '5', 'currency': 'usd'}]
-        context = await ds.bind(_page('/pricing', [f'plans:{app_id}', f'app:{app_id}']), f'{APP_URL}/pricing')
+        context = await ds.bind(_page('/pricing', [f'plans:{app_id}', f'app:{app_id}']))
         assert context == {'plans': [], 'app': None}, app_id
         assert ds.jsonld(context, f'{APP_URL}/pricing') == [], app_id
 
@@ -227,7 +227,7 @@ async def test_plans_normalize_to_the_documented_shape(acct):
         {'name': 'Long s', 'price': '1', 'currency': 'u\u017fd'},
         'junk',
     ]
-    context = await ds.bind(_page('/pricing', ['plans']), '')
+    context = await ds.bind(_page('/pricing', ['plans']))
     assert context['plans'] == [
         {'id': 'pro', 'name': 'Pro', 'price': '20', 'currency': 'USD', 'period': 'month', 'features': ['A', '3']},
         # Only ASCII is upper-cased: 'u\u017fd'.upper() would be 'USD'.
@@ -245,7 +245,7 @@ async def test_plan_prices_keep_their_exact_decimal_form(acct):
         {'name': 'Whole float', 'price': 29.0},
         {'name': 'Not a number', 'price': Decimal('NaN')},
     ]
-    context = await ds.bind(_page('/pricing', ['plans']), '')
+    context = await ds.bind(_page('/pricing', ['plans']))
     assert [(p['name'], p['price']) for p in context['plans']] == [
         ('Text', '29.50'),
         ('Int', '29'),
@@ -281,6 +281,26 @@ def test_app_entry_emits_software_application(acct, shell_root):
     calls = acct.publish_list_calls
     human = client.get('/', headers={'User-Agent': BROWSER})
     assert 'SPA' in human.text and _jsonld(human.text) == [] and acct.publish_list_calls == calls
+
+
+async def test_a_bound_app_url_is_empty_until_subdomains_ship(acct):
+    # Plan 4.5 and 6: app.url is the app's own subdomain URL, '' until subdomain
+    # routing is live. The key is always there, so templates can test it.
+    context = await ds.bind(_page('/', ['app:acme.brandy']))
+    assert context['app'] == {'name': 'Brandy', 'description': 'Brand kit generator.', 'url': ''}
+
+
+async def test_a_url_section_renders_nothing_and_reports_no_issue(acct):
+    # The anchor renders only when app.url is present (plan 3.3). The key exists
+    # and '' is falsy, so render_section stays silent: no "unknown field" issue,
+    # and no outer url can stand in for it.
+    from ai.modules.shell.template import render
+
+    context = await ds.bind(_page('/', ['app:acme.brandy']))
+    issues = []
+    tpl = '{{#app}}<h3>{{name}}</h3>{{#url}}<a href="{{url}}">site</a>{{/url}}{{/app}}'
+    assert render(tpl, {**context, 'url': 'https://outer.example/'}, on_issue=issues.append) == '<h3>Brandy</h3>'
+    assert issues == []
 
 
 def test_jsonld_shapes():
@@ -339,10 +359,9 @@ def test_a_plan_without_a_plain_price_and_iso_currency_gets_no_offer(price, curr
 
 
 @pytest.mark.parametrize('base', ['http://cloud.example', 'javascript:alert(1)//', ''])
-async def test_source_urls_are_https_or_empty(acct, base):
+async def test_jsonld_urls_are_https_or_absent(acct, base):
     acct.plans['acme.brandy'] = PLANS
-    context = await ds.bind(_page('/', ['app:acme.brandy', 'plans:acme.brandy']), f'{base}/')
-    assert context['app']['url'] == ''
+    context = await ds.bind(_page('/', ['app:acme.brandy', 'plans:acme.brandy']))
     for obj in ds.jsonld(context, f'{base}/'):
         assert 'url' not in obj and 'url' not in obj.get('offers', {}), obj
 
@@ -388,8 +407,9 @@ def test_store_text_never_becomes_a_url(acct, shell_root):
     )
     _serve(_page('/x', ['app:acme.jsurl']))
     text = _crawl(_client(), '/x').text
-    assert '<a href="https://cloud.example/x">javascript:alert(1)//&quot;&gt;&lt;script&gt;' in text
+    assert '<a href="">javascript:alert(1)//&quot;&gt;&lt;script&gt;' in text
     assert 'href="javascript' not in text and '<script>alert(2)' not in text
+    # JSON-LD takes the page's canonical URL from the engine, never from store text.
     (block,) = _jsonld(text)
     assert block['name'] == block['description'] == hostile and block['url'] == 'https://cloud.example/x'
 
@@ -550,7 +570,7 @@ async def test_one_bind_reads_a_named_app_once(acct, monkeypatch):
     monkeypatch.setattr(singleton, 'deployments_artifact', counting_artifact)
     acct.plans['acme.brandy'] = PLANS
     calls = acct.publish_list_calls
-    context = await ds.bind(_page('/pricing', ['plans:acme.brandy', 'app:acme.brandy']), f'{APP_URL}/pricing')
+    context = await ds.bind(_page('/pricing', ['plans:acme.brandy', 'app:acme.brandy']))
     assert context['app']['name'] == 'Brandy' and len(context['plans']) == 2
     assert acct.publish_list_calls == calls + 1 and reads == ['acme.brandy']
 

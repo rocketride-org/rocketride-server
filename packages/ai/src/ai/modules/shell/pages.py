@@ -582,7 +582,7 @@ def _read_finished(page: Page, path: str, read: 'asyncio.Task[bytes]') -> None:
     error(f'[public_pages] reading snapshot {path} failed: {failure!r}')
 
 
-async def _page_data(page: Page, canonical: str) -> Tuple[Dict[str, Any], bool]:
+async def _page_data(page: Page) -> Tuple[Dict[str, Any], bool]:
     """The page's bound data sources: ``(context, complete)``.
 
     A source that cannot be read within ``_DATA_SECONDS`` is logged as a
@@ -590,7 +590,7 @@ async def _page_data(page: Page, canonical: str) -> Tuple[Dict[str, Any], bool]:
     next request tries again.
     """
     try:
-        return await asyncio.wait_for(data_sources.bind(page, canonical), _DATA_SECONDS), True
+        return await asyncio.wait_for(data_sources.bind(page), _DATA_SECONDS), True
     except asyncio.TimeoutError:
         reason = f'no answer within {_DATA_SECONDS:g} s'
     except Exception as exc:
@@ -944,7 +944,7 @@ async def _render(path: str, page: Page, crawler: bool, document: Path, now: flo
     # A render bound to nothing never expires.
     expires = math.inf
     if sources:
-        context, cacheable = await _page_data(page, canonical)
+        context, cacheable = await _page_data(page)
         expires = now + data_sources.TTL_SECONDS
     snapshot = None
     if crawler:

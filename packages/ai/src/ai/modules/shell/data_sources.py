@@ -39,8 +39,9 @@ permissions, and neither the binding nor the app's own manifest says
 empty and ``app`` is None.
 
 Store text (names, descriptions) is text only. The one URL a source exposes,
-``app.url``, is the declaring page's canonical URL, built by the engine from
-``RR_APP_URL``, and only when it is ``https://`` (else empty).
+``app.url``, is the app's subdomain URL; '' until subdomain routing ships
+(plan section 4.5). The key is always present, so a template renders its
+anchor only when the URL is (``{{#url}}...{{/url}}``).
 
 ``jsonld`` turns a bound context into the page's structured data:
 SoftwareApplication for ``app``, a Product with an Offer for each plan whose
@@ -235,15 +236,14 @@ async def plans(app_id: str, acct: Any = None) -> List[Dict[str, Any]]:
     return out
 
 
-async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
+async def bind(page: Page, acct: Any = None) -> Dict[str, Any]:
     """The template and JSON-LD context of one page: ``{source name: value}``.
 
-    ``url`` is the page's canonical URL, exposed as ``app.url`` when it is
-    ``https://``.
+    ``app.url`` is the app's subdomain URL; '' until subdomain routing ships
+    (plan section 4.5). ``jsonld`` takes the page's canonical URL on its own.
 
     Args:
         page: The page whose ``data`` entries to bind.
-        url: The page's canonical URL.
         acct: The account layer (the singleton when None).
 
     Returns:
@@ -275,7 +275,7 @@ async def bind(page: Page, url: str, acct: Any = None) -> Dict[str, Any]:
             context['app'] = None
             item = await visible(app_id)
             if item is not None:
-                context['app'] = {**item, 'url': _https(url)}
+                context['app'] = {**item, 'url': ''}
     return context
 
 

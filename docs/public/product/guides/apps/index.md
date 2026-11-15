@@ -349,8 +349,10 @@ name whatever its argument:
   string such as `29` or `29.50` (the server accepts a string, an integer or a
   decimal, never a float) and `currency` an upper-case code such as `USD`.
 - `app:<appId>`: `{{#app}}...{{/app}}` holds `{name, description, url}`. `url` is
-  the page's canonical URL when `RR_APP_URL` is `https://`, else empty; name
-  and description are store text, safe only where escaping makes them safe.
+  the app's subdomain URL; it is empty until subdomain routing ships, so put a
+  link to it inside `{{#url}}...{{/url}}`, which renders only when it is set.
+  Name and description are store text, safe only where escaping makes them
+  safe.
 
 A named app contributes only while anonymous store visitors can see it: its
 public listing is live, it requires no permissions, and its manifest does not
