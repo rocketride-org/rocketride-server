@@ -84,15 +84,12 @@ const NOT_RUN: ActionOutcome = { status: 'not_run' };
  */
 export async function openAppPage(client: RocketRideClient, app: PreviewApp, opts: { lifetime: AbortSignal; conversationId: string }): Promise<AppPage> {
 	// step: the shell announces its dev hooks before any app code runs, on the first load and after every
-	// reload, so a pipeline the app starts as it mounts is recorded too, and a dialog it raises then is answered
+	// reload, so a pipeline the app starts as it mounts is recorded too. The preview answers the page's
+	// dialogs from then on, and the log hears what they said
 	const runs = new RunRecorder();
 	const dialogs = new DialogLog();
-	const onDevReady = (win: Window): void => {
-		runs.watch(win);
-		dialogs.watch(win);
-	};
 	// step: an abort during the boot disposes the preview and rejects inside bootHiddenPreview
-	const hidden = await bootHiddenPreview(client, app, { signal: opts.lifetime, onDevReady });
+	const hidden = await bootHiddenPreview(client, app, { signal: opts.lifetime, onDevReady: (win) => runs.watch(win), onDialog: dialogs.hear });
 	const page = new HostedPage(client, hidden, runs, dialogs, publishWatch({ conversationId: opts.conversationId, appId: app.id, appName: app.name, frame: hidden.frame }));
 	// step: the turn may have ended between the boot resolving and here
 	if (opts.lifetime.aborted) {
@@ -418,16 +415,21 @@ function nextTask(): Promise<void> {
 // =============================================================================
 
 /**
- * The page's dialogs, answered for its whole life (pageDom answerDialogs), and what each said until it is
- * taken: an action takes the ones raised while it ran, and a use takes the rest as problems, including
- * those raised on load, between uses, or while a check held the page.
+ * What the page's dialogs said, until it is taken: an action takes the ones raised while it ran, and a use
+ * takes the rest as problems, including those raised on load, between uses, or while a check held the
+ * page. The hidden preview answers them for its whole life and tells the log (bootHiddenPreview onDialog).
  */
 class DialogLog {
 	private readonly notes: string[] = [];
 
-	/** Answers the dialogs of the window's current document. Safe to call again for the same document. */
+	/** Takes one dialog's note. */
+	readonly hear = (note: string): void => {
+		this.notes.push(note);
+	};
+
+	/** Answers the dialogs of the window's current document if nothing does yet. Safe to call again for the same document. */
 	watch(win: Window): void {
-		answerDialogs(win, (note) => this.notes.push(note));
+		answerDialogs(win, this.hear);
 	}
 
 	/** Where the log stands now, for take() to start from. */

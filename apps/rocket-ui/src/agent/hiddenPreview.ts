@@ -27,7 +27,8 @@
 /**
  * check_app builds an app in a preview, and use_app acts in the agent's own copy of one. The agent host
  * boots those here: the same session, page and handshake as the App Builder's Design preview, in an
- * iframe the user never sees. Whoever booted it disposes it, so nothing keeps running after it.
+ * offscreen iframe (watch.ts draws use_app's copy where the user can watch it). Whoever booted it
+ * disposes it, so nothing keeps running after it.
  */
 
 import { ConnectionManager, type RocketRideClient } from 'shell';
@@ -36,6 +37,7 @@ import type { WatchStatus } from 'shared/tools/appdev';
 import { createDevPreviewPage } from '../surfaces/preview/session/devPreviewPage';
 import { WebDevSession } from '../surfaces/preview/session/devSession';
 import { answerPreviewMessage } from '../surfaces/preview/session/previewHandshake';
+import { answerDialogs } from './pageDom';
 
 /** How long boot plus the first build may take. Measured at 0.7 s locally; the rest is room for slow networks inside check_app's 60 s build wait. */
 const BOOT_TIMEOUT_MS = 30_000;
@@ -61,15 +63,19 @@ export interface HiddenPreview {
  * handshake with the builder's own token (ConnectionManager.getInstance().loadToken()). Resolves once the first
  * build has run. Rejects, after cleaning up, on timeout, abort or open failure.
  *
+ * The preview's alerts, confirms and prompts are answered for its whole life (pageDom answerDialogs): the
+ * frame is same-origin in the user's tab, so one left open would block the whole builder.
+ *
  * @param client - The connected client the session builds with.
  * @param app - The app: its manifest id, its folder under apps/ and its display name.
- * @param opts - The signal that gives up the boot, how long the boot may take (default 30 s), and
+ * @param opts - The signal that gives up the boot, how long the boot may take (default 30 s),
  *   `onDevReady`, called with the preview's window each time its shell announces its dev hooks: on the
- *   first load and after every reload, before the app's code runs.
+ *   first load and after every reload, before the app's code runs; and `onDialog`, which hears what each
+ *   dialog said and how it was answered.
  * @returns The attached session, its frame, and dispose(), which removes the iframe and ends the session.
  */
-export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opts: { signal?: AbortSignal; timeoutMs?: number; onDevReady?: (win: Window) => void } = {}): Promise<HiddenPreview> {
-	const { signal, timeoutMs = BOOT_TIMEOUT_MS, onDevReady } = opts;
+export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opts: { signal?: AbortSignal; timeoutMs?: number; onDevReady?: (win: Window) => void; onDialog?: (note: string) => void } = {}): Promise<HiddenPreview> {
+	const { signal, timeoutMs = BOOT_TIMEOUT_MS, onDevReady, onDialog } = opts;
 	// step: hidden, so findDevSession never hands an agent's preview to the user's lookups or to another conversation's check
 	const session = new WebDevSession(client, app.id, app.folder, app.name, { hidden: true });
 	const frame = document.createElement('iframe');
@@ -114,7 +120,11 @@ export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opt
 			onMessage = (e: MessageEvent): void => {
 				const win = frame.contentWindow;
 				if (!win || e.source !== win) return;
-				if ((e.data as { type?: unknown } | null)?.type === 'shell:devReady') onDevReady?.(win);
+				// step: each load's document gets its own dialogs, so they are answered again on every devReady
+				if ((e.data as { type?: unknown } | null)?.type === 'shell:devReady') {
+					answerDialogs(win, (note) => onDialog?.(note));
+					onDevReady?.(win);
+				}
 				void answerPreviewMessage(session, win, e.data, () => ConnectionManager.getInstance().loadToken())?.then(resolve, reject);
 			};
 			window.addEventListener('message', onMessage);
