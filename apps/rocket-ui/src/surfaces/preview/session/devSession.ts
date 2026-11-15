@@ -314,6 +314,8 @@ export class WebDevSession {
 	private linked = 0;
 	/** The newest link whose loader the shell has called and whose import has finished. */
 	private loadedLink = 0;
+	/** The preview document the latest link went into. A reload replaces it with one that shows nothing until the shell re-attaches. */
+	private linkedDocument: Document | null = null;
 	/** Code changes shown in the preview: every link and every hot swap. */
 	private revisions = 0;
 	private readonly settleWaiters = new Set<() => void>();
@@ -475,7 +477,8 @@ export class WebDevSession {
 	 * Reliable right after an agent write: the write queues its change notification before its promise
 	 * resolves, and onFsChange counts the adoption, so the count is up before a later call can ask. The
 	 * first read after a boot waits here too: the shell calls the loader only after it connects, so
-	 * `loaded` stays false while it shows its loading screen.
+	 * `loaded` stays false while it shows its loading screen. So does a read after the page reloads,
+	 * until the new shell re-attaches and the session links the app into it.
 	 *
 	 * @param opts - `limitMs` caps the wait; `signal` ends it early. Either way it resolves, with `timedOut`.
 	 */
@@ -492,7 +495,7 @@ export class WebDevSession {
 				if (!this.settleWaiters.delete(check)) return;
 				clearTimeout(timer);
 				opts.signal?.removeEventListener('abort', giveUp);
-				resolve({ watch: this.watchStatus, loaded: this.loadedLink === this.linked, timedOut });
+				resolve({ watch: this.watchStatus, loaded: this.showsLatestLink(), timedOut });
 			};
 			this.settleWaiters.add(check);
 			opts.signal?.addEventListener('abort', giveUp, { once: true });
@@ -503,7 +506,18 @@ export class WebDevSession {
 
 	/** Nothing being adopted, nothing building or queued, and the latest link loaded (or the build failed, which loads nothing). */
 	private isSettled(): boolean {
-		return this.adopting === 0 && !this.building && !this.buildQueued && (this.loadedLink === this.linked || this.watchStatus.state === 'error');
+		return this.adopting === 0 && !this.building && !this.buildQueued && (this.showsLatestLink() || this.watchStatus.state === 'error');
+	}
+
+	/** Whether the shell has loaded the latest link, in the document the preview shows now. */
+	private showsLatestLink(): boolean {
+		if (this.loadedLink !== this.linked) return false;
+		try {
+			return this.previewWindow?.document === this.linkedDocument;
+		} catch {
+			// a page that went to another origin keeps its document to itself
+			return false;
+		}
 	}
 
 	/** Re-checks the settle waiters; called wherever a settle condition may have changed. */
@@ -844,6 +858,7 @@ export class WebDevSession {
 			// step: settled() waits for the shell to call this link's loader; a failed import counts as loaded
 			// too, or a crashing app would hold every read for the whole limit
 			const link = ++this.linked;
+			this.linkedDocument = win.document;
 			const loaded = (): void => {
 				this.loadedLink = Math.max(this.loadedLink, link);
 				this.poke();

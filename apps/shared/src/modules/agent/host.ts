@@ -145,8 +145,9 @@ export interface PageProblem {
 	 * console: a console.error from app code (build lines and the browser's ResizeObserver notice are left out).
 	 * error: an uncaught error or unhandled rejection. crash: the shell's error boundary caught a render crash.
 	 * not_ready: the app had not built or loaded when the page was read, so the outline shows the shell, not the app.
+	 * dialog: an alert, confirm or prompt no action raised (on load, or between uses), and how it was answered.
 	 */
-	readonly kind: 'console' | 'error' | 'crash' | 'not_ready';
+	readonly kind: 'console' | 'error' | 'crash' | 'not_ready' | 'dialog';
 	readonly text: string;
 }
 

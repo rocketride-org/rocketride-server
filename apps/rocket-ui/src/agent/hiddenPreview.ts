@@ -60,11 +60,13 @@ export interface HiddenPreview {
  *
  * @param client - The connected client the session builds with.
  * @param app - The app: its manifest id, its folder under apps/ and its display name.
- * @param opts - The signal that gives up the boot, and how long the boot may take (default 30 s).
+ * @param opts - The signal that gives up the boot, how long the boot may take (default 30 s), and
+ *   `onDevReady`, called with the preview's window each time its shell announces its dev hooks: on the
+ *   first load and after every reload, before the app's code runs.
  * @returns The attached session, its frame, and dispose(), which removes the iframe and ends the session.
  */
-export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<HiddenPreview> {
-	const { signal, timeoutMs = BOOT_TIMEOUT_MS } = opts;
+export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opts: { signal?: AbortSignal; timeoutMs?: number; onDevReady?: (win: Window) => void } = {}): Promise<HiddenPreview> {
+	const { signal, timeoutMs = BOOT_TIMEOUT_MS, onDevReady } = opts;
 	// step: hidden, so findDevSession never hands an agent's preview to the user's lookups or to another conversation's check
 	const session = new WebDevSession(client, app.id, app.folder, app.name, { hidden: true });
 	const frame = document.createElement('iframe');
@@ -109,6 +111,7 @@ export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opt
 			onMessage = (e: MessageEvent): void => {
 				const win = frame.contentWindow;
 				if (!win || e.source !== win) return;
+				if ((e.data as { type?: unknown } | null)?.type === 'shell:devReady') onDevReady?.(win);
 				void answerPreviewMessage(session, win, e.data, () => ConnectionManager.getInstance().loadToken())?.then(resolve, reject);
 			};
 			window.addEventListener('message', onMessage);

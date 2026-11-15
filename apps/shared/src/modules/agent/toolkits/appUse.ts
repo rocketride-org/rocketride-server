@@ -21,27 +21,30 @@
 // SOFTWARE.
 
 // =============================================================================
-// USE APP — the agent reads its own copy of an app, for the turn
+// USE APP — the agent tries its own copy of an app, for the turn
 // =============================================================================
 
 /**
- * `use_app` reads the agent's own copy of an app and returns the errors the page raised and the page
- * outline, with refs. The copy is a hidden preview the host opens on the first call for an app in a turn
- * and closes when the turn ends.
+ * `use_app` runs a short list of actions (click, type, select, press, wait_for) on the agent's own copy
+ * of an app, and returns a line per action, the errors the page raised, and the page outline after the
+ * last action, with refs. The copy is a hidden preview the host opens on the first call for an app in a
+ * turn and closes when the turn ends.
  *
  * This module never touches the DOM. The host's AppPage does every page job and answers in domain terms
- * (outline lines, problems). What lives here is what the agent decides:
- * - the app a call names, by folder only, so the loop's same-wave ordering always applies
- * - the act the approval list rates (approval.ts TOOL_LIST.use_app)
- * - the turn's pages: one per app, opened on first use, living until `ended` aborts
- * - the call's own deadline, so a slow call ends as a result instead of running on as a late call
+ * (outcomes, outline lines, problems). What lives here is what the agent decides:
+ * - the arguments the model may pass, checked here (the loop validates no schema), with the app by
+ *   folder only, so the loop's same-wave ordering always applies
+ * - the act the approval list rates: `[appId, ...action kinds]` (approval.ts TOOL_LIST.use_app)
+ * - the turn's pages: one per app, opened on first use, living until `ended` aborts, and opened afresh
+ *   once a page has left the app
+ * - the call's own deadline, so a slow call ends as a result instead of clicking on as a late call
  * - the text the model reads, and its trim to the summary budget (the loop does not cap show())
  */
 
-import type { AgentHost, AppPage, OutlineLine, PageProblem, PageUse, PreviewApp } from '../host';
+import { PageGoneError, type ActionOutcome, type AgentHost, type AppPage, type ElementRef, type OutlineLine, type PageAction, type PageActionKind, type PageProblem, type PageUse, type PreviewApp } from '../host';
 import { AgentTool, AgentToolkit, type ToolAct, type ToolStep } from '../tools';
 import { SUMMARY_BUDGET, SUMMARY_HARD_CAP } from '../wave/summary';
-import { brief } from './common';
+import { brief, isJsonObject, numberArg, textArg } from './common';
 import { findApp, readApps } from './inventory';
 
 // =============================================================================
@@ -57,6 +60,17 @@ export const USE_APP_TOOL = 'use_app';
  * to run on late, holding the page.
  */
 const CALL_LIMIT_MS = 120_000;
+
+/** The most actions one call takes; a longer flow goes over several calls, reading the page between them. */
+const MAX_ACTIONS = 20;
+
+/** wait_for's wait in seconds: by default, and the bounds a given one is held to. */
+const WAIT_FOR_DEFAULT_S = 10;
+const WAIT_FOR_MIN_S = 1;
+const WAIT_FOR_MAX_S = 30;
+
+/** What an action the page never reached gets. */
+const NOT_RUN: ActionOutcome = { status: 'not_run' };
 
 /** The most error lines a result lists; the rest are counted. */
 const PROBLEMS_MAX = 10;
@@ -75,6 +89,12 @@ const WORDS = {
 	description: 'Use your own copy of an app the way a person would: click, type, pick an option, press a key or wait for text, then read the page. Returns a line per action, any errors the page raised, and the page outline with refs to act on next. With no actions it only reads the page.',
 	params: {
 		app: "The app's folder under apps/ (for example daybook-ui).",
+		actions: `Up to ${MAX_ACTIONS} actions, run in order; the list stops at the first failure. Leave it out to read the page.`,
+		ref: 'The element, as the page outline names it (e5). Required for click, type and select; optional for press.',
+		text: 'type: the new value of the field. wait_for: the text to wait for.',
+		value: 'select: the option, by value or label.',
+		key: 'press: Enter, Escape, Tab, ArrowDown, or one character.',
+		timeoutS: `wait_for: how long to wait in seconds, ${WAIT_FOR_DEFAULT_S} by default, at most ${WAIT_FOR_MAX_S}.`,
 	},
 	/** A host with no app preview (the eval runner). Thrown in prepare, so no card asks first. */
 	notHere: "use_app isn't available here because there's no app preview. check_app still checks the build.",
@@ -82,7 +102,21 @@ const WORDS = {
 	appByFolder: (folder: string, given: 'id' | 'name'): string => `Pass the app's folder, ${folder}, not its ${given}.`,
 	appNoId: (folder: string, path: string): string => `${folder} has no manifest id, so it can't be opened. Fix appManifest.id in ${path}/package.json, then call check_app.`,
 	turnEnded: 'the turn ended',
+	actionsNotList: 'actions must be a list, for example [{"action":"click","ref":"e5"}]; leave it out to read the page.',
+	actionsTooMany: `At most ${MAX_ACTIONS} actions in one call; do the rest in the next call.`,
+	/** Names the action a refusal is about. */
+	actionAt: (index: number, why: string): string => `actions[${index}]: ${why}`,
+	actionNotObject: 'each action must be an object, for example {"action":"click","ref":"e5"}.',
+	actionUnknown: 'action must be click, type, select, press or wait_for.',
+	actionRef: 'ref must be a ref from the page outline, like e5. Call use_app with no actions to read the page.',
+	actionTypeText: 'type needs text, the new value of the field ("" clears it).',
+	actionWaitText: 'wait_for needs text, the text to wait for.',
+	actionValue: 'select needs value, the option by its value or label.',
+	actionKey: 'press needs key, for example Enter, Escape, Tab, ArrowDown or one character.',
 	result: {
+		done: (changed: boolean, notes: readonly string[]): string => [changed ? 'done, page changed' : 'done, no change', ...notes].join('; '),
+		failed: (why: string): string => `failed, ${why}`,
+		notRun: 'not run',
 		errors: 'Errors during this call:',
 		page: 'Page now:',
 		empty: '(the page is empty)',
@@ -95,6 +129,23 @@ const PARAMETERS = {
 	type: 'object',
 	properties: {
 		app: { type: 'string', description: WORDS.params.app },
+		actions: {
+			type: 'array',
+			description: WORDS.params.actions,
+			items: {
+				type: 'object',
+				properties: {
+					action: { type: 'string', enum: ['click', 'type', 'select', 'press', 'wait_for'] },
+					ref: { type: 'string', description: WORDS.params.ref },
+					text: { type: 'string', description: WORDS.params.text },
+					value: { type: 'string', description: WORDS.params.value },
+					key: { type: 'string', description: WORDS.params.key },
+					timeout_s: { type: 'number', description: WORDS.params.timeoutS },
+				},
+				required: ['action'],
+				additionalProperties: false,
+			},
+		},
 	},
 	required: ['app'],
 	additionalProperties: false,
@@ -118,7 +169,8 @@ export interface AppUseOptions {
 
 /**
  * use_app for one run. Built in run.ts on `runEnded`, so its pages live exactly as long as the turn. Its
- * pages are this run's alone: the host lists no agent preview as a dev session.
+ * pages are this run's alone: the host lists no agent preview as a dev session. A call that clicks, types,
+ * selects or presses asks first; a read or a wait is free (approval.ts TOOL_LIST.use_app).
  */
 export class AppUseToolkit extends AgentToolkit {
 	readonly name = 'app-use';
@@ -154,15 +206,17 @@ export class AppUseToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Gets one call ready: its app and the act the approval list rates. Reads only.
+	 * Gets one call ready: its app, its actions and the act the approval list rates. Reads only.
 	 *
-	 * @throws On a host with no app preview, before any card, or for an app that is not a listed folder with a manifest id.
+	 * @throws On a host with no app preview, before any card; for an app that is not a listed folder with a
+	 *   manifest id; or for a bad action.
 	 */
 	private async prepare(args: Record<string, unknown>): Promise<ToolStep> {
 		const open = this.host.openAppPage?.bind(this.host);
 		if (!open) throw new Error(WORDS.notHere);
 		const app = await this.appOf(args);
-		return { act: actOf(app.id), run: () => this.run(app, open) };
+		const actions = parseActions(args.actions);
+		return { act: actOf(app.id, actions), run: () => this.run(app, actions, open) };
 	}
 
 	/**
@@ -182,17 +236,31 @@ export class AppUseToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Does the call: gets the turn's page of the app, reads it under the call's own deadline, and writes the
-	 * result. Only a page that could not open throws.
+	 * Does the call: gets the turn's page of the app, uses it under the call's own deadline, and writes the
+	 * result. A failed action is part of the result; only a page that could not open throws.
 	 */
-	private async run(app: PreviewApp, open: NonNullable<AgentHost['openAppPage']>): Promise<string> {
+	private async run(app: PreviewApp, actions: readonly PageAction[], open: NonNullable<AgentHost['openAppPage']>): Promise<string> {
 		// step: the deadline counts the boot too, but never races it: the boot has its own 30 s limit
 		const call = deadline(this.opts.ended, this.opts.callLimitMs ?? CALL_LIMIT_MS);
 		try {
-			const page = await this.pageOf(app, open);
-			return renderUse(await page.use([], call.signal), this.opts.hide);
+			return renderUse(actions, await this.usePage(app, actions, open, call.signal), this.opts.hide);
 		} finally {
 			call.dispose();
+		}
+	}
+
+	/**
+	 * Uses the turn's page of the app. A page that left the app has closed itself, and says so before it
+	 * runs anything, so the call drops it and opens a fresh copy, once, within the same deadline.
+	 */
+	private async usePage(app: PreviewApp, actions: readonly PageAction[], open: NonNullable<AgentHost['openAppPage']>, signal: AbortSignal): Promise<PageUse> {
+		const opening = this.pageOf(app, open);
+		try {
+			return await (await opening).use(actions, signal);
+		} catch (err) {
+			if (!(err instanceof PageGoneError)) throw err;
+			this.forget(app.id, opening);
+			return (await this.pageOf(app, open)).use(actions, signal);
 		}
 	}
 
@@ -208,19 +276,91 @@ export class AppUseToolkit extends AgentToolkit {
 		if (known) return known;
 		const opening = open(app, { lifetime: this.opts.ended, conversationId: this.opts.conversationId });
 		this.pages.set(app.id, opening);
-		opening.catch(() => {
-			if (this.pages.get(app.id) === opening) this.pages.delete(app.id);
-		});
+		opening.catch(() => this.forget(app.id, opening));
 		return opening;
+	}
+
+	/** Drops a page of the turn, unless a newer one has already taken its place (a racing call reopened first). */
+	private forget(appId: string, opening: Promise<AppPage>): void {
+		if (this.pages.get(appId) === opening) this.pages.delete(appId);
 	}
 }
 
+// =============================================================================
+// ARGUMENTS AND THE ACT
+// =============================================================================
+
 /**
- * The act the approval list rates: the app's manifest id. Kept small, because approval.ts keys passes by
- * the params' JSON. TOOL_LIST.use_app makes a read free.
+ * The model's actions, checked and parsed. None given means none: the call reads the page.
+ *
+ * @throws With the action's index and the fix, for a list that is not a list, is too long, or holds a bad action.
  */
-function actOf(appId: string): ToolAct {
-	return { name: USE_APP_TOOL, params: [appId] };
+function parseActions(raw: unknown): PageAction[] {
+	if (raw === undefined || raw === null) return [];
+	if (!Array.isArray(raw)) throw new Error(WORDS.actionsNotList);
+	if (raw.length > MAX_ACTIONS) throw new Error(WORDS.actionsTooMany);
+	return raw.map((item, index) => {
+		try {
+			return parseAction(item);
+		} catch (err) {
+			throw new Error(WORDS.actionAt(index, (err as Error).message));
+		}
+	});
+}
+
+/**
+ * One action, as the page takes it. wait_for's wait is held between WAIT_FOR_MIN_S and WAIT_FOR_MAX_S.
+ *
+ * @throws Saying what is missing or wrong, and how to put it right.
+ */
+function parseAction(item: unknown): PageAction {
+	if (!isJsonObject(item)) throw new Error(WORDS.actionNotObject);
+	switch (textArg(item, 'action')) {
+		case 'click':
+			return { kind: 'click', ref: refArg(item) };
+		case 'type':
+			// untrimmed: the spaces are part of what is typed, and "" clears the field
+			if (typeof item.text !== 'string') throw new Error(WORDS.actionTypeText);
+			return { kind: 'type', ref: refArg(item), text: item.text };
+		case 'select': {
+			const value = textArg(item, 'value');
+			if (!value) throw new Error(WORDS.actionValue);
+			return { kind: 'select', ref: refArg(item), value };
+		}
+		case 'press':
+			// untrimmed: " " is the space key
+			if (typeof item.key !== 'string' || !item.key) throw new Error(WORDS.actionKey);
+			return textArg(item, 'ref') ? { kind: 'press', key: item.key, ref: refArg(item) } : { kind: 'press', key: item.key };
+		case 'wait_for': {
+			const text = textArg(item, 'text');
+			if (!text) throw new Error(WORDS.actionWaitText);
+			const seconds = Math.min(Math.max(numberArg(item, 'timeout_s') ?? WAIT_FOR_DEFAULT_S, WAIT_FOR_MIN_S), WAIT_FOR_MAX_S);
+			return { kind: 'wait_for', text, timeoutMs: seconds * 1000 };
+		}
+		default:
+			throw new Error(WORDS.actionUnknown);
+	}
+}
+
+/** The action's ref, or a throw that says what a ref looks like. */
+function refArg(item: Record<string, unknown>): ElementRef {
+	const ref = textArg(item, 'ref');
+	if (!isRef(ref)) throw new Error(WORDS.actionRef);
+	return ref;
+}
+
+function isRef(text: string): text is ElementRef {
+	return /^e[1-9]\d*$/.test(text);
+}
+
+/**
+ * The act the approval list rates: the app's manifest id, then each action kind once, in first use. Kept
+ * small, because approval.ts keys passes by the params' JSON. TOOL_LIST.use_app makes it free when the
+ * kinds are only wait_for, or none (a read).
+ */
+function actOf(appId: string, actions: readonly PageAction[]): ToolAct {
+	const kinds: PageActionKind[] = [...new Set(actions.map((action) => action.kind))];
+	return { name: USE_APP_TOOL, params: [appId, ...kinds] };
 }
 
 /**
@@ -249,6 +389,11 @@ function deadline(ended: AbortSignal, ms: number): { signal: AbortSignal; dispos
 /**
  * The whole result, stored in memory as is:
  *
+ *     1. type e3 "Customer name": done, page changed
+ *     2. click e5 "Save": done, page changed; the page asked "Discard changes?" (answered OK)
+ *     3. wait_for "Saved": failed, not on the page after 10 s
+ *     4. click e9: not run
+ *
  *     Errors during this call:
  *     - console: Pipeline invoice-extract failed: ...
  *
@@ -260,13 +405,39 @@ function deadline(ended: AbortSignal, ms: number): { signal: AbortSignal; dispos
  *       - button "Cancel" [ref=e11]
  *     - text "No invoices yet"
  *
- * Names, values and errors go through `hide` before they are cut, because a cut value no longer matches.
+ * Names, values, notes and errors go through `hide` before they are cut, because a cut value no longer matches.
  */
-function renderUse(use: PageUse, hide: (text: string) => string): string {
+function renderUse(actions: readonly PageAction[], use: PageUse, hide: (text: string) => string): string {
 	const blocks: string[][] = [];
+	if (actions.length) blocks.push(actions.map((action, i) => actionLine(i + 1, action, use.outcomes[i] ?? NOT_RUN, hide)));
 	if (use.problems.length) blocks.push([WORDS.result.errors, ...problemLines(use.problems, hide)]);
 	blocks.push([WORDS.result.page, ...(use.outline.length ? use.outline.map((line) => outlineLine(line, hide)) : [WORDS.result.empty])]);
 	return blocks.map((block) => block.join('\n')).join('\n\n');
+}
+
+/** `2. click e5 "Save": done, page changed; the page asked "Discard changes?" (answered OK)`: the action, the element's name as it was, and how it went. */
+function actionLine(n: number, action: PageAction, outcome: ActionOutcome, hide: (text: string) => string): string {
+	const label: string[] = [action.kind];
+	if (action.kind === 'wait_for') label.push(quoted(action.text, hide));
+	else if (action.ref) label.push(action.ref);
+	if (outcome.status !== 'not_run' && outcome.target) label.push(quoted(outcome.target, hide));
+	if (action.kind === 'press') label.push(JSON.stringify(action.key));
+	return `${n}. ${label.join(' ')}: ${statusOf(outcome, hide)}`;
+}
+
+/** `done, page changed; a note`, `failed, why` or `not run`. Notes and reasons carry the page's own text, so they are hidden and cut too. */
+function statusOf(outcome: ActionOutcome, hide: (text: string) => string): string {
+	switch (outcome.status) {
+		case 'done':
+			return WORDS.result.done(
+				outcome.changed,
+				outcome.notes.map((note) => brief(hide(note)))
+			);
+		case 'failed':
+			return WORDS.result.failed(brief(hide(outcome.why)));
+		case 'not_run':
+			return WORDS.result.notRun;
+	}
 }
 
 /** `- console: ...`, at most PROBLEMS_MAX, then `- ... and N more`. */

@@ -39,4 +39,20 @@ export const PAGE_TEXT = {
 	previewGone: 'the preview is gone',
 	leftApp: 'the page left the app; the next use_app call opens a fresh copy',
 	turnEndedWhileStarting: 'the turn ended while the preview was starting',
+	/** An action the call's deadline stopped, or never let start. */
+	outOfTime: 'the call ran out of time',
+	refGone: (ref: string): string => `${ref} is no longer on the page; read the page again`,
+	refUnknown: (ref: string): string => `${ref} is not a ref on this page; read the page again`,
+	disabled: 'it is disabled',
+	notTextField: 'it is not a text field you can type in; type works on inputs and text areas',
+	notSelect: 'it is not a native dropdown; for a custom one, click it, then click the option',
+	noOption: (value: string, options: readonly string[]): string => `no option "${value}"; the options are: ${options.join(', ')}`,
+	notFound: (seconds: number): string => `not on the page after ${seconds} s`,
+	/** Notes on a done action: what the page's dialogs said and how each was answered (a page problem when no action raised it), a held new tab, and what replaced the page under it. */
+	alerted: (message: string): string => `the page showed the message "${message}"`,
+	confirmed: (message: string): string => `the page asked "${message}" (answered OK)`,
+	prompted: (message: string): string => `the page asked for text: "${message}" (cancelled)`,
+	newTab: (url: string): string => `the page tried to open ${url} in a new tab, which was not opened`,
+	reloaded: 'the page reloaded',
+	rebuilt: 'the app rebuilt during this action (a file changed)',
 } as const;

@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// PAGE DOM — reading the preview's document from the builder's realm
+// PAGE DOM — reading and acting on the preview's document from the builder's realm
 // =============================================================================
 
 /**
@@ -31,15 +31,18 @@
  * builder.
  *
  * Realm rules, each one a bug when broken:
- * - Classes and getComputedStyle come from the frame's window (`win.MutationObserver`), never the
- *   builder's: a cross-realm `instanceof` is always false. Elements are told apart by tag name.
+ * - Classes, getComputedStyle and event constructors come from the frame's window
+ *   (`win.MutationObserver`, `new win.MouseEvent`), never the builder's: a cross-realm `instanceof` is
+ *   always false. Elements are told apart by tag name.
  * - Nothing here keeps the document: a reload replaces it. Callers pass `win` each time.
- * - No focus(): the builder's chat composer keeps the keyboard.
+ * - No focus(): the builder's chat composer keeps the keyboard. type and select set values and send
+ *   events; a key with no ref goes to whatever the page already focused.
  *
  * Only appPage.ts imports this module.
  */
 
-import type { ElementRef, OutlineLine, OutlineState } from 'shared/modules/agent/host';
+import type { ElementRef, OutlineLine, OutlineState, PageAction } from 'shared/modules/agent/host';
+import { PAGE_TEXT } from './pageText';
 
 // =============================================================================
 // REFS — stable for the page's life (the turn)
@@ -345,6 +348,180 @@ function statesOf(el: Element): OutlineState[] {
 /** Whitespace collapsed and trimmed. */
 function clean(text: string): string {
 	return text.replace(/\s+/g, ' ').trim();
+}
+
+// =============================================================================
+// ACTIONS — events built in the frame's realm
+// =============================================================================
+
+/** An action on an element: every kind but wait_for, which reads the page instead. */
+export type ElementAction = Exclude<PageAction, { kind: 'wait_for' }>;
+
+/** The frame's window with its own constructors, which build the events. */
+type Realm = Window & typeof globalThis;
+
+/**
+ * Does one action on its element.
+ *
+ * - click: what a person's click sends, at the element's centre: pointerdown, mousedown, pointerup and
+ *   mouseup, then el.click() for the click and its default action. So a component that listens on
+ *   pointer or mouse down works too.
+ * - type: the new value through the realm's native setter, so React's value tracker sees a change, then
+ *   a bubbling `input`. Inputs and text areas only.
+ * - select: a native select's option, by value or label, then `input` and `change`.
+ * - press: keydown, then keyup. Enter in a form's input also calls requestSubmit(), because a synthetic
+ *   Enter submits nothing; not when the page cancelled the keydown, as a browser wouldn't either.
+ *
+ * @returns Why the element can't take the action, or null when it was done.
+ */
+export function act(win: Window, el: Element, action: ElementAction): string | null {
+	if (el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true') return PAGE_TEXT.disabled;
+	const realm = win as Realm;
+	switch (action.kind) {
+		case 'click':
+			return click(realm, el);
+		case 'type':
+			return type(realm, el, action.text);
+		case 'select':
+			return select(realm, el, action.value);
+		case 'press':
+			return press(realm, el, action.key);
+	}
+}
+
+function click(realm: Realm, el: Element): null {
+	const box = el.getBoundingClientRect();
+	const at: MouseEventInit = { bubbles: true, cancelable: true, composed: true, view: realm, button: 0, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+	const pointer: PointerEventInit = { ...at, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+	el.dispatchEvent(new realm.PointerEvent('pointerdown', { ...pointer, buttons: 1 }));
+	el.dispatchEvent(new realm.MouseEvent('mousedown', { ...at, buttons: 1 }));
+	el.dispatchEvent(new realm.PointerEvent('pointerup', pointer));
+	el.dispatchEvent(new realm.MouseEvent('mouseup', at));
+	// step: an SVG element has no click(), and its click has no default action to run
+	if (typeof (el as HTMLElement).click === 'function') (el as HTMLElement).click();
+	else el.dispatchEvent(new realm.MouseEvent('click', at));
+	return null;
+}
+
+function type(realm: Realm, el: Element, text: string): string | null {
+	const field = el.localName === 'textarea' ? realm.HTMLTextAreaElement.prototype : el.localName === 'input' && !VALUELESS_INPUTS.has((el as HTMLInputElement).type) ? realm.HTMLInputElement.prototype : null;
+	if (!field || (el as HTMLInputElement).readOnly) return PAGE_TEXT.notTextField;
+	Object.getOwnPropertyDescriptor(field, 'value')?.set?.call(el, text);
+	el.dispatchEvent(new realm.InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+	return null;
+}
+
+function select(realm: Realm, el: Element, value: string): string | null {
+	if (el.localName !== 'select') return PAGE_TEXT.notSelect;
+	// step: a disabled option is no choice a person has
+	const options = [...(el as HTMLSelectElement).options].filter((option) => !option.disabled);
+	const labels = options.map((option) => clean(option.label));
+	const wanted = clean(value).toLowerCase();
+	const option = options.find((o) => o.value === value) ?? options[labels.findIndex((label) => label.toLowerCase() === wanted)];
+	if (!option) return PAGE_TEXT.noOption(value, labels);
+	option.selected = true;
+	el.dispatchEvent(new realm.Event('input', { bubbles: true }));
+	el.dispatchEvent(new realm.Event('change', { bubbles: true }));
+	return null;
+}
+
+function press(realm: Realm, el: Element, key: string): null {
+	const init: KeyboardEventInit = { key, bubbles: true, cancelable: true, composed: true, view: realm };
+	const proceed = el.dispatchEvent(new realm.KeyboardEvent('keydown', init));
+	const form = el.localName === 'input' ? (el as HTMLInputElement).form : null;
+	if (key === 'Enter' && proceed && form) form.requestSubmit();
+	el.dispatchEvent(new realm.KeyboardEvent('keyup', init));
+	return null;
+}
+
+/**
+ * What a field holds as properties, which no MutationObserver sees change: the value typed or chosen,
+ * and whether a box is ticked. An action compares it before and after, so typing that changes only the
+ * value still counts as a change. Undefined for an element that is no field.
+ */
+export function fieldState(el: Element): string | undefined {
+	switch (el.localName) {
+		case 'input':
+			return `${(el as HTMLInputElement).checked} ${(el as HTMLInputElement).value}`;
+		case 'textarea':
+			return (el as HTMLTextAreaElement).value;
+		case 'select':
+			return [...(el as HTMLSelectElement).options].map((option) => (option.selected ? '1' : '0')).join('');
+	}
+	return undefined;
+}
+
+/** Whether the text shows on the page: the body's rendered text (innerText skips hidden text), case and spacing ignored. */
+export function findText(doc: Document, text: string): boolean {
+	return doc.body ? clean(doc.body.innerText).toLowerCase().includes(clean(text).toLowerCase()) : false;
+}
+
+// =============================================================================
+// GUARDS — what the page can't be allowed to do to the builder
+// =============================================================================
+
+/** Marks a document's window whose dialogs are answered, so answering the same document again does nothing. */
+const ANSWERED = Symbol('use_app answers dialogs');
+
+/**
+ * Answers the page's blocking dialogs for the rest of its document's life. The frame is same-origin in
+ * the user's tab, so an alert, confirm or prompt the app raises at any time, on load or between actions
+ * too, would block the whole builder and show the user a dialog.
+ *
+ * - alert: dismissed. confirm: answered OK, because the agent chose to use the app. prompt: cancelled.
+ * - `heard` gets one note per dialog, saying what it said and how it was answered.
+ *
+ * A reload brings a new window behind the frame with its own dialogs, so the caller answers each new
+ * document (the shell's devReady comes before the app's code runs). A window already answered is skipped.
+ */
+export function answerDialogs(win: Window, heard: (note: string) => void): void {
+	if (Object.hasOwn(win, ANSWERED)) return;
+	win.alert = (message?: unknown): void => heard(PAGE_TEXT.alerted(String(message ?? '')));
+	win.confirm = (message?: string): boolean => {
+		heard(PAGE_TEXT.confirmed(String(message ?? '')));
+		return true;
+	};
+	win.prompt = (message?: string): null => {
+		heard(PAGE_TEXT.prompted(String(message ?? '')));
+		return null;
+	};
+	Object.defineProperty(win, ANSWERED, { value: true });
+}
+
+/**
+ * Holds the page's new tabs for one action and its settle: window.open and a click on a target=_blank
+ * link would open real tabs. Each is held and noted with its address.
+ *
+ * @returns The notes so far, and restore(), which gives the page its own window.open back. A page that
+ *   reloaded or left meanwhile has a fresh one, so restore leaves it alone.
+ */
+export function holdNewTabs(win: Window): { said(): string[]; restore(): void } {
+	const notes: string[] = [];
+	const doc = win.document;
+	const own = win.open;
+	win.open = (url?: string | URL): null => {
+		notes.push(PAGE_TEXT.newTab(String(url ?? '')));
+		return null;
+	};
+	const holdLink = (e: Event): void => {
+		const link = (e.target as Element | null)?.closest?.('a[target="_blank" i], area[target="_blank" i]');
+		if (!link) return;
+		e.preventDefault();
+		notes.push(PAGE_TEXT.newTab((link as HTMLAnchorElement).href));
+	};
+	win.addEventListener('click', holdLink, true);
+	return {
+		said: () => [...notes],
+		restore: () => {
+			try {
+				if (win.document !== doc) return;
+				win.open = own;
+				win.removeEventListener('click', holdLink, true);
+			} catch {
+				// a page that went to another origin can't be touched, and kept none of these anyway
+			}
+		},
+	};
 }
 
 // =============================================================================

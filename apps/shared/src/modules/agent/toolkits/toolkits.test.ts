@@ -24,7 +24,8 @@
 // TOOLKIT TESTS — the agent never writes over the user's work and a Stop stops,
 // the user says yes first, secrets stay out of the model, deploy_app keeps its
 // version, check_app fails a broken app and builds in a preview it leases,
-// Auto stops only its own runs, and use_app reads one page per app for the turn
+// Auto stops only its own runs, and use_app keeps one page per app for the turn
+// and asks before it acts on it
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -44,7 +45,7 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
+import { PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
@@ -1040,7 +1041,8 @@ test("Auto stops the conversation's own run after a fresh status read, and refus
 });
 
 // =============================================================================
-// USE_APP — one page per app for the turn, refused before any card where it can't run, a view within budget
+// USE_APP — one page per app for the turn, refused before any card where it can't run, a view within budget,
+// its limits, a card before it acts, and a fresh copy once a page leaves the app
 // =============================================================================
 
 test('use_app opens one page per app for the turn: racing calls share one open, its lifetime is the turn, a failed open is tried again, and nothing opens once the turn ended', async () => {
@@ -1133,4 +1135,84 @@ test('a use_app call that runs out of time ends as a result: the page sees its d
 	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open }), { callLimitMs: 20 }).toolkit, USE_APP_TOOL);
 	assert.match(await use.execute({ app: 'daybook-ui' }), /ran out of time/);
 	assert.ok(page.uses[0].signal.aborted);
+});
+
+test('use_app enforces its limits with the fix in each refusal: at most 20 actions, wait_for held to 1-30 s, and a ref shaped like e5', async () => {
+	const asked = fakeAsk([]);
+	const page = fakePage();
+	const { open, opened } = opener(page);
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: open })).toolkit, USE_APP_TOOL, approvalsFor(null, asked.ask));
+	const wait = (timeout_s?: number): Record<string, unknown> => ({ action: 'wait_for', text: 'Saved', timeout_s });
+
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: Array.from({ length: 21 }, () => wait()) }), /20/, 'over 20 actions is refused, naming the limit');
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: [wait(), { action: 'click', ref: 'Save' }] }), /actions\[1\].*e5/, 'a ref that is not one is refused, naming the action and what a ref looks like');
+	assert.equal(opened.length, 0, 'a refused call opens no page');
+	assert.equal(asked.cards.length, 0, 'a refusal comes before any card');
+
+	await use.execute({ app: 'daybook-ui', actions: [wait(999), wait(), wait(0), ...Array.from({ length: 17 }, () => wait())] });
+	const waits = page.uses[0].actions.map((action) => (action.kind === 'wait_for' ? action.timeoutMs : null));
+	assert.equal(waits.length, 20, '20 actions are taken');
+	assert.deepEqual(waits.slice(0, 3), [30_000, 10_000, 1_000], 'wait_for is held to 30 s at most, 10 s by default and 1 s at least');
+});
+
+test('use_app asks before it acts on the page: a read or a wait runs free, a click asks with the use_app card, a declined card never reaches the page, and after a failed action the rest are not run', async () => {
+	const page = fakePage(async (actions) => ({ outcomes: actions.length ? [{ status: 'failed', why: 'the first failed' }] : [], outline: [], problems: [] }));
+	const asked = fakeAsk(['approve', 'deny']);
+	const approvals = new Approvals({ client: () => null, vfs: new MemoryWorkspace(DAYBOOK), ask: asked.ask, signal: new AbortController().signal });
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open })).toolkit, USE_APP_TOOL, approvals);
+
+	await use.execute({ app: 'daybook-ui' });
+	await use.execute({ app: 'daybook-ui', actions: [{ action: 'wait_for', text: 'Saved' }] });
+	assert.equal(asked.cards.length, 0, 'a read and a wait ask nothing');
+
+	const result = await use.execute({
+		app: 'daybook-ui',
+		actions: [
+			{ action: 'click', ref: 'e1' },
+			{ action: 'type', ref: 'e2', text: 'hello' },
+			{ action: 'press', key: 'Enter' },
+		],
+	});
+	assert.equal(asked.cards.length, 1, 'a click asks');
+	assert.match(asked.cards[0].title, /Daybook/, 'the use_app card names the app by its manifest name');
+	const statuses = [1, 2, 3].map((n) =>
+		result
+			.split('\n')
+			.find((line) => line.startsWith(`${n}. `))
+			?.split(': ')
+			.at(-1)
+	);
+	assert.ok(
+		statuses.every((status) => status !== undefined),
+		'one line per action, though the page answered only the first'
+	);
+	assert.equal(statuses[1], statuses[2], 'the actions after the failure read the same');
+	assert.notEqual(statuses[1], statuses[0], 'and not as the failure does');
+
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: [{ action: 'select', ref: 'e3', value: 'b' }] }));
+	assert.equal(asked.cards.length, 2, 'a select asks');
+	assert.equal(page.uses.length, 3, 'the declined call never reached the page');
+});
+
+test('after the page leaves the app, the next use_app call opens a fresh copy, and calls racing to it share one', async () => {
+	let left = false;
+	const first = fakePage(async () => {
+		if (left) throw new PageGoneError('the page left the app');
+		left = true;
+		return { outcomes: [{ status: 'failed', why: 'the page left the app' }], outline: [], problems: [] };
+	});
+	const fresh = fakePage(async () => ({ outcomes: [], outline: [{ depth: 0, role: 'heading', name: 'fresh-copy', states: [] }], problems: [] }));
+	const { open, opened } = opener(first, fresh);
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: open })).toolkit, USE_APP_TOOL);
+
+	await use.execute({ app: 'daybook-ui', actions: [{ action: 'click', ref: 'e1' }] });
+	const results = await Promise.all([use.execute({ app: 'daybook-ui' }), use.execute({ app: 'daybook-ui' })]);
+	assert.equal(opened.length, 2, 'both calls share one fresh copy');
+	assert.ok(
+		results.every((result) => result.includes('fresh-copy')),
+		"both calls read the fresh copy's page"
+	);
+	await use.execute({ app: 'daybook-ui' });
+	assert.equal(opened.length, 2, 'later calls keep the fresh copy');
+	assert.equal(fresh.uses.length, 3);
 });
