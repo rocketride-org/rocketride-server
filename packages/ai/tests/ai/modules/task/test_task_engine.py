@@ -1208,9 +1208,11 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
 
     assert [request for _, request in calls['authorize']] == [target]
     assert calls['authorize'][0][0]['public_endpoint'] is public
-    # The task file is the resolved pipeline too: what was checked is what runs.
-    written = t._write_task_file.call_args.args[0]['components']
-    assert '${' not in json.dumps(written)
+    # What RUNS keeps its placeholders (plan 6.2): the task file carries the
+    # spec as written plus the engine's default env (the referenced values)
+    written, default_env = t._write_task_file.call_args.args
+    assert '${' in json.dumps(written['components'])
+    assert default_env == env
 
 
 @pytest.mark.asyncio

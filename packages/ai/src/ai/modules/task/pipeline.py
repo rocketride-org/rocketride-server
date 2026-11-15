@@ -45,6 +45,54 @@ def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[
     return json.loads(resolved_str)
 
 
+def validate_placeholders(pipeline: Dict[str, Any]) -> list:
+    """
+    Check where a pipeline uses ``${...}`` placeholders (plan 6.2).
+
+    A placeholder is legal in exactly one place: a component's CONFIG value,
+    naming a ``ROCKETRIDE_*`` variable the caller's environment fills at run
+    time. Anywhere else (a component id, a provider, a connection, the source)
+    it would change what the pipeline IS per caller, which a shared engine
+    cannot be; a name outside the ``ROCKETRIDE_`` prefix would reach into the
+    server's own environment.
+
+    Args:
+        pipeline: The pipeline dict.
+
+    Returns:
+        Error entries ``{id, message}``; empty when every placeholder is legal.
+    """
+    errors = []
+    components = pipeline.get('components') or []
+    # Step 1: the pipeline's STRUCTURE outside the components: the source
+    # names a component and is part of the address, so it cannot vary per
+    # caller (display fields such as name/description are not checked here;
+    # diagnostics a client sends along are not pipeline content)
+    for name in PLACEHOLDER.findall(json.dumps({'source': pipeline.get('source')})):
+        errors.append(
+            {'id': 'pipeline', 'message': f'placeholder ${{{name}}} is only allowed in a component config value'}
+        )
+    for component in components:
+        if not isinstance(component, dict):
+            continue
+        component_id = str(component.get('id') or component.get('provider') or 'component')
+        shell = {k: v for k, v in component.items() if k != 'config'}
+        for name in PLACEHOLDER.findall(json.dumps(shell)):
+            errors.append(
+                {'id': component_id, 'message': f'placeholder ${{{name}}} is only allowed in a component config value'}
+            )
+        # Step 2: inside config values, the name must be the caller's environment
+        for name in PLACEHOLDER.findall(json.dumps(component.get('config') or {})):
+            if not name.startswith(ALLOWED_ENV_PREFIX):
+                errors.append(
+                    {
+                        'id': component_id,
+                        'message': f'placeholder ${{{name}}} must name a {ALLOWED_ENV_PREFIX}* variable',
+                    }
+                )
+    return errors
+
+
 def references_env(pipeline: Dict[str, Any]) -> bool:
     """Whether the pipeline has a ``${...}`` placeholder that resolves from the environment.
 

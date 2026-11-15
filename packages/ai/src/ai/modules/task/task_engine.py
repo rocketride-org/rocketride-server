@@ -32,6 +32,7 @@ import os
 import asyncio
 import contextlib
 import sys
+import copy
 import json
 import tempfile
 import time
@@ -89,7 +90,7 @@ from rocketride import (
 )
 from .dbg_stdio import DbgStdio
 from .engine_key import CONST_CATALOG_NODE_PREFIX
-from .pipeline import references_env, resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -916,13 +917,44 @@ class TaskEngine(DAPBase):
             return {}
         return await self._env_source()
 
-    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
-
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+    async def _default_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
         """
-        env = await self._load_env(pipeline)
-        return resolve_pipeline_env(pipeline, env)
+        The engine's DEFAULT environment: the ``ROCKETRIDE_*`` values ``pipeline`` references, for a private engine.
+
+        A ``(hash, owner)`` engine has one owner, so its bindings without a
+        caller (a scan source's own getPipe) and its uncertified nodes'
+        global config read the owner's values (plan 6.2). A cross-user engine
+        has no default: every value rides the caller's ``_caller.env`` and a
+        certified node refuses env-valued keys at global scope. Loaded at
+        each start, never retained on the engine.
+
+        Args:
+            pipeline: The spec about to start.
+
+        Returns:
+            ``{name: value}`` for the referenced names only (least privilege).
+        """
+        if self.shared:
+            return {}
+        return substituted_env(pipeline, await self._load_env(pipeline))
+
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The engine's VIEW of the spec for the pre-launch checks: placeholders filled from the default env.
+
+        This copy is checked and authorized (DB targets, public sources) and
+        then dropped. It is never what the engine runs: the task file keeps
+        the placeholders and carries the default env beside them (plan 6.2),
+        so the content key is env-independent and each caller's values are
+        applied at read.
+
+        Args:
+            pipeline: The spec about to start.
+
+        Returns:
+            The expanded copy (non-``ROCKETRIDE_*`` names redacted).
+        """
+        return resolve_pipeline_env(pipeline, await self._default_env(pipeline))
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -1191,13 +1223,17 @@ class TaskEngine(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
 
         Args:
-            pipeline: Resolved pipeline dict (secrets already substituted). Must
-                      not be stored — caller discards it after the temp file is written.
+            pipeline: The pipeline dict as the engine runs it: ``${ROCKETRIDE_*}``
+                      placeholders KEPT (plan 6.2). Must not be stored.
+            env: The engine's default environment, the referenced
+                 ``ROCKETRIDE_*`` values of a private engine's owner (empty on
+                 a shared engine): what a binding without a caller and an
+                 uncertified node's global config read.
 
         Returns:
             Complete subprocess task configuration
@@ -1221,6 +1257,11 @@ class TaskEngine(DAPBase):
                 'parameters': pipeline.get('parameters') or {},
             },
             'threadCount': self._threads,
+            # The engine's DEFAULT environment (plan 6.2): a private engine's
+            # owner values for the names the spec references; empty on a
+            # shared engine. Read by bindings without a caller and by an
+            # uncertified node's global config; never part of the engine key.
+            'env': dict(env or {}),
             # The engine DEFAULT level, for work outside any binding; the
             # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -1292,7 +1333,7 @@ class TaskEngine(DAPBase):
             return ''
         return validate_storage_root(f'users/{self.client_id}/files')
 
-    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
+    async def _write_task_file(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> str:
         """
         Write task configuration to temporary file.
 
@@ -1302,8 +1343,9 @@ class TaskEngine(DAPBase):
         - O_EXCL flag to prevent TOCTOU race conditions
 
         Args:
-            pipeline: Resolved pipeline dict (secrets already substituted). The
-                      caller must not retain a reference after this returns.
+            pipeline: The pipeline dict as the engine runs it (placeholders kept).
+                      The caller must not retain a reference after this returns.
+            env: The engine's default environment (see ``_default_env``).
 
         Returns:
             Path to temporary task configuration file
@@ -1311,7 +1353,7 @@ class TaskEngine(DAPBase):
         Raises:
             OSError: If file cannot be created or written
         """
-        pipeline_task = self._build_task(pipeline)
+        pipeline_task = self._build_task(pipeline, env)
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
 
         fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
@@ -3046,9 +3088,12 @@ class TaskEngine(DAPBase):
             self._status.state = TASK_STATE.STARTING.value
             self.state = EngineState.STARTING
 
-            # Resolve ${...} placeholders into a local variable — never stored on self
-            # so secrets are not retained in memory beyond the temp file write.
-            resolved = await self._resolve_pipeline(self._pipeline)
+            # The engine's default environment (a private engine's owner values;
+            # nothing on a shared one), loaded at this start only, and the
+            # engine's VIEW of the spec for the checks below. Neither is
+            # stored on self: secrets live in the task file and nowhere else.
+            default_env = await self._default_env(self._pipeline)
+            resolved = resolve_pipeline_env(self._pipeline, default_env)
 
             # Check it - throws on error
             self._check_pipeline(resolved)
@@ -3061,12 +3106,15 @@ class TaskEngine(DAPBase):
             # rewrite any string, a node's provider included.
             db_access = self._db_access(resolved)
 
-            # Decode parameter tokens the subprocess has no key for
-            resolved = resolve_parameter_tokens(resolved)
+            # What the engine RUNS keeps its placeholders (plan 6.2): each
+            # caller's values are applied at read from _caller.env, the
+            # default env beside the spec serves bindings without a caller.
+            # Parameter tokens the subprocess has no key for are decoded.
+            spec = resolve_parameter_tokens(copy.deepcopy(self._pipeline))
 
-            # Write it out, then let `resolved` go out of scope
-            self._tmpfile = await self._write_task_file(resolved)
-            del resolved
+            # Write it out, then let the copies go out of scope
+            self._tmpfile = await self._write_task_file(spec, default_env)
+            del resolved, spec, default_env
 
             # Setup the first part of the command line args
             # --autoterm: exit when parent dies (stdin closes)

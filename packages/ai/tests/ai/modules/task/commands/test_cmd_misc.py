@@ -670,7 +670,15 @@ async def test_on_rrext_validate_maps_component_ids_back(monkeypatch):
     full = await _reply(conn, pipeline)
     single = await _reply(conn, {'version': 1, 'component': _llm('${ROCKETRIDE_NODE_ID}', 'llm_opnai')})
 
-    expected = [{'message': _template_message(env, 'error'), 'id': '${ROCKETRIDE_NODE_ID}'}]
+    # The validator's own error, templated; then the placeholder-position error
+    # (plan 6.2: a placeholder is legal only in a config value), named as written
+    expected = [
+        {'message': _template_message(env, 'error'), 'id': '${ROCKETRIDE_NODE_ID}'},
+        {
+            'id': '${ROCKETRIDE_NODE_ID}',
+            'message': 'placeholder ${ROCKETRIDE_NODE_ID} is only allowed in a component config value',
+        },
+    ]
     assert full['errors'] == expected
     assert single['errors'] == expected
     assert full['pipeline']['components'][0]['id'] == '${ROCKETRIDE_NODE_ID}'

@@ -54,7 +54,13 @@ from ai.common.parameters import validate_parameters
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..address import in_endpoint_scope
-from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
+from ..pipeline import (
+    MultipleSourcesError,
+    resolve_implied_source,
+    resolve_pipeline_env,
+    substituted_env,
+    validate_placeholders,
+)
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
@@ -466,6 +472,17 @@ class MiscCommands(DAPConn):
                     ]
                 data = dict(data)
                 data['errors'] = list(data.get('errors') or []) + config_errors
+            # Placeholders: only ROCKETRIDE_* names, only in config values (plan
+            # 6.2). Checked on the SUBMITTED text, so the message names what the
+            # author wrote and is never templated; both payload forms are checked
+            placeholder_errors = validate_placeholders(
+                submitted
+                if 'components' in submitted
+                else {**submitted, 'components': [submitted.get('component') or {}]}
+            )
+            if placeholder_errors:
+                data = dict(data)
+                data['errors'] = list(data.get('errors') or []) + placeholder_errors
 
             # Return the results
             return self.build_response(request, body=data)

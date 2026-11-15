@@ -101,6 +101,7 @@ from ai.constants import (
     CONST_MAX_UNAUTHED_IPS,
 )
 from ai.common.parameters import validate_parameters
+from .pipeline import references_env, substituted_env, validate_placeholders
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
@@ -326,6 +327,25 @@ def _require_valid_parameters(pipeline: Dict[str, Any]) -> None:
             TaskError.INVALID_ARGUMENT,
             'parameters: ' + '; '.join(e['message'] for e in errors),
             field='parameters',
+        )
+
+
+def _require_valid_placeholders(pipeline: Dict[str, Any]) -> None:
+    """
+    Refuse a pipeline with a ``${...}`` placeholder outside a config value or outside ``ROCKETRIDE_*`` (plan 6.2).
+
+    Args:
+        pipeline: The pipeline about to start.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT on ``pipeline`` naming the first problem.
+    """
+    errors = validate_placeholders(pipeline)
+    if errors:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            'placeholders: ' + '; '.join(e['message'] for e in errors),
+            field='pipeline',
         )
 
 
@@ -1135,6 +1155,41 @@ class TaskServer(DAPBase):
         if require and require not in perms:
             raise PermissionError(f'Permission {require!r} denied for this task')
         return control
+
+    async def _resolve_control_env(self, control: TaskControl) -> Dict[str, str]:
+        """
+        The ``ROCKETRIDE_*`` values a control's bindings run with (plan 6.2).
+
+        The team layer is the control's TEAM CONTEXT: the team whose
+        publication answered a ``@team`` call, a scoped key's frozen team, the
+        deploying team on the deploy rail, the caller's home team otherwise. A
+        team-owned run applies no user layer (a deployment's configuration
+        never depends on which human deployed it). Only the names the spec
+        references are kept (least privilege): a pipeline using
+        ``${ROCKETRIDE_OPENAI_KEY}`` never sees the caller's other variables.
+
+        Args:
+            control: The control, with its pipeline and team context set.
+
+        Returns:
+            ``{name: value}``; empty when the spec references nothing or the
+            account could not answer (logged; the run then has no env).
+        """
+        pipeline = control.pipeline or {}
+        if not substituted_env(pipeline, {}) and not references_env(pipeline):
+            return {}
+        from ai.account import account
+
+        try:
+            merged = await account.get_merged_env(
+                user_id='' if control.owner_kind == 'team' else control.userId,
+                org_id=control.orgId,
+                team_id=control.team_context.team_id,
+            )
+        except Exception as e:
+            self.debug_message(f'Environment for {control.key} could not be resolved: {e}')
+            return {}
+        return substituted_env(pipeline, merged)
 
     def control_by_key(self, key: str) -> TaskControl:
         """
@@ -2523,6 +2578,7 @@ class TaskServer(DAPBase):
         # every component id are single dot-free segments.
         validate_component_ids(control.pipeline)
         _require_valid_parameters(control.pipeline)
+        _require_valid_placeholders(control.pipeline)
         control.address = build_address(control.developer_id, control.project_id, control.source)
         control.id = control.address
 
@@ -2563,6 +2619,9 @@ class TaskServer(DAPBase):
         control.team_context = team_context or TeamContext(
             control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
         )
+        # The values this control's bindings run with, from its team context
+        # (plan 6.2): resolved once here, carried on every frame's _caller
+        control.env = await self._resolve_control_env(control)
 
         # Parse and validate launch type from request command
         try:
@@ -3159,6 +3218,7 @@ class TaskServer(DAPBase):
             # must not smuggle in a dotted component id
             validate_component_ids(pipeline)
             _require_valid_parameters(pipeline)
+            _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
 
             old_engine = control.task
@@ -3171,8 +3231,10 @@ class TaskServer(DAPBase):
                 wait_running=wait_for_running,
             )
 
-            # The control admits the accepted pipeline's parameters now
+            # The control admits the accepted pipeline's parameters now, and
+            # its environment follows the new spec's references
             control.setup_declared_parameters()
+            control.env = await self._resolve_control_env(control)
 
             # Ownership transfers ONLY once the restart has succeeded: until
             # then the previous owner keeps the task

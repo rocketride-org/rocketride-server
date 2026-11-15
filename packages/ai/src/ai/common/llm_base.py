@@ -14,7 +14,36 @@ class LLMBase(IInstanceBase):
 
     This class is the canonical node-level base for LLM providers and adapters.
     Provider-specific request/retry behavior remains in ai.common.chat.ChatBase.
+
+    The chat client is PER CALL (plan 6.2, 12 A): ``_chat_client`` builds the
+    node's ``Chat`` from this binding's ``settings`` through
+    ``IGlobal.provider_client`` when a per-caller key (an env-valued or
+    param-flagged one) differs from the shared config, and reuses the
+    global's own client otherwise. A node's IGlobal keeps constructing its
+    default ``_chat`` from ``self.config``; on a private engine that is the
+    owner's value, on a shared one a certified node's config refuses the key
+    and every call comes through here.
     """
+
+    def _chat_client(self):
+        """
+        The chat client for THIS call: the global's own when nothing per-caller differs, else one built from settings.
+
+        Returns:
+            ChatBase: The provider's client for the binding's effective config.
+        """
+        default = self.IGlobal._chat
+        settings = self.settings
+        # Step 1: the keys a caller can change: env-valued and param-flagged
+        keys = set(settings.env_keys) | set(settings.param_keys)
+        if not keys:
+            return default
+        # Step 2: a client per distinct set of those values, cached on the
+        # global; the node's own Chat class, built the way its IGlobal built the
+        # default (provider, config view, bag)
+        provider = self.IGlobal.glb.logicalType
+        bag = self.IEndpoint.endpoint.bag
+        return self.IGlobal.provider_client(settings, keys, lambda view: type(default)(provider, view, bag))
 
     def _question(
         self,
@@ -24,7 +53,7 @@ class LLMBase(IInstanceBase):
         on_reasoning_chunk: Optional[Callable[[str], None]] = None,
         stop: Optional[List[str]] = None,
     ) -> Answer:
-        chat = self.IGlobal._chat
+        chat = self._chat_client()
         # Publish the stop sequences on the per-call contextvar so ChatBase's model sinks
         # forward them to the provider API. A contextvar (not a chat() kwarg) leaves the
         # many chat()/_chat() provider overrides untouched. Reset in finally so a stop from
@@ -114,15 +143,15 @@ class LLMBase(IInstanceBase):
 
     @invoke_function
     def getContextLength(self, _param):
-        return self.IGlobal._chat.getTotalTokens()
+        return self._chat_client().getTotalTokens()
 
     @invoke_function
     def getOutputLength(self, _param):
-        return self.IGlobal._chat.getOutputTokens()
+        return self._chat_client().getOutputTokens()
 
     @invoke_function
     def getTokenCounter(self, _param):
-        return self.IGlobal._chat.getTokens
+        return self._chat_client().getTokens
 
     @invoke_function
     def ask(self, param):
