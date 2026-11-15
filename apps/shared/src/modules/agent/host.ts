@@ -72,6 +72,117 @@ export interface AgentDevSession {
 /** A preview lent to one check. A failed lease says why; a held one must be released when the check ends. */
 export type PreviewLease = { readonly ok: true; readonly session: AgentDevSession; release(): void } | { readonly ok: false; readonly why: string };
 
+// =============================================================================
+// THE APP PAGE — the agent's own copy of an app (use_app)
+// =============================================================================
+
+// Only domain types cross here: actions in, outcomes, outline lines and problems out. No Window,
+// Document, Element or iframe reaches agent code.
+
+/** An app to preview: its manifest id, its folder under apps/ and its display name. */
+export interface PreviewApp {
+	readonly id: string;
+	readonly folder: string;
+	readonly name: string;
+}
+
+/**
+ * An element of the agent's copy of an app, as the page outline names it: `e1`, `e2`, ...
+ * A ref names the same element for the rest of the turn while that element stays on the page.
+ * The tool parses the model's strings into this type; nothing else makes one.
+ */
+export type ElementRef = `e${number}`;
+
+/** One thing the agent does in its copy of an app. The list runs in order and stops at the first failure. */
+export type PageAction =
+	| { readonly kind: 'click'; readonly ref: ElementRef }
+	/** Replaces the field's value, as a person selecting all and typing would. */
+	| { readonly kind: 'type'; readonly ref: ElementRef; readonly text: string }
+	/** A native <select>, by option value or label. A custom dropdown is clicks. */
+	| { readonly kind: 'select'; readonly ref: ElementRef; readonly value: string }
+	/** A key ('Enter', 'Escape', 'Tab', 'ArrowDown', 'a') to the element, or to the focused one. */
+	| { readonly kind: 'press'; readonly key: string; readonly ref?: ElementRef }
+	/** Waits until the text shows on the page (case and spacing ignored). */
+	| { readonly kind: 'wait_for'; readonly text: string; readonly timeoutMs: number };
+
+export type PageActionKind = PageAction['kind'];
+
+/**
+ * How one action went. `target` is the accessible name of the element acted on, as it was then.
+ * The outcomes of a use are as many as its actions, in the same order: everything after the first
+ * `failed` is `not_run`.
+ */
+export type ActionOutcome =
+	/** `changed`: the page's DOM changed before it went quiet. `notes`: what else happened (a dialog the page opened and how it was answered, a link that would open a new tab, a rebuild under the action). */
+	| { readonly status: 'done'; readonly target?: string; readonly changed: boolean; readonly notes: readonly string[] }
+	| { readonly status: 'failed'; readonly target?: string; readonly why: string }
+	| { readonly status: 'not_run' };
+
+/** A state shown after an outline line. */
+export type OutlineState = 'checked' | 'disabled' | 'selected' | 'expanded' | 'collapsed';
+
+/**
+ * One line of the page outline: a visible element, or a run of text that sits in no element that
+ * can be acted on. Names, values and text are whole: the agent hides secrets before it cuts them.
+ */
+export interface OutlineLine {
+	/** Nesting under a dialog, form, list, menu or table; 0 at the top. Other wrappers add none. */
+	readonly depth: number;
+	/** The ARIA role ('button', 'textbox', 'heading', 'link', 'dialog', ...), or 'text'. */
+	readonly role: string;
+	/** The accessible name; for 'text', the text. */
+	readonly name: string;
+	/** Present only on elements that can be acted on. */
+	readonly ref?: ElementRef;
+	/** A field's value (a password's shows as dots). */
+	readonly value?: string;
+	readonly states: readonly OutlineState[];
+}
+
+/** Something the page raised during a use, apart from the actions' own outcomes. */
+export interface PageProblem {
+	/**
+	 * console: a console.error from app code (build lines and the browser's ResizeObserver notice are left out).
+	 * error: an uncaught error or unhandled rejection. crash: the shell's error boundary caught a render crash.
+	 * not_ready: the app had not built or loaded when the page was read, so the outline shows the shell, not the app.
+	 */
+	readonly kind: 'console' | 'error' | 'crash' | 'not_ready';
+	readonly text: string;
+}
+
+/** What one use of the page did, and the page after it. */
+export interface PageUse {
+	readonly outcomes: readonly ActionOutcome[];
+	/** The whole page after the last action ran or failed: body, popup portal and overlays. */
+	readonly outline: readonly OutlineLine[];
+	readonly problems: readonly PageProblem[];
+}
+
+/**
+ * The agent's own copy of an app, open for one turn. The host does every page job behind it:
+ * waiting for the app to show the latest edit, finding elements by ref, sending events, waiting for
+ * the page to go quiet, reading the outline and collecting errors.
+ */
+export interface AppPage {
+	/**
+	 * Runs `actions` in order once the app shows the latest work, stopping at the first failure, then
+	 * reads the page. An empty list just reads it. A failed action is an outcome, never a throw.
+	 *
+	 * @param signal - The call's own deadline. When it aborts, the action under way fails ("ran out of
+	 *   time"), the rest are not run, and the page is still read, so the call ends as a result.
+	 * @throws PageGoneError once the page has closed (its turn ended) or left the app; a fresh copy needs a new openAppPage.
+	 */
+	use(actions: readonly PageAction[], signal: AbortSignal): Promise<PageUse>;
+}
+
+/** Thrown by AppPage.use once the page is gone: it closed, or it left the app and closed itself. */
+export class PageGoneError extends Error {
+	constructor(why: string) {
+		super(why);
+		this.name = 'PageGoneError';
+	}
+}
+
 /**
  * A save that wrote nothing because the user dropped or replaced the editor's
  * text while it waited (Reload, Discard mine, Overwrite, Don't Save). Whatever
@@ -141,7 +252,18 @@ export interface AgentHost {
 	 * @param app - The app to preview: its manifest id, its folder under apps/ and its display name.
 	 * @param signal - Aborted when the user stops the run; a boot still under way gives up.
 	 */
-	leasePreview(app: { id: string; folder: string; name: string }, signal?: AbortSignal): Promise<PreviewLease>;
+	leasePreview(app: PreviewApp, signal?: AbortSignal): Promise<PreviewLease>;
+	/**
+	 * Opens the agent's own copy of an app: always a new hidden preview, never the user's. use_app reads
+	 * and acts on it. It lives until `lifetime` aborts and then closes itself, which holds for a boot still
+	 * running when `lifetime` aborts too. Hosts without app previews leave it out, and use_app refuses.
+	 *
+	 * @param opts.lifetime - The turn's end (`runEnded` in run.ts), never the Stop-only signal: a page tied
+	 *   to Stop would outlive every turn that finishes normally.
+	 * @param opts.conversationId - The chat whose live view shows the copy.
+	 * @throws When the preview could not start (the message says why) or the team changed.
+	 */
+	openAppPage?(app: PreviewApp, opts: { lifetime: AbortSignal; conversationId: string }): Promise<AppPage>;
 	/**
 	 * The user's approval mode and grants, live. Without it a run asks for
 	 * everything the approval list rates as asking, nothing is always allowed,

@@ -39,6 +39,7 @@ import { findDevSession, type WebDevSession } from '../surfaces/preview/session/
 import { packAppSource } from '../surfaces/preview/session/pack';
 import { openWorkspaceFile } from '../surfaces/workspace/vfs/openWorkspaceFile';
 import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
+import { openAppPage } from './appPage';
 import { editorControl } from './editorControls';
 import { bootHiddenPreview } from './hiddenPreview';
 
@@ -48,6 +49,9 @@ import { bootHiddenPreview } from './hiddenPreview';
 
 /** The frame the New App wizard starts with (NewAppForm's initial options): full screen. */
 const WIZARD_FRAME: FrameOptions = { sidebar: false, statusFooter: false, docTabs: false };
+
+/** Why an app page does not open once another team's workspace is current. */
+const PAGE_TEAM_CHANGED = 'the team changed while the preview was starting';
 
 // =============================================================================
 // DEV SESSIONS
@@ -232,6 +236,8 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 				return { ok: false, why: messageOf(err) };
 			}
 		},
+		// step: always the agent's own hidden copy, in this host's team only
+		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
 		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },

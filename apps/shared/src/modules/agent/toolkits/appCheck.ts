@@ -699,8 +699,8 @@ const DEFAULT_RUNTIME_GRACE_MS = 1500;
 /** The watch `target` of a hot refresh, which swaps one module into a mounted app without a build. */
 const HOT_REFRESH_TARGET = 'hot refresh';
 
-/** Window errors the shell forwards that a healthy app raises (the browser's ResizeObserver notices), which are not failures. */
-const BENIGN_ERROR = /ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
+/** Window errors the shell forwards that a healthy app raises (the browser's ResizeObserver notices), which are not failures. use_app's page leaves them out too. */
+export const BENIGN_ERROR = /ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
 
 const BUILD_RAN = 'rebuild the app in its Design preview and wait for the build to settle';
 

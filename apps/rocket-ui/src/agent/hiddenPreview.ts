@@ -21,16 +21,17 @@
 // SOFTWARE.
 
 // =============================================================================
-// HIDDEN PREVIEW — a preview of one app that only the agent's check sees
+// HIDDEN PREVIEW — a preview of one app that only the agent sees
 // =============================================================================
 
 /**
- * check_app builds an app in a preview. When the user has none open, the agent host boots one here for the
- * length of one check: the same session, page and handshake as the App Builder's Design preview, in an
- * iframe the user never sees. The check disposes it, so nothing keeps running after it.
+ * check_app builds an app in a preview, and use_app acts in the agent's own copy of one. The agent host
+ * boots those here: the same session, page and handshake as the App Builder's Design preview, in an
+ * iframe the user never sees. Whoever booted it disposes it, so nothing keeps running after it.
  */
 
 import { ConnectionManager, type RocketRideClient } from 'shell';
+import type { PreviewApp } from 'shared/modules/agent/host';
 import type { WatchStatus } from 'shared/tools/appdev';
 import { createDevPreviewPage } from '../surfaces/preview/session/devPreviewPage';
 import { WebDevSession } from '../surfaces/preview/session/devSession';
@@ -40,7 +41,16 @@ import { answerPreviewMessage } from '../surfaces/preview/session/previewHandsha
 const BOOT_TIMEOUT_MS = 30_000;
 
 /** Offscreen at full size rather than display:none, so an app that measures itself lays out as it would in view. */
-const OFFSCREEN_STYLE = 'position:fixed;left:-20000px;top:0;width:1200px;height:800px;border:none;';
+export const OFFSCREEN_STYLE = 'position:fixed;left:-20000px;top:0;width:1200px;height:800px;border:none;';
+
+/** A booted hidden preview. */
+export interface HiddenPreview {
+	readonly session: WebDevSession;
+	/** The offscreen iframe; the app page reads the preview's window through it. */
+	readonly frame: HTMLIFrameElement;
+	/** Removes the iframe and ends the session. A second call does nothing. */
+	dispose(): void;
+}
 
 /**
  * Boots a hidden preview for one app: a new WebDevSession (open() loads its files as models), an offscreen
@@ -50,10 +60,10 @@ const OFFSCREEN_STYLE = 'position:fixed;left:-20000px;top:0;width:1200px;height:
  *
  * @param client - The connected client the session builds with.
  * @param app - The app: its manifest id, its folder under apps/ and its display name.
- * @param opts - The run's stop signal, and how long the boot may take (default 30 s).
- * @returns The attached session, and dispose(), which removes the iframe and ends the session.
+ * @param opts - The signal that gives up the boot, and how long the boot may take (default 30 s).
+ * @returns The attached session, its frame, and dispose(), which removes the iframe and ends the session.
  */
-export function bootHiddenPreview(client: RocketRideClient, app: { id: string; folder: string; name: string }, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<{ session: WebDevSession; dispose(): void }> {
+export function bootHiddenPreview(client: RocketRideClient, app: PreviewApp, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<HiddenPreview> {
 	const { signal, timeoutMs = BOOT_TIMEOUT_MS } = opts;
 	// step: hidden, so findDevSession never hands an agent's preview to the user's lookups or to another conversation's check
 	const session = new WebDevSession(client, app.id, app.folder, app.name, { hidden: true });
@@ -61,6 +71,8 @@ export function bootHiddenPreview(client: RocketRideClient, app: { id: string; f
 	frame.style.cssText = OFFSCREEN_STYLE;
 	frame.setAttribute('aria-hidden', 'true');
 	frame.tabIndex = -1;
+	// step: marks the agent's frames, so the browser-agent eval runner's blob-iframe query skips them
+	frame.dataset.rrAgentPreview = 'true';
 	let revokePage: (() => void) | undefined;
 	let onMessage: ((e: MessageEvent) => void) | undefined;
 	let disposed = false;
@@ -125,7 +137,7 @@ export function bootHiddenPreview(client: RocketRideClient, app: { id: string; f
 		signal?.addEventListener('abort', onAbort, { once: true });
 		boot().then(() => {
 			stopWaiting();
-			if (!disposed) resolve({ session, dispose });
+			if (!disposed) resolve({ session, frame, dispose });
 		}, fail);
 	});
 }
