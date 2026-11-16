@@ -30,7 +30,7 @@
  * live in modules/flow/types.ts.
  */
 
-import type { PipelineComponent, PipelineConfig } from 'rocketride';
+import type { PipelineComponent, PipelineConfig, ServiceParamDescriptor, ServiceProperty } from 'rocketride';
 
 // Re-export SDK types under local aliases
 export { TASK_STATE as ITaskState } from 'rocketride';
@@ -46,7 +46,7 @@ export type { TASK_STATUS_FLOW as IFlowData } from 'rocketride';
 /**
  * Generic form data record type for dynamic form submissions.
  * Intentionally uses `any` to accommodate the wide variety of field types
- * produced by RJSF forms.
+ * a node's configuration tree holds.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type IFormData = Record<string, any>;
@@ -82,7 +82,7 @@ export interface IDimensions {
 
 /**
  * User-configured form data for a pipeline component.
- * Contains key/value pairs from the RJSF configuration form.
+ * Contains the node's configuration tree, addressed by leaf path.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type INodeConfig = Record<string, any>;
@@ -116,7 +116,7 @@ export enum IServiceCapabilities {
 // ============================================================================
 
 /**
- * Pairs a JSON Schema with its corresponding RJSF UI schema for a single
+ * Pairs a JSON Schema with its corresponding UI schema for a single
  * form section (e.g. Pipe, Source, Target).
  *
  * The schema defines the data shape and validation rules. The ui schema
@@ -126,7 +126,7 @@ export interface IServiceSchema {
 	/** JSON Schema defining the data shape and validation rules. */
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	schema: Record<string, any>;
-	/** RJSF UI schema controlling widget rendering and layout. */
+	/** UI schema controlling widget rendering and layout. */
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	ui: Record<string, any>;
 }
@@ -204,6 +204,16 @@ export interface IService {
 
 	/** Execution plan identifiers. */
 	plans?: string[];
+
+	/**
+	 * The resolved configuration properties, every leaf with its `path`
+	 * (present on a FULL definition, absent on the bulk summary). The
+	 * node-config form renders this tree directly.
+	 */
+	properties?: ServiceProperty[];
+
+	/** Descriptors of the `param`-flagged properties, in schema order. */
+	params?: ServiceParamDescriptor[];
 
 	/** Pipe configuration schema (compiled from fields/shape/preconfig by the engine). */
 	Pipe?: IServiceSchema;

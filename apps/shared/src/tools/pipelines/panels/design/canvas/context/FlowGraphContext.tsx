@@ -47,7 +47,6 @@
  */
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { deepEquals } from '@rjsf/utils';
 
 import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges, useUpdateNodeInternals } from '@xyflow/react';
 
@@ -59,9 +58,8 @@ export type FlowNode = Node<INodeData>;
 import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId, DEFAULT_EDGE } from '../util/graph';
 import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
-import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
-import { validateFormData } from 'shared/components/node-config';
-import { mergeFormDefaults } from 'shared/components/node-config/storedArrays';
+import { deepEquals, hasConfigurableSchema } from '../util/helpers';
+import { constantMarkers, validateConfig } from 'shared/components/node-config';
 
 // =============================================================================
 // Quick-add state (click handle → popup → create + connect)
@@ -189,6 +187,17 @@ export interface IFlowGraphContext {
 
 	/** Marks the project as dirty and notifies the host of content changes. */
 	onContentUpdated: () => void;
+
+	// --- Pipeline parameters (plan §5.2) -----------------------------------
+
+	/** The pipeline's `parameters` map: public name → `nodeId.configKey`. */
+	parameters: Record<string, string>;
+
+	/**
+	 * Replaces the `parameters` map (the node config panel's expose chip and
+	 * the PARAMS page write it). The caller follows up with onContentUpdated.
+	 */
+	setParameters: (parameters: Record<string, string>) => void;
 
 	// --- Quick-add popup ---------------------------------------------------
 
@@ -374,6 +383,15 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const currentProjectRef = useRef(currentProject);
 	currentProjectRef.current = currentProject;
 
+	// --- Pipeline parameters map (plan §5.2) ---------------------------------
+	// State for consumers, a ref for the serializer (which runs off a timer).
+	const [parameters, setParametersState] = useState<Record<string, string>>({});
+	const parametersRef = useRef<Record<string, string>>({});
+	const setParameters = useCallback((next: Record<string, string>) => {
+		parametersRef.current = { ...next };
+		setParametersState(parametersRef.current);
+	}, []);
+
 	/** Ref to the latest projectLayout so onContentUpdated reads current values without re-creating. */
 	const projectLayoutRef = useRef(projectLayout);
 	projectLayoutRef.current = projectLayout;
@@ -400,6 +418,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const components = getProjectComponents(currentNodes as INode[], currentEdges);
 			const nextVersion = (lastSentVersion.current ?? 0) + 1;
 			const layout = projectLayoutRef.current;
+			// Parameters whose target node left the canvas go with it
+			const nodeIds = new Set(currentNodes.map((node) => node.id));
+			const parameters = Object.fromEntries(Object.entries(parametersRef.current).filter(([, target]) => nodeIds.has(target.split('.')[0])));
 			const project: IProject = {
 				...currentProjectRef.current,
 				components,
@@ -409,6 +430,11 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				version: PIPELINE_SCHEMA_VERSION,
 				docRevision: nextVersion,
 			};
+			// The map is written when it has entries and REMOVED otherwise, so a
+			// stale copy inherited from the loaded project never survives the
+			// last exposure being dropped
+			if (Object.keys(parameters).length > 0) project.parameters = parameters;
+			else delete project.parameters;
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
@@ -677,19 +703,15 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * Determines the initial formDataValid state for a new node by
 	 * checking whether its service schema requires configuration.
 	 *
-	 * A node requires config when its Pipe schema has properties
-	 * (excluding the hideForm flag). Nodes without schemas or with
-	 * hideForm set are considered valid by default.
-	 *
-	 * Matches the logic from the old factory code in factories.ts.
+	 * A node requires config when its resolved definition has a leaf the
+	 * user can edit. Nodes without such a definition are valid by default.
 	 */
 	const getInitialFormDataValid = useCallback(
 		(data: INodeData): boolean => {
 			if (data.formDataValid !== undefined) return data.formDataValid;
 			const service = servicesJson?.[data.provider];
 			if (!service) return true;
-			const pipe = service.Pipe as { schema?: { properties?: Record<string, unknown> } } | undefined;
-			return hasConfigurableSchema(pipe) ? false : true;
+			return hasConfigurableSchema(service) ? false : true;
 		},
 		[servicesJson]
 	);
@@ -755,24 +777,18 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				}
 			}
 
-			// Resolve default config from the service JSON schema (same as old FlowContext)
+			// The persisted config. Defaults are NEVER written (they are ghosts in
+			// the form, plan §5.6.2); a fresh node stores only its constant
+			// markers (`mode: Source`), which the source lists key on.
 			const service = servicesJson?.[data.provider];
-			const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
-			let formData = data.formData ?? {};
 			let formDataValid = getInitialFormDataValid(data);
+			const config = data.config && Object.keys(data.config).length > 0 ? { ...data.config } : { ...constantMarkers(service) };
 
-			if (pipe?.schema && Object.keys(formData).length === 0) {
-				formData = resolveDefaultFormData(id, pipe.schema);
-				// hideForm/no-properties schemas render no config form — seed
-				// their defaults but never flag the node as needing configuration
-				if (hasConfigurableSchema(pipe)) {
-					const validation = validateFormData(pipe.schema, formData as Record<string, unknown>);
-					formDataValid = validation.errors.length === 0;
-				}
+			// Non-configurable definitions never flag the node as needing
+			// configuration; configurable ones take the resolver's verdict.
+			if (service?.properties && hasConfigurableSchema(service)) {
+				formDataValid = validateConfig(service, config).length === 0;
 			}
-
-			// config is the persisted form data — use resolved defaults if empty
-			const config = data.config && Object.keys(data.config).length > 0 ? { ...data.config } : { ...formData };
 
 			// Default the display name from the service catalog if not already set
 			if (!config.name && service?.title) {
@@ -790,7 +806,6 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 					...data,
 					name,
 					config,
-					formData,
 					formDataValid,
 					input: data.input ?? [],
 					control: data.control ?? [],
@@ -870,12 +885,19 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const connectedSet = new Set(connected.map((e) => e.id));
 			const remaining = edges.filter((e) => !connectedSet.has(e.id));
 			setEdges(remaining);
+			// A deleted node's exposures leave the OWNED map too: node ids are
+			// reused by generateNodeId, so a lingering binding would otherwise
+			// attach itself to the next node of that provider
+			const deletedIds = new Set(deletedNodes.map((node) => node.id));
+			const kept = Object.entries(parametersRef.current).filter(([, target]) => !deletedIds.has(target.split('.')[0]));
+			const droppedBindings = kept.length !== Object.keys(parametersRef.current).length;
+			if (droppedBindings) setParameters(Object.fromEntries(kept));
 			// Notify host so project state stays in sync
-			if (connected.length > 0) {
+			if (connected.length > 0 || droppedBindings) {
 				onContentUpdated();
 			}
 		},
-		[edges, setEdges, onContentUpdated]
+		[edges, setEdges, setParameters, onContentUpdated]
 	);
 
 	// =====================================================================
@@ -926,23 +948,26 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				const data = node.data as Record<string, unknown>;
 				const provider = data?.provider as string;
 				const service = servicesJson?.[provider];
-				const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
-				if (pipe?.schema) {
-					// Backfill schema defaults UNDER the persisted config. Nodes
-					// created while the full definition was unavailable are missing
-					// the hidden defaults (e.g. the `mode: "Source"` marker the
-					// DEVELOPMENT page keys on); explicit node values always win.
-					const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-					const config = mergeFormDefaults(pipe.schema, resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>, existing);
+				if (service?.properties) {
+					// Only the constant markers are backfilled UNDER the persisted
+					// config (nodes created while the full definition was
+					// unavailable miss the `mode: "Source"` marker the source lists
+					// key on); every other default stays a ghost in the form.
+					const existing = (data?.config ?? {}) as Record<string, unknown>;
+					const config = { ...constantMarkers(service), ...existing };
 					(data as any).config = config;
-					// hideForm/no-properties schemas render no config form: force
+					// Non-configurable definitions render no config form: force
 					// valid (self-healing any stale persisted flag) instead of
 					// validating a form the user could never fill in.
-					const valid = hasConfigurableSchema(pipe) ? validateFormData(pipe.schema, config).errors.length === 0 : true;
+					const valid = hasConfigurableSchema(service) ? validateConfig(service, config).length === 0 : true;
 					(data as any).formDataValid = valid;
 					if (!valid) unconfigured++;
 				}
 			}
+
+			// The pipeline's parameters map rides the project document
+			parametersRef.current = { ...(project.parameters ?? {}) };
+			setParametersState(parametersRef.current);
 
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
 			const newEdges = getEdgesFromNodes(sortedNodes);
@@ -1055,22 +1080,20 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const data = node.data as Record<string, unknown>;
 			const provider = data?.provider as string;
 			const service = servicesJson[provider];
-			const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
-			if (!pipe?.schema) return node;
+			if (!service?.properties) return node;
 
-			// Backfill schema defaults UNDER the persisted config. Nodes created
-			// while the full definition was unavailable are missing the hidden
-			// defaults (e.g. the `mode: "Source"` marker the DEVELOPMENT page
-			// keys on). Explicit values win; null placeholders for encrypted
-			// arrays are removed so they do not hide the saved entries.
-			const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-			const config = mergeFormDefaults(pipe.schema, resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>, existing);
+			// Backfill only the constant markers UNDER the persisted config
+			// (nodes created while the full definition was unavailable miss the
+			// `mode: "Source"` marker the source lists key on). Explicit values
+			// win; every other default stays a ghost in the form.
+			const existing = (data?.config ?? {}) as Record<string, unknown>;
+			const config = { ...constantMarkers(service), ...existing };
 			const configChanged = !deepEquals(config, existing);
 
-			// hideForm/no-properties schemas render no config form: force valid
+			// Non-configurable definitions render no config form: force valid
 			// (self-healing any stale persisted flag) instead of validating a
 			// form the user could never fill in.
-			const valid = hasConfigurableSchema(pipe) ? validateFormData(pipe.schema, config).errors.length === 0 : true;
+			const valid = hasConfigurableSchema(service) ? validateConfig(service, config).length === 0 : true;
 			if (configChanged || (data as any).formDataValid !== valid) {
 				changed = true;
 				return { ...node, data: { ...data, config, formDataValid: valid } };
@@ -1112,8 +1135,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const provider = (node.data as Record<string, unknown>)?.provider as string | undefined;
 			if (!provider) continue;
 			const service = servicesJson?.[provider];
-			// Only summaries need resolving; a merged full definition has Pipe.
-			if (service && !(service as Record<string, unknown>).Pipe) {
+			// Only summaries need resolving; a merged full definition has properties.
+			if (service && !service.properties) {
 				requestNodeSchema(provider);
 			}
 		}
@@ -1191,6 +1214,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		editingNodeId,
 		setEditingNodeId,
 		onContentUpdated,
+		parameters,
+		setParameters,
 		loadData,
 		loadCanvas,
 		isFlowReady,
@@ -1203,7 +1228,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		onNodesChange, onEdgesChange, onEdgeConnect, isValidConnection,
 		onDragOver, onDrop, onNodeDragStop, addNode, updateNode, deleteNode,
 		onNodesDelete, tempNode, focusOnNode, editingNodeId,
-		onContentUpdated, loadData, loadCanvas, isFlowReady,
+		onContentUpdated, parameters, setParameters, loadData, loadCanvas, isFlowReady,
 		quickAddState, configSnackbar,
 	]);
 

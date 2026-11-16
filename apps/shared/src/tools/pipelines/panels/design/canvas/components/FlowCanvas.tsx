@@ -502,7 +502,8 @@ export default function Canvas({ cloudPromptDismissed, onDismissCloudPrompt, onD
 			{showCreatePanel && <CreateNodePanel onClose={() => setShowCreatePanel(false)} />}
 
 			{/* Node config panel — slides in from the right */}
-			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
+			{/* Keyed by node: a node switch resets the panel's local form state instead of reusing the previous node's. */}
+			{showConfigPanel && editingNode && <NodeConfigPanel key={editingNode.id} node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
 			{/* Configuration reminder after template instantiation */}
 			{configSnackbar !== null && (
 				<div

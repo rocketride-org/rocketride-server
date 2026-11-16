@@ -31,7 +31,7 @@ export function readTheme(): ThemeTokens {
 
 /**
  * Fetch a theme JSON file from the server and apply it.
- * Returns the token object so callers can pass it to iframes or buildMuiTheme.
+ * Returns the token object so callers can pass it to iframes.
  * @param themeId  Theme file name without extension (e.g. 'rocketride-light')
  * @param basePath URL prefix where theme files are hosted (default: '/themes')
  */

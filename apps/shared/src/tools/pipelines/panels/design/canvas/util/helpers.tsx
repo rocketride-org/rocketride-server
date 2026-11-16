@@ -29,7 +29,7 @@
  */
 
 import { ILaneObject, IService, IServiceCapabilities, IServiceLane } from '../types';
-import { getDefaultFormState } from 'shared/components/node-config';
+import { hasConfigurableSchema as hasConfigurableProperties } from 'shared/components/node-config';
 
 // =============================================================================
 // Lane Utilities
@@ -137,32 +137,33 @@ export const renameInvokeType = (invokeType = ''): string => INVOKE_TYPE_LABELS[
 // =============================================================================
 
 /**
- * Resolves the default form data for a service by generating RJSF defaults
- * from its JSON Schema. Used when creating a new node on the canvas to
- * populate form fields with their initial/default values.
+ * True when a service's resolved definition exposes a user-configurable form:
+ * at least one leaf that is neither hidden nor a constant. A summary-only
+ * catalog entry (no `properties` yet) or a node with nothing to edit renders
+ * no config form, so such nodes must never be marked as needing
+ * configuration — the user would have nothing to fix.
  *
- * @param id - The service identifier (currently unused but reserved for future overrides).
- * @param schema - The JSON Schema to generate defaults from.
- * @returns The default form data object with all required fields populated.
+ * @param service - The catalog entry (summary or full definition).
+ * @returns Whether the definition should drive form validation / the red gear.
  */
-export const resolveDefaultFormData = (_id: string, schema: Record<string, unknown>) => {
-	return getDefaultFormState(schema);
-};
+export const hasConfigurableSchema = (service?: IService): boolean => hasConfigurableProperties(service);
 
 /**
- * True when a service's Pipe section exposes a user-configurable form.
- * Schemas flagged with `hideForm` (or with no properties at all) render no
- * config form in the node panel, so their nodes must never be marked as
- * needing configuration — the user would have nothing to fix.
+ * Structural equality for config trees (plain JSON data).
  *
- * @param pipe - The service's Pipe section ({ schema, ui }).
- * @returns Whether the schema should drive form validation / the red gear.
+ * @param left - One value.
+ * @param right - The other value.
+ * @returns True when both hold the same data.
  */
-export const hasConfigurableSchema = (pipe?: { schema?: unknown }): boolean => {
-	const properties = (pipe?.schema as { properties?: Record<string, unknown> } | undefined)?.properties;
-	if (!properties) return false;
-	if (properties.hideForm !== undefined) return false;
-	return Object.keys(properties).length > 0;
+export const deepEquals = (left: unknown, right: unknown): boolean => {
+	if (left === right) return true;
+	if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') return false;
+	if (Array.isArray(left) !== Array.isArray(right)) return false;
+	if (Array.isArray(left)) return left.length === (right as unknown[]).length && left.every((item, index) => deepEquals(item, (right as unknown[])[index]));
+	const leftKeys = Object.keys(left as object);
+	const rightKeys = Object.keys(right as object);
+	if (leftKeys.length !== rightKeys.length) return false;
+	return leftKeys.every((key) => Object.hasOwn(right as object, key) && deepEquals((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
 };
 
 /**

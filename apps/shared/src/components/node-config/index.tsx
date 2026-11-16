@@ -26,11 +26,14 @@
 // =============================================================================
 //
 // MULTI-TOOL by design: the pipeline canvas's config panel and sql-ui's
-// connection editor both render service configs through this module
-// (schema-driven RJSF form, secured fields, `${ROCKETRIDE_*}` env
-// references, OAuth widgets). It lives in shared/components — never inside
-// a tool — and depends on no tool code; hosting surfaces provide the OAuth
-// environment through OAuthEnvContext when they support consent flows.
+// connection editor both render service configs through this module — our
+// own form handler over the engine's resolved property model (plan §5.6.5):
+// a recursive render over get/set/delete(path), ghost defaults, selector
+// recursion, descriptor validation, secret masking, `${ROCKETRIDE_*}`
+// autocomplete, upload and OAuth widgets, the expose chip. It lives in
+// shared/components — never inside a tool — and depends on no tool code;
+// hosting surfaces provide the OAuth environment through OAuthEnvContext
+// when they support consent flows.
 // =============================================================================
 
 /**
@@ -39,8 +42,35 @@
  */
 export const PIPELINE_SCHEMA_VERSION = 1;
 
-export { default as NodeConfigForm, default, validationProblemFromResponse } from './NodeConfigForm';
-export type { INodeConfigFormProps, INodeConfigFormHandle } from './NodeConfigForm';
+export { default as NodeConfigForm, default } from './NodeConfigForm';
+export type { INodeConfigFormProps, INodeConfigFormHandle, INodeConfigExposure } from './NodeConfigForm';
 export { OAuthEnvProvider, useOAuthEnv } from './OAuthEnvContext';
 export type { IOAuthEnv } from './OAuthEnvContext';
-export { getSecuredFormData, removeRequired, setUiSchemaProperty, validateFormData, getDefaultFormState } from './rjsf';
+export { getAtPath, setAtPath, deleteAtPath, clearSecure, splitPath, dottedNames, flattenLeaves, effectiveValue, hasConfigurableSchema, constantMarkers, paramDescriptor, isSelector, isGroup, leafKind, enumOptions, enumValues, isStoredSecurely } from './model';
+export type { IConfigTree, INodeSchema, ILeafEntry, LeafKind } from './model';
+export { validateConfig, validateLeafValue, validateLeafAt } from './validate';
+export type { IConfigProblem } from './validate';
+export { PUBLIC_NAME_PATTERN, publicNameProblem, describeParam } from './widgets/ExposeNameDialog';
+export { oauthProviderOf } from './widgets/OAuthWidget';
+export type { OAuthProvider } from './widgets/OAuthWidget';
+
+// =============================================================================
+// Validation-response helper
+// =============================================================================
+
+/**
+ * Extracts the human-readable problem from a validate-pipeline response —
+ * shared so every NodeConfigForm container reports identical messages.
+ *
+ * @param resp - The response from `handleValidatePipeline` / the validate call.
+ * @returns The problem string, or null when the response is clean.
+ */
+export function validationProblemFromResponse(resp: unknown): string | null {
+	const response = (resp ?? {}) as { error?: { message?: string }; errors?: Array<{ message?: string }>; warnings?: Array<{ message?: string }>; data?: { errors?: Array<{ message?: string }>; warnings?: Array<{ message?: string }> } };
+	if (response.error) return `Validation error: ${response.error.message ?? ''}`;
+	const errors = response.errors ?? response.data?.errors ?? [];
+	if (errors.length > 0) return `Validation error: ${errors.map((entry) => entry.message).join(' ')}`;
+	const warnings = response.warnings ?? response.data?.warnings ?? [];
+	if (warnings.length > 0) return `Warning: ${warnings.map((entry) => entry.message).join(' ')}`;
+	return null;
+}

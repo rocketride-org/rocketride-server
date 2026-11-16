@@ -41,11 +41,9 @@
  */
 
 import React, { ReactElement } from 'react';
-import { Tooltip } from '@mui/material';
 import { Settings } from 'lucide-react';
 
 import { Option } from 'shared/types/ui';
-import { sanitizeAndParseHtmlToReact } from '../../../../util/helpers';
 import ConditionalRender from '../../../ConditionalRender';
 import { Icon } from '../../../../util/Icon';
 import MoreMenu from './more-menu';
@@ -193,6 +191,9 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 	// Build the subtitle from class type tags (e.g. "AGENT · TOOL")
 	const subtitleText = classType?.length ? classType.join(' · ') : undefined;
 
+	// Plain text of the (HTML) catalog description for the native tooltip
+	const descriptionText = description ? String(description).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim() : undefined;
+
 	// Title element — reused in both the tooltip and non-tooltip render paths
 	const titleElement = (
 		<div>
@@ -244,35 +245,8 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 			{/* Title with optional tooltip showing the HTML description */}
 			<div style={styles.boxLabel}>
 				<ConditionalRender condition={description && !toolchainState.isDragging} fallback={titleElement}>
-					<Tooltip
-						enterDelay={700}
-						arrow
-						placement="top"
-						title={
-							<div
-								style={{
-									fontSize: 'var(--rr-font-size)',
-									fontFamily: 'var(--rr-font-family)',
-									fontWeight: 400,
-									padding: '0.25rem',
-								}}
-							>
-								{sanitizeAndParseHtmlToReact(description)}
-							</div>
-						}
-						slotProps={{
-							tooltip: {
-								sx: {
-									maxWidth: 300,
-									fontWeight: 400,
-									fontFamily: 'var(--rr-font-family)',
-									fontSize: 'var(--rr-font-size)',
-								},
-							},
-						}}
-					>
-						{titleElement}
-					</Tooltip>
+					{/* The catalog description as the native hover tooltip (tags stripped). */}
+					<div title={descriptionText}>{titleElement}</div>
 				</ConditionalRender>
 			</div>
 
@@ -291,7 +265,7 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 					</button>
 				</ConditionalRender>
 				<ConditionalRender condition={options}>
-					<MoreMenu buttonSx={{ padding: 0 }} options={options!} isDisabled={false} />
+					<MoreMenu buttonStyle={{ padding: 0 }} options={options!} isDisabled={false} />
 				</ConditionalRender>
 			</div>
 		</div>

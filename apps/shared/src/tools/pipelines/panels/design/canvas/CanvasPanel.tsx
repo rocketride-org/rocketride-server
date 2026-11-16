@@ -26,22 +26,17 @@
  *
  * This is the single component that host applications (VS Code, web app)
  * render. It sets up:
- *   - MUI ThemeProvider with live VS Code theme synchronisation
- *   - CssBaseline reset
- *   - Full-viewport container
+ *   - Full-viewport container (theming is the --rr-* token contract of the
+ *     host's stylesheet; nothing is bridged at runtime)
  *   - FlowContainer (context providers) + Canvas (ReactFlow surface)
  *
  * The host only needs to pass project data, service definitions, and
  * callback handlers. Everything else is self-contained.
  */
 
-import { ThemeProvider, CssBaseline } from '@mui/material';
-import { useMemo, useState, useEffect } from 'react';
-
 import FlowContainer from './components/FlowContainer';
 import FlowCanvas from './components/FlowCanvas';
 import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from './types';
-import { getMuiTheme } from 'shared/themes/getMuiTheme';
 import { buildInventory } from './util/helpers';
 import { IServiceCatalog } from './types';
 
@@ -164,52 +159,16 @@ export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExter
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
-	// --- MUI theme with live VS Code theme sync -----------------------------
-
-	// Counter bumped whenever VS Code switches themes, triggering theme rebuild
-	const [themeVersion, setThemeVersion] = useState(0);
-
-	useEffect(() => {
-		if (typeof document === 'undefined') return;
-
-		// Watch for theme attribute changes:
-		//   - VS Code webview switches kind via `data-vscode-theme-kind` /
-		//     `data-vscode-theme-id` on `<body>`.
-		//   - Non-VS Code apps flip light/dark via `data-theme` on `<html>`
-		//     (see rocketride-default.css header).
-		const bump = () => setThemeVersion((v) => v + 1);
-		const bodyObserver = new MutationObserver(bump);
-		bodyObserver.observe(document.body, {
-			attributes: true,
-			attributeFilter: ['class', 'data-vscode-theme-kind', 'data-vscode-theme-id'],
-		});
-		const rootObserver = new MutationObserver(bump);
-		rootObserver.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ['data-theme'],
-		});
-
-		return () => {
-			bodyObserver.disconnect();
-			rootObserver.disconnect();
-		};
-	}, []);
-
-	// Rebuild MUI theme from --rr-* CSS custom properties
-	const currentTheme = useMemo(() => getMuiTheme(), [themeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-
 	// NOTE: `--icon-color` is driven by the theme contract — see
 	// rocketride-default.css (`:root` + `[data-theme="dark"]` for the standalone
 	// case) and rocketride-vscode.css (`data-vscode-theme-kind` selectors for
-	// the webview case). `buildMuiTheme.ts` bridges the `--rr-icon-color`
-	// token to `--icon-color` via MuiCssBaseline. No runtime override is
-	// needed (or wanted — it would break per-theme customization).
+	// the webview case). No runtime override is needed (or wanted — it would
+	// break per-theme customization).
 
 	// --- Render --------------------------------------------------------------
 
 	return (
-		<ThemeProvider theme={currentTheme}>
-			<CssBaseline />
+		<>
 			<div
 				style={{
 					position: 'absolute',
@@ -223,6 +182,6 @@ export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExter
 					<FlowCanvas cloudPromptDismissed={cloudPromptDismissed} onDismissCloudPrompt={onDismissCloudPrompt} onDismissCloudPromptForever={onDismissCloudPromptForever} />
 				</FlowContainer>
 			</div>
-		</ThemeProvider>
+		</>
 	);
 }

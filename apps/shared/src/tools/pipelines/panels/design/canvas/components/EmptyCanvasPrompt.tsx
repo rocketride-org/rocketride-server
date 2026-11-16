@@ -43,8 +43,8 @@ import { templates as templateCatalog } from '../templates';
 import { commonStyles } from 'shell';
 import type { ITemplate } from '../templates/types';
 import { Icon } from '../util/Icon';
-import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
-import { validateFormData } from 'shared/components/node-config';
+import { hasConfigurableSchema } from '../util/helpers';
+import { constantMarkers, validateConfig } from 'shared/components/node-config';
 import TemplatePickerDialog from './TemplatePickerDialog';
 
 // =============================================================================
@@ -211,17 +211,13 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 			control: [],
 		});
 
-		// Check if the newly added node needs configuration
+		// Check if the newly added node needs configuration. A fresh node holds
+		// only its constant markers (defaults are ghosts, never written), so
+		// validity is the resolver's verdict on that - unconfigured when a
+		// required leaf has no default. Non-configurable definitions never
+		// need configuration.
 		const service = servicesJson?.[providerKey];
-		const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
-		let formDataValid = true;
-		// hideForm/no-properties schemas render no config form — those nodes
-		// never need configuration, so only configurable schemas validate
-		if (pipe?.schema && hasConfigurableSchema(pipe)) {
-			const formData = resolveDefaultFormData(providerKey, pipe.schema);
-			const validation = validateFormData(pipe.schema, formData);
-			formDataValid = validation.errors.length === 0;
-		}
+		const formDataValid = hasConfigurableSchema(service) ? validateConfig(service, constantMarkers(service)).length === 0 : true;
 		onNodeAdded(nodeId, formDataValid);
 	};
 

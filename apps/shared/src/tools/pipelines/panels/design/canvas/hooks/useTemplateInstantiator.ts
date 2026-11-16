@@ -46,8 +46,8 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import { generateNodeId, getEdgesFromNodes, getProjectComponents } from '../util/graph';
 import type { IProject } from '../types';
 import { PIPELINE_SCHEMA_VERSION } from '../types';
-import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
-import { validateFormData } from 'shared/components/node-config';
+import { hasConfigurableSchema } from '../util/helpers';
+import { constantMarkers, validateConfig } from 'shared/components/node-config';
 import type { ITemplate } from '../templates/types';
 import type { INodeData } from '../types';
 
@@ -147,22 +147,12 @@ export function useTemplateInstantiator() {
 				// Use template position, fall back to horizontal stagger
 				const position = comp.position ?? { x: i * 230, y: 0 };
 
-				// Resolve default config from the service JSON schema
-				// (same logic as addNode in FlowGraphContext)
+				// A new node stores only its constant markers (defaults are
+				// ghosts, never written) - same as addNode in FlowGraphContext.
+				// Non-configurable definitions never need configuration.
 				const service = servicesJson?.[provider];
-				const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
-				let formData: Record<string, unknown> = {};
-				let formDataValid = true;
-
-				if (pipe?.schema) {
-					formData = resolveDefaultFormData(nodeId, pipe.schema);
-					// hideForm/no-properties schemas render no config form — seed
-					// their defaults but never flag the node as needing configuration
-					if (hasConfigurableSchema(pipe)) {
-						const validation = validateFormData(pipe.schema, formData);
-						formDataValid = validation.errors.length === 0;
-					}
-				}
+				const config = constantMarkers(service);
+				const formDataValid = hasConfigurableSchema(service) ? validateConfig(service, config).length === 0 : true;
 
 				if (!formDataValid) unconfiguredCount++;
 
@@ -174,8 +164,7 @@ export function useTemplateInstantiator() {
 						provider,
 						name: '',
 						description: '',
-						config: formData,
-						formData,
+						config,
 						formDataValid,
 						input,
 						control,

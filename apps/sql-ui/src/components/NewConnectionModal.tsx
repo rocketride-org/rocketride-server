@@ -38,8 +38,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, ConnectionManager, ContentHeader, Modal } from 'shell';
-import type { IFormData, IService, IServiceSchema } from 'shell';
-import NodeConfigForm, { validationProblemFromResponse } from 'shared/components/node-config';
+import type { IFormData, IService } from 'shell';
+import NodeConfigForm, { hasConfigurableSchema, validationProblemFromResponse } from 'shared/components/node-config';
 import type { INodeConfigFormHandle } from 'shared/components/node-config';
 import { PIPELINE_SCHEMA_VERSION } from 'shared/components/node-config';
 import {
@@ -268,7 +268,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 			try {
 				const def = (await env.getService(provider)) as IService | undefined;
 				if (!alive) return;
-				if (!def?.Pipe) {
+				if (!def?.properties || !hasConfigurableSchema(def)) {
 					setSchemaError(`No configuration schema for ${providerTitle(provider)}.`);
 					return;
 				}
@@ -363,7 +363,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	const handleSave = useCallback(() => {
 		setError('');
 		if (path === 'pipeline') savePipeline();
-		// Direct: drive the RJSF submit; saveDirect runs on validation pass.
+		// Direct: drive the form submit; saveDirect runs on validation pass.
 		else formRef.current?.submit();
 	}, [path, savePipeline]);
 
@@ -467,14 +467,14 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 					{/* Config form — mounts once the full schema resolves. */}
 					{schemaError && <div style={styles.bannerWrap}><Banner variant="error">{schemaError}</Banner></div>}
 					{provider && !service && !schemaError && <div style={styles.listEmpty}>Loading configuration…</div>}
-					{provider && service?.Pipe && (
+					{provider && service?.properties && (
 						<div style={page ? undefined : styles.formScroll}>
 							<NodeConfigForm
 								key={provider}
 								ref={formRef}
 								provider={provider}
-								schema={service.Pipe as IServiceSchema}
-								formData={config}
+								schema={{ properties: service.properties, params: service.params }}
+								config={config}
 								onChange={setConfig}
 								onSubmit={(formData) => { void saveDirect(formData); }}
 								envKeys={envKeys}
