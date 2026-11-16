@@ -44,7 +44,7 @@ The result carries the stamps of plan 3.1: ``token`` (the address),
 (absent on ``@dev``), ``engineKey``, ``specMatch``, ``converged``
 (``none``/``started``/``repointed``), ``ignored`` (server-controlled
 arguments a NAME call passed: ``threads``, ``args``, ``env``, ``ttl``) and
-``warnings`` (``address_collision``, ``repoint_storm``) when any.
+``warnings`` (``repoint_storm``) when any.
 
 The server adds no deadline of its own (plan 3.1): a request runs until the
 pipeline answers, fails, or the caller cancels its pipe. How long to wait is
@@ -103,7 +103,7 @@ class SubmitCommands(DAPConn):
             request: The DAP request. ``arguments`` carry exactly one of
                 ``name`` (the address) or ``pipeline`` (an inline spec), and
                 optionally ``source``, ``team``, ``data`` (inline payload),
-                ``objinfo``, ``mimetype``, ``onChange`` (spec calls), ``origin`` (spec calls),
+                ``objinfo``, ``mimetype``, ``onChange`` (spec calls),
                 ``pipelineTraceLevel``, and the spec-only ``threads``/
                 ``args``/``env``/``ttl``.
 

@@ -66,7 +66,9 @@ const SENSITIVE_KEY_PATTERN = new RegExp(
 );
 
 /** Prefixes that indicate a secret value regardless of key name. */
-const SENSITIVE_VALUE_PREFIXES = ['sk-', 'pk_', 'tk_', 'rr_'];
+// pk_/tk_ task tokens no longer exist (plan B1); account keys and provider
+// keys are the credentials that can appear in output.
+const SENSITIVE_VALUE_PREFIXES = ['sk-', 'rr_'];
 
 /**
  * Returns true if a string value looks like a secret based on its prefix.
@@ -78,7 +80,7 @@ function isSensitiveValue(value: string): boolean {
 /**
  * Recursively redacts sensitive fields in an object.
  * Modifies the object in place, replacing values of sensitive keys with "*****".
- * Also redacts string values that match known secret prefixes (sk-, pk_, tk_, rr_).
+ * Also redacts string values that match known secret prefixes (sk-, rr_).
  *
  * @param obj The object to redact (will be modified in place)
  */

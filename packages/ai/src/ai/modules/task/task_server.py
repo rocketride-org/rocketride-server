@@ -2535,7 +2535,7 @@ class TaskServer(DAPBase):
                     ``'repointed'`` (plan 3.1 stamps).
                 spec_match: With ``on_change``: whether the engine runs the
                     submitted spec.
-                warnings: ``address_collision`` / ``repoint_storm`` warnings.
+                warnings: ``repoint_storm`` warnings, when any.
             """
             result = {
                 'id': control.id,
@@ -2693,7 +2693,6 @@ class TaskServer(DAPBase):
         control.ttl = CONST_DEFAULT_TTL if ttl is None else int(ttl)
         control.trace_level = args.get('pipelineTraceLevel')
         control.setup_declared_parameters()
-        control.origin = args.get('origin')
         control.deployment = deployment
         control.version = version
         control.team_context = team_context or TeamContext(
@@ -2726,12 +2725,16 @@ class TaskServer(DAPBase):
             reusable = use_existing_task or on_change is not None
             if not existing_control.task.is_task_complete() or (reusable and existing_control.dormant):
                 # A Play/.use/submit(spec) for a live presence whose engine runs
-                # other content from another workspace: say so (plan 2.3)
+                # other content is the ordinary on_change case: spec_changed
+                # by default, keep or repoint when asked (plan 3.4). There is
+                # no cross-workspace collision warning (plan 2.3, 2026-11-16):
+                # the differing content IS the protection, so the only
+                # warnings a presence can add are repoint_storm ones.
                 current_hash = existing_control.task.engine_key.split(':', 1)[0]
                 # The same conversion the first start gets: an unkeyable spec
                 # is engine_start_failed here too, never a raw exception
                 new_hash = self._engine_shape(control, args)[0].split(':', 1)[0]
-                warnings = self._collision_warnings(existing_control, control, current_hash, new_hash)
+                warnings: List[Dict[str, Any]] = []
 
                 # submit(spec): on_change decides (plan 3.4)
                 if on_change is not None:
@@ -2904,25 +2907,6 @@ class TaskServer(DAPBase):
                 custom_shape = True
         shared = content.shareable and not custom_shape
         return content.key(shared=shared, owner_id=control.owner_id), shared, threads
-
-    @staticmethod
-    def _collision_warnings(
-        existing: TaskControl, incoming: TaskControl, current_hash: str, new_hash: str
-    ) -> List[Dict[str, Any]]:
-        """
-        The ``address_collision`` warning (plan 2.3), or none.
-
-        Fires when a spec call meets a live presence at the same address whose
-        engine runs different content AND whose ``origin`` (workspace root +
-        path) differs from the caller's: two workspaces reuse one short id.
-
-        Returns:
-            ``[{code, address, origins}]`` or ``[]``.
-        """
-        origins = [existing.origin, incoming.origin]
-        if current_hash == new_hash or not all(origins) or origins[0] == origins[1]:
-            return []
-        return [{'code': 'address_collision', 'address': existing.address, 'origins': origins}]
 
     def _storm_warning(self, control: TaskControl, now: Optional[float] = None) -> List[Dict[str, Any]]:
         """
