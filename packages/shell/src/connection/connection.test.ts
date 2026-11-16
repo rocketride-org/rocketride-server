@@ -721,7 +721,7 @@ test('auth:complete carries the round trip since startOAuth as duration_ms, and 
 test('a consented signup completion keeps attribution only in the credential and preserves round-trip duration', async () => {
 	const signup = signupContext();
 	const page = callbackPage([[AUTH_START_STAMP, String(Date.now() - 41_000)], ['rr:auth:signup', JSON.stringify(signup)]]);
-	const local = recordingSession([['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
 	await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
 		resetTelemetryHostForTests();
 		const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
@@ -1810,7 +1810,7 @@ test('delayed callback rechecks consent, privacy and expiry before persisting si
 			['rr:pkce_verifier', 'verifier-1'],
 			['rr:auth:signup', JSON.stringify(signup)],
 		]);
-		const local = recordingSession([['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at })]]);
+		const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at })]]);
 		const nav = { globalPrivacyControl: false };
 		const win = topLevelWindow({ location: { search: '?code=abc', pathname: '/', origin: 'https://shell.example.test' }, history: { state: null, replaceState: () => {} } });
 		await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: nav }, async () => {
@@ -1840,7 +1840,7 @@ test('delayed callback rechecks consent, privacy and expiry before persisting si
 			const resolveProvider = providerSignup as () => unknown;
 			assert.deepEqual(resolveProvider(), signup);
 			const originalNow = Date.now;
-			if (change === 'withdraw') local.storage.setItem('rr:consent', JSON.stringify({ v: 1, choice: 'rejected', at }));
+			if (change === 'withdraw') local.storage.setItem('rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at }));
 			if (change === 'privacy') nav.globalPrivacyControl = true;
 			if (change === 'expire') Date.now = () => at + 1800001;
 			try {
@@ -1883,7 +1883,7 @@ for (const mode of ['provider', 'direct'] as const) {
 			const signup = signupContext();
 			const session = recordingSession([['rr:auth:signup', 'stale context']]);
 			const local = recordingSession();
-			if (scenario !== 'missing') local.storage.setItem('rr:consent', JSON.stringify({ v: 1, choice: scenario === 'rejected' ? 'rejected' : 'accepted', at: Date.now() }));
+			if (scenario !== 'missing') local.storage.setItem('rr_consent_v1', JSON.stringify({ v: 1, choice: scenario === 'rejected' ? 'rejected' : 'accepted', at: Date.now() }));
 			const redirects: string[] = [];
 			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
 			await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
@@ -1923,9 +1923,9 @@ for (const mode of ['provider', 'direct'] as const) {
 			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 			const session = recordingSession([['rr:auth:signup', 'stale context']]);
 			const records: Array<[string, string]> = [];
-			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr:consent', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
+			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
 			// An expired record no longer counts as a choice.
-			if (scenario === 'expired') records.push(['rr:consent', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() - 366 * 24 * 60 * 60 * 1000 })]);
+			if (scenario === 'expired') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() - 366 * 24 * 60 * 60 * 1000 })]);
 			const local = recordingSession(records);
 			let localStorage: object = local.storage;
 			if (scenario === 'unreadable') localStorage = { getItem: () => { throw new Error('storage denied'); } };
@@ -1977,7 +1977,7 @@ test('a cookieless signup completion reads its context from the OAuth state enve
 		const location = (page.globals.window as { location: { search: string } }).location;
 		if (state !== null) location.search = `?code=abc&state=${encodeURIComponent(state)}`;
 		const local = recordingSession();
-		if (record) local.storage.setItem('rr:consent', JSON.stringify(record));
+		if (record) local.storage.setItem('rr_consent_v1', JSON.stringify(record));
 		await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
 			const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
 			await manager.bootstrap();
@@ -1999,7 +1999,7 @@ test('a cookieless signup completion reads its context from the OAuth state enve
 test('startOAuth in an embedded dev shell does not touch host signup storage', async () => {
 	const signup = signupContext();
 	const session = recordingSession([['rr:auth:signup', 'host context']]);
-	const local = recordingSession([['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
 	const win = { self: {}, top: {}, location: { search: '?rrdev=1', pathname: '/' } };
 	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: {} }, async () => {
 		resetTelemetryHostForTests(); // constructs the queue in the embedded shell: memory-only, no host-tab writes
@@ -2029,12 +2029,12 @@ test('signup consent schema and privacy signals fail closed without blocking nat
 	const win = topLevelWindow({ location: { search: '' } });
 	await withGlobals({ window: win, localStorage: local.storage, sessionStorage: session.storage, navigator: browserNavigator }, () => {
 		for (const record of invalidRecords) {
-			local.storage.setItem('rr:consent', JSON.stringify(record));
+			local.storage.setItem('rr_consent_v1', JSON.stringify(record));
 			assert.equal(currentSignupProperties(signup), null);
 		}
-		local.storage.setItem('rr:consent', '{');
+		local.storage.setItem('rr_consent_v1', '{');
 		assert.equal(currentSignupProperties(signup), null);
-		local.storage.setItem('rr:consent', JSON.stringify(valid));
+		local.storage.setItem('rr_consent_v1', JSON.stringify(valid));
 		assert.deepEqual(currentSignupProperties(signup), signup);
 		assert.equal(currentSignupProperties(new Proxy(signup, { ownKeys: () => { throw new Error('unavailable context'); } })), null);
 		for (const signal of [true, 1, '1', 'yes']) {
@@ -2143,7 +2143,7 @@ test('an error and state the shell did not start (no stored verifier) are left f
 
 test('startOAuth omits a throwing signup getter and allows retry after provider failure', async () => {
 	const session = recordingSession();
-	const local = recordingSession([['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
 	const win = topLevelWindow({ location: { search: '', pathname: '/' } });
 	await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: {} }, async () => {
 		resetTelemetryHostForTests();
@@ -2174,7 +2174,7 @@ test('startOAuth omits a throwing signup getter and allows retry after provider 
 test('native auth facts contain no signup attribution in the queue, its hold, or the retired channel', async () => {
 	const signup = signupContext();
 	const page = callbackPage([['rr:auth:signup', JSON.stringify(signup)]]);
-	const local = recordingSession([['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
+	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);
 	await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
 		resetTelemetryHostForTests();
 		const { manager } = callbackManager({ ...authenticatedResult, isNewUser: true });

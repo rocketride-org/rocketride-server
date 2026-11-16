@@ -71,13 +71,13 @@ test('reload follows another tab: a removed record emits undecided with origin e
 	consent.subscribe((state, origin) => { seen.push([state, origin]); });
 	consent.decide('accepted');
 	assert.deepEqual(seen, [['accepted', 'local']]);
-	store.delete('rr:consent'); // the other tab withdrew
+	store.delete('rr_consent_v1'); // the other tab withdrew
 	consent.reload();
 	assert.equal(consent.state(), 'undecided');
 	assert.deepEqual(seen.at(-1), ['undecided', 'external']);
 	consent.reload();
 	assert.equal(seen.length, 2, 'no change, no emit');
-	store.set('rr:consent', JSON.stringify({ v: 1, choice: 'rejected', at: 999_000 })); // the other tab rejected
+	store.set('rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: 999_000 })); // the other tab rejected
 	consent.reload();
 	assert.deepEqual(seen.at(-1), ['rejected', 'external']);
 	assert.equal(consent.state(), 'rejected');

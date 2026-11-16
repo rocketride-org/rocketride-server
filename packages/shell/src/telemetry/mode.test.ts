@@ -165,12 +165,12 @@ test('a failing consented instance keeps the cookieless routing', () => {
 
 test('clearPostHogStorage removes ph_ keys from both storages and expires ph_ cookies', () => {
 	const mk = (keys: string[]) => { const d = new Map(keys.map((k) => [k, '1'])); return { get length() { return d.size; }, key: (i: number) => Array.from(d.keys())[i] ?? null, removeItem: (k: string) => { d.delete(k); }, d }; };
-	const local = mk(['ph_phc_x_posthog', 'rr:consent', '__ph_opt_in_out_x']); const session = mk(['ph_phc_x_window_id', 'rr:auth:start_ts']);
+	const local = mk(['ph_phc_x_posthog', 'rr_consent_v1', '__ph_opt_in_out_x']); const session = mk(['ph_phc_x_window_id', 'rr:auth:start_ts']);
 	const doc = { cookie: 'ph_phc_x_posthog=abc; other=1' };
 	const written: string[] = [];
 	const docProxy = { get cookie() { return doc.cookie; }, set cookie(v: string) { written.push(v); } };
 	clearPostHogStorage(docProxy, local, session, 'cloud.rocketride.ai');
-	assert.deepEqual(Array.from(local.d.keys()), ['rr:consent']);
+	assert.deepEqual(Array.from(local.d.keys()), ['rr_consent_v1']);
 	assert.deepEqual(Array.from(session.d.keys()), ['rr:auth:start_ts']);
 	assert.ok(written.some((w) => w.startsWith('ph_phc_x_posthog=;') && w.includes('domain=.rocketride.ai')));
 	assert.ok(written.every((w) => !w.startsWith('other=')));

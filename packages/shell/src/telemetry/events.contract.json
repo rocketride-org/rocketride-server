@@ -40,7 +40,7 @@
 				"accepted",
 				"rejected"
 			],
-			"description": "The visitor's consent record at capture time (our own rr:consent, never PostHog's flag). undecided and rejected: the cookieless instance; accepted: the persistent instance with replay and heatmaps."
+			"description": "The visitor's consent record at capture time (our own rr_consent_v1, never PostHog's flag). undecided and rejected: the cookieless instance; accepted: the persistent instance with replay and heatmaps."
 		},
 		"rr_replay_gate": {
 			"type": "string",
