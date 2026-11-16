@@ -187,13 +187,13 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
-     docker create --name rocketride-engine -p 127.0.0.1:5565:5565 -e ROCKETRIDE_APIKEY=rr_local ghcr.io/rocketride-org/rocketride-engine:latest
+     docker create --name rocketride-engine -p 127.0.0.1:5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
      docker start rocketride-engine
      ```
 
      The image is amd64 only. On Apple Silicon, add `--platform linux/amd64` to both `docker pull` and `docker create`.
 
-     `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send, so the CLI and SDK must send the same value (`export ROCKETRIDE_APIKEY=rr_local`). Any string that starts with `rr_` works. To connect a coding agent over MCP, follow the [coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/).
+     Clients need a non-empty key, and an engine started without one accepts any value (for example `export ROCKETRIDE_APIKEY=rr_local`). To use the engine's built-in MCP server, start it with `-e ROCKETRIDE_APIKEY=rr_...` and send that same value; the [coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/) has the full MCP setup.
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
@@ -328,10 +328,11 @@ Docker, on-premises, or a local process in your IDE. Full control, full data res
 
 <br/>
 
-Point a client at your local engine in one line:
+Point a client at your local engine:
 
 ```bash
 ROCKETRIDE_URI=ws://localhost:5565
+ROCKETRIDE_APIKEY=rr_local
 ```
 
 <p align="center">

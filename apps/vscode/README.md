@@ -29,9 +29,8 @@
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE -
-using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
+Build, test and publish durable agents that scale in production.
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 

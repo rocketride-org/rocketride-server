@@ -52,9 +52,8 @@ schedules, server-side file storage, and run-log replay.
 [RocketRide](https://rocketride.org) is an open source AI meta-harness with the only
 enterprise-grade runtime built on C++. Build, test and publish durable agents that
 scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
-stage, test, release and maintain, with a rapidly growing node library including
-agents, models, vector/graph/SQL databases, OCR, tools, evals, data stores, NER and
-more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
+stage, test, release and maintain. Its rapidly growing node library includes agents,
+models, vector/graph/SQL databases, OCR, tools, evals, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 
 ## Configuration
 
