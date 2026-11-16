@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from typing import Any
 
 from rocketlib import IInstanceBase, tool_function, warning
@@ -52,6 +53,11 @@ def _as_dict(args: Any) -> dict:
     return args if isinstance(args, dict) else {}
 
 
+# Two attached download_file calls of one binding run on worker threads and
+# os.remove blocks inside the retention step: one lock for the read-modify-write
+_TEMP_FILES_LOCK = threading.Lock()
+
+
 class IInstance(IInstanceBase):
     """One request's view of the bucket: its downloads live and die with the binding (plan 4.1, 12 B)."""
 
@@ -60,11 +66,12 @@ class IInstance(IInstanceBase):
 
     def _retain_temp_file(self, path: str) -> None:
         """Track ``path`` for this request and delete its older download so disk use stays bounded."""
-        if self._temp_files is None:
-            self._temp_files = []
-        # A path whose deletion failed stays tracked so endInstance retries it
-        self._temp_files = [older for older in self._temp_files if not self._remove_temp_path(older)]
-        self._temp_files.append(path)
+        with _TEMP_FILES_LOCK:
+            if self._temp_files is None:
+                self._temp_files = []
+            # A path whose deletion failed stays tracked so endInstance retries it
+            self._temp_files = [older for older in self._temp_files if not self._remove_temp_path(older)]
+            self._temp_files.append(path)
 
     @staticmethod
     def _remove_temp_path(path: str) -> bool:

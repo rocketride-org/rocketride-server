@@ -86,6 +86,7 @@ class UsageSink:
         self._post = post
         # Pending increments by ledger key: {key: {'amount', 'request_count', 'row'}}
         self._pending: Dict[str, Dict[str, Any]] = {}
+        self._unconfirmed: Dict[str, Dict[str, Any]] = {}
 
     @staticmethod
     def day_number(now: Optional[float] = None) -> int:
@@ -113,6 +114,9 @@ class UsageSink:
             pending = self._pending.get(key)
             if pending is None:
                 pending = self._pending[key] = {
+                    # The increment's own identity: the ledger refuses a second
+                    # write of it, so a retry after an unanswered write is safe
+                    'increment_id': uuid.uuid4().hex,
                     'amount': 0.0,
                     'request_count': 0,
                     'row': {
@@ -130,39 +134,54 @@ class UsageSink:
 
     async def flush(self) -> None:
         """
-        Write every pending increment.
+        Write every increment not yet confirmed.
 
-        Each entry is DETACHED before its write is awaited, so increments
-        posted meanwhile start a new entry and are never lost with the old
-        one. A write that fails is dropped, not retried: the day row's key
-        does not identify the increment, so a retry after a write that
-        committed but did not answer would add it twice; the loss is bounded
-        by one flush window of one user's usage on one pipe (plan 8.2).
+        Each open entry is DETACHED before its write is awaited, so increments
+        posted meanwhile start a new entry (a new increment id) and are never
+        lost with the old one. A write that fails stays UNCONFIRMED and is
+        retried first on the next flush, with the same increment id: the
+        ledger records applied increment ids with the addition in one
+        transaction and refuses a second write of one, so a write that
+        committed but did not answer is never added twice (plan 8.2).
         """
-        if not self._pending:
+        if not self._pending and not self._unconfirmed:
             return
         post = self._post
         if post is None:
             from ai.account import account
 
             post = account.apply_usage
+        # Step 1: the earlier failures first, then the open entries detached
         for key in list(self._pending):
             pending = self._pending.pop(key, None)
-            if pending is None:
-                continue
+            if pending is not None:
+                self._unconfirmed[pending['increment_id']] = pending
+        # Step 2: one write per increment; confirmed ones are forgotten
+        for increment_id, pending in list(self._unconfirmed.items()):
             try:
                 await post(
                     amount=pending['amount'],
                     request_count=pending['request_count'],
+                    increment_id=increment_id,
                     **pending['row'],
                 )
             except Exception as e:
-                debug(f'[TaskMetrics] Usage increment {key} ({pending["amount"]}) not written and dropped: {e}')
+                debug(
+                    f'[TaskMetrics] Usage increment {pending["row"]["idempotency_key"]} ({increment_id}) not '
+                    f'written, retried on the next flush: {e}'
+                )
+                continue
+            self._unconfirmed.pop(increment_id, None)
 
     @property
     def pending(self) -> Dict[str, Dict[str, Any]]:
-        """The increments not yet confirmed written (for tests and the audit)."""
+        """The OPEN increments, by ledger key: still taking posts, not yet sent."""
         return self._pending
+
+    @property
+    def unconfirmed(self) -> Dict[str, Dict[str, Any]]:
+        """The increments sent but not confirmed written, by increment id: retried on the next flush."""
+        return self._unconfirmed
 
 
 class TaskMetrics:
@@ -254,6 +273,9 @@ class TaskMetrics:
         # What the sink has already posted per resource, so the engine owner's
         # cumulative debit never charges a caller's request a second time
         self._attributed: Dict[str, float] = {}
+        # The debit lines an earlier report wrote with a positive amount: a
+        # later report brings one to zero by writing a zero replacement
+        self._debited: set = set()
 
         # Process handle
         self._process = psutil.Process(pid)
@@ -726,8 +748,12 @@ class TaskMetrics:
                 'tokens_total': round(self._status.tokens.total, 2),
             }
             for resource, description, amount in token_totals:
-                if amount <= 0:
+                # A line attribution brought to zero still REPLACES the row an
+                # earlier report wrote, else the owner keeps paying what the
+                # caller was charged meanwhile
+                if amount <= 0 and description not in self._debited:
                     continue
+                self._debited.add(description) if amount > 0 else self._debited.discard(description)
                 idem_key = f'task:{self.billing_run_id}:{description}'
                 await account.apply_debit(
                     org_id=self.org_id,
@@ -981,6 +1007,9 @@ class TaskMetrics:
         # Send final billing report on shutdown (captures any remaining incremental
         # usage), and the last request increments with it
         async with self._metrics_lock:
+            # A closed bucket still waiting for its claim is attributed now,
+            # before the owner's final report subtracts it
+            self._adopt_orphans()
             await self._report_to_billing_system()
             await self.usage_sink.flush()
 

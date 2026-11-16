@@ -368,6 +368,7 @@ class AccountBase(ABC):
         request_count: int,
         context: dict,
         description: str | None = None,
+        increment_id: str = '',
     ) -> bool:
         """
         Add one increment of named-pipe usage to its DAY row (plan 8.2, S11).
@@ -389,9 +390,13 @@ class AccountBase(ABC):
             request_count:   Requests this increment covers.
             context:         Audit context (the publication served, source, rung).
             description:     Line-item detail (the metric name).
+            increment_id:    This increment's own id: the ledger records it with
+                             the addition in one transaction and refuses a
+                             second write of it, so the sender may retry an
+                             unanswered write without adding twice.
 
         Returns:
-            True when a row was added to, False on a no-op.
+            True when a row was added to, False on a no-op (a repeated increment included).
         """
         return False
 

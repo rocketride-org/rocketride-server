@@ -640,9 +640,10 @@ def test_tokens_for_bills_gpu_under_tokens_and_metered_keys_under_their_own_name
 
 
 @pytest.mark.asyncio
-async def test_the_sink_coalesces_increments_and_never_adds_a_failed_write_twice():
-    """Increments of one row add up in the buffer; a write, confirmed or failed, is detached and never resent
-    (the day row's key cannot tell a replay from a new increment, plan 8.2); increments after it start afresh.
+async def test_the_sink_coalesces_increments_and_retries_a_failed_write_under_its_own_id():
+    """Increments of one row add up in an OPEN entry; a flush detaches it and sends it under its increment id; a
+    failed write is retried on the next flush with the SAME id (the ledger refuses a repeat), while increments
+    posted meanwhile form a new entry with a new id.
     """
     writes = []
     fail = {'on': True}
@@ -660,16 +661,26 @@ async def test_the_sink_coalesces_increments_and_never_adds_a_failed_write_twice
     key = 'usage:20772:acme.docBrain:user-a:hold_time'
     assert sink.pending[key]['amount'] == 0.75 and sink.pending[key]['request_count'] == 2
     assert sink.pending['usage:20772:acme.docBrain:user-a:tokens']['request_count'] == 1
+    first_id = sink.pending[key]['increment_id']
 
     await sink.flush()
-    assert writes == [] and sink.pending == {}, 'a failed write is dropped: a replay could add it twice'
-    fail['on'] = False
+    assert writes == [] and sink.pending == {} and len(sink.unconfirmed) == 2, 'detached, unconfirmed, nothing lost'
+    # Posted while the first write is out: a NEW entry under a new id
     sink.post(_usage(3), {'hold_time': 0.75}, now=now)
+    assert sink.pending[key]['increment_id'] != first_id
+    fail['on'] = False
     await sink.flush()
-    assert [w['idempotency_key'] for w in writes] == [key]
-    hold = writes[0]
-    assert (hold['amount'], hold['request_count'], hold['user_id'], hold['team_id']) == (0.75, 1, 'user-a', 'team-home')
-    assert sink.pending == {}
+    holds = [w for w in writes if w['resource'] == 'hold_time']
+    assert [w['increment_id'] for w in holds] == [first_id, sink_second_id(holds)]
+    assert [(w['amount'], w['request_count']) for w in holds] == [(0.75, 2), (0.75, 1)]
+    assert holds[0]['user_id'] == 'user-a' and holds[0]['team_id'] == 'team-home'
+    assert sink.pending == {} and sink.unconfirmed == {}
+
+
+def sink_second_id(holds):
+    """The second hold write's increment id (distinct from the first by construction)."""
+    assert holds[1]['increment_id'] != holds[0]['increment_id']
+    return holds[1]['increment_id']
 
 
 def test_a_tree_without_a_paying_unit_is_not_posted():
