@@ -230,6 +230,15 @@ export interface AppListing {
 }
 
 /**
+ * What ONE save may carry: any subset of the listing fields. Each pane
+ * persists only the fields it owns (the STORE tab: mode + plans; the PACKAGE
+ * tab: name, description and the packaging fields), so two panes saving the
+ * same manifest never write each other's fields back stale. A field that is
+ * absent is left as it is on disk.
+ */
+export type AppListingPatch = Partial<Omit<AppListing, 'appId'>>;
+
+/**
  * Reads the STORE listing from the folder's appManifest.
  *
  * @param folder - The app's bound folder (absolute path).
@@ -300,31 +309,34 @@ export function readAppListing(folder: string): AppListing {
 }
 
 /**
- * Writes the app-manifest draft back into the folder's appManifest — name,
- * description, mode, billing.plans, and the packaging fields (icon, readme,
- * include). Plan metadata rides along verbatim; other billing keys are
- * preserved. Empty values DELETE their key (an empty plan list removes
- * billing.plans and an emptied billing block entirely; '' icon/readme and
- * an empty include list drop the manifest key) so the manifest never
- * accumulates dead fields.
+ * Writes the fields a save CARRIES back into the folder's appManifest —
+ * name, description, mode, billing.plans, and the packaging fields (icon,
+ * readme, include, typecheck). A field absent from the patch is left as it
+ * is on disk, so each pane persists only what it owns (AppListingPatch) and
+ * a Store save can never write a stale name over a Package save. Plan
+ * metadata rides along verbatim; other billing keys are preserved. Empty
+ * values DELETE their key (an empty plan list removes billing.plans and an
+ * emptied billing block entirely; '' icon/readme and an empty include list
+ * drop the manifest key) so the manifest never accumulates dead fields.
  *
  * @param folder - The app's bound folder (absolute path).
- * @param listing - The draft to persist.
+ * @param listing - The fields to persist.
  */
-export function saveAppListing(folder: string, listing: AppListing): void {
+export function saveAppListing(folder: string, listing: AppListingPatch): void {
 	const file = readPkg(folder);
 	const manifest = file.pkg.appManifest as AppManifestJson;
-	manifest.name = listing.name;
-	manifest.description = listing.description;
-	manifest.mode = listing.mode;
-	if (listing.plans.length > 0) {
-		manifest.billing = { ...(manifest.billing ?? {}), plans: listing.plans };
-	} else if (manifest.billing) {
-		delete manifest.billing.plans;
-		if (Object.keys(manifest.billing).length === 0) delete manifest.billing;
+	if (listing.name !== undefined) manifest.name = listing.name;
+	if (listing.description !== undefined) manifest.description = listing.description;
+	if (listing.mode !== undefined) manifest.mode = listing.mode;
+	if (listing.plans !== undefined) {
+		if (listing.plans.length > 0) {
+			manifest.billing = { ...(manifest.billing ?? {}), plans: listing.plans };
+		} else if (manifest.billing) {
+			delete manifest.billing.plans;
+			if (Object.keys(manifest.billing).length === 0) delete manifest.billing;
+		}
 	}
-	// Packaging fields — only touched when the draft carries them (the STORE
-	// tab's save omits them; the PACKAGE tab's save owns them).
+	// Packaging fields — the same rule: only touched when the patch carries them.
 	if (listing.icon !== undefined) {
 		if (listing.icon) manifest.icon = listing.icon;
 		else delete manifest.icon;

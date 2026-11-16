@@ -25,14 +25,16 @@
 // =============================================================================
 
 /**
- * The DESIGN view: `Preview | Components | Events | Console | Errors` as
- * pill-switched panes of ONE workspace (the Status-screen idiom — pills
- * switch the lens, never the context: the dev session, watch state, and
- * accumulated feeds persist across pane switches). Components is the one
- * deliberate stretch of that idiom: a stateless reference pane (the stock
- * component gallery) rather than a lens on the session. The Code surface
- * is NOT a pill — it is a top-level activity view owned by
- * AppBuilderScreen (web hosts only).
+ * The DESIGN view: `Preview | Components` as pill-switched panes of ONE
+ * workspace (the Status-screen idiom — pills switch the lens, never the
+ * context: the dev session, watch state, and accumulated feeds persist
+ * across pane switches). The console — console output, errors and platform
+ * events as one log — is a pane DOCKED UNDER the preview (named-pipes mockup
+ * 1.1, 2026-11-16), opened and closed from the preview toolbar or its own ✕,
+ * never a pill that hides the app it describes. Components is the one
+ * deliberate stretch of the idiom: a stateless reference pane (the stock
+ * component gallery) rather than a lens on the session. Code editing lives
+ * outside this screen on every host.
  *
  * Host differences ride the capability flags: the native-files strip
  * renders only when `hasNativeFiles` (VSCode); Debug only when `canDebug`.
@@ -128,6 +130,8 @@ interface PreviewPrefs {
 	inheritAuth: boolean;
 	/** Fit mode: the frame tracks the container size (10px margins). */
 	fit: boolean;
+	/** The console docked under the preview is open (the toolbar toggle / its ✕). */
+	console?: boolean;
 }
 
 /** Breathing room the fitted frame keeps from every container edge. */
@@ -451,6 +455,44 @@ const styles: Record<string, React.CSSProperties> = {
 		flexDirection: 'column',
 		position: 'relative',
 	},
+	// The console docked under the preview: a fixed band the preview
+	// surface yields to, with its own head (title, Clear/Copy/✕) and the
+	// shared LogList below.
+	consoleDock: {
+		height: 200,
+		flexShrink: 0,
+		display: 'flex',
+		flexDirection: 'column',
+		borderTop: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-default)',
+	},
+	consoleHead: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+		padding: '4px 10px',
+		borderBottom: '1px solid var(--rr-border)',
+		flexShrink: 0,
+	},
+	consoleTitle: {
+		fontSize: 12,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+	},
+	consoleSub: {
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+	},
+	consoleActions: {
+		marginLeft: 'auto',
+		display: 'flex',
+		gap: 6,
+	},
+	consoleGlyph: {
+		fontFamily: 'var(--rr-font-mono, Consolas, monospace)',
+		fontSize: 11,
+		fontWeight: 700,
+	},
 	previewSurface: {
 		flex: 1,
 		minHeight: 0,
@@ -512,6 +554,10 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 	// Inherit Auth: hand the host's session to the preview (default) or make
 	// the preview run its own OAuth cycle.
 	const [inheritAuth, setInheritAuth] = useState(() => storedPrefs?.inheritAuth ?? true);
+	// The console docked under the preview (named-pipes mockup 1.1): open by
+	// default, closed by its ✕ or the toolbar toggle, remembered with the
+	// other preview prefs. It is a pane of the PREVIEW, not a pill of its own.
+	const [consoleOpen, setConsoleOpen] = useState(() => storedPrefs?.console ?? true);
 	// A persisted "off" must reach the host at mount — its own default is ON.
 	useEffect(() => {
 		if (!(storedPrefs?.inheritAuth ?? true)) host.setInheritAuth?.(false);
@@ -651,12 +697,13 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 	const [watch, setWatch] = useState<WatchStatus | null>(null);
 	useEffect(() => host.subscribeWatch?.((s) => setWatch(s)), [host.subscribeWatch]);
 
-	// ── Pill menu — Errors and events fold into Console (one log), so no
-	//    pills of their own. Code lives up on the activity strip, not here.
+	// ── Pill menu — Preview and Components. Errors and events fold into the
+	//    console (one log), and the console is a pane DOCKED UNDER the preview
+	//    (toolbar toggle / its ✕), not a pill: switching to it must never hide
+	//    the app it describes. Code lives up on the activity strip, not here.
 	const pillOptions = useMemo<Array<{ id: DesignPane; label: string }>>(() => [
 		{ id: 'preview', label: 'Preview' },
 		{ id: 'components', label: 'Components' },
-		{ id: 'console', label: 'Console' },
 	], []);
 
 	/** Switch panes, mounting the Components gallery on its first visit. */
@@ -791,10 +838,10 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 	const prefsMountedRef = useRef(false);
 	useEffect(() => {
 		if (!prefsMountedRef.current) { prefsMountedRef.current = true; return; }
-		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth, fit: fitMode };
+		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth, fit: fitMode, console: consoleOpen };
 		host.setPref?.(PREVIEW_PREFS_KEY, bag);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- host is stable; persist on value changes only
-	}, [layout, orientation, previewZoom, presetIdx, inheritAuth, fitMode]);
+	}, [layout, orientation, previewZoom, presetIdx, inheritAuth, fitMode, consoleOpen]);
 
 	// In-flight pan drag; pointer capture on the backdrop keeps move events
 	// coming even while the pointer crosses the preview iframe.
@@ -1002,6 +1049,15 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 							disabled={fitMode}
 							onClick={() => setHandTool((h) => !h)}
 						><Hand size={14} /></button>
+						{/* Console toggle — opens/closes the log docked under the
+						    preview (the pane's ✕ is the other way to close it). */}
+						<button
+							style={consoleOpen ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
+							title={consoleOpen ? 'Hide the console under the preview' : 'Show the console under the preview'}
+							aria-label="Console"
+							aria-pressed={consoleOpen}
+							onClick={() => setConsoleOpen((o) => !o)}
+						><span style={styles.consoleGlyph} aria-hidden="true">&gt;_</span></button>
 						{/* Gear — the devtools-style overflow menu for the options
 						    that are not part of the geometry cluster. */}
 						<button
@@ -1081,6 +1137,28 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 							)}
 						</div>
 					</div>
+					{/* The console, DOCKED under the preview (named-pipes mockup 1.1,
+					    Ryan): the ONE log — console output, errors (red), platform
+					    events (info) — in arrival order, with Clear, Copy and the ✕
+					    that closes it. The preview above stays mounted either way. */}
+					{consoleOpen && (
+						<div style={styles.consoleDock}>
+							<div style={styles.consoleHead}>
+								<span style={styles.consoleTitle}>Console</span>
+								<span style={styles.consoleSub}>console · errors · events, one log</span>
+								<span style={styles.consoleActions}>
+									<button style={styles.toolBtn} onClick={() => setLogRows([])}>Clear</button>
+									<button style={styles.toolBtn} onClick={copyLog}>Copy</button>
+									<button style={styles.toolBtn} title="Close the console (reopen it from the toolbar)" aria-label="Close the console" onClick={() => setConsoleOpen(false)}>✕</button>
+								</span>
+							</div>
+							<LogList
+								rows={logRows}
+								emptyTitle="No output yet"
+								emptyDescription="Everything lands here as the app runs: console.log / warn / error from the preview, runtime and build errors, and shell platform events."
+							/>
+						</div>
+					)}
 				</div>
 			)}
 
@@ -1094,21 +1172,6 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 				</div>
 			)}
 
-			{/* PANE: CONSOLE — the ONE log: console output, errors (red), and
-			    platform events (info), interleaved in arrival order. */}
-			{pane === 'console' && (
-				<div style={styles.paneHost}>
-					<div style={styles.logToolbar}>
-						<button style={styles.toolBtn} onClick={() => setLogRows([])}>Clear</button>
-						<button style={styles.toolBtn} onClick={copyLog}>Copy</button>
-					</div>
-					<LogList
-						rows={logRows}
-						emptyTitle="No output yet"
-						emptyDescription="Everything lands here as the app runs: console.log / warn / error from the preview, runtime and build errors, and shell platform events."
-					/>
-				</div>
-			)}
 		</div>
 	);
 };

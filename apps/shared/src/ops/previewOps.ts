@@ -22,7 +22,7 @@
 // =============================================================================
 
 import type { ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
-import type { AppSummary, AppBuilderCapabilities, ListingDraft, PreflightCheck } from '../tools/appdev/types';
+import type { AppSummary, AppBuilderCapabilities, ListingDraft, ListingPatch, PreflightCheck } from '../tools/appdev/types';
 
 /**
  * What `host.preview.load` answers: the page's full boot state. The
@@ -76,7 +76,7 @@ export interface PreviewHostOpMap extends ShellOpMap {
 	/** The current listing draft from the app's package.json (null = none). */
 	'host.preview.loadListing': ShellOpSpec<{ app: string }, ListingDraft | null>;
 	/** Persists the listing draft into the app's package.json. */
-	'host.preview.saveListing': ShellOpSpec<{ app: string; draft: ListingDraft }, void>;
+	'host.preview.saveListing': ShellOpSpec<{ app: string; draft: ListingPatch }, void>;
 	/** Moves a `local.*` app to `<developerId>.<name>` in its files, then
 	 *  reopens the App Builder on the new id. Answers the new id. */
 	'host.preview.adoptDeveloperId': ShellOpSpec<{ app: string; developerId: string }, { appId: string }>;

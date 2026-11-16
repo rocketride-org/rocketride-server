@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-import type { AppListing } from 'rocketride/app-pack';
+import type { AppListing, AppListingPatch } from 'rocketride/app-pack';
 
 
 // =============================================================================
@@ -164,6 +164,9 @@ export type { BillingPlan } from 'rocketride/app-pack';
 // shape, one owner (rocketride/app-pack reads and writes package.json's
 // appManifest). The tool-side name survives for its many consumers.
 export type ListingDraft = AppListing;
+/** What one save carries: the subset of listing fields the saving pane owns
+ * (Store: mode + plans; Package: name, description, packaging fields). */
+export type ListingPatch = AppListingPatch;
 
 /** One pre-flight readiness check row. */
 export interface PreflightCheck {
@@ -414,8 +417,9 @@ export interface IAppBuilderHost {
 	// ── Store ────────────────────────────────────────────────────────────
 	/** Load the current listing draft (null = no server record yet). */
 	loadListing?: () => Promise<ListingDraft | null>;
-	/** Persist the listing draft. */
-	saveListing?: (draft: ListingDraft) => Promise<void>;
+	/** Persist the fields the patch carries; fields it omits stay as they are
+	 * on disk, so each pane writes only what it owns. */
+	saveListing?: (patch: ListingPatch) => Promise<void>;
 	/** Run the pre-flight checks for the current build. */
 	runPreflight?: () => Promise<PreflightCheck[]>;
 	/** Native file picker for a manifest asset. Returns the picked file's
@@ -471,10 +475,13 @@ export interface NewAppIdentity {
 // VIEW VOCABULARY
 // =============================================================================
 
-/** The activity views. Code editing lives outside the App Builder on every
-    host (VSCode edits natively; the web edits through the workspace
-    Explorer's file tabs) — there is no Code stage. */
-export type AppBuilderStage = 'dashboard' | 'design' | 'package' | 'store' | 'deploy';
+/** The activity views: DESIGN (the landing view) · PACKAGE · DEPLOY. Code
+    editing lives outside the App Builder on every host (VSCode edits
+    natively; the web edits through the workspace Explorer's file tabs) —
+    there is no Code stage. DASHBOARD was retired and STORE became a PACKAGE
+    side tab on 2026-11-16 (named-pipes mockups 1.x); the review thread
+    lives on PACKAGE › Review. */
+export type AppBuilderStage = 'design' | 'package' | 'deploy';
 
 /** The DESIGN pill panes. */
 export type DesignPane = 'preview' | 'components' | 'events' | 'console' | 'errors';

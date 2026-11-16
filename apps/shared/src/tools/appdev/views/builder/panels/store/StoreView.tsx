@@ -67,6 +67,11 @@ export interface IStoreViewProps {
 	readOnly?: boolean;
 	/** Switch the builder to another stage — the "Ready to deploy" handoff. */
 	onNavigate?: (stage: AppBuilderStage) => void;
+	/**
+	 * Rendered as the PACKAGE › Store side tab (the only place since
+	 * 2026-11-16): no view header of its own, the PACKAGE page carries it.
+	 */
+	embedded?: boolean;
 }
 
 // =============================================================================
@@ -306,7 +311,7 @@ function storeFields(d: ListingDraft): string {
  *
  * @param props - See {@link IStoreViewProps}.
  */
-export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNavigate }) => {
+export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNavigate, embedded = false }) => {
 	// ── Data — loaded through the host adapter ───────────────────────────
 	const [draft, setDraft] = useState<ListingDraft | null>(null);
 	// The saved manifest the draft was seeded from — the dirty compare's
@@ -350,15 +355,20 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 		void refresh();
 	}, [refresh]);
 
-	/** Persist the WHOLE form (mode + plans) through the host, then reload —
-	 *  the refresh re-seeds the baseline (the footer dematerializes) and
-	 *  reruns pre-flight so the plan-count check tracks the save. */
+	/** Persist the Store-owned fields (mode + plans) through the host, then
+	 *  reload — the refresh re-seeds the baseline (the footer dematerializes)
+	 *  and reruns pre-flight so the plan-count check tracks the save.
+	 *
+	 *  ONLY this pane's fields are sent: the writer leaves every field the
+	 *  patch omits as it is on disk, so a Package save made since this pane
+	 *  loaded (name, description, assets) is never written back stale, and no
+	 *  read-modify-write of the whole listing happens here at all. */
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing || readOnly) return;
 		setSaving(true);
 		setError('');
 		try {
-			await host.saveListing(draft);
+			await host.saveListing({ mode: draft.mode, plans: draft.plans });
 			await refresh();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
@@ -390,10 +400,12 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 		return (
 			<div style={styles.wrap}>
 				<div style={styles.scroll}>
-					<div style={styles.head}>
-						<div style={styles.h1}>{app.name}</div>
-						<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this.</div>
-					</div>
+					{!embedded && (
+						<div style={styles.head}>
+							<div style={styles.h1}>{app.name}</div>
+							<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this.</div>
+						</div>
+					)}
 					<div style={styles.emptyWrap}>
 						<EmptyState title="Store publishing is not wired up yet" description="Once the marketplace flows land, the listing form, pre-flight checks, and the per-version review timeline appear here." />
 					</div>
@@ -418,10 +430,12 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 			    footer bar below stays anchored. */}
 			<div style={styles.scroll}>
 				{/* View header — title + one-line purpose */}
-				<div style={styles.head}>
-					<div style={styles.h1}>{app.name}</div>
-					<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this. Every public version is reviewed; submission happens on the Deploy tab.</div>
-				</div>
+				{!embedded && (
+					<div style={styles.head}>
+						<div style={styles.h1}>{app.name}</div>
+						<div style={styles.sub}>Store: the commerce posture and the public rung (pricing mode, plans, and the requirements every public version must pass). Only needed to distribute on the App Store; @me and @team deploys skip all of this. Every public version is reviewed; submission happens on the Deploy tab.</div>
+					</div>
+				)}
 
 				{/* Save failure — the footer stays dirty, so the reason has to
 				    be on screen or the retry looks like a no-op. */}

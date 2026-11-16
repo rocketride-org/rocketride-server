@@ -26,10 +26,12 @@
 
 /**
  * The App Builder's entire view surface: a top TabControl strip switching
- * the activity views — DASHBOARD | DESIGN | PACKAGE | STORE | DEPLOY —
- * with the app's `id · version` in the trailing slot (revised decision D1:
- * activity names, no coach bar, no artifact views). DASHBOARD is the
- * landing view; PACKAGE is the complete-app bar, STORE is commerce only.
+ * the activity views — DESIGN | PACKAGE | DEPLOY — with the app's
+ * `id · version` in the trailing slot (revised decision D1: activity names,
+ * no coach bar, no artifact views). DESIGN is the landing view; PACKAGE
+ * describes the app in side tabs (Identity, Assets, Build, Store,
+ * Requirements, Review). DASHBOARD was retired and STORE folded into
+ * PACKAGE on 2026-11-16 (named-pipes mockups 1.x).
  * Code editing lives OUTSIDE this screen on every host (VSCode edits
  * natively; the web edits through the workspace Explorer's file tabs).
  *
@@ -43,11 +45,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { TabControl } from 'shell';
 import type { ViewMenu } from 'shell';
-import { DashboardView } from './panels/dashboard/DashboardView';
 import { DesignView } from './panels/design/DesignView';
 import { DeployView } from './panels/deploy/DeployView';
 import { PackageView } from './panels/package/PackageView';
-import { StoreView } from './panels/store/StoreView';
 import { NamespaceBanner } from './NamespaceBanner';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost } from '../../types';
 
@@ -60,17 +60,21 @@ const STAGE_PREF_KEY = 'stage';
 
 /**
  * Maps a persisted stage to the CURRENT vocabulary, defaulting to the landing
- * view. Two legacy values exist and must not resurrect a tab that is gone:
- * 'develop' predates the DEVELOP -> DESIGN rename, and 'code' predates the
- * web host dropping the CODE tab (the Explorer's file tabs replaced it).
+ * view (DESIGN). Legacy values must not resurrect a tab that is gone:
+ * 'develop' predates the DEVELOP -> DESIGN rename, 'code' predates the web
+ * host dropping the CODE tab, 'dashboard' predates the DASHBOARD retirement
+ * and 'store' predates STORE becoming a PACKAGE side tab (2026-11-16).
  *
  * @param raw - The persisted value, or undefined when never persisted.
  * @returns A stage that exists today.
  */
 function normalizeStage(raw: unknown): AppBuilderStage {
-	if (raw === 'develop') return 'design';
-	if (raw === 'design' || raw === 'package' || raw === 'store' || raw === 'deploy' || raw === 'dashboard') return raw;
-	return 'dashboard';
+	if (raw === 'design' || raw === 'package' || raw === 'deploy') return raw;
+	// 'develop' predates the DEVELOP -> DESIGN rename; 'dashboard' predates
+	// the DASHBOARD retirement (DESIGN is the landing view now); 'store'
+	// predates STORE becoming a PACKAGE side tab (2026-11-16).
+	if (raw === 'store') return 'package';
+	return 'design';
 }
 
 /** Props for the {@link AppBuilderScreen} component. */
@@ -141,14 +145,12 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	}, [host]);
 	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
 
-	// The activity views, per the settled UI model — Dashboard lands first;
-	// Package is the complete-app bar, Store is commerce only.
+	// The activity views (named-pipes mockups 1.x, 2026-11-16): Design lands
+	// first; Package describes the app, Store included, in side tabs.
 	const viewMenu: ViewMenu = useMemo(() => ({
 		entries: [
-			{ id: 'dashboard', label: 'Dashboard' },
 			{ id: 'design', label: 'Design' },
 			{ id: 'package', label: 'Package' },
-			{ id: 'store', label: 'Store' },
 			{ id: 'deploy', label: 'Deploy' },
 		],
 	}), []);
@@ -174,29 +176,26 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				}
 			/>
 
-			{/* Namespace-mismatch banner — why the page below is read-only.
-			    STORE/DEPLOY only: DESIGN is local work (always allowed), and the
-			    DASHBOARD is read-only by nature — it disables just its reply box
-			    with an inline hint instead of opening the landing tab on a warning.
-			    A `local.*` app on a host that can rewrite its files is offered
-			    the move to <developerId>.<name>; anything else keeps the
+			{/* Namespace-mismatch banner — why parts of the page below are
+			    read-only. PACKAGE/DEPLOY: DESIGN is local work (always allowed);
+			    on PACKAGE the local pages stay editable and only the Store and
+			    Review side tabs are gated (the reply box disables with an inline
+			    hint). A `local.*` app on a host that can rewrite its files is
+			    offered the move to <developerId>.<name>; anything else keeps the
 			    hand-edit instruction. */}
-			{namespaceMismatch && developerId !== null && (stage === 'store' || stage === 'deploy') && (
+			{namespaceMismatch && developerId !== null && (stage === 'package' || stage === 'deploy') && (
 				<NamespaceBanner appId={app.id} developerId={developerId} onAdopt={host.adoptDeveloperId} />
 			)}
 
 			{/* Active view body */}
 			<div style={styles.body}>
-				{stage === 'dashboard' && (
-					<DashboardView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />
-				)}
 				{stage === 'design' && (
 					<DesignView host={host} previewPane={previewPane} />
 				)}
-				{/* Package edits LOCAL files (like DESIGN) — never namespace-gated. */}
-				{stage === 'package' && <PackageView host={host} app={app} />}
+				{/* Package edits LOCAL files (like DESIGN); its Store and Review
+				    side tabs are the namespace-gated ones. */}
+				{stage === 'package' && <PackageView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
 				{stage === 'deploy' && <DeployView host={host} app={app} readOnly={namespaceMismatch} />}
-				{stage === 'store' && <StoreView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
 			</div>
 		</div>
 	);
