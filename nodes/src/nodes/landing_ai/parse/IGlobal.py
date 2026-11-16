@@ -32,7 +32,7 @@ class IGlobal(IGlobalBase):
     def __init__(self):
         """Declare instance attributes; heavy initialization happens in beginGlobal."""
         super().__init__()
-        self.parser = None
+        self._parser = None
 
     def beginGlobal(self):
         """Install dependencies and build the shared parser instance from the resolved config."""
@@ -43,10 +43,14 @@ class IGlobal(IGlobalBase):
         from .parse import Parser
 
         bag = self.IEndpoint.endpoint.bag
-        self.parser = Parser(self.glb.logicalType, self.config, bag)
+        self._parser = Parser(self.glb.logicalType, self.config, bag)
         debug('Landing.ai Parse Global: parser initialized')
+
+    def parser(self):
+        """The shared client (an accessor: instances read IGlobal through methods)."""
+        return self._parser
 
     def endGlobal(self):
         """Clean up resources when global configuration is being destroyed."""
         debug('Landing.ai Parse Global: cleanup')
-        self.parser = None
+        self._parser = None

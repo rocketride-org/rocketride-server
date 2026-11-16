@@ -87,7 +87,7 @@ Usage:
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 # ============================================================================
@@ -122,6 +122,14 @@ class MetricsManager:
 
         # Single lock protects all three collections
         self._lock = threading.Lock()
+        # Per REQUEST TREE (plan 8.2): the same timers and counters, bucketed by
+        # the engine's bare traceId, so the host attributes each request's work
+        # to the control that owns it. A bucket is marked closed at putPipe and
+        # leaves with the next snapshot (one-shot delivery of its final state).
+        self._traces: Dict[int, Dict[str, Any]] = {}
+        # The request tree the calling worker thread is working for (data_conn
+        # binds it around each frame of a binding); None outside a binding
+        self._current = threading.local()
 
     # ========================================================================
     # RESET
@@ -138,6 +146,67 @@ class MetricsManager:
             self._timers.clear()
             self._counters.clear()
             self._events.clear()
+            self._traces.clear()
+
+    # ========================================================================
+    # REQUEST TREES
+    # ========================================================================
+
+    def set_current_trace(self, trace_id: Optional[int]) -> Optional[int]:
+        """
+        Bind the calling thread to a request tree; every timer and counter it
+        records until unbound is ALSO booked to that tree (plan 8.2).
+
+        Args:
+            trace_id: The engine's bare traceId, or None to unbind.
+
+        Returns:
+            The thread's previous binding, for the caller to restore.
+        """
+        previous = getattr(self._current, 'trace_id', None)
+        self._current.trace_id = trace_id
+        return previous
+
+    def _bucket(self, trace_id: int) -> Dict[str, Any]:
+        """The tree's bucket, created on first use (caller holds the lock)."""
+        bucket = self._traces.get(trace_id)
+        if bucket is None:
+            bucket = self._traces[trace_id] = {'timers': {}, 'counters': {}, 'closed': False}
+        return bucket
+
+    def _book_trace(self, kind: str, name: str, value: float) -> None:
+        """Book ``value`` under ``name`` for the calling thread's tree, if bound (caller holds the lock)."""
+        trace_id = getattr(self._current, 'trace_id', None)
+        if trace_id is None:
+            return
+        table = self._bucket(trace_id)[kind]
+        table[name] = table.get(name, 0) + value
+
+    def trace_timer(self, trace_id: int, name: str) -> float:
+        """
+        The milliseconds booked under ``name`` for one request tree so far.
+
+        Args:
+            trace_id: The engine's bare traceId.
+            name: The timer key.
+
+        Returns:
+            Accumulated milliseconds, 0.0 when nothing was booked.
+        """
+        with self._lock:
+            bucket = self._traces.get(trace_id)
+            return float(bucket['timers'].get(name, 0.0)) if bucket else 0.0
+
+    def close_trace(self, trace_id: int) -> None:
+        """
+        The request tree ended (its last pipe was put back): its bucket is
+        final and leaves with the next snapshot.
+
+        Args:
+            trace_id: The engine's bare traceId.
+        """
+        with self._lock:
+            self._bucket(trace_id)['closed'] = True
 
     # ========================================================================
     # TIMERS
@@ -169,6 +238,7 @@ class MetricsManager:
             elapsed_ms = (time.perf_counter() - start) * 1000
             with self._lock:
                 self._timers[name] = self._timers.get(name, 0.0) + elapsed_ms
+                self._book_trace('timers', name, elapsed_ms)
 
     def add_time(self, timers: Dict[str, float]):
         """
@@ -188,9 +258,11 @@ class MetricsManager:
                     the corresponding timer keys.
         """
         with self._lock:
-            # Walk the dict and accumulate each timer
+            # Walk the dict and accumulate each timer, engine-wide and for
+            # the calling thread's request tree
             for name, ms in timers.items():
                 self._timers[name] = self._timers.get(name, 0.0) + ms
+                self._book_trace('timers', name, ms)
 
     # ========================================================================
     # COUNTERS
@@ -207,6 +279,7 @@ class MetricsManager:
         """
         with self._lock:
             self._counters[name] = self._counters.get(name, 0) + value
+            self._book_trace('counters', name, value)
 
     # ========================================================================
     # EVENTS
@@ -244,15 +317,30 @@ class MetricsManager:
         Returns:
             ``{'timers': {name: ms, ...},
               'counters': {name: int, ...},
-              'events': [dict, ...]}``
+              'events': [dict, ...],
+              'traces': {traceId: {'timers': {...}, 'counters': {...}, 'closed': bool}, ...}}``
+            The per-tree buckets are cumulative like the rest; a closed tree
+            rides exactly one snapshot and is then dropped.
         """
         with self._lock:
             # Shallow-copy each collection so the snapshot is independent
-            return {
+            snapshot = {
                 'timers': dict(self._timers),
                 'counters': dict(self._counters),
                 'events': list(self._events),
+                'traces': {
+                    str(trace_id): {
+                        'timers': dict(bucket['timers']),
+                        'counters': dict(bucket['counters']),
+                        'closed': bucket['closed'],
+                    }
+                    for trace_id, bucket in self._traces.items()
+                },
             }
+            # A closed tree has been delivered: its final state is in this snapshot
+            for trace_id in [t for t, b in self._traces.items() if b['closed']]:
+                del self._traces[trace_id]
+            return snapshot
 
 
 # ============================================================================

@@ -90,7 +90,9 @@ class IInstance(IInstanceBase):
         laser = self._laser('remember')
         memory_id = _run(cfg, 'remember', _remember_op(laser, namespace, content, conversation))
 
-        out: Dict[str, Any] = {'memory_id': str(memory_id), 'namespace': namespace}
+        # The answer names the namespace as the caller knows it, so it can be
+        # passed back to recall/improve/forget unchanged
+        out: Dict[str, Any] = {'memory_id': str(memory_id), 'namespace': self._public_namespace(args, 'remember')}
         if conversation:
             out['conversation'] = conversation
         return out
@@ -269,7 +271,17 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _namespace(self, args: Dict[str, Any], tool_name: str) -> str:
-        """Resolve the namespace: per-call override falling back to config."""
+        """The BACKEND namespace: the public one (per-call override or config), qualified by the caller."""
+        ns = self._public_namespace(args, tool_name)
+        # The memory is the CALLER's (plan 4.1 rule 3, 12 B): on a shared engine
+        # two callers naming one namespace must never read each other's facts,
+        # so the stored namespace is qualified by the caller. A binding without
+        # a caller (the owner's own engine) keeps the bare name.
+        owner = str((getattr(self, '_caller', None) or {}).get('userId') or '')
+        return f'{owner}:{ns}' if owner else ns
+
+    def _public_namespace(self, args: Dict[str, Any], tool_name: str) -> str:
+        """The namespace as the caller names it: per-call override falling back to config (what answers carry)."""
         cfg = self.IGlobal
         ns = _opt_str(args, tool_name, 'namespace')
         if ns and ns != cfg.namespace and not cfg.allow_namespace_override:

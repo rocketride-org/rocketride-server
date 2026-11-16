@@ -2,7 +2,7 @@
 	"title": "Media Toolkit: Inspect",
 	"protocol": "media_inspect://",
 	"classType": ["video"],
-	"capabilities": [],
+	"capabilities": ["multitenant"],
 	"node": "python",
 	"path": "nodes.media_inspect",
 	"prefix": "media_inspect",

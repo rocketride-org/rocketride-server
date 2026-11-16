@@ -79,3 +79,13 @@ async def test_a_refused_pipe_keeps_its_code_on_the_way_back():
     with pytest.raises(OutOfCreditsError, match='Out of credits') as exc_info:
         await task._send_data({'command': 'rrext_process', 'arguments': {'subcommand': 'open'}})
     assert exc_info.value.code == 'OUT_OF_CREDITS'
+
+
+@pytest.mark.asyncio
+async def test_a_named_caller_is_the_paying_unit_not_the_engine_starter(monkeypatch):
+    """The gate names the binding's caller (plan 8.3): their org is asked, whoever started the engine."""
+    check = AsyncMock(return_value=None)
+    monkeypatch.setattr(ai.account.account, 'check_spend', check)
+    reply = await _check_spend(_task('org-starter'), {'caller': {'orgId': 'org-caller', 'userId': 'u'}}, None)
+    check.assert_awaited_once_with('org-caller')
+    assert reply.body == {'refusal': None}

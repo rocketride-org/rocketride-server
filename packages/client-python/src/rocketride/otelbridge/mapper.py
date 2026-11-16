@@ -763,7 +763,7 @@ class FlowSpanMapper:
     # ------------------------------------------------------------------
 
     def _handle_sse(self, body: dict) -> None:
-        pipe_id = body.get('pipe_id')
+        pipe_id = body.get('pipeId')
         sse_type = body.get('type') or 'sse'
         run_id = body.get('__id') or ''
         # SSE bodies carry no project_id/source; __id presence is unverified

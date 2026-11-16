@@ -27,9 +27,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 from typing import Any
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function, warning
 
 from .IGlobal import IGlobal
 
@@ -52,7 +53,43 @@ def _as_dict(args: Any) -> dict:
     return args if isinstance(args, dict) else {}
 
 
+# Two attached download_file calls of one binding run on worker threads and
+# os.remove blocks inside the retention step: one lock for the read-modify-write
+_TEMP_FILES_LOCK = threading.Lock()
+
+
 class IInstance(IInstanceBase):
+    """One request's view of the bucket: its downloads live and die with the binding (plan 4.1, 12 B)."""
+
+    #: Temp files this binding downloaded; the most recent is kept, the rest deleted
+    _temp_files: list | None = None
+
+    def _retain_temp_file(self, path: str) -> None:
+        """Track ``path`` for this request and delete its older download so disk use stays bounded."""
+        with _TEMP_FILES_LOCK:
+            if self._temp_files is None:
+                self._temp_files = []
+            # A path whose deletion failed stays tracked so endInstance retries it
+            self._temp_files = [older for older in self._temp_files if not self._remove_temp_path(older)]
+            self._temp_files.append(path)
+
+    @staticmethod
+    def _remove_temp_path(path: str) -> bool:
+        """Delete one downloaded file, tolerating one already gone; False when it is still there."""
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+            return True
+        except OSError as e:
+            warning(f'tool_gcs: failed to remove temp file {path}: {e}')
+            return False
+
+    def endInstance(self) -> None:
+        """The request ended: its downloads go with it (another caller never sees or deletes them)."""
+        for path in list(self._temp_files or []):
+            self._remove_temp_path(path)
+        self._temp_files = None
+
     """GCS instance, providing tool functions for reading and listing files."""
 
     IGlobal: IGlobal
@@ -60,10 +97,10 @@ class IInstance(IInstanceBase):
     @tool_function(
         description=(
             'Download a file from Google Cloud Storage. Returns a dictionary containing '
-            'the local temporary path of the downloaded file. Only the most recent download '
-            'is retained; a new download deletes the previous temp file. Remaining files are '
-            'removed when the node shuts down (endGlobal). Objects larger than the configured '
-            'maxDownloadBytes are rejected.'
+            'the local temporary path of the downloaded file. The file belongs to THIS '
+            'request: only its most recent download is retained (a new download deletes the '
+            'previous temp file) and every remaining file is removed when the request ends. '
+            'Objects larger than the configured maxDownloadBytes are rejected.'
         ),
         input_schema={
             'type': 'object',
@@ -80,15 +117,15 @@ class IInstance(IInstanceBase):
         args = _as_dict(args)
         file_name = str(args.get('file_name') or '')
 
-        client = self.IGlobal.client
+        client = self.IGlobal.gcs_client()
         if not client:
             return {'error': 'GCS client is not connected.'}
 
-        bucket_name = self.IGlobal.bucket_name
+        bucket_name = self.IGlobal.bucket()
         if not bucket_name:
             return {'error': 'Bucket name not configured.'}
 
-        file_name = join_gcs_prefix(self.IGlobal.prefix, file_name)
+        file_name = join_gcs_prefix(self.IGlobal.object_prefix(), file_name)
 
         temp_path = None
         try:
@@ -96,7 +133,7 @@ class IInstance(IInstanceBase):
             blob = bucket.blob(file_name)
             blob.reload()
             size = blob.size or 0
-            max_bytes = self.IGlobal.max_download_bytes
+            max_bytes = self.IGlobal.download_limit()
             if size > max_bytes:
                 return {
                     'error': (
@@ -121,7 +158,7 @@ class IInstance(IInstanceBase):
                     )
                 }
 
-            self.IGlobal.retain_temp_file(temp_path)
+            self._retain_temp_file(temp_path)
             return {'success': True, 'local_path': temp_path, 'size': actual_size}
         except Exception as e:
             if temp_path and os.path.exists(temp_path):
@@ -149,15 +186,15 @@ class IInstance(IInstanceBase):
         except (TypeError, ValueError):
             max_results = 10
 
-        client = self.IGlobal.client
+        client = self.IGlobal.gcs_client()
         if not client:
             return ['Error: GCS client is not connected.']
 
-        bucket_name = self.IGlobal.bucket_name
+        bucket_name = self.IGlobal.bucket()
         if not bucket_name:
             return ['Error: Bucket name not configured.']
 
-        full_prefix = join_gcs_prefix(self.IGlobal.prefix, prefix)
+        full_prefix = join_gcs_prefix(self.IGlobal.object_prefix(), prefix)
 
         try:
             bucket = client.bucket(bucket_name)

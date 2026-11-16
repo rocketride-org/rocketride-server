@@ -115,7 +115,6 @@ def _make_instance(*, prefix='data', max_download_bytes=100, blob=None, names=No
     glb.bucket_name = 'my-bucket'
     glb.prefix = prefix
     glb.max_download_bytes = max_download_bytes
-    glb.temp_files = []
 
     inst = IInstance()
     inst.IGlobal = glb
@@ -149,7 +148,7 @@ def test_download_file_rejects_oversize_before_fetch():
     assert 'error' in result
     assert 'exceeds' in result['error']
     blob.download_to_filename.assert_not_called()
-    assert inst.IGlobal.temp_files == []
+    assert not inst._temp_files
 
 
 def test_download_file_rejects_if_fetched_size_grows():
@@ -166,7 +165,7 @@ def test_download_file_rejects_if_fetched_size_grows():
 
     assert 'error' in result
     assert 'downloaded' in result['error']
-    assert inst.IGlobal.temp_files == []
+    assert not inst._temp_files
     blob.download_to_filename.assert_called_once()
 
 
@@ -191,8 +190,8 @@ def test_download_file_success_and_evicts_previous():
     second_path = second['local_path']
     assert Path(second_path).exists()
     assert not Path(first_path).exists()
-    assert inst.IGlobal.temp_files == [second_path]
+    assert inst._temp_files == [second_path]
 
-    inst.IGlobal.endGlobal()
+    inst.endInstance()
     assert not Path(second_path).exists()
-    assert inst.IGlobal.temp_files is None
+    assert inst._temp_files is None

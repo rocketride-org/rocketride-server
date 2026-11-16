@@ -67,6 +67,10 @@ class IInstance(IInstanceBase):
         IGlobal: Shared global state providing FFmpeg encoding configuration.
     """
 
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
 
     # Maps MIME type to the FFmpeg image2pipe input codec name
@@ -86,7 +90,7 @@ class IInstance(IInstanceBase):
         self._image_mime = 'image/png'
         self._filename = 'output.mp4'
 
-        cfg = self.IGlobal.config
+        cfg = self.settings
         # Normalize numeric types up front so the range checks in _encode_video
         # can't blow up with TypeError/ValueError on non-numeric config values.
         try:

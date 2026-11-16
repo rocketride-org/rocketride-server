@@ -100,7 +100,10 @@ class EventMixin(DAPClient):
         self._caller_on_connect_error: Optional[ConnectErrorCallback] = kwargs.get('on_connect_error', None)
         self._caller_on_protocol_message: Optional[Any] = kwargs.get('on_protocol_message', None)
         self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
-        # Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch
+        # Maps a pipe SLOT → SSE callback. A slot is reused by the next binding
+        # once a pipe closes; dispatch by the never-reused traceId (which every
+        # SSE body now carries) lands with the 2.0 surface, in step with the
+        # TypeScript SDK, whose frozen 1.x class type pins the slot-keyed map.
         self._sse_pipe_callbacks: Dict[int, Callable] = {}
         # Reference-counted monitor subscriptions: key_string → {event_type: ref_count}
         self._monitor_keys: Dict[str, Dict[str, int]] = {}
@@ -298,7 +301,7 @@ class EventMixin(DAPClient):
 
         # Dispatch pipe-scoped SSE events to the registered DataPipe callback
         if event_type == 'apaevt_sse':
-            pipe_id = event_body.get('pipe_id')
+            pipe_id = event_body.get('pipeId')
             callback = self._sse_pipe_callbacks.get(pipe_id)
             if callback is not None:
                 try:

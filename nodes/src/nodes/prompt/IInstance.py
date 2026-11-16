@@ -28,6 +28,10 @@ from rocketlib import debug, error, Entry
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
 
     def __init__(self):
@@ -110,8 +114,9 @@ class IInstance(IInstanceBase):
             if not self._received_input():
                 return
 
-            # The instructions from the resolved config (the schema supplies the default)
-            instructions = list(self.IGlobal.config.instructions)
+            # The instructions for THIS call (the schema supplies the default; a
+            # caller's parameter or environment may set them per call)
+            instructions = list(self.settings.instructions)
 
             # Add each instruction to the question
             for i, instruction in enumerate(instructions):

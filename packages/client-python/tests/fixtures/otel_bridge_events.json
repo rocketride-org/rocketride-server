@@ -589,7 +589,7 @@
  {
   "event": "apaevt_sse",
   "body": {
-   "pipe_id": 0,
+   "pipeId": 0,
    "type": "thinking",
    "data": {
     "message": "Analyzing your request..."

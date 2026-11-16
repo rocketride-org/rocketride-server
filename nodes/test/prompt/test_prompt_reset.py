@@ -116,6 +116,11 @@ def _load_iinstance_class():
         def __init__(self):
             pass
 
+        @property
+        def settings(self):
+            # With no caller the real settings view IS the shared config (rocketlib/filters.py)
+            return self.IGlobal.config
+
         def preventDefault(self):
             # Raises, like the real one (rocketlib/filters.py), rather than setting a flag.
             raise PreventDefaultRaised()

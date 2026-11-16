@@ -1124,7 +1124,7 @@ class RunLogWriter:
         # list truthful so a sparse (touched-based) walk never skips a
         # segment whose only activity for the trace is SSE messages.
         if event == 'apaevt_sse' and isinstance(body, dict):
-            sse_doc = self._kf_docs.get(body.get('pipe_id'))
+            sse_doc = self._kf_docs.get(body.get('pipeId'))
             if sse_doc is not None:
                 sse_doc.setdefault('touched', set()).add(seg_id)
             return msg

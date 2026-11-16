@@ -958,7 +958,7 @@ class TransportStdio(TransportBase):
                 # TRIGGER ON_DISCONNECTED CALLBACK (malformed exit)
                 await self._transport_disconnected('Process exited with malformed exit message', has_error=True)
 
-        # Parse SSE messages: '>SSE*{"pipe_id": N, "traceId": N, "type": "...", "data": {...}}'
+        # Parse SSE messages: '>SSE*{"pipeId": N, "traceId": N, "type": "...", "data": {...}}'
         elif message.startswith('>SSE*'):
             try:
                 parts = message.split('*', 1)

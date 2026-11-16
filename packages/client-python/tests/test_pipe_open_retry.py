@@ -51,7 +51,7 @@ def test_open_retries_on_transient_connect_error(monkeypatch):
     pipe, transport = _make_pipe(
         [
             ('fail', "Failed to open a data pipe.\n\nConnect call failed ('127.0.0.1', 40006)"),
-            ('ok', {'pipe_id': 7}),
+            ('ok', {'pipeId': 7}),
         ]
     )
 

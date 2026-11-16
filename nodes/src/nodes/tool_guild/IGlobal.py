@@ -31,7 +31,6 @@ options from the resolved node config. Tool logic lives on IInstance via
 
 from __future__ import annotations
 
-import threading
 
 from rocketlib import IGlobalBase
 
@@ -85,24 +84,9 @@ class IGlobal(IGlobalBase):
         self.verify_tls = cfg.verifyTls
 
         # Guild bills per automation (100/month on the free tier), so the node
-        # caps how many sessions one pipeline run may start. Shared across every
-        # instance of this node in the run, hence the lock.
-        self._session_lock = threading.Lock()
-        self._sessions_started = 0
-
-    def claim_session_slot(self) -> None:
-        """Reserve one session against the per-run budget, or raise."""
-        lock = getattr(self, '_session_lock', None)
-        if lock is None:
-            return
-        with lock:
-            if self._sessions_started >= self.max_sessions:
-                raise ValueError(
-                    f'Guild session budget exhausted: this pipeline run has already started '
-                    f'{self._sessions_started} session(s), the configured maximum. Raise "Max sessions '
-                    'per run" if this is expected - each session is a billed Guild automation.'
-                )
-            self._sessions_started += 1
+        # caps how many sessions one REQUEST may start (the instance keeps the
+        # count, plan 12 B: a budget on the shared global let one caller
+        # exhaust every other caller's)
 
     def endGlobal(self) -> None:
         self.key_id = ''

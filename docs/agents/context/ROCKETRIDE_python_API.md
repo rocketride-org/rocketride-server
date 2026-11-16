@@ -486,7 +486,7 @@ Create a streaming data pipe for sending large datasets in chunks. `mime_type` d
 
 ### DataPipe
 
-Created via `client.pipe()`. Properties: `is_opened` (bool), `pipe_id` (server-assigned id after open).
+Created via `client.pipe()`. Properties: `is_opened` (bool), `pipe_id` (the server-assigned SLOT after open; reused across bindings), `trace_id` (str, the request tree the pipe started, `nodeId.engineId.n`; never reused, opaque; what every event of the request carries).
 
 - `async open() -> DataPipe` — open the pipe for data transmission; must be called before any `write()`. Raises `RuntimeError` if already opened, `PipeException` if the server rejects the open (common causes: the pipeline is not running, the source is not `chat`/`webhook`/`dropper`, or the MIME type does not match a source lane).
 - `async write(buffer: bytes) -> None` — write a chunk. `buffer` must be `bytes` (`ValueError` otherwise); raises `RuntimeError` if the pipe is not open, `PipeException` on server-side write failure.

@@ -268,7 +268,7 @@ class TestReport:
     def test_report_empty(self, m):
         """report() on a fresh manager should return empty collections."""
         report = m.report()
-        assert report == {'timers': {}, 'counters': {}, 'events': []}
+        assert report == {'timers': {}, 'counters': {}, 'events': [], 'traces': {}}
 
     def test_report_shape(self, m):
         """report() should always have timers, counters, and events keys."""
@@ -361,3 +361,50 @@ class TestThreadSafety:
         assert report['timers']['postprocess'] == num_threads * 0.5
         # timer('gpu') should have some positive value from all threads
         assert report['timers']['gpu'] > 0
+
+
+# ============================================================================
+# REQUEST TREE TESTS (plan 8.2)
+# ============================================================================
+
+
+class TestTraces:
+    """A thread bound to a request tree books into that tree's bucket as well as the totals."""
+
+    def test_a_bound_thread_books_into_its_tree(self, m):
+        previous = m.set_current_trace(7)
+        assert previous is None
+        m.add_time({'gpu_compute': 10.0})
+        m.counter('bytes_in', 5)
+        m.set_current_trace(None)
+        m.add_time({'gpu_compute': 2.0})  # unbound: totals only
+        report = m.report()
+        assert report['timers']['gpu_compute'] == 12.0
+        assert report['traces'] == {
+            '7': {'timers': {'gpu_compute': 10.0}, 'counters': {'bytes_in': 5}, 'closed': False}
+        }
+
+    def test_trace_timer_reads_one_trees_timer(self, m):
+        m.set_current_trace(3)
+        m.add_time({'gpu_queue_wait': 30.0})
+        m.set_current_trace(None)
+        assert m.trace_timer(3, 'gpu_queue_wait') == 30.0
+        assert m.trace_timer(3, 'other') == 0.0 and m.trace_timer(99, 'gpu_queue_wait') == 0.0
+
+    def test_a_closed_tree_rides_one_snapshot_then_leaves(self, m):
+        m.set_current_trace(4)
+        m.add_time({'hold_time': 50.0})
+        m.set_current_trace(None)
+        m.close_trace(4)
+        first = m.report()
+        assert first['traces']['4']['closed'] is True and first['traces']['4']['timers'] == {'hold_time': 50.0}
+        assert m.report()['traces'] == {}
+        # The engine totals keep what the tree booked
+        assert m.report()['timers']['hold_time'] == 50.0
+
+    def test_reset_clears_the_trees(self, m):
+        m.set_current_trace(1)
+        m.counter('bytes_in', 1)
+        m.set_current_trace(None)
+        m.reset()
+        assert m.report()['traces'] == {}

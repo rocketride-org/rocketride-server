@@ -38,6 +38,8 @@ class IGlobal(IGlobalBase):
             backend=config.backend,
             max_history=config.max_history,
             auto_summarize=config.auto_summarize,
+            # The redis keys exist only on the redis branch of the backend selector;
+            # the in-memory backend's view has none, so the store's own defaults apply
             redis_host=config.get('redis_host', 'localhost'),
             redis_port=config.get('redis_port', 6379),
             redis_password=config.get('redis_password') or None,

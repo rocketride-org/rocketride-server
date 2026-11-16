@@ -362,6 +362,7 @@ def test_cleanup_pipe_returns_pipe_to_endpoint_on_success(monkeypatch):
     pipe_conn = SimpleNamespace(
         correlation_id=None,
         hold_started=None,
+        trace_id=None,
         pipe=pipe,
         pipe_id='p-1',
         size=None,
@@ -391,6 +392,7 @@ def test_cleanup_pipe_calls_monitor_failed_on_error(monkeypatch):
     pipe_conn = SimpleNamespace(
         correlation_id=None,
         hold_started=None,
+        trace_id=None,
         pipe=pipe,
         pipe_id='p-1',
         size=100,
@@ -415,6 +417,7 @@ def test_cleanup_pipe_swallows_target_errors(monkeypatch):
     conn._target.putPipe = MagicMock(side_effect=RuntimeError('cannot return'))
     pipe_conn = SimpleNamespace(
         hold_started=None,
+        trace_id=None,
         pipe=MagicMock(),
         pipe_id='p-1',
         size=None,
@@ -432,6 +435,7 @@ def test_cleanup_pipe_handles_missing_pipe_object():
     conn = _make_conn()
     pipe_conn = SimpleNamespace(
         hold_started=None,
+        trace_id=None,
         pipe=None,
         pipe_id='p-1',
         size=None,
@@ -493,8 +497,8 @@ async def test_write_text_joins_a_character_split_across_two_writes(monkeypatch)
     data = 'Привет, мир'.encode('utf-8')
 
     # 'П' is two bytes; the first write ends after its first byte
-    await conn._write({}, {'pipe_id': 1, 'data': data[:1]})
-    await conn._write({}, {'pipe_id': 1, 'data': data[1:]})
+    await conn._write({}, {'pipeId': 1, 'data': data[:1]})
+    await conn._write({}, {'pipeId': 1, 'data': data[1:]})
 
     assert _written_text(conn_pipe) == 'Привет, мир'
     assert not conn_pipe.has_failed
@@ -506,7 +510,7 @@ async def test_write_text_one_byte_at_a_time_sends_no_empty_text(monkeypatch):
     conn, conn_pipe = _make_text_conn(monkeypatch)
 
     for byte in 'あいう'.encode('utf-8'):
-        await conn._write({}, {'pipe_id': 1, 'data': bytes([byte])})
+        await conn._write({}, {'pipeId': 1, 'data': bytes([byte])})
 
     assert _written_text(conn_pipe) == 'あいう'
     assert all(call.args[0] for call in conn_pipe.pipe.writeText.call_args_list)
@@ -518,7 +522,7 @@ async def test_write_text_still_rejects_bytes_that_are_not_utf8(monkeypatch):
     conn, conn_pipe = _make_text_conn(monkeypatch)
 
     with pytest.raises(UnicodeDecodeError):
-        await conn._write({}, {'pipe_id': 1, 'data': b'ok \xff'})
+        await conn._write({}, {'pipeId': 1, 'data': b'ok \xff'})
 
     assert conn_pipe.has_failed
 
@@ -530,17 +534,17 @@ async def test_a_frame_for_another_request_never_reaches_a_reused_slot(monkeypat
     conn_pipe.correlation_id = 'req-b'
 
     with pytest.raises(ValueError, match='another request'):
-        await conn._write({}, {'pipe_id': 1, 'data': b'x', '_caller': {'correlationId': 'req-a'}})
+        await conn._write({}, {'pipeId': 1, 'data': b'x', '_caller': {'correlationId': 'req-a'}})
     with pytest.raises(ValueError, match='another request'):
-        await conn._close({}, {'pipe_id': 1, '_caller': {'correlationId': 'req-a'}})
+        await conn._close({}, {'pipeId': 1, '_caller': {'correlationId': 'req-a'}})
     with pytest.raises(ValueError, match='another request'):
-        await conn._tool({}, {'pipe_id': 1, 'tool': 't', '_caller': {'correlationId': 'req-a'}})
+        await conn._tool({}, {'pipeId': 1, 'tool': 't', '_caller': {'correlationId': 'req-a'}})
     assert conn._pipe_map == {1: conn_pipe}, "the other request's binding is untouched"
 
     # The request the slot was opened for, and a binding the engine opened itself, go through
-    await conn._write({}, {'pipe_id': 1, 'data': b'ok', '_caller': {'correlationId': 'req-b'}})
+    await conn._write({}, {'pipeId': 1, 'data': b'ok', '_caller': {'correlationId': 'req-b'}})
     conn_pipe.correlation_id = None
-    await conn._write({}, {'pipe_id': 1, 'data': b'ok', '_caller': {'correlationId': 'req-a'}})
+    await conn._write({}, {'pipeId': 1, 'data': b'ok', '_caller': {'correlationId': 'req-a'}})
     assert _written_text(conn_pipe) == 'okok'
 
 
@@ -548,9 +552,9 @@ async def test_a_frame_for_another_request_never_reaches_a_reused_slot(monkeypat
 async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
     """A text that ends on a character boundary closes normally."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'Привет'.encode('utf-8')})
+    await conn._write({}, {'pipeId': 1, 'data': 'Привет'.encode('utf-8')})
 
-    result = await conn._close({}, {'pipe_id': 1})
+    result = await conn._close({}, {'pipeId': 1})
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
@@ -561,10 +565,10 @@ async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
 async def test_close_fails_text_that_ends_inside_a_character(monkeypatch):
     """A body cut inside its last character fails the close; the pipe still goes back."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'ok П'.encode('utf-8')[:-1]})
+    await conn._write({}, {'pipeId': 1, 'data': 'ok П'.encode('utf-8')[:-1]})
 
     with pytest.raises(UnicodeDecodeError):
-        await conn._close({}, {'pipe_id': 1})
+        await conn._close({}, {'pipeId': 1})
 
     assert conn_pipe.has_failed
     conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
@@ -574,11 +578,11 @@ async def test_close_fails_text_that_ends_inside_a_character(monkeypatch):
 async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypatch):
     """A pipe whose write already failed closes as before, without a new decode error."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
-    await conn._write({}, {'pipe_id': 1, 'data': 'П'.encode('utf-8')[:1]})
+    await conn._write({}, {'pipeId': 1, 'data': 'П'.encode('utf-8')[:1]})
     with pytest.raises(UnicodeDecodeError):
-        await conn._write({}, {'pipe_id': 1, 'data': b'\xff'})
+        await conn._write({}, {'pipeId': 1, 'data': b'\xff'})
 
-    result = await conn._close({}, {'pipe_id': 1})
+    result = await conn._close({}, {'pipeId': 1})
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
@@ -667,7 +671,7 @@ async def test_open_stamps_the_caller_on_the_pipe_at_its_trace_level(monkeypatch
         {'object': {'name': 'x'}, 'mimeType': 'application/octet-stream', '_caller': dict(caller)},
     )
 
-    assert body == {'pipe_id': 7, 'traceId': 3}
+    assert body == {'pipeId': 7, 'traceId': 3}
     target.getPipe.assert_called_once_with('full')
     assert pipe.caller == caller
     record = conn._pipe_map[7]
@@ -698,7 +702,9 @@ async def test_a_borrowed_tool_pipe_carries_the_caller_and_books_its_hold(monkey
     conn._emit_tool_trace = lambda *a, **k: None
     conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
     holds = []
-    monkeypatch.setattr(conn, '_record_hold', lambda started, bytes_in: holds.append((started, bytes_in)))
+    monkeypatch.setattr(
+        conn, '_record_hold', lambda started, bytes_in, trace_id=None: holds.append((started, bytes_in, trace_id))
+    )
     caller = {'userId': 'u1', 'traceLevel': 'none'}
 
     body = await conn._tool(
@@ -711,3 +717,32 @@ async def test_a_borrowed_tool_pipe_carries_the_caller_and_books_its_hold(monkey
     assert pipe.caller == caller
     target.putPipe.assert_called_once_with(pipe)
     assert len(holds) == 1 and holds[0][0] is not None and holds[0][1] == 0
+    assert holds[0][2] == 11, "the hold is booked into the borrowed tool's own tree"
+
+
+def test_record_hold_books_the_tree_less_its_queue_wait_and_closes_it(monkeypatch):
+    """Occupancy, never contention (P29): the model server's queue wait inside the request comes off the hold;
+    the hold and bytes land in the tree's bucket, which is then final.
+    """
+    from ai.modules.data import data_conn as data_conn_mod
+
+    calls = []
+    fake_metrics = MagicMock()
+    fake_metrics.trace_timer = lambda trace_id, name: 20.0 if (trace_id, name) == (7, 'gpu_queue_wait') else 0.0
+    # The thread was bound to tree 3 before: the restore must put it back
+    fake_metrics.set_current_trace = lambda trace_id: (calls.append(('bind', trace_id)), 3)[1]
+    fake_metrics.add_time = lambda timers: calls.append(('time', timers))
+    fake_metrics.counter = lambda name, value: calls.append(('count', name, value))
+    fake_metrics.close_trace = lambda trace_id: calls.append(('close', trace_id))
+    fake_metrics.report = lambda: {'timers': {}, 'counters': {}, 'events': [], 'traces': {}}
+    monkeypatch.setattr(data_conn_mod, 'metrics', fake_metrics)
+    monkeypatch.setattr(data_conn_mod, 'monitorMetrics', lambda report: calls.append(('flush',)))
+
+    # A fixed clock: the hold is exactly 100 ms, 20 ms of it the GPU queue
+    monkeypatch.setattr(data_conn_mod.time, 'perf_counter', lambda: 1000.0)
+    data_conn_mod.DataConn._record_hold(1000.0 - 0.1, 64, 7)
+    kinds = [c[0] for c in calls]
+    assert kinds == ['bind', 'time', 'count', 'bind', 'close', 'flush']
+    assert calls[0] == ('bind', 7) and calls[3] == ('bind', 3), 'bound to the tree, then the previous tree restored'
+    assert calls[1][1]['hold_time'] == pytest.approx(80.0)
+    assert calls[2] == ('count', 'bytes_in', 64) and calls[4] == ('close', 7)

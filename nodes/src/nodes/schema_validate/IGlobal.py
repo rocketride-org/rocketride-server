@@ -62,5 +62,9 @@ class IGlobal(IGlobalBase):
             'require_provenance': config.require_provenance,
         }
 
+    def validation_rules(self):
+        """The compiled validation rules."""
+        return self.validation
+
     def endGlobal(self):
         self.validation = {}

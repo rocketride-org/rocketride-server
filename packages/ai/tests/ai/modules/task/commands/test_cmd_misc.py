@@ -229,7 +229,9 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     # payload['pipeline'] — the same envelope pipe_Validate builds.
     assert captured['payload']['pipeline']['source'] == 'explicit-source'
     assert captured['payload']['pipeline']['version'] == 1  # default
-    assert result == {'type': 'response', 'body': {'ok': True}}
+    body = dict(result['body'])
+    assert body.pop('engineSharing') in ('owner', 'users')
+    assert result['type'] == 'response' and body == {'ok': True}
 
 
 @pytest.mark.asyncio
@@ -737,7 +739,9 @@ async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch
     result = await MiscCommands.on_rrext_validate(conn, request)
 
     assert len(calls) == 1
-    assert result == {'type': 'response', 'body': {'ok': True}}
+    body = dict(result['body'])
+    body.pop('engineSharing', None)  # an unkeyable spec carries no decision (plan 4.4)
+    assert result['type'] == 'response' and body == {'ok': True}
 
 
 @pytest.mark.asyncio
@@ -1751,7 +1755,10 @@ async def test_on_rrext_validate_adds_no_errors_key_when_every_config_fits(monke
     pipeline = {'source': 'q1', 'components': [{'id': 'q1', 'provider': 'store_qdrant', 'config': {'mode': 'local'}}]}
     result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
 
-    assert result['body'] == {'ok': True}
+    # The engine-key decision rides every whole-pipeline validation (plan 4.4)
+    body = dict(result['body'])
+    assert body.pop('engineSharing') in ('owner', 'users')
+    assert body == {'ok': True}
 
 
 @pytest.mark.asyncio
@@ -1764,7 +1771,10 @@ async def test_on_rrext_validate_leaves_an_unknown_provider_to_the_engine(monkey
     pipeline = {'source': 'n1', 'components': [{'id': 'n1', 'provider': 'nope', 'config': {'bogus': 1}}]}
     result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
 
-    assert result['body'] == {'ok': True}
+    # The engine-key decision rides every whole-pipeline validation (plan 4.4)
+    body = dict(result['body'])
+    body.pop('engineSharing', None)  # an unkeyable spec carries no decision (plan 4.4)
+    assert body == {'ok': True}
 
 
 @pytest.mark.asyncio

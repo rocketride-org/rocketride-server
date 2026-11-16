@@ -922,18 +922,26 @@ def search_hybrid_pkg():
     import types
 
     def make_instance(engine, top_k=10, rrf_k=60):
-        """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
+        """Build an IInstance with a mock IGlobal/engine and a mock pipeline.
+
+        The instance is certified multitenant (plan 4.2): it reaches the engine
+        through the global's accessor and its knobs through ``settings``, so
+        the mock answers ``search_engine()`` and the settings view is seeded
+        on the instance.
+        """
         inst = IInstance.__new__(IInstance)
         iglobal = MagicMock(spec=IGlobal)
         iglobal.engine = engine
-        iglobal.top_k = top_k
-        iglobal.rrf_k = rrf_k
+        iglobal.search_engine.return_value = engine
         inst.IGlobal = iglobal
+        # The settings view is per instance (the base caches it on _settings),
+        # so two instances keep their own knobs
+        inst._settings = types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k)
         mock_instance = MagicMock()
         inst.instance = mock_instance
         return inst, mock_instance
 
-    return types.SimpleNamespace(
+    pkg = types.SimpleNamespace(
         IInstance=IInstance,
         Doc=Doc,
         Question=Question,
@@ -942,6 +950,7 @@ def search_hybrid_pkg():
         SubQuestion=QuestionText,
         make_instance=make_instance,
     )
+    yield pkg
 
 
 class TestIInstanceIntegration:

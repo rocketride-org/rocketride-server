@@ -255,7 +255,7 @@ async def test_send_task_event_pipe_scoped_subscription():
         monitors={'p.dev.user-1.proj-1.src-1.42': EVENT_TYPE.SSE},
     )
     await MonitorCommands.send_task_event(
-        conn, EVENT_TYPE.SSE, KEY, {'event': 'sse', 'body': {'pipe_id': 42, 'message': 'hi'}}
+        conn, EVENT_TYPE.SSE, KEY, {'event': 'sse', 'body': {'pipeId': 42, 'message': 'hi'}}
     )
     conn.send_event.assert_awaited_once()
 

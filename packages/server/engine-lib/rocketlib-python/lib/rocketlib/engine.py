@@ -119,9 +119,8 @@ def monitorSSE(pipe_id: int, type: str, data: dict = None, trace_id: int = 0) ->
     """
     import json
 
-    # pipe_id stays until the SSE readers (cmd_monitor, run_log) move to pipeId
-    # together with the data-op bodies in the Step 3 wire rename
-    payload = {'pipe_id': pipe_id, 'traceId': trace_id, 'type': type}
+    # Step 1: the wire body: the slot, the request tree and the node-defined type
+    payload = {'pipeId': pipe_id, 'traceId': trace_id, 'type': type}
     if data:
         payload['data'] = data
     engLib.monitorOther('SSE', json.dumps(payload, separators=(',', ':')))

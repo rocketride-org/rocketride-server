@@ -21,40 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Dict, Optional
 
-from rocketlib import IGlobalBase, warning
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    """Global lifecycle: read and normalise the node configuration once per run."""
+    """
+    Shared infrastructure only: nothing per call lives here.
 
-    # The normalised conversion settings convert_fact reads; None outside a run.
-    conversion: Optional[Dict[str, Any]] = None
-
-    def beginGlobal(self):
-        # The resolver has applied the defaults and typed every value (a
-        # numeric rate, an integer decimals, non-empty currency codes); the
-        # codes are stripped here because the fact comparison is textual.
-        config = self.config
-
-        self.conversion = {
-            'source_currency': config.source_currency.strip(),
-            'target_currency': config.target_currency.strip(),
-            'rate': config.rate,
-            'rate_date': config.rate_date.strip(),
-            'amount_field': config.amount_field.strip() or 'amount',
-            'currency_field': config.currency_field.strip() or 'currency',
-            'decimals': config.decimals,
-        }
-
-        # Conversion is opt-in: surface a blank code loudly but never crash
-        # the pipeline — an unconfigured node simply passes answers through.
-        if not self.conversion['source_currency'] or not self.conversion['target_currency']:
-            warning(
-                'currency_convert_explicit: both source_currency and target_currency '
-                'must be set; answers will pass through unchanged.'
-            )
-
-    def endGlobal(self):
-        self.conversion = None
+    The conversion settings are per-call values (an env placeholder among
+    them resolves to the CALLER's value on a shared engine), so each binding's
+    instance normalises them from its own settings view (plan 6.2, 4.4).
+    """

@@ -361,7 +361,7 @@ def test_sse_becomes_event_on_innermost_span():
     mapper, exporter = make_mapper()
     mapper.handle_event('apaevt_flow', flow('begin', 'probe.txt', pipes=['probe.txt']))
     mapper.handle_event('apaevt_flow', flow('enter', 'agent_rocketride_1'))
-    mapper.handle_event('apaevt_sse', {'pipe_id': 0, 'type': 'thinking', 'data': {'message': 'hmm'}, '__id': RUN_ID})
+    mapper.handle_event('apaevt_sse', {'pipeId': 0, 'type': 'thinking', 'data': {'message': 'hmm'}, '__id': RUN_ID})
     mapper.handle_event('apaevt_flow', flow('leave', 'agent_rocketride_1', trace={'result': 'continue'}))
     mapper.handle_event('apaevt_flow', flow('end', 'probe.txt'))
 
@@ -376,7 +376,7 @@ def test_sse_without_id_routes_to_sole_active_run():
     mapper, exporter = make_mapper()
     mapper.handle_event('apaevt_flow', flow('begin', 'probe.txt', pipes=['probe.txt']))
     # No __id, 'data' key omitted entirely (wire truth): must not KeyError.
-    mapper.handle_event('apaevt_sse', {'pipe_id': 0, 'type': 'tool_call'})
+    mapper.handle_event('apaevt_sse', {'pipeId': 0, 'type': 'tool_call'})
     mapper.handle_event('apaevt_flow', flow('end', 'probe.txt'))
 
     root = spans_by_name(exporter, 'probe.txt')[0]
@@ -385,7 +385,7 @@ def test_sse_without_id_routes_to_sole_active_run():
 
 def test_sse_unroutable_is_dropped():
     mapper, exporter = make_mapper()
-    mapper.handle_event('apaevt_sse', {'pipe_id': 0, 'type': 'thinking'})  # no runs at all
+    mapper.handle_event('apaevt_sse', {'pipeId': 0, 'type': 'thinking'})  # no runs at all
     mapper.close_all()
     assert exporter.get_finished_spans() == ()
 
@@ -402,7 +402,7 @@ def _feed_content_events(mapper):
     mapper.handle_event(
         'apaevt_flow', flow('enter', 'llm_openai_1', trace={'lane': 'text', 'data': {'text': SENTINEL}})
     )
-    mapper.handle_event('apaevt_sse', {'pipe_id': 0, 'type': 'thinking', 'data': {'message': SENTINEL}, '__id': RUN_ID})
+    mapper.handle_event('apaevt_sse', {'pipeId': 0, 'type': 'thinking', 'data': {'message': SENTINEL}, '__id': RUN_ID})
     mapper.handle_event(
         'apaevt_flow',
         flow('leave', 'llm_openai_1', trace={'lane': 'text', 'data': {'text': SENTINEL}, 'result': 'continue'}),
@@ -532,7 +532,7 @@ def test_fallback_state_absorbed_when_canonical_state_already_exists():
     """
     mapper, exporter = make_mapper()
     # 1. SSE with __id creates the canonical run (implicit root for pipe 5).
-    mapper.handle_event('apaevt_sse', {'pipe_id': 5, 'type': 'thinking', '__id': RUN_ID})
+    mapper.handle_event('apaevt_sse', {'pipeId': 5, 'type': 'thinking', '__id': RUN_ID})
     # 2. Id-less flow events for the same run: no alias -> fallback state.
     mapper.handle_event('apaevt_flow', flow('begin', 'probe.txt', pipes=['probe.txt'], run_id=''))
     mapper.handle_event('apaevt_flow', flow('enter', 'response_1', run_id=''))
@@ -559,7 +559,7 @@ def test_fallback_absorption_closes_colliding_pipes_as_unclosed():
     and the fallback duplicate is closed as unclosed rather than merged.
     """
     mapper, exporter = make_mapper()
-    mapper.handle_event('apaevt_sse', {'pipe_id': 0, 'type': 'thinking', '__id': RUN_ID})
+    mapper.handle_event('apaevt_sse', {'pipeId': 0, 'type': 'thinking', '__id': RUN_ID})
     mapper.handle_event('apaevt_flow', flow('begin', 'probe.txt', pipes=['probe.txt'], run_id=''))
     mapper.handle_event('apaevt_task', task('begin', name='demo'))  # reconciles: pipe 0 collides
     mapper.handle_event('apaevt_task', task('end'))
@@ -936,7 +936,7 @@ def test_sse_span_event_uses_event_time():
     mapper, exporter = make_mapper()
     mapper.handle_event('apaevt_flow', at(flow('begin', 'probe.txt', pipes=['probe.txt']), 0))
     mapper.handle_event('apaevt_flow', at(flow('enter', 'agent_rocketride_1'), 1))
-    mapper.handle_event('apaevt_sse', at({'pipe_id': 0, 'type': 'thinking', '__id': RUN_ID}, 2))
+    mapper.handle_event('apaevt_sse', at({'pipeId': 0, 'type': 'thinking', '__id': RUN_ID}, 2))
     mapper.handle_event('apaevt_flow', at(flow('leave', 'agent_rocketride_1'), 3))
     mapper.handle_event('apaevt_flow', at(flow('end', 'probe.txt'), 4))
 

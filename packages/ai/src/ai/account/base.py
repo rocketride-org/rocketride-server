@@ -357,6 +357,49 @@ class AccountBase(ABC):
         """
         return {'balances': {}}
 
+    async def apply_usage(
+        self,
+        org_id: str,
+        user_id: str,
+        team_id: str | None,
+        resource: str,
+        amount: float,
+        idempotency_key: str,
+        request_count: int,
+        context: dict,
+        description: str | None = None,
+        increment_id: str = '',
+    ) -> bool:
+        """
+        Add one increment of named-pipe usage to its DAY row (plan 8.2, S11).
+
+        Unlike ``apply_debit`` (a REPLACING upsert for an owned run's
+        cumulative per-task rows), this is ADDITIVE: the row keyed
+        ``usage:{dayNumber}:{developerId.pipeId}:{userId}:{resource}`` gains
+        ``amount`` and ``request_count``, atomically in the database, so any
+        number of engines and servers may add into one day's row. OSS keeps no
+        ledger and returns False.
+
+        Args:
+            org_id:          The paying org (the caller's).
+            user_id:         The caller.
+            team_id:         The caller's HOME team (plan 8.3), or None.
+            resource:        Billing bucket (``tokens``, or a custom resource).
+            amount:          Positive tokens to add (negated internally, like a debit).
+            idempotency_key: The day row's key.
+            request_count:   Requests this increment covers.
+            context:         Audit context (the publication served, source, rung).
+            description:     Line-item detail (the metric name).
+            increment_id:    This increment's own id: the ledger records it with
+                             the addition in one transaction and refuses a
+                             second write of it, so the sender may retry an
+                             unanswered write without adding twice.
+
+        Returns:
+            True when a row was added to, False on a no-op (a repeated increment included).
+        """
+        return False
+
     async def check_spend(self, org_id: str) -> 'str | None':
         """Why the org may not open a pipe, or None if it may. OSS has no balance, so it always may."""
         return None

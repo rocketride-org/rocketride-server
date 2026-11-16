@@ -31,6 +31,10 @@ from rocketlib.types import IInvokeLLM
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     # Reference to a global instance providing shared functionality.
     IGlobal: IGlobal
 
@@ -62,7 +66,7 @@ class IInstance(IInstanceBase):
 
         # Create all the fields declarations
         fields: List[str] = []
-        for field in self.IGlobal.fields:
+        for field in self.IGlobal.field_definitions():
             field_name = field.get('column', '').ljust(32)
             field_type = field.get('type', '').ljust(16)
             field_defval = field.get('defval', '')

@@ -37,6 +37,7 @@ class _Channel:
 
     def request_sync(self, command, arguments=None, *, timeout):
         self.asked.append(command)
+        self.arguments = arguments
         if self.error:
             raise self.error
         return ChannelReply(body={'refusal': self.refusal})
@@ -48,6 +49,7 @@ def channel(monkeypatch):
     fake = _Channel()
     monkeypatch.setattr(data_server, 'task_channel', fake)
     monkeypatch.setattr(data_server, '_allowed_until', 0.0)
+    monkeypatch.setattr(data_server, '_allowed_units', {})
     return fake
 
 
@@ -151,3 +153,35 @@ def test_pipes_opened_together_ask_once_and_all_wait_for_the_answer(channel):
 
     assert not any(thread.is_alive() for thread in threads) and errors == []
     assert answered.is_set() and len(channel.asked) == 1
+
+
+# ---------------------------------------------------------------------------
+# The caller's paying unit (plan 8.3, P9)
+# ---------------------------------------------------------------------------
+
+
+def test_the_gate_names_the_bindings_caller_and_remembers_the_allow_per_paying_unit(channel):
+    """The data path names the caller before getPipe; the question carries it; an allow is per (org, address)."""
+    from ai.modules.data.caller_context import set_pending_caller
+
+    caller_a = {'userId': 'u-a', 'orgId': 'org-a', 'address': 'acme.docBrain.chat', 'rung': 'team', 'env': {'x': 1}}
+    caller_b = {'userId': 'u-b', 'orgId': 'org-b', 'address': 'acme.docBrain.chat', 'rung': 'team'}
+    try:
+        set_pending_caller(caller_a)
+        data_server.require_credit()
+        assert channel.arguments == {
+            'caller': {'userId': 'u-a', 'orgId': 'org-a', 'address': 'acme.docBrain.chat', 'rung': 'team'}
+        }
+        # The same paying unit within the window: not asked again
+        data_server.require_credit()
+        assert channel.asked == ['spend.check']
+        # Another caller's org on the same engine: asked
+        set_pending_caller(caller_b)
+        data_server.require_credit()
+        assert channel.asked == ['spend.check', 'spend.check'] and channel.arguments['caller']['orgId'] == 'org-b'
+        # A binding the engine opens itself (no caller) has its own allow
+        set_pending_caller(None)
+        data_server.require_credit()
+        assert len(channel.asked) == 3 and channel.arguments is None
+    finally:
+        set_pending_caller(None)

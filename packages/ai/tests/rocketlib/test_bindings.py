@@ -227,7 +227,7 @@ def test_logger_captures_the_binding(endpoint, monkeypatch):
     key, payload = sent[-1]
     body = json.loads(payload)
     assert key == 'SSE'
-    assert body['pipe_id'] == log.pipeId
+    assert body['pipeId'] == log.pipeId
     assert body['traceId'] == log.traceId
     assert body['type'] == 'thinking'
     assert body['data'] == {'message': 'still mine'}

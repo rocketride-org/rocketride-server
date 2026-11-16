@@ -43,7 +43,7 @@ async def test_a_second_open_for_one_correlation_id_returns_the_same_binding():
             request, {'object': {'name': 'x'}, 'mimeType': 'text/plain', 'correlationId': 'req-1'}
         )
 
-        assert response['body'] == {'pipe_id': 3, 'traceId': 0x2A0001}
+        assert response['body'] == {'pipeId': 3, 'traceId': 0x2A0001}
         conn._ensure_pipe_sem.assert_not_awaited()
     finally:
         await conn.disconnect()

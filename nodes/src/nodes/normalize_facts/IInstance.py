@@ -29,6 +29,10 @@ from .normalize import dedupe_facts, normalize_payload
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal  # Reference to the global context holding the resolved config
 
     # Normalized payloads collected during the object, emitted at closing.
@@ -58,7 +62,7 @@ class IInstance(IInstanceBase):
             payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append(('json', normalize_payload(payload, self.IGlobal.rules)))
+            self.pending.append(('json', normalize_payload(payload, self.IGlobal.normalization_rules())))
         else:
             # Plain text / scalar JSON carries no fact — pass through verbatim.
             self.pending.append(('text', answer.getText() if answer is not None else ''))
@@ -89,7 +93,7 @@ class IInstance(IInstanceBase):
             else:
                 extras.append(data)
 
-        deduped = dedupe_facts(facts, self.IGlobal.rules.get('label_field') or 'label')
+        deduped = dedupe_facts(facts, self.IGlobal.normalization_rules().get('label_field') or 'label')
 
         if deduped:
             # Preserve a lone bare-dict payload's shape; otherwise emit one list.

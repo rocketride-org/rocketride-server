@@ -447,6 +447,9 @@ class LogEventStream:
         what exists).
         """
         slot = begin_body.get('id')
+        # The request tree the begin belongs to: SSE lines correlate by it (a
+        # slot is reused by the next request; a traceId never is)
+        tree = begin_body.get('traceId')
         events: List[LogEvent] = []
         state = {'ended': False, 'end_time': None, 'calls': 0}
 
@@ -459,9 +462,9 @@ class LogEventStream:
                     continue
                 body = ev.get('body') or {}
                 # The trace's events: its flow ops (slot = body.id) and the
-                # node's SSE narration on the same slot (body.pipe_id).
+                # node's SSE narration in the same request tree (body.traceId)
                 is_flow = ev.get('event') == 'apaevt_flow' and body.get('id') == slot
-                is_sse = ev.get('event') == 'apaevt_sse' and body.get('pipe_id') == slot
+                is_sse = ev.get('event') == 'apaevt_sse' and tree is not None and body.get('traceId') == tree
                 if not is_flow and not is_sse:
                     continue
                 # Seq-dedupe across sources (a tail copy may duplicate disk).

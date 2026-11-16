@@ -47,6 +47,10 @@ class IInstance(IInstanceBase):
     Facts are emitted on closing() to the answers and/or documents lanes.
     """
 
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     # Reference to a global instance providing shared functionality.
     IGlobal: IGlobal
 
@@ -142,7 +146,7 @@ class IInstance(IInstanceBase):
     def _fieldSpec(self) -> str:
         """Render the user-configured target fields into prompt text."""
         fields: List[str] = []
-        for field in self.IGlobal.fields:
+        for field in self.IGlobal.field_definitions():
             field_name = field.get('column', '').ljust(32)
             field_type = field.get('type', '').ljust(16)
             field_defval = field.get('defval', '')
@@ -345,7 +349,7 @@ class IInstance(IInstanceBase):
             return []
 
         # Validator toggle (services.json facts.validate).
-        if not self.IGlobal.validate:
+        if not self.settings.validate:
             return candidates
 
         question = self._buildValidatorQuestion(candidates)
@@ -366,7 +370,9 @@ class IInstance(IInstanceBase):
                 continue
             if same_shape:
                 original = candidates[idx]
-                changed = any(fact.get(f.get('column')) != original.get(f.get('column')) for f in self.IGlobal.fields)
+                changed = any(
+                    fact.get(f.get('column')) != original.get(f.get('column')) for f in self.IGlobal.field_definitions()
+                )
                 reason = 'validator did not annotate; diffed against first pass'
             else:
                 changed = None
@@ -381,7 +387,7 @@ class IInstance(IInstanceBase):
 
     def _stripProvenance(self, facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Remove _provenance when the include_provenance toggle is off."""
-        if self.IGlobal.include_provenance:
+        if self.settings.include_provenance:
             return facts
         cleaned: List[Dict[str, Any]] = []
         for fact in facts:

@@ -57,7 +57,7 @@ class IInstance(IInstanceBase):
 
         extraction = {}
         if markdown:
-            extraction = self.IGlobal.extractor.extract(markdown)
+            extraction = self.IGlobal.extractor().extract(markdown)
         else:
             debug('Landing.ai Extract: no markdown received, emitting empty result')
 

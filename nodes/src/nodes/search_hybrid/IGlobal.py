@@ -47,6 +47,10 @@ class IGlobal(IGlobalBase):
         self.rrf_k = int(config.rrf_k)
         self.engine = HybridSearchEngine(alpha=float(config.alpha))
 
+    def search_engine(self):
+        """The shared hybrid search engine, or None before beginGlobal."""
+        return self.engine
+
     def endGlobal(self):
         """Release shared search state."""
         self.engine = None

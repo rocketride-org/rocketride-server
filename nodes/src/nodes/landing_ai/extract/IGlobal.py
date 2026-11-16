@@ -32,7 +32,7 @@ class IGlobal(IGlobalBase):
     def __init__(self):
         """Declare instance attributes; heavy initialization happens in beginGlobal."""
         super().__init__()
-        self.extractor = None
+        self._extractor = None
 
     def beginGlobal(self):
         """Install dependencies and build the shared extractor instance from the resolved config."""
@@ -42,10 +42,14 @@ class IGlobal(IGlobalBase):
 
         from .extract import Extractor
 
-        self.extractor = Extractor(self.glb.logicalType, self.config)
+        self._extractor = Extractor(self.glb.logicalType, self.config)
         debug('Landing.ai Extract Global: extractor initialized')
+
+    def extractor(self):
+        """The shared client (an accessor: instances read IGlobal through methods)."""
+        return self._extractor
 
     def endGlobal(self):
         """Clean up resources when global configuration is being destroyed."""
         debug('Landing.ai Extract Global: cleanup')
-        self.extractor = None
+        self._extractor = None

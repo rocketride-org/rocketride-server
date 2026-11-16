@@ -32,7 +32,7 @@ the storage client every instance call goes through.
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import Any
 
 from rocketlib import IGlobalBase, debug, warning
 
@@ -51,7 +51,6 @@ except ImportError:
 
 _GCS_SCOPES = ['https://www.googleapis.com/auth/devstorage.read_only']
 # Only the most recent download is kept; a new download deletes the previous temp file.
-_MAX_RETAINED_TEMP_FILES = 1
 
 
 class IGlobal(IGlobalBase):
@@ -61,7 +60,6 @@ class IGlobal(IGlobalBase):
     bucket_name: str = ''
     prefix: str = ''
     max_download_bytes: int = 52428800
-    temp_files: List[str] | None = None
 
     def beginGlobal(self) -> None:
         if storage is None:
@@ -77,7 +75,6 @@ class IGlobal(IGlobalBase):
         self.bucket_name = str(cfg.bucketName or '').strip()
         self.prefix = str(cfg.prefix or '').strip()
         self.max_download_bytes = cfg.maxDownloadBytes
-        self.temp_files = []
 
         # Auth
         try:
@@ -99,25 +96,23 @@ class IGlobal(IGlobalBase):
             warning(f'GCS connection check failed: {e}')
             raise
 
-    def _remove_temp_path(self, path: str) -> None:
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except OSError as e:
-            warning(f'tool_gcs: failed to remove temp file {path}: {e}')
+    def gcs_client(self) -> Any:
+        """The shared storage client (an accessor: instances read IGlobal through methods)."""
+        return self.client
 
-    def retain_temp_file(self, path: str) -> None:
-        """Track ``path`` and delete older downloads so disk use stays bounded."""
-        if self.temp_files is None:
-            self.temp_files = []
-        while len(self.temp_files) >= _MAX_RETAINED_TEMP_FILES:
-            self._remove_temp_path(self.temp_files.pop(0))
-        self.temp_files.append(path)
+    def bucket(self) -> str:
+        """The configured bucket name."""
+        return self.bucket_name
+
+    def object_prefix(self) -> str:
+        """The configured object prefix."""
+        return self.prefix
+
+    def download_limit(self) -> int:
+        """The largest object a download may fetch, in bytes."""
+        return self.max_download_bytes
 
     def endGlobal(self) -> None:
-        for path in list(self.temp_files or []):
-            self._remove_temp_path(path)
-        self.temp_files = None
 
         if self.client is not None:
             self.client.close()

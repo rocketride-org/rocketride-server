@@ -308,8 +308,8 @@ class MonitorCommands(DAPConn):
         # so each subscriber receives the event at most once.
         merged_preference = EVENT_TYPE(0)
 
-        # Pipe-scoped check (most specific) — SSE events embed pipe_id in body
-        pipe_id = (event or {}).get('body', {}).get('pipe_id')
+        # Pipe-scoped check (most specific) — SSE events carry the slot as pipeId
+        pipe_id = (event or {}).get('body', {}).get('pipeId')
         if pipe_id is not None:
             pipe_key = f'{project_key}.{pipe_id}'
             if pipe_key in self._monitors:

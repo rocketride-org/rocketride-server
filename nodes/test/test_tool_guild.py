@@ -610,29 +610,27 @@ def test_iglobal_defaults_match_services_profile():
 
 
 def _make_global(**over):
-    """An IGlobal instance with the budget lock initialised, bypassing beginGlobal."""
+    """An IGlobal instance with the config values the instances read, bypassing beginGlobal."""
     g = _gmod.IGlobal()
     g.max_sessions = over.get('max_sessions', 10)
-    import threading
-
-    g._session_lock = threading.Lock()
-    g._sessions_started = 0
     return g
 
 
-def test_claim_session_slot_enforces_the_budget():
-    g = _make_global(max_sessions=2)
-    g.claim_session_slot()
-    g.claim_session_slot()
+def test_the_session_budget_is_the_requests(monkeypatch):
+    """Each request (instance) has its own budget: two claims pass, the third is refused and not counted."""
+    inst = _make_instance(monkeypatch, _StubClient(), max_sessions=2)
+    inst._claim_session_slot()
+    inst._claim_session_slot()
     with pytest.raises(ValueError, match='budget exhausted'):
-        g.claim_session_slot()
-    assert g._sessions_started == 2  # the rejected claim did not increment
-
-
-def test_claim_session_slot_no_lock_is_a_noop():
-    """A config-mode instance never built the lock; claiming must not crash."""
-    g = _gmod.IGlobal()
-    g.claim_session_slot()  # no _session_lock attribute -> early return
+        inst._claim_session_slot()
+    assert inst._sessions_started == 2  # the rejected claim did not increment
+    # Another request on the SAME engine (one shared global) starts from zero and claims its full budget
+    second = _make_instance(monkeypatch, _StubClient(), max_sessions=2)
+    second.IGlobal = inst.IGlobal
+    assert second._sessions_started == 0
+    second._claim_session_slot()
+    second._claim_session_slot()
+    assert (inst._sessions_started, second._sessions_started) == (2, 2)
 
 
 class _FakeInstance:

@@ -106,6 +106,7 @@ from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
+from ai.account.base import OutOfCreditsError
 from ai.account.models import AccountInfo, home_team, resolve_run_permissions, resolve_task_permissions
 from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
 from ai.account.store import Store
@@ -2019,6 +2020,25 @@ class TaskServer(DAPBase):
                 control.draining.release(control.key)
                 control.draining = None
 
+    async def _require_start_credit(self, control: TaskControl) -> None:
+        """
+        Refuse to start an owned run whose org may not spend (plan 0 S9).
+
+        Args:
+            control: The control about to launch.
+
+        Raises:
+            OutOfCreditsError: The account refused the spend.
+        """
+        from ai.account import account
+
+        org_id = control.billing.org_id
+        if not org_id:
+            return
+        refusal = await account.check_spend(org_id)
+        if refusal:
+            raise OutOfCreditsError(f'{refusal} ({control.address})')
+
     async def release_draining(self, control: TaskControl, reason: str) -> None:
         """
         Drop the hold a control kept on the engine draining its open pipes after a repoint, if any.
@@ -2682,6 +2702,11 @@ class TaskServer(DAPBase):
         # The values this control's bindings run with, from its team context
         # (plan 6.2): resolved once here, carried on every frame's _caller
         control.env = await self._resolve_control_env(control)
+        # Credit, before anything launches (plan 0 S9): a dev run's paying
+        # unit is its control's org; a published rung's callers are checked
+        # per request by the data path
+        if control.run_kind == 'dev':
+            await self._require_start_credit(control)
 
         # Parse and validate launch type from request command
         try:
@@ -3285,6 +3310,11 @@ class TaskServer(DAPBase):
             _require_valid_parameters(pipeline)
             _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
+
+            # Credit, before the new content launches (plan 0 S9): the same
+            # gate the first start of a dev run passes
+            if control.run_kind == 'dev':
+                await self._require_start_credit(control)
 
             old_engine = control.task
             engine = await self._repoint(

@@ -346,7 +346,7 @@ def engine_log(monkeypatch):
     async def send(self, request):
         sent.append(request['arguments'])
         if request['arguments'].get('subcommand') == 'open':
-            return {'body': {'pipe_id': 1, 'traceId': '1.1.7'}}
+            return {'body': {'pipeId': 1, 'traceId': '1.1.7'}}
         if request['arguments'].get('subcommand') == 'tool':
             return {'body': {'result': 1, 'traceId': '1.1.8'}}
         return {'body': {'ok': True}}
@@ -372,8 +372,8 @@ async def test_an_open_claims_the_tree_and_a_close_releases_it_counting_the_bind
     assert (owner.control_key, owner.conn_id, owner.late) == (control.key, 1, False)
     assert control.stats.totalCount == 1
 
-    await _frame(conn, subcommand='write', pipe_id=1, data=b'12345')
-    await _frame(conn, subcommand='close', pipe_id=1)
+    await _frame(conn, subcommand='write', pipeId=1, data=b'12345')
+    await _frame(conn, subcommand='close', pipeId=1)
     assert ts.trace_owners.owner('1.1.7').late is True
     assert (control.stats.completedCount, control.stats.completedSize, control.stats.failedCount) == (1, 5, 0)
 
@@ -387,7 +387,7 @@ async def test_a_failed_close_counts_the_binding_failed(catalog, engines, engine
     monkeypatch.setattr(TaskEngine, '_send_data', AsyncMock(side_effect=RuntimeError('gone')))
 
     with pytest.raises(RuntimeError):
-        await _frame(conn, subcommand='close', pipe_id=1)
+        await _frame(conn, subcommand='close', pipeId=1)
     assert (control.stats.failedCount, control.stats.completedCount) == (1, 0)
     assert ts.trace_owners.owner('1.1.7').late is True
 

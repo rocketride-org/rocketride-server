@@ -119,6 +119,8 @@ _TEST_BILLING_RATES = {
     'gpu_postprocess': 0.0,
     'gpu_queue_wait': 0.0,
     'gpu_inference_count': 0.0,
+    'hold_time': 0.001,  # tokens per ms (the pipe hold, plan 8.1)
+    'bytes_in': 0.0,
 }
 
 
@@ -565,3 +567,164 @@ def test_stop_monitoring_on_idle_is_a_noop(fake_psutil, no_gpu):
         await tm.stop_monitoring()
 
     asyncio.run(run())  # absence of exception is the assertion
+
+
+# ---------------------------------------------------------------------------
+# Request trees -> usage increments (plan 8.2, 8.3)
+# ---------------------------------------------------------------------------
+
+
+def _attribution(org='org-1', user='user-a', team='team-home'):
+    from ai.modules.task.task_control import BillingAttribution
+
+    return BillingAttribution(org_id=org, team_id=team, user_id=user)
+
+
+def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None):
+    return task_metrics.TraceUsage(
+        control_key=control_key,
+        billing=billing or _attribution(),
+        address='acme.docBrain.chat',
+        rung='team',
+    )
+
+
+def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gpu, mock_billing_rates):
+    """The engine's final bucket for a tree is converted at the rates and queued under the caller's day row."""
+    sink = task_metrics.UsageSink(post=None)
+    tm, _ = _make_metrics(fake_psutil)
+    tm._attribute = lambda trace_id: _usage(trace_id)
+    tm.usage_sink = sink
+    tm.merge_subprocess_metrics(
+        {
+            'timers': {'hold_time': 500.0},
+            'counters': {'bytes_in': 10},
+            'traces': {'7': {'timers': {'hold_time': 500.0}, 'counters': {'bytes_in': 10}, 'closed': True}},
+        }
+    )
+    day = task_metrics.UsageSink.day_number()
+    key = f'usage:{day}:acme.docBrain:user-a:hold_time'
+    assert list(sink.pending) == [key]
+    pending = sink.pending[key]
+    assert pending['amount'] == 0.5 and pending['request_count'] == 1  # 500 ms x 0.001; bytes_in bills nothing
+    assert pending['row']['org_id'] == 'org-1' and pending['row']['team_id'] == 'team-home'
+    assert pending['row']['context']['rung'] == 'team' and 7 not in tm.traces
+
+
+def test_an_open_tree_is_tracked_and_an_unclaimed_tree_stays_engine_level(fake_psutil, no_gpu, mock_billing_rates):
+    tm, _ = _make_metrics(fake_psutil)
+    tm._attribute = lambda trace_id: _usage(trace_id) if trace_id == 1 else None
+    tm.usage_sink = task_metrics.UsageSink(post=None)
+    tm.merge_subprocess_metrics(
+        {
+            'timers': {},
+            'counters': {},
+            'traces': {
+                '1': {'timers': {'gpu_compute': 100.0}, 'counters': {}, 'closed': False},
+                '2': {'timers': {'gpu_compute': 100.0}, 'counters': {}, 'closed': True},
+            },
+        }
+    )
+    assert tm.traces[1].timers == {'gpu_compute': 100.0} and 2 not in tm.traces
+    assert tm.usage_sink.pending == {}
+
+
+def test_tokens_for_bills_gpu_under_tokens_and_metered_keys_under_their_own_name(
+    fake_psutil, no_gpu, mock_billing_rates
+):
+    tm, _ = _make_metrics(fake_psutil)
+    usage = _usage(1)
+    usage.timers = {'gpu_compute': 200.0, 'gpu_memory': 1.0, 'hold_time': 1000.0, 'gpu_queue_wait': 999.0}
+    usage.counters = {'bytes_in': 4096}
+    assert tm.tokens_for(usage) == {'tokens': 3.0, 'hold_time': 1.0}
+
+
+@pytest.mark.asyncio
+async def test_the_sink_coalesces_increments_and_retries_a_failed_write_under_its_own_id():
+    """Increments of one row add up in an OPEN entry; a flush detaches it and sends it under its increment id; a
+    failed write is retried on the next flush with the SAME id (the ledger refuses a repeat), while increments
+    posted meanwhile form a new entry with a new id.
+    """
+    writes = []
+    fail = {'on': True}
+
+    async def post(**row):
+        if fail['on']:
+            raise RuntimeError('ledger down')
+        writes.append(row)
+        return True
+
+    sink = task_metrics.UsageSink(post=post)
+    now = 20772 * 86400 + 10
+    sink.post(_usage(1), {'hold_time': 0.5}, now=now)
+    sink.post(_usage(2), {'hold_time': 0.25, 'tokens': 2.0}, now=now)
+    key = 'usage:20772:acme.docBrain:user-a:hold_time'
+    assert sink.pending[key]['amount'] == 0.75 and sink.pending[key]['request_count'] == 2
+    assert sink.pending['usage:20772:acme.docBrain:user-a:tokens']['request_count'] == 1
+    first_id = sink.pending[key]['increment_id']
+
+    await sink.flush()
+    assert writes == [] and sink.pending == {} and len(sink.unconfirmed) == 2, 'detached, unconfirmed, nothing lost'
+    # Posted while the first write is out: a NEW entry under a new id
+    sink.post(_usage(3), {'hold_time': 0.75}, now=now)
+    assert sink.pending[key]['increment_id'] != first_id
+    fail['on'] = False
+    await sink.flush()
+    holds = [w for w in writes if w['resource'] == 'hold_time']
+    assert [w['increment_id'] for w in holds] == [first_id, sink_second_id(holds)]
+    assert [(w['amount'], w['request_count']) for w in holds] == [(0.75, 2), (0.75, 1)]
+    assert holds[0]['user_id'] == 'user-a' and holds[0]['team_id'] == 'team-home'
+    assert sink.pending == {} and sink.unconfirmed == {}
+
+
+def sink_second_id(holds):
+    """The second hold write's increment id (distinct from the first by construction)."""
+    assert holds[1]['increment_id'] != holds[0]['increment_id']
+    return holds[1]['increment_id']
+
+
+def test_a_tree_without_a_paying_unit_is_not_posted():
+    sink = task_metrics.UsageSink(post=None)
+    usage = _usage(1)
+    usage.billing = None
+    sink.post(usage, {'hold_time': 1.0})
+    sink.post(_usage(2, billing=_attribution(user='')), {'hold_time': 1.0})
+    assert sink.pending == {}
+
+
+def test_a_zero_replacement_stays_eligible_until_its_write_succeeds(fake_psutil, no_gpu, monkeypatch):
+    """A line an earlier report charged is written as ZERO once attribution empties it; a failed zero write is
+    retried by the next report, so the owner's old debit never outlives the callers' charge.
+    """
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    status.tokens.custom = {'hold_time': 5.0}
+    debits = []
+    fail = {'on': False}
+
+    async def apply_debit(**row):
+        if fail['on']:
+            raise RuntimeError('ledger down')
+        debits.append((row['description'], row['amount']))
+        return True
+
+    # The autouse fixture installs a mock ai.account module: the report imports through sys.modules
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+
+    asyncio.run(tm._report_to_billing_system())
+    assert ('hold_time', 5.0) in debits and 'hold_time' in tm._debited
+
+    # Every ms of that hold was a caller's: the owner's line is now zero
+    tm._attributed['hold_time'] = 5.0
+    fail['on'] = True
+    asyncio.run(tm._report_to_billing_system())
+    assert 'hold_time' in tm._debited, 'the failed zero write keeps the line eligible'
+
+    fail['on'] = False
+    asyncio.run(tm._report_to_billing_system())
+    assert debits[-1] == ('hold_time', 0.0) and 'hold_time' not in tm._debited
+    # Nothing left to replace: the next report writes no zero
+    asyncio.run(tm._report_to_billing_system())
+    assert debits[-1] == ('hold_time', 0.0) and len([d for d in debits if d == ('hold_time', 0.0)]) == 1

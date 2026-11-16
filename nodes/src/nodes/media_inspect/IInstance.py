@@ -43,6 +43,10 @@ SCHEMA_VERSION = 1
 class IInstance(MediaInstance):
     """Measure a recording or extract caller-selected pictures."""
 
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
     node = NODE
     modes = ('probe', 'levels', 'stills')
@@ -140,7 +144,7 @@ class IInstance(MediaInstance):
             debug(f'{NODE}: no image descriptor for {name}: {exc}')
             payload = b''
         mime = 'image/jpeg'
-        chunk_bytes = self.IGlobal.chunk_bytes
+        chunk_bytes = int(self.settings.chunk_kb) * 1024
         self.instance.writeImage(AVI_ACTION.BEGIN, mime, payload)
         try:
             for at in range(0, len(data), chunk_bytes):
@@ -159,7 +163,7 @@ class IInstance(MediaInstance):
         which on a long recording is the difference between a second and a
         minute per ten minutes of picture.
         """
-        cfg = self.IGlobal.config
+        cfg = self.settings
         span = common_media.parse_range(ctx.get('range')) or (0, int(media.get('duration_ms') or 0))
         windows = common_media.parse_ranges(ctx.get('ranges'))
         wanted = as_bool(ctx.get('scan'), True)

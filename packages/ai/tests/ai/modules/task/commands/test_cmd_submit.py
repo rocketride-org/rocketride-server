@@ -70,7 +70,7 @@ def data_path(monkeypatch):
         arguments = request['arguments']
         calls.append((self, arguments['subcommand'], dict(arguments)))
         if arguments['subcommand'] == 'open':
-            return {'body': {'pipe_id': 1, 'traceId': 99}}
+            return {'body': {'pipeId': 1, 'traceId': 99}}
         if arguments['subcommand'] == 'close':
             return {'body': {'objects': 1, 'answer': 'ok'}}
         return {'body': {}}
@@ -160,9 +160,9 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     claims: List[tuple] = []
     real_claim = ts.trace_owners.claim
 
-    def claim(trace_id, control_key, conn_id):
+    def claim(trace_id, control_key, conn_id, **attribution):
         claims.append((trace_id, control_key, conn_id))
-        real_claim(trace_id, control_key, conn_id)
+        real_claim(trace_id, control_key, conn_id, **attribution)
 
     ts.trace_owners.claim = claim
     await _submit(conn, name=ADDRESS, data=b'hello')
@@ -171,6 +171,8 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     # Released at the close: the owner lingers for the grace, stamped late
     owner = ts.trace_owners.owner('99')
     assert owner is not None and owner.control_key == control.key and owner.late is True
+    # The tree is paid by the CALLER (plan 8.3): their org and user, their home team
+    assert (owner.billing.org_id, owner.billing.user_id, owner.address) == ('org-1', 'user-a', ADDRESS)
     assert (control.stats.totalCount, control.stats.completedCount, control.stats.completedSize) == (1, 1, 5)
 
 
@@ -243,8 +245,8 @@ async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, m
         if sub == 'write':
             await asyncio.sleep(10)
         if sub == 'close':
-            closed.append(request['arguments']['pipe_id'])
-        return {'body': {'pipe_id': 1}}
+            closed.append(request['arguments']['pipeId'])
+        return {'body': {'pipeId': 1}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     with pytest.raises(TaskError) as err:
@@ -264,7 +266,7 @@ async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, de
     async def send(self, request):
         if request['arguments']['subcommand'] in ('write', 'close'):
             await asyncio.sleep(10)
-        return {'body': {'pipe_id': 1}}
+        return {'body': {'pipeId': 1}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     started = time.monotonic()
