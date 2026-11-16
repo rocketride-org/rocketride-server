@@ -5,6 +5,9 @@ import type * as Preset from '@docusaurus/preset-classic';
 import redirects, { createRedirects } from './redirects';
 import remarkStripTitle from './src/lib/remark-strip-title.mjs';
 
+// A CommonJS module, shared with the docs build scripts.
+const { describePage } = require('./scripts/lib/description.js');
+
 // Use Algolia DocSearch when credentials are present; otherwise fall back to the
 // local search index (matches the previous site).
 const algolia = process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_API_KEY ? { appId: process.env.ALGOLIA_APP_ID, apiKey: process.env.ALGOLIA_API_KEY, indexName: process.env.ALGOLIA_INDEX_NAME || 'rocketride' } : null;
@@ -16,7 +19,11 @@ const algolia = process.env.ALGOLIA_APP_ID && process.env.ALGOLIA_API_KEY ? { ap
 // `pnpm build` work standalone after a gather has run.
 const contentPath = process.env.ROCKETRIDE_DOCS_CONTENT || path.resolve(__dirname, 'content');
 
-const { describePage } = require('./scripts/lib/description.js');
+/** Whether a source file is a partial (a file or folder name starting with `_`), relative to the content tree. */
+function isPartial(filePath: unknown): boolean {
+	if (typeof filePath !== 'string') return false;
+	return path.relative(contentPath, filePath).split(/[\\/]/).some((part) => part.startsWith('_'));
+}
 
 const config: Config = {
 	title: 'RocketRide Documentation',
@@ -94,8 +101,7 @@ const config: Config = {
 		// matter on a partial makes the MDX loader throw in CI.
 		parseFrontMatter: async (params) => {
 			const result = await params.defaultParseFrontMatter(params);
-			const isPartial = typeof params.filePath === 'string' && path.relative(contentPath, params.filePath).split(/[\\/]/).some((part) => part.startsWith('_'));
-			if (!isPartial && !result.frontMatter.description) {
+			if (!isPartial(params.filePath) && !result.frontMatter.description) {
 				const description = describePage(result.content);
 				if (description) result.frontMatter.description = description;
 			}
