@@ -121,6 +121,8 @@ class IInstance(IInstanceBase):
         Raises:
             RuntimeError: On END, the frame could not be decoded, processed or written;
                 the message names the cause.
+            Exception: An engine error raised through a lane write, for example by a
+                downstream node, re-raised unchanged with its own code, text and location.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -137,6 +139,9 @@ class IInstance(IInstanceBase):
                 debug(f'pose: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, persons)
             except Exception as exc:
+                # A downstream node's engine error: keep its own code, text and location
+                if hasattr(exc, '__formatted'):
+                    raise
                 cause = str(exc) or type(exc).__name__
                 raise RuntimeError(f'pose_estimation failed to process the input frame: {cause}') from exc
             finally:

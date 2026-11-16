@@ -93,6 +93,8 @@ class IInstance(IInstanceBase):
         Raises:
             RuntimeError: On END, the frame could not be decoded, processed or written;
                 the message names the cause.
+            Exception: An engine error raised through a lane write, for example by a
+                downstream node, re-raised unchanged with its own code, text and location.
         """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
@@ -105,6 +107,9 @@ class IInstance(IInstanceBase):
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 self._emit(image)
             except Exception as exc:
+                # A downstream node's engine error: keep its own code, text and location
+                if hasattr(exc, '__formatted'):
+                    raise
                 cause = str(exc) or type(exc).__name__
                 raise RuntimeError(f'depth_estimate failed to process the input frame: {cause}') from exc
             finally:

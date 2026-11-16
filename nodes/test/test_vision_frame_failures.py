@@ -9,7 +9,9 @@ Frame-failure tests for the vision nodes' writeImage handlers.
 On END each handler decodes the buffered frame, runs its model and writes its
 outputs. A failure in any of those steps used to be logged as a warning and the
 frame dropped, so the image or video completed with that frame missing and no
-error. The handler now raises RuntimeError and the engine fails the object.
+error. The handler now raises RuntimeError and the engine fails the object. An
+engine error raised through a lane write, for example by a downstream node, is
+re-raised unchanged so it keeps its own code, text and location.
 The engine builds the object's error from str() of the raised exception only and
 never reads __cause__ (engLib/python/call.hpp), so the message must carry the cause.
 
@@ -104,6 +106,26 @@ def _fail(*args, **kwargs):
 def _fail_write(*args, **kwargs):
     """Fail like an image-lane write would, for example when the output stream cannot be written."""
     raise OSError('injected write failure')
+
+
+def _engine_error(message):
+    """Build the exception the engine raises when the node on a lane fails.
+
+    The engine's exception translator (engLib/store/python/bindings.cpp) raises a plain
+    Exception with __formatted, code, message, filename, function and line set, and
+    call.hpp reads those fields back only when __formatted is present.
+    """
+    exc = Exception(f'Exception: {message} at (downstream.py:7)')
+    for name, value in {
+        '__formatted': True,
+        'code': 1,
+        'message': message,
+        'filename': 'downstream.py',
+        'function': 'writeImage',
+        'line': 7,
+    }.items():
+        setattr(exc, name, value)
+    return exc
 
 
 def _model_result(node, image):
@@ -251,6 +273,31 @@ def test_image_write_failure_after_the_text_write_fails_the_object(handler, node
     assert instance._image_data is None
     assert instance.IGlobal.device_lock.acquire(blocking=False), 'device_lock is still held after the failure'
     instance.IGlobal.device_lock.release()
+
+
+@pytest.mark.parametrize('node', NODES)
+def test_downstream_engine_error_passes_through_unchanged(handler, node):
+    """An engine error that the node on the image lane raises reaches the engine as it was raised."""
+    raised = []
+
+    def fail_downstream(*args, **kwargs):
+        """Fail like the image-lane write does when the next node fails."""
+        raised.append(_engine_error('injected downstream failure'))
+        raise raised[-1]
+
+    instance = handler(node, decode=_decode, model=lambda image: _model_result(node, image), forward=fail_downstream)
+    forwarded = []
+
+    with pytest.raises(Exception) as caught:
+        _end(instance, forwarded)
+
+    assert caught.value is raised[0], f'the downstream error was wrapped as {caught.value!r}'
+    assert forwarded == [], 'the raw END was forwarded after the failure'
+    assert instance._image_data is None
+    assert instance.IGlobal.device_lock.acquire(blocking=False), 'device_lock is still held after the failure'
+    instance.IGlobal.device_lock.release()
+    if node == 'face_detection':
+        assert instance._chunk_id == 1, 'the frame counter did not move past the failed frame'
 
 
 @pytest.mark.parametrize('node', NODES)
