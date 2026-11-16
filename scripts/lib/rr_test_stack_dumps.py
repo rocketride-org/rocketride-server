@@ -63,7 +63,8 @@ fsynced because the process may hang right after::
 followed by a blank line. With ``_WMI_SKIP`` false the wrapper returns the original result
 or re-raises the original exception unchanged. With ``_WMI_SKIP`` true (the default) it never
 calls ``_wmi``: it appends the block below and raises ``OSError``, which ``platform`` treats
-as "WMI unavailable" and answers from ``sys.getwindowsversion()`` and the environment::
+as "WMI unavailable" and answers from ``sys.getwindowsversion()``, the ``ver`` command
+(run once in a child process) and the environment::
 
     === wmi query seconds=<s, 3 decimals> skipped query=<first 200 chars>
 
