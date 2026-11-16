@@ -307,9 +307,9 @@ function clientTool(client: RocketRideClient, ask = (): ChatAsking => ({ answer:
 }
 
 /** Runs one agent turn as the Agent tab does, minus the browser: the chat's cards go to `ask`, the unsaved-changes dialog to `choose`. */
-async function agentTurn(ws: MemoryWorkspace, model: ScriptedModel, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl> } = {}): Promise<Array<{ type: string; text: string }>> {
-	const { editors } = opts;
-	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
+async function agentTurn(ws: MemoryWorkspace, model: ScriptedModel, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl>; openAppPage?: AgentHost['openAppPage'] } = {}): Promise<Array<{ type: string; text: string }>> {
+	const { editors, openAppPage } = opts;
+	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}), ...(openAppPage ? { openAppPage } : {}) });
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: model, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
@@ -1048,7 +1048,8 @@ test("Auto stops the conversation's own run after a fresh status read, and refus
 
 // =============================================================================
 // USE_APP — one page per app for the turn, refused before any card where it can't run, a view within budget,
-// its limits, a card before it acts, a fresh copy once a page leaves the app, and check_app borrowing the page
+// its limits, a card before it acts, a native call reaching the page, a fresh copy once a page leaves the app,
+// and check_app borrowing the page
 // =============================================================================
 
 test('use_app opens one page per app for the turn: racing calls share one open, its lifetime is the turn, a failed open is tried again, and nothing opens once the turn ended', async () => {
@@ -1212,6 +1213,28 @@ test('use_app asks before it acts on the page: a read or a wait runs free, a cli
 	await usingWith(auto.ask, fakeSettings('auto')).execute(click);
 	assert.equal(auto.cards.length, 0, 'Auto shows no card');
 	assert.equal(page.uses.length, 5, 'both calls reached the page');
+});
+
+test("a turn sends use_app's whole schema as a native tool, and a native call's actions reach the page as the actions it wrote", async () => {
+	const page = fakePage();
+	const actions = [
+		{ action: 'click', ref: 'e5' },
+		{ action: 'type', ref: 'e6', text: 'hi' },
+		{ action: 'wait_for', text: 'Saved', timeout_s: 5 },
+	];
+	const model = scriptedModel([plan(['use_app', { app: 'daybook-ui', actions }]), done('Tried the form.')]);
+	const ask = (): ChatAsking => ({ answer: Promise.resolve('approve'), approve: () => undefined });
+	await agentTurn(new MemoryWorkspace(DAYBOOK), model, { openAppPage: opener(page).open, ask });
+
+	const [sent] = model.requests;
+	assert.equal(sent.kind, 'turn');
+	const declared = toolOf(appUseFor(hostFor(new MemoryWorkspace({}))).toolkit, USE_APP_TOOL).tool.parameters;
+	assert.deepEqual(sent.kind === 'turn' && sent.tools.find((tool) => tool.name === USE_APP_TOOL)?.inputSchema, declared, 'the model gets the schema whole, its action items included');
+	assert.deepEqual(page.uses[0]?.actions, [
+		{ kind: 'click', ref: 'e5' },
+		{ kind: 'type', ref: 'e6', text: 'hi' },
+		{ kind: 'wait_for', text: 'Saved', timeoutMs: 5000 },
+	]);
 });
 
 test('after the page leaves the app, the next use_app call opens a fresh copy, and calls racing to it share one', async () => {
