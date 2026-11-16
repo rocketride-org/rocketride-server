@@ -72,9 +72,21 @@ export class AccountApi {
 	}
 
 	/**
-	 * Sets the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
+	 * Sets the user's TEAM ORDER in the active organization: the teams `@team` resolution walks.
+	 * The first team that publishes a name answers for it; the first team overall is the HOME
+	 * team — dev-mode runs bill to it and its environment layer applies. Teams left out follow
+	 * in membership order.
 	 *
-	 * @param teamId - The team ID to set as default.
+	 * @param order - Team IDs, the home team first (it must carry `task.control`).
+	 */
+	async setTeamOrder(order: string[]): Promise<void> {
+		await this.client.call('rrext_account_me', { subcommand: 'set_team_order', teamOrder: [...order] });
+	}
+
+	/**
+	 * Makes a team the user's HOME team: moves it to the front of their team order.
+	 *
+	 * @param teamId - The team ID to put first.
 	 */
 	async setDevTeam(teamId: string): Promise<void> {
 		await this.client.call('rrext_account_me', { subcommand: 'set_dev_team', teamId });
@@ -196,7 +208,7 @@ export class AccountApi {
 	/**
 	 * Creates a new API key and returns the raw key string.
 	 *
-	 * @param params - Key creation parameters (name, permissions, expiresAt).
+	 * @param params - Key creation parameters (name, permissions, expiresAt, teamId, endpoints).
 	 * @returns Object containing the raw key string.
 	 */
 	async createKey(params: CreateKeyParams): Promise<{ key: string }> {

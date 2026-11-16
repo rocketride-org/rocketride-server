@@ -105,6 +105,7 @@ export const EVENT_TYPE_NAMES = [
 	'DASHBOARD',
 	'BILLING',
 	'DEPLOY',
+	'OPS',
 ] as const;
 
 /** One subscription category name. */

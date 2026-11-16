@@ -48,6 +48,7 @@ from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.task_control import TaskControl
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
+from ai.modules.task.trace_owner import TraceOwners
 
 ADDRESS = 'acme.proj-tk.src'
 
@@ -79,6 +80,7 @@ def _server():
     ts._task_control = ControlRegistry()
     ts._engines = EngineRegistry()
     ts._engine_unavailable = {}
+    ts.trace_owners = TraceOwners()
     ts._deployment_revoked = {}
     ts._engine_ids = itertools.count(1)
     ts._node_id = 1

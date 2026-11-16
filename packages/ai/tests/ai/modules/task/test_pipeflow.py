@@ -1,7 +1,7 @@
 """Unit tests for ai.modules.task.pipeflow.apply_pipeflow_event.
 
 These pin the two fixes for the agent-trace "missing leave event" / duplicate-span
-bug (reentrant agent sub-invocations share one pipe_index and interleave):
+bug (reentrant agent sub-invocations share one pipe_id and interleave):
 
 1. Each emitted `pipes` chain is an independent snapshot — mutating the stack via
    later events must NOT change an already-captured chain (the aliasing bug where

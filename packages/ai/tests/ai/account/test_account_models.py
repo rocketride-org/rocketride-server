@@ -59,3 +59,47 @@ def test_is_new_user_defaults_to_unknown_and_reaches_connect_result():
     returning = AccountInfo(userId='u3', auth='rr_k', userToken='rr_k', isNewUser=False)
     assert returning.to_connect_result()['isNewUser'] is False
     assert 'auth' not in fresh.to_connect_result()
+
+
+# =============================================================================
+# TEAM ORDER (B39)
+# =============================================================================
+
+
+def _member(order, teams, endpoints=None):
+    from ai.account.models import AccountInfo
+
+    return AccountInfo(
+        userId='u',
+        devTeam=order[0] if order else '',
+        teamOrder=list(order),
+        organization={
+            'id': 'org',
+            'name': '',
+            'permissions': [],
+            'teams': [{'id': t, 'name': t, 'permissions': []} for t in teams],
+        },
+        endpoints=endpoints,
+    )
+
+
+def test_team_order_is_the_stored_order_then_the_teams_joined_since():
+    from ai.account.models import home_team, team_order
+
+    info = _member(['b', 'gone'], ['a', 'b', 'c'])
+    assert team_order(info) == ['b', 'a', 'c']
+    assert home_team(info) == 'b'
+
+
+def test_team_order_without_a_stored_order_is_membership_order():
+    from ai.account.models import home_team, team_order
+
+    assert team_order(_member([], ['a', 'b'])) == ['a', 'b']
+    assert home_team(_member([], [])) == ''
+
+
+def test_a_scoped_key_resolves_through_its_frozen_team_only():
+    from ai.account.models import team_order
+
+    assert team_order(_member(['a'], ['a'], endpoints=['acme.p.*'])) == ['a']
+    assert team_order(_member(['a', 'b'], ['a', 'b'], endpoints=['acme.p.*'])) == []

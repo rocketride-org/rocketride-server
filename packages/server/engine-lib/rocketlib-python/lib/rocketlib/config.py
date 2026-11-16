@@ -375,6 +375,7 @@ class ConfigView(Mapping):
         *,
         refuse_params: bool = False,
         refuse_env: bool = False,
+        env_keys: Optional[frozenset] = None,
     ):
         """
         Build a view. Callers use ``resolveConfig``; this is the resolver's constructor.
@@ -387,6 +388,11 @@ class ConfigView(Mapping):
             capabilities (int): The node's PROTOCOL_CAPS bitmask.
             refuse_params (bool): Raise ``TenancyViolation`` on param-flagged keys.
             refuse_env (bool): Raise ``TenancyViolation`` on env-valued keys.
+            env_keys (frozenset): The env-valued keys of the view this one
+                derives from. A derived view (expanded, overlaid, restricted)
+                keeps them: which keys a caller's environment decides is a
+                fact of the SPEC, not of the values currently in them, and
+                the per-call client caches key on it.
         """
         object.__setattr__(self, '_values', dict(values))
         object.__setattr__(self, '_descriptors', dict(descriptors))
@@ -399,7 +405,11 @@ class ConfigView(Mapping):
             self, '_param_keys', frozenset(key for key, desc in descriptors.items() if desc.get('param'))
         )
         object.__setattr__(
-            self, '_env_keys', frozenset(key for key, value in values.items() if _has_placeholder(value))
+            self,
+            '_env_keys',
+            env_keys
+            if env_keys is not None
+            else frozenset(key for key, value in values.items() if _has_placeholder(value)),
         )
 
     # ---- Mapping protocol ------------------------------------------------
@@ -502,6 +512,7 @@ class ConfigView(Mapping):
             self._capabilities,
             refuse_params=refuse_params,
             refuse_env=refuse_env,
+            env_keys=self._env_keys,
         )
 
     def expand_env(self, env: Optional[Mapping[str, Any]]) -> 'ConfigView':
@@ -558,8 +569,10 @@ class ConfigView(Mapping):
     # ---- Internals --------------------------------------------------------
 
     def _with_values(self, values: Dict[str, Any]) -> 'ConfigView':
-        """Clone with ``values`` and no refusals (settings never refuses)."""
-        return ConfigView(values, self._descriptors, self._paths, self._params, self._capabilities)
+        """Clone with ``values`` and no refusals (settings never refuses); the env-valued keys stay known."""
+        return ConfigView(
+            values, self._descriptors, self._paths, self._params, self._capabilities, env_keys=self._env_keys
+        )
 
     def _refuse(self, key: str) -> None:
         """Raise the teaching error for a key this view must not serve."""

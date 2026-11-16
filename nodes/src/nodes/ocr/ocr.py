@@ -34,7 +34,6 @@ from typing import Any, Dict, List
 import numpy as np
 from PIL import Image
 
-from ai.common.reader import ReaderBase
 from ai.common.models import EasyOCR, DocTR, Surya, TrOCR
 from rocketlib import debug
 
@@ -97,7 +96,7 @@ OCR_ENGINES = {
 }
 
 
-class Reader(ReaderBase):
+class Reader:
     """
     OCR Reader using model server wrappers.
 
@@ -120,8 +119,6 @@ class Reader(ReaderBase):
             connConfig: Connection configuration
             bag: Shared bag dictionary
         """
-        super().__init__(provider, connConfig, bag)
-
         # The resolved node configuration (defaults and enums are the schema's)
         config = connConfig
 

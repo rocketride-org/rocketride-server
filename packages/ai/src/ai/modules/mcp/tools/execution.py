@@ -78,24 +78,33 @@ _RUN_DROPPER_PIPE_SCHEMA = {
 _SEND_DATA_SCHEMA = {
     'type': 'object',
     'properties': {
-        'task_token': {'type': 'string', 'description': 'Task token returned by run_pipeline'},
+        'address': {
+            'type': 'string',
+            'description': 'The task address returned by run_pipeline (developerId.pipelineId.source)',
+        },
         'input': {'type': 'string', 'description': 'Data to send to the running task'},
     },
-    'required': ['task_token', 'input'],
+    'required': ['address', 'input'],
 }
 
 _TERMINATE_SCHEMA = {
     'type': 'object',
     'properties': {
-        'task_token': {'type': 'string', 'description': 'Task token returned by run_pipeline'},
+        'address': {
+            'type': 'string',
+            'description': 'The task address returned by run_pipeline (developerId.pipelineId.source)',
+        },
     },
-    'required': ['task_token'],
+    'required': ['address'],
 }
 
 _SEND_FILES_SCHEMA = {
     'type': 'object',
     'properties': {
-        'task_token': {'type': 'string', 'description': 'Task token returned by run_pipeline'},
+        'address': {
+            'type': 'string',
+            'description': 'The task address returned by run_pipeline (developerId.pipelineId.source)',
+        },
         'files': {
             'type': 'array',
             'items': {'type': 'string'},
@@ -103,7 +112,7 @@ _SEND_FILES_SCHEMA = {
             'description': "Paths on the engine host's local filesystem to upload to the running task",
         },
     },
-    'required': ['task_token', 'files'],
+    'required': ['address', 'files'],
 }
 
 
@@ -133,7 +142,7 @@ async def _start_task(client, args: Dict[str, Any], tool_name: str):
     except asyncio.TimeoutError:
         return None, _timeout(
             f'{tool_name} timed out waiting for the engine to start the task',
-            'the task may still be starting; call monitor once a task_token is known, or retry',
+            'the task may still be starting; call monitor once an address is known, or retry',
         )
     return started or {}, None
 
@@ -146,12 +155,12 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     token = started.get('token')
     if not token:
         return _bad(
-            'engine did not return a task token',
+            'engine did not return a task address',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
     tasks.add(token, pipeline_ref='<inline>')
 
-    result_payload: Dict[str, Any] = {'ok': True, 'task_token': token}
+    result_payload: Dict[str, Any] = {'ok': True, 'address': token}
     result_payload['projectId'] = started.get('projectId')
     result_payload['source'] = started.get('source')
 
@@ -165,7 +174,7 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         except asyncio.TimeoutError:
             return _timeout(
                 'run_pipeline started the task but timed out waiting for the initial send() result',
-                f'the task_token is {token}; call monitor or send_data to check on it',
+                f'the address is {token}; call monitor or send_data to check on it',
             )
         result_payload['result'] = result
         # One-shot run: inputs were sent and a result came back synchronously,
@@ -212,12 +221,14 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
         )
     tasks.add(address, pipeline_ref='<inline>')
 
+    # The upload door is the address-keyed data route; the dropper UI is the
+    # shell app's deep link (plan 3.6) - no credential rides either URL
     base_url = str(client.base_url).rstrip('/')
     result_payload: Dict[str, Any] = {
         'ok': True,
-        'task_token': address,
         'address': address,
         'upload_url': f'{base_url}/task/data/{address}',
+        'dropper_url': f'{base_url}/?appid=rocketride.dropper&pipe={address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),
     }
@@ -226,16 +237,16 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:
-    # token/data aliases: the SDK validates only the request envelope, not
-    # per-tool inputSchema, so alias-only calls from lenient hosts do land
-    # here. The schema stays strict as the advertised contract.
-    token = args.get('task_token') or args.get('token')
+    # data alias: the SDK validates only the request envelope, not per-tool
+    # inputSchema, so alias-only calls from lenient hosts do land here. The
+    # schema stays strict as the advertised contract.
+    token = args.get('address')
     data = args.get('input')
     if data is None:
         data = args.get('data')
 
     if not token:
-        return _bad('task_token is required', 'call run_pipeline first to obtain a task_token')
+        return _bad('address is required', 'call run_pipeline first to obtain the task address')
     if data is None:
         return _bad('input is required', 'pass the data to send to the running task')
 
@@ -254,9 +265,9 @@ async def _send_data(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _terminate(client, tasks, args: Dict[str, Any]) -> dict:
-    token = args.get('task_token')
+    token = args.get('address')
     if not token:
-        return _bad('task_token is required', 'pass the token returned by run_pipeline')
+        return _bad('address is required', 'pass the address returned by run_pipeline')
 
     try:
         await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
@@ -271,10 +282,10 @@ async def _terminate(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
-    token = args.get('task_token')
+    token = args.get('address')
     files = args.get('files')
     if not token:
-        return _bad('task_token is required', 'pass the token returned by run_pipeline')
+        return _bad('address is required', 'pass the address returned by run_pipeline')
     if not files:
         return _bad('files is required and must be a non-empty array', 'pass one or more file paths to upload')
 
@@ -291,14 +302,14 @@ async def _send_files(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 def register(registry: ToolRegistry) -> None:
-    """Register the 5 token-based execution tools against ``registry``.
+    """Register the 5 address-based execution tools against ``registry``.
 
     ``send_files`` is ``local_engine_only``: a deployed engine's registry
     neither lists nor runs it.
     """
     registry.register(
         'run_pipeline',
-        'Start a RocketRide pipeline from an inline definition, returning a task_token. '
+        'Start a RocketRide pipeline from an inline definition, returning the task address. '
         'Pass inputs to also send data immediately and get a result back in the same call; '
         'that one-shot run is terminated once the result is back (unless use_existing attached to a running one). '
         'Result includes projectId and source for use with log_traces/log_trace.',
@@ -333,7 +344,7 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'send_data',
-        'Send data to a running pipeline task (by task_token) and return its result.',
+        'Send data to a running pipeline task (by address) and return its result.',
         _SEND_DATA_SCHEMA,
         hints=ToolHints(
             read_only=False,
@@ -346,7 +357,7 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'terminate',
-        'Terminate a running pipeline task by task_token -- also the stop-runaway-task path.',
+        'Terminate a running pipeline task by address -- also the stop-runaway-task path.',
         _TERMINATE_SCHEMA,
         hints=ToolHints(
             read_only=False,
@@ -359,7 +370,7 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'send_files',
-        "Upload files from the engine host's local filesystem to a running pipeline task by task_token. "
+        "Upload files from the engine host's local filesystem to a running pipeline task by address. "
         'Only available on a local engine (bound to loopback), where that filesystem is your own machine; '
         'otherwise use run_dropper_pipe.',
         _SEND_FILES_SCHEMA,

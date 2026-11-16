@@ -44,6 +44,10 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from rocketride.types.task import TASK_METRICS, TASK_TOKENS
+
+from ai.common.parameters import resolve_call_params
+from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
 from .types import EngineState, LAUNCH_TYPE, TaskError
 
@@ -191,6 +195,60 @@ class TeamContext:
     kind: str = 'home'
 
 
+# ==== Per-control counts ===========================================================
+
+
+@dataclass
+class ControlStats:
+    """
+    What THIS control's own bindings did (plan 7.5): counts and bytes, summable, never rates.
+
+    On a shared engine the engine-wide counters are other holders' work too;
+    a holder's status carries these instead. Maintained by the data path as
+    pipes open and close through the control.
+
+    Attributes:
+        totalCount: Bindings opened.
+        completedCount: Bindings closed without failure.
+        failedCount: Bindings closed failed.
+        completedSize: Bytes written through bindings that completed.
+        failedSize: Bytes written through bindings that failed.
+    """
+
+    totalCount: int = 0
+    completedCount: int = 0
+    failedCount: int = 0
+    completedSize: int = 0
+    failedSize: int = 0
+
+
+# ==== The open-pipe record =======================================================
+
+
+@dataclass
+class OpenPipe:
+    """
+    One pipe a control has open on an engine (plan 3.1, P1/P2).
+
+    The record is the OWNERSHIP check and the ENGINE PIN of the data path: a
+    ``write``/``close``/``tool`` naming a slot that is not on the caller's
+    control is refused before anything is forwarded (on a shared engine the
+    slot number alone must never reach the subprocess), and the later frames
+    of an open pipe go to the engine the pipe opened on, so a repoint never
+    redirects an in-flight request.
+
+    Attributes:
+        engine: The engine the pipe was opened on.
+        trace_id: The request tree's wire ``traceId`` (``nodeId.engineId.n``).
+        correlation_id: The server-minted request id the open carried.
+    """
+
+    engine: 'TaskEngine'
+    trace_id: str
+    correlation_id: str
+    bytes: int = 0
+
+
 # ==== The control ==============================================================
 
 
@@ -288,6 +346,34 @@ class TaskControl:
     ttl: int = 0
     origin: Optional[str] = None
 
+    # The ROCKETRIDE_* values this control's bindings run with, resolved once
+    # from the team context (plan 6.2; filled by C.10); rides _caller.env
+    env: Dict[str, str] = field(default_factory=dict)
+
+    # After a repoint, the engine still serving this control's open pipes: the
+    # slot numbers a client names are that engine's, so the control opens on
+    # it until the last of them closes, then its hold goes (plan 7.2 P2)
+    draining: Optional['TaskEngine'] = None
+
+    # Opens forwarded and not yet answered, by the engine they went to: they
+    # hold no record yet, and a repoint must not let that engine go
+    pending_opens: Dict[Any, int] = field(default_factory=dict, repr=False, compare=False)
+
+    # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
+    # bindings did so far (plan 7.5)
+    open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
+    stats: ControlStats = field(default_factory=ControlStats)
+
+    # The resolved config views of the components the parameters map targets,
+    # built on first use and dropped when the pipeline changes: the schema is
+    # resolved once per component for the control's life, not once per request
+    param_views: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    # When the paying unit last answered "allowed" (monotonic); a request within
+    # CONST_SPEND_ALLOW_SECONDS of it asks no question (the engine's own gate
+    # trusts an allow for the same window). A refusal is never cached.
+    credit_allowed_at: float = 0.0
+
     # The control's own idle clock and its idle-expiry heap entry: activity
     # through one control never keeps another alive (plan 7.1)
     last_activity: float = field(default_factory=time.monotonic)
@@ -323,6 +409,25 @@ class TaskControl:
         """
         kind = self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
         return self.teamId if kind == 'team' else self.userId
+
+    def pipes_on(self, engine: 'TaskEngine') -> bool:
+        """
+        Whether any binding of this control is open, or opening, on ``engine``.
+
+        Args:
+            engine: The engine to check.
+
+        Returns:
+            True while a recorded pipe or an unanswered open is on it.
+        """
+        if any(record.engine is engine for record in self.open_pipes.values()):
+            return True
+        return self.pending_opens.get(engine, 0) > 0
+
+    @property
+    def pending_open_count(self) -> int:
+        """How many opens of this control the engines have not answered yet."""
+        return sum(self.pending_opens.values())
 
     @property
     def billing(self) -> BillingAttribution:
@@ -392,6 +497,115 @@ class TaskControl:
             )
         return dict(params)
 
+    def resolve_params(self, admitted: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """
+        The per-node map of admitted params the engine applies (plan 5.4 item 5, the descriptor half).
+
+        Each value is validated against its leaf's descriptor through the
+        node's resolver; a target that is not a ``param``-flagged key is
+        refused. The result keys each node's values by the leaf's schema path,
+        which ``IInstanceBase.settings`` overlays.
+
+        Args:
+            admitted: Params already admitted by name (``check_params``).
+
+        Returns:
+            ``{nodeId: {path: value}}``; empty when none were given.
+
+        Raises:
+            TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``.
+        """
+        if not admitted:
+            return {}
+        per_node, errors = resolve_call_params(self.pipeline or {}, self.parameters, admitted, self.param_views)
+        if errors:
+            names = ', '.join(e['name'] for e in errors)
+            raise TaskError(
+                TaskError.PARAM_REJECTED,
+                f'params rejected on {self.address!r}: {names}',
+                address=self.address,
+                errors=errors,
+            )
+        return per_node
+
+    def project_status(self, status: Dict[str, Any], shared: bool) -> Dict[str, Any]:
+        """
+        The status body THIS control's holders may see (plan 7.5).
+
+        Every holder gets the engine's availability. On a private engine the
+        engine's counters are the owner's own work and pass through. On a
+        shared engine they are every holder's work: the counts become this
+        control's own, rates and engine-level diagnostics (warnings, errors,
+        component stats, slowest documents, metrics) are scrubbed, and no
+        holder count rides anywhere (``pipeflow.totalPipes`` stays 0).
+
+        Args:
+            status: The engine's ``TASK_STATUS`` as a dict (not modified).
+            shared: Whether the engine is shared across users.
+
+        Returns:
+            The projected status body.
+        """
+        body = dict(status)
+        # Step 1: the availability projection every holder is entitled to
+        body['engine'] = {'availability': self.engine_state}
+        if not shared:
+            return body
+        # Step 2: a shared engine's counters are replaced by this control's own
+        body.update(
+            totalCount=self.stats.totalCount,
+            completedCount=self.stats.completedCount,
+            failedCount=self.stats.failedCount,
+            completedSize=self.stats.completedSize,
+            failedSize=self.stats.failedSize,
+            totalSize=self.stats.completedSize + self.stats.failedSize,
+            rateCount=0,
+            rateSize=0,
+            wordsCount=0,
+            wordsSize=0,
+            currentObject='',
+            currentSize=0,
+        )
+        # Step 3: engine-level diagnostics and the engine's resource and token
+        # totals belong to the ops stream (a holder's own usage is C.13)
+        for key, empty in (
+            ('warnings', []),
+            ('errors', []),
+            ('notes', []),
+            ('componentStats', {}),
+            ('slowestDocs', []),
+            ('metrics', TASK_METRICS().model_dump()),
+            ('tokens', TASK_TOKENS().model_dump()),
+        ):
+            if key in body:
+                body[key] = empty
+        return body
+
+    def setup_declared_parameters(self) -> None:
+        """
+        Set up the per-call parameters the control's current pipeline DECLARES (its ``parameters`` map).
+
+        The map (public name -> ``nodeId.configKey``, plan 5.2) is the admission
+        list for per-call ``params``; the resolved node views cached for it are
+        dropped at the same time. Called wherever the control's pipeline is set
+        or replaced (a start, a repoint): the cached views describe components
+        of the pipeline they were resolved from, so they go with it.
+        """
+        self.parameters = dict((self.pipeline or {}).get('parameters') or {})
+        self.param_views.clear()
+
+    def credit_allowed(self, now: float) -> bool:
+        """
+        Whether a recent credit check already allowed this control's paying unit.
+
+        Args:
+            now: ``time.monotonic()``.
+
+        Returns:
+            True within ``CONST_SPEND_ALLOW_SECONDS`` of the last allow.
+        """
+        return now - self.credit_allowed_at < CONST_SPEND_ALLOW_SECONDS
+
     def begin_request(self) -> None:
         """
         A request starts running through this control: activity, and the idle clock is held.
@@ -438,8 +652,8 @@ class TaskControl:
         - ``'stopped'``: no engine, a stopped or stopping one (a dormant
           control reads ``'stopped'`` until its next request).
 
-        TODO(plan 7.5, C.9): carried in ``apaevt_status`` as
-        ``body.engine.availability``.
+        Carried in every status body as ``engine.availability``
+        (``project_status``) and in task lists as ``engineState``.
         """
         # A restart through this control is in the start gate
         engine = self.task

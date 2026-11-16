@@ -22,11 +22,10 @@
 # =============================================================================
 
 from typing import Any, Dict, Mapping, Optional, List
-from ai.common.reader import ReaderBase
 from rocketlib import debug
 
 
-class Parser(ReaderBase):
+class Parser:
     """Parser class for Reducto document processing.
 
     This class handles the core interaction with Reducto's API endpoints for:
@@ -44,7 +43,6 @@ class Parser(ReaderBase):
             bag: Shared resource bag from the endpoint
         """
         # Init the base
-        super().__init__(provider, config, bag)
 
         # Store the bag explicitly
         self.bag = bag
@@ -66,7 +64,7 @@ class Parser(ReaderBase):
     def read(self, file_data: bytes) -> str:
         """Read and parse document data using Reducto.
 
-        This method is required by ReaderBase.
+        The reader hook the node calls.
 
         Args:
             file_data: Document data in bytes

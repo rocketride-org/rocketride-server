@@ -60,7 +60,7 @@ def test_register_all_yields_the_expected_tool_surface():
 
 
 @pytest.mark.asyncio
-async def test_monitor_requires_task_token(fake_engine):
+async def test_monitor_requires_address(fake_engine):
     registry = ToolRegistry()
     visibility.register(registry)
 
@@ -84,10 +84,10 @@ async def test_monitor_polls_until_terminal_state(fake_engine, monkeypatch):
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['ok'] is True
-    assert result['task_token'] == 'tok-1'
+    assert result['address'] == 'tok-1'
     assert result['state'] == 5
     assert result['state_label'] == 'completed'
     assert result['completed'] is True
@@ -111,7 +111,7 @@ async def test_monitor_terminates_on_cancelled_state(fake_engine, monkeypatch):
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['ok'] is True
     assert result['state'] == 6
@@ -133,7 +133,7 @@ async def test_monitor_terminates_when_status_completed_flag_true_even_if_state_
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['ok'] is True
     assert result['terminal'] is True
@@ -159,7 +159,7 @@ async def test_monitor_always_running_returns_non_terminal_snapshot_at_timeout(f
     registry = ToolRegistry()
     visibility.register(registry)
 
-    result = await registry.handler('monitor')(fake_engine, None, {'task_token': 'tok-1', 'timeout': 2, 'interval': 1})
+    result = await registry.handler('monitor')(fake_engine, None, {'address': 'tok-1', 'timeout': 2, 'interval': 1})
 
     assert result['ok'] is True
     assert result['terminal'] is False
@@ -179,7 +179,7 @@ async def test_monitor_handles_get_task_status_raising(fake_engine, monkeypatch)
     registry = ToolRegistry()
     visibility.register(registry)
 
-    result = await registry.handler('monitor')(fake_engine, None, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, None, {'address': 'tok-1'})
 
     assert result['ok'] is False
     assert result['error_type'] == 'RuntimeError'
@@ -199,7 +199,7 @@ async def test_monitor_polls_counter_matches_call_count(fake_engine, monkeypatch
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['polls'] == len(fake_engine.get_task_status_calls) == 3
     assert tasks.get('tok-1') is None
@@ -215,7 +215,7 @@ async def test_monitor_default_counts_when_status_lacks_them(fake_engine, monkey
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['counts'] == {'completedCount': 0, 'failedCount': 0, 'totalCount': 0}
     assert result['status'] == {'state': 5, 'completed': True}
@@ -236,7 +236,7 @@ async def test_monitor_single_poll_timeout_returns_current_snapshot_not_hard_err
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('monitor')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['ok'] is True
     assert result['terminal'] is False
@@ -293,7 +293,7 @@ async def test_monitor_clamps_poll_parameters(fake_engine, monkeypatch):
     visibility.register(registry)
 
     result = await registry.handler('monitor')(
-        fake_engine, TaskRegistry(), {'task_token': 'tok-1', 'timeout': 999999, 'interval': 0}
+        fake_engine, TaskRegistry(), {'address': 'tok-1', 'timeout': 999999, 'interval': 0}
     )
 
     assert result['ok'] is True
@@ -323,7 +323,7 @@ async def test_monitor_oversized_timeout_is_clamped_to_max(fake_engine, monkeypa
     visibility.register(registry)
 
     result = await registry.handler('monitor')(
-        fake_engine, None, {'task_token': 'tok-1', 'timeout': 999999, 'interval': 1}
+        fake_engine, None, {'address': 'tok-1', 'timeout': 999999, 'interval': 1}
     )
 
     assert result['ok'] is True

@@ -50,10 +50,17 @@ from rocketride import EVENT_TYPE
 from rocketlib import ConfigError, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.node_config import node_schema, resolve_node_config
+from ai.common.parameters import validate_parameters
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..address import in_endpoint_scope
-from ..pipeline import MultipleSourcesError, resolve_implied_source, resolve_pipeline_env, substituted_env
+from ..pipeline import (
+    MultipleSourcesError,
+    resolve_implied_source,
+    resolve_pipeline_env,
+    substituted_env,
+    validate_placeholders,
+)
 from .. import services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
@@ -442,6 +449,16 @@ class MiscCommands(DAPConn):
             # start, so what fails here is exactly what would fail the run: hard
             # errors, on the engine's own errors list.
             config_errors = _config_errors(components)
+            # The parameters map (plan 5.4 item 3): the same rules the start
+            # and publish doors enforce, on the same errors list. The map is
+            # checked as SUBMITTED: a placeholder in a target would be expanded
+            # by the substitution above, and the start and publish doors never
+            # expand it (plan 5.3: params are literal)
+            if 'components' in pipeline:
+                as_written = (
+                    {**pipeline, 'parameters': submitted['parameters']} if 'parameters' in submitted else pipeline
+                )
+                config_errors = config_errors + validate_parameters(as_written)
             if config_errors:
                 if substituted:
                     # A resolver message may quote the resolved value, so under
@@ -461,6 +478,17 @@ class MiscCommands(DAPConn):
                     ]
                 data = dict(data)
                 data['errors'] = list(data.get('errors') or []) + config_errors
+            # Placeholders: only ROCKETRIDE_* names, only in config values (plan
+            # 6.2). Checked on the SUBMITTED text, so the message names what the
+            # author wrote and is never templated; both payload forms are checked
+            placeholder_errors = validate_placeholders(
+                submitted
+                if 'components' in submitted
+                else {**submitted, 'components': [submitted.get('component') or {}]}
+            )
+            if placeholder_errors:
+                data = dict(data)
+                data['errors'] = list(data.get('errors') or []) + placeholder_errors
 
             # Return the results
             return self.build_response(request, body=data)
@@ -920,13 +948,12 @@ class MiscCommands(DAPConn):
                         'status': getattr(task_status, 'status', None) if not completed else None,
                         'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
                         'endTime': end if completed else None,
-                        'connections': control.task.get_connection_count(),
                         'state': getattr(task_status, 'state', 0),
                         # The CONTROL's idle time: each holder ages on its own
                         'idleTime': int(control.idle_seconds()),
                         # Its engine: 'running', 'starting' or 'stopped' (a
-                        # dormant control reads 'stopped'; TODO(plan 7.5,
-                        # C.9): the full availability projection)
+                        # dormant control reads 'stopped'), the same value the
+                        # status body carries as engine.availability (plan 7.5)
                         'engineState': control.engine_state,
                         'ttl': getattr(control, 'ttl', 0),
                         'metrics': metrics_dict,
@@ -984,7 +1011,7 @@ class MiscCommands(DAPConn):
         if len(parts) < 3:
             return 'Task monitor'
         project_id = parts[2]
-        project_label = project_names.get(project_id, project_id[:8])
+        project_label = project_names.get(project_id, project_id)
 
         if len(parts) == 3 or parts[3] == '*':
             return f'{project_label}.*'

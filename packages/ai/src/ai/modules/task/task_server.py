@@ -100,6 +100,8 @@ from ai.constants import (
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
 )
+from ai.common.parameters import validate_parameters
+from .pipeline import references_env, substituted_env, validate_placeholders
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
@@ -108,6 +110,7 @@ from ai.account.models import AccountInfo, home_team, resolve_run_permissions, r
 from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
+from .trace_owner import TraceOwners
 from .task_control import RUNGS, DeploymentRef, TaskControl, TeamContext, control_key, rung_of
 from .engine_key import engine_content
 from .node_id import node_id
@@ -308,6 +311,44 @@ class EngineRegistry(Mapping):
         return frozenset(self._starts)
 
 
+def _require_valid_parameters(pipeline: Dict[str, Any]) -> None:
+    """
+    Refuse a pipeline whose ``parameters`` map is malformed (plan 5.4 item 1).
+
+    Args:
+        pipeline: The pipeline about to start.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT on ``parameters`` naming the first problem.
+    """
+    errors = validate_parameters(pipeline)
+    if errors:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            'parameters: ' + '; '.join(e['message'] for e in errors),
+            field='parameters',
+        )
+
+
+def _require_valid_placeholders(pipeline: Dict[str, Any]) -> None:
+    """
+    Refuse a pipeline with a ``${...}`` placeholder outside a config value or outside ``ROCKETRIDE_*`` (plan 6.2).
+
+    Args:
+        pipeline: The pipeline about to start.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT on ``pipeline`` naming the first problem.
+    """
+    errors = validate_placeholders(pipeline)
+    if errors:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            'placeholders: ' + '; '.join(e['message'] for e in errors),
+            field='pipeline',
+        )
+
+
 class ControlRegistry(MutableMapping):
     """
     The control registry and its two indexes (plan 3.2: lookups are indexed, never scanned).
@@ -495,7 +536,12 @@ class _EngineTransition:
     - ``confirm``: the new engine reports running (``start_task`` returns at
       launch, before that).
     - ``commit``: the old hold goes through the hold rule; the old engine stops
-      when that was its last hold.
+      when that was its last hold. While the control still has pipes OPEN on
+      the old engine the hold is kept and the engine recorded as the control's
+      ``draining`` one: the pipe slots a client names are the engine's own
+      numbers, so a control's open pipes live on ONE engine at a time (the
+      data path keeps opening on the draining engine, plan 7.2 P2) and the
+      hold goes when the last of them closes.
     - ``abort``: the control is put back on its old pipeline and engine BEFORE
       any await, then the new hold goes through the hold rule (a replacement
       nobody holds does not linger).
@@ -534,6 +580,10 @@ class _EngineTransition:
         def _hold(engine: TaskEngine) -> None:
             if control.task is engine:
                 return
+            if control.draining is engine:
+                # Back onto the engine still draining this control's pipes:
+                # its hold is already ours and becomes the current one
+                control.draining = None
             engine.acquire(control.key, control.ttl)
             control.task = engine
 
@@ -557,9 +607,16 @@ class _EngineTransition:
             await self.engine.wait_for_running()
 
     async def commit(self) -> None:
-        """The move is final: the old hold goes, and the old engine with it when that was its last."""
+        """The move is final: the old hold goes (once its open pipes drained), and the old engine with it when that was its last."""
+        control = self._control
         if self.moved and self.old_engine is not None:
-            await self._server.release_hold(self.old_engine, self._control.key, 'repointed')
+            if control.pipes_on(self.old_engine):
+                # The in-flight requests (an open not yet answered included)
+                # finish where they started; the data path releases this hold
+                # at the last close (cmd_data)
+                control.draining = self.old_engine
+            else:
+                await self._server.release_hold(self.old_engine, control.key, 'repointed')
         self._server.debug_message(
             f'Task "{self._control.id}" {"repointed to" if self.moved else "stays on"} engine '
             f'"{self.engine.engine_key if self.engine else "?"}"'
@@ -569,6 +626,10 @@ class _EngineTransition:
         """Undo: the control is back on its old pipeline and engine before anything is awaited."""
         control = self._control
         control.pipeline = self.old_pipeline
+        # The declared parameters follow the pipeline: a per-call submit that
+        # ran while the new pipeline was installed cached views of ITS
+        # components (resolve_params), and those must not serve the restored one
+        control.setup_declared_parameters()
         failed = control.task
         control.task = self.old_engine
         if failed is not None and failed is not self.old_engine:
@@ -651,6 +712,8 @@ class TaskServer(DAPBase):
         self._task_control = ControlRegistry()  # Control registry: <rung>.<ownerId>.<address>, indexed
         self._engines = EngineRegistry()  # Engine pool: content key -> engine, start lock inside
         self._engine_unavailable: Dict[str, Tuple[str, str]] = {}  # Control key -> (engineKey, reason)
+        # Which control each live request tree belongs to, by wire traceId (plan 7.5)
+        self.trace_owners = TraceOwners()
         # Deployments whose holds were released (disabled/removed), by the monotonic
         # time of the release: a control registered through a deployment that was
         # revoked after its state was read, or still holding one that was revoked
@@ -1060,14 +1123,6 @@ class TaskServer(DAPBase):
             user_id=conn_user_id,
         )
 
-        # Detach this connection from every engine (a debugger attachment is
-        # per engine, not per control)
-        for engine in list(self._engines.values()):
-            try:
-                await engine.detach_task(conn)
-            except Exception as e:
-                self.debug_message(f'Error detaching connection {connection_id} from engine "{engine.id}": {e}')
-
         # Auto-terminate the tasks THIS connection launched: that ends each
         # control's hold; an engine other controls hold keeps serving them.
         # By the launch index, never a walk of the registry.
@@ -1092,86 +1147,6 @@ class TaskServer(DAPBase):
 
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
-
-    def get_task_control_by_project(
-        self,
-        project_id: str,
-        source: str,
-        account_info: AccountInfo,
-        require: Optional[str] = None,
-        team_id: str = '',
-        run_kind: str = '',
-    ) -> TaskControl:
-        """
-        Retrieve task control structure by its owner-scoped identity.
-
-        ``team_id`` set addresses the team's (team-OWNED) DEPLOY run of
-        ``project_id``/``source``. ``team_id`` absent addresses the
-        caller's OWN run (owner = ``account_info.userId``), where
-        ``run_kind`` picks the continuum: ''/'dev' is the dev run;
-        'deploy' is the caller's personal @me deploy run — deploy-kind but
-        user-owned, the one case teamId-presence cannot express. All are
-        unique by construction — task identity is
-        {runKind}.{owner}.{project}.{source}. There is no account-less
-        scan: every lookup is scoped to the caller.
-
-        Args:
-            project_id (str): Project identity of the run
-            source (str): Source component id of the run
-            account_info (AccountInfo): Caller identity for scoping and
-                permission checks (required)
-            require (Optional[str]): Permission that must be granted on the
-                run's team (e.g. 'task.monitor')
-            team_id (str): Owner team — addresses that team's team-owned
-                deploy run; empty addresses the caller's own run
-            run_kind (str): Teamless continuum selector: ''/'dev' = the
-                caller's dev run, 'deploy' = the caller's @me deploy run.
-                Ignored when team_id is set.
-
-        Raises:
-            TaskError: Code TASK_NOT_REGISTERED if no matching task exists
-            PermissionError: If the caller is unauthenticated or the
-                permission check fails
-        """
-        if account_info is None:
-            raise PermissionError('Not authenticated')
-
-        def _verify(control: TaskControl) -> TaskControl:
-            """Run-scoped permission check (owner-private for user-owned runs)."""
-            return self._verify_control(control, account_info, require)
-
-        # Team scope: the team's TEAM-OWNED deploy run. owner_kind must be
-        # checked: an @me deploy carries the SAME billing teamId, and
-        # matching it here would let any teammate reach a personal run
-        # through team permissions.
-        if team_id:
-            for control in self._task_control.for_owner(team_id):
-                if (
-                    control.run_kind == 'deploy'
-                    and control.owner_kind != 'user'
-                    and control.teamId == team_id
-                    and control.project_id == project_id
-                    and control.source == source
-                ):
-                    return _verify(control)
-            raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
-
-        # Own scope: the caller's run in the selected continuum (dev by
-        # default; the caller's @me deploy when run_kind says so) — unique
-        # per user per continuum by construction.
-        # A @public control is user-owned and deploy-kind too: it is never
-        # the caller's @me deploy.
-        wanted_kind = run_kind or 'dev'
-        for control in self._task_control.for_owner(account_info.userId):
-            if (
-                control.run_kind == wanted_kind
-                and control.rung != 'public'
-                and control.owner_id == account_info.userId
-                and control.project_id == project_id
-                and control.source == source
-            ):
-                return _verify(control)
-        raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
 
     @staticmethod
     def _verify_control(control: TaskControl, account_info: AccountInfo, require: Optional[str]) -> TaskControl:
@@ -1200,6 +1175,41 @@ class TaskServer(DAPBase):
         if require and require not in perms:
             raise PermissionError(f'Permission {require!r} denied for this task')
         return control
+
+    async def _resolve_control_env(self, control: TaskControl) -> Dict[str, str]:
+        """
+        The ``ROCKETRIDE_*`` values a control's bindings run with (plan 6.2).
+
+        The team layer is the control's TEAM CONTEXT: the team whose
+        publication answered a ``@team`` call, a scoped key's frozen team, the
+        deploying team on the deploy rail, the caller's home team otherwise. A
+        team-owned run applies no user layer (a deployment's configuration
+        never depends on which human deployed it). Only the names the spec
+        references are kept (least privilege): a pipeline using
+        ``${ROCKETRIDE_OPENAI_KEY}`` never sees the caller's other variables.
+
+        Args:
+            control: The control, with its pipeline and team context set.
+
+        Returns:
+            ``{name: value}``; empty when the spec references nothing or the
+            account could not answer (logged; the run then has no env).
+        """
+        pipeline = control.pipeline or {}
+        if not substituted_env(pipeline, {}) and not references_env(pipeline):
+            return {}
+        from ai.account import account
+
+        try:
+            merged = await account.get_merged_env(
+                user_id='' if control.owner_kind == 'team' else control.userId,
+                org_id=control.orgId,
+                team_id=control.team_context.team_id,
+            )
+        except Exception as e:
+            self.debug_message(f'Environment for {control.key} could not be resolved: {e}')
+            return {}
+        return substituted_env(pipeline, merged)
 
     def control_by_key(self, key: str) -> TaskControl:
         """
@@ -1231,9 +1241,16 @@ class TaskServer(DAPBase):
         require: Optional[str] = None,
         *,
         team: Optional[str] = None,
+        rung: Optional[str] = None,
     ) -> TaskControl:
         """
         THE resolver over the registry: an address plus the request's account yields one control.
+
+        ``rung`` holds the walk to ONE rung (``'dev'``, ``'me'``, ``'team'``,
+        ``'public'``) for a caller that already knows which continuum it
+        means (a monitor subscription keyed to the caller's dev run must
+        never land on their personal deploy of the same address, nor the
+        reverse); the default walks them all.
 
         Walks the rungs in the fixed order and takes the first that answers
         (``@dev``: the caller's own presence, attach-only; ``@me``: the
@@ -1293,7 +1310,7 @@ class TaskServer(DAPBase):
 
         # Step 2: live controls first, then anything still registered
         for live_only in (True, False):
-            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team)
+            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team, only=rung)
             if control is not None:
                 return self._check_engine_available(control)
 
@@ -1395,6 +1412,7 @@ class TaskServer(DAPBase):
         live_only: bool,
         rungs: List[str],
         team: Optional[str] = None,
+        only: Optional[str] = None,
     ) -> Optional[TaskControl]:
         """
         One walk of the rungs over the registry indexes: the first hit, verified, or None.
@@ -1407,6 +1425,7 @@ class TaskServer(DAPBase):
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
             team: Per-call ``@team`` override.
+            only: Walk this one rung (``'dev'``/``'me'``/``'team'``/``'public'``) instead of all four.
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1450,46 +1469,53 @@ class TaskServer(DAPBase):
             found = [registry.lookup(control_key(rung, user_id, a)) for a in addresses]
             return _pick([c for c in found if _usable(c)])
 
+        def _wanted(rung: str) -> bool:
+            """Whether this walk visits ``rung`` (every rung unless one was asked for)."""
+            return only is None or only == rung
+
         # Step 2: @dev, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
-        if endpoints is None:
+        if endpoints is None and _wanted('dev'):
             rungs.append('@dev')
             control = _exact('dev')
             if control is not None:
                 return self._verify_control(control, account_info, require)
 
         # Step 3: @me, the caller's personal (user-owned) deployment run
-        rungs.append('@me')
-        control = _exact('me')
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
-
-        # Step 4: @team, the first team in the caller's team order (or the
-        # team= override, or a scoped key's frozen team) with a team-owned
-        # run of the address: one owner-index probe per team and address
-        rungs.append('@team')
-        for team_id in teams_to_probe(account_info, team):
-            runs = [
-                c
-                for a in addresses
-                for c in registry.owned(a, team_id)
-                if c.run_kind == 'deploy'
-                and c.owner_kind != 'user'
-                and _usable(c)
-                and resolve_run_permissions(account_info, c)
-            ]
-            control = _pick(runs)
+        if _wanted('me'):
+            rungs.append('@me')
+            control = _exact('me')
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
+        # Step 4: @team, the first team in the caller's team order (or the
+        # team= override, or a scoped key's frozen team) with a team-owned
+        # run of the address: one owner-index probe per team and address
+        if _wanted('team'):
+            rungs.append('@team')
+            for team_id in teams_to_probe(account_info, team):
+                runs = [
+                    c
+                    for a in addresses
+                    for c in registry.owned(a, team_id)
+                    if c.run_kind == 'deploy'
+                    and c.owner_kind != 'user'
+                    and _usable(c)
+                    and resolve_run_permissions(account_info, c)
+                ]
+                control = _pick(runs)
+                if control is not None:
+                    check_endpoint_scope(endpoints, control.address)
+                    return self._verify_control(control, account_info, require)
+
         # Step 5: @public, the caller's own control on a store publication
-        rungs.append('@public')
-        control = _exact('public')
-        if control is not None:
-            check_endpoint_scope(endpoints, control.address)
-            return self._verify_control(control, account_info, require)
+        if _wanted('public'):
+            rungs.append('@public')
+            control = _exact('public')
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
         return None
 
     @staticmethod
@@ -1896,7 +1922,9 @@ class TaskServer(DAPBase):
             except Exception as e:
                 self.debug_message(f'push_org_changed failed for conn {conn.get_connection_id()}: {e}')
 
-    async def broadcast_task_event(self, event_type: EVENT_TYPE, key: str, event: Dict[str, Any]) -> None:
+    async def broadcast_task_event(
+        self, event_type: EVENT_TYPE, key: str, event: Dict[str, Any], opener: Optional[int] = None
+    ) -> None:
         """
         Broadcast a task-scoped event to all connections that are subscribed to the given task.
 
@@ -1905,6 +1933,12 @@ class TaskServer(DAPBase):
         hold task.monitor on the run) and silently skipped. All other exceptions are
         logged but do not abort the broadcast to remaining connections.
 
+        OPENER FIRST (plan 7.5): when ``opener`` names the connection that opened
+        the binding the event belongs to, it is delivered there before the
+        subscription fan-out and skipped in it, so nothing arrives twice and an
+        ``>SSE`` emitted before the SDK's subscribe round trip is not lost
+        (``submit(on_sse=)`` relies on this).
+
         Args:
             event_type (EVENT_TYPE): Event type bitmask (e.g. SUMMARY, SSE) used by each
                 connection's send_task_event to decide whether it should receive the event.
@@ -1912,6 +1946,8 @@ class TaskServer(DAPBase):
                 resolves it to its subscription key independently.
             event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
                 Expected keys: 'event' (str) and 'body' (Any).
+            opener (int, optional): The connection that opened the event's
+                binding: delivered first, directly, and skipped in the fan-out.
         """
         # If the task has already been removed from the registry (e.g.
         # cleanup raced with pending broadcasts), skip silently instead of
@@ -1919,10 +1955,23 @@ class TaskServer(DAPBase):
         if key not in self._task_control:
             return
 
-        # Snapshot to list() so a connection joining or dropping mid-broadcast
-        # does not raise RuntimeError on the next iteration; matches the
-        # pattern used by broadcast_server_event / push_account_update above.
+        # Step 1: the opener, directly (its own permission checks still run
+        # inside send_task_event; a connection that left is simply gone)
+        opener_conn = self._connections.get(opener) if opener is not None else None
+        if opener_conn is not None:
+            try:
+                await opener_conn.send_task_event(event_type, key=key, event=event, direct=True)
+            except PermissionError:
+                pass
+            except Exception as e:
+                self.debug_message(f'Failed to deliver event to its opener: {e}')
+
+        # Step 2: everyone else, by subscription. Snapshot to list() so a
+        # connection joining or dropping mid-broadcast does not raise
+        # RuntimeError on the next iteration; matches broadcast_server_event.
         for conn in list(self._connections.values()):
+            if conn is opener_conn:
+                continue
             try:
                 await conn.send_task_event(event_type, key=key, event=event)
 
@@ -1958,10 +2007,35 @@ class TaskServer(DAPBase):
             self._task_control.pop(control.key, None)
             self._engine_unavailable.pop(control.key, None)
             self._forget_launch_owner(control)
+            # Its request trees go with it (their records did)
+            self.trace_owners.forget_control(control.key)
 
-        # The control's one hold
-        if control.task is not None and not keep_hold:
-            control.task.release(control.key)
+        # The control's one hold, and the one it still has on an engine
+        # draining its open pipes after a repoint
+        if not keep_hold:
+            if control.task is not None:
+                control.task.release(control.key)
+            if control.draining is not None:
+                control.draining.release(control.key)
+                control.draining = None
+
+    async def release_draining(self, control: TaskControl, reason: str) -> None:
+        """
+        Drop the hold a control kept on the engine draining its open pipes after a repoint, if any.
+
+        Through the hold rule, so the old engine stops when the control was
+        its last holder. Called by the data path at the last close and by
+        every path that drops the control.
+
+        Args:
+            control: The control.
+            reason: Why the engine stops, when it does.
+        """
+        draining = control.draining
+        if draining is None:
+            return
+        control.draining = None
+        await self.release_hold(draining, control.key, reason)
 
     async def release_hold(self, engine: Optional[TaskEngine], control_key: str, reason: str) -> None:
         """
@@ -2053,6 +2127,7 @@ class TaskServer(DAPBase):
         # through the one rule that stops the engine when it was the last
         self._forget_control(control, keep_hold=True)
         await self.release_hold(engine, control.key, reason)
+        await self.release_draining(control, reason)
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -2562,6 +2637,8 @@ class TaskServer(DAPBase):
         # The address grammar, enforced at execute: project id, source and
         # every component id are single dot-free segments.
         validate_component_ids(control.pipeline)
+        _require_valid_parameters(control.pipeline)
+        _require_valid_placeholders(control.pipeline)
         control.address = build_address(control.developer_id, control.project_id, control.source)
         control.id = control.address
 
@@ -2595,13 +2672,16 @@ class TaskServer(DAPBase):
         control.trigger = trigger
         control.ttl = CONST_DEFAULT_TTL if ttl is None else int(ttl)
         control.trace_level = args.get('pipelineTraceLevel')
-        control.parameters = dict(control.pipeline.get('parameters') or {})
+        control.setup_declared_parameters()
         control.origin = args.get('origin')
         control.deployment = deployment
         control.version = version
         control.team_context = team_context or TeamContext(
             control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
         )
+        # The values this control's bindings run with, from its team context
+        # (plan 6.2): resolved once here, carried on every frame's _caller
+        control.env = await self._resolve_control_env(control)
 
         # Parse and validate launch type from request command
         try:
@@ -2917,6 +2997,11 @@ class TaskServer(DAPBase):
             env_source=env_source,
             wait_running=wait_for_running,
         )
+        # The control admits the accepted spec's parameters and runs with its
+        # references: the incoming control resolved both for the same caller
+        # and team context (a failed repoint raised above and kept the old ones)
+        existing.setup_declared_parameters()
+        existing.env = dict(incoming.env)
         return results(
             existing,
             reused=True,
@@ -3185,9 +3270,6 @@ class TaskServer(DAPBase):
             control = self.resolve_control(address, account_info, 'task.control')
             self.debug_message(f'Restart requested for task "{control.id}"')
 
-            if control.task.has_attached_debugger():
-                raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
-
             # The source is part of the task's identity: checked on the REQUEST,
             # before normalisation stamps the control's source onto it
             requested_source = pipeline.get('source')
@@ -3200,6 +3282,8 @@ class TaskServer(DAPBase):
             # The address grammar holds on restart too: a restarted pipeline
             # must not smuggle in a dotted component id
             validate_component_ids(pipeline)
+            _require_valid_parameters(pipeline)
+            _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
 
             old_engine = control.task
@@ -3212,8 +3296,15 @@ class TaskServer(DAPBase):
                 wait_running=wait_for_running,
             )
 
-            # The control admits the accepted pipeline's parameters now
-            control.parameters = dict(control.pipeline.get('parameters') or {})
+            # The control admits the accepted pipeline's parameters now, and
+            # its environment follows the new spec's references
+            control.setup_declared_parameters()
+            installed = control.pipeline
+            env = await self._resolve_control_env(control)
+            # A restart that overtook this one while the lookup awaited owns
+            # the control's pipeline now; its env is the one that matches it
+            if control.pipeline is installed:
+                control.env = env
 
             # Ownership transfers ONLY once the restart has succeeded: until
             # then the previous owner keeps the task
@@ -3303,63 +3394,6 @@ class TaskServer(DAPBase):
         except Exception as e:
             # Log but ignore errors - task may already be stopped or removed
             self.debug_message(f'Task stop request handled (may have been already stopped): {e}')
-
-    async def detach_task(self, request: Dict[str, Any], conn: TaskConn):
-        """
-        Detach a DAP connection from a task with optional termination.
-
-        This method safely disconnects a client from a task while preserving
-        the task state for other connected clients. It optionally terminates
-        the task if requested by the detaching client.
-
-        Args:
-            request (Dict[str, Any]): Detach request containing:
-                - arguments: Optional parameters including:
-                    - token: The task address to detach from
-                    - terminateDebuggee: Boolean flag to terminate task on detach
-            conn (TaskConn): Connection to detach from the task
-
-        Detachment Process:
-        1. Extract detachment parameters including termination flag
-        2. Locate and validate task (with graceful error handling)
-        3. Detach connection from task's debugging interface
-        4. Remove monitoring subscription for this connection
-        5. Optionally terminate task if requested
-
-        Error Handling:
-        - Missing tasks or authentication failures are handled gracefully
-        - Detachment operations are best-effort and don't propagate errors
-        - Task may have been auto-cleaned up between request and processing
-        """
-        # Extract task identification and termination preference
-        args = request.get('arguments', {})
-        address = args.get('token', 'not-specified')
-        terminate_task = args.get('terminateDebuggee', False)
-
-        try:
-            # Resolve under the connection's account (ownership validated inside)
-            control = self.resolve_control(address, getattr(conn, '_account_info', None) if conn else None)
-
-            # Detach connection from task's debugging interface
-            await control.task.detach_task(conn)
-
-            # Remove monitoring subscription for this connection
-            if conn:
-                await conn.set_monitor(
-                    token=control.address,
-                    type=EVENT_TYPE.NONE,
-                )
-
-            # Terminate task if requested by client
-            if terminate_task:
-                await self.stop_task(control.key)
-
-            # Log successful detachment
-            self.debug_message(f'Connection detached from task "{control.id}"')
-
-        except Exception as e:
-            # Handle errors gracefully - task may not exist or be accessible
-            self.debug_message(f'Task detachment handled (task may be gone): "{address}": {e}')
 
     def get_connection_count(self) -> int:
         """

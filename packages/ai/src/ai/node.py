@@ -1,3 +1,4 @@
+import os
 import argparse
 import sys
 import asyncio
@@ -387,6 +388,22 @@ def _teardown_shared_web_server(server: Optional[Any], future: Optional[Any]) ->
             debug(f'shared WebServer serve() future raised: {e}')
 
 
+def _install_node_baseline() -> None:
+    """Install the node packages' shared requirements (``nodes/requirements.txt``) once per engine run."""
+    import importlib.util
+
+    from depends import depends  # type: ignore
+
+    spec = importlib.util.find_spec('nodes')
+    if spec is None or not spec.submodule_search_locations:
+        return
+    for location in spec.submodule_search_locations:
+        requirements = os.path.join(location, 'requirements.txt')
+        if os.path.exists(requirements):
+            depends(requirements)
+            return
+
+
 def run():
     """
     Execute the script.
@@ -456,6 +473,11 @@ def run():
 
     # This will actually do the dependency loading and start the main process
     from rocketlib import processArguments, monitorStatus
+
+    # The node packages' shared baseline (requests, numpy, ...) installs HERE,
+    # on the engine's run path, never at import: the root `nodes` package is
+    # empty so a validator import (CONFIG mode, plan 5.6.6) resolves no pip
+    _install_node_baseline()
 
     # Update the status
     monitorStatus('Loading pipeline')

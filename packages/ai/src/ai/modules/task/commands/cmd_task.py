@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
+from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
 from ..task_control import TeamContext
@@ -453,17 +454,15 @@ class TaskCommands(DAPConn):
             # Resolve the caller's control
             control = self.get_control(request, 'task.monitor')
 
-            # Its status. TODO(plan 7.5, C.9): computed from the control's own
-            # bindings; until then the engine's status, projected per control.
-            status = control.task.get_status()
-
-            # Convert status to dictionary format for response
-            response = status.model_dump()
+            # The engine's status projected to THIS control (plan 7.5): the
+            # engine's availability always, and on a shared engine the
+            # control's own counts in place of the engine-wide ones
+            response = control.project_status(control.task.get_status().model_dump(), control.task.shared)
 
             # The engine behind the control: 'running', 'starting' (in the
             # start gate or not yet confirmed running) or 'stopped' (a dormant
-            # control reads 'stopped' until its next request starts it).
-            # TODO(plan 7.5, C.9): the full availability projection
+            # control reads 'stopped' until its next request starts it); the
+            # same value as engine.availability, kept for the task-list shape
             response['engineState'] = control.engine_state
 
             # Return successful response with status data
@@ -562,11 +561,9 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
-                    - teamId (str, optional): Address the team's DEPLOY run;
-                      absent addresses the caller's own run
-                    - runKind (str, optional): Teamless continuum selector —
-                      absent/'dev' = the caller's dev run, 'deploy' = the
-                      caller's personal @me deploy run
+                    - teamId (str, optional): Resolve through this team of
+                      the caller's (the ``team=`` override of plan 3.2);
+                      absent walks the caller's rungs
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -580,20 +577,25 @@ class TaskCommands(DAPConn):
             project_id = args.get('projectId', None)
             source = args.get('source', None)
             team_id = args.get('teamId') or ''
-            run_kind = args.get('runKind') or ''
+            if not project_id or not source:
+                raise ValueError('projectId and source are required')
 
             # Verify permission against the requested scope: the named team
-            # for a deploy lookup, the caller's default context otherwise
+            # for a team lookup, the caller's default context otherwise
             # (prior art: cmd_log._verify_log_access).
             if team_id:
                 self.verify_team_permission(team_id, 'task.monitor')
             else:
                 self.verify_permission('task.monitor')
 
-            # Get the task control (owner scoping + permission check inside)
-            control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
-            )
+            # ONE resolver (plan 3.2): the address is the caller's developer
+            # id, the short pipe id and the source; the rungs decide whose
+            # control answers, and a key's endpoints scope is enforced inside
+            developer_id = _developer_id_of(self)
+            if not developer_id:
+                raise ValueError('Your organization has no developer id yet; an address cannot be formed')
+            address = build_address(developer_id, project_id, source)
+            control = self._server.resolve_control(address, self._account_info, 'task.monitor', team=team_id or None)
 
             # Return the address in the token slot
             return self.build_response(

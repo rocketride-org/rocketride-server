@@ -38,11 +38,10 @@ from rocketlib import debug
 from typing import List, Dict, Any
 
 from langchain_openai import OpenAIEmbeddings
-from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
 
 
-class OpenAIEmbeddingWrapper(EmbeddingBase):
+class OpenAIEmbeddingWrapper:
     """
     The embedding class controls the conversion of a piece of text into a vector. This can be a query or a set of document chunks.
     """
@@ -63,7 +62,6 @@ class OpenAIEmbeddingWrapper(EmbeddingBase):
             bag: The endpoint bag.
         """
         # Init the base
-        super().__init__(provider, config, bag)
 
         # The model is the selector and the key a required leaf, so both are set
         self._model = config['model']

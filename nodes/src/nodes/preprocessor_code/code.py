@@ -33,7 +33,6 @@ import importlib
 import re
 from tree_sitter import Language, Parser
 from typing import List, Dict, Any, Mapping
-from ai.common.preprocessor import PreProcessorBase
 
 RXFLAGS = re.MULTILINE | re.DOTALL
 
@@ -157,7 +156,7 @@ def detect_language_by_regex(code: str) -> str:
     return winner
 
 
-class PreProcessor(PreProcessorBase):
+class PreProcessor:
     """
     Use TreeSitter to split source code into meaningful chunks such as functions, classes, and statements.
     """
@@ -177,7 +176,6 @@ class PreProcessor(PreProcessorBase):
             bag: The endpoint's shared bag.
         """
         # Init the base
-        super().__init__(provider, config, bag)
 
         # Save the language
         self.language = config['language']

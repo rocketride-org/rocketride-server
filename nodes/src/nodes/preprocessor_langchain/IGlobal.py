@@ -21,13 +21,12 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Any, Optional
 from rocketlib import IGlobalBase
-
-from ai.common.preprocessor import PreProcessorBase
 
 
 class IGlobal(IGlobalBase):
-    preprocessor: PreProcessorBase | None = None
+    preprocessor: Optional[Any] = None
 
     def beginGlobal(self):
         """Create the LangChain splitter from the resolved config (splitter, mode, sizes, options)."""

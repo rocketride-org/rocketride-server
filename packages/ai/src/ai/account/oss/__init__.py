@@ -217,6 +217,7 @@ class Account(AccountBase):
             phoneNumberVerified=False,
             locale='',
             devTeam='local',
+            teamOrder=['local'],
             # Single synthetic organisation with org.admin so that
             # resolve_team_permissions expands to the full permission set.
             organization={
@@ -412,7 +413,10 @@ class Account(AccountBase):
     async def update_user(self, user_id: str, display_name: str):
         self._saas_only()
 
-    async def set_dev_team(self, user_id: str, team_id: str):
+    async def set_team_order(self, user_id: str, order: List[str]):
+        self._saas_only()
+
+    async def set_home_team(self, user_id: str, team_id: str):
         self._saas_only()
 
     async def list_keys(self, user_id: str) -> List:

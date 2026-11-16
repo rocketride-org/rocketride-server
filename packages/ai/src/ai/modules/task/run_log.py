@@ -263,6 +263,35 @@ def writer_key(scope_id: str, stream: str) -> str:
     return f'{scope_id}/{stream}'
 
 
+def live_writer(
+    run_kind: str, client_id: str, team_id: str, owner_kind: str, project_id: str, source: str
+) -> 'Optional[RunLogWriter]':
+    """
+    The writer currently open on a control's continuum, whoever opened it, or None.
+
+    A control's continuum has ONE live writer. While a control drains its open
+    pipes on the engine it repointed away from, both engines emit events for
+    it; the second engine appends through this writer instead of opening a
+    competitor on the same stream (two writers would rewrite one control
+    record and issue sequences from one stored lastSeq).
+
+    Args:
+        run_kind: The control's run kind.
+        client_id: The store anchor (the team of a team-owned run, else the user).
+        team_id: The control's team.
+        owner_kind: ``'team'`` or ``'user'``.
+        project_id: The control's project.
+        source: The control's source.
+
+    Returns:
+        The open writer, or None.
+    """
+    scope_team = team_id if owner_kind == 'team' else ''
+    _prefix, scope_id = scope_paths(run_kind, client_id, scope_team)
+    writer = WRITERS.get(writer_key(scope_id, stream_name(project_id, source, run_kind)))
+    return writer if writer is not None and (writer.is_live or writer.is_opening) else None
+
+
 # =============================================================================
 # STARTUP HYGIENE
 # =============================================================================
@@ -448,6 +477,11 @@ class RunLogWriter:
         self._stamp = stamp
         self._raise_seq_floor = raise_seq_floor
         self._debug = debug or (lambda _msg: None)
+        # The open in flight: registered in WRITERS before the first storage
+        # await so a second engine joining this continuum finds it and waits
+        # (``wait_opened``) instead of opening a competitor
+        self._opening = False
+        self._opened = asyncio.Event()
 
         # Identity-derived names/paths. STORAGE scope is chosen by owner_kind,
         # NOT by the billing team: a team-owned deploy lives in the team tree
@@ -522,6 +556,31 @@ class RunLogWriter:
     # OPEN / RECOVERY
     # =========================================================================
 
+    @property
+    def is_live(self) -> bool:
+        """Whether this writer is open (between ``open`` and ``end_run``)."""
+        return self._open
+
+    @property
+    def is_opening(self) -> bool:
+        """Whether this writer's ``open`` is in flight (registered, storage not yet read)."""
+        return self._opening
+
+    async def wait_opened(self) -> bool:
+        """
+        Wait for an in-flight ``open`` to finish.
+
+        Returns:
+            True when the writer is open; False when its open failed.
+        """
+        await self._opened.wait()
+        return self._open
+
+    @property
+    def last_seq(self) -> int:
+        """The highest ``logSeq`` this continuum has recorded so far."""
+        return int(self._control.get('lastSeq', 0))
+
     async def open(
         self,
         *,
@@ -545,6 +604,50 @@ class RunLogWriter:
             pipeline_hash: Hash/version of the pipeline config for the header.
             trace_level: The run's pipeline trace level.
         """
+        # Announce the open BEFORE anything awaits: from here a joining engine
+        # finds this writer in the registry and waits for it
+        key = writer_key(self._scope_id, self._stream)
+        self._opening = True
+        self._opened.clear()
+        WRITERS[key] = self
+        try:
+            await self._open_stream(trigger, user, pipeline_hash, trace_level)
+        except BaseException:
+            self._abandon_open(key)
+            raise
+        finally:
+            self._opening = False
+            self._opened.set()
+
+    def _abandon_open(self, key: str) -> None:
+        """
+        Undo a failed or cancelled ``open``: nothing it set up survives, and the writer reports not open.
+
+        ``_open_stream`` marks the writer open and may have opened the spool
+        file and started the worker before the step that failed; a joining
+        engine waiting on ``wait_opened`` must see False, and a later open of
+        the stream must find no stale registration.
+
+        Args:
+            key: This writer's registry key.
+        """
+        self._open = False
+        if WRITERS.get(key) is self:
+            WRITERS.pop(key, None)
+        worker = self._worker
+        if worker is not None:
+            worker.cancel()
+            self._worker = None
+        active = self._active_file
+        if active is not None:
+            try:
+                active.close()
+            except OSError:
+                pass
+            self._active_file = None
+
+    async def _open_stream(self, trigger: str, user: str, pipeline_hash: str, trace_level: str) -> None:
+        """The body of ``open``: storage recovery, the floor, the run-begin marker, the worker."""
         async with self._lock:
             # Ensure the spool root exists (a custom RR_LOG_SPOOL_ROOT may
             # not; the default system temp dir always does).
@@ -621,8 +724,8 @@ class RunLogWriter:
             self._open = True
             await self._write_control()
 
-            # Register as the stream's live writer (delete coordination + L5
-            # live-tail composition).
+            # The stream's live writer (delete coordination + L5 live-tail
+            # composition): registered at the start of open, confirmed here
             WRITERS[writer_key(self._scope_id, self._stream)] = self
 
             # Background worker: backstop seal + upload drain + retention.
@@ -761,9 +864,12 @@ class RunLogWriter:
         #    keyframe written from the CURRENT (pre-event) state.
         self._ensure_active(message)
 
-        # 2. Encode against the state (delta bodies where a same-segment base
-        #    exists) and update the state machine. Codec failures must never
-        #    break logging: fall back to the full event.
+        # 2. Track the continuum from the event AS STAMPED (the codec may move
+        #    a status body under its delta key, where the line writer would not
+        #    see the sequence), then encode against the state (delta bodies
+        #    where a same-segment base exists) and update the state machine.
+        #    Codec failures must never break logging: fall back to the full event.
+        self._track(message)
         seg_id = int(self._control.get('nextSegmentId', 0))
         try:
             encoded = self._kf_process(message, seg_id)
@@ -816,18 +922,21 @@ class RunLogWriter:
             # continuous truth again.
             self._kf_complete = True
 
+    def _track(self, message: Dict[str, Any]) -> None:
+        """Advance the continuum's lastSeq and time span from one stamped event (before encoding)."""
+        body_stamps = message.get('body') or {}
+        self._control['lastSeq'] = max(int(self._control.get('lastSeq', 0)), int(body_stamps.get('logSeq') or 0))
+        self._control['endTime'] = float(body_stamps.get('eventTime') or time.time())
+        if self._control.get('startTime') is None:
+            self._control['startTime'] = self._control['endTime']
+
     def _append_line(self, message: Dict[str, Any]) -> None:
         """Serialize one encoded line, append it, and run the seal check."""
         line = json.dumps(message, separators=(',', ':'), default=str) + '\n'
         self._active_file.write(line)
         self._active_bytes += len(line)
 
-        # Track stream bookkeeping.
-        body_stamps = message.get('body') or {}
-        self._control['lastSeq'] = max(int(self._control.get('lastSeq', 0)), int(body_stamps.get('logSeq') or 0))
-        self._control['endTime'] = float(body_stamps.get('eventTime') or time.time())
-        if self._control.get('startTime') is None:
-            self._control['startTime'] = self._control['endTime']
+        # The chapter marker (the sequence and times were tracked before encoding)
         if message.get('event') == 'apaevt_log_lifecycle' and message.get('body', {}).get('action') == 'run-begin':
             self._active_has_chapter_start = True
 
@@ -1196,6 +1305,7 @@ class RunLogWriter:
             if not self._open:
                 return
 
+            self._raise_seq_floor(self.last_seq + 1)
             end = self._stamp(
                 _lifecycle_event(
                     'run-end', outcome=outcome, detail=exit_message, **({'reason': reason} if reason else {})
@@ -1230,8 +1340,11 @@ class RunLogWriter:
                 pass
             self._worker = None
 
-        # Deregister as the stream's live writer.
-        WRITERS.pop(writer_key(self._scope_id, self._stream), None)
+        # Deregister as the stream's live writer, and only when it is still
+        # this writer: a replacement that registered meanwhile keeps its entry
+        key = writer_key(self._scope_id, self._stream)
+        if WRITERS.get(key) is self:
+            WRITERS.pop(key, None)
 
     # =========================================================================
     # CONTROL FILE
@@ -1346,8 +1459,10 @@ class RunLogReader:
             FileNotFoundError: If the stream has no control (never logged).
         """
         writer = WRITERS.get(writer_key(self._scope_id, self._stream))
-        if writer is not None:
+        if writer is not None and writer.is_live:
             return writer._control
+        # No live writer (or one still opening, whose catalog is not loaded
+        # yet): the persisted copy is the stream's history
         try:
             raw = await self._store.read(self._control_path())
         except StorageNotFoundError as exc:

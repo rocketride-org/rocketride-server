@@ -34,7 +34,7 @@ state that truthfully, you have not earned the run — do the missing step inste
 1. **Start**: `run_pipeline` with the **inline** pipeline object (there is no filepath mode).
    One-shot text input? Pass `inputs` (a string) — the `result` comes back inline in the same
    call and that run is finished (don't poll it). Otherwise you get
-   `{task_token, projectId, source}`. **Keep `projectId` + `source`** — they key the run-log
+   `{address, projectId, source}`. **Keep `projectId` + `source`** — they key the run-log
    tools if debugging is needed. Reuse a long-lived pipeline with `use_existing: true` (avoids
    "Pipeline is already running"); to force a fresh start, `terminate` then re-run. Two instances
    of one pipe at once need their own unguessable `tk_` token each, through the SDK's `use()` or

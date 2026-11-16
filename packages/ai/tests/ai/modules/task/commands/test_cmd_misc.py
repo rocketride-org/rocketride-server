@@ -670,7 +670,15 @@ async def test_on_rrext_validate_maps_component_ids_back(monkeypatch):
     full = await _reply(conn, pipeline)
     single = await _reply(conn, {'version': 1, 'component': _llm('${ROCKETRIDE_NODE_ID}', 'llm_opnai')})
 
-    expected = [{'message': _template_message(env, 'error'), 'id': '${ROCKETRIDE_NODE_ID}'}]
+    # The validator's own error, templated; then the placeholder-position error
+    # (plan 6.2: a placeholder is legal only in a config value), named as written
+    expected = [
+        {'message': _template_message(env, 'error'), 'id': '${ROCKETRIDE_NODE_ID}'},
+        {
+            'id': '${ROCKETRIDE_NODE_ID}',
+            'message': 'placeholder ${ROCKETRIDE_NODE_ID} is only allowed in a component config value',
+        },
+    ]
     assert full['errors'] == expected
     assert single['errors'] == expected
     assert full['pipeline']['components'][0]['id'] == '${ROCKETRIDE_NODE_ID}'
@@ -701,6 +709,21 @@ async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch)
     assert reply['errors'] == [{'message': _template_message(ENV, 'error'), 'id': 'llm_1'}]
     assert 'warnings' not in reply
     assert not _has_expanded_value(reply)
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_checks_the_parameters_map_as_submitted(monkeypatch):
+    """A placeholder in a parameters target is the author's text: validate reports what start and publish would."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'pipeline': payload['pipeline'], 'errors': []})
+    conn = _validate_conn(monkeypatch, env={**ENV, 'ROCKETRIDE_TARGET': 'llm_1.model'})
+    pipeline = {'components': [_llm('llm_1', 'llm_opnai')], 'parameters': {'model': '${ROCKETRIDE_TARGET}'}}
+
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    # Under substitution the message is templated and lists the submitted references
+    errors = result['body'].get('errors') or []
+    assert len(errors) == 1, result['body']
+    assert '${ROCKETRIDE_TARGET}' in errors[0]['message']
 
 
 @pytest.mark.asyncio
@@ -1027,7 +1050,6 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
     )
     own_task = SimpleNamespace(
         get_status=lambda: own_status,
-        get_connection_count=lambda: 1,
     )
     own_control = SimpleNamespace(
         id='acme.proj-1.reader',
@@ -1038,7 +1060,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         source='reader',
         project_id='proj-1',
         run_kind='dev',
-        # Real controls always expose owner_id (dev run -> the user).
+        # Every control carries its owner (plan 1): a dev run -> its user
+        owner_kind='user',
         owner_id='user-1',
         provider='node-x',
         ttl=600,
@@ -1056,6 +1079,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         source='other-source',
         project_id='proj-2',
         run_kind='dev',
+        owner_kind='user',
         owner_id='other-user',
         provider='node-y',
         task=MagicMock(),
@@ -1115,14 +1139,14 @@ def _list_control(
     team_id='team-1',
     completed=False,
     user_id='user-1',
-    legacy=False,
+    team_owned=False,
 ):
     """Build a minimal task control whose get_status() yields a stable row.
 
     The control mirrors what launch stamps: id is the address, the key is
-    runKind.ownerId.address, and a dev run is owned by its user. legacy=True
-    builds an ownerless control (OSS single-user run), which resolves
-    through team permissions instead of ownership.
+    runKind.ownerId.address, and a dev run is owned by its user. team_owned=True
+    builds a team-owned control (a deploy run), which resolves through team
+    permissions instead of ownership; every control carries an owner (plan 1).
     """
     status = SimpleNamespace(
         name=name or f'task.{task_id}',
@@ -1148,15 +1172,16 @@ def _list_control(
         source='reader',
         project_id=task_id,
         run_kind='dev',
-        # A dev run is owned by its user; a legacy control carries no owner
-        owner_id='' if legacy else user_id,
+        # A dev run is owned by its user, a team-owned run by its team: every
+        # control carries an owner (plan 1)
+        owner_kind='team' if team_owned else 'user',
+        owner_id=team_id if team_owned else user_id,
         provider=provider,
         ttl=600,
         idle_seconds=lambda: 0.0,
         engine_state='running',
         task=SimpleNamespace(
             get_status=lambda: status,
-            get_connection_count=lambda: 0,
         ),
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
@@ -1278,7 +1303,7 @@ async def test_list_tasks_search_matches_name(monkeypatch):
 @pytest.mark.asyncio
 async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
     """Only runs the caller may reach enter the row set: their own dev runs,
-    and ownerless (legacy) runs in a team they can monitor.
+    and team-owned runs in a team they can monitor.
     """
     monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
 
@@ -1287,9 +1312,9 @@ async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
         _list_control('task-1'),
         # Another user's dev run in the caller's team: private to its owner
         _list_control('task-2', user_id='other-user'),
-        # Legacy ownerless runs resolve through team permissions
-        _list_control('task-3', legacy=True),
-        _list_control('task-4', team_id='team-other', legacy=True),
+        # Team-owned runs resolve through team permissions
+        _list_control('task-3', team_owned=True),
+        _list_control('task-4', team_id='team-other', team_owned=True),
     ]
     conn = _make_conn(account_info=_caller_account(), server=_make_server(controls))
 

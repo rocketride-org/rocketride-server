@@ -591,18 +591,3 @@ async def task_Data(
         # Always disconnect the client to clean up resources
         if client:
             await client.disconnect()
-
-
-async def task_Process(
-    request: Request,
-    authorization: Optional[str] = Header(
-        None,
-        description='The account API key (rr_) as a Bearer credential. Header ONLY.',
-    ),
-) -> DataResult:
-    r"""
-    Process data uploads through RocketRide pipelines.
-
-    DEPRECATED - Use /task/data/{address}.
-    """
-    return await task_Data(request=request, authorization=authorization)

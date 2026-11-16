@@ -58,6 +58,9 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
+from ai.account.app_deploy import _developer_id_of
+from ai.modules.task.address import ENDPOINT_ANY_SOURCE, build_address
+from ai.modules.task.types import TaskError
 
 
 # Only import for type checking to avoid circular import errors
@@ -186,6 +189,11 @@ class MonitorCommands(DAPConn):
         # Step 3: bitmask must match
         if not (event_type & self._monitors['*']):
             return
+        # Step 3b: the platform-wide streams (OPS, DASHBOARD) are masked at
+        # DELIVERY too (plan 7.5, B31): a permission that lapsed mid-session
+        # stops them at once, whatever the retained subscription says
+        if event_type & (EVENT_TYPE.OPS | EVENT_TYPE.DASHBOARD) and not self._is_platform_operator():
+            return
         # Step 4: org scoping
         if org_id is not None and hasattr(self, '_account_info') and self._account_info:
             conn_org = ''
@@ -200,11 +208,22 @@ class MonitorCommands(DAPConn):
                 return
         await self.send_event(event.get('event', 'unknown'), body=event.get('body'))
 
+    def _is_platform_operator(self) -> bool:
+        """
+        Whether this connection may see platform-wide streams (``OPS``, ``DASHBOARD`` on ``*``).
+
+        Returns:
+            True for ``sys.admin`` or the server's own ``internal`` identity.
+        """
+        perms = getattr(getattr(self, '_account_info', None), 'sysPermissions', None) or []
+        return 'sys.admin' in perms or 'internal' in perms
+
     async def send_task_event(
         self,
         event_type: EVENT_TYPE,
         key: str,
         event: Dict[str, Any] = None,
+        direct: bool = False,
     ) -> None:
         """
         Forward a task event to subscribed monitors based on their subscription preferences.
@@ -220,6 +239,9 @@ class MonitorCommands(DAPConn):
             event (Dict[str, Any]): The event payload containing:
                 - event: String identifier for the event type
                 - body: Event-specific data payload
+            direct (bool): This connection OPENED the event's binding (plan
+                7.5, opener first): the event is delivered without a
+                subscription, once the permission checks pass.
 
         Event Routing Logic:
         - Events are only sent to monitors subscribed to the run's owner-scoped key
@@ -269,6 +291,11 @@ class MonitorCommands(DAPConn):
         if not resolve_run_permissions(self._account_info, control):
             return
         if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
+            return
+
+        # The opener needs no subscription: the binding is its own request
+        if direct:
+            await _send_event(event_type)
             return
 
         # Build the base owner-scoped key: events land on the key of the
@@ -378,10 +405,11 @@ class MonitorCommands(DAPConn):
                     # Task is running: send current status, under the same
                     # permission as a live status update
                     if self._may_monitor():
+                        # The same projection the live status carries (plan 7.5)
                         await self.send_event(
                             event='apaevt_status_update',
                             id=control.id,
-                            body=control.task.get_status().model_dump(),
+                            body=control.project_status(control.task.get_status().model_dump(), control.task.shared),
                         )
                 elif project_id is not None and source is not None:
                     # Task is not running: send empty state so client shows "not running"
@@ -506,11 +534,20 @@ class MonitorCommands(DAPConn):
         """
         control = None
 
+        # OPS is engine-level and reachable only through the wildcard, by an
+        # operator (plan 7.5): a control-scoped subscription never carries it
+        if token != '*' and type & EVENT_TYPE.OPS:
+            raise PermissionError('OPS is subscribed on the wildcard, by sys.admin')
+
         # If we are supposed to monitor all tasks...
         if token == '*':
             # Only token can be specified
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
+            # Platform-wide bits on the wildcard are an operator's (plan 7.5):
+            # OPS is every shared engine's internals, DASHBOARD every connection
+            if type & (EVENT_TYPE.OPS | EVENT_TYPE.DASHBOARD) and not self._is_platform_operator():
+                raise PermissionError('OPS and DASHBOARD subscriptions require sys.admin')
 
             event_key = '*'
             event_id = None
@@ -537,11 +574,11 @@ class MonitorCommands(DAPConn):
         elif project_id and source:
             # A team-scoped (deploy-run) subscription requires task.monitor on
             # THAT team, checked HERE. Subscribe-before-launch must not register
-            # under a foreign team's key: the get_task_control_by_project check
-            # below only fires when a run is LIVE; for a not-running foreign
-            # scope it raises RuntimeError, which the except-Exception swallow
-            # would let through, leaving the subscription registered under the
-            # foreign key. (OSS-safe: the synthetic 'local' team grants monitor.)
+            # under a foreign team's key: the resolver below only fires when a
+            # run is LIVE; for a not-running foreign scope it raises, which the
+            # except-Exception swallow would let through, leaving the
+            # subscription registered under the foreign key. (OSS-safe: the
+            # synthetic 'local' team grants monitor.)
             if team_id and 'task.monitor' not in resolve_task_permissions(self._account_info, team_id):
                 raise PermissionError('Access denied: no permissions for this team')
 
@@ -567,11 +604,28 @@ class MonitorCommands(DAPConn):
             key_kind = 'deploy' if team_id else (run_kind or 'dev')
             event_key = owner_key(key_kind, owner_id, project_id, source)
 
-            # If is ok if the task doesn't exist at this point in time...
+            # It is ok if the task doesn't exist at this point in time (a
+            # subscription before the launch). When it does, ONE resolver
+            # names it (plan 3.2): the caller's developer id, the pipe and the
+            # source; a key's endpoints scope is enforced inside it. The
+            # resolver is held to the CONTINUUM the key names (a dev-keyed
+            # subscription never reads a personal deploy's status, nor the
+            # reverse), and the all-sources scope ('*') is no address at all
+            developer_id = _developer_id_of(self)
+            address = (
+                build_address(developer_id, project_id, source)
+                if developer_id and source != ENDPOINT_ANY_SOURCE
+                else ''
+            )
             try:
-                # Get the task (owner scoping + permission check inside)
-                control = self._server.get_task_control_by_project(
-                    project_id, source, self._account_info, require='task.monitor', team_id=team_id, run_kind=run_kind
+                if not address:
+                    raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
+                control = self._server.resolve_control(
+                    address,
+                    self._account_info,
+                    'task.monitor',
+                    team=team_id or None,
+                    rung='team' if team_id else ('me' if key_kind == 'deploy' else 'dev'),
                 )
 
                 # The task is running, we can fill it in
@@ -583,7 +637,7 @@ class MonitorCommands(DAPConn):
 
             except Exception:
                 event_id = None
-                filter_name = f'<Project:{project_id[:8]}.{source}>'
+                filter_name = f'<Project:{address or project_id + "." + source}>'
 
         else:
             # Invalid

@@ -86,7 +86,10 @@ _STATE_LABELS = {
 _MONITOR_SCHEMA = {
     'type': 'object',
     'properties': {
-        'task_token': {'type': 'string', 'description': 'Task token returned by run_pipeline'},
+        'address': {
+            'type': 'string',
+            'description': 'The task address returned by run_pipeline (developerId.pipelineId.source)',
+        },
         'timeout': {
             'type': 'number',
             'minimum': 0,
@@ -99,7 +102,7 @@ _MONITOR_SCHEMA = {
             'description': 'Seconds to wait between polls (default 1)',
         },
     },
-    'required': ['task_token'],
+    'required': ['address'],
 }
 
 
@@ -112,7 +115,7 @@ def _snapshot(token: str, status: Dict[str, Any], polls: int) -> dict:
     completed = bool(status.get('completed'))
     return {
         'ok': True,
-        'task_token': token,
+        'address': token,
         'state': state,
         'state_label': _STATE_LABELS.get(state, 'none'),
         'completed': completed,
@@ -130,9 +133,9 @@ def _snapshot(token: str, status: Dict[str, Any], polls: int) -> dict:
 
 
 async def _monitor(client, tasks, args: Dict[str, Any]) -> dict:
-    token = args.get('task_token')
+    token = args.get('address')
     if not token:
-        return _bad('task_token is required', 'call run_pipeline first to obtain a task_token')
+        return _bad('address is required', 'call run_pipeline first to obtain the task address')
 
     try:
         timeout = float(args.get('timeout', DEFAULT_TIMEOUT_SECONDS))
@@ -192,7 +195,7 @@ def register(registry: ToolRegistry) -> None:
     """Register the visibility tools (`monitor`, `list_running_pipelines`) against ``registry``."""
     registry.register(
         'monitor',
-        'Poll a running pipeline task (by task_token) until it reaches a terminal state or the '
+        'Poll a running pipeline task (by address) until it reaches a terminal state or the '
         'timeout elapses, returning a status snapshot. Long-lived tasks (e.g. webhooks) may never '
         'reach a terminal state -- the snapshot returned at timeout has terminal=false.',
         _MONITOR_SCHEMA,

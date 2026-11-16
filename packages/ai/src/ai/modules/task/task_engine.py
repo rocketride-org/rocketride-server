@@ -32,6 +32,7 @@ import os
 import asyncio
 import contextlib
 import sys
+import copy
 import json
 import tempfile
 import time
@@ -89,9 +90,10 @@ from rocketride import (
 )
 from .dbg_stdio import DbgStdio
 from .engine_key import CONST_CATALOG_NODE_PREFIX
-from .pipeline import references_env, resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
+from . import run_log
 from .task_metrics import TaskMetrics
 
 # Serialized-size cap for one trace payload. Trace (and its derived flow)
@@ -524,7 +526,6 @@ class TaskEngine(DAPBase):
         _server (TaskServer): Central orchestration server
         _status (TASK_STATUS): Task state and statistics
         _engine_process (Optional[Process]): Subprocess handle
-        _debugger (Optional[TaskConn]): Primary debugging connection
         _debug_stdio (Optional[DbgStdio]): stdio interface
         _data_client (Optional[DAPClient]): Data communication client
         _data_port (Optional[int]): Data communication port
@@ -804,7 +805,6 @@ class TaskEngine(DAPBase):
         self._stop_reason: 'str | None' = None
 
         # Client connections
-        self._debugger: Optional[TaskConn] = None
         self._monitors: Dict[TaskConn, EVENT_TYPE] = {}
 
         # Debug interfaces
@@ -872,7 +872,15 @@ class TaskEngine(DAPBase):
         # team-owned deploy's files into the dispatcher's user tree.
         if owner_kind not in ('', 'user', 'team'):
             raise ValueError(f'invalid owner_kind: {owner_kind!r}')
-        self._run_log: Optional[RunLogWriter] = None
+        # One run-log continuum per holding CONTROL (plan 7.5): writers by
+        # control key, opened at start for the controls holding the engine and
+        # on first event for a holder that joined later; keys whose writer
+        # could not open are not retried (the run continues unlogged there)
+        self._run_logs: Dict[str, RunLogWriter] = {}
+        self._run_log_failed: set = set()
+        # One open per control: two events forwarded together for a control
+        # without a writer must not open two (the displaced one would never close)
+        self._run_log_open_lock = asyncio.Lock()
         self._run_kind: str = run_kind
         # Owner scope: 'user' (interactive .use OR a personal @me deploy) vs
         # 'team' (a @team deploy). Decides where the run's working files and
@@ -913,13 +921,44 @@ class TaskEngine(DAPBase):
             return {}
         return await self._env_source()
 
-    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
-
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+    async def _default_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
         """
-        env = await self._load_env(pipeline)
-        return resolve_pipeline_env(pipeline, env)
+        The engine's DEFAULT environment: the ``ROCKETRIDE_*`` values ``pipeline`` references, for a private engine.
+
+        A ``(hash, owner)`` engine has one owner, so its bindings without a
+        caller (a scan source's own getPipe) and its uncertified nodes'
+        global config read the owner's values (plan 6.2). A cross-user engine
+        has no default: every value rides the caller's ``_caller.env`` and a
+        certified node refuses env-valued keys at global scope. Loaded at
+        each start, never retained on the engine.
+
+        Args:
+            pipeline: The spec about to start.
+
+        Returns:
+            ``{name: value}`` for the referenced names only (least privilege).
+        """
+        if self.shared:
+            return {}
+        return substituted_env(pipeline, await self._load_env(pipeline))
+
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The engine's VIEW of the spec for the pre-launch checks: placeholders filled from the default env.
+
+        This copy is checked and authorized (DB targets, public sources) and
+        then dropped. It is never what the engine runs: the task file keeps
+        the placeholders and carries the default env beside them (plan 6.2),
+        so the content key is env-independent and each caller's values are
+        applied at read.
+
+        Args:
+            pipeline: The spec about to start.
+
+        Returns:
+            The expanded copy (non-``ROCKETRIDE_*`` names redacted).
+        """
+        return resolve_pipeline_env(pipeline, await self._default_env(pipeline))
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -1188,13 +1227,17 @@ class TaskEngine(DAPBase):
             provider = source_component.get('provider', 'Unknown')
             config['type'] = provider
 
-    def _build_task(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_task(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Construct complete task configuration for subprocess.
 
         Args:
-            pipeline: Resolved pipeline dict (secrets already substituted). Must
-                      not be stored — caller discards it after the temp file is written.
+            pipeline: The pipeline dict as the engine runs it: ``${ROCKETRIDE_*}``
+                      placeholders KEPT (plan 6.2). Must not be stored.
+            env: The engine's default environment, the referenced
+                 ``ROCKETRIDE_*`` values of a private engine's owner (empty on
+                 a shared engine): what a binding without a caller and an
+                 uncertified node's global config read.
 
         Returns:
             Complete subprocess task configuration
@@ -1218,6 +1261,11 @@ class TaskEngine(DAPBase):
                 'parameters': pipeline.get('parameters') or {},
             },
             'threadCount': self._threads,
+            # The engine's DEFAULT environment (plan 6.2): a private engine's
+            # owner values for the names the spec references; empty on a
+            # shared engine. Read by bindings without a caller and by an
+            # uncertified node's global config; never part of the engine key.
+            'env': dict(env or {}),
             # The engine DEFAULT level, for work outside any binding; the
             # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -1289,7 +1337,7 @@ class TaskEngine(DAPBase):
             return ''
         return validate_storage_root(f'users/{self.client_id}/files')
 
-    async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
+    async def _write_task_file(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> str:
         """
         Write task configuration to temporary file.
 
@@ -1299,8 +1347,9 @@ class TaskEngine(DAPBase):
         - O_EXCL flag to prevent TOCTOU race conditions
 
         Args:
-            pipeline: Resolved pipeline dict (secrets already substituted). The
-                      caller must not retain a reference after this returns.
+            pipeline: The pipeline dict as the engine runs it (placeholders kept).
+                      The caller must not retain a reference after this returns.
+            env: The engine's default environment (see ``_default_env``).
 
         Returns:
             Path to temporary task configuration file
@@ -1308,7 +1357,7 @@ class TaskEngine(DAPBase):
         Raises:
             OSError: If file cannot be created or written
         """
-        pipeline_task = self._build_task(pipeline)
+        pipeline_task = self._build_task(pipeline, env)
         pipeline_str = json.dumps(pipeline_task, indent=2) + '\n\n'
 
         fd, taskpath = tempfile.mkstemp(suffix='.json', prefix=f'task-{self.id}-')
@@ -1871,17 +1920,6 @@ class TaskEngine(DAPBase):
         except Exception as e:
             self.debug_message(f'Error cleaning up update task: {e}')
 
-        try:
-            # Clean up attached debugger
-            if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
-                await self._debugger._transport.disconnect()
-
-                self._debugger = None
-                self._status.debuggerAttached = False
-        except Exception as e:
-            self.debug_message(f'Error cleaning up debugger termination: {e}')
-
         # Set final state
         if self._stop_reason is not None:
             self._status.status = 'Stopped'
@@ -2010,21 +2048,23 @@ class TaskEngine(DAPBase):
         # is NOT a new run: the chapter continues and only a restart marker
         # is recorded; a real termination completes the chapter with its
         # outcome. Best-effort — never blocks or breaks teardown.
-        if self._run_log is not None:
-            try:
-                # A ttl-window expiry is SUCCESS: the run stayed up
-                # exactly as configured, then shut down. Only a real
-                # stop (or abnormal exit) reads as cancelled.
-                if self._status.state == TASK_STATE.CANCELLED.value:
-                    outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
-                elif self._status.exitCode == 0:
-                    outcome = 'ok'
-                else:
-                    outcome = 'error'
-                await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
-                self._run_log = None
-            except Exception as e:
-                self.debug_message(f'Run-log close failed: {e}')
+        if self._run_logs:
+            # A ttl-window expiry is SUCCESS: the run stayed up exactly as
+            # configured, then shut down. Only a real stop (or abnormal exit)
+            # reads as cancelled.
+            if self._status.state == TASK_STATE.CANCELLED.value:
+                outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
+            elif self._status.exitCode == 0:
+                outcome = 'ok'
+            else:
+                outcome = 'error'
+            # Every holding control's continuum completes with the engine's outcome
+            for key, writer in list(self._run_logs.items()):
+                try:
+                    await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
+                except Exception as e:
+                    self.debug_message(f'Run-log close failed for {key}: {e}')
+            self._run_logs.clear()
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -2190,87 +2230,312 @@ class TaskEngine(DAPBase):
         message: Dict[str, Any] = None,
     ):
         """
-        Forward events to appropriate monitoring clients.
+        Deliver one engine event to the controls it belongs to (plan 7.5), or to the ops stream.
+
+        Pipe-tagged events (a flow trace, an ``>SSE``) carry the request tree's
+        ``traceId`` and go to the control that OWNS the tree, its opener
+        connection first. Engine-level events go to every holder of a private
+        engine (they are all the owner's) and to the ops stream of a shared one,
+        except the status and task-lifecycle events every holder is entitled
+        to, which each holder receives projected to its own view.
 
         Args:
-            event_type: Event category for routing
-            message: Event payload
+            type: Event category for routing.
+            message: Event payload.
         """
-        # Safety net: every broadcast event carries the continuum headers.
-        # Idempotent — events stamped at ingress or at their build site pass
-        # through unchanged; anything constructed on a path that missed a
-        # stamp (e.g. status updates built in _send_status_update) is stamped
-        # here, immediately before the one shared dict fans out to clients.
-        self.stamp_log_event(message)
-
-        # Safety net #2: every task-scoped event carries its identity in
-        # the body (project_id + source) so clients filter uniformly by
-        # body fields — raw engine events (output, SSE, granular status)
-        # arrive from the child without it. Idempotent: events that already
-        # carry project_id pass through untouched.
+        # Step 1: the identity every task-scoped body carries (project_id +
+        # source, the run classification) so clients filter uniformly by body
+        # fields; raw engine events arrive from the child without it. The
+        # engine's identity is the default; each receiving control stamps its
+        # own below
         body = message.get('body') if isinstance(message, dict) else None
         if isinstance(body, dict) and 'project_id' not in body:
             body['project_id'] = self.project_id
             body['source'] = self.source
-        # Concrete identity stamp: teamId/userId/runKind ride every event
-        # body so watchers can scope streams client-side (two teams or two
-        # devs running the SAME project no longer alias in a watch UI), and
-        # server-side subscription filters can match these fields verbatim
-        # when they land. Idempotent like the project_id stamp above.
         if isinstance(body, dict) and 'runKind' not in body:
             body['runKind'] = self._run_kind
             body['teamId'] = self.team_id
             body['userId'] = self.client_id
-        # The engine that emitted it (ALB seam 3): every event body carries
-        # its engineKey; the controlId is stamped per holder below
         if isinstance(body, dict):
+            # The engine that emitted it (ALB seam 3) and the wire traceId: the
+            # engine's bare counter becomes {nodeId}.{engineId}.{n} here, the
+            # one place its events leave the task process (plan 7.4)
             body['engineKey'] = self.engine_key
-
-            # The engine's bare trace counter becomes the wire traceId here,
-            # the one place its events leave the task process (plan 7.4)
             if isinstance(body.get('traceId'), int):
                 body['traceId'] = self.trace_ref(body['traceId'])
 
-        # Append to the run-log continuum: what clients see is what replay
-        # reproduces (the writer filters/samples/caps internally; never
-        # blocks on the store).
-        if self._run_log is not None:
-            try:
-                self._run_log.append(message)
-            except Exception as e:
-                self.debug_message(f'Run-log append failed: {e}')
+        # Step 2: who receives it
+        event_name = message.get('event', '') if isinstance(message, dict) else ''
+        targets = self._route(type, event_name, body if isinstance(body, dict) else {})
+        if not targets:
+            self.stamp_log_event(message)
+            await self._emit_ops(event_name, body)
+            return
 
-        # Route debug events to debugger
-        if type & EVENT_TYPE.DEBUGGER:
-            # If we have an attach debugger
-            if self._debugger is not None:
+        # Step 3: the receiving controls' continua, opened BEFORE the event is
+        # numbered: opening a restored continuum lifts the engine's logSeq
+        # floor to its lastSeq + 1, so a seq assigned first could repeat one
+        # that continuum already recorded
+        writers = {key: await self._run_log_for(key) for key, _opener, _late in targets}
+
+        # Step 4: the continuum stamps, numbered above everything the receiving
+        # continua recorded (another engine may append to a shared one while
+        # this control drains). Idempotent: events stamped at ingress or at
+        # their build site pass through unchanged
+        for writer in writers.values():
+            if writer is not None:
+                self.raise_log_seq_floor(writer.last_seq + 1)
+        self.stamp_log_event(message)
+
+        # Step 5: one copy per receiving control, carrying its controlId (the
+        # control's key string, ALB seam 3) and ITS identity, appended to THAT
+        # control's run log, then delivered opener first. Every append happens
+        # before the first await so no other engine's stamp interleaves
+        deliveries = []
+        for key, opener, late in targets:
+            copy = {**body, 'controlId': key} if isinstance(body, dict) else body
+            writer = writers.get(key)
+            if isinstance(copy, dict):
+                self._stamp_control_identity(key, copy)
+                if late:
+                    copy['late'] = True
+                if event_name == 'apaevt_status_update':
+                    copy = self._project_status(key, copy)
+                # The run's chapter is per continuum: the receiving control's
+                # run-begin marker, not the first holder's
+                if event_name == 'apaevt_task' and 'beginSeq' in copy and writer is not None:
+                    copy['beginSeq'] = writer.chapter_begin_seq
+            event = {**message, 'body': copy}
+            if writer is not None:
                 try:
-                    event = message.get('event', '')
-                    body = message.get('body', {})
-
-                    await self._debugger.send_event(
-                        event=event,
-                        id=self.id,
-                        body=body,
-                    )
-
+                    writer.append(event)
                 except Exception as e:
-                    self.debug_message(f'Failed to send event to debugger: {e}')
+                    self.debug_message(f'Run-log append failed for {key}: {e}')
+            deliveries.append((key, opener, event))
+        for key, opener, event in deliveries:
+            await self._server.broadcast_task_event(event_type=type, key=key, event=event, opener=opener)
 
-        else:
-            # Route through server broadcast system, once per holding control.
-            # TODO(plan 7.5, C.9): route pipe-tagged events by traceId to the
-            # owning control only; until then every holder sees the engine's
-            # events (the engine status projected per control).
-            # Each holder's copy carries its own controlId (the control's key
-            # string, ALB seam 3); the body is copied, never shared across holders.
-            for key in list(self._holds):
-                event = {**message, 'body': {**body, 'controlId': key}} if isinstance(body, dict) else message
-                await self._server.broadcast_task_event(
-                    event_type=type,
-                    key=key,
-                    event=event,
-                )
+    def _stamp_control_identity(self, key: str, body: Dict[str, Any]) -> None:
+        """
+        Stamp the receiving control's identity on its copy of an event.
+
+        Two controls can share one engine under different project ids (the
+        same graph, two names), so the engine's identity is only the default:
+        the copy a control receives names THAT control's project, source and
+        run classification, which is what its clients filter by.
+
+        Args:
+            key: The receiving control's registry key.
+            body: The control's copy of the body, updated in place.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return
+        body['project_id'] = control.project_id or body.get('project_id')
+        body['source'] = control.source or body.get('source')
+        body['runKind'] = control.run_kind or body.get('runKind')
+        if control.teamId:
+            body['teamId'] = control.teamId
+        if control.userId:
+            body['userId'] = control.userId
+
+    def _route(self, type: EVENT_TYPE, event_name: str, body: Dict[str, Any]) -> List[tuple]:
+        """
+        The controls an event is delivered to, as ``(control_key, opener_conn_id, late)``.
+
+        Args:
+            type: The event category.
+            event_name: The DAP event name.
+            body: The event body (``traceId`` when pipe-tagged).
+
+        Returns:
+            Empty when the event belongs to the ops stream.
+        """
+        holders = [(key, None, False) for key in self._holds]
+        trace_id = body.get('traceId')
+        if isinstance(trace_id, str) and trace_id:
+            # Step 1: a pipe-tagged event goes to the tree's owner, the opener first
+            owner = self._server.trace_owners.owner(trace_id)
+            if owner is not None and owner.control_key in self._holds:
+                return [(owner.control_key, owner.conn_id, owner.late)]
+            # Step 2: an unknown or released tree: on a private engine every
+            # binding is the owner's (a scan source's own getPipe has no
+            # record); on a shared one it is nobody's and goes to ops
+            return holders if not self.shared else []
+        # Step 3: engine-level. A private engine's output is its owner's. On a
+        # shared engine only the status (projected per holder) and the task
+        # lifecycle reach the holders; counts, errors, bare output and the
+        # debugger channel are platform signal
+        if not self.shared or type & (EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK) or event_name == 'apaevt_status_update':
+            return holders
+        return []
+
+    async def _emit_ops(self, event_name: str, body: Any) -> None:
+        """
+        Put an engine-level event of a shared engine on the ops stream (``apaevt_ops``, plan 7.5).
+
+        Args:
+            event_name: The original DAP event name (``kind`` on the ops body).
+            body: The original body.
+        """
+        ops_body = {
+            **(body if isinstance(body, dict) else {'body': body}),
+            'engineKey': self.engine_key,
+            'kind': event_name,
+        }
+        try:
+            await self._server.broadcast_server_event(EVENT_TYPE.OPS, {'event': 'apaevt_ops', 'body': ops_body})
+        except Exception as e:
+            self.debug_message(f'Ops event delivery failed: {e}')
+
+    def _project_status(self, key: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The status body the control ``key`` may see (its own counts on a shared engine, the availability always).
+
+        Args:
+            key: The receiving control's registry key.
+            body: The engine's status body.
+
+        Returns:
+            The projected body (the engine's when the control cannot be resolved).
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return body
+        return control.project_status(body, self.shared)
+
+    async def _run_log_for(self, key: str) -> Optional[RunLogWriter]:
+        """
+        The run-log writer of the control ``key``, opened on first use.
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The writer, or None when it could not be opened (not retried).
+        """
+        # Under the lock, with the map re-read inside it: the first forward
+        # for a new control opens its writer, the ones that overlapped it reuse it
+        async with self._run_log_open_lock:
+            writer = self._run_logs.get(key)
+            if writer is None and key not in self._run_log_failed:
+                # A control draining its open pipes on the engine it left has
+                # that engine's writer open on its continuum: append through
+                # it rather than open a competitor (one writer per stream);
+                # this engine's own writer opens once that one has closed
+                shared = await self._shared_run_log(key)
+                if shared is not None:
+                    return shared
+                writer = await self._open_run_log(key)
+        return writer
+
+    async def _shared_run_log(self, key: str) -> Optional[RunLogWriter]:
+        """
+        Another engine's writer on the control ``key``'s continuum, if one is open or opening.
+
+        An open in flight is waited for (the writer announces itself before
+        its first storage await, so two engines never open one continuum
+        twice); this engine's own numbering is lifted above what that
+        continuum has recorded, so the lines it appends never fall below them.
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The live writer, or None.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return None
+        owner_is_team = control.owner_kind == 'team'
+        try:
+            writer = run_log.live_writer(
+                control.run_kind,
+                control.teamId if owner_is_team else control.userId,
+                control.teamId,
+                control.owner_kind or 'user',
+                control.project_id or self.project_id,
+                control.source or self.source,
+            )
+        except (TypeError, ValueError):
+            # A control whose identity is not string-shaped names no stream
+            return None
+        if writer is None or writer in self._run_logs.values():
+            return None
+        if not writer.is_live and not await writer.wait_opened():
+            return None
+        self.raise_log_seq_floor(writer.last_seq + 1)
+        return writer
+
+    def _chapter_begin_seq(self) -> Optional[int]:
+        """The run-begin marker's seq of the first holder's continuum, or None when unlogged."""
+        for writer in self._run_logs.values():
+            return writer.chapter_begin_seq
+        return None
+
+    async def _open_run_log(self, key: str) -> Optional[RunLogWriter]:
+        """
+        Open the run-log continuum of the control ``key`` (plan 7.5: one continuum per control).
+
+        The writer is bound to the CONTROL's identity (its owner, project,
+        source and run kind), not the engine's: two controls on one engine are
+        two continua. The account-scoped FileStore handles path scoping and
+        refuses an empty client id (such a control runs unlogged and says so).
+        The run-log writer is the ONLY legal writer of .logs content (the
+        store's policy denies every user identity; internal-only entry).
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The opened writer, or None (recorded as failed; not retried).
+        """
+        try:
+            from ai.account import RequestContext, Store
+
+            control = self._server.control_by_key(key)
+            # The store view anchors at the control's OWNER namespace: the
+            # TEAM for a team-owned (@team) deploy, the USER for a user-owned
+            # run (an interactive .use or a personal @me deploy: private, so
+            # its continuum never lands in the billing team's tree)
+            owner_is_team = control.owner_kind == 'team'
+            writer = RunLogWriter(
+                Store.file_store(
+                    RequestContext.internal('run-log'),
+                    client_id=control.teamId if owner_is_team else control.userId,
+                ),
+                control.userId,
+                control.project_id or self.project_id,
+                control.source or self.source,
+                control.run_kind,
+                self.stamp_log_event,
+                self.raise_log_seq_floor,
+                # team_id is the run's BILLING team (provenance for the control
+                # record) for every owner kind; owner_kind decides where the
+                # logs physically live
+                team_id=control.teamId,
+                owner_kind=control.owner_kind or 'user',
+                org_id=control.orgId,
+                debug=self.debug_message,
+            )
+            await writer.open(
+                trigger=control.trigger or self._run_trigger,
+                user=control.userId,
+                pipeline_hash=hashlib.sha256(
+                    json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                ).hexdigest()[:16],
+                # The control's own trace level is what its continuum records
+                trace_level=control.trace_level or self._pipelineTraceLevel,
+            )
+        except Exception as e:
+            self._run_log_failed.add(key)
+            self.debug_message(f'Run-log setup failed for {key} (its run continues unlogged): {e}')
+            return None
+        self._run_logs[key] = writer
+        return writer
 
     def _update_status(self, message: Dict[str, Any]) -> None:
         """
@@ -2458,7 +2723,7 @@ class TaskEngine(DAPBase):
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
-            pipe_index = body.get('pipeId', '')
+            pipe_id = body.get('pipeId', '')
             component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
@@ -2468,21 +2733,23 @@ class TaskEngine(DAPBase):
 
             # Update the per-pipe execution stack and get a stable snapshot chain.
             # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
-            # snapshot is copied (reentrant sub-invocations share one pipe_index and
+            # snapshot is copied (reentrant sub-invocations share one pipe_id and
             # interleave across threads).
-            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_index, operation, component_name)
+            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_id, operation, component_name)
 
             # Build the flow event. `component` names the component this op refers to
             # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
             # rather than assuming strict LIFO order — reentrant agent sub-invocations
-            # interleave under one pipe_index. `pipes` remains the current component stack.
+            # interleave under one pipe_id. `pipes` remains the current component stack.
             # Identity (project_id + source) is stamped centrally by
             # _forward_task_event — not duplicated here.
             body = {
-                'id': pipe_index,
+                'id': pipe_id,
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
+                # The request tree (routes the flow to its owner, plan 7.5)
+                'traceId': body.get('traceId'),
                 # Filled below only when tracing is on — the clamp
                 # serializes the whole trace, wasted work for a body that
                 # never leaves this method (synthetic tool-call traces
@@ -2492,42 +2759,21 @@ class TaskEngine(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
-            # If this task is started with tracing.
-            #
-            # `'none'` IS A LEVEL, NOT AN ABSENCE. It is a non-empty string and
-            # so was truthy here, which meant a caller asking for no tracing got
-            # the payload suppressed on the engine side and every enter/leave
-            # still derived, seq-stamped, broadcast and written to the run log —
-            # a flow event carrying `trace: {}`. Roughly 379 bytes of identity
-            # and envelope for no signal, one pair per component per request.
-            #
-            # A settings stream that answers UI clicks and is deliberately kept
-            # out of the Runs timeline had accumulated 325 MB that way, 94% of
-            # it empty-payload flow. The level names are documented as
-            # none/metadata/summary/full, and `none` is documented as "no flow
-            # traces"; this is the code catching up with that.
-            if self._pipelineTraceLevel and self._pipelineTraceLevel != 'none':
-                # Clamp oversized payloads HERE, before the rebuilt body
-                # fans out to the broadcast, the derived flow, and the
-                # run-log continuum.
-                body['trace'] = cap_trace_payload(raw_trace) or {}
-                # Build the derived flow event only when it will actually be
-                # delivered — build_event assigns its continuum seq, and a
-                # built-but-unsent event would leave a gap. It inherits the
-                # source trace message's emission time.
-                flow = self.build_event(
-                    'apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime')
-                )
-
-                # Accumulate run analytics from the derived flow (its body
-                # carries the stamped eventTime, and for 'begin' its logSeq
-                # is the trace's permanent identity). Gated on tracing like
-                # the flow derivation itself — no traces, honest empties.
-                self._accumulate_analytics(operation, pipe_index, component_name, pipes, flow['body'])
-
-                # Forward off the event
-                await self._forward_task_event(EVENT_TYPE.FLOW, flow)
-
+            # A trace arrived because ITS binding asked for one: the engine emits
+            # >DBG per binding at the binding's own level (plan 7.4), so there
+            # is no engine-level gate here any more. Clamp oversized payloads
+            # before the rebuilt body fans out to the broadcast, the derived
+            # flow and the run-log continuum.
+            body['trace'] = cap_trace_payload(raw_trace) or {}
+            # Build the derived flow event; build_event assigns its continuum
+            # seq. It inherits the source trace message's time.
+            flow = self.build_event('apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime'))
+            # Accumulate run analytics from the derived flow (its body carries
+            # the stamped eventTime, and for 'begin' its logSeq is the trace's
+            # permanent identity).
+            self._accumulate_analytics(operation, pipe_id, component_name, pipes, flow['body'])
+            # Forward off the event
+            await self._forward_task_event(EVENT_TYPE.FLOW, flow)
         # Handle real-time node-to-UI SSE messages (pass-through, no status tracking)
         elif event_type == 'apaevt_sse':
             await self._forward_task_event(EVENT_TYPE.SSE, message)
@@ -2601,36 +2847,6 @@ class TaskEngine(DAPBase):
     def accepting_holds(self) -> bool:
         """True while a control may take a hold: built, starting or running; never once a stop began."""
         return self.state in (EngineState.NEW, EngineState.STARTING, EngineState.RUNNING)
-
-    def is_attached(self, conn: TaskConn) -> bool:
-        """
-        Check if connection is attached as primary debugger.
-
-        Args:
-            conn: Connection to check
-
-        Returns:
-            True if connection is attached debugger, False otherwise
-        """
-        return self._debugger is not None and self._debugger == conn
-
-    def has_attached_debugger(self) -> bool:
-        """
-        Check if debugging client is attached.
-
-        Returns:
-            True if debugger attached, False otherwise
-        """
-        return self._debugger is not None
-
-    def get_connection_count(self) -> int:
-        """
-        Get number of active debugging connections.
-
-        Returns:
-            Number of active debugging connections (0 or 1)
-        """
-        return 1 if self._debugger is not None else 0
 
     async def wait_for_running(self) -> None:
         """
@@ -2781,23 +2997,8 @@ class TaskEngine(DAPBase):
         details = f'reason: {reason}, ' if reason else ''
         self.debug_message(f'Task {title} ({details}run: {run}, lifetime: {lifetime}s)')
 
-    async def detach_task(self, conn: TaskConn) -> Dict[str, Any]:
-        """
-        Detach debugging client with cleanup.
-
-        Args:
-            conn: Connection to detach
-        """
-        if self._debugger != conn:
-            return
-
-        self._debugger = None
-        self._status.debuggerAttached = False
-
-        self.debug_message('Debugger detached from task')
-
     def _accumulate_analytics(
-        self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
+        self, operation: str, pipe_id: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
     ) -> None:
         """
         Fold one trace operation into the status body's run analytics.
@@ -2809,7 +3010,7 @@ class TaskEngine(DAPBase):
 
         Args:
             operation: Trace op (begin / enter / leave / end).
-            pipe_index: The REAL pipe id the op runs on (correlation key).
+            pipe_id: The REAL pipe id the op runs on (correlation key).
             component_name: The component this op refers to.
             pipes: Current component stack (pipes[0] = the object name that
                 a begin carries).
@@ -2830,7 +3031,7 @@ class TaskEngine(DAPBase):
                 self._an_idle_since = 0.0
                 self._refresh_idle_status(event_time)
             # A pipe hosts one completion at a time — its end looks up THIS.
-            self._an_open_by_pipe[pipe_index] = {
+            self._an_open_by_pipe[pipe_id] = {
                 'name': str(pipes[0] if pipes else component_name)[:200],
                 'beginTime': event_time,
                 'beginSeq': flow_body.get('logSeq'),
@@ -2838,10 +3039,10 @@ class TaskEngine(DAPBase):
 
         elif operation == 'enter':
             # Reentrancy within one pipe stacks; key = (pipe, component).
-            self._an_component_open.setdefault((pipe_index, component_name), []).append(event_time)
+            self._an_component_open.setdefault((pipe_id, component_name), []).append(event_time)
 
         elif operation == 'leave':
-            stack = self._an_component_open.get((pipe_index, component_name))
+            stack = self._an_component_open.get((pipe_id, component_name))
             if stack:
                 delta = max(0.0, event_time - stack.pop())
                 stat = self._status.componentStats.get(component_name)
@@ -2853,7 +3054,7 @@ class TaskEngine(DAPBase):
                 stat.maxSeconds = max(stat.maxSeconds, round(delta, 2))
 
         elif operation == 'end':
-            begun = self._an_open_by_pipe.pop(pipe_index, None)
+            begun = self._an_open_by_pipe.pop(pipe_id, None)
             if begun is not None:
                 elapsed = round(max(0.0, event_time - begun['beginTime']), 2)
                 self._status.completionSeconds = round(self._status.completionSeconds + elapsed, 2)
@@ -2984,14 +3185,20 @@ class TaskEngine(DAPBase):
             self.engine_id = self._server.next_engine_id()
             self._is_terminating = False
             self._reset_channel_state()
+            # A writer open that failed is suppressed for the rest of ITS run
+            # only: storage may have recovered by this launch
+            self._run_log_failed.clear()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
             self.state = EngineState.STARTING
 
-            # Resolve ${...} placeholders into a local variable — never stored on self
-            # so secrets are not retained in memory beyond the temp file write.
-            resolved = await self._resolve_pipeline(self._pipeline)
+            # The engine's default environment (a private engine's owner values;
+            # nothing on a shared one), loaded at this start only, and the
+            # engine's VIEW of the spec for the checks below. Neither is
+            # stored on self: secrets live in the task file and nowhere else.
+            default_env = await self._default_env(self._pipeline)
+            resolved = resolve_pipeline_env(self._pipeline, default_env)
 
             # Check it - throws on error
             self._check_pipeline(resolved)
@@ -3004,12 +3211,15 @@ class TaskEngine(DAPBase):
             # rewrite any string, a node's provider included.
             db_access = self._db_access(resolved)
 
-            # Decode parameter tokens the subprocess has no key for
-            resolved = resolve_parameter_tokens(resolved)
+            # What the engine RUNS keeps its placeholders (plan 6.2): each
+            # caller's values are applied at read from _caller.env, the
+            # default env beside the spec serves bindings without a caller.
+            # Parameter tokens the subprocess has no key for are decoded.
+            spec = resolve_parameter_tokens(copy.deepcopy(self._pipeline))
 
-            # Write it out, then let `resolved` go out of scope
-            self._tmpfile = await self._write_task_file(resolved)
-            del resolved
+            # Write it out, then let the copies go out of scope
+            self._tmpfile = await self._write_task_file(spec, default_env)
+            del resolved, spec, default_env
 
             # Setup the first part of the command line args
             # --autoterm: exit when parent dies (stdin closes)
@@ -3136,63 +3346,13 @@ class TaskEngine(DAPBase):
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
 
-            # Open the run-log continuum for this run. Logging is best-effort
-            # observability: any failure here is logged and the task runs
+            # Open the run-log continuum of every control holding the engine at
+            # start (plan 7.5: one continuum per control; a holder that joins
+            # later gets its writer on its first event). Logging is best-effort
+            # observability: a failure is logged and that control's run goes
             # unlogged rather than failing execution.
-            try:
-                # The account-scoped FileStore handles user path scoping (and
-                # REFUSES an empty client_id — such a task runs unlogged and
-                # says so, rather than writing into a collapsed users/ path).
-                # Internal identity: the run-log writer is the ONLY legal
-                # writer of .logs content (the store's policy denies every
-                # user identity — internal-only entry).
-                from ai.account import RequestContext, Store
-
-                # The store view anchors at the run's OWNER namespace: the
-                # TEAM for team-owned (@team) deploys — which carry no user
-                # identity, every path they write is '@/Team/=<id>/'-prefixed
-                # anyway — and the USER for user-owned runs (an interactive
-                # .use or a personal @me deploy: private, so its continuum
-                # must never land in the billing team's tree). An
-                # internal-context store REQUIRES a concrete anchor — an empty
-                # one raises, and the except below would silently disable the
-                # run log for the whole run.
-                owner_is_team = self._owner_kind == 'team'
-                self._run_log = RunLogWriter(
-                    Store.file_store(
-                        RequestContext.internal('run-log'),
-                        client_id=self.team_id if owner_is_team else self.client_id,
-                    ),
-                    self.client_id,
-                    self.project_id,
-                    self.source,
-                    self._run_kind,
-                    self.stamp_log_event,
-                    self.raise_log_seq_floor,
-                    # team_id is the run's real BILLING team (provenance for
-                    # the control record) for EVERY owner kind; owner_kind
-                    # decides where the logs physically live. Team-owned
-                    # deploys write the TEAM continuum (teams are the
-                    # environments — teammates watch/replay the same stream);
-                    # user-owned (@me) runs stay private in the owner's tree.
-                    # Passing team_id here for an @me run keeps its billing
-                    # provenance without leaking its logs into the team tree.
-                    team_id=self.team_id,
-                    owner_kind=self._owner_kind,
-                    org_id=self.org_id,
-                    debug=self.debug_message,
-                )
-                await self._run_log.open(
-                    trigger=self._run_trigger,
-                    user=self.client_id,
-                    pipeline_hash=hashlib.sha256(
-                        json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
-                    ).hexdigest()[:16],
-                    trace_level=self._pipelineTraceLevel,
-                )
-            except Exception as e:
-                self._run_log = None
-                self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+            for key in list(self._holds):
+                await self._run_log_for(key)
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
@@ -3237,7 +3397,7 @@ class TaskEngine(DAPBase):
                     # seq (the writer opened just above). Lets clients
                     # synthesize the chapter locally with the exact key
                     # the server's chapter list will carry.
-                    'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
+                    'beginSeq': self._chapter_begin_seq(),
                 },
                 id=self.id,
             )

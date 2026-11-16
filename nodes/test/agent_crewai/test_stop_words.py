@@ -319,7 +319,8 @@ def _load_llm_base(stop_var):
 class TestQuestionContextvar:
     def _make_self(self, chat):
         ig = type('IGlobal', (), {'_chat': chat})()
-        return type('Node', (), {'IGlobal': ig})()
+        # The per-call client seam (plan 6.2) hands back the one chat under test
+        return type('Node', (), {'IGlobal': ig, '_chat_client': lambda self: chat})()
 
     def test_question_sets_stop_during_and_resets_after(self):
         var = _load_native_stream().STOP_SEQUENCES_VAR

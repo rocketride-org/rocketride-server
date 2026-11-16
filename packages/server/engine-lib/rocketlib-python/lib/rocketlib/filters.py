@@ -23,9 +23,10 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
+import threading
 import functools
 import json
-from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+from typing import Iterable, TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 from .config import MULTITENANT_BIT, ConfigError, ConfigView, TenancyViolation, resolveConfig
@@ -315,6 +316,23 @@ class IGlobalBase:
     glb: IFilterGlobal = None
     _config_view: Optional[ConfigView] = None  #: Cached full resolution (see _resolved).
     _config_restricted: Optional[ConfigView] = None  #: Cached node-facing view (see config).
+    #: Per-call clients by the values they were built from (see provider_client);
+    #: a dict per global, created on first use so the class attribute is never shared
+    _provider_clients: Optional[Dict[tuple, Any]] = None
+    _provider_lock_value: Optional[Any] = None
+    #: Guards the creation of a global's own lock and cache: two worker threads
+    #: reaching provider_client first on one global must agree on ONE lock
+    _PROVIDER_INIT_LOCK = threading.Lock()
+
+    @property
+    def _provider_lock(self):
+        """The lock guarding this global's provider-client cache (created once, per global)."""
+        if self._provider_lock_value is None:
+            with IGlobalBase._PROVIDER_INIT_LOCK:
+                if self._provider_lock_value is None:
+                    self._provider_clients = {}
+                    self._provider_lock_value = threading.Lock()
+        return self._provider_lock_value
 
     def preventDefault(self) -> None:
         """
@@ -348,6 +366,55 @@ class IGlobalBase:
             raise ConfigError(f'The service {logical_type} was not found')
         return IJson.toDict(schema)
 
+    def provider_client(self, settings: ConfigView, keys: Iterable[str], build: Callable[[ConfigView], Any]) -> Any:
+        """
+        The client for one call's effective configuration: built once per distinct set of values, then reused.
+
+        The per-call seam of plan 6.2 / 12 A: a node never builds a client from
+        ``IGlobal.config`` at global scope (that bakes one caller's
+        ``${ROCKETRIDE_*}`` values into a shared engine); it asks here with the
+        binding's ``settings``. Callers with identical values share one client,
+        so a single-user engine costs exactly what it did before.
+
+        Args:
+            settings: The binding's ``IInstanceBase.settings``.
+            keys: The config keys the client depends on (typically the node's
+                env-valued and param-flagged keys).
+            build: Builds the client from a view; called once per distinct value set.
+
+        Returns:
+            The client for these values.
+        """
+        # Step 1: the identity of this client: the values of the keys it depends on
+        cache_key = tuple((key, repr(settings[key])) for key in sorted(set(keys)))
+        # Step 2: one build per distinct identity, under a lock (bindings run on
+        # worker threads); a build that raises leaves no entry behind
+        with self._provider_lock:
+            client = self._provider_clients.get(cache_key)
+            if client is None:
+                client = build(settings)
+                self._provider_clients[cache_key] = client
+        return client
+
+    def _default_env(self) -> Dict[str, Any]:
+        """
+        The engine's DEFAULT environment from the task file (``config.env``), or nothing.
+
+        A private engine carries its owner's referenced ``ROCKETRIDE_*`` values
+        here; a shared engine carries none (plan 6.2). Read by ``config`` for
+        an uncertified node and by ``settings`` for a binding without a caller.
+
+        Returns:
+            dict: ``{name: value}``; empty outside an engine.
+        """
+        endpoint = getattr(self.IEndpoint, 'endpoint', None)
+        task_config = getattr(endpoint, 'taskConfig', None)
+        try:
+            env = task_config.get('env') if task_config is not None else None
+        except Exception:
+            env = None
+        return dict(env) if isinstance(env, dict) else {}
+
     def _resolved(self) -> ConfigView:
         """
         Return the full resolved configuration, cached on first use.
@@ -377,9 +444,14 @@ class IGlobalBase:
         """
         if self._config_restricted is None:
             full = self._resolved()
-            self._config_restricted = full.restricted(
-                refuse_params=True, refuse_env=bool(full.capabilities & MULTITENANT_BIT)
-            )
+            certified = bool(full.capabilities & MULTITENANT_BIT)
+            # An uncertified node runs on its owner's private engine: its
+            # global config reads the owner's values (the engine's default
+            # env). A certified node may serve many callers, so an env-valued
+            # key has no single value here and is refused.
+            if not certified:
+                full = full.expand_env(self._default_env())
+            self._config_restricted = full.restricted(refuse_params=True, refuse_env=certified)
         return self._config_restricted
 
     # -------------------
@@ -1076,7 +1148,12 @@ class IInstanceBase:
         if self._settings is None:
             caller = self._caller or {}
             params = (caller.get('params') or {}).get(self.instance.pipeType.id)
-            self._settings = self._iglobal._resolved().expand_env(caller.get('env')).overlay(params)
+            # The caller's environment when there is a caller; a binding the
+            # engine itself opened (a scan source) reads the engine's default
+            env = caller.get('env') if caller else None
+            if env is None:
+                env = self._iglobal._default_env()
+            self._settings = self._iglobal._resolved().expand_env(env).overlay(params)
         return self._settings
 
     # ------------------------------------------------------------------

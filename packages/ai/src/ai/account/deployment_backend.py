@@ -328,10 +328,16 @@ class FileDeploymentBackend:
         # (Deferred import: ai.modules.task's package init pulls the task
         # server, which imports this account layer.)
         if str(pipeline.get('kind') or 'pipe') == 'pipe':
+            from ai.common.parameters import validate_parameters
             from ai.modules.task.address import validate_component_ids, validate_segment
 
             validate_segment(project_id, 'project_id')
             validate_component_ids(pipeline)
+            # The parameters map is frozen into the artifact: it must be valid
+            # against the nodes it names (plan 5.4 item 4)
+            parameter_errors = validate_parameters(pipeline)
+            if parameter_errors:
+                raise ValueError('parameters: ' + '; '.join(e['message'] for e in parameter_errors))
         who = _actor_record(actor)
 
         # The artifact bytes are canonical: stable key order so the sha256 is

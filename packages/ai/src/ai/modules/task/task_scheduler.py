@@ -433,7 +433,7 @@ class TaskScheduler:
 
             try:
                 ttl = sched.get('ttl')
-                task_token = await start_server_task_as_team(
+                control_id = await start_server_task_as_team(
                     self._server,
                     pipeline,
                     org_id=org_id,
@@ -460,10 +460,10 @@ class TaskScheduler:
                 error(f'[SCHEDULER] {entry.key}: dispatch failed: {e}')
                 return
 
-            self._active_tokens[entry.key] = task_token
+            self._active_tokens[entry.key] = control_id
             await account.deployments_mark_run(org_id, team_id, project_id, source_id)
             await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
-            self._debug_dispatch(entry.key, task_token, ttl)
+            self._debug_dispatch(entry.key, control_id, ttl)
         finally:
             # A dispatch that succeeded replaced the in-flight marker with
             # the real token above; every other exit clears the marker so
@@ -545,9 +545,9 @@ class TaskScheduler:
             running = ''
         debug(f'[SCHEDULER] {key}: previous run still active{running}, skipping')
 
-    def _debug_dispatch(self, key: RunKey, task_token: str, ttl: Any) -> None:
+    def _debug_dispatch(self, key: RunKey, control_id: str, ttl: Any) -> None:
         """Log a successful dispatch with the run window it was given."""
-        ctrl = self._server._task_control.get(task_token)
+        ctrl = self._server._task_control.get(control_id)
         task = f'"{ctrl.id}"' if ctrl else 'started'
         debug(f'[SCHEDULER] {key}: dispatched -> task {task} (ttl: {self._format_ttl(ttl)})')
 

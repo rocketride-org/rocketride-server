@@ -20,12 +20,3 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 # =============================================================================
-
-import os
-
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-
-# Load any dependencies
-from depends import depends  # type: ignore
-
-depends(requirements)

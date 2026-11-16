@@ -131,7 +131,10 @@ export enum EVENT_TYPE {
 	/** Deployment change events - pointer/state/schedule/run mutations, scoped by org */
 	DEPLOY = 1 << 9,
 
-	/** Convenience combination - ALL events except NONE for comprehensive monitoring */
+	/** Engine-level output of SHARED engines (counts, errors, bare prints, start/stop/crash); sys.admin only */
+	OPS = 1 << 10,
+
+	/** Convenience combination - every category except OPS (an operator opts into that one explicitly) */
 	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY,
 }
 

@@ -63,7 +63,7 @@ async def test_run_pipeline_returns_token_and_registers_it(fake_engine):
 
     result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE})
 
-    assert result == {'ok': True, 'task_token': fake_engine._token, 'projectId': 'proj-fake', 'source': 'src-fake'}
+    assert result == {'ok': True, 'address': fake_engine._token, 'projectId': 'proj-fake', 'source': 'src-fake'}
     assert fake_engine.used == [{'pipeline': PIPE, 'pipelineTraceLevel': 'summary'}]
     registered = tasks.get(fake_engine._token)
     assert registered is not None
@@ -118,7 +118,7 @@ async def test_run_pipeline_with_inputs_also_sends_and_returns_result(fake_engin
     result = await registry.handler('run_pipeline')(fake_engine, tasks, {'pipeline': PIPE, 'inputs': 'hello world'})
 
     assert result['ok'] is True
-    assert result['task_token'] == fake_engine._token
+    assert result['address'] == fake_engine._token
     assert result['result'] == fake_engine._result
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
@@ -189,7 +189,7 @@ async def test_send_data_requires_input(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('send_data')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('send_data')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result['ok'] is False
     assert result['error_type'] == 'BadRequest'
@@ -202,19 +202,19 @@ async def test_send_data_returns_result(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('send_data')(fake_engine, tasks, {'task_token': 'tok-1', 'input': 'payload'})
+    result = await registry.handler('send_data')(fake_engine, tasks, {'address': 'tok-1', 'input': 'payload'})
 
     assert result == {'ok': True, 'result': fake_engine._result}
     assert fake_engine.sent == [{'token': 'tok-1', 'data': 'payload', 'objinfo': None, 'mimetype': None}]
 
 
 @pytest.mark.asyncio
-async def test_send_data_accepts_token_and_data_aliases(fake_engine):
+async def test_send_data_accepts_the_data_alias(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('send_data')(fake_engine, tasks, {'token': 'tok-2', 'data': 'payload2'})
+    result = await registry.handler('send_data')(fake_engine, tasks, {'address': 'tok-2', 'data': 'payload2'})
 
     assert result['ok'] is True
     assert fake_engine.sent == [{'token': 'tok-2', 'data': 'payload2', 'objinfo': None, 'mimetype': None}]
@@ -235,7 +235,7 @@ async def test_send_data_times_out(fake_engine, monkeypatch):
     # TimeoutError is converted.
     monkeypatch.setattr(execution, 'DEFAULT_TIMEOUT_SECONDS', 0.01)
 
-    result = await registry.handler('send_data')(fake_engine, tasks, {'task_token': 'tok-1', 'input': 'payload'})
+    result = await registry.handler('send_data')(fake_engine, tasks, {'address': 'tok-1', 'input': 'payload'})
 
     assert result['ok'] is False
     assert result['error_type'] == 'Timeout'
@@ -264,7 +264,7 @@ async def test_terminate_calls_seam_and_removes_from_registry(fake_engine):
     tasks = TaskRegistry()
     tasks.add('tok-1', pipeline_ref='p.pipe')
 
-    result = await registry.handler('terminate')(fake_engine, tasks, {'task_token': 'tok-1'})
+    result = await registry.handler('terminate')(fake_engine, tasks, {'address': 'tok-1'})
 
     assert result == {'ok': True, 'terminated': 'tok-1'}
     assert fake_engine.terminated == ['tok-1']
@@ -294,7 +294,7 @@ async def test_send_files_rejects_empty_files(fake_engine):
     execution.register(registry)
     tasks = TaskRegistry()
 
-    result = await registry.handler('send_files')(fake_engine, tasks, {'task_token': 'tok-1', 'files': []})
+    result = await registry.handler('send_files')(fake_engine, tasks, {'address': 'tok-1', 'files': []})
 
     assert result['ok'] is False
     assert result['error_type'] == 'BadRequest'
@@ -309,7 +309,7 @@ async def test_send_files_calls_seam_with_files_then_token_order(fake_engine):
     tasks = TaskRegistry()
     files = ['/tmp/a.pdf', '/tmp/b.pdf']
 
-    result = await registry.handler('send_files')(fake_engine, tasks, {'task_token': 'tok-1', 'files': files})
+    result = await registry.handler('send_files')(fake_engine, tasks, {'address': 'tok-1', 'files': files})
 
     assert result == {'ok': True, 'result': {'uploaded': 2}}
     assert fake_engine.sent_files == [{'files': files, 'token': 'tok-1'}]
@@ -346,14 +346,15 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
     result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
 
     assert result['ok'] is True
-    assert result['task_token'] == fake_engine._token
     assert result['address'] == fake_engine._token
     # The address is public information and rides the path; no credential
     # ever rides a URL (access logs, Referer, history) — the uploader sends
     # its rr_ key in the Authorization header.
     assert result['upload_url'] == f'{fake_engine.base_url}/task/data/{fake_engine._token}'
     assert '?' not in result['upload_url']
-    assert 'dropper_url' not in result
+    # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
+    assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={fake_engine._token}'
+    assert 'auth=' not in result['dropper_url']
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
     # address tracked so monitor/terminate work against it

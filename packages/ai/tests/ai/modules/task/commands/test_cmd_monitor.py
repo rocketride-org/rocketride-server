@@ -47,7 +47,7 @@ ADDRESS = 'acme.proj-1.src-1'
 KEY = 'dev.user-1.acme.proj-1.src-1'
 
 
-def _account_info(*, user_id='user-1', team_id='team-1'):
+def _account_info(*, user_id='user-1', team_id='team-1', sys_permissions=()):
     """
     Build an AccountInfo stub with a single org/team membership.
 
@@ -56,12 +56,16 @@ def _account_info(*, user_id='user-1', team_id='team-1'):
         team_id: the team that the caller has ``task.monitor``/``task.data``/``task.control``
             permissions on. Any control whose ``teamId`` matches this value will be
             visible; controls with a different ``teamId`` are filtered out.
+        sys_permissions: platform permissions (``sys.admin`` makes the caller an
+            operator, who alone receives the DASHBOARD and OPS streams, B31).
     """
     return SimpleNamespace(
         userId=user_id,
         userToken='token-' + user_id,
+        sysPermissions=list(sys_permissions),
         organization={
             'id': 'org-1',
+            'developerId': 'acme',
             'permissions': [],
             'teams': [
                 {
@@ -96,19 +100,28 @@ async def test_send_server_event_skipped_when_bit_not_subscribed():
 
 @pytest.mark.asyncio
 async def test_send_server_event_dispatches_when_subscribed():
-    """Matching '*' subscription + bit causes the event to be dispatched."""
+    """Matching '*' subscription + bit causes the event to be dispatched (to an operator, for DASHBOARD)."""
     conn = _make_conn(
         monitors={'*': EVENT_TYPE.DASHBOARD},
-        account_info=_account_info(),
+        account_info=_account_info(sys_permissions=['sys.admin']),
     )
     await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {'x': 1}})
     conn.send_event.assert_awaited_once_with('evt', body={'x': 1})
 
 
 @pytest.mark.asyncio
+async def test_a_retained_dashboard_subscription_is_masked_once_the_operator_permission_lapses():
+    """DASHBOARD, like OPS, is checked at DELIVERY: the subscription outlives the permission, the stream does not (B31)."""
+    conn = _make_conn(monitors={'*': EVENT_TYPE.DASHBOARD | EVENT_TYPE.OPS}, account_info=_account_info())
+    await MonitorCommands.send_server_event(conn, EVENT_TYPE.DASHBOARD, {'event': 'evt', 'body': {}})
+    await MonitorCommands.send_server_event(conn, EVENT_TYPE.OPS, {'event': 'apaevt_ops', 'body': {}})
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_send_server_event_filters_by_user_id_tenant_scoping():
     """A tenant-scoped event (user_id set) is filtered against the caller's userId."""
-    account = SimpleNamespace(userId='user-1', userToken='ak_mine')
+    account = SimpleNamespace(userId='user-1', userToken='ak_mine', sysPermissions=['sys.admin'])
     conn = _make_conn(monitors={'*': EVENT_TYPE.DASHBOARD}, account_info=account)
     # Mismatched user_id: should be filtered out.
     await MonitorCommands.send_server_event(
@@ -260,7 +273,9 @@ async def test_send_updates_summary_with_running_control():
     status.model_dump = MagicMock(return_value=status_dict)
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
-    control = SimpleNamespace(id='task-1', task=task)
+    task.shared = False
+    # A private engine's status passes through the projection unchanged
+    control = SimpleNamespace(id='task-1', task=task, project_status=lambda body, shared: body)
 
     conn = _make_conn()
     await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)
@@ -548,7 +563,7 @@ async def test_send_task_event_dev_vs_deploy_keys_never_alias():
 async def test_set_monitor_project_scope_binds_caller_as_owner():
     """A project/source subscription without team_id binds the CALLER's userId."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control())
+    server.resolve_control = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
     await MonitorCommands.set_monitor(conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY)
@@ -559,16 +574,16 @@ async def test_set_monitor_project_scope_binds_caller_as_owner():
 async def test_set_monitor_team_scope_binds_team_as_owner():
     """A project/source subscription WITH team_id builds the team-scoped key."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(
         conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY, team_id='team-1'
     )
     assert 'p.deploy.team-1.proj-1.src-1' in conn._monitors
-    # The lookup was scoped to the team as well.
-    _, kwargs = server.get_task_control_by_project.call_args
-    assert kwargs.get('team_id') == 'team-1'
+    # The lookup went through the ONE resolver, scoped to the team as well.
+    args, kwargs = server.resolve_control.call_args
+    assert args[0] == 'acme.proj-1.src-1' and kwargs.get('team') == 'team-1'
 
 
 @pytest.mark.asyncio
@@ -586,7 +601,7 @@ async def test_set_monitor_token_for_deploy_run_builds_team_key():
 async def test_on_rrext_monitor_passes_team_id_through():
     """The wire teamId argument reaches set_monitor's team scope."""
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.get_task_address = MagicMock(return_value='')
@@ -605,14 +620,14 @@ async def test_on_rrext_monitor_passes_team_id_through():
 @pytest.mark.asyncio
 async def test_set_monitor_foreign_team_scope_denied_even_when_not_running():
     """Subscribing to another team's deploy scope is rejected up front -- even
-    when no run exists yet. Regression: get_task_control_by_project raises a
-    RuntimeError (not a PermissionError) on the not-running path, which the
+    when no run exists yet. Regression: the resolver raises a not-registered
+    error (not a PermissionError) on the not-running path, which the
     except-Exception branch swallows; without the membership check the foreign
     subscription would still be registered under p.<foreignTeam>.<proj>.<src>.
     """
     server = MagicMock()
     # Subscribe-before-launch: no live run -> RuntimeError, NOT PermissionError.
-    server.get_task_control_by_project = MagicMock(side_effect=RuntimeError('Your pipeline is not running'))
+    server.resolve_control = MagicMock(side_effect=RuntimeError('Your pipeline is not running'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(team_id='team-1'), server=server)
 
@@ -625,7 +640,7 @@ async def test_set_monitor_foreign_team_scope_denied_even_when_not_running():
     # reached (the membership check fires first).
     assert 'p.deploy.team-other.proj-1.src-1' not in conn._monitors
     assert conn._monitors == {}
-    server.get_task_control_by_project.assert_not_called()
+    server.resolve_control.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -634,7 +649,7 @@ async def test_set_monitor_own_team_scope_allowed_before_a_run_exists():
     not-running RuntimeError is tolerated once membership is established.
     """
     server = MagicMock()
-    server.get_task_control_by_project = MagicMock(side_effect=RuntimeError('not running'))
+    server.resolve_control = MagicMock(side_effect=RuntimeError('not running'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(team_id='team-1'), server=server)
 

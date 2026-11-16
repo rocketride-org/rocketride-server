@@ -233,18 +233,8 @@ def _check_scope(endpoints: Optional[List[str]], address: 'Address') -> None:
     """
     from ai.modules.task.address import build_address, check_endpoint_scope
 
-    if endpoints is None:
-        return
-    if address.source is not None:
-        check_endpoint_scope(endpoints, build_address(*address))
-        return
-    for entry in endpoints:
-        parts = str(entry).split('.')
-        if len(parts) == 3 and parts[0] == address.developer_id and parts[1] == address.pipe_id:
-            return
-    raise PermissionError(
-        f'This API key is scoped to other endpoints; {address.developer_id}.{address.pipe_id} is not among them'
-    )
+    # ONE matcher: the address module's, which takes the two-segment form too
+    check_endpoint_scope(endpoints, build_address(*address))
 
 
 # ==== The row source ===========================================================

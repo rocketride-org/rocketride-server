@@ -32,13 +32,61 @@ This module works in conjunction with TaskServer to:
 - Handle processing errors and edge cases
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+import time
+import uuid
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+from ai.account.base import OutOfCreditsError
 from ai.common.dap import DAPConn, TransportBase
+
+from .. import caller_stamp
+from ..task_control import OpenPipe
 from .engine_access import engine_for, wait_running
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
+    from ..task_control import TaskControl
+    from ..task_engine import TaskEngine
     from ..task_server import TaskServer
+
+
+# ==== The binding a frame belongs to ===============================================
+
+
+def _object_failed(body: Any) -> bool:
+    """
+    Whether a close body reports the object as failed.
+
+    ``DataConn._close`` answers normally for an object the pipeline failed and
+    puts the completion error on the body (``error``), so the transport's
+    success says nothing about the object's.
+
+    Args:
+        body: The engine's close response body.
+
+    Returns:
+        True when the body carries the object's error.
+    """
+    return isinstance(body, dict) and 'error' in body
+
+
+@dataclass
+class _Frame:
+    """
+    Where one data frame runs and under which request id.
+
+    Attributes:
+        engine: The engine the frame goes to (the control's hold for a new
+            binding; the recorded engine for a frame of an open pipe).
+        correlation_id: The server-minted request id of the binding.
+        params: The admitted per-call params, per node (an open only).
+    """
+
+    engine: 'TaskEngine'
+    correlation_id: str
+    params: Optional[Dict[str, Dict[str, Any]]] = None
+    record: Optional[OpenPipe] = None
 
 
 class DataCommands(DAPConn):
@@ -94,110 +142,317 @@ class DataCommands(DAPConn):
 
     async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'rrext_process' command for data processing requests.
+        Handle DAP 'rrext_process': one frame of the data path (open, write, close, tool).
 
-        This method processes data processing requests by locating the target task,
-        ensuring it's in a running state, and forwarding the data processing request
-        to the task instance. It handles the complete request lifecycle from
-        authentication through response delivery.
+        Every frame belongs to a BINDING. An ``open`` (or a standalone ``tool``
+        call that names no pipe) starts one: it resolves the caller's control,
+        takes the engine under its hold and mints the request id. A frame that
+        names a ``pipe_id`` attaches to a binding this control already has
+        open, through the control's open-pipe record (plan 3.1 P1/P2).
 
         Args:
-            request (Dict[str, Any]): DAP data processing request containing:
-                - apikey: Authentication key for task access control
-                - token: Unique identifier for the target task instance
-                - arguments: Data processing parameters and payload (task-specific)
+            request: The DAP request; ``arguments.subcommand`` selects the frame
+                kind, ``arguments.pipe_id`` names an open binding.
 
         Returns:
-            Dict[str, Any]: Response from the task's data processing operation,
-                          which may contain:
-                          - Processed data results
-                          - Status information
-                          - Task-specific response payload
-
-        Workflow:
-        1. Extract authentication credentials (apikey) and task identifier (token)
-        2. Locate the target task instance using server registry
-        3. Wait for task to reach running state (blocks until ready)
-        4. Forward the complete request to task's data processing method
-        5. Return the task's response directly to the client
-        6. Handle and log any errors that occur during processing
+            The engine's response body in an envelope keyed off this request.
 
         Raises:
-            Exception: If task lookup fails, task is not accessible, task cannot
-                      reach running state, or data processing operation fails
-
-        Note:
-        - This method blocks until the target task is in running state
-        - The actual data processing logic is implemented by the task instance
-        - Error details are logged for debugging but original exceptions are re-raised
-        - Response format is determined by the individual task's processing logic
+            PermissionError: The caller has no access, or names a pipe that is
+                not open on their control.
+            TaskError: The engine could not start, or the params were rejected.
+            OutOfCreditsError: The control's paying unit is out of credit.
         """
         try:
-            # The correlationId is server-minted (it makes `open` idempotent,
-            # ALB seam 7): a client-sent one must never name another
-            # request's binding
             arguments = request.get('arguments')
-            if isinstance(arguments, dict):
-                arguments.pop('correlationId', None)
+            if not isinstance(arguments, dict):
+                raise ValueError('arguments must be an object')
+            subcommand = arguments.get('subcommand')
+            pipe_id = arguments.get('pipe_id')
 
-            # The caller's control for the address. An OPEN resolves the way
-            # submit() does: the live run on the first rung that answers, or
-            # the publication started from its artifact (plan 3.2, one resolver
-            # for every verb). The frames of an open pipe (write/close/tool)
-            # ATTACH only: they must land on the control the open found, never
-            # start a publication a colder rung could not. C.8's open-pipe
-            # record pins each slot to the engine it opened on (plan 3.1 P2).
-            subcommand = arguments.get('subcommand') if isinstance(arguments, dict) else None
-            if subcommand == 'open':
-                control = await self.resolve_control_or_start(request, 'task.data')
+            # Step 1: the caller's control for the address
+            control = await self._control_for(request, subcommand)
+
+            # Step 2: the binding this frame belongs to: a new one, or the one
+            # the named pipe was opened on
+            if pipe_id is None:
+                frame = await self._new_binding(control, arguments)
             else:
-                control = self.get_control(request, 'task.data')
+                frame = self._attached_binding(control, pipe_id)
 
-            # Per-call params on an open are admitted by public name against
-            # the control's parameters map (plan 5.4 item 5): an unknown name
-            # is refused here, never dropped; C.8 adds the descriptor filter
-            if isinstance(arguments, dict) and arguments.get('subcommand') == 'open' and 'params' in arguments:
-                arguments['params'] = control.check_params(arguments.get('params'))
-
-            # The engine this request runs on: one that stopped on its
-            # inactivity timer starts again under the same key (plan 7.2),
-            # after the caller's team access is re-checked for the restart
-            task = await engine_for(self, control, 'task.data')
-
-            # A data request (pipe open/write/close, tool, ...) is activity
-            # of THIS control only, and in flight through it until the answer
-            # comes back: its idle clock is held meanwhile, so a request
-            # longer than the ttl is never expired mid-flight; another holder
-            # of the engine keeps aging
-            control.begin_request()
+            # Step 3: forward with the caller stamped, as activity of this control;
+            # an open is in flight until the engine answers (a repoint meanwhile
+            # keeps that engine); a close retires its record whatever the
+            # engine answered
+            opening = subcommand == 'open'
+            if opening:
+                control.pending_opens[frame.engine] = control.pending_opens.get(frame.engine, 0) + 1
+            succeeded = False
+            body = None
             try:
-                # Ensure the task is ready to process data (blocks until running);
-                # a start that never confirms is engine_start_failed
-                await wait_running(task)
-
-                # Forward the data processing request to the task instance and
-                # get the raw response from the subprocess
-                subprocess_response = await task._send_data(request)
+                body = await self._forward(control, frame, request, arguments)
+                succeeded = True
             finally:
-                control.end_request()
+                if opening:
+                    left = control.pending_opens.get(frame.engine, 0) - 1
+                    if left > 0:
+                        control.pending_opens[frame.engine] = left
+                    else:
+                        control.pending_opens.pop(frame.engine, None)
+                if subcommand == 'close' and pipe_id is not None:
+                    # Transport success is not object success: a close the
+                    # engine answered normally still carries the object's error
+                    # when the pipeline failed it
+                    self._retire(control, pipe_id, succeeded and not _object_failed(body))
+                if (opening and not succeeded) or (subcommand == 'close' and pipe_id is not None):
+                    await self._settle_drain(control)
 
-            # Rebuild the response envelope keyed off the INBOUND request so the
-            # inbound DAPConn can correlate it back to the originating chat client.
-            # _send_data builds its own outbound DAP packet with a fresh seq for
-            # the eaas->subprocess hop, which means subprocess_response.request_seq
-            # points at the outbound seq, not the chat client's original seq.
-            # build_response constructs a fresh envelope keyed off the inbound
-            # request so request_seq matches what the chat client sent.  Mirrors
-            # the same pattern task_conn.request uses for the debug channel.
+            # Step 4: a successful open is a binding the control now has open;
+            # a standalone tool call was a binding that opened and closed
+            if subcommand == 'open':
+                self._record_open(control, frame, body)
+            elif subcommand == 'tool' and pipe_id is None:
+                self._note_borrowed(control, body)
 
-            return self.build_response(
-                request,
-                body=subprocess_response.get('body'),
-            )
-
+            # The envelope is keyed off the INBOUND request so the inbound
+            # DAPConn correlates it to the originating client (_send_data
+            # builds its own outbound packet with a fresh seq)
+            return self.build_response(request, body=body)
         except Exception as e:
-            # Log data processing failure with context for debugging
+            # The context for debugging; the client gets the original error
             self.debug_message(f'Failed to process data request: {str(e)}')
-
-            # Re-raise the exception to maintain error propagation to client
             raise
+
+    # ==== The steps ===================================================================
+
+    async def _control_for(self, request: Dict[str, Any], subcommand: Optional[str]) -> 'TaskControl':
+        """
+        The caller's control for the request's address.
+
+        An OPEN resolves the way submit() does: the live run on the first rung
+        that answers, or the publication started from its artifact (plan 3.2,
+        one resolver for every verb). Every other frame ATTACHES only: it must
+        land on the control the open found, never start a publication a
+        colder rung could not.
+
+        Args:
+            request: The DAP request.
+            subcommand: The frame kind.
+
+        Returns:
+            The resolved control.
+        """
+        if subcommand == 'open':
+            return await self.resolve_control_or_start(request, 'task.data')
+        return self.get_control(request, 'task.data')
+
+    async def _new_binding(self, control: 'TaskControl', arguments: Dict[str, Any]) -> '_Frame':
+        """
+        Start a binding: an open, or a standalone tool call.
+
+        Args:
+            control: The caller's control.
+            arguments: The frame's arguments; ``params`` is consumed here.
+
+        Returns:
+            The frame: the engine under the control's hold, a fresh request id,
+            and the admitted per-call params.
+
+        Raises:
+            TaskError: TASK_PARAM_REJECTED, or the engine could not start.
+            OutOfCreditsError: The paying unit is out of credit.
+        """
+        # Step 1: the engine under the control's hold, started again when it
+        # stopped on its inactivity timer (plan 7.2) after the caller's team
+        # access is re-checked. A control whose pipes are still open on the
+        # engine it repointed away from keeps opening THERE: the slot numbers
+        # a client names are one engine's (plan 7.2 P2)
+        engine = await engine_for(self, control, 'task.data')
+        draining = control.draining
+        if draining is not None and draining.is_live and control.pipes_on(draining):
+            engine = draining
+
+        # Step 2: per-call params enter by the open: admitted by public name
+        # against the control's parameters map, then by value against the
+        # node's descriptors (plan 5.4 item 5); a rejected key never reaches
+        # the engine
+        params = control.resolve_params(control.check_params(arguments.pop('params', None)))
+
+        # Step 3: credit, on the control's paying unit, before any bytes reach
+        # the subprocess (plan 0 S9); the engine-side gate stays for the
+        # bindings EaaS never sees
+        await self._require_credit(control)
+
+        # Step 4: a server-minted request id; a client never names another
+        # request's binding (ALB seam 7)
+        return _Frame(engine=engine, correlation_id=uuid.uuid4().hex, params=params)
+
+    @staticmethod
+    def _attached_binding(control: 'TaskControl', pipe_id: Any) -> '_Frame':
+        """
+        The binding a write/close/tool frame names, from the control's open-pipe record.
+
+        The record is the ownership check and the engine pin (plan 3.1 P1/P2):
+        a slot that is not open on the CALLER's control is refused here, never
+        forwarded (on a shared engine the slot number alone must never reach
+        the subprocess), and the frame goes to the engine the pipe opened on,
+        whatever the control holds now.
+
+        Args:
+            control: The caller's control.
+            pipe_id: The slot the frame names.
+
+        Returns:
+            The frame on the recorded engine, under the open's request id.
+
+        Raises:
+            PermissionError: The slot is not open on this control.
+        """
+        record = control.open_pipes.get(pipe_id)
+        if record is None:
+            raise PermissionError(f'Pipe {pipe_id} is not open on your control for {control.address!r}')
+        return _Frame(engine=record.engine, correlation_id=record.correlation_id, record=record)
+
+    async def _forward(
+        self, control: 'TaskControl', frame: '_Frame', request: Dict[str, Any], arguments: Dict[str, Any]
+    ) -> Any:
+        """
+        Send one frame to its engine with the caller stamped; return the engine's body.
+
+        Args:
+            control: The caller's control.
+            frame: The binding the frame belongs to.
+            request: The inbound DAP request (its envelope is reused).
+            arguments: The frame's arguments as the client sent them.
+
+        Returns:
+            The engine's response body.
+        """
+        # Step 1: strip-then-inject the caller context (plan 5.3): every
+        # reserved key the client sent is removed, the server's _caller set
+        stamped = caller_stamp.prepare(
+            self, control, arguments, correlation_id=frame.correlation_id, params=frame.params
+        )
+        # An open carries its request id in the clear too: the engine's
+        # idempotent open keys on it (ALB seam 7)
+        if arguments.get('subcommand') == 'open':
+            stamped['correlationId'] = frame.correlation_id
+        # The bytes a write carries count toward this control's own totals
+        if arguments.get('subcommand') == 'write' and frame.record is not None:
+            frame.record.bytes += len(arguments.get('data') or b'')
+        forwarded = dict(request)
+        forwarded['arguments'] = stamped
+
+        # Step 2: the request is activity of THIS control only, and in flight
+        # through it until the answer comes back: its idle clock is held
+        # meanwhile, so a request longer than the ttl is never expired
+        # mid-flight; another holder of the engine keeps aging
+        control.begin_request()
+        try:
+            # A start that never confirms running is engine_start_failed
+            await wait_running(frame.engine)
+            response = await frame.engine._send_data(forwarded)
+        finally:
+            control.end_request()
+        return response.get('body')
+
+    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any) -> None:
+        """
+        Record a successful open on the control: the slot, its engine and its request tree.
+
+        The tree is CLAIMED for the control (plan 7.5): its pipe-tagged events
+        route to this control only, the opener connection first.
+
+        Args:
+            control: The caller's control.
+            frame: The binding the open started.
+            body: The engine's open response (``pipe_id``, wire ``traceId``).
+        """
+        if not isinstance(body, dict) or body.get('pipe_id') is None:
+            return
+        trace_id = str(body.get('traceId') or '')
+        control.open_pipes[body['pipe_id']] = OpenPipe(
+            engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
+        )
+        control.stats.totalCount += 1
+        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+
+    def _retire(self, control: 'TaskControl', pipe_id: Any, succeeded: bool) -> None:
+        """
+        A close went through (or failed): the slot's record is retired and the binding counted.
+
+        Args:
+            control: The caller's control.
+            pipe_id: The closed slot.
+            succeeded: Whether the engine accepted the close AND the object went through.
+        """
+        record = control.open_pipes.pop(pipe_id, None)
+        if record is None:
+            return
+        # Step 1: the control's own counts (plan 7.5): what its bindings did
+        if succeeded:
+            control.stats.completedCount += 1
+            control.stats.completedSize += record.bytes
+        else:
+            control.stats.failedCount += 1
+            control.stats.failedSize += record.bytes
+        # Step 2: the tree is released; it lingers for the grace, then is forgotten
+        self._server.trace_owners.release(record.trace_id)
+
+    async def _settle_drain(self, control: 'TaskControl') -> None:
+        """
+        After a close: the engine a repoint left draining goes once no pipe of the control is open on it.
+
+        Args:
+            control: The caller's control.
+        """
+        draining = control.draining
+        if draining is None or control.pipes_on(draining):
+            return
+        await self._server.release_draining(control, 'repointed')
+
+    def _note_borrowed(self, control: 'TaskControl', body: Any) -> None:
+        """
+        A standalone tool call opened and closed a binding in one frame: claim and release its tree.
+
+        Its events may still arrive within the grace, so the owner is recorded
+        for that long and nothing else.
+
+        Args:
+            control: The caller's control.
+            body: The tool response (``traceId`` of the borrowed pipe).
+        """
+        trace_id = str((body or {}).get('traceId') or '') if isinstance(body, dict) else ''
+        if not trace_id:
+            return
+        control.stats.totalCount += 1
+        control.stats.completedCount += 1
+        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+        self._server.trace_owners.release(trace_id)
+
+    async def _require_credit(self, control: 'TaskControl') -> None:
+        """
+        Refuse a request on a control whose paying unit is out of credit (plan 0 S9).
+
+        One ledger question per control per allow window, not one per request:
+        an allow is trusted for ``CONST_SPEND_ALLOW_SECONDS`` (the engine's
+        own gate uses the same window); a refusal is never cached, so a topped
+        up account is admitted on its next request.
+
+        Args:
+            control: The resolved control; its org is the paying unit.
+
+        Raises:
+            OutOfCreditsError: The account refused the spend.
+        """
+        from ai.account import account
+
+        # Step 1: a recent allow answers without asking
+        now = time.monotonic()
+        if control.credit_allowed(now):
+            return
+        # Step 2: ask the account for the paying unit; remember an allow only
+        refusal = await account.check_spend(control.billing.org_id)
+        if refusal:
+            raise OutOfCreditsError(f'{refusal} ({control.address})')
+        control.credit_allowed_at = now

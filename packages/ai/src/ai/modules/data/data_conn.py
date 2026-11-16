@@ -29,6 +29,7 @@ from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, C
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
+from ai.web.metrics import metrics
 from rocketlib import (
     APERR,
     AVI_ACTION,
@@ -42,6 +43,7 @@ from rocketlib import (
     isCancelled,
     monitorCompleted,
     monitorFailed,
+    monitorMetrics,
     monitorOther,
     warning,
 )
@@ -121,6 +123,8 @@ class DataConnPipe:
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
     trace_id: int = None  # The request tree this binding started (plan 7.4)
     correlation_id: str = None  # The server-minted request id this pipe was opened for (ALB seam 7)
+    caller: Optional[Dict[str, Any]] = None  # The server-set caller context stamped on the pipe (plan 5.3)
+    hold_started: float = None  # perf_counter at getPipe(): the billable hold starts after admission (plan 8.1)
     # Text lane: holds the bytes of a character that a write cut in half
     text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
 
@@ -569,13 +573,77 @@ class DataConn(DAPConn):
             self._open_by_correlation.pop(conn_pipe.correlation_id, None)
         return conn_pipe
 
+    def _binding_for(self, pipe_id: Any, args: Dict[str, Any], verb: str) -> DataConnPipe:
+        """
+        The open binding a write/close/tool frame names, checked against the frame's request.
+
+        A slot is the engine's own number and is reused: a binding this
+        connection reaped idle (``_monitor_pipes``) leaves the slot free for
+        another control's open on the same engine, while the first control's
+        record still names it. The server stamps every frame with its request's
+        ``correlationId`` (``_caller``, plan 5.3), so a frame whose request is
+        not the one the slot was opened for is refused here instead of
+        operating on another request's pipe (plan 3.1 P1). A binding the
+        engine opened itself carries no request id and is not checked.
+
+        Args:
+            pipe_id: The slot the frame names.
+            args: The frame's arguments (``_caller`` as the server stamped it).
+            verb: The frame's verb, for the message.
+
+        Returns:
+            The binding on that slot.
+
+        Raises:
+            ValueError: The slot is not open, or is open for another request.
+        """
+        conn_pipe = self._pipe_map.get(pipe_id, None)
+        if not conn_pipe:
+            raise ValueError(f'{verb} pipe with id {pipe_id} not found')
+        caller = args.get('_caller')
+        expected = caller.get('correlationId') if isinstance(caller, dict) else None
+        if expected and conn_pipe.correlation_id and expected != conn_pipe.correlation_id:
+            raise ValueError(f'{verb} pipe with id {pipe_id} is open for another request')
+        return conn_pipe
+
+    @staticmethod
+    def _record_hold(hold_started: Optional[float], bytes_in: int) -> None:
+        """
+        Book one binding's hold time and bytes, and flush a metrics snapshot (plan 8.1, 8.2).
+
+        The billing period IS the pipe hold: the clock started after the
+        semaphore admitted the binding (admission wait is never billed) and
+        stops here, at putPipe. Metric names are STABLE (``hold_time`` in ms,
+        ``bytes_in``); the request identity rides beside the value in the
+        trace usage (C.13), never in the key. The snapshot goes out NOW, so a
+        subprocess killed before the next object end does not lose the hold.
+
+        Args:
+            hold_started: ``perf_counter`` at getPipe, or None when no pipe was taken.
+            bytes_in: Bytes the binding received.
+        """
+        # Step 1: no pipe was taken (the open failed before getPipe): nothing to bill
+        if hold_started is None:
+            return
+        # Step 2: the hold in milliseconds, as a TIMER (float ms is what bills
+        # against a metrics_conversions rate row); bytes as a counter
+        metrics.add_time({'hold_time': (time.perf_counter() - hold_started) * 1000})
+        if bytes_in:
+            metrics.counter('bytes_in', int(bytes_in))
+        # Step 3: flush the cumulative snapshot through the >MET* protocol now,
+        # not at the next object end
+        report = metrics.report()
+        if report:
+            monitorMetrics(report)
+
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
         Execute synchronous pipe cleanup (runs in thread, no async semaphore operations).
 
         This method handles the complete cleanup of a pipe including:
         1. Monitoring metrics reporting
-        2. Returning the pipe to the endpoint
+        2. Returning the pipe to the endpoint (which ends the binding's
+           instances and drops its caller context) and booking its hold
 
         Note: Semaphore release is handled by the caller in async context.
 
@@ -595,10 +663,11 @@ class DataConn(DAPConn):
             else:
                 monitorCompleted(size)
 
-            # Return pipe to the endpoint for reuse
+            # Return pipe to the endpoint for reuse; the hold ends here
             if conn_pipe.pipe:
                 self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
+                self._record_hold(conn_pipe.hold_started, conn_pipe.written)
 
             # Release the entry
             if conn_pipe.entry:
@@ -755,6 +824,12 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
+        # The server-set caller context (plan 5.3): stamped on the PIPE right
+        # after getPipe, copied into each instance by the binder at
+        # construction, cleared by putPipe. It never rides the Entry. The
+        # binding's trace level is the caller's (its control's, plan 7.4).
+        caller = args.pop('_caller', None)
+        trace_level = (caller or {}).get('traceLevel')
         # An open already served for this request: hand back the same binding
         correlation_id = args.get('correlationId') or None
         if correlation_id is not None:
@@ -776,13 +851,17 @@ class DataConn(DAPConn):
             # Do the actual pipe operations in thread
             def open_sync():
                 pipe_instance = None
+                hold_started = None
 
                 try:
                     # Create an entry object from the provided object metadata
                     entry = getObject(obj=obj)
 
-                    # Get a pipe from the target endpoint
-                    pipe_instance = self._require_target().getPipe()
+                    # Get a pipe from the target endpoint: the hold starts here,
+                    # after admission (plan 8.1), with the caller stamped on it
+                    hold_started = time.perf_counter()
+                    pipe_instance = self._require_target().getPipe(trace_level)
+                    pipe_instance.caller = caller
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
                     # Get the ids and determine the lane
@@ -811,6 +890,8 @@ class DataConn(DAPConn):
                         last_activity_time=current_time,  # Initialize activity timer
                         trace_id=trace_id,
                         correlation_id=correlation_id,
+                        caller=caller,
+                        hold_started=hold_started,
                     )
 
                     # Begin the pipe
@@ -828,13 +909,16 @@ class DataConn(DAPConn):
                     return pipe_id, trace_id
 
                 except Exception:
-                    # Clean up pipe if allocated.
+                    # Clean up pipe if allocated. The pipe was HELD from getPipe
+                    # to here, so the failed open books its hold like any other
+                    # (plan 8.1); a failure before the pipe was taken bills nothing
                     if pipe_instance:
                         try:
                             self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
+                        self._record_hold(hold_started, 0)
                     raise
 
             # Execute sync operations in thread
@@ -862,9 +946,7 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        conn_pipe = self._pipe_map.get(pipe_id, None)
-        if not conn_pipe:
-            raise ValueError(f'Write pipe with id {pipe_id} not found')
+        conn_pipe = self._binding_for(pipe_id, args, 'Write')
 
         if not conn_pipe.is_open:
             raise ValueError(f'Write pipe with id {pipe_id} is not open')
@@ -999,10 +1081,9 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        # Retrieve and remove the DataConnPipe instance from our mapping immediately
+        # The frame's own binding, then removed from our mapping immediately
+        self._binding_for(pipe_id, args, 'Close')
         conn_pipe = self._pop_binding(pipe_id)
-        if not conn_pipe:
-            raise ValueError(f'Close pipe with id {pipe_id} not found')
 
         try:
             # Reset activity timer since close is considered activity
@@ -1064,6 +1145,10 @@ class DataConn(DAPConn):
             results = await asyncio.to_thread(close_sync)
 
             # Return the complete processing results to the client
+            # The close body names the request tree it closed, so EaaS can
+            # route late events and retire the binding's record (plan 7.5)
+            if isinstance(results, dict):
+                results['traceId'] = conn_pipe.trace_id
             return self.build_response(request, body=results)
 
         except Exception as e:
@@ -1154,13 +1239,14 @@ class DataConn(DAPConn):
         node_id = args.get('nodeId', '')
         tool_input = args.get('input', {})
         pipe_id = args.get('pipe_id', None)
+        caller = args.pop('_caller', None)
 
         # Resolve conn_pipe in async scope so we can set in_use before
         # dispatching to the thread (mirrors _write pattern).
         conn_pipe = None
         if pipe_id is not None:
-            conn_pipe = self._pipe_map.get(pipe_id)
-            if not conn_pipe or not conn_pipe.is_open:
+            conn_pipe = self._binding_for(pipe_id, {'_caller': caller}, 'Tool')
+            if not conn_pipe.is_open:
                 raise ValueError(f'Pipe {pipe_id} is not open')
             if conn_pipe.has_failed:
                 raise ValueError(f'Pipe {pipe_id} has failed')
@@ -1183,10 +1269,15 @@ class DataConn(DAPConn):
 
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one
+            hold_started = None
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
             else:
-                pipe = self._target.getPipe()
+                # A borrowed pipe is a binding like any other: the caller is
+                # stamped on it and its hold is billed (plan 5.3, 8.1)
+                hold_started = time.perf_counter()
+                pipe = self._target.getPipe((caller or {}).get('traceLevel'))
+                pipe.caller = caller
 
             # Open the trace for this call ON ITS REAL PIPE — a plain nested
             # BEGIN/ENTER/LEAVE/END sequence, exactly like a document
@@ -1245,7 +1336,9 @@ class DataConn(DAPConn):
                                 },
                             },
                         )
-                        return param.output
+                        # The result and the tree it ran in (a borrowed pipe's
+                        # traceId is otherwise unknown to EaaS)
+                        return param.output, pipe.traceId
                     except APERR as e:
                         if e.ec == Ec.PreventDefault:
                             # This node does not own the tool — record the probe
@@ -1275,13 +1368,14 @@ class DataConn(DAPConn):
                 self._emit_tool_trace('END', pipe, call_label, {})
                 if borrowed:
                     self._target.putPipe(pipe)
+                    self._record_hold(hold_started, 0)
 
         # Execute in thread, marking pipe as in-use so the zombie detector skips it
         if conn_pipe is not None:
             conn_pipe.in_use = True
         try:
-            result = await asyncio.to_thread(tool_sync)
-            return self.build_response(request, body={'result': result})
+            result, trace_id = await asyncio.to_thread(tool_sync)
+            return self.build_response(request, body={'result': result, 'traceId': trace_id})
         finally:
             if conn_pipe is not None:
                 conn_pipe.in_use = False

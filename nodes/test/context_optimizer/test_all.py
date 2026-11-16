@@ -796,8 +796,7 @@ class TestModelLimits:
         if not catalog:
             pytest.skip('no llm_* catalog in this build')
         shared = sorted(set(catalog) & set(ContextOptimizer.MODEL_LIMITS))
-        if not shared:
-            pytest.skip('MODEL_LIMITS and the catalog share no id in this tree yet (no converted llm_* node)')
+        assert shared, 'MODEL_LIMITS and the catalog share no model id'
         disagreements = {
             model: (ContextOptimizer.MODEL_LIMITS[model], catalog[model])
             for model in shared
@@ -885,8 +884,7 @@ class TestModelCatalog:
             )
 
         declared = self._declared_ids_by_node()
-        if not declared:
-            pytest.skip('no llm_* node declares its models in the propertyDefinitions format in this tree yet')
+        assert declared, 'no llm_* node declares its models in the propertyDefinitions format'
         for node, ids in declared.items():
             assert ids & set(catalog), f'no model id from {node} reached the catalog'
 

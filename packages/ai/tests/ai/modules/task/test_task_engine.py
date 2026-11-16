@@ -12,8 +12,7 @@ Focus areas:
 - ``_build_task`` — subprocess-config shape
 - ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
-- ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
-  ``get_connection_count`` / ``get_status`` — accessors
+- ``is_task_complete`` / ``is_live`` / ``get_status`` — accessors
 - ``note_activity`` / ``idle_since`` / ``idle_seconds`` / ``ages`` — the engine's own inactivity timer
 - ``send_scheduled_updates`` — state setter
 
@@ -47,6 +46,7 @@ from ai.modules.task.task_engine import (
     resolve_parameter_tokens,
     saas_pipeline_violation,
 )
+from ai.modules.task.trace_owner import TraceOwners
 from ai.modules.task.types import EngineState
 
 
@@ -75,7 +75,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
         Task: bare instance ready for method calls.
     """
     t = TaskEngine.__new__(TaskEngine)
-    t._server = SimpleNamespace(next_engine_id=lambda: 1, node_id=1)  # the server hands out engine ids
+    # the server hands out engine ids and records which control owns each request tree
+    t._server = SimpleNamespace(next_engine_id=lambda: 1, node_id=1, trace_owners=TraceOwners())
     t.id = 'task-test'
     t.engine_key = 'enginehash:user-1'
     t.engine_id = 1
@@ -100,7 +101,6 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._run_kind = 'dev'
     t._owner_kind = 'user'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
-    t._debugger = None
     t._last_activity = 0.0
     t._last_pipeline_event = 0.0
     t._status_updated = False
@@ -108,7 +108,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # Run-log continuum state consulted by _forward_task_event's stamping
     # safety net (see TaskEngine.stamp_log_event): fresh-stream counter + no writer.
     t._log_seq_next = 1
-    t._run_log = None
+    t._run_logs = {}
+    t._run_log_open_lock = asyncio.Lock()
+    t._run_log_failed = set()
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
@@ -391,43 +393,6 @@ def test_is_task_complete(state, complete, live):
     t.state = state
     assert TaskEngine.is_task_complete(t) is complete
     assert TaskEngine.is_live.fget(t) is live
-
-
-def test_is_attached_returns_true_for_matching_connection():
-    """is_attached compares against ``_debugger`` by equality."""
-    t = _task()
-    conn = MagicMock()
-    t._debugger = conn
-    assert TaskEngine.is_attached(t, conn) is True
-
-
-def test_is_attached_returns_false_when_no_debugger():
-    """When no debugger is attached, is_attached returns False."""
-    t = _task()
-    assert TaskEngine.is_attached(t, MagicMock()) is False
-
-
-def test_is_attached_returns_false_for_other_connection():
-    """A different connection than the attached debugger returns False."""
-    t = _task()
-    t._debugger = MagicMock(name='primary')
-    assert TaskEngine.is_attached(t, MagicMock(name='other')) is False
-
-
-def test_has_attached_debugger_reflects_debugger_field():
-    """has_attached_debugger is True iff ``_debugger`` is not None."""
-    t = _task()
-    assert TaskEngine.has_attached_debugger(t) is False
-    t._debugger = MagicMock()
-    assert TaskEngine.has_attached_debugger(t) is True
-
-
-def test_get_connection_count_is_zero_or_one():
-    """get_connection_count returns 1 with a debugger, 0 without."""
-    t = _task()
-    assert TaskEngine.get_connection_count(t) == 0
-    t._debugger = MagicMock()
-    assert TaskEngine.get_connection_count(t) == 1
 
 
 def test_get_status_returns_the_status_object():
@@ -738,39 +703,12 @@ def test_update_status_unknown_event_is_silently_ignored():
 
 
 @pytest.mark.asyncio
-async def test_forward_task_event_debugger_routes_to_debugger_send_event():
-    """A DEBUGGER event is sent directly to ``self._debugger.send_event``."""
-    from rocketride import EVENT_TYPE
-    from unittest.mock import AsyncMock
-
-    t = _task()
-    t._debugger = MagicMock()
-    t._debugger.send_event = AsyncMock()
-    t.id = 'task-1'
-
-    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output', 'body': {'x': 1}})
-    t._debugger.send_event.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_forward_task_event_debugger_skipped_when_no_debugger_attached():
-    """If ``_debugger`` is None, DEBUGGER events are dropped."""
-    from rocketride import EVENT_TYPE
-
-    t = _task()
-    t._debugger = None
-    # Should not raise.
-    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
-
-
-@pytest.mark.asyncio
 async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
     """A non-DEBUGGER event is routed through the TaskServer broadcast API."""
     from rocketride import EVENT_TYPE
     from unittest.mock import AsyncMock
 
     t = _task()
-    t._debugger = None
     server = MagicMock()
     server.broadcast_task_event = AsyncMock()
     t._server = server
@@ -788,20 +726,6 @@ async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
     assert sent['body']['controlId'] == 'dev.user-1.acme.proj-x.src-x'
     assert sent['body']['engineKey'] == t.engine_key
     assert 'controlId' not in payload['body']
-
-
-@pytest.mark.asyncio
-async def test_forward_task_event_debugger_swallows_send_failure():
-    """A failed send_event call is logged but does not propagate."""
-    from rocketride import EVENT_TYPE
-    from unittest.mock import AsyncMock
-
-    t = _task()
-    t._debugger = MagicMock()
-    t._debugger.send_event = AsyncMock(side_effect=RuntimeError('socket broken'))
-
-    # Should not raise.
-    await TaskEngine._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
 
 
 # ---------------------------------------------------------------------------
@@ -1285,9 +1209,11 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
 
     assert [request for _, request in calls['authorize']] == [target]
     assert calls['authorize'][0][0]['public_endpoint'] is public
-    # The task file is the resolved pipeline too: what was checked is what runs.
-    written = t._write_task_file.call_args.args[0]['components']
-    assert '${' not in json.dumps(written)
+    # What RUNS keeps its placeholders (plan 6.2): the task file carries the
+    # spec as written plus the engine's default env (the referenced values)
+    written, default_env = t._write_task_file.call_args.args
+    assert '${' in json.dumps(written['components'])
+    assert default_env == env
 
 
 @pytest.mark.asyncio
@@ -2055,8 +1981,9 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
     t._forward_task_event = TaskEngine._forward_task_event.__get__(t)  # the real forwarder stamps the body
     t._server.broadcast_task_event = AsyncMock()
     t._holds = {'dev.user-1.acme.proj-test.src-id': 900}
-    t._run_log = None
-    t._debugger = None
+    t._run_logs = {}
+    t._run_log_open_lock = asyncio.Lock()
+    t._run_log_failed = set()
     message = {'event': 'apaevt_sse', 'body': {'pipe_id': 0, 'traceId': 7, 'type': 'thinking', 'data': {}}}
 
     await TaskEngine.on_event(t, message)
@@ -2067,26 +1994,20 @@ async def test_an_sse_event_leaves_with_the_wire_trace_id():
 
 
 @pytest.mark.asyncio
-async def test_the_none_level_emits_no_flow_at_all():
+@pytest.mark.parametrize('level', ['none', '', None])
+async def test_a_trace_derives_a_flow_whatever_the_engine_default_level(level):
     """
-    `'none'` IS A LEVEL, NOT AN ABSENCE — and a non-empty string is truthy.
-    Read as "tracing on with the payload suppressed", every enter/leave was
-    still derived, seq-stamped, broadcast and written to the run log: a flow
-    event carrying `trace: {}`, roughly 379 bytes of envelope for no signal,
-    one pair per component per request. A settings stream kept deliberately out
-    of the Runs timeline had accumulated 325 MB that way.
-
-    Nothing else about the event changes: the pipe stack is still tracked and
-    the status is still marked for update.
+    The engine emits >DBG per BINDING at the binding's own trace level (plan
+    7.4): a trace that arrives here was asked for by its binding, so the
+    engine's default level (`none` for a shared engine, absent on an old task
+    file) no longer gates the flow derivation. A holder tracing FULL on an
+    engine whose default is `none` sees its flow.
     """
-    t = _trace_task('none')
-
+    t = _trace_task(level)
     await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
-
-    t._forward_task_event.assert_not_awaited()
-    t._accumulate_analytics.assert_not_called()
-    t.build_event.assert_not_called()
-    # The parts that are NOT gated on the trace level.
+    t._forward_task_event.assert_awaited_once()
+    t._accumulate_analytics.assert_called_once()
+    assert t.build_event.call_args.kwargs['body']['trace'] == {'text': 'hello'}
     assert t._status_updated is True
     assert t._status.pipeflow.byPipe == {0: ['parse']}
 
@@ -2103,17 +2024,6 @@ async def test_a_trace_never_sets_the_engine_wide_pipe_count():
     await TaskEngine.on_event(t, {**_TRACE_MESSAGE, 'body': {**_TRACE_MESSAGE['body'], 'totalPipes': 5}})
 
     assert t._status.pipeflow.totalPipes == 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('level', ['', None])
-async def test_an_absent_trace_level_still_emits_nothing(level):
-    """The original behaviour, unchanged: no level means no flow."""
-    t = _trace_task(level)
-
-    await TaskEngine.on_event(t, dict(_TRACE_MESSAGE))
-
-    t._forward_task_event.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -2536,3 +2446,14 @@ async def test_wait_terminated_releases_when_teardown_raises():
     with pytest.raises(RuntimeError):
         await t._terminated()
     await asyncio.wait_for(t.wait_terminated(), timeout=1)
+
+
+async def test_start_task_retries_a_run_log_open_that_failed_in_the_previous_run(monkeypatch):
+    """A failed writer open is suppressed for ITS run only: the next launch of the engine tries again."""
+    t, _ = _startable_task(monkeypatch)
+    t._run_log_failed = {'dev.user-1.acme.docBrain.webhook_1'}
+
+    with pytest.raises(_LaunchStop):
+        await TaskEngine.start_task(t)
+
+    assert t._run_log_failed == set()

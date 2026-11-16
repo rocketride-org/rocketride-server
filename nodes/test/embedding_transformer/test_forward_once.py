@@ -41,10 +41,6 @@ class FakeQuestion:
     """Stand-in for ai.common.schema.Question, passed through untouched."""
 
 
-class FakeEmbeddingBase:
-    """Stand-in for ai.common.embedding.EmbeddingBase, needed only by IGlobal's annotation."""
-
-
 class _PreventDefaultRaised(Exception):
     """Stand-in for the real preventDefault(), which raises rather than setting a flag."""
 
@@ -89,14 +85,12 @@ def _load_iinstance():
         'ai': types.ModuleType('ai'),
         'ai.common': types.ModuleType('ai.common'),
         'ai.common.schema': types.ModuleType('ai.common.schema'),
-        'ai.common.embedding': types.ModuleType('ai.common.embedding'),
     }
     stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
     stubs['rocketlib'].IGlobalBase = FakeIGlobalBase
     stubs['rocketlib'].Entry = FakeEntry
     stubs['ai.common.schema'].Doc = FakeDoc
     stubs['ai.common.schema'].Question = FakeQuestion
-    stubs['ai.common.embedding'].EmbeddingBase = FakeEmbeddingBase
 
     for name, stub in stubs.items():
         saved[name] = sys.modules.get(name)
