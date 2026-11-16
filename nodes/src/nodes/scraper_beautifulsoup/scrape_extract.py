@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import urljoin
 from xml.parsers import expat
 
@@ -132,21 +132,61 @@ def _child_text(el: ET.Element, *names: str) -> Optional[str]:
     return None
 
 
-def _atom_link(entry: ET.Element) -> Optional[str]:
+_XML_BASE = '{http://www.w3.org/XML/1998/namespace}base'
+
+
+def _with_base(base: Optional[str], element: ET.Element) -> Optional[str]:
+    """The effective ``xml:base`` inside ``element``, given its parent's."""
+    value = element.get(_XML_BASE)
+    if not value:
+        return base
+    return _resolve(base, value)
+
+
+def _resolve(base: Optional[str], ref: str) -> str:
+    """``ref`` resolved against ``base``; a ref that does not parse is left for the row check to drop."""
+    if not base:
+        return ref
+    try:
+        return urljoin(base, ref)
+    except ValueError:
+        return ref
+
+
+def _feed_entries(root: ET.Element) -> List[Tuple[ET.Element, Optional[str]]]:
+    """Every item / entry in document order, with the ``xml:base`` in effect there (RFC 4287).
+
+    ElementTree keeps no parent links, so the base is carried down an explicit
+    stack while walking the tree.
+    """
+    found: List[Tuple[ET.Element, Optional[str]]] = []
+    stack = [(root, _with_base(None, root))]
+    while stack:
+        element, base = stack.pop()
+        if _local(element.tag) in ('item', 'entry'):
+            found.append((element, base))
+        for child in reversed(list(element)):
+            stack.append((child, _with_base(base, child)))
+    return found
+
+
+def _atom_link(entry: ET.Element, base: Optional[str] = None) -> Optional[str]:
+    """The entry's article link, resolved against the ``xml:base`` in effect on the link element."""
     fallback = None
     for child in entry:
         if _local(child.tag) != 'link':
             continue
+        link_base = _with_base(base, child)
         href = child.get('href')
         if not href:
             text = (child.text or '').strip()
             if text:
-                return text
+                return _resolve(link_base, text)
             continue
         rel = child.get('rel', 'alternate')
         if rel == 'alternate':
-            return href
-        fallback = fallback or href
+            return _resolve(link_base, href)
+        fallback = fallback or _resolve(link_base, href)
     return fallback
 
 
@@ -195,10 +235,9 @@ def parse_feed(content: Union[bytes, str]) -> List[Dict[str, Any]]:
     except ET.ParseError as e:
         raise ValueError(f'Not a valid RSS/Atom document: {e}') from e
 
-    entries = [el for el in root.iter() if _local(el.tag) in ('item', 'entry')]
     items: List[Dict[str, Any]] = []
-    for entry in entries:
-        link = _atom_link(entry) or _child_text(entry, 'guid')
+    for entry, base in _feed_entries(root):
+        link = _atom_link(entry, base) or _child_text(entry, 'guid')
         body_raw = _child_text(entry, 'content', 'encoded', 'summary', 'description')
         categories = []
         for child in entry:
@@ -254,13 +293,45 @@ def html_to_text(value: Optional[str]) -> str:
     return _WS.sub(' ', soup.get_text(' ')).strip()
 
 
+def _split_attr(spec: str) -> Tuple[str, str]:
+    """Split ``"selector@attr"`` at the last ``@`` outside CSS quotes and brackets.
+
+    An ``@`` inside an attribute selector (``a[href*="@"]@href``) belongs to
+    the selector.
+    """
+    quote = ''
+    depth = 0
+    at = -1
+    index = 0
+    while index < len(spec):
+        ch = spec[index]
+        if ch == '\\':
+            index += 2
+            continue
+        if quote:
+            if ch == quote:
+                quote = ''
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth = max(depth - 1, 0)
+        elif ch == '@' and depth == 0:
+            at = index
+        index += 1
+    if at < 0:
+        return spec, ''
+    return spec[:at], spec[at + 1 :]
+
+
 def _select_value(scope: Tag, spec: str, base_url: str) -> Optional[str]:
     """Evaluate ``"css selector@attr"``; ``"@attr"`` reads the scope element itself.
 
     Without ``@attr`` the element's text is returned. ``href`` / ``src``
     attributes are resolved against ``base_url``.
     """
-    selector, _, attr = spec.partition('@')
+    selector, attr = _split_attr(spec)
     selector = selector.strip()
     el = _select_one(scope, selector) if selector else scope
     if el is None:

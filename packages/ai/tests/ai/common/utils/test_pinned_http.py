@@ -28,6 +28,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -283,6 +284,51 @@ def test_pinned_session_ignores_environment_proxies(local_port, monkeypatch):
     addresses = resolve_addresses(f'http://127.0.0.1:{local_port}/', is_allowed=lambda address: address.is_loopback)
     with pinned_session(addresses) as session:
         assert session.get(f'http://127.0.0.1:{local_port}/', timeout=5).status_code == 200
+
+
+class _SlowHeaders(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        try:
+            self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Pad: ')
+            for _ in range(100):
+                self.wfile.write(b'a')
+                self.wfile.flush()
+                time.sleep(0.1)
+        except OSError:
+            pass
+        self.close_connection = True
+
+
+def test_abort_ends_a_request_blocked_on_slow_headers():
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), _SlowHeaders)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    port = httpd.server_address[1]
+    try:
+        addresses = resolve_addresses(f'http://127.0.0.1:{port}/', is_allowed=lambda address: address.is_loopback)
+        with pinned_session(addresses) as session:
+            threading.Timer(0.5, session.abort).start()
+            start = time.monotonic()
+            with pytest.raises((requests.RequestException, OSError)):
+                session.get(f'http://127.0.0.1:{port}/', timeout=5)
+            assert time.monotonic() - start < 3
+    finally:
+        httpd.shutdown()
+
+
+def test_a_socket_opened_after_abort_is_shut_down_at_once():
+    adapter = pinned_http.PinnedAddressAdapter(_ADDRESS)
+    adapter.abort()
+    left, right = socket.socketpair()
+    try:
+        adapter._track_socket(left)
+        right.settimeout(2)
+        assert right.recv(1) == b''  # the peer sees the shutdown at once
+    finally:
+        left.close()
+        right.close()
 
 
 def test_pinned_session_requires_addresses():

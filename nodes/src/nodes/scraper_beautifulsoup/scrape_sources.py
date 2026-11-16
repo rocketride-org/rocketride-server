@@ -326,8 +326,12 @@ def normalize_row(
     url = _to_text(raw.get('url'))
     if not url:
         return None
-    url = urljoin(base_url, url)
-    parsed = urlparse(url)
+    try:
+        url = urljoin(base_url, url)
+        parsed = urlparse(url)
+    except ValueError:
+        # e.g. "https://[" from an API item: drop this row, keep the source going.
+        return None
     if parsed.scheme not in ('http', 'https') or not parsed.netloc:
         return None
 

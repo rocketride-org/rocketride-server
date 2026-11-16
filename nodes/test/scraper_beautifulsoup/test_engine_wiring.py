@@ -245,6 +245,16 @@ def test_extract_refuses_a_binary_content_type():
         instance.extract({'url': 'https://site.example/i.png', 'fields': {'title': 'h1'}})
 
 
+@pytest.mark.parametrize('tool', ['fetch_page', 'fetch_json', 'fetch_feed'])
+def test_tool_errors_omit_the_query_string(tool):
+    url = 'https://api.example/data?api_key=SECRET'
+    instance = make_instance({url: ('application/pdf', b'%PDF not json, not a feed')})
+    with pytest.raises(ValueError) as exc_info:
+        getattr(instance, tool)({'url': url})
+    assert 'SECRET' not in str(exc_info.value)
+    assert 'https://api.example/data' in str(exc_info.value)
+
+
 def test_fetch_page_accepts_plain_text_and_a_missing_content_type():
     instance = make_instance(
         {'https://site.example/t': ('text/plain', b'hello'), 'https://site.example/n': ('', b'hi')}

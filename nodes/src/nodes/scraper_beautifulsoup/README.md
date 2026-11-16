@@ -112,7 +112,7 @@ When loading into `rocketride_sql` or `db_postgres`, it is best to create the ta
 #### Network limits
 
 The source and the tools share these fields:
-- **Timeout**: one limit for the whole fetch, including redirects, connecting, and reading the body.
+- **Timeout**: one limit for the whole fetch, including redirects, connecting, the TLS handshake, the response headers, and reading the body. A server that sends any of them a byte at a time is cut off at the limit.
 - **Max response size**: the body is read up to this size and the rest is dropped.
 - **Delay between requests to one host**: politeness pacing, 250 ms by default.
 - **User agent**: some sites, such as Reddit, reject generic agents.

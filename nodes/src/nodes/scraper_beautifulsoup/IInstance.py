@@ -60,7 +60,7 @@ from .scrape_extract import (
     page_to_text,
     parse_feed,
 )
-from .scrape_fetch import FetchError
+from .scrape_fetch import FetchError, redact_url
 from .scrape_sources import normalize_row
 
 # Content types fetch_page and extract parse as a page ('' = the server sent none).
@@ -114,7 +114,7 @@ class IInstance(IInstanceBase):
         """Fetch a URL that will be parsed as a page; binary types fail instead of becoming garbage text."""
         result = self._fetch(url)
         if result.content_type not in PAGE_CONTENT_TYPES:
-            raise ValueError(f'{result.url}: unsupported content type {result.content_type}')
+            raise ValueError(f'{redact_url(result.url)}: unsupported content type {result.content_type}')
         return result
 
     @tool_function(
@@ -240,7 +240,7 @@ class IInstance(IInstanceBase):
         try:
             raw_items = parse_feed(result.content)
         except ValueError as e:
-            raise ValueError(f'{result.url}: {e}') from e
+            raise ValueError(f'{redact_url(result.url)}: {e}') from e
         items = []
         for raw in raw_items:
             row = normalize_row(
@@ -305,7 +305,7 @@ class IInstance(IInstanceBase):
         try:
             data = result.json()
         except ValueError as e:
-            raise ValueError(f'{result.url} did not return JSON: {e}') from e
+            raise ValueError(f'{redact_url(result.url)} did not return JSON: {e}') from e
 
         items_path = args.get('items_path')
         if items_path:

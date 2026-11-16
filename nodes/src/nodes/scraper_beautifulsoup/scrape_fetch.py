@@ -34,9 +34,9 @@ addresses, so a second DNS answer cannot redirect it (no rebinding gap).
 Redirects are followed manually so each ``Location`` is re-resolved and
 re-validated; responses are streamed and capped at ``max_bytes``; requests to
 the same host are paced by ``min_interval``. ``timeout`` bounds the whole
-fetch (every hop, connect and body read), not each socket operation. Error
-messages carry the URL without its query string, so keys in a query never
-reach the logs.
+fetch (every hop: connect, TLS handshake, response headers and body), not
+each socket operation. Error messages carry the URL without its query
+string, so keys in a query never reach the logs.
 
 This module has no engine imports so it can be unit-tested standalone.
 """
@@ -45,7 +45,6 @@ from __future__ import annotations
 
 import json
 import re
-import socket
 import threading
 import time
 from dataclasses import dataclass, field
@@ -182,7 +181,8 @@ class Fetcher:
         """Fetch ``url``, following redirects manually with re-validation.
 
         ``timeout`` covers the whole call: every redirect hop, each connect
-        attempt and the body read share one deadline. Time spent pacing is
+        attempt, the TLS handshake, the response headers and the body read
+        share one deadline. Time spent pacing is
         politeness, not network time, and extends the deadline.
         """
         method = (method or 'GET').upper()
@@ -202,49 +202,56 @@ class Fetcher:
             deadline += self._pace(current)
             timeout = self._remaining(deadline, current)
             session = self.open_session(addresses)
+            timed_out = threading.Event()
+            watchdog = _arm_watchdog(session, timeout, timed_out)
             try:
-                resp = session.request(
-                    method,
-                    current,
-                    headers=send_headers,
-                    params=params,
-                    json=json_body if method == 'POST' else None,
-                    timeout=timeout,
-                    allow_redirects=False,
-                    stream=True,
-                )
-            except requests.RequestException as e:
-                session.close()
-                # The exception text repeats the URL (query included): report its type only.
-                raise FetchError(f'{method} {redact_url(current)} failed: {type(e).__name__}') from e
+                try:
+                    resp = session.request(
+                        method,
+                        current,
+                        headers=send_headers,
+                        params=params,
+                        json=json_body if method == 'POST' else None,
+                        timeout=timeout,
+                        allow_redirects=False,
+                        stream=True,
+                    )
+                except (requests.RequestException, OSError) as e:
+                    if timed_out.is_set():
+                        raise FetchError(f'Fetching {redact_url(current)} timed out after {self.timeout:g}s') from e
+                    # The exception text repeats the URL (query included): report its type only.
+                    raise FetchError(f'{method} {redact_url(current)} failed: {type(e).__name__}') from e
 
-            try:
-                if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
-                    target = urljoin(current, resp.headers['location'])
-                    if _origin(target) != _origin(current):
-                        if json_body is not None and resp.status_code in (307, 308):
-                            # 307/308 resend the body, which can carry a key: never to another origin.
-                            raise FetchError('Refusing to forward a request body to a different origin')
-                        # Caller headers may carry credentials (Authorization,
-                        # API keys): never forward them to another origin.
-                        send_headers = {k: v for k, v in send_headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}
-                    current = target
-                    # Query params were already applied to the first URL.
-                    params = None
-                    if resp.status_code == 303 or (resp.status_code in (301, 302) and method == 'POST'):
-                        method, json_body = 'GET', None
-                    continue
+                try:
+                    if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
+                        target = urljoin(current, resp.headers['location'])
+                        if _origin(target) != _origin(current):
+                            if json_body is not None and resp.status_code in (307, 308):
+                                # 307/308 resend the body, which can carry a key: never to another origin.
+                                raise FetchError('Refusing to forward a request body to a different origin')
+                            # Caller headers may carry credentials (Authorization,
+                            # API keys): never forward them to another origin.
+                            send_headers = {k: v for k, v in send_headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}
+                        current = target
+                        # Query params were already applied to the first URL.
+                        params = None
+                        if resp.status_code == 303 or (resp.status_code in (301, 302) and method == 'POST'):
+                            method, json_body = 'GET', None
+                        continue
 
-                content, truncated = self._read_capped(resp, deadline, current)
-                result = FetchResult(
-                    url=current,
-                    status=resp.status_code,
-                    headers={k.lower(): v for k, v in resp.headers.items()},
-                    content=content,
-                    truncated=truncated,
-                )
+                    content, truncated = self._read_capped(resp, deadline, current, timed_out)
+                    result = FetchResult(
+                        url=current,
+                        status=resp.status_code,
+                        headers={k.lower(): v for k, v in resp.headers.items()},
+                        content=content,
+                        truncated=truncated,
+                    )
+                finally:
+                    resp.close()
             finally:
-                resp.close()
+                if watchdog is not None:
+                    watchdog.cancel()
                 session.close()
 
             if raise_for_status and result.status >= 400:
@@ -253,27 +260,14 @@ class Fetcher:
 
         raise FetchError(f'Too many redirects (>{self.max_redirects}) starting at {redact_url(url)}')
 
-    def _read_capped(self, resp: requests.Response, deadline: float, url: str) -> tuple[bytes, bool]:
+    def _read_capped(
+        self, resp: requests.Response, deadline: float, url: str, timed_out: threading.Event
+    ) -> tuple[bytes, bool]:
         """Stream the body, stopping at ``max_bytes`` or the deadline; returns (content, truncated).
 
-        A read blocks until a whole chunk arrives, so a server trickling bytes
-        could hold it far past the deadline. A watchdog therefore shuts the
-        socket down at the deadline, which ends the blocked read.
+        The hop's watchdog (see :func:`_arm_watchdog`) aborts a read that a
+        trickling server would otherwise hold open; ``timed_out`` says it fired.
         """
-        timed_out = threading.Event()
-        sock = _response_socket(resp)
-
-        def abort() -> None:
-            timed_out.set()
-            try:
-                sock.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-
-        watchdog = threading.Timer(self._remaining(deadline, url), abort) if sock is not None else None
-        if watchdog is not None:
-            watchdog.daemon = True
-            watchdog.start()
         chunks: List[bytes] = []
         total = 0
         try:
@@ -292,26 +286,34 @@ class Fetcher:
             if isinstance(e, (requests.RequestException, OSError)):
                 raise FetchError(f'Reading {redact_url(url)} failed: {type(e).__name__}') from e
             raise
-        finally:
-            if watchdog is not None:
-                watchdog.cancel()
         if timed_out.is_set():
-            # A body without Content-Length ends "normally" when the socket closes.
+            # A body without Content-Length ends "normally" when the socket shuts down.
             raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
         return b''.join(chunks), False
 
 
-def _response_socket(resp: requests.Response) -> Optional[socket.socket]:
-    """The socket under a streamed response, or None if it cannot be reached."""
-    connection = getattr(resp.raw, 'connection', None) or getattr(resp.raw, '_connection', None)
-    sock = getattr(connection, 'sock', None)
-    if not isinstance(sock, socket.socket):
-        # When the response closes the connection, http.client drops
-        # ``connection.sock`` and the socket lives on in the response's file
-        # (urllib3 response -> http.client response -> BufferedReader -> SocketIO).
-        fp = getattr(getattr(resp.raw, '_fp', None), 'fp', None)
-        sock = getattr(getattr(fp, 'raw', None), '_sock', None)
-    return sock if isinstance(sock, socket.socket) else None
+def _arm_watchdog(session: Any, seconds: float, timed_out: threading.Event) -> Optional[threading.Timer]:
+    """Abort the hop when its share of the deadline runs out.
+
+    A per-socket timeout restarts with every byte, so a server sending its
+    TLS handshake, headers or body one byte at a time could hold a request
+    open indefinitely. The timer covers the whole hop instead: when it fires
+    it sets ``timed_out`` and calls ``session.abort()`` (``pinned_session``
+    provides it), which shuts the sockets down and ends the blocked read.
+    A session without ``abort`` gets no watchdog.
+    """
+    abort = getattr(session, 'abort', None)
+    if abort is None:
+        return None
+
+    def fire() -> None:
+        timed_out.set()
+        abort()
+
+    watchdog = threading.Timer(seconds, fire)
+    watchdog.daemon = True
+    watchdog.start()
+    return watchdog
 
 
 def compile_patterns(raw: Any) -> List[re.Pattern]:

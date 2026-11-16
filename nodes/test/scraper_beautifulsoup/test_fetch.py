@@ -102,6 +102,20 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
         elif self.path.startswith('/404'):
             self._send(404, b'nope')
+        elif self.path == '/slow-headers':
+            # Status line, then one header byte every 100 ms (10 s): each byte
+            # restarts a per-read socket timeout.
+            try:
+                self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Pad: ')
+                self.wfile.flush()
+                for _ in range(100):
+                    self.wfile.write(b'a')
+                    self.wfile.flush()
+                    time.sleep(0.1)
+                self.wfile.write(b'\r\nContent-Length: 0\r\n\r\n')
+            except OSError:
+                pass  # the client gave up
+            self.close_connection = True
         elif self.path.startswith('/trickle'):
             # Declares 100 bytes, then sends one every 100 ms (10 s in total).
             self.send_response(200)
@@ -327,6 +341,21 @@ def test_timeout_bounds_whole_body_read(server, path):
     with pytest.raises(FetchError, match='timed out'):
         fetcher.fetch(f'{server}{path}')
     assert time.monotonic() - start < 3
+
+
+def test_timeout_bounds_slow_response_headers(server):
+    start = time.monotonic()
+    with pytest.raises(FetchError, match='timed out'):
+        make(timeout=1).fetch(f'{server}/slow-headers')
+    assert time.monotonic() - start < 3
+
+
+def test_resolver_error_omits_query_string():
+    # An out-of-range port passes the scheme and host checks and fails in the resolver.
+    fetcher = Fetcher(resolve_url=pinned_http.resolve_public_addresses, open_session=pinned_http.pinned_session)
+    with pytest.raises(FetchError) as exc_info:
+        fetcher.fetch('https://api.example.com:99999/v1?apiKey=SECRET')
+    assert 'SECRET' not in str(exc_info.value)
 
 
 def test_size_cap_truncates(server):

@@ -48,6 +48,7 @@ import ipaddress
 import os
 import socket
 import sys
+import threading
 import time
 from typing import Callable, Optional, Tuple
 from urllib.parse import urlsplit
@@ -158,17 +159,17 @@ def resolve_addresses(
     parsed = urlsplit(url)
     scheme = parsed.scheme.lower()
     if scheme not in ('http', 'https'):
-        raise ValueError(f'URL scheme must be http or https: {url!r}')
+        raise ValueError('URL scheme must be http or https')
     if not parsed.hostname:
-        raise ValueError(f'URL must include a hostname: {url!r}')
+        raise ValueError('URL must include a hostname')
     if parsed.username is not None:
         raise ValueError('URL must not include userinfo')
     try:
         port = parsed.port
     except ValueError:
-        raise ValueError(f'URL port is invalid: {url!r}') from None
+        raise ValueError(f'URL port is invalid for host {parsed.hostname}') from None
     if port == 0:
-        raise ValueError(f'URL port is invalid: {url!r}')
+        raise ValueError(f'URL port is invalid for host {parsed.hostname}')
     port = port or (443 if scheme == 'https' else 80)
 
     try:
@@ -202,8 +203,15 @@ class _PinnedConnectionMixin:
 
     validated_addresses: Tuple[ResolvedAddress, ...]
 
-    def __init__(self, *args, validated_addresses: Tuple[ResolvedAddress, ...], **kwargs):
+    def __init__(
+        self,
+        *args,
+        validated_addresses: Tuple[ResolvedAddress, ...],
+        on_socket: Optional[Callable[[socket.socket], None]] = None,
+        **kwargs,
+    ):
         self.validated_addresses = validated_addresses
+        self.on_socket = on_socket
         super().__init__(*args, **kwargs)
 
     def _new_conn(self):
@@ -222,6 +230,8 @@ class _PinnedConnectionMixin:
                         last_error = socket.timeout('connect budget exhausted')
                         break
                 sock = socket.socket(family, socktype, proto)
+                if self.on_socket is not None:
+                    self.on_socket(sock)
                 for option in self.socket_options or ():
                     sock.setsockopt(*option)
                 if deadline is not None:
@@ -267,7 +277,31 @@ class PinnedAddressAdapter(HTTPAdapter):
     def __init__(self, validated_addresses: Tuple[ResolvedAddress, ...]):
         self.validated_addresses = validated_addresses
         self._pinned_pools = []
+        self._sockets: list = []
+        self._sockets_lock = threading.Lock()
+        self._aborted = False
         super().__init__()
+
+    def abort(self) -> None:
+        """Shut down every socket this adapter opened, now and from here on.
+
+        Called from another thread to end a request that is blocked in the
+        TLS handshake, on response headers or on the body: the blocked read
+        returns and the request fails. A per-socket timeout cannot do this,
+        because each byte that arrives restarts it.
+        """
+        with self._sockets_lock:
+            self._aborted = True
+            sockets = list(self._sockets)
+        for sock in sockets:
+            _shutdown(sock)
+
+    def _track_socket(self, sock: socket.socket) -> None:
+        with self._sockets_lock:
+            self._sockets.append(sock)
+            aborted = self._aborted
+        if aborted:
+            _shutdown(sock)
 
     def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
         if select_proxy(request.url, proxies):
@@ -287,6 +321,7 @@ class PinnedAddressAdapter(HTTPAdapter):
             maxsize=1,
             block=True,
             validated_addresses=self.validated_addresses,
+            on_socket=self._track_socket,
         )
         self._pinned_pools.append(pool)
         return pool
@@ -298,20 +333,39 @@ class PinnedAddressAdapter(HTTPAdapter):
         super().close()
 
 
-def pinned_session(addresses: Tuple[ResolvedAddress, ...]) -> requests.Session:
+def _shutdown(sock: socket.socket) -> None:
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass  # not connected yet, or already closed
+
+
+class PinnedSession(requests.Session):
+    """A ``requests.Session`` over one :class:`PinnedAddressAdapter`, with :meth:`abort`."""
+
+    def __init__(self, adapter: PinnedAddressAdapter):
+        super().__init__()
+        self.trust_env = False
+        self.verify = os.environ.get('REQUESTS_CA_BUNDLE') or os.environ.get('CURL_CA_BUNDLE') or True
+        self._pinned_adapter = adapter
+        self.mount('http://', adapter)
+        self.mount('https://', adapter)
+
+    def abort(self) -> None:
+        """End any request in flight on this session (safe to call from another thread)."""
+        self._pinned_adapter.abort()
+
+
+def pinned_session(addresses: Tuple[ResolvedAddress, ...]) -> PinnedSession:
     """A session that connects only to ``addresses`` (from :func:`resolve_public_addresses`).
 
     Environment proxies and ``.netrc`` credentials are ignored; a custom CA
     bundle from ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE`` is honored. Use one
     session per validated URL and close it after the response is read.
+    ``session.abort()`` from another thread ends a request in flight, so a
+    caller can enforce a deadline that a per-read socket timeout cannot.
     """
     _check_runtime()
     if not addresses:
         raise ValueError('pinned_session needs at least one validated address')
-    session = requests.Session()
-    session.trust_env = False
-    session.verify = os.environ.get('REQUESTS_CA_BUNDLE') or os.environ.get('CURL_CA_BUNDLE') or True
-    adapter = PinnedAddressAdapter(addresses)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    return session
+    return PinnedSession(PinnedAddressAdapter(addresses))

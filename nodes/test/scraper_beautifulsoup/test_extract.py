@@ -145,6 +145,24 @@ class TestFeeds:
         assert entry['body'] == 'An abstract.'
         assert entry['categories'] == ['cs.AI']
 
+    def test_atom_links_resolve_against_xml_base(self):
+        atom = b"""<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://articles.example/posts/">
+          <entry><title>One</title><link href="one"/></entry>
+          <entry xml:base="archive/"><title>Two</title><link href="two"/></entry>
+          <entry><title>Three</title><link xml:base="https://cdn.example/x/" href="three"/></entry>
+          <entry><title>Four</title><link href="https://abs.example/four"/></entry>
+        </feed>"""
+        assert [item['url'] for item in parse_feed(atom)] == [
+            'https://articles.example/posts/one',
+            'https://articles.example/posts/archive/two',
+            'https://cdn.example/x/three',
+            'https://abs.example/four',
+        ]
+
+    def test_feed_without_xml_base_keeps_relative_links(self):
+        atom = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/p/1"/></entry></feed>'
+        assert parse_feed(atom)[0]['url'] == '/p/1'
+
     def test_rss1_rdf(self):
         (entry,) = parse_feed(RDF)
         assert entry['url'] == 'https://arxiv.org/abs/2'
@@ -199,6 +217,17 @@ class TestHtml:
             b'<a class="x" href="/r">R</a>', 'https://e.com/', 'a.x', {'url': '@href', 'title': ''}
         )
         assert items == [{'url': 'https://e.com/r', 'title': 'R'}]
+
+    def test_at_sign_inside_an_attribute_selector_stays_in_the_selector(self):
+        page = b'<a href="mailto:x@y.z">M</a><a href="/p">P</a>'
+        fields = {'url': 'a[href*="@"]@href', 'other': "a[href^='/']@href"}
+        assert extract_html_items(page, 'https://e.com/', '', fields) == [
+            {'url': 'mailto:x@y.z', 'other': 'https://e.com/p'}
+        ]
+
+    def test_at_sign_inside_an_attribute_selector_without_attr_reads_text(self):
+        page = b'<a href="mailto:x@y.z">Mail</a>'
+        assert extract_html_items(page, 'https://e.com/', '', {'title': 'a[href*="@"]'}) == [{'title': 'Mail'}]
 
     def test_invalid_selector_is_value_error(self):
         with pytest.raises(ValueError, match='Invalid CSS selector'):

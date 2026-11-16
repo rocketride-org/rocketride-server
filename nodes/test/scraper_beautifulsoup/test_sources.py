@@ -369,6 +369,29 @@ def test_feed_source_with_extra_and_partial_failure():
     assert len(result.errors) == 1 and result.errors[0].startswith('Dead:')
 
 
+def test_malformed_item_url_drops_that_row_only():
+    (spec,) = parse_sources(
+        [
+            {
+                'name': 'X',
+                'kind': 'json',
+                'url': 'https://x/api',
+                'itemsPath': 'items',
+                'fields': {'url': 'u', 'title': 't'},
+            }
+        ]
+    )
+    body = {'items': [{'u': 'https://ok.example/1', 't': 'Good'}, {'u': 'https://[', 't': 'Bad'}]}
+    result = run_source(spec, StubFetcher({'https://x/api': body}), now=NOW)
+    assert [row['url'] for row in result.rows] == ['https://ok.example/1']
+    assert result.errors == []
+
+
+def test_normalize_row_rejects_an_unparseable_url():
+    row = normalize_row({'url': 'https://['}, source='S', platform='p', base_url='https://x/', fetched_at='t', extra={})
+    assert row is None
+
+
 def test_html_source():
     html = b'<div class="r"><a href="/one">One</a></div><div class="r"><a href="/two">Two</a></div>'
     (spec,) = parse_sources(
