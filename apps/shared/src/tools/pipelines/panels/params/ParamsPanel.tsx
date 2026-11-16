@@ -675,7 +675,8 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 	/** Commit a typed rename when it is free and well-formed; leave the draft showing its problem otherwise. */
 	const commitName = useCallback(
 		(row: IRow) => {
-			const draft = drafts[row.key];
+			// Own entries only: a row named __proto__ must not read Object.prototype as its draft
+			const draft = Object.hasOwn(drafts, row.key) ? drafts[row.key] : undefined;
 			if (draft === undefined || !row.name || !row.target || draft === row.name) return;
 			if (publicNameProblem(draft, row.target, parameters, describeTarget)) return;
 			commit(withEntry(withoutEntry(parameters, row.name), draft, row.target));
@@ -717,7 +718,7 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 				<tbody>
 					{rows.map((row) => {
 						const option = row.target ? optionByTarget.get(row.target) : undefined;
-						const draft = drafts[row.key];
+						const draft = Object.hasOwn(drafts, row.key) ? drafts[row.key] : undefined;
 						const shown = draft ?? row.name ?? '';
 						const problem = draft !== undefined && draft !== row.name ? publicNameProblem(draft, row.target ?? '', parameters, describeTarget) : null;
 						const rowId = `rr-param-${row.key.replace(/[^A-Za-z0-9_-]/g, '-')}`;

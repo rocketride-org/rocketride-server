@@ -1054,6 +1054,11 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 					setParametersState(incomingParameters);
 				}
 			}
+			// The document's revision is the allocator for every committed state,
+			// the PARAMS page's included: the next canvas edit must number past
+			// it, or an undo back to this state would carry the same revision
+			// as that edit and never reload
+			if (incomingVersion > (lastSentVersion.current ?? 0)) lastSentVersion.current = incomingVersion;
 			return;
 		}
 

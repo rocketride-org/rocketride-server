@@ -33,15 +33,22 @@ const PARAMS = [
 	{ name: 'detail', value: true },
 ];
 
+/** The `params` object literal of a JavaScript example, evaluated: what a caller's runtime would send. */
+function evaluatedJsParams(source: string): Record<string, unknown> {
+	const match = /params: (\{.*\}),\n/.exec(source);
+	assert.ok(match, 'the params object literal is on one line');
+	return new Function(`return (${match[1]});`)() as Record<string, unknown>;
+}
+
 describe('buildCallExamples', () => {
-	it('names the address and every parameter in each language with that language\'s literals', () => {
+	it("names the address and every parameter in each language with that language's literals", () => {
 		const out = buildCallExamples({ address: 'acme.myDropper', params: PARAMS, host: 'https://api.example.com/' });
 		assert.match(out.javascript, /require\('rocketride'\)/);
 		assert.match(out.javascript, /client\.submit\(\{/);
 		assert.match(out.javascript, /name: "acme\.myDropper"/);
-		assert.match(out.javascript, /params: \{ "maxEdge": 2048, "outputFormat": "webp", "detail": true \}/);
+		assert.match(out.javascript, /params: \{ maxEdge: 2048, outputFormat: "webp", detail: true \}/);
 		assert.match(out.typescript, /import \{ RocketRideClient \} from 'rocketride'/);
-		assert.match(out.typescript, /params: \{ "maxEdge": 2048, "outputFormat": "webp", "detail": true \}/);
+		assert.match(out.typescript, /params: \{ maxEdge: 2048, outputFormat: "webp", detail: true \}/);
 		assert.match(out.python, /await client\.submit\(/);
 		assert.match(out.python, /params=\{"maxEdge": 2048, "outputFormat": "webp", "detail": True\}/);
 	});
@@ -62,16 +69,26 @@ describe('buildCallExamples', () => {
 
 	it('escapes quotes, line breaks and control characters so every example stays valid source', () => {
 		const out = buildCallExamples({ address: 'acme.p', params: [{ name: 'tone', value: 'dry "n" wry\nline two\t\u0001' }] });
-		assert.match(out.javascript, /"tone": "dry \\"n\\" wry\\nline two\\t\\u0001"/);
+		assert.match(out.javascript, /tone: "dry \\"n\\" wry\\nline two\\t\\u0001"/);
 		assert.match(out.python, /"tone": "dry \\"n\\" wry\\nline two\\t\\u0001"/);
 		assert.doesNotMatch(out.javascript, /\n\s*line two/, 'no raw line break inside a literal (multiline value)');
 		assert.doesNotMatch(out.python, /\n\s*line two/);
+		assert.equal(evaluatedJsParams(out.javascript).tone, 'dry "n" wry\nline two\t\u0001');
 	});
 
-	it('serializes every accepted public name as a key, so 1st and __proto__ stay plain data properties', () => {
+	it('makes every accepted public name an OWN property of the JavaScript params object (1st, __proto__)', () => {
 		const out = buildCallExamples({ address: 'acme.p', params: [{ name: '1st', value: 1 }, { name: '__proto__', value: 'x' }] });
-		assert.match(out.javascript, /params: \{ "1st": 1, "__proto__": "x" \}/);
+		assert.match(out.javascript, /params: \{ \["1st"\]: 1, \["__proto__"\]: "x" \}/);
+		const sent = evaluatedJsParams(out.javascript);
+		assert.ok(Object.hasOwn(sent, '1st') && Object.hasOwn(sent, '__proto__'), 'both are own properties');
+		assert.equal(sent['__proto__'], 'x');
 		assert.match(out.python, /params=\{"1st": 1, "__proto__": "x"\}/);
+	});
+
+	it('spells structured values in Python without touching the strings inside them', () => {
+		const out = buildCallExamples({ address: 'acme.p', params: [{ name: 'opts', value: { message: 'true false null', enabled: true, none: null, list: [false, 'null'] } }] });
+		assert.match(out.python, /params=\{"opts": \{"message": "true false null", "enabled": True, "none": None, "list": \[False, "null"\]\}\}/);
+		assert.match(out.javascript, /params: \{ opts: \{"message":"true false null","enabled":true,"none":null,"list":\[false,"null"\]\} \}/);
 	});
 });
 

@@ -124,9 +124,28 @@ function pyLiteral(value: unknown): string {
 	if (typeof value === 'number') return String(value);
 	if (value === null || value === undefined) return 'None';
 	// A JSON string literal is a valid Python string literal (the same escapes,
-	// \uXXXX included); objects and lists are spelled with Python's constants
+	// \uXXXX included); structured values are walked so a string INSIDE one is
+	// never rewritten by the constant spelling of its container
 	if (typeof value === 'string') return JSON.stringify(value);
-	return JSON.stringify(value).replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False').replace(/\bnull\b/g, 'None');
+	if (Array.isArray(value)) return `[${value.map(pyLiteral).join(', ')}]`;
+	return `{${Object.entries(value as Record<string, unknown>)
+		.map(([key, item]) => `${JSON.stringify(key)}: ${pyLiteral(item)}`)
+		.join(', ')}}`;
+}
+
+/** A name that may stand bare as a JavaScript object key: an identifier that is not `__proto__`. */
+const BARE_KEY = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * A public name as a JavaScript object-literal key that creates an OWN property:
+ * bare when it is an ordinary identifier, computed (`["1st"]`, `["__proto__"]`)
+ * otherwise, since a quoted `"__proto__"` key still sets the prototype.
+ *
+ * @param name - The public name.
+ * @returns The key source.
+ */
+function jsKey(name: string): string {
+	return BARE_KEY.test(name) && name !== '__proto__' ? name : `[${JSON.stringify(name)}]`;
 }
 
 /**
@@ -137,8 +156,8 @@ function pyLiteral(value: unknown): string {
  */
 function jsParams(params: ICallExampleParam[]): string {
 	if (params.length === 0) return '{}';
-	// Keys are serialized: every accepted public name (`1st`, `__proto__`) stays a plain data property
-	return `{ ${params.map((p) => `${JSON.stringify(p.name)}: ${jsLiteral(p.value)}`).join(', ')} }`;
+	// Every accepted public name (`1st`, `__proto__`) becomes an own property (jsKey)
+	return `{ ${params.map((p) => `${jsKey(p.name)}: ${jsLiteral(p.value)}`).join(', ')} }`;
 }
 
 /**
