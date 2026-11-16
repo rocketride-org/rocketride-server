@@ -57,12 +57,13 @@ export interface ViewState {
 
 /**
  * Top-level document pages (UI direction v5): DESIGN edits the canvas,
- * DEVELOPMENT monitors + replays the dev continuum, DEPLOY the deploy
- * continuum (plus, when the deploy feature lands, its lifecycle card).
- * The former per-view modes (status/tokens/flow/trace/errors) became
- * per-source pills inside each page's SourcePanels.
+ * PARAMS exposes per-call parameters (plan §5.5), DEVELOPMENT monitors +
+ * replays the dev continuum, DEPLOY the deploy continuum (plus, when the
+ * deploy feature lands, its lifecycle card). The former per-view modes
+ * (status/tokens/flow/trace/errors) became per-source pills inside each
+ * page's SourcePanels.
  */
-export type ProjectViewMode = 'design' | 'development' | 'deploy';
+export type ProjectViewMode = 'design' | 'params' | 'development' | 'deploy';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {

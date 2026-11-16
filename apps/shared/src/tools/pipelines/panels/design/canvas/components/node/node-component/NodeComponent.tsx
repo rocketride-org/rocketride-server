@@ -114,7 +114,7 @@ interface INodeProps {
  */
 export default function NodeComponent({ id, data, type, parentId, children, layout = 'horizontal', handleClick }: INodeProps): ReactElement {
 	// Pull shared canvas state from the flow context
-	const { nodes, edges } = useFlowGraph();
+	const { nodes, edges, parameters } = useFlowGraph();
 	const { taskStatuses, componentPipeCounts, totalPipes, servicesJson } = useFlowProject();
 	const { setQuickAddState } = useFlowGraph();
 	const { onOpenStatus, onOpenLink, serverHost } = useFlowProject();
@@ -154,6 +154,9 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 
 	/** Whether this node's service is flagged as experimental. */
 	const isExperimental = (IServiceCapabilities.Experimental & capabilities) === IServiceCapabilities.Experimental;
+
+	/** How many of this node's fields the pipeline exposes as public parameters (targets are `nodeId.configKey`). */
+	const paramCount = useMemo(() => Object.values(parameters ?? {}).filter((target) => target.split('.')[0] === id).length, [parameters, id]);
 
 	/** Keys of invoke channels this node can source (e.g. ["llm", "memory", "tool"]). */
 	const invokeSourceKeys = useMemo(() => Object.keys(invokeConfig ?? {}), [invokeConfig]);
@@ -222,7 +225,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={isLocked ? undefined : setQuickAddState} />
 
 			{/* Header — icon, title, class type, gear, overflow menu, error badge */}
-			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} />
+			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} paramCount={paramCount} />
 			{children}
 
 			{/* Data lanes — input/output handles */}

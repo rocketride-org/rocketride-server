@@ -11,6 +11,8 @@
  * - DESIGN: the pipeline canvas (the only page with Save).
  * - DEVELOPMENT: one self-contained {@link SourcePanel} per source over the
  *   dev run-log continuum — live monitoring, replay player, log, analysis.
+ * - PARAMS: the {@link ParamsPanel} (every param-capable field, the expose
+ *   toggle and public names, the live call examples; plan §5.5)
  * - DEPLOY: the {@link DeployPanel} (version strip, where-live,
  *   history), composed here like the sibling pages — capability-fed from the
  *   host's `fetchDeployLifecycle`/publish/deploy closures; its presence
@@ -45,6 +47,7 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './panels/
 import { createLiveEventStore, type LiveEventStore } from './panels/development/hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus } from './types';
 import { DeployTab } from './panels/deploy';
+import { ParamsPanel } from './panels/params';
 import type { IPipelineDeploy } from './panels/deploy';
 import { TASK_STATE } from './types';
 
@@ -103,6 +106,12 @@ export interface IProjectViewProps {
 	 * failure so the canvas can retry; resolve undefined for a genuine miss.
 	 */
 	getNodeSchema?: (provider: string) => Promise<Record<string, any> | undefined>;
+	/**
+	 * The caller's developer id (the first segment of every address, plan
+	 * §2.2), for the PARAMS page's call examples; absent until the host knows
+	 * it, when the examples show a placeholder.
+	 */
+	developerId?: string;
 	/** Called for pipeline run/stop/restart actions. Trace level and idle-timeout (TTL) are resolved host-side from the pipeline-builder settings. */
 	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
@@ -213,12 +222,13 @@ interface SourceInfo {
 // =============================================================================
 
 /** Non-canvas pages that render the document {@link ContentHeader}. */
-type DocSubView = 'development' | 'deploy';
+type DocSubView = 'params' | 'development' | 'deploy';
 
 /**
  * Per-page header subtitles — "{Page} — {short descriptor}".
  */
 const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
+	params: 'Params: the fields callers may set per request, and how to call the pipeline.',
 	development: 'Development: live monitoring and replay of your dev runs.',
 	deploy: 'Deploy: the deployed pipeline (scheduled runs, monitoring, and replay).',
 };
@@ -229,7 +239,7 @@ const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
  * DEVELOPMENT page now is.
  */
 function migrateViewMode(mode: string | undefined): ProjectViewMode {
-	if (mode === 'design' || mode === 'development' || mode === 'deploy') return mode;
+	if (mode === 'design' || mode === 'params' || mode === 'development' || mode === 'deploy') return mode;
 	if (mode === 'status' || mode === 'tokens' || mode === 'flow' || mode === 'trace' || mode === 'errors') {
 		return 'development';
 	}
@@ -243,7 +253,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -456,7 +466,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	const totalIssues = totalErrors + totalWarnings;
 	const viewMenu = useMemo<ViewMenu>(
 		() => ({
-			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }])],
+			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'params', label: 'Params' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }])],
 		}),
 		[isReadonly, totalIssues]
 	);
@@ -586,6 +596,25 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						</AppStateProvider>
 					</PrefsProvider>
 				</div>
+			),
+		},
+		params: {
+			// The per-call parameters page (plan §5.5): the expose toggle and
+			// public names write the document's parameters map; the canvas
+			// takes the new map through its project reload path.
+			content: renderDocPanel(
+				project ? (
+					<ParamsPanel
+						project={project}
+						servicesJson={servicesJson}
+						getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined}
+						onContentChanged={isReadonly ? undefined : handleContentChanged}
+						address={`${developerId || '{developerId}'}.${project.project_id ?? '{pipeId}'}`}
+						serverHost={serverHost}
+					/>
+				) : (
+					<div style={commonStyles.empty}>No pipeline loaded</div>
+				)
 			),
 		},
 		development: {
