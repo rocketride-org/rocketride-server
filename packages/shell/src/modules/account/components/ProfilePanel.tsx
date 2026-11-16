@@ -21,7 +21,7 @@
  * Cards. All server interactions are delegated to the host via callback props.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
@@ -30,7 +30,7 @@ import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import { Button } from '../../../components/button/Button';
 import { StatusBadge } from '../../../components/status-badge/StatusBadge';
-import { GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 import type { ConnectResult, ProfileUpdate, TeamInfo } from '../types';
 import { S, Badge, Avatar, initials, avatarColor } from './shared';
 import { moveItem, orderTeams, ordinal } from './teamOrder';
@@ -184,6 +184,13 @@ const styles = {
 		userSelect: 'none',
 	}),
 
+	/** Keyboard reorder controls at the right of a team row (Move up / Move down). */
+	moveButtons: {
+		display: 'flex',
+		gap: 2,
+		flexShrink: 0,
+	} as CSSProperties,
+
 	/** Drag grip icon slot at the left of a team row (fixed width so rows align without it). */
 	grip: {
 		width: 14,
@@ -291,13 +298,45 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 	const [error, setError] = useState<string | null>(null);
 	const rows = pending ?? ordered;
 	const canReorder = rows.length > 1 && pending == null;
+	// The save in flight: the ids it sent and whether the call has resolved.
+	const saveRef = useRef<{ ids: string[]; resolved: boolean } | null>(null);
 
-	// The server's answer to a saved order arrives as a pushed `order`; that
-	// push (not the resolved call) retires the in-flight rows, so the card
-	// never snaps back to the old order between the two.
+	// The server's answer to a saved order arrives as a pushed `order`. The
+	// in-flight rows retire when a push carries the saved order, or when any
+	// push follows the resolved call (the server may normalize the order).
+	// A profile response that was already underway at the drop and comes
+	// back with the old order is neither, so it cannot acknowledge the save.
 	useEffect(() => {
-		setPending(null);
-	}, [order]);
+		const save = saveRef.current;
+		if (!save) return;
+		const pushed = ordered.map((t) => t.id);
+		if (save.resolved || (pushed.length === save.ids.length && pushed.every((id, i) => id === save.ids[i]))) {
+			saveRef.current = null;
+			setPending(null);
+		}
+	}, [ordered]);
+
+	/**
+	 * Moves the row at `from` to `to`, shows the new order at once, and
+	 * persists it; drag-and-drop and the keyboard buttons both land here. A
+	 * refusal restores the server's order and names the reason.
+	 */
+	const commitMove = async (from: number, to: number): Promise<void> => {
+		if (!canReorder || from < 0 || to < 0 || to >= rows.length || from === to) return;
+		const next = moveItem(rows, from, to);
+		const ids = next.map((t) => t.id);
+		saveRef.current = { ids, resolved: false };
+		setPending(next);
+		setError(null);
+		try {
+			await onSetTeamOrder(ids);
+			if (saveRef.current?.ids === ids) saveRef.current.resolved = true;
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Could not save the team order');
+			if (saveRef.current?.ids === ids) saveRef.current = null;
+			setPending(null);
+		}
+	};
 
 	/** Starts a row drag: records the team id in the transfer data and locally. */
 	const handleDragStart = (e: React.DragEvent, teamId: string): void => {
@@ -325,26 +364,13 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 		setOverId(null);
 	};
 
-	/**
-	 * Drops the dragged row on `teamId`: computes the new order, shows it at
-	 * once, and persists it. The server pushes the stored order back through
-	 * the account update, which replaces the in-flight rows.
-	 */
-	const handleDrop = async (e: React.DragEvent, teamId: string): Promise<void> => {
+	/** Drops the dragged row on `teamId` and commits the move. */
+	const handleDrop = (e: React.DragEvent, teamId: string): void => {
 		e.preventDefault();
 		const from = rows.findIndex((t) => t.id === draggingId);
 		const to = rows.findIndex((t) => t.id === teamId);
 		handleDragEnd();
-		if (from < 0 || to < 0 || from === to) return;
-		const next = moveItem(rows, from, to);
-		setPending(next);
-		try {
-			await onSetTeamOrder(next.map((t) => t.id));
-		} catch (err) {
-			// A refusal restores the server's order and names the reason.
-			setError(err instanceof Error ? err.message : 'Could not save the team order');
-			setPending(null);
-		}
+		void commitMove(from, to);
 	};
 
 	return (
@@ -353,7 +379,7 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 			header={
 				<>
 					Teams
-					<span style={styles.cardHint}>{rows.length > 1 ? 'drag to order · the first team is your home team' : 'your home team'}</span>
+					<span style={styles.cardHint}>{rows.length > 1 ? 'drag or use the arrows to order · the first team is your home team' : 'your home team'}</span>
 				</>
 			}
 		>
@@ -377,7 +403,7 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 							onDragLeave={() => {
 								if (overId === t.id) setOverId(null);
 							}}
-							onDrop={(e) => void handleDrop(e, t.id)}
+							onDrop={(e) => handleDrop(e, t.id)}
 							onDragEnd={handleDragEnd}
 							style={styles.teamOrderRow(home, overId === t.id && draggingId !== t.id, draggingId === t.id, canReorder, last)}
 						>
@@ -392,6 +418,16 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 								</div>
 							</div>
 							{home && <StatusBadge variant="success">Home</StatusBadge>}
+							{rows.length > 1 && (
+								<div style={styles.moveButtons}>
+									<Button variant="ghost" small disabled={!canReorder || i === 0} title={`Move ${t.name} up`} onClick={() => void commitMove(i, i - 1)}>
+										<ChevronUp size={14} aria-hidden="true" />
+									</Button>
+									<Button variant="ghost" small disabled={!canReorder || last} title={`Move ${t.name} down`} onClick={() => void commitMove(i, i + 1)}>
+										<ChevronDown size={14} aria-hidden="true" />
+									</Button>
+								</div>
+							)}
 						</div>
 					);
 				})}

@@ -439,7 +439,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 *  back through shell:accountUpdate. */
 	const handleSetTeamOrder = useCallback(
 		async (order: string[]) => {
-			if (!client) return;
+			// Throw (not return): the card keeps the dropped order until the
+			// server answers, so a silent no-op would leave it stuck.
+			if (!client) throw new Error('Not connected');
 			await client.account.setTeamOrder(order);
 		},
 		[client]

@@ -297,8 +297,14 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
 	// The user's HOME team (first of the team order, B39): the API-key mint
-	// form's default scope. '' when the profile has not arrived.
-	const homeTeamId = profile?.teamOrder?.[0] ?? authUser?.teamOrder?.[0] ?? profile?.devTeam ?? authUser?.devTeam ?? '';
+	// form's default scope. Read from ONE snapshot (the current profile, else
+	// the cached auth user) so an empty stored order falls back to that same
+	// snapshot's devTeam rather than to a stale cached order. '' when neither
+	// has arrived.
+	const homeTeamId = useMemo(() => {
+		const snapshot = profile ?? authUser;
+		return snapshot?.teamOrder?.[0] ?? snapshot?.devTeam ?? '';
+	}, [profile, authUser]);
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.
