@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 8072094ba7b1dbdc2b61f601bb5f87689ffc7560
+// Source commit: d34aafa30b25a80c7593958b9883416d05296f0c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -2557,7 +2557,9 @@ export interface ServerInfoResult {
      * The analytics ingestion address telemetry requests go to.
      *
      * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
-     * is; defaults server-side to the managed analytics proxy.
+     * is: the server serves neither unless the operator configured both,
+     * so a self-hosted engine never sends its users' events to a host it
+     * did not choose.
      */
     posthogHost?: string;
     /**
@@ -3347,11 +3349,12 @@ export interface ValidationError {
 /**
  * Result of a pipeline validation via `validate()`.
  *
- * The engine validates structure — required fields and component
- * references. The result contains any errors and warnings found.
+ * The engine checks required fields and component references, then the
+ * pipeline against the services it names: providers, control entries and
+ * lanes. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
-    /** Validation errors — pipeline will not execute with these. */
+    /** Validation errors — a run can start despite a wiring error. */
     errors: ValidationError[];
     /** Validation warnings — pipeline may still execute. */
     warnings: ValidationError[];
@@ -5980,8 +5983,13 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Validate a pipeline configuration.
      *
-     * Sends the pipeline to the server for structural validation, checking
-     * required fields and component references.
+     * Sends the pipeline to the server, which checks required fields and
+     * component references, then checks the pipeline against the services
+     * it names: each provider is a service on the engine, each control
+     * entry sits on the node being called, and each input's lane is one
+     * its upstream node produces and its node takes. A node with no lanes,
+     * such as a tool, is not checked for the lanes it takes, and a `"*"`
+     * in a node's lanes matches any lane.
      *
      * Source resolution follows the same logic as {@link use}:
      * 1. Explicit `source` option (if provided)

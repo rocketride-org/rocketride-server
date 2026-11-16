@@ -24,7 +24,6 @@ import { classifyTraffic, isTestHost } from './traffic';
 import { privacySignalOn } from 'rocketride/analytics';
 import { newJourneyKey } from './bridge';
 import { SdkQueue } from './sdkQueue';
-import type { SdkLike } from './mode';
 import type * as Transport from './transport';
 
 /** The lazily loaded transport chunk; null until its import resolves (or forever, keyless). */
@@ -45,8 +44,6 @@ let knownSignedOut = false;
  * signed-out report, which would reset a stored identified identity).
  */
 let lastAuth: { isAuthed: boolean; userId: string | null } | null = null;
-/** The app-registerable before-send veto for experiment-bearing events; allows everything by default. */
-let attributionGate: (event: unknown) => boolean = () => true;
 /**
  * The embedding host's telemetry setting (VS Code), mirrored over the bus.
  * Consulted ONLY when consentSource is 'host' — never OR'd with the stored
@@ -192,9 +189,6 @@ function onTransportLoaded(module: typeof Transport): void {
 		},
 		ensureInit: () => {
 			return enabled === true;
-		},
-		allowAttribution: (event) => {
-			return attributionGate(event);
 		},
 	});
 	// The banner rendered before the chunk landed: its exposure goes out now (queued like any capture).
@@ -393,14 +387,6 @@ export function dropTelemetryHold(): void {
 }
 
 /**
- * Register the before-send veto for experiment-bearing events (assignment_id):
- * the home app's roulette gate. One registrant; the default allows everything.
- */
-export function setAttributionGate(gate: (event: unknown) => boolean): void {
-	attributionGate = gate;
-}
-
-/**
  * The embedding host's telemetry setting (VS Code), pushed by the extension
  * host over the bus. Meaningful only when consentSource is 'host'.
  */
@@ -436,14 +422,60 @@ export function trackConsentShown(): void {
 }
 
 /**
- * The explicit-consent experiment gateway: the active consented instance and
- * surface state, or null while capture is unavailable (no consent, SDK not
- * started, or the transport chunk not in yet). home-ui's roulette exposure
- * capture uses it for session-id reads and deterministic-uuid captures that
- * a plain reporter cannot express.
+ * A report bound to one consented session: it sends through the app's own
+ * reporter (sanitised, app-stamped, consent-routed) and returns whether the
+ * event went out. It refuses, returning false, once the moment the capture was
+ * taken in has passed: consent withdrawn, the SDK gone, or the session rotated.
  */
-export function getConsentedCapture(): { sdk: SdkLike; signedOut: boolean } | null {
-	return transport?.getConsentedCapture() ?? null;
+export type ConsentedReporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => boolean;
+
+/**
+ * What an app gets from getConsentedCapture: the consented session it was
+ * taken in, a report bound to it, and the surface state. Never the SDK: no
+ * app can reconfigure the transport or record a screen through this.
+ */
+export type ConsentedCapture = {
+	/** The app's report, bound to this session (ConsentedReporter). */
+	report: ConsentedReporter;
+	/** The consented instance's session id when this capture was taken. */
+	sessionId: string;
+	/** Subscribe to session rotation on the consented instance; returns the unsubscribe. */
+	onSessionId(callback: (sessionId: string) => void): () => void;
+	/** True only on a known signed-out surface. */
+	signedOut: boolean;
+};
+
+/**
+ * The explicit-consent measurement seam, the same for every app: the consented
+ * session's id with a report bound to it, or null while there is none (no
+ * consent, SDK not started, no session yet, or the transport chunk not in).
+ * An app that keys a measurement on the session (one exposure per session, a
+ * deterministic uuid from it) takes this, decides, and reports through the
+ * bound report, which drops anything the session no longer covers.
+ *
+ * @param report - The app's bound reporter (useReport, or the one handed to the app).
+ * @returns The consented capture, or null.
+ */
+export function getConsentedCapture(report: Reporter): ConsentedCapture | null {
+	const current = transport?.consentedSession() ?? null;
+	if (!current) {
+		return null;
+	}
+	const sessionId = current.sessionId;
+	return {
+		report: (event, props, options) => {
+			if (transport?.consentedSession()?.sessionId !== sessionId) {
+				return false;
+			}
+			report(event, props, options);
+			return true;
+		},
+		sessionId,
+		onSessionId: (callback) => {
+			return transport?.onConsentedSessionId(callback) ?? (() => { /* chunk gone: nothing to unsubscribe */ });
+		},
+		signedOut: current.signedOut,
+	};
 }
 
 /**
@@ -478,7 +510,6 @@ export function resetTelemetryHostForTests(): void {
 	trafficClass = 'visible';
 	knownSignedOut = false;
 	lastAuth = null;
-	attributionGate = () => true;
 	hostTelemetryEnabled = null;
 	consentShownPending = false;
 	reporters.clear();

@@ -1,6 +1,6 @@
 // MIT License - Copyright (c) 2026 Aparavi Software AG
 //
-// The consent banner. Our own record (rr:consent) decides what it shows;
+// The consent banner. Our own record (rr_consent_v1) decides what it shows;
 // PostHog's flag is never consulted. A fixed overlay (no layout shift, never
 // any page padding), mounted once the page has settled (never the LCP
 // element), non-blocking. Desktop and tablet: a compact toast in a bottom

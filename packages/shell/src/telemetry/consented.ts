@@ -29,12 +29,6 @@ import type { SendOptions } from 'rocketride/analytics';
 export type ConsentHost = {
 	/** The capture mode once the SDK started; null before. */
 	mode(): CaptureMode | null;
-	/**
-	 * Recheck consent and traffic before sending an event with experiment identifiers.
-	 * @param event Candidate event name.
-	 * @returns Whether the experiment event may be captured now.
-	 */
-	allowAttribution(event: unknown): boolean;
 	/** True once posthog-js is initialised. */
 	sdkStarted(): boolean;
 	/** True on a shell screen (initShellScreen): not a page, so no instance sends a page leave or web vitals. */
@@ -91,27 +85,72 @@ let hasCookielessVitals = false;
 let consentedSdk: SdkLike | null = null;
 /** True once posthog-js's storage writes are reduced (guardStorage); without it no opted-in instance is created. */
 let isStorageGuarded = false;
+/** Apps subscribed to the consented instance's session rotation (host.ts getConsentedCapture). */
+const sessionListeners = new Set<(sessionId: string) => void>();
+/** The consented instance whose onSessionId feeds sessionListeners (hooked once: a revival keeps the instance). */
+let sessionHooked: SdkLike | null = null;
 
 /** Sanitised, then rr_continued_visit kept only on the session that continues a cookieless visit (bridge.ts). */
 function consentedNext<T extends CaptureLike | null>(event: T): T {
-	if (event?.properties?.assignment_id && (!getConsentedCapture() || !host?.allowAttribution(event.event))) return null as T;
 	return normalizeContinued(sanitizeEvent(event));
 }
 
 /**
- * Provide the explicit-consent experiment gateway without exposing the cookieless SDK.
- * @returns The active consented SDK and surface state, or null when capture is unavailable.
+ * The active consented instance, for this chunk's own use only.
+ * @returns The instance when consent is accepted and it is the active one; else null.
  */
-export function getConsentedCapture(): { sdk: SdkLike; signedOut: boolean } | null {
+function consentedInstance(): SdkLike | null {
 	try {
 		if (parseConsent(JSON.stringify(consent.record()), Date.now())?.choice !== 'accepted') return null;
 		if (!host?.sdkStarted()) return null;
 		const mode = host.mode();
 		if (!mode?.isConsented()) return null;
-		return { sdk: mode.active(), signedOut: signedOut() };
+		return mode.active();
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * The consented session an app may measure in: its id and the surface state. No instance leaves this chunk.
+ * @returns The session, or null when there is none (no consent, SDK not started, no session id yet).
+ */
+export function consentedSession(): { sessionId: string; signedOut: boolean } | null {
+	try {
+		const sessionId = consentedInstance()?.get_session_id?.();
+		if (!sessionId) return null;
+		return { sessionId, signedOut: signedOut() };
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Subscribe to the consented instance's session rotation. The subscription outlives the instance's
+ * withdrawal and revival (one instance per page load), and an instance created later feeds it too.
+ * @param callback Called with the new session id.
+ * @returns The unsubscribe.
+ */
+export function onConsentedSessionId(callback: (sessionId: string) => void): () => void {
+	sessionListeners.add(callback);
+	return () => {
+		sessionListeners.delete(callback);
+	};
+}
+
+/** Feed sessionListeners from the instance's session rotation, once per instance. @param sdk The consented instance. */
+function hookSession(sdk: SdkLike): void {
+	if (sessionHooked === sdk) return;
+	sessionHooked = sdk;
+	quietly(() => {
+		sdk.onSessionId?.((sessionId) => {
+			for (const listener of sessionListeners) {
+				try {
+					listener(sessionId);
+				} catch { /* a listener never breaks the others */ }
+			}
+		});
+	});
 }
 
 /** The consented instance's before_send: rich events only from a signed-out surface, everything sanitised. */
@@ -300,6 +339,7 @@ export function createConsented(): SdkLike | null {
 	scrubStoredProps(instance.persistence, reduceStoredProps);
 	scrubStoredProps(instance.sessionPersistence, reduceStoredProps);
 	consentedSdk = instance;
+	hookSession(instance);
 	armConsented(instance);
 	return instance;
 }

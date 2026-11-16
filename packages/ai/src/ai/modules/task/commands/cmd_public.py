@@ -141,14 +141,22 @@ class PublicCommands(DAPConn):
             debug('[public] RR_STRIPE_PUBLISHABLE_KEY is not a pk_ publishable key — omitting it from the public probe')
         # PostHog project token only — a personal/server key (phx_*, anything
         # without the phc_ prefix) would hand a real credential to every
-        # browser, so refuse to emit it and warn. The host is only meaningful
-        # alongside a key; it defaults to the managed analytics proxy.
+        # browser, so refuse to emit it and warn. The host is NEVER defaulted:
+        # a self-hosted engine with only a key set must not route its users'
+        # events, IPs and user agents through our managed proxy, so the pair
+        # is served only when the operator set both, and our own deployments
+        # set RR_POSTHOG_HOST explicitly.
         posthog_key = os.environ.get('RR_POSTHOG_PUBLISHABLE_KEY', '').strip()
-        if posthog_key.startswith('phc_'):
-            info['posthogPublishableKey'] = posthog_key
-            info['posthogHost'] = os.environ.get('RR_POSTHOG_HOST', '').strip() or 'https://e.rocketride.ai'
-        elif posthog_key:
+        posthog_host = os.environ.get('RR_POSTHOG_HOST', '').strip()
+        if posthog_key and not posthog_key.startswith('phc_'):
             debug('[public] RR_POSTHOG_PUBLISHABLE_KEY is not a phc_ project token — omitting it from the public probe')
+        elif posthog_key and not posthog_host:
+            debug(
+                '[public] RR_POSTHOG_PUBLISHABLE_KEY is set without RR_POSTHOG_HOST — omitting telemetry from the public probe'
+            )
+        elif posthog_key:
+            info['posthogPublishableKey'] = posthog_key
+            info['posthogHost'] = posthog_host
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────

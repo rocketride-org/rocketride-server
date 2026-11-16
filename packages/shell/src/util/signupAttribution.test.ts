@@ -70,7 +70,7 @@ function withLocalStorage(records: Array<[string, string]>, fn: () => void): voi
 test('a decision this page could not store fails closed: no cookieless or consented context rides the redirect', () => {
 	const consented = signupContext();
 	const cookieless: SignupProperties = { ...consented, consent_state: 'undecided' };
-	const accepted: Array<[string, string]> = [['rr:consent', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]];
+	const accepted: Array<[string, string]> = [['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]];
 
 	// Step 1: before any decision on this page, the stored record decides.
 	assert.equal(consentDecisionUnsaved(), false);
