@@ -288,6 +288,7 @@ class SubmitCommands(DAPConn):
             # control's run log; the binding counts in the control's own stats
             trace_id = str(opened_body.get('traceId') or '')
             owners = self._server.trace_owners
+            team, version = control.publication()
             owners.claim(
                 trace_id,
                 control.key,
@@ -295,6 +296,8 @@ class SubmitCommands(DAPConn):
                 billing=control.caller_billing(self._account_info),
                 address=control.address,
                 rung=control.rung or '',
+                team=team,
+                version=version,
             )
             control.stats.totalCount += 1
             succeeded = False

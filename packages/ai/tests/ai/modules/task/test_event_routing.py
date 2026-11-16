@@ -402,3 +402,24 @@ async def test_a_borrowed_tool_pipe_is_claimed_and_released_in_one_frame(catalog
 
     assert ts.trace_owners.owner('1.1.8').late is True
     assert (control.stats.totalCount, control.stats.completedCount) == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_claim_names_the_publication_that_answered(catalog, engines, engine_log):
+    """The usage row is keyed by the answering publication (plan 8.2): the claim carries its slot and version."""
+    from ai.modules.task.task_control import DeploymentRef
+
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    assert control.publication() == ('', None)  # a dev run serves through no publication
+    control.deployment = DeploymentRef(org_id='org-1', team_id='team-staging', project_id='docBrain')
+    control.version = 5
+    conn = _data_conn(ts, control)
+
+    await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain')
+
+    owner = ts.trace_owners.owner('1.1.7')
+    assert (owner.team, owner.version) == ('team-staging', 5)
+    ts.trace_owners.release('1.1.7')
+    late = ts.trace_owners.owner('1.1.7')
+    assert late.late is True and (late.team, late.version) == ('team-staging', 5)

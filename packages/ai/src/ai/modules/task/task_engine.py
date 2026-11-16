@@ -2126,7 +2126,14 @@ class TaskEngine(DAPBase):
         owner = owners.owner(self.trace_ref(trace_id))
         if owner is None:
             return None
-        return TraceUsage(control_key=owner.control_key, billing=owner.billing, address=owner.address, rung=owner.rung)
+        return TraceUsage(
+            control_key=owner.control_key,
+            billing=owner.billing,
+            address=owner.address,
+            rung=owner.rung,
+            team=owner.team,
+            version=owner.version,
+        )
 
     def _on_metrics_updated(self) -> None:
         """

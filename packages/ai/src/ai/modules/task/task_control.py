@@ -42,7 +42,7 @@ this control holds".
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Tuple
 
 from rocketride.types.task import TASK_METRICS, TASK_TOKENS
 
@@ -433,6 +433,23 @@ class TaskControl:
     def billing(self) -> BillingAttribution:
         """The paying unit of this control: per control, never per engine."""
         return BillingAttribution(org_id=self.orgId, team_id=self.teamId, user_id=self.userId)
+
+    def publication(self) -> Tuple[str, Optional[int]]:
+        """
+        The publication this control serves through, for the usage row (plan 8.2).
+
+        A request's usage row is keyed by the publication that answered it,
+        so a caller who used Staging and then Production on one day holds two
+        rows, not one with a flipping context. A dev run serves through no
+        publication and reports neither part.
+
+        Returns:
+            ``(team_slot, version)``: the deployment's audience slot
+            (``user~{uid}``, a team id or ``~public``) or ``''``, and the
+            artifact version or None.
+        """
+        team = self.deployment.team_id if self.deployment is not None else ''
+        return team, self.version
 
     def caller_billing(self, account_info: Any) -> BillingAttribution:
         """

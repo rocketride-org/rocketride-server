@@ -50,6 +50,8 @@ class TraceUsage:
         billing: Who pays (plan 8.3): the request's caller and their home team.
         address: The control's address (``developerId.pipeId.source``).
         rung: The rung the control resolved on.
+        team: The answering publication's audience slot (``''`` on a dev run).
+        version: The answering artifact version (None on a dev run).
     """
 
     control_key: str
@@ -58,6 +60,8 @@ class TraceUsage:
     billing: Any = None
     address: str = ''
     rung: str = ''
+    team: str = ''
+    version: Optional[int] = None
 
 
 #: How long a closed bucket with no owner yet waits for its claim before it is dropped
@@ -70,8 +74,12 @@ class UsageSink:
 
     The unit of accounting is ONE REQUEST: when a tree closes, its tokens per
     resource and ``request_count`` 1 are an INCREMENT to the day row
-    ``usage:{dayNumber}:{developerId.pipeId}:{userId}:{resource}`` of its
-    paying unit, written with the account's additive ``apply_usage``. Posting
+    ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``
+    of its paying unit, written with the account's additive ``apply_usage``.
+    The PUBLICATION that answered (rung, audience slot, version; ``-`` where a
+    dev run has none) is part of the key, so one caller's calls through
+    Staging and through Production on one day are two rows and a per-team
+    count is a plain group-by (decided 2026-11-16). Posting
     coalesces the increments of one row until ``flush`` (the billing report
     interval, and engine end), an optimisation only: a buffered increment is
     dropped when the database confirms the write, and a failed write rides
@@ -107,10 +115,14 @@ class UsageSink:
             return
         pipe = '.'.join(usage.address.split('.')[:2]) if usage.address else ''
         day = self.day_number(now)
+        # The publication segments: a dev run serves through none, so its
+        # rows carry '-' where a published rung carries the slot and version
+        team = usage.team or '-'
+        version = '-' if usage.version is None else str(usage.version)
         for resource, amount in tokens.items():
             if amount <= 0:
                 continue
-            key = f'usage:{day}:{pipe}:{billing.user_id}:{resource}'
+            key = f'usage:{day}:{pipe}:{usage.rung or "-"}:{team}:{version}:{billing.user_id}:{resource}'
             pending = self._pending.get(key)
             if pending is None:
                 pending = self._pending[key] = {
@@ -126,7 +138,14 @@ class UsageSink:
                         'resource': resource,
                         'idempotency_key': key,
                         'description': resource,
-                        'context': {'address': usage.address, 'pipe': pipe, 'rung': usage.rung, 'day': day},
+                        'context': {
+                            'address': usage.address,
+                            'pipe': pipe,
+                            'rung': usage.rung,
+                            'team': usage.team or None,
+                            'version': usage.version,
+                            'day': day,
+                        },
                     },
                 }
             pending['amount'] += float(amount)

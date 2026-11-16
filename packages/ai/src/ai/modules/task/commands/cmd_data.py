@@ -389,6 +389,7 @@ class DataCommands(DAPConn):
             trace_id: The wire traceId the engine answered with.
             account_info: The account that dispatched the frame (read before the engine was awaited).
         """
+        team, version = control.publication()
         self._server.trace_owners.claim(
             trace_id,
             control.key,
@@ -396,6 +397,8 @@ class DataCommands(DAPConn):
             billing=control.caller_billing(account_info),
             address=control.address,
             rung=control.rung or '',
+            team=team,
+            version=version,
         )
 
     def _retire(self, control: 'TaskControl', pipe_id: Any, succeeded: bool) -> None:

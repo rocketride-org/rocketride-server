@@ -375,10 +375,11 @@ class AccountBase(ABC):
 
         Unlike ``apply_debit`` (a REPLACING upsert for an owned run's
         cumulative per-task rows), this is ADDITIVE: the row keyed
-        ``usage:{dayNumber}:{developerId.pipeId}:{userId}:{resource}`` gains
-        ``amount`` and ``request_count``, atomically in the database, so any
-        number of engines and servers may add into one day's row. OSS keeps no
-        ledger and returns False.
+        ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``
+        gains ``amount`` and ``request_count``, atomically in the database, so
+        any number of engines and servers may add into one day's row; the
+        publication that answered is part of the key, so two publications
+        never share a row. OSS keeps no ledger and returns False.
 
         Args:
             org_id:          The paying org (the caller's).
