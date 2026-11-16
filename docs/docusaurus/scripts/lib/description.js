@@ -8,28 +8,34 @@
  * Text inside inline code is kept as written, so `<your-api-key>` survives.
  */
 
-const { fenceOpener, fenceCloses, codeSpanEnd } = require('./markdown');
+const { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop } = require('./markdown');
 
 const MAX = 160;
-const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|import\s|export\s|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
-const CODE_SPAN = /(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g;
+const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
+const ESM_LINE = /^(import|export)\s/;
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
 // A period after these does not end a sentence, even when a capital letter follows.
 const SENTENCE_END = /(?<!\b(?:[Ee]\.g|[Ii]\.e|etc|vs|cf)\.)(?<=[.!?])\s+(?=[A-Z0-9"([])/;
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': ' ' };
+
+/** Index of the newline that ends the line at `i`, or the end of the text. */
+function lineEnd(text, i) {
+	const nl = text.indexOf('\n', i);
+	return nl < 0 ? text.length : nl;
+}
 
 /**
  * End index of the fenced block that opens on the line at `i`, copied up to its
  * closing line (or the end of the text); -1 when no fence opens there.
  */
 function fenceBlockEnd(text, i) {
-	const nl = text.indexOf('\n', i);
-	const open = fenceOpener(text.slice(i, nl < 0 ? text.length : nl));
+	const open = fenceOpener(text.slice(i, lineEnd(text, i)));
 	if (!open) return -1;
-	let stop = nl < 0 ? text.length : nl + 1;
+	let stop = Math.min(lineEnd(text, i) + 1, text.length);
 	while (stop < text.length) {
-		const next = text.indexOf('\n', stop);
-		const line = text.slice(stop, next < 0 ? text.length : next);
-		stop = next < 0 ? text.length : next + 1;
+		const end = lineEnd(text, stop);
+		const line = text.slice(stop, end);
+		stop = Math.min(end + 1, text.length);
 		if (fenceCloses(line, open)) break;
 	}
 	return stop;
@@ -40,15 +46,6 @@ function commentEnd(text, i) {
 	if (!text.startsWith('<!--', i)) return -1;
 	const end = text.indexOf('-->', i + 4);
 	return end < 0 ? -1 : end + 3;
-}
-
-/** End index of the code span at `i`; an unclosed backtick run is just the run itself. */
-function codeSpanStop(text, i) {
-	const end = codeSpanEnd(text, i);
-	if (end >= 0) return end;
-	let run = i;
-	while (text[run] === '`') run++;
-	return run;
 }
 
 /**
@@ -98,8 +95,11 @@ function firstParagraph(body) {
 	const para = [];
 	let fence = null; // the open code fence
 	let inStatement = false; // an MDX import/export runs to the next blank line, as in Docusaurus createExcerpt
+	let prevBlank = true; // import/export is ESM only at the start of a block
 	for (const line of text.split(/\r?\n/)) {
 		const t = line.trim();
+		const blockStart = prevBlank;
+		prevBlank = !t;
 		if (fence) {
 			if (fenceCloses(line, fence)) fence = null;
 			continue;
@@ -111,7 +111,7 @@ function firstParagraph(body) {
 			continue;
 		}
 		if (!t) inStatement = false;
-		else if (/^(import|export)\s/.test(t)) inStatement = true;
+		else if (blockStart && ESM_LINE.test(line)) inStatement = true;
 		if (!t || inStatement || SKIP_LINE.test(t)) {
 			if (para.length) break;
 			continue;
@@ -123,9 +123,32 @@ function firstParagraph(body) {
 
 /** Remove markdown and HTML markup from a paragraph. Inline code keeps its text. */
 function stripMarkup(raw) {
-	const spans = [];
-	const text = raw
-		.replace(CODE_SPAN, (m, ticks, inner) => `\uE000${spans.push(inner.replace(/^ (.*) $/, '$1')) - 1}\uE001`)
+	const kept = [];
+	const hold = (s) => `\uE000${kept.push(s) - 1}\uE001`;
+	let protectedText = '';
+	for (let i = 0; i < raw.length; ) {
+		const ch = raw[i];
+		if (ch === '\\' && ESCAPABLE.test(raw[i + 1] || '')) {
+			protectedText += hold(raw[i + 1]); // an escaped character is literal, without its backslash
+			i += 2;
+		} else if (ch === '`') {
+			const end = codeSpanEnd(raw, i);
+			if (end < 0) {
+				const stop = codeSpanStop(raw, i);
+				protectedText += raw.slice(i, stop);
+				i = stop;
+				continue;
+			}
+			let len = 0;
+			while (raw[i + len] === '`') len++;
+			protectedText += hold(raw.slice(i + len, end - len).replace(/^ (.*) $/, '$1'));
+			i = end;
+		} else {
+			protectedText += ch;
+			i++;
+		}
+	}
+	const text = protectedText
 		.replace(/!\[[^\]]*\]\([^)]*\)/g, '')
 		.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
 		.replace(/<\/?[A-Za-z][^<>]*>/g, '')
@@ -133,7 +156,7 @@ function stripMarkup(raw) {
 		.replace(/&(?:amp|lt|gt|quot|nbsp|#39);/g, (e) => ENTITIES[e])
 		.replace(/\s+/g, ' ')
 		.trim();
-	return text.replace(/\uE000(\d+)\uE001/g, (m, n) => spans[n]);
+	return text.replace(/\uE000(\d+)\uE001/g, (m, n) => kept[n]);
 }
 
 /**

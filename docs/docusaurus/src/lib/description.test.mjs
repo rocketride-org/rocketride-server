@@ -103,3 +103,40 @@ describe('firstParagraph', () => {
 		assert.equal(firstParagraph('<!-- note -->\nVisible text.\n'), 'Visible text.');
 	});
 });
+
+describe('describePage: code spans and escapes', () => {
+	it('keeps the text of a span that holds markup and drops the backticks', () => {
+		assert.equal(describePage('Use the `**client**` and *bold* text.'), 'Use the **client** and bold text.');
+	});
+
+	it('does not let an escaped backtick open a code span', () => {
+		assert.equal(describePage('What is \\`? Use the `**client**` and *bold* text.'), 'What is `? Use the **client** and bold text.');
+	});
+
+	it('pairs backticks the way CommonMark does', () => {
+		assert.equal(describePage('A stray ` here and `x` there.'), 'A stray here andx` there.');
+	});
+
+	it('keeps an unclosed backtick run as written', () => {
+		assert.equal(describePage('Press ``` to open a fence.'), 'Press ``` to open a fence.');
+	});
+
+	it('unescapes punctuation', () => {
+		assert.equal(describePage('Pass \\*args and \\_name.'), 'Pass *args and _name.');
+	});
+
+	it('does not read an import or export in the middle of a paragraph as ESM', () => {
+		assert.equal(describePage('With the CLI you can\nimport pipelines from a folder.\n'), 'With the CLI you can import pipelines from a folder.');
+		assert.equal(describePage('The engine can\nexport default settings.\n'), 'The engine can export default settings.');
+	});
+
+	it('still skips an import at the start of a block', () => {
+		assert.equal(describePage("import A from 'a';\nimport B from 'b';\n\nReal prose.\n"), 'Real prose.');
+	});
+
+	it('cuts a long single sentence at an em dash clause', () => {
+		const lead = 'The engine reads every file that matches the pattern in the folder you name';
+		const text = `${lead} — and then it keeps going with a very long tail that has no stop in it for a long while indeed.`;
+		assert.equal(describePage(text), `${lead}.`);
+	});
+});

@@ -60,6 +60,15 @@ function codeSpanEnd(src, i) {
 	return -1;
 }
 
+/** End index of the code span at `i`; an unclosed backtick run is just the run itself. */
+function codeSpanStop(src, i) {
+	const end = codeSpanEnd(src, i);
+	if (end >= 0) return end;
+	let run = i;
+	while (src[run] === '`') run++;
+	return run;
+}
+
 /** Extract a `title:` from a leading YAML front-matter block, if present. */
 function frontMatterTitle(content) {
 	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
@@ -68,4 +77,4 @@ function frontMatterTitle(content) {
 	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
 }
 
-module.exports = { fenceOpener, fenceCloses, codeSpanEnd, frontMatterTitle };
+module.exports = { fenceOpener, fenceCloses, codeSpanEnd, codeSpanStop, frontMatterTitle };
