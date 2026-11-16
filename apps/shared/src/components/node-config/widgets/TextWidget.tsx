@@ -136,6 +136,10 @@ export interface ITextWidgetProps {
 	autoFocus?: boolean;
 	/** Ids of the message / help elements the control is described by. */
 	describedBy?: string;
+	/** Required state, announced on the control. */
+	required?: boolean;
+	/** Accessible name when no visible label targets the control (array items). */
+	label?: string;
 }
 
 // =============================================================================
@@ -148,7 +152,7 @@ export interface ITextWidgetProps {
  * @param props - {@link ITextWidgetProps}.
  * @returns The control.
  */
-export default function TextWidget({ id, type, stored, defaultValue, onChange, multiline, secret, storedSecurely, placeholder, envKeys = [], minimum, maximum, disabled, invalid, autoFocus, describedBy }: ITextWidgetProps): ReactElement {
+export default function TextWidget({ id, type, stored, defaultValue, onChange, multiline, secret, storedSecurely, placeholder, envKeys = [], minimum, maximum, disabled, invalid, autoFocus, describedBy, required, label }: ITextWidgetProps): ReactElement {
 	// The shell InputField forwards no ref, so the wrapper anchors the
 	// suggestion list and the control is found inside it when needed.
 	const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -216,6 +220,8 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 		autoFocus,
 		'aria-invalid': invalid || undefined,
 		'aria-describedby': describedBy,
+		'aria-required': required || undefined,
+		'aria-label': label,
 		...combobox,
 	};
 

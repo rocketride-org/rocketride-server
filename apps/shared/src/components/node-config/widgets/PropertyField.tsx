@@ -175,7 +175,7 @@ export default function PropertyField({ id, title, description, required, ghost,
 	return (
 		<div style={fieldStyles.field}>
 			<div style={fieldStyles.labelRow}>
-				<label style={fieldStyles.label} htmlFor={id}>
+				<label id={`${id}-label`} style={fieldStyles.label} htmlFor={id}>
 					<span>{title}</span>
 					{required && <span style={fieldStyles.required}>*</span>}
 					{ghost && <span style={fieldStyles.ghostMark}>default</span>}

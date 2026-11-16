@@ -55,8 +55,18 @@ const styles = {
 		gap: 4,
 	} as CSSProperties,
 
+	// Visually hidden, NOT display:none: the native file input stays in the
+	// accessibility tree so the frame's label, help and error reach it.
 	hidden: {
-		display: 'none',
+		position: 'absolute',
+		width: 1,
+		height: 1,
+		padding: 0,
+		margin: -1,
+		overflow: 'hidden',
+		clip: 'rect(0 0 0 0)',
+		whiteSpace: 'nowrap',
+		border: 0,
 	} as CSSProperties,
 };
 
@@ -136,6 +146,8 @@ export interface IUploadWidgetProps {
 	invalid?: boolean;
 	/** Ids of the message / help elements the control is described by. */
 	describedBy?: string;
+	/** Required state, announced on the control. */
+	required?: boolean;
 }
 
 // =============================================================================
@@ -148,7 +160,7 @@ export interface IUploadWidgetProps {
  * @param props - {@link IUploadWidgetProps}.
  * @returns The control.
  */
-export default function UploadWidget({ id, stored, storedSecurely, accept, onChange, disabled, invalid, describedBy }: IUploadWidgetProps): ReactElement {
+export default function UploadWidget({ id, stored, storedSecurely, accept, onChange, disabled, invalid, describedBy, required }: IUploadWidgetProps): ReactElement {
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const hasFile = storedSecurely || (typeof stored === 'string' && stored.length > 0);
 
@@ -164,7 +176,7 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 	};
 
 	return (
-		<div style={{ ...styles.row, ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}) }}>
+		<div style={{ ...styles.row, position: 'relative', ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}) }}>
 			<span style={{ ...styles.name, ...(hasFile ? {} : commonStyles.textMuted) }}>{hasFile ? (storedSecurely ? 'Saved securely' : fileNameOf(stored)) : 'No file chosen'}</span>
 			<div style={styles.actions}>
 				{!disabled && (
@@ -186,6 +198,8 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 				style={styles.hidden}
 				disabled={disabled}
 				aria-describedby={describedBy}
+				aria-required={required || undefined}
+				aria-invalid={invalid || undefined}
 				onChange={(event) => {
 					const file = event.target.files?.[0];
 					event.target.value = '';

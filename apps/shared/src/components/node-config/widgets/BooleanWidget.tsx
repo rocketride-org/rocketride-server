@@ -73,6 +73,12 @@ export interface IBooleanWidgetProps {
 	disabled?: boolean;
 	/** Ids of the message / help elements the control is described by. */
 	describedBy?: string;
+	/** Required state, announced on the control. */
+	required?: boolean;
+	/** Invalid state (the file holds a non-boolean). */
+	invalid?: boolean;
+	/** Accessible name when no visible label targets the control (array items). */
+	label?: string;
 }
 
 // =============================================================================
@@ -85,10 +91,10 @@ export interface IBooleanWidgetProps {
  * @param props - {@link IBooleanWidgetProps}.
  * @returns The control.
  */
-export default function BooleanWidget({ id, value, ghost, caption, onChange, disabled, describedBy }: IBooleanWidgetProps): ReactElement {
+export default function BooleanWidget({ id, value, ghost, caption, onChange, disabled, describedBy, required, invalid, label }: IBooleanWidgetProps): ReactElement {
 	return (
 		<label style={{ ...styles.row, ...(ghost ? fieldStyles.ghostControl : {}), ...(disabled ? { cursor: 'default', opacity: 0.6 } : {}) }}>
-			<input id={id} type="checkbox" style={styles.box} checked={value} disabled={disabled} aria-describedby={describedBy} onChange={(event) => onChange(event.target.checked)} />
+			<input id={id} type="checkbox" style={styles.box} checked={value} disabled={disabled} aria-describedby={describedBy} aria-required={required || undefined} aria-invalid={invalid || undefined} aria-label={label} onChange={(event) => onChange(event.target.checked)} />
 			<span>{caption ?? (value ? 'Enabled' : 'Disabled')}</span>
 		</label>
 	);

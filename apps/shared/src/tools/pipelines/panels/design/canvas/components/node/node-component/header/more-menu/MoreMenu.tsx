@@ -201,18 +201,23 @@ export default function MoreMenu({ options, isDisabled, buttonStyle }: IMoreMenu
 							return <div key={index} style={styles.divider} role="separator" />;
 						}
 
-						// The wrapper is the focusable menu item; its click (pointer or
-						// Enter / Space) reaches the PopupRow's handler.
+						// The wrapper is the focusable menu item and owns the action: a
+						// pointer click bubbles up to it, Enter / Space click it directly.
 						return (
-							<div key={index} role="menuitem" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} style={{ ...styles.item, ...(disabled ? styles.disabled : {}) }}>
-								<PopupRow
-									onClick={(event) => {
-										event.stopPropagation();
-										if (!handleClick || disabled) return;
-										handleClick(event);
-										setOpen(false);
-									}}
-								>
+							<div
+								key={index}
+								role="menuitem"
+								tabIndex={disabled ? -1 : 0}
+								aria-disabled={disabled || undefined}
+								style={{ ...styles.item, ...(disabled ? styles.disabled : {}) }}
+								onClick={(event) => {
+									event.stopPropagation();
+									if (!handleClick || disabled) return;
+									handleClick(event);
+									setOpen(false);
+								}}
+							>
+								<PopupRow>
 									<span style={styles.row}>
 										<span style={styles.label}>{label}</span>
 										<span style={styles.keys}>{keys?.length ? keys.map((value: string, i: number) => <KeyboardChip key={i} text={value} />) : null}</span>

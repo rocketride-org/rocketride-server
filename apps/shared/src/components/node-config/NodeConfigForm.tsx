@@ -295,7 +295,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				const stale = value !== undefined && value !== null && !branch;
 				out.push(
 					<PropertyField key={key} {...frame} error={stale ? null : message}>
-						<EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message) || stale} describedBy={describedBy(stale ? null : message)} />
+						<EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} required={required} invalid={Boolean(message) || stale} describedBy={describedBy(stale ? null : message)} />
 						{stale && (
 							<div style={styles.stale}>
 								<span>
@@ -319,16 +319,16 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 			let control: ReactNode;
 			switch (kind) {
 				case 'enum':
-					control = <EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
+					control = <EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} required={required} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				case 'boolean':
-					control = <BooleanWidget id={id} value={value === true} ghost={ghost} onChange={(next) => set(path, next)} disabled={readonly} describedBy={describedBy(message)} />;
+					control = <BooleanWidget id={id} value={value === true} ghost={ghost} onChange={(next) => set(path, next)} disabled={readonly} required={required} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				case 'array':
-					control = <ArrayWidget id={id} property={property} stored={stored} value={Array.isArray(value) ? value : []} ghost={ghost} onChange={(next) => set(path, next)} envKeys={envKeys} disabled={readonly} describedBy={describedBy(message)} />;
+					control = <ArrayWidget id={id} property={property} stored={stored} value={Array.isArray(value) ? value : []} ghost={ghost} onChange={(next) => set(path, next)} envKeys={envKeys} disabled={readonly} required={required} describedBy={describedBy(message)} />;
 					break;
 				case 'upload':
-					control = <UploadWidget id={id} stored={stored} storedSecurely={isStoredSecurely(config, path)} accept={typeof (property.options as Record<string, unknown> | undefined)?.accept === 'string' ? ((property.options as Record<string, unknown>).accept as string) : undefined} onChange={(next) => (next === undefined ? reset(path) : set(path, next))} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
+					control = <UploadWidget id={id} stored={stored} storedSecurely={isStoredSecurely(config, path)} accept={typeof (property.options as Record<string, unknown> | undefined)?.accept === 'string' ? ((property.options as Record<string, unknown>).accept as string) : undefined} onChange={(next) => (next === undefined ? reset(path) : set(path, next))} disabled={readonly} required={required} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				case 'oauth2': {
 					const oauthProvider = oauthProviderOf(title) ?? 'google';
@@ -339,7 +339,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				case 'object':
 					// A free-form object leaf edits as JSON; the validator reports a
 					// non-object the same way the server would
-					control = <TextWidget id={id} type="string" stored={stored === undefined ? undefined : typeof stored === 'string' ? stored : JSON.stringify(stored, null, 2)} defaultValue={hasDefault ? JSON.stringify(property.default) : undefined} multiline onChange={(next) => set(path, parseJsonOrKeep(next))} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
+					control = <TextWidget id={id} type="string" stored={stored === undefined ? undefined : typeof stored === 'string' ? stored : JSON.stringify(stored, null, 2)} defaultValue={hasDefault ? JSON.stringify(property.default) : undefined} multiline onChange={(next) => set(path, parseJsonOrKeep(next))} disabled={readonly} required={required} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				default:
 					control = (
@@ -357,6 +357,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 							minimum={typeof property.minimum === 'number' ? property.minimum : undefined}
 							maximum={typeof property.maximum === 'number' ? property.maximum : undefined}
 							disabled={readonly}
+							required={required}
 							invalid={Boolean(message)}
 							describedBy={describedBy(message)}
 						/>

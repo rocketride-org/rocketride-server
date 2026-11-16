@@ -125,6 +125,8 @@ export interface IArrayWidgetProps {
 	disabled?: boolean;
 	/** Ids of the message / help elements the control is described by. */
 	describedBy?: string;
+	/** Required state, announced on the group. */
+	required?: boolean;
 }
 
 // =============================================================================
@@ -137,8 +139,11 @@ export interface IArrayWidgetProps {
  * @param props - {@link IArrayWidgetProps}.
  * @returns The control.
  */
-export default function ArrayWidget({ id, property, value, ghost, onChange, envKeys, disabled, describedBy }: IArrayWidgetProps): ReactElement {
+export default function ArrayWidget({ id, property, value, ghost, onChange, envKeys, disabled, describedBy, required }: IArrayWidgetProps): ReactElement {
 	const item = arrayItem(property);
+	const title = String(property.title ?? property.name ?? 'Item');
+	// The frame's label names the group; items are named by title and position
+	const group = { id, role: 'group' as const, 'aria-labelledby': `${id}-label`, 'aria-describedby': describedBy, 'aria-required': required || undefined };
 	const itemType = typeof item?.type === 'string' ? item.type : 'string';
 	const list = Array.isArray(value) ? value : [];
 
@@ -146,7 +151,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 	if (item && Array.isArray(item.enum)) {
 		const options = enumOptions(item);
 		return (
-			<div style={styles.list} id={id} role="group" aria-describedby={describedBy}>
+			<div style={styles.list} {...group}>
 				{options.map(([optionValue, label]) => {
 					const checked = list.includes(optionValue);
 					return (
@@ -181,13 +186,13 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 	const add = (): void => onChange([...list, objectChildren ? {} : itemType === 'boolean' ? false : itemType === 'number' || itemType === 'integer' ? 0 : '']);
 
 	return (
-		<div style={styles.list} id={id} role="group" aria-describedby={describedBy}>
+		<div style={styles.list} {...group}>
 			{list.length === 0 && <span style={styles.ghostNote}>No entries</span>}
 			{list.map((element, index) => (
 				<div key={index} style={styles.row}>
 					{objectChildren ? (
 						<div style={styles.itemCard}>
-							<div style={styles.itemTitle}>{`${property.title ?? property.name ?? 'Item'} ${index + 1}`}</div>
+							<div style={styles.itemTitle}>{`${title} ${index + 1}`}</div>
 							{objectChildren.map((child) => {
 								const name = typeof child.name === 'string' ? child.name : (typeof child.path === 'string' ? child.path.split('.').pop() ?? '' : '');
 								if (!name || isFlagged(child, 'hidden') || child.type === 'constant') return null;
@@ -211,7 +216,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 							})}
 						</div>
 					) : (
-						<div style={styles.rowControl}>{renderScalar(`${id}-${index}`, item ?? { name: 'item', type: 'string' }, element, (next) => update(index, next ?? ''), envKeys, disabled || (item ? isFlagged(item, 'readonly') : false))}</div>
+						<div style={styles.rowControl}>{renderScalar(`${id}-${index}`, item ?? { name: 'item', type: 'string' }, element, (next) => update(index, next ?? ''), envKeys, disabled || (item ? isFlagged(item, 'readonly') : false), `${title} ${index + 1}`)}</div>
 					)}
 					{!disabled && (
 						<Button variant="ghost" small onClick={() => remove(index)} title="Remove">
@@ -241,16 +246,17 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
  * absent child key still MEANS the child's default, so a choice control shows
  * that default without writing it into the item.
  */
-function renderScalar(id: string, descriptor: ServiceProperty, value: unknown, onChange: (next: unknown) => void, envKeys: string[] | undefined, disabled: boolean | undefined): ReactElement {
+function renderScalar(id: string, descriptor: ServiceProperty, value: unknown, onChange: (next: unknown) => void, envKeys: string[] | undefined, disabled: boolean | undefined, label?: string): ReactElement {
 	const type = typeof descriptor.type === 'string' ? descriptor.type : 'string';
 	const absent = value === undefined || value === null;
 	const shown = absent ? descriptor.default : value;
+	const required = isFlagged(descriptor, 'required');
 	if (Array.isArray(descriptor.enum)) {
-		return <EnumWidget id={id} options={enumOptions(descriptor)} value={shown} ghost={absent && shown !== undefined} onChange={onChange} disabled={disabled} />;
+		return <EnumWidget id={id} options={enumOptions(descriptor)} value={shown} ghost={absent && shown !== undefined} onChange={onChange} disabled={disabled} required={required} label={label} />;
 	}
 	if (type === 'boolean') {
-		return <BooleanWidget id={id} value={shown === true} ghost={absent} onChange={onChange} disabled={disabled} />;
+		return <BooleanWidget id={id} value={shown === true} ghost={absent} onChange={onChange} disabled={disabled} required={required} label={label} />;
 	}
 	const numeric = type === 'number' || type === 'integer';
-	return <TextWidget id={id} type={numeric ? type : 'string'} stored={value} defaultValue={descriptor.default} onChange={onChange} multiline={descriptor.format === 'textarea'} secret={isFlagged(descriptor, 'secret')} envKeys={envKeys} disabled={disabled} placeholder={typeof descriptor.placeholder === 'string' ? descriptor.placeholder : undefined} />;
+	return <TextWidget id={id} type={numeric ? type : 'string'} stored={value} defaultValue={descriptor.default} onChange={onChange} multiline={descriptor.format === 'textarea'} secret={isFlagged(descriptor, 'secret')} envKeys={envKeys} disabled={disabled} required={required} label={label} placeholder={typeof descriptor.placeholder === 'string' ? descriptor.placeholder : undefined} />;
 }

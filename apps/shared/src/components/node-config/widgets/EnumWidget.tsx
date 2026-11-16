@@ -67,6 +67,10 @@ export interface IEnumWidgetProps {
 	invalid?: boolean;
 	/** Ids of the message / help elements the control is described by. */
 	describedBy?: string;
+	/** Required state, announced on the control. */
+	required?: boolean;
+	/** Accessible name when no visible label targets the control (array items). */
+	label?: string;
 }
 
 // =============================================================================
@@ -79,7 +83,7 @@ export interface IEnumWidgetProps {
  * @param props - {@link IEnumWidgetProps}.
  * @returns The control.
  */
-export default function EnumWidget({ id, options, value, ghost, onChange, disabled, invalid, describedBy }: IEnumWidgetProps): ReactElement {
+export default function EnumWidget({ id, options, value, ghost, onChange, disabled, invalid, describedBy, required, label }: IEnumWidgetProps): ReactElement {
 	const keys = options.map(([optionValue]) => JSON.stringify(optionValue));
 	const current = value === undefined ? '' : JSON.stringify(value);
 	const stale = current !== '' && !keys.includes(current);
@@ -92,6 +96,8 @@ export default function EnumWidget({ id, options, value, ghost, onChange, disabl
 			disabled={disabled}
 			aria-invalid={invalid || undefined}
 			aria-describedby={describedBy}
+			aria-required={required || undefined}
+			aria-label={label}
 			onChange={(event) => {
 				const index = keys.indexOf(event.target.value);
 				if (index >= 0) onChange(options[index][0]);
