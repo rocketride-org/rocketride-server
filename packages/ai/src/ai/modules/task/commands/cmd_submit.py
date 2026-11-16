@@ -51,13 +51,14 @@ pipeline answers, fails, or the caller cancels its pipe. How long to wait is
 the caller's decision, made on the client.
 """
 
+import asyncio
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ai.common.dap import DAPConn, TransportBase
 from .. import caller_stamp
 from .engine_access import engine_for, wait_running
-from ai.constants import CONST_SUBMIT_INLINE_MAX
+from ai.constants import CONST_SUBMIT_CLOSE_SECONDS, CONST_SUBMIT_INLINE_MAX
 
 from ..address import build_address, parse_address
 from ..task_control import control_key
@@ -328,15 +329,20 @@ class SubmitCommands(DAPConn):
 
     async def _close_after_failure(self, task: Any, close: Dict[str, Any]) -> None:
         """
-        Close a pipe after a failed write, never raising.
+        Close a pipe after a failed write, bounded, never raising.
 
         The failure that got here (a refused write, a pipeline error) is what
         the caller sees; the close is cleanup so the engine releases the slot.
+        It gets ``CONST_SUBMIT_CLOSE_SECONDS`` at most: this is not a deadline
+        on the request (that already failed) but a guard so an engine that
+        stops answering cannot hold the control's request slot forever. The
+        close itself is shielded, so it still completes on the engine when
+        the wait gives up.
         """
         pipe_id = (close.get('arguments') or {}).get('pipeId')
         try:
-            await task._send_data(close)
-        except Exception as exc:  # noqa: BLE001 - cleanup must not replace the original failure
+            await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_SUBMIT_CLOSE_SECONDS)
+        except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure
             self.debug_message(f'submit(): closing pipe {pipe_id} after a failed write did not complete: {exc!r}')
 
     def _data_request(self, arguments: Dict[str, Any]) -> Dict[str, Any]:

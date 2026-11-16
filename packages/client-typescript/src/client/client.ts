@@ -274,7 +274,9 @@ export class DataPipe {
 	 *
 	 * @example
 	 * ```typescript
-	 * const timer = setTimeout(() => void pipe.cancel(), 60_000);
+	 * const timer = setTimeout(() => {
+	 *   pipe.cancel().catch((err) => console.warn('cancel refused', err));
+	 * }, 60_000);
 	 * try {
 	 *   await pipe.write(data);
 	 * } finally {

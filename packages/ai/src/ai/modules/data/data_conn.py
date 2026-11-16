@@ -155,6 +155,7 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    cancelled: bool = False  # Set by a cancel frame; read by the tool dispatch, which never crosses the binder
     trace_id: int = None  # The request tree this binding started (plan 7.4)
     correlation_id: str = None  # The server-minted request id this pipe was opened for (ALB seam 7)
     caller: Optional[Dict[str, Any]] = None  # The server-set caller context stamped on the pipe (plan 5.3)
@@ -1190,8 +1191,10 @@ class DataConn(DAPConn):
         if not conn_pipe.is_open:
             raise ValueError(f'Cancel pipe with id {pipe_id} is not open')
 
-        # Flag the request; the binder does the rest
+        # Flag the request: the binder refuses the next lane, and the tool
+        # dispatch (which calls tool functions directly) reads the record
         conn_pipe.pipe.cancel()
+        conn_pipe.cancelled = True
         self._reset_pipe_activity(conn_pipe)
         self.debug_message(f'Cancelled pipe {pipe_id}')
         return self.build_response(request, body={'pipeId': pipe_id, 'cancelled': True})
@@ -1446,6 +1449,11 @@ class DataConn(DAPConn):
 
                 # Invoke the tool on the first node that handles it.
                 for node in candidates:
+                    # A cancel that arrived while the previous candidate ran
+                    # stops the dispatch here: tool functions are invoked
+                    # directly, so the binder's own check never runs for them
+                    if conn_pipe is not None and conn_pipe.cancelled:
+                        raise RequestCancelled(f'Pipe {pipe_id}: the request was cancelled')
                     py_instance = getattr(node, 'pyInstance', None)
                     if py_instance is None:
                         continue

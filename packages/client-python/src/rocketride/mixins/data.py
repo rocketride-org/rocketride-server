@@ -413,12 +413,17 @@ class DataMixin(DAPClient):
             Example:
                 async def bounded(pipe, data, seconds):
                     writer = asyncio.create_task(pipe.write(data))
-                    done, _ = await asyncio.wait({writer}, timeout=seconds)
-                    if not done:
-                        await pipe.cancel()
                     try:
-                        await writer
+                        done, _ = await asyncio.wait({writer}, timeout=seconds)
+                        if not done:
+                            await pipe.cancel()
+                        return await writer
                     finally:
+                        # The writer is observed on every path, a refused
+                        # cancel included, and the pipe is always closed
+                        if not writer.done():
+                            writer.cancel()
+                        await asyncio.gather(writer, return_exceptions=True)
                         await pipe.close()
             """
             if not self._opened or self._closed:

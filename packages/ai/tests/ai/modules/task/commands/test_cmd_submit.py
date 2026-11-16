@@ -33,6 +33,7 @@ advertises ``submit``.
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock
 
@@ -446,3 +447,26 @@ async def test_the_probe_advertises_process():
     response = await conn.on_rrext_public_probe(conn.build_request('rrext_public_probe'))
 
     assert 'submit' in response['body']['features']
+
+
+@pytest.mark.asyncio
+async def test_the_cleanup_close_after_a_failed_write_is_bounded(catalog, engines, deployments, monkeypatch):
+    """An engine that stops answering the cleanup close cannot hold the failed request open; the write's failure is what propagates."""
+    ts = _server()
+    deployments.deploy('team-1')
+    monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
+
+    async def send(self, request):
+        sub = request['arguments']['subcommand']
+        if sub == 'write':
+            raise TaskError(TaskError.CANCELLED, 'Pipe 1: the request was cancelled')
+        if sub == 'close':
+            await asyncio.sleep(10)
+        return {'body': {'pipeId': 1}}
+
+    monkeypatch.setattr(TaskEngine, '_send_data', send)
+    started = time.monotonic()
+    with pytest.raises(TaskError) as err:
+        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x')
+    assert err.value.code == TaskError.CANCELLED
+    assert time.monotonic() - started < 2.0

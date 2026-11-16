@@ -761,6 +761,7 @@ async def test_cancel_flags_the_pipe_and_keeps_the_binding(monkeypatch):
     body = await conn._cancel({}, {'pipeId': 1})
 
     conn_pipe.pipe.cancel.assert_called_once_with()
+    assert conn_pipe.cancelled, 'the record carries the flag for the tool path'
     assert body == {'pipeId': 1, 'cancelled': True}
     assert conn._pipe_map[1] is conn_pipe
     assert conn_pipe.is_open
@@ -849,3 +850,25 @@ async def test_close_still_closes_the_pipe_when_end_is_refused(monkeypatch):
     assert conn_pipe.has_failed
     assert body['objectId'] == 'obj-1'
     assert 1 not in conn._pipe_map
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_pipe_refuses_a_tool_dispatch_before_any_candidate_runs(monkeypatch):
+    """Tool functions are invoked directly, without the binder: the dispatch reads the record's flag itself."""
+    from ai.modules.data.data_conn import DataConnPipe, RequestCancelled
+
+    conn = _make_conn()
+    pipe = MagicMock(pipeId=1, traceId=11)
+    pipe.pipeType.id = 'tool_1'
+    pipe.next = None
+    pipe.pyInstance.invoke = MagicMock(side_effect=AssertionError('a cancelled request must not run a tool'))
+    conn._emit_tool_trace = lambda *a, **k: None
+    conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
+    conn._pipe_map = {1: DataConnPipe(pipe_id=1, pipe=pipe, is_open=True, cancelled=True)}
+
+    with pytest.raises(RequestCancelled):
+        await conn._tool(
+            {'command': 'rrext_process', 'seq': 2, 'arguments': {}},
+            {'tool': 'ask', 'nodeId': 'tool_1', 'input': {}, 'pipeId': 1, '_caller': {'userId': 'u1'}},
+        )
+    pipe.pyInstance.invoke.assert_not_called()
