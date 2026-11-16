@@ -387,8 +387,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	// State for consumers, a ref for the serializer (which runs off a timer).
 	const [parameters, setParametersState] = useState<Record<string, string>>({});
 	const parametersRef = useRef<Record<string, string>>({});
+	// True from a local change of the map until the serializer has sent it: an
+	// echo of an OLDER document must not replace what has not left yet
+	const parametersUnsentRef = useRef(false);
 	const setParameters = useCallback((next: Record<string, string>) => {
 		parametersRef.current = { ...next };
+		parametersUnsentRef.current = true;
 		setParametersState(parametersRef.current);
 	}, []);
 
@@ -435,6 +439,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// last exposure being dropped
 			if (Object.keys(parameters).length > 0) project.parameters = parameters;
 			else delete project.parameters;
+			parametersUnsentRef.current = false;
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
@@ -1038,11 +1043,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// The components are what the canvas holds. The parameters map may
 			// still differ: the PARAMS page writes it through the document
 			// (plan §5.5), and the canvas must serialize THAT map next, not
-			// the one it loaded. Take it without a canvas reload.
-			const incomingParameters = { ...((currentProject as { parameters?: Record<string, string> }).parameters ?? {}) };
-			if (JSON.stringify(incomingParameters) !== JSON.stringify(parametersRef.current)) {
-				parametersRef.current = incomingParameters;
-				setParametersState(incomingParameters);
+			// the one it loaded. Take it without a canvas reload, unless a local
+			// change of the map is still waiting for the serializer: a stale
+			// echo arriving in that window must not replace it (undo/redo of a
+			// parameters-only change has nothing unsent, so it still lands).
+			if (!parametersUnsentRef.current) {
+				const incomingParameters = { ...((currentProject as { parameters?: Record<string, string> }).parameters ?? {}) };
+				if (JSON.stringify(incomingParameters) !== JSON.stringify(parametersRef.current)) {
+					parametersRef.current = incomingParameters;
+					setParametersState(incomingParameters);
+				}
 			}
 			return;
 		}

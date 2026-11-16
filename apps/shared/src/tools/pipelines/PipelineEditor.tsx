@@ -555,6 +555,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				onContentChanged={host.onContentChanged}
 				onValidate={handleValidate}
 				getNodeSchema={handleGetNodeSchema}
+				{...(developerId ? { developerId } : {})}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
 				onOpenLink={host.openLink}

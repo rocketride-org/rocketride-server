@@ -107,9 +107,10 @@ export function exampleValue(descriptor: ServiceParamDescriptor, effectiveDefaul
  * @returns The literal source.
  */
 function jsLiteral(value: unknown): string {
-	if (typeof value === 'string') return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+	// JSON string syntax is JavaScript string syntax: every control character,
+	// quote and line break arrives escaped
 	if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-	return JSON.stringify(value);
+	return JSON.stringify(value ?? null);
 }
 
 /**
@@ -119,11 +120,13 @@ function jsLiteral(value: unknown): string {
  * @returns The literal source.
  */
 function pyLiteral(value: unknown): string {
-	if (typeof value === 'string') return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 	if (typeof value === 'boolean') return value ? 'True' : 'False';
 	if (typeof value === 'number') return String(value);
 	if (value === null || value === undefined) return 'None';
-	return JSON.stringify(value);
+	// A JSON string literal is a valid Python string literal (the same escapes,
+	// \uXXXX included); objects and lists are spelled with Python's constants
+	if (typeof value === 'string') return JSON.stringify(value);
+	return JSON.stringify(value).replace(/\btrue\b/g, 'True').replace(/\bfalse\b/g, 'False').replace(/\bnull\b/g, 'None');
 }
 
 /**
@@ -134,7 +137,8 @@ function pyLiteral(value: unknown): string {
  */
 function jsParams(params: ICallExampleParam[]): string {
 	if (params.length === 0) return '{}';
-	return `{ ${params.map((p) => `${p.name}: ${jsLiteral(p.value)}`).join(', ')} }`;
+	// Keys are serialized: every accepted public name (`1st`, `__proto__`) stays a plain data property
+	return `{ ${params.map((p) => `${JSON.stringify(p.name)}: ${jsLiteral(p.value)}`).join(', ')} }`;
 }
 
 /**
@@ -145,7 +149,7 @@ function jsParams(params: ICallExampleParam[]): string {
  */
 function pyParams(params: ICallExampleParam[]): string {
 	if (params.length === 0) return '{}';
-	return `{${params.map((p) => `'${p.name}': ${pyLiteral(p.value)}`).join(', ')}}`;
+	return `{${params.map((p) => `${JSON.stringify(p.name)}: ${pyLiteral(p.value)}`).join(', ')}}`;
 }
 
 // =============================================================================

@@ -390,7 +390,7 @@ const styles = {
 	// The P·n badge: this node contributes n public parameters (mockup M-1.1).
 	paramBadge: {
 		display: 'inline-block',
-		fontSize: '8px',
+		fontSize: 'var(--rr-font-size-xs)',
 		fontWeight: 600,
 		padding: '1px 4px',
 		marginLeft: 4,
