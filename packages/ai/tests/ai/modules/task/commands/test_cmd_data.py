@@ -99,11 +99,13 @@ async def test_a_dev_run_whose_org_is_out_of_credit_is_refused_at_start(catalog,
     """An owned run's paying unit is checked before anything launches."""
     import ai.account
 
-    monkeypatch.setattr(ai.account.account, 'check_spend', AsyncMock(return_value='no credit left'), raising=False)
+    check = AsyncMock(return_value='no credit left')
+    monkeypatch.setattr(ai.account.account, 'check_spend', check, raising=False)
     ts = _server()
     with pytest.raises(OutOfCreditsError):
         await _start(ts, _pipeline())
     assert engines == []
+    check.assert_awaited_once_with('org-1')
 
 
 # =============================================================================

@@ -640,8 +640,10 @@ def test_tokens_for_bills_gpu_under_tokens_and_metered_keys_under_their_own_name
 
 
 @pytest.mark.asyncio
-async def test_the_sink_coalesces_increments_and_keeps_a_failed_write_for_the_next_flush():
-    """Increments of one row add up in the buffer; a confirmed write drops it; a failed one rides the next flush."""
+async def test_the_sink_coalesces_increments_and_never_adds_a_failed_write_twice():
+    """Increments of one row add up in the buffer; a write, confirmed or failed, is detached and never resent
+    (the day row's key cannot tell a replay from a new increment, plan 8.2); increments after it start afresh.
+    """
     writes = []
     fail = {'on': True}
 
@@ -660,14 +662,13 @@ async def test_the_sink_coalesces_increments_and_keeps_a_failed_write_for_the_ne
     assert sink.pending['usage:20772:acme.docBrain:user-a:tokens']['request_count'] == 1
 
     await sink.flush()
-    assert writes == [] and len(sink.pending) == 2  # nothing confirmed, nothing lost
+    assert writes == [] and sink.pending == {}, 'a failed write is dropped: a replay could add it twice'
     fail['on'] = False
+    sink.post(_usage(3), {'hold_time': 0.75}, now=now)
     await sink.flush()
-    assert sorted(w['idempotency_key'] for w in writes) == sorted(
-        ['usage:20772:acme.docBrain:user-a:hold_time', 'usage:20772:acme.docBrain:user-a:tokens']
-    )
-    hold = next(w for w in writes if w['resource'] == 'hold_time')
-    assert (hold['amount'], hold['request_count'], hold['user_id'], hold['team_id']) == (0.75, 2, 'user-a', 'team-home')
+    assert [w['idempotency_key'] for w in writes] == [key]
+    hold = writes[0]
+    assert (hold['amount'], hold['request_count'], hold['user_id'], hold['team_id']) == (0.75, 1, 'user-a', 'team-home')
     assert sink.pending == {}
 
 

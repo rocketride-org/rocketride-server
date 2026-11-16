@@ -624,8 +624,13 @@ def test_the_session_budget_is_the_requests(monkeypatch):
     with pytest.raises(ValueError, match='budget exhausted'):
         inst._claim_session_slot()
     assert inst._sessions_started == 2  # the rejected claim did not increment
-    # Another request on the same engine starts from zero
-    assert _make_instance(monkeypatch, _StubClient(), max_sessions=2)._sessions_started == 0
+    # Another request on the SAME engine (one shared global) starts from zero and claims its full budget
+    second = _make_instance(monkeypatch, _StubClient(), max_sessions=2)
+    second.IGlobal = inst.IGlobal
+    assert second._sessions_started == 0
+    second._claim_session_slot()
+    second._claim_session_slot()
+    assert (inst._sessions_started, second._sessions_started) == (2, 2)
 
 
 class _FakeInstance:

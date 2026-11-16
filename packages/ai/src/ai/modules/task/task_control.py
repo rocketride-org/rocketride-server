@@ -455,7 +455,11 @@ class TaskControl:
         organization = getattr(account_info, 'organization', None) or {}
         org_id = str(organization.get('id') or self.orgId or '')
         user_id = str(getattr(account_info, 'userId', '') or self.userId or '')
-        return BillingAttribution(org_id=org_id, team_id=home_team(account_info) or self.teamId, user_id=user_id)
+        # An authenticated caller is attributed to THEIR home team, an empty
+        # one included (a member of no team in this org); the control's team
+        # stands in only when no caller identity came with the request
+        team_id = home_team(account_info) if account_info is not None else self.teamId
+        return BillingAttribution(org_id=org_id, team_id=team_id, user_id=user_id)
 
     # ==== Idle tracking ===========================================================
 

@@ -57,7 +57,7 @@ import copy
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -921,29 +921,22 @@ def search_hybrid_pkg():
     """
     import types
 
-    patchers = []
-
     def make_instance(engine, top_k=10, rrf_k=60):
         """Build an IInstance with a mock IGlobal/engine and a mock pipeline.
 
         The instance is certified multitenant (plan 4.2): it reaches the engine
         through the global's accessor and its knobs through ``settings``, so
-        the mock answers ``search_engine()`` and the settings view is patched
-        on the class for the fixture's lifetime.
+        the mock answers ``search_engine()`` and the settings view is seeded
+        on the instance.
         """
         inst = IInstance.__new__(IInstance)
         iglobal = MagicMock(spec=IGlobal)
         iglobal.engine = engine
         iglobal.search_engine.return_value = engine
         inst.IGlobal = iglobal
-        patcher = patch.object(
-            IInstance,
-            'settings',
-            new_callable=PropertyMock,
-            return_value=types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k),
-        )
-        patcher.start()
-        patchers.append(patcher)
+        # The settings view is per instance (the base caches it on _settings),
+        # so two instances keep their own knobs
+        inst._settings = types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k)
         mock_instance = MagicMock()
         inst.instance = mock_instance
         return inst, mock_instance
@@ -958,8 +951,6 @@ def search_hybrid_pkg():
         make_instance=make_instance,
     )
     yield pkg
-    for patcher in patchers:
-        patcher.stop()
 
 
 class TestIInstanceIntegration:

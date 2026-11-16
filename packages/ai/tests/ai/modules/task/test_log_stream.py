@@ -129,6 +129,9 @@ async def seed_rich(istore, spool_root, monkeypatch):
             # Overlapping status bodies so interior updates delta-encode.
             writer.append(stamp(status_event(state='running', objects={'ok': i, 'bad': 0})))
     writer.append(stamp(sse_event(7, 'embedding chunk 3/10')))
+    # An SSE on the same SLOT but another tree: a reader correlating by slot
+    # would take it; the trace id says it is not this request's
+    writer.append(stamp(sse_event(7, 'another tree on slot 7', tree='1.1.70')))
     writer.append(stamp(flow_op('leave', pid=7, component='loader', data={'doc': 'a.txt', 'step': 2})))
     writer.append(stamp(flow_op('end', pid=7, component='loader')))
 
@@ -159,12 +162,12 @@ async def seed_rich(istore, spool_root, monkeypatch):
     )
 
 
-def sse_event(pid, message):
-    """A node-authored SSE narration message on a pipe slot (unstamped); the tree matches flow_op's."""
+def sse_event(pid, message, tree=None):
+    """A node-authored SSE narration message on a pipe slot (unstamped); the tree matches flow_op's unless given."""
     return {
         'type': 'event',
         'event': 'apaevt_sse',
-        'body': {'pipeId': pid, 'traceId': f'1.1.{pid}', 'message': message},
+        'body': {'pipeId': pid, 'traceId': tree or f'1.1.{pid}', 'message': message},
     }
 
 
@@ -175,11 +178,13 @@ def golden_trace_windows(golden):
         if ev.get('event') != 'apaevt_flow' or (ev.get('body') or {}).get('op') != 'begin':
             continue
         slot = ev['body'].get('id')
+        tree = ev['body'].get('traceId')
         window = []
         for later in golden[i:]:
             body = later.get('body') or {}
             is_flow = later.get('event') == 'apaevt_flow' and body.get('id') == slot
-            is_sse = later.get('event') == 'apaevt_sse' and body.get('pipeId') == slot
+            # An SSE belongs to the request by its TREE, never by the reused slot
+            is_sse = later.get('event') == 'apaevt_sse' and body.get('traceId') == tree
             if not is_flow and not is_sse:
                 continue
             window.append(later)

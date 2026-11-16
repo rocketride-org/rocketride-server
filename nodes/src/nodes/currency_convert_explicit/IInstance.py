@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import Entry, IInstanceBase
+from rocketlib import warning, Entry, IInstanceBase
 from ai.common.schema import Answer
 
 from .IGlobal import IGlobal
@@ -41,6 +41,38 @@ class IInstance(IInstanceBase):
 
     def open(self, object: Entry):
         self.pending = []
+
+    def _conversion(self) -> dict:
+        """
+        The normalised conversion settings this binding converts with, built once from its settings view.
+
+        The resolver has applied the defaults and typed every value; the codes
+        are stripped because the fact comparison is textual. Read through
+        ``settings`` (never ``IGlobal.config``) so a caller's env placeholder
+        resolves to that caller's value on a shared engine.
+        """
+        cached = getattr(self, '_conversion_cache', None)
+        if cached is not None:
+            return cached
+        cfg = self.settings
+        conversion = {
+            'source_currency': str(cfg.source_currency or '').strip(),
+            'target_currency': str(cfg.target_currency or '').strip(),
+            'rate': cfg.rate,
+            'rate_date': str(cfg.rate_date or '').strip(),
+            'amount_field': str(cfg.amount_field or '').strip() or 'amount',
+            'currency_field': str(cfg.currency_field or '').strip() or 'currency',
+            'decimals': cfg.decimals,
+        }
+        # Conversion is opt-in: a blank code is loud but never fatal; the
+        # answers pass through unchanged (convert_fact handles the blank)
+        if not conversion['source_currency'] or not conversion['target_currency']:
+            warning(
+                'currency_convert_explicit: both source_currency and target_currency '
+                'must be set; answers will pass through unchanged.'
+            )
+        self._conversion_cache = conversion
+        return conversion
 
     def writeAnswers(self, answer: Answer):
         """Collect and convert an incoming answer; emit happens in ``closing``.
@@ -68,7 +100,7 @@ class IInstance(IInstanceBase):
                 payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append((True, convert_payload(payload, self.IGlobal.conversion_table())))
+            self.pending.append((True, convert_payload(payload, self._conversion())))
         else:
             # Plain text / scalar JSON carries no currency — pass through verbatim.
             self.pending.append((False, answer.getText() if answer is not None else ''))

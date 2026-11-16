@@ -21,7 +21,7 @@ import time
 import uuid
 import psutil
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, TYPE_CHECKING, Callable
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Tuple
 from rocketlib import debug
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
@@ -58,6 +58,10 @@ class TraceUsage:
     billing: Any = None
     address: str = ''
     rung: str = ''
+
+
+#: How long a closed bucket with no owner yet waits for its claim before it is dropped
+CONST_ORPHAN_BUCKET_SECONDS = 60.0
 
 
 class UsageSink:
@@ -125,7 +129,16 @@ class UsageSink:
             pending['request_count'] += 1
 
     async def flush(self) -> None:
-        """Write every pending increment; one that fails stays pending for the next flush."""
+        """
+        Write every pending increment.
+
+        Each entry is DETACHED before its write is awaited, so increments
+        posted meanwhile start a new entry and are never lost with the old
+        one. A write that fails is dropped, not retried: the day row's key
+        does not identify the increment, so a retry after a write that
+        committed but did not answer would add it twice; the loss is bounded
+        by one flush window of one user's usage on one pipe (plan 8.2).
+        """
         if not self._pending:
             return
         post = self._post
@@ -133,7 +146,10 @@ class UsageSink:
             from ai.account import account
 
             post = account.apply_usage
-        for key, pending in list(self._pending.items()):
+        for key in list(self._pending):
+            pending = self._pending.pop(key, None)
+            if pending is None:
+                continue
             try:
                 await post(
                     amount=pending['amount'],
@@ -141,10 +157,7 @@ class UsageSink:
                     **pending['row'],
                 )
             except Exception as e:
-                debug(f'[TaskMetrics] Usage increment {key} not written, carried to the next flush: {e}')
-                continue
-            # Confirmed: never add it again
-            self._pending.pop(key, None)
+                debug(f'[TaskMetrics] Usage increment {key} ({pending["amount"]}) not written and dropped: {e}')
 
     @property
     def pending(self) -> Dict[str, Dict[str, Any]]:
@@ -234,6 +247,13 @@ class TaskMetrics:
         self._attribute = attribute
         # Where a closed tree's usage goes (plan 8.2)
         self.usage_sink = usage_sink if usage_sink is not None else UsageSink()
+        # Closed buckets whose owner was not known when they arrived (a
+        # borrowed tool pipe's tree is claimed only once its response reaches
+        # the server): kept until the claim lands, dropped after the grace
+        self._orphans: Dict[int, Tuple[Dict[str, Any], float]] = {}
+        # What the sink has already posted per resource, so the engine owner's
+        # cumulative debit never charges a caller's request a second time
+        self._attributed: Dict[str, float] = {}
 
         # Process handle
         self._process = psutil.Process(pid)
@@ -619,6 +639,25 @@ class TaskMetrics:
         if self._on_update_callback:
             self._on_update_callback()
 
+    def _less_attributed(self, totals: List[Tuple[str, str, float]]) -> List[Tuple[str, str, float]]:
+        """
+        The owner's debit lines with the sink-posted amounts removed per resource.
+
+        Args:
+            totals: ``(resource, description, amount)`` lines, cumulative.
+
+        Returns:
+            The same lines, each resource reduced by what callers were charged, never below zero.
+        """
+        remaining = dict(self._attributed)
+        out: List[Tuple[str, str, float]] = []
+        for resource, description, amount in totals:
+            taken = min(amount, remaining.get(resource, 0.0))
+            if taken > 0:
+                remaining[resource] -= taken
+            out.append((resource, description, round(amount - taken, 1)))
+        return out
+
     async def _report_to_billing_system(self) -> None:
         """
         Write cumulative token usage to the credit ledger via ``account.apply_debit()``.
@@ -644,6 +683,11 @@ class TaskMetrics:
         # Custom counters use the counter name as both resource and description
         for counter_name, counter_tokens in self._status.tokens.custom.items():
             token_totals.append((counter_name, counter_name, counter_tokens))
+        # A caller's request is charged once: what the usage sink posted to the
+        # callers' day rows (hold time, bytes, the trees' GPU time) comes off
+        # the engine owner's cumulative debit, per resource (dashboard totals
+        # above stay engine-wide)
+        token_totals = self._less_attributed(token_totals)
         # ── Debug logging ────────────────────────────────────────────────
         try:
             debug(
@@ -770,24 +814,54 @@ class TaskMetrics:
         Args:
             traces: ``{traceId: {'timers', 'counters', 'closed'}}`` from the engine.
         """
+        self._adopt_orphans()
         for raw_id, bucket in traces.items():
             try:
                 trace_id = int(raw_id)
             except (TypeError, ValueError):
                 continue
-            usage = self.traces.get(trace_id)
+            if not self._take_bucket(trace_id, bucket):
+                # Nobody has claimed the tree yet: a closed bucket waits for
+                # the claim (a borrowed tool pipe's arrives with the tool
+                # response); an open one comes again with the next snapshot
+                if bucket.get('closed'):
+                    self._orphans[trace_id] = (bucket, time.time())
+
+    def _take_bucket(self, trace_id: int, bucket: Dict[str, Any]) -> bool:
+        """
+        Merge one tree's bucket into its accumulator; post and drop it when closed.
+
+        Args:
+            trace_id: The engine's bare traceId.
+            bucket: ``{'timers', 'counters', 'closed'}``.
+
+        Returns:
+            False when the tree has no owner yet (nothing taken).
+        """
+        usage = self.traces.get(trace_id)
+        if usage is None:
+            usage = self._attribute(trace_id) if self._attribute is not None else None
             if usage is None:
-                usage = self._attribute(trace_id) if self._attribute is not None else None
-                if usage is None:
-                    # Nobody claimed the tree (the engine's own binding): its
-                    # work is in the engine totals already
-                    continue
-                self.traces[trace_id] = usage
-            usage.timers = {str(k): float(v) for k, v in (bucket.get('timers') or {}).items()}
-            usage.counters = {str(k): int(v) for k, v in (bucket.get('counters') or {}).items()}
-            if bucket.get('closed'):
-                self.usage_sink.post(usage, self.tokens_for(usage))
-                self.traces.pop(trace_id, None)
+                return False
+            self.traces[trace_id] = usage
+        usage.timers = {str(k): float(v) for k, v in (bucket.get('timers') or {}).items()}
+        usage.counters = {str(k): int(v) for k, v in (bucket.get('counters') or {}).items()}
+        if bucket.get('closed'):
+            tokens = self.tokens_for(usage)
+            self.usage_sink.post(usage, tokens)
+            for resource, amount in tokens.items():
+                self._attributed[resource] = self._attributed.get(resource, 0.0) + float(amount)
+            self.traces.pop(trace_id, None)
+        return True
+
+    def _adopt_orphans(self) -> None:
+        """Attribute the closed buckets that arrived before their claim; drop those past the grace."""
+        if not self._orphans:
+            return
+        now = time.time()
+        for trace_id, (bucket, arrived) in list(self._orphans.items()):
+            if self._take_bucket(trace_id, bucket) or now - arrived > CONST_ORPHAN_BUCKET_SECONDS:
+                self._orphans.pop(trace_id, None)
 
     def tokens_for(self, usage: TraceUsage) -> Dict[str, float]:
         """

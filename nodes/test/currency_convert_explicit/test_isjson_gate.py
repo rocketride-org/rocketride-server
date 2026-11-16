@@ -136,6 +136,9 @@ def _build_instance(node_config):
 
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = glob
+    # The instance reads the conversion from its settings view (plan 6.2); outside
+    # the engine the resolved config stands in for it
+    inst._settings = glob.config
     captured = types.SimpleNamespace(answers=[])
     inst.instance = types.SimpleNamespace(writeAnswers=lambda a: captured.answers.append(a))
     inst.preventDefault = lambda: None

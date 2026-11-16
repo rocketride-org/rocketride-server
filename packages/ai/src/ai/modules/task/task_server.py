@@ -3311,6 +3311,11 @@ class TaskServer(DAPBase):
             _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
 
+            # Credit, before the new content launches (plan 0 S9): the same
+            # gate the first start of a dev run passes
+            if control.run_kind == 'dev':
+                await self._require_start_credit(control)
+
             old_engine = control.task
             engine = await self._repoint(
                 control,

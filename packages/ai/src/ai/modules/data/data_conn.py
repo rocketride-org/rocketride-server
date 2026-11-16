@@ -959,12 +959,15 @@ class DataConn(DAPConn):
                     # to here, so the failed open books its hold like any other
                     # (plan 8.1); a failure before the pipe was taken bills nothing
                     if pipe_instance:
+                        # Read before putPipe: the slot may be re-stamped by
+                        # another binding the moment it is back in the pool
+                        failed_trace_id = pipe_instance.traceId
                         try:
                             self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
-                        self._record_hold(hold_started, 0, pipe_instance.traceId)
+                        self._record_hold(hold_started, 0, failed_trace_id)
                     raise
                 finally:
                     metrics.set_current_trace(None)
@@ -1423,8 +1426,10 @@ class DataConn(DAPConn):
                 self._emit_tool_trace('END', pipe, call_label, {})
                 metrics.set_current_trace(previous_trace)
                 if borrowed:
+                    # Read before putPipe: the slot may be re-stamped by another binding at once
+                    borrowed_trace_id = pipe.traceId
                     self._target.putPipe(pipe)
-                    self._record_hold(hold_started, 0, pipe.traceId)
+                    self._record_hold(hold_started, 0, borrowed_trace_id)
 
         # Execute in thread, marking pipe as in-use so the zombie detector skips it
         if conn_pipe is not None:

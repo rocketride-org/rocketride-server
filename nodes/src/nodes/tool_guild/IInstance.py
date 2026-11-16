@@ -43,6 +43,7 @@ the obsolete style (see ``tool_v0/IInstance.py`` for the same rationale).
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any, Dict
 
 from rocketlib import Entry, IInstanceBase, tool_function
@@ -52,6 +53,11 @@ from ai.common.utils import normalize_tool_input, optional_int, require_str
 
 from . import guild_client
 from .IGlobal import IGlobal
+
+
+# One check-then-increment at a time: tool calls of one wave run on worker
+# threads, and a lock built per instance would itself be built in a race
+_BUDGET_LOCK = threading.Lock()
 
 
 class IInstance(IInstanceBase):
@@ -68,13 +74,14 @@ class IInstance(IInstanceBase):
     def _claim_session_slot(self) -> None:
         """Reserve one session against this request's budget, or raise."""
         limit = self._max_sessions()
-        if self._sessions_started >= limit:
-            raise ValueError(
-                f'Guild session budget exhausted: this request has already started '
-                f'{self._sessions_started} session(s), the configured maximum. Raise "Max sessions '
-                'per run" if this is expected - each session is a billed Guild automation.'
-            )
-        self._sessions_started += 1
+        with _BUDGET_LOCK:
+            if self._sessions_started >= limit:
+                raise ValueError(
+                    f'Guild session budget exhausted: this request has already started '
+                    f'{self._sessions_started} session(s), the configured maximum. Raise "Max sessions '
+                    'per run" if this is expected - each session is a billed Guild automation.'
+                )
+            self._sessions_started += 1
 
     """Dual node: exposes Guild.ai as an agent tool and as a pipeline step."""
 

@@ -54,6 +54,8 @@ class IGlobal(IGlobalBase):
     # out their full op_timeout against a stopped loop.
     _closing: bool = False
     _pending: Any = None
+    #: Guards the in-flight set and the open/closing transition (beginGlobal makes one per global)
+    _pending_lock: threading.Lock = threading.Lock()
 
     def beginGlobal(self) -> None:
         """Read the resolved config and start the bridge loop (once per pipe)."""
@@ -105,16 +107,18 @@ class IGlobal(IGlobalBase):
         the bridge loop itself (that would deadlock). Timeout defaults to the
         configured ``op_timeout``.
         """
-        loop = self._loop
-        if self._closing or loop is None or not loop.is_running():
-            coro.close()
-            raise RuntimeError('laserdata: node is not open')
         budget = self.op_timeout if timeout is None else timeout
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
-        pending = self._pending
-        if pending is not None:
-            with self._pending_lock:
-                pending.add(future)
+        # The open-state check, the scheduling and the registration are one
+        # step under the lock teardown takes to close and snapshot the set,
+        # so a future is never scheduled after the snapshot it is missing from
+        with self._pending_lock:
+            loop = self._loop
+            pending = self._pending
+            if self._closing or loop is None or pending is None or not loop.is_running():
+                coro.close()
+                raise RuntimeError('laserdata: node is not open')
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            pending.add(future)
         try:
             return future.result(budget)
         except concurrent.futures.CancelledError:
@@ -123,9 +127,8 @@ class IGlobal(IGlobalBase):
             future.cancel()
             raise RuntimeError(f'laserdata: operation timed out after {budget}s') from None
         finally:
-            if pending is not None:
-                with self._pending_lock:
-                    pending.discard(future)
+            with self._pending_lock:
+                pending.discard(future)
 
     def get_laser(self) -> Any:
         """Return the shared Laser connection, opening it on first use."""
@@ -140,11 +143,14 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         """Close the connection, stop the bridge loop, and clear secrets."""
-        self._closing = True
-        laser, self._laser = self._laser, None
-        loop, self._loop = self._loop, None
-        thread, self._loop_thread = self._loop_thread, None
-        pending, self._pending = self._pending, None
+        # The closing transition and the snapshot of in-flight futures happen
+        # under the lock run() registers under (see run)
+        with self._pending_lock:
+            self._closing = True
+            laser, self._laser = self._laser, None
+            loop, self._loop = self._loop, None
+            thread, self._loop_thread = self._loop_thread, None
+            pending, self._pending = self._pending, None
 
         # Fail concurrent in-flight tool calls fast: a cancelled future raises
         # in its waiting thread immediately instead of sitting out op_timeout

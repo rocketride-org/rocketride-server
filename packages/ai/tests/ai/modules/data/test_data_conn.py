@@ -703,7 +703,7 @@ async def test_a_borrowed_tool_pipe_carries_the_caller_and_books_its_hold(monkey
     conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
     holds = []
     monkeypatch.setattr(
-        conn, '_record_hold', lambda started, bytes_in, trace_id=None: holds.append((started, bytes_in))
+        conn, '_record_hold', lambda started, bytes_in, trace_id=None: holds.append((started, bytes_in, trace_id))
     )
     caller = {'userId': 'u1', 'traceLevel': 'none'}
 
@@ -717,19 +717,20 @@ async def test_a_borrowed_tool_pipe_carries_the_caller_and_books_its_hold(monkey
     assert pipe.caller == caller
     target.putPipe.assert_called_once_with(pipe)
     assert len(holds) == 1 and holds[0][0] is not None and holds[0][1] == 0
+    assert holds[0][2] == 11, "the hold is booked into the borrowed tool's own tree"
 
 
 def test_record_hold_books_the_tree_less_its_queue_wait_and_closes_it(monkeypatch):
     """Occupancy, never contention (P29): the model server's queue wait inside the request comes off the hold;
     the hold and bytes land in the tree's bucket, which is then final.
     """
-    import time as _time
     from ai.modules.data import data_conn as data_conn_mod
 
     calls = []
     fake_metrics = MagicMock()
     fake_metrics.trace_timer = lambda trace_id, name: 20.0 if (trace_id, name) == (7, 'gpu_queue_wait') else 0.0
-    fake_metrics.set_current_trace = lambda trace_id: calls.append(('bind', trace_id))
+    # The thread was bound to tree 3 before: the restore must put it back
+    fake_metrics.set_current_trace = lambda trace_id: (calls.append(('bind', trace_id)), 3)[1]
     fake_metrics.add_time = lambda timers: calls.append(('time', timers))
     fake_metrics.counter = lambda name, value: calls.append(('count', name, value))
     fake_metrics.close_trace = lambda trace_id: calls.append(('close', trace_id))
@@ -737,9 +738,11 @@ def test_record_hold_books_the_tree_less_its_queue_wait_and_closes_it(monkeypatc
     monkeypatch.setattr(data_conn_mod, 'metrics', fake_metrics)
     monkeypatch.setattr(data_conn_mod, 'monitorMetrics', lambda report: calls.append(('flush',)))
 
-    data_conn_mod.DataConn._record_hold(_time.perf_counter() - 0.1, 64, 7)
+    # A fixed clock: the hold is exactly 100 ms, 20 ms of it the GPU queue
+    monkeypatch.setattr(data_conn_mod.time, 'perf_counter', lambda: 1000.0)
+    data_conn_mod.DataConn._record_hold(1000.0 - 0.1, 64, 7)
     kinds = [c[0] for c in calls]
     assert kinds == ['bind', 'time', 'count', 'bind', 'close', 'flush']
-    booked = calls[1][1]['hold_time']
-    assert 60.0 <= booked < 100.0  # about 100 ms held, 20 ms of it the GPU queue
+    assert calls[0] == ('bind', 7) and calls[3] == ('bind', 3), 'bound to the tree, then the previous tree restored'
+    assert calls[1][1]['hold_time'] == pytest.approx(80.0)
     assert calls[2] == ('count', 'bytes_in', 64) and calls[4] == ('close', 7)

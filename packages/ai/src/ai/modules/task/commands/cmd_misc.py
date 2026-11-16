@@ -496,7 +496,9 @@ class MiscCommands(DAPConn):
             if 'components' in pipeline:
                 from ..task_engine import engine_sharing  # the engine module imports this package: lazy
 
-                sharing = engine_sharing(pipeline)
+                # The source validation ran against (an explicit argument, the
+                # spec's own, or the implied one), not only the spec's key
+                sharing = engine_sharing(pipeline, source or None)
                 if sharing is not None:
                     data = dict(data)
                     data['engineSharing'] = sharing

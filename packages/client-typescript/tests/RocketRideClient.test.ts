@@ -3182,7 +3182,7 @@ describe('RocketRideClient lifecycle operations', () => {
 				type: 'event',
 				seq: 81,
 				event: 'apaevt_sse',
-				body: { pipe_id: 7, type: 'chunk', data: { value: 'old' } },
+				body: { pipeId: 7, type: 'chunk', data: { value: 'old' } },
 			}),
 		} as MessageEvent);
 		await waitForLifecycle(() => sseStarted, 'held old SSE callback');

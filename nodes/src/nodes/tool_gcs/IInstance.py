@@ -62,18 +62,20 @@ class IInstance(IInstanceBase):
         """Track ``path`` for this request and delete its older download so disk use stays bounded."""
         if self._temp_files is None:
             self._temp_files = []
-        while self._temp_files:
-            self._remove_temp_path(self._temp_files.pop(0))
+        # A path whose deletion failed stays tracked so endInstance retries it
+        self._temp_files = [older for older in self._temp_files if not self._remove_temp_path(older)]
         self._temp_files.append(path)
 
     @staticmethod
-    def _remove_temp_path(path: str) -> None:
-        """Delete one downloaded file, tolerating one already gone."""
+    def _remove_temp_path(path: str) -> bool:
+        """Delete one downloaded file, tolerating one already gone; False when it is still there."""
         try:
             if path and os.path.exists(path):
                 os.remove(path)
+            return True
         except OSError as e:
             warning(f'tool_gcs: failed to remove temp file {path}: {e}')
+            return False
 
     def endInstance(self) -> None:
         """The request ended: its downloads go with it (another caller never sees or deletes them)."""
