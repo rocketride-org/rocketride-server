@@ -46,8 +46,9 @@ The result carries the stamps of plan 3.1: ``token`` (the address),
 arguments a NAME call passed: ``threads``, ``args``, ``env``, ``ttl``) and
 ``warnings`` (``address_collision``, ``repoint_storm``) when any.
 
-``timeout`` covers the request only, open to close. The server adds no
-deadline of its own (plan 3.1).
+The server adds no deadline of its own (plan 3.1): a request runs until the
+pipeline answers, fails, or the caller cancels its pipe. How long to wait is
+the caller's decision, made on the client.
 """
 
 import asyncio
@@ -102,8 +103,7 @@ class SubmitCommands(DAPConn):
             request: The DAP request. ``arguments`` carry exactly one of
                 ``name`` (the address) or ``pipeline`` (an inline spec), and
                 optionally ``source``, ``team``, ``data`` (inline payload),
-                ``objinfo``, ``mimetype``, ``timeout`` (seconds, open to
-                close), ``onChange`` (spec calls), ``origin`` (spec calls),
+                ``objinfo``, ``mimetype``, ``onChange`` (spec calls), ``origin`` (spec calls),
                 ``pipelineTraceLevel``, and the spec-only ``threads``/
                 ``args``/``env``/``ttl``.
 
@@ -114,7 +114,7 @@ class SubmitCommands(DAPConn):
         Raises:
             TaskError: TASK_INVALID_ARGUMENT, TASK_NOT_REGISTERED,
                 TASK_SOURCE_REQUIRED, TASK_SPEC_CHANGED, TASK_PAYLOAD_TOO_LARGE,
-                TASK_TIMEOUT, TASK_ENGINE_UNAVAILABLE.
+                TASK_ENGINE_UNAVAILABLE.
             PermissionError: No permission, or outside a scoped key's endpoints.
         """
         # Step 1: exactly one of name / pipeline
@@ -156,7 +156,7 @@ class SubmitCommands(DAPConn):
         # Step 4: deliver inline, or hand the address back for streaming
         body: Dict[str, Any] = {}
         if data is not None:
-            body = await self._deliver(control, args, data, stamps['converged'], params)
+            body = await self._deliver(control, args, data, params)
         body.update(stamps)
         return self.build_response(request, body=body)
 
@@ -243,7 +243,6 @@ class SubmitCommands(DAPConn):
         control: 'TaskControl',
         args: Dict[str, Any],
         data: bytes,
-        converged: str,
         params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -252,12 +251,9 @@ class SubmitCommands(DAPConn):
         ``params`` (already admitted by the control) ride the open, the one
         door every per-call value enters by (plan 3.1).
 
-        The clock of ``timeout`` starts at the open and stops at the close.
         The open carries a server-minted ``correlationId`` (idempotent open,
         ALB seam 7). A failure after the open closes the pipe before raising.
-
-        Raises:
-            TaskError: TASK_TIMEOUT with ``address`` and ``converged``.
+        Nothing here bounds the request: the server adds no deadline.
         """
         # Step 1: the engine (started again if it stopped, after the team
         # re-check), ready; the request is in flight through this control
@@ -306,7 +302,7 @@ class SubmitCommands(DAPConn):
                 try:
                     await task._send_data(_stamped({'subcommand': 'write', 'pipeId': pipe_id, 'data': data}))
                 except BaseException:
-                    await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipeId': pipe_id}))
+                    await self._close_after_failure(task, _stamped({'subcommand': 'close', 'pipeId': pipe_id}))
                     raise
                 closed = await task._send_data(_stamped({'subcommand': 'close', 'pipeId': pipe_id}))
                 closed_body = dict(closed.get('body') or {})
@@ -323,30 +319,25 @@ class SubmitCommands(DAPConn):
                     control.stats.failedSize += len(data)
                 owners.release(trace_id)
 
-        # Step 2: the request, bounded only by the caller's timeout
-        timeout = args.get('timeout')
+        # Step 2: the request, unbounded: it ends when the pipeline answers
+        # or fails. A caller that wants a bound streams through its own pipe
+        # and cancels it
         try:
-            if timeout is None:
-                return await _round_trip()
-            return await asyncio.wait_for(_round_trip(), float(timeout))
-        except asyncio.TimeoutError:
-            raise TaskError(
-                TaskError.TIMEOUT,
-                f'submit() on {control.address!r} exceeded its timeout of {timeout}s',
-                address=control.address,
-                converged=converged,
-            ) from None
+            return await _round_trip()
         finally:
             control.end_request()
 
-    async def _close_quietly(self, task: Any, close: Dict[str, Any]) -> None:
+    async def _close_after_failure(self, task: Any, close: Dict[str, Any]) -> None:
         """
         Close a pipe after a failed write, bounded, never raising.
 
-        The failure that got here (a timeout cancelling the write, a refused
-        write) is what the caller sees; the close is cleanup and gets
-        ``CONST_SUBMIT_CLOSE_SECONDS`` at most, so a cancelled request is
-        never held open by an engine that does not answer the close.
+        The failure that got here (a refused write, a pipeline error) is what
+        the caller sees; the close is cleanup so the engine releases the slot.
+        It gets ``CONST_SUBMIT_CLOSE_SECONDS`` at most: this is not a deadline
+        on the request (that already failed) but a guard so an engine that
+        stops answering cannot hold the control's request slot forever. The
+        close itself is shielded, so it still completes on the engine when
+        the wait gives up.
         """
         pipe_id = (close.get('arguments') or {}).get('pipeId')
         try:

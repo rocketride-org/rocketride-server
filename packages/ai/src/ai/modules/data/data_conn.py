@@ -25,7 +25,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 from starlette.websockets import WebSocketDisconnect
-from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
+from ai.constants import (
+    CONST_DATA_OPEN_TARGET_WAIT,
+    CONST_DATA_PIPE_TIMEOUT,
+    CONST_DATA_SHUTDOWN_TIMEOUT,
+    CONST_TASK_CANCELLED_CODE,
+)
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
@@ -99,6 +104,34 @@ def _trim_tool_data(value: Any) -> Any:
     return text[:TOOL_TRACE_DATA_CAP] + '...'
 
 
+class RequestCancelled(RuntimeError):
+    """
+    The caller cancelled the request a write or tool frame was running (``pipe.cancel()``).
+
+    Raised in place of the engine's ``Ec.Cancelled`` error so the DAP error
+    response carries ``code`` (the DAP base copies a string ``code`` onto the
+    packet) and the server can hand the SDK a typed ``TaskError``.
+    """
+
+    code = CONST_TASK_CANCELLED_CODE
+
+
+def _raise_if_cancelled(exc: BaseException, pipe_id: Any) -> None:
+    """
+    Turn the engine's ``Ec.Cancelled`` into ``RequestCancelled``; any other error passes.
+
+    Args:
+        exc: The exception a pipe call raised (the binder's ``Error`` arrives
+            as a plain ``Exception`` with an integer ``code``).
+        pipe_id: The slot, for the message.
+
+    Raises:
+        RequestCancelled: ``exc`` is the binder refusing a cancelled request.
+    """
+    if getattr(exc, 'code', None) == int(Ec.Cancelled):
+        raise RequestCancelled(f'Pipe {pipe_id}: the request was cancelled') from exc
+
+
 @dataclass
 class DataConnPipe:
     """
@@ -122,6 +155,7 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    cancelled: bool = False  # Set by a cancel frame; read by the tool dispatch, which never crosses the binder
     trace_id: int = None  # The request tree this binding started (plan 7.4)
     correlation_id: str = None  # The server-minted request id this pipe was opened for (ALB seam 7)
     caller: Optional[Dict[str, Any]] = None  # The server-set caller context stamped on the pipe (plan 5.3)
@@ -828,6 +862,8 @@ class DataConn(DAPConn):
             return await self._write(request, args)
         elif subcmd == 'close':
             return await self._close(request, args)
+        elif subcmd == 'cancel':
+            return await self._cancel(request, args)
         elif subcmd == 'tool':
             return await self._tool(request, args)
         else:
@@ -1037,11 +1073,13 @@ class DataConn(DAPConn):
                         pipe.writeText(string_data)
 
                 elif lane == 'json':
+                    # Only the parse is converted: an error from the write keeps
+                    # its code (the binder's Cancelled is recognised by the frame)
                     try:
                         json_data = json.loads(data.decode('utf-8'))
-                        pipe.writeJson(IJson(json_data))
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeJson(IJson(json_data))
 
                 elif lane == 'audio':
                     pipe.writeAudio(AVI_ACTION.WRITE, mime_type, data)
@@ -1062,9 +1100,9 @@ class DataConn(DAPConn):
                     try:
                         question_str = data.decode('utf-8')
                         question = Question.model_validate_json(question_str)
-                        pipe.writeQuestions(question)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeQuestions(question)
 
                 elif lane == 'documents':
                     try:
@@ -1075,17 +1113,17 @@ class DataConn(DAPConn):
                             docs = [Doc.model_validate(d) for d in doc_data]
                         else:
                             docs = [Doc.model_validate(doc_data)]
-                        pipe.writeDocuments(docs)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeDocuments(docs)
 
                 elif lane == 'answers':
                     try:
                         answer_str = data.decode('utf-8')
                         answer = Answer.model_validate_json(answer_str)
-                        pipe.writeAnswers(answer)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeAnswers(answer)
 
                 elif lane == 'classifications':
                     try:
@@ -1095,9 +1133,9 @@ class DataConn(DAPConn):
                         classifications = class_data.get('classifications', {})
                         policy = class_data.get('classificationPolicy', {})
                         rules = class_data.get('classificationRules', {})
-                        pipe.writeClassifications(classifications, policy, rules)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeClassifications(classifications, policy, rules)
 
                 else:
                     raise ValueError(f'Invalid lane {lane}')
@@ -1112,9 +1150,54 @@ class DataConn(DAPConn):
         conn_pipe.in_use = True
         try:
             await asyncio.to_thread(self._in_trace, conn_pipe.trace_id, write_sync)
+        except Exception as exc:
+            # A cancelled request answers with its own code; the pipe stays
+            # open for the close that releases it
+            _raise_if_cancelled(exc, pipe_id)
+            raise
         finally:
             conn_pipe.in_use = False
         return self.build_response(request)
+
+    async def _cancel(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the cancel command: flag the request so its write unwinds at the next node boundary.
+
+        One atomic store on the engine pipe, from the event loop while the
+        write runs on its worker thread: no lock, no wait, and the binding is
+        NOT removed. The write in flight fails with ``TASK_CANCELLED`` when the
+        binder next crosses a node, and the client's close then runs as
+        usual and releases the slot. A pipe with no write in flight is
+        flagged all the same: its next write fails at once. Cancel is
+        activity for the zombie timer.
+
+        Args:
+            request: The DAP request.
+            args: ``pipeId`` and the server's ``_caller`` stamp.
+
+        Returns:
+            ``{pipeId, cancelled: True}``.
+
+        Raises:
+            ValueError: No ``pipe_id``, the slot is not open, or it is open
+                for another request.
+        """
+        pipe_id = args.get('pipeId', None)
+        if pipe_id is None:
+            raise ValueError('No pipe_id specified')
+
+        # The frame's own binding, checked like a write's
+        conn_pipe = self._binding_for(pipe_id, args, 'Cancel')
+        if not conn_pipe.is_open:
+            raise ValueError(f'Cancel pipe with id {pipe_id} is not open')
+
+        # Flag the request: the binder refuses the next lane, and the tool
+        # dispatch (which calls tool functions directly) reads the record
+        conn_pipe.pipe.cancel()
+        conn_pipe.cancelled = True
+        self._reset_pipe_activity(conn_pipe)
+        self.debug_message(f'Cancelled pipe {pipe_id}')
+        return self.build_response(request, body={'pipeId': pipe_id, 'cancelled': True})
 
     async def _close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -1159,15 +1242,17 @@ class DataConn(DAPConn):
                 # the pipeline produced — so result extraction is OUTSIDE
                 # the try/except.
                 try:
-                    # End the pipe (sends END action to finalize streams)
-                    self._end(conn_pipe)
-
-                    # Close the pipe to finalize all processing.
-                    # This calls closing() which may flush buffered data
-                    # through the pipeline — if a downstream node throws,
-                    # the exception is caught below.
-                    pipe = conn_pipe.pipe
-                    pipe.close()
+                    try:
+                        # End the pipe (sends END action to finalize streams)
+                        self._end(conn_pipe)
+                    finally:
+                        # Close the pipe to finalize all processing, even when
+                        # END was refused (a cancelled request refuses every
+                        # lane but close). This calls closing() which may flush
+                        # buffered data through the pipeline — if a downstream
+                        # node throws, the exception is caught below.
+                        pipe = conn_pipe.pipe
+                        pipe.close()
 
                 except Exception as e:
                     # Pipeline error during end/close — log it but continue
@@ -1364,6 +1449,11 @@ class DataConn(DAPConn):
 
                 # Invoke the tool on the first node that handles it.
                 for node in candidates:
+                    # A cancel that arrived while the previous candidate ran
+                    # stops the dispatch here: tool functions are invoked
+                    # directly, so the binder's own check never runs for them
+                    if conn_pipe is not None and conn_pipe.cancelled:
+                        raise RequestCancelled(f'Pipe {pipe_id}: the request was cancelled')
                     py_instance = getattr(node, 'pyInstance', None)
                     if py_instance is None:
                         continue
@@ -1437,6 +1527,10 @@ class DataConn(DAPConn):
         try:
             result, trace_id = await asyncio.to_thread(tool_sync)
             return self.build_response(request, body={'result': result, 'traceId': trace_id})
+        except Exception as exc:
+            # A tool call on a cancelled pipe answers with the request's code
+            _raise_if_cancelled(exc, pipe_id)
+            raise
         finally:
             if conn_pipe is not None:
                 conn_pipe.in_use = False

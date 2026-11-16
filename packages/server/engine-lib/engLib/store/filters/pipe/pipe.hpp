@@ -175,6 +175,15 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
+    ///		Set by the caller's cancel: Binder::callMethods refuses every
+    ///		lane but close/closing with Ec::Cancelled from then on, so the
+    ///		request unwinds at the next node boundary without any node
+    ///		taking part. Cleared by getPipe() when the slot is handed out
+    //-----------------------------------------------------------------
+    std::atomic<bool> cancelled{false};
+
+    //-----------------------------------------------------------------
+    /// @details
     ///		The binding generation: bumped by every getPipe() that hands
     ///		this pipe out. Each instance of the chain binds to it on its
     ///		first touch and is ended by putPipe() (plan 4.1 rule 2);

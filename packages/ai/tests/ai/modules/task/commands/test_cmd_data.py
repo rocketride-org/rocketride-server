@@ -472,3 +472,33 @@ def test_the_stamp_and_record_cost_microseconds():
 
     assert per_frame < 100e-6, f'{per_frame * 1e6:.1f} us per frame'
     assert ts is not None
+
+
+# =============================================================================
+# cancel: an attach-only frame on the request's own binding
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_attaches_to_the_open_pipe_and_leaves_its_record_in_place(catalog, engines, engine_log):
+    """Cancel rides the open-pipe record like a write: same engine, same request id, nothing retired."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+
+    # Nobody opened slot 1 on this control: refused before anything is sent
+    with pytest.raises(PermissionError):
+        await _frame(conn, subcommand='cancel', pipeId=1)
+    assert engine_log == []
+
+    slot = await _opened(ts, conn)
+    opened_on = engine_log[0]['engine']
+    await _frame(conn, subcommand='cancel', pipeId=slot)
+
+    # Forwarded to the engine the pipe opened on, under the open's request id
+    assert engine_log[1]['engine'] is opened_on
+    assert engine_log[1]['_caller']['correlationId'] == engine_log[0]['correlationId']
+    # The binding is still open: the close that follows is what retires it
+    assert slot in control.open_pipes
+    await _frame(conn, subcommand='close', pipeId=slot)
+    assert slot not in control.open_pipes

@@ -92,11 +92,6 @@ CONST_ENV_MASK = '••••••••'
 # One shared constant with the server and the TypeScript SDK (1 MiB).
 SUBMIT_INLINE_MAX = 1024 * 1024
 
-#: Seconds the TRANSPORT deadline of a submit() request outlives the caller's
-#: ``timeout`` (which the server enforces, pipe open to close): the server's own
-#: timeout error, never the transport's, is what the caller sees.
-SUBMIT_TRANSPORT_MARGIN = 60
-
 # Default store directory for project pipeline files.
 # Use this constant instead of hardcoding '.projects'.
 PROJECT_DIR = '.projects'

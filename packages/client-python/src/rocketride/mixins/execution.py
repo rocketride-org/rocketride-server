@@ -59,7 +59,7 @@ import copy
 import os
 from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
-from ..core.constants import SUBMIT_INLINE_MAX, SUBMIT_TRANSPORT_MARGIN
+from ..core.constants import SUBMIT_INLINE_MAX
 from ..types.pipeline import SUBMIT_RESULT, PipelineConfig
 from ..types.task import TASK_STATUS
 
@@ -143,7 +143,6 @@ class ExecutionMixin(DAPClient):
         env: Dict[str, str] = None,
         pipeline_trace_level: str = None,
         on_change: str = 'error',
-        timeout: float = None,
         team: str = None,
     ) -> SUBMIT_RESULT:
         """
@@ -185,7 +184,6 @@ class ExecutionMixin(DAPClient):
             pipeline_trace_level: Trace level for this pipeline's requests
                 (``'none'``, ``'metadata'``, ``'summary'``, ``'full'``).
             on_change: ``'error'`` | ``'keep'`` | ``'auto'`` (spec calls).
-            timeout: Seconds for the request (pipe open to close).
             team: Answer ``@team`` from this one of your teams.
 
         Returns:
@@ -198,8 +196,13 @@ class ExecutionMixin(DAPClient):
             ValueError: Not exactly one of name/pipeline/filepath, or data
                 that is neither str nor bytes.
             RuntimeError: The server refused (not found, spec changed,
-                permission, timeout ...), or does not support ``submit``.
-            TimeoutError: A streamed request outlived ``timeout``.
+                permission ...), or does not support ``submit``.
+
+        ``submit()`` adds no deadline of its own and neither does the
+        server: the request runs until the pipeline answers or fails. A
+        ``request_timeout`` configured on the client still applies, as the
+        caller's own bound. To stop a request, stream through your own
+        ``pipe()`` and call ``cancel()`` on it.
 
         Example:
             result = await client.submit(name='acme.docBrain', data='What is in this file?')
@@ -232,27 +235,22 @@ class ExecutionMixin(DAPClient):
             'args': args,
             'ttl': ttl,
             'pipelineTraceLevel': pipeline_trace_level,
-            'timeout': timeout,
         }
         arguments.update({key: value for key, value in optional.items() if value is not None})
         rocket_env = self._rocket_env(env) if name is None else (env or {})
         if rocket_env:
             arguments['env'] = rocket_env
 
-        # Step 3: inline in one request, unless the SDK must stream. The
-        # request is built here, not through call(): ``timeout`` is a SERVER
-        # argument (seconds, pipe open to close) that call() would take for
-        # its own transport deadline. The transport deadline is separate and
-        # outlives the server's, so the server's timeout error is the one the
-        # caller sees.
+        # Step 3: inline in one request, unless the SDK must stream. No
+        # deadline on either side: the request runs until the pipeline
+        # answers or fails.
         inline = data is not None and on_sse is None and len(data) <= SUBMIT_INLINE_MAX
         if inline:
             arguments['data'] = data
         message = self.build_request(command='rrext_submit', arguments=arguments)
-        transport_timeout = None if timeout is None else (float(timeout) + SUBMIT_TRANSPORT_MARGIN) * 1000
         if self._on_trace:
             self._on_trace(self.TRACE_REQUEST, message)
-        response = await self.request(message, timeout=transport_timeout)
+        response = await self.request(message)
         if self.did_fail(response):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
@@ -269,10 +267,9 @@ class ExecutionMixin(DAPClient):
         # Step 4: stream to the address the server answered with, through
         # the team that answered (``@team``): the data path resolves the
         # address again and must land on the same control.
-        streamed = self.send(
+        result = await self.send(
             stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'), params=params
         )
-        result = await (asyncio.wait_for(streamed, timeout) if timeout is not None else streamed)
         return {**(result or {}), **stamps}
 
     async def use(

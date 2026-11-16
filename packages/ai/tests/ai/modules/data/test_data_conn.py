@@ -746,3 +746,129 @@ def test_record_hold_books_the_tree_less_its_queue_wait_and_closes_it(monkeypatc
     assert calls[0] == ('bind', 7) and calls[3] == ('bind', 3), 'bound to the tree, then the previous tree restored'
     assert calls[1][1]['hold_time'] == pytest.approx(80.0)
     assert calls[2] == ('count', 'bytes_in', 64) and calls[4] == ('close', 7)
+
+
+# ---------------------------------------------------------------------------
+# cancel — flags the engine pipe; the write in flight answers TASK_CANCELLED
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_flags_the_pipe_and_keeps_the_binding(monkeypatch):
+    """One store on the engine pipe, no removal: the close that follows releases the slot."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+
+    body = await conn._cancel({}, {'pipeId': 1})
+
+    conn_pipe.pipe.cancel.assert_called_once_with()
+    assert conn_pipe.cancelled, 'the record carries the flag for the tool path'
+    assert body == {'pipeId': 1, 'cancelled': True}
+    assert conn._pipe_map[1] is conn_pipe
+    assert conn_pipe.is_open
+
+
+@pytest.mark.asyncio
+async def test_cancel_on_a_slot_that_is_not_open_is_refused(monkeypatch):
+    """A slot nobody opened, or one open for another request, never reaches the engine."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+
+    with pytest.raises(ValueError, match='not found'):
+        await conn._cancel({}, {'pipeId': 2})
+
+    conn_pipe.correlation_id = 'req-a'
+    with pytest.raises(ValueError, match='another request'):
+        await conn._cancel({}, {'pipeId': 1, '_caller': {'correlationId': 'req-b'}})
+    conn_pipe.pipe.cancel.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_write_the_binder_refused_as_cancelled_answers_with_the_cancelled_code(monkeypatch):
+    """The binder's Ec.Cancelled arrives as a plain exception with an int code; the frame answers TASK_CANCELLED."""
+    from rocketlib import Ec
+
+    from ai.constants import CONST_TASK_CANCELLED_CODE
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeText.side_effect = refused
+
+    with pytest.raises(RequestCancelled) as err:
+        await conn._write({}, {'pipeId': 1, 'data': b'more'})
+    assert err.value.code == CONST_TASK_CANCELLED_CODE
+    assert conn_pipe.has_failed
+    # The binding stays for the close
+    assert conn._pipe_map[1] is conn_pipe
+
+
+@pytest.mark.asyncio
+async def test_any_other_write_error_passes_through_unchanged(monkeypatch):
+    """Only the binder's Cancelled is re-coded; a node's own error keeps its type."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.pipe.writeText.side_effect = RuntimeError('node blew up')
+
+    with pytest.raises(RuntimeError, match='node blew up'):
+        await conn._write({}, {'pipeId': 1, 'data': b'x'})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_json_write_keeps_the_cancelled_code(monkeypatch):
+    """The json lane converts only its parse to ValueError: the binder's Cancelled from the write keeps its code."""
+    from rocketlib import Ec
+
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'json'
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeJson.side_effect = refused
+
+    with pytest.raises(RequestCancelled):
+        await conn._write({}, {'pipeId': 1, 'data': b'{"k": 1}'})
+    # A parse failure is still the lane's ValueError
+    conn_pipe.has_failed = False
+    with pytest.raises(ValueError):
+        await conn._write({}, {'pipeId': 1, 'data': b'not json'})
+
+
+@pytest.mark.asyncio
+async def test_close_still_closes_the_pipe_when_end_is_refused(monkeypatch):
+    """After a cancel the END lane write is refused; pipe.close() must still run so the slot is released."""
+    from rocketlib import Ec
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'audio'
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeAudio.side_effect = refused
+
+    body = await conn._close({}, {'pipeId': 1})
+
+    conn_pipe.pipe.close.assert_called_once_with()
+    assert conn_pipe.has_failed
+    assert body['objectId'] == 'obj-1'
+    assert 1 not in conn._pipe_map
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_pipe_refuses_a_tool_dispatch_before_any_candidate_runs(monkeypatch):
+    """Tool functions are invoked directly, without the binder: the dispatch reads the record's flag itself."""
+    from ai.modules.data.data_conn import DataConnPipe, RequestCancelled
+
+    conn = _make_conn()
+    pipe = MagicMock(pipeId=1, traceId=11)
+    pipe.pipeType.id = 'tool_1'
+    pipe.next = None
+    pipe.pyInstance.invoke = MagicMock(side_effect=AssertionError('a cancelled request must not run a tool'))
+    conn._emit_tool_trace = lambda *a, **k: None
+    conn.build_response = MagicMock(side_effect=lambda request, body=None: body)
+    conn._pipe_map = {1: DataConnPipe(pipe_id=1, pipe=pipe, is_open=True, cancelled=True)}
+
+    with pytest.raises(RequestCancelled):
+        await conn._tool(
+            {'command': 'rrext_process', 'seq': 2, 'arguments': {}},
+            {'tool': 'ask', 'nodeId': 'tool_1', 'input': {}, 'pipeId': 1, '_caller': {'userId': 'u1'}},
+        )
+    pipe.pyInstance.invoke.assert_not_called()

@@ -1729,9 +1729,15 @@ class TaskEngine(DAPBase):
         # Propagate subprocess failures so callers don't silently
         # receive success for a failed operation.
         if client.did_fail(response):
-            if response.get('code') == OutOfCreditsError.code:
-                raise OutOfCreditsError(response.get('message'))
-            raise RuntimeError(response.get('message', 'Data request failed'))
+            code = response.get('code')
+            message = response.get('message', 'Data request failed')
+            if code == OutOfCreditsError.code:
+                raise OutOfCreditsError(message)
+            # A coded refusal (a cancelled request, for one) keeps its code
+            # across the hop, so the client can classify on it
+            if isinstance(code, str) and code:
+                raise TaskError(code, message)
+            raise RuntimeError(message)
 
         # An open answers with the binding's bare trace counter; the caller
         # gets the wire traceId (plan 7.4) - the same string its events carry

@@ -80,6 +80,14 @@ async with await client.pipe(token, mime_type='application/json') as pipe:
     await pipe.write(b'{"key": "value2"}')
 ```
 
+A request has no timeout of its own: a write returns when the pipeline has processed
+it, however long that takes (a `request_timeout` configured on the client still
+applies). To stop one, call `cancel()` from another task. Cancellation is cooperative
+and takes effect at the next node boundary: the pending write fails with a
+`PipeException` whose `code` is `TASK_CANCELLED` once the node running its current step
+finishes, and a cancel during the last node lets that write complete. `close()` still
+runs and releases the pipe.
+
 Properties: `is_opened` and `pipe_id` (server-assigned after `open()`). `pipe()` and
 the pipe itself accept an `on_sse` callback for server-sent events, and
 `DataPipe.tool()` invokes a pipeline tool function through the pipe — see the

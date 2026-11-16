@@ -476,6 +476,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe(PIPELINE_TRACE_LEVEL traceLevel,
         bound->traceLevel = traceLevel;
         bound->bindDepth = bindDepth;
 
+        // A cancel belongs to the request that asked for it, never to the
+        // next holder of the slot
+        bound->cancelled.store(false, std::memory_order_relaxed);
+
         // A new binding: every instance of the chain is constructed again
         // on its first touch under this generation (plan 4.1 rule 2)
         ++bound->generation;

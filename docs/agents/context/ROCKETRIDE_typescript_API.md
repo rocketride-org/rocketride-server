@@ -365,12 +365,12 @@ await client.restart({ projectId: 'proj-123', source: 'webhook_1', pipeline });
 
 ### `submit(options): Promise<SUBMIT_RESULT>`
 
-One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Options: exactly one of `name`, `pipeline` or `filepath` (Node only), plus `source?`, `params?`, `data?`, `objinfo?`, `mimetype?`, `onSSE?`, `threads?`, `args?`, `ttl?`, `env?`, `pipelineTraceLevel?`, `onChange?` (`'error'` | `'keep'` | `'auto'`), `timeout?` (seconds), `team?`.
+One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Options: exactly one of `name`, `pipeline` or `filepath` (Node only), plus `source?`, `params?`, `data?`, `objinfo?`, `mimetype?`, `onSSE?`, `threads?`, `args?`, `ttl?`, `env?`, `pipelineTraceLevel?`, `onChange?` (`'error'` | `'keep'` | `'auto'`), `team?`.
 
 - **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@dev` run (attach only; a name never starts a dev run), your `@me` deployment, the first team in your team order that publishes it (`team` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
 - **`pipeline` / `filepath`** address your own `@dev` run for that spec. When it already runs other content, `onChange` decides: `'error'` (default, fails with both hashes), `'keep'` (deliver to the running engine; `specMatch` is `false`), `'auto'` (move your run to the new spec; nothing is stopped for anyone else).
 - Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `onSSE`, streams through a pipe. Same result either way.
-- `timeout` (seconds) covers the request only, pipe open to close. The pipeline stays up afterwards and expires on its idle ttl.
+- No timeout of its own, on either side: the request runs until the pipeline answers or fails (a request timeout configured on the client still applies, as your own bound). To stop a request, stream it through your own `pipe()` and call `cancel()` on it. The pipeline stays up afterwards and expires on its idle ttl.
 
 Returns the pipe close body plus the stamps `token` (the address that answered), `resolved` (`'@dev'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@dev`), `engineKey`, `specMatch`, `converged` (`'none'`, `'started'`, `'repointed'`), `ignored`, and `warnings` (`address_collision`, `repoint_storm`) when any.
 
@@ -485,6 +485,7 @@ A stream-like interface over one server-side data pipe.
 - `open(): Promise<DataPipe>` — open the pipe; must be called before `write()`. Throws `PipeException` when the server rejects the open (wrong token, terminated task, source not `chat`/`webhook`/`dropper`, or MIME type not matching a source lane)
 - `write(buffer: Uint8Array): Promise<void>` — write one chunk; call repeatedly to stream large datasets
 - `close(): Promise<PIPELINE_RESULT | undefined>` — close the pipe and get the processing result; a closed pipe cannot be reopened
+- `cancel(): Promise<void>` — cancel the request in flight. The pending `write()` (or `tool()`) rejects at the next node boundary with a `PipeException` whose `code` is `TASK_CANCELLED`; the pipe stays open, so call `close()` afterwards as usual. Cancellation is cooperative: a node in the middle of its step finishes it first, and a cancel that arrives while the last node runs lets that write complete. Neither the SDK nor the server adds a deadline of its own: this is how a caller stops a request
 - `tool<T>(tool: string, nodeId?: string, input?: Record<string, unknown>): Promise<T>` — invoke a `@tool_function` on a pipeline node **through this open pipe**, reusing its pipeline instance (no pool borrow). An empty `nodeId` broadcasts to all tool-lane nodes; the first owner of the tool handles it
 - Properties: `isOpened: boolean` (true between a successful `open()` and `close()`), `pipeId: number | undefined` (the server-assigned SLOT, reused across bindings), `traceId: string | undefined` (the request tree the pipe started, `nodeId.engineId.n`; never reused, opaque; what every event of the request carries)
 
