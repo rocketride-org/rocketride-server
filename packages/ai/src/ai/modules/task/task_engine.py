@@ -2278,13 +2278,20 @@ class TaskEngine(DAPBase):
         # that continuum already recorded
         writers = {key: await self._run_log_for(key) for key, _opener, _late in targets}
 
-        # Step 4: the continuum stamps. Idempotent: events stamped at ingress
-        # or at their build site pass through unchanged
+        # Step 4: the continuum stamps, numbered above everything the receiving
+        # continua recorded (another engine may append to a shared one while
+        # this control drains). Idempotent: events stamped at ingress or at
+        # their build site pass through unchanged
+        for writer in writers.values():
+            if writer is not None:
+                self.raise_log_seq_floor(writer.last_seq + 1)
         self.stamp_log_event(message)
 
         # Step 5: one copy per receiving control, carrying its controlId (the
         # control's key string, ALB seam 3) and ITS identity, appended to THAT
-        # control's run log and delivered opener first
+        # control's run log, then delivered opener first. Every append happens
+        # before the first await so no other engine's stamp interleaves
+        deliveries = []
         for key, opener, late in targets:
             copy = {**body, 'controlId': key} if isinstance(body, dict) else body
             writer = writers.get(key)
@@ -2304,6 +2311,8 @@ class TaskEngine(DAPBase):
                     writer.append(event)
                 except Exception as e:
                     self.debug_message(f'Run-log append failed for {key}: {e}')
+            deliveries.append((key, opener, event))
+        for key, opener, event in deliveries:
             await self._server.broadcast_task_event(event_type=type, key=key, event=event, opener=opener)
 
     def _stamp_control_identity(self, key: str, body: Dict[str, Any]) -> None:
@@ -2416,18 +2425,20 @@ class TaskEngine(DAPBase):
                 # that engine's writer open on its continuum: append through
                 # it rather than open a competitor (one writer per stream);
                 # this engine's own writer opens once that one has closed
-                shared = self._shared_run_log(key)
+                shared = await self._shared_run_log(key)
                 if shared is not None:
                     return shared
                 writer = await self._open_run_log(key)
         return writer
 
-    def _shared_run_log(self, key: str) -> Optional[RunLogWriter]:
+    async def _shared_run_log(self, key: str) -> Optional[RunLogWriter]:
         """
-        Another engine's live writer on the control ``key``'s continuum, if one is open.
+        Another engine's writer on the control ``key``'s continuum, if one is open or opening.
 
-        This engine's own numbering is lifted above what that continuum has
-        recorded, so the lines it appends never fall below them.
+        An open in flight is waited for (the writer announces itself before
+        its first storage await, so two engines never open one continuum
+        twice); this engine's own numbering is lifted above what that
+        continuum has recorded, so the lines it appends never fall below them.
 
         Args:
             key: The control's registry key.
@@ -2453,6 +2464,8 @@ class TaskEngine(DAPBase):
             # A control whose identity is not string-shaped names no stream
             return None
         if writer is None or writer in self._run_logs.values():
+            return None
+        if not writer.is_live and not await writer.wait_opened():
             return None
         self.raise_log_seq_floor(writer.last_seq + 1)
         return writer

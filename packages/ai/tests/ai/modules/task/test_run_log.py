@@ -34,6 +34,7 @@ segment read leases with deferred deletes, and spool startup hygiene.
 """
 
 import os
+import asyncio
 import json
 import time
 import shutil
@@ -857,3 +858,60 @@ async def test_an_older_writer_closing_leaves_the_newer_one_registered(istore, s
     assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
     await newer.end_run('ok', '', reason='user')
     assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+
+
+# =============================================================================
+# THE SHARED CONTINUUM (a control draining on the engine it left)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_delta_encoded_status_advances_the_continuums_last_seq(istore, spool_root):
+    """The codec may store a status body as a delta; the sequence bookkeeping reads the event as stamped."""
+    stamp, raise_floor, _ = make_stamp(start=10)
+    writer = await open_writer(istore, spool_root, stamp, raise_floor)
+    writer.append(stamp(status_event(completedCount=1), event_time=1000.0))
+    writer.append(stamp(status_event(completedCount=2), event_time=2000.0))
+    assert writer.last_seq == 12
+    await writer.end_run('ok', '')
+
+
+@pytest.mark.asyncio
+async def test_a_writer_announces_its_open_before_its_first_storage_read(istore, spool_root):
+    """A second engine joining the continuum finds the opening writer and waits for it, never opening a twin."""
+    stamp, raise_floor, _ = make_stamp()
+    writer = RunLogWriter(
+        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+    )
+    # The storage read is held, as a slow store would hold it
+    gate = asyncio.Event()
+    real_load = writer._load_control
+
+    async def held_load():
+        await gate.wait()
+        return await real_load()
+
+    writer._load_control = held_load
+    opening = asyncio.create_task(
+        writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
+    )
+    await asyncio.sleep(0)
+    found = run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE)
+    assert found is writer and writer.is_opening and not writer.is_live
+    gate.set()
+    assert await writer.wait_opened() is True and writer.is_live
+    await opening
+    await writer.end_run('ok', '')
+    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_the_run_end_is_numbered_above_everything_the_continuum_recorded(istore, spool_root):
+    """Another engine appended through this writer: the owner's synthetic run-end lifts its floor first."""
+    stamp, raise_floor, state = make_stamp(start=10)
+    writer = await open_writer(istore, spool_root, stamp, raise_floor)
+    writer.append({'type': 'event', 'event': 'output', 'body': {'eventTime': 1000.0, 'logSeq': 500, 'output': 'x'}})
+    await writer.end_run('ok', '')
+    assert state['floor_calls'][-1] == 501
+    # The run-end itself carried 501: it is the last sequence the continuum recorded
+    assert writer.last_seq == 501
