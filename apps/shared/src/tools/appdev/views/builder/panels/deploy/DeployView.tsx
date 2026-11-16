@@ -167,16 +167,17 @@ const styles: Record<string, React.CSSProperties> = {
 		fontStyle: 'italic',
 		marginTop: 5,
 	},
+	// Chips and actions are the card's FOOTER, pinned to the bottom together
+	// (decided 2026-11-16): cards with short and long messages line up.
 	chips: {
 		display: 'flex',
 		gap: 5,
 		flexWrap: 'wrap',
-		marginTop: 9,
+		marginTop: 'auto',
+		paddingTop: 9,
 		minHeight: 20,
 	},
 	cardAction: {
-		// auto margin pins the buttons to the card bottom (see card).
-		marginTop: 'auto',
 		paddingTop: 10,
 		display: 'flex',
 		gap: 6,
@@ -455,6 +456,9 @@ const LIVE_STATE_STYLE: Record<ServingTone, 'liveStateOk' | 'liveStateWarn' | 'l
  * (#2461) — serving, or why not, from the server's own serving gate. */
 const LiveState: React.FC<{ pin: RungPin }> = ({ pin }) => {
 	const status = pinStatusOf(pin);
+	// A row means serving (decided 2026-11-16): the serving state carries no
+	// word; only a reason the row is NOT serving is drawn.
+	if (status.tone === 'ok') return null;
 	return <span style={styles[LIVE_STATE_STYLE[status.tone]]}>&#9679; {status.word}</span>;
 };
 
@@ -515,6 +519,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }> | null>(null);
 	// The pin awaiting soft-remove confirmation (null = none).
 	const [removePin, setRemovePin] = useState<RungPin | null>(null);
+	// A publish chosen in the dialog, awaiting its confirmation (decided
+	// 2026-11-16: every pointer move is confirmed, on apps as on pipelines).
+	const [pendingPublish, setPendingPublish] = useState<{ version: AppVersionInfo; target: string; label: string } | null>(null);
 	// Deploy-message dialog (stock Modal + input — window.prompt is disabled in
 	// the VSCode webview). An empty comment is allowed (it is optional).
 	const [deployOpen, setDeployOpen] = useState(false);
@@ -821,9 +828,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							{regError ? <div style={styles.devError}>{regError}</div> : null}
 						</div>
 					)}
-					{/* Published versions rail */}
+					{/* Deployed versions rail */}
 					<div style={styles.sectLabel}>
-						Published versions
+						Deployed versions
 						<span style={styles.sectMicro}>org registry · immutable · newest first</span>
 					</div>
 					<div style={styles.rail}>
@@ -962,7 +969,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 										<span style={styles.liveWhen}>{p.deployedAt ? `deployed ${formatWhen(p.deployedAt)}` : ''}</span>
 										{host.removePublish && !readOnly && (
 											<button style={styles.liveRemove} onClick={() => setRemovePin(p)}>
-												Remove
+												Unpublish
 											</button>
 										)}
 									</div>
@@ -1038,11 +1045,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
 							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
 					</div>
-					<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@me')}>
+					<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@me', label: 'Me' })}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
 					</button>
 					{(teams ?? []).map((t) => (
-						<button key={t.id} style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, `@team/${t.id}`)}>
+						<button key={t.id} style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: `@team/${t.id}`, label: t.name })}>
 							{t.name}
 							<span style={styles.pubRowState}>{pinStateOf(`@team/${t.name}`, publishFor)}</span>
 						</button>
@@ -1051,7 +1058,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					    any servable version on @public) the store row is as open as
 					    the internal rows; with one, only 'ready' unlocks it. */}
 					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
-						<button style={styles.pubRow} onClick={() => void onPublishTo(publishFor.registryVersion, '@public')}>
+						<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@public', label: 'the app store' })}>
 							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>
 					) : (
@@ -1062,12 +1069,34 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				</Modal>
 			)}
 
+			{/* ── Publish confirmation — every pointer move is confirmed, as on
+			      pipelines: it changes what an audience gets. ────────────── */}
+			{pendingPublish && (
+				<ConfirmDialog
+					title={`Publish v${pendingPublish.version.registryVersion} to ${pendingPublish.label}?`}
+					message={(() => {
+						const current = (pins ?? []).find((p) => p.handle === pendingPublish.target);
+						return current
+							? `${pendingPublish.label} serves v${current.registryVersion} now; this repoints it to v${pendingPublish.version.registryVersion}. Nothing is rebuilt, and publishing v${current.registryVersion} again is the rollback.`
+							: `${pendingPublish.label} is not published yet; this is its first publish, and it serves v${pendingPublish.version.registryVersion} at once.`;
+					})()}
+					confirmLabel="Publish"
+					cancelLabel="Cancel"
+					onConfirm={() => {
+						const move = pendingPublish;
+						setPendingPublish(null);
+						void onPublishTo(move.version.registryVersion, move.target);
+					}}
+					onCancel={() => setPendingPublish(null)}
+				/>
+			)}
+
 			{/* ── Soft-remove confirmation for a where-live pin ─────────── */}
 			{removePin && (
 				<ConfirmDialog
-					title={`Remove ${app.name} from ${removePin.label}?`}
-					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. This is a SOFT remove: every published version and the audit history survive, and publishing to ${removePin.handle} again revives it.`}
-					confirmLabel="Remove"
+					title={`Unpublish ${app.name} from ${removePin.label}?`}
+					message={`Takes the app off ${removePin.handle}: it stops serving to that audience. Every deployed version and the history survive, and publishing to ${removePin.handle} again revives it.`}
+					confirmLabel="Unpublish"
 					cancelLabel="Cancel"
 					onConfirm={() => {
 						const pin = removePin;

@@ -20,7 +20,7 @@
  * sidebar and badges.
  *
  * Cardinality-driven collapsing (never an edition check): with exactly one
- * deployable team the "Deploy to…" picker becomes a plain Deploy button,
+ * deployable team the "Publish to…" picker becomes a plain Publish button,
  * badges reduce to a single DEPLOYED marker, and the where-live grid is
  * hidden (its one row is already on the strip).
  *
@@ -73,7 +73,7 @@ export interface IDeployPanelProps {
 	publishDisabledReason?: string;
 	/** The document holds unsaved changes; publishing saves it FIRST. */
 	requiresSave?: boolean;
-	/** Save the document (the 'Save & publish' path). */
+	/** Save the document (the 'Save & deploy' path). */
 	onSaveDocument?: () => Promise<void>;
 	/** Publish the CURRENT saved pipeline (host snapshots the file). */
 	onPublish: (comment: string, deployTo?: string) => Promise<void>;
@@ -82,7 +82,10 @@ export interface IDeployPanelProps {
 	/** Open a deployment record drawer: the TEAM record (header/badge
 	    gestures, no sourceId) or one SOURCE's record (source-row gesture). */
 	onOpenDeployment?: (teamId: string, sourceId?: string) => void;
-	/** Toggle the whole-deployment kill switch from the where-live header. */
+	/** Accepted for hosts that still wire it, but the table no longer renders
+	    the enable/disable toggle (decided 2026-11-16): a row means serving and
+	    Unpublish is the one user verb; the server's disable state stays for
+	    operators and shows as a plain word when set. */
 	onSetDisabled?: (teamId: string, disabled: boolean) => Promise<void>;
 	/** Soft-remove one team's deployment from the where-live header —
 	    listings hide it; history and artifacts survive; re-deploying any
@@ -339,7 +342,7 @@ function shortSha(sha: string): string {
  * The DEPLOY-page lifecycle surface: version strip, where-live grid,
  * merged history grid. See the module docstring for the collapsing rules.
  */
-export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onSetDisabled, onRemove, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
+export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
@@ -462,7 +465,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 		<div>
 			{/* ── Version strip ─────────────────────────────────────────── */}
 			<div style={S.stripLabel}>
-				<span>Published versions</span>
+				<span>Deployed versions</span>
 				<span style={{ ...commonStyles.textMuted, fontSize: 11.5, textTransform: 'none', letterSpacing: 0 }}>org registry &middot; immutable &middot; newest first</span>
 			</div>
 			<div style={S.strip}>
@@ -473,12 +476,12 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						// A dirty doc is not a dead end: when the host can save,
 						// the card stays live and the dialog saves first.
 						const clickable = (canPublish || (requiresSave && Boolean(onSaveDocument))) && !busy;
-						const hint = canPublish ? 'snapshot current pipeline' : requiresSave && onSaveDocument ? 'saves your changes, then publishes' : (publishDisabledReason ?? 'unavailable');
+						const hint = canPublish ? `snapshot the current pipeline as v${nextVersion}` : requiresSave && onSaveDocument ? `saves your changes, then deploys v${nextVersion}` : (publishDisabledReason ?? 'unavailable');
 						return (
 							<div style={S.publishCard(clickable)} {...buttonize(() => setPublishOpen(true), clickable)} title={hint}>
 								<div style={{ fontSize: 20, fontWeight: 300 }}>+</div>
 								<div>
-									<b>Publish v{nextVersion}</b>
+									<b>Deploy</b>
 								</div>
 								<div style={{ fontSize: 11 }}>{hint}</div>
 							</div>
@@ -526,12 +529,12 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									{singleTarget ? (
 										live.some((dep) => dep.teamId === singleTarget.id) ? null : (
 											<Button variant="secondary" small disabled={busy} onClick={() => stageDeploy(v.version, singleTarget)}>
-												Deploy
+												Publish
 											</Button>
 										)
 									) : (
 										<Button variant="secondary" small disabled={busy} onClick={() => setPickerVersion(v.version)}>
-											Deploy to&hellip;
+											Publish to&hellip;
 										</Button>
 									)}
 								</div>
@@ -554,25 +557,13 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} {...buttonize(() => onOpenDeployment?.(dep.teamId), Boolean(onOpenDeployment))}>
 										<span style={S.liveTeam}>{dep.teamName}</span>
 										<span style={S.liveVersion}>v{dep.version}</span>
-										<span
-											style={S.liveState(dep.state, Boolean(onSetDisabled))}
-											title={onSetDisabled ? (dep.state === 'enabled' ? 'Click to disable' : 'Click to enable') : undefined}
-											{...buttonize(
-												(e) => {
-													// The dot is the kill-switch toggle; the row still
-													// opens the record everywhere else (a disabled dot
-													// lets the gesture fall through to the header).
-													e.stopPropagation();
-													void run(() => onSetDisabled!(dep.teamId, dep.state === 'enabled'));
-												},
-												Boolean(onSetDisabled) && !busy
-											)}
-										>
-											&#9679; {dep.state}
-										</span>
-										{/* Live-run roll-up: any source running lights the group. */}
-										{dep.sources.some((src) => src.running) && <span style={S.liveRunning}>&#9679; running</span>}
-										<span style={S.liveDeployedAt}>{dep.deployedAt ? `deployed ${formatDayTime(dep.deployedAt)}` : ''}</span>
+										{/* A row means serving (decided 2026-11-16): a serving row
+										    carries no state word and no process state. A deployment
+										    the server holds in another state (an operator's disable,
+										    an error) says so in plain words; Unpublish is the one
+										    user verb, the enable/disable toggle is gone. */}
+										{dep.state !== 'enabled' && <span style={S.liveState(dep.state, false)}>{dep.state}</span>}
+										<span style={S.liveDeployedAt}>{dep.deployedAt ? `published ${formatDayTime(dep.deployedAt)}` : ''}</span>
 										{onRemove && (
 											<button
 												style={S.liveRemoveBtn}
@@ -588,7 +579,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 												// deployment record.
 												onKeyDown={(e) => e.stopPropagation()}
 											>
-												Remove
+												Unpublish
 											</button>
 										)}
 									</div>
@@ -596,7 +587,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									{dep.sources.map((src) => (
 										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} {...buttonize(() => onOpenDeployment?.(dep.teamId, src.sourceId), Boolean(onOpenDeployment))}>
 											<span style={S.liveSourceName}>{src.sourceName}</span>
-											{src.running && <span style={S.liveRunning}>&#9679; running</span>}
 											<span
 												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
 												title={onSetSchedule ? 'Edit schedule' : undefined}
@@ -605,7 +595,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 													setEditSchedule({ teamId: dep.teamId, teamName: dep.teamName, source: src });
 												}, Boolean(onSetSchedule))}
 											>
-												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'manual'}
+												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'on demand'}
 											</span>
 											{src.lastRunAt ? <span style={S.liveLastRun}>last run {formatDayTime(src.lastRunAt)}</span> : null}
 										</div>
@@ -620,9 +610,9 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{/* ── Soft-remove confirmation (where-live header verb) ─────── */}
 			{removeTeam && onRemove && (
 				<ConfirmDialog
-					title={`Remove ${pipelineName || 'this deployment'} from ${removeTeam.teamName}?`}
-					message={`Takes ${pipelineName || 'the deployment'} off ${removeTeam.teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove: the audit history and every published version survive, and deploying any version to ${removeTeam.teamName} revives it.`}
-					confirmLabel="Remove"
+					title={`Unpublish ${pipelineName || 'this pipeline'} from ${removeTeam.teamName}?`}
+					message={`Takes ${pipelineName || 'the pipeline'} off ${removeTeam.teamName}: it stops serving there, schedules stop firing and the deployment leaves all listings. Every deployed version, the schedules and the history survive; publishing any version to ${removeTeam.teamName} again revives it.`}
+					confirmLabel="Unpublish"
 					cancelLabel="Cancel"
 					onConfirm={() => {
 						const team = removeTeam;
@@ -666,7 +656,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{/* ── Publish dialog ────────────────────────────────────────── */}
 			{publishOpen && (
 				<Modal
-					title={`Publish v${nextVersion}`}
+					title={`Deploy v${nextVersion}`}
 					onClose={closeDialogs}
 					footer={
 						<>
@@ -685,7 +675,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									})
 								}
 							>
-								{busy ? 'Publishing…' : requiresSave ? 'Save & publish' : 'Publish'}
+								{busy ? 'Deploying…' : requiresSave ? 'Save & deploy' : 'Deploy'}
 							</Button>
 						</>
 					}
@@ -702,7 +692,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{/* ── Deploy-to team picker ─────────────────────────────────── */}
 			{pickerVersion !== null && (
 				<Modal
-					title={`Deploy v${pickerVersion} to…`}
+					title={`Publish v${pickerVersion} to…`}
 					onClose={closeDialogs}
 					footer={
 						<Button variant="secondary" disabled={busy} onClick={closeDialogs}>
@@ -717,7 +707,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						return (
 							<div key={team.id} style={S.pickerRow(!busy && !isCurrent)} {...buttonize(() => stageDeploy(pickerVersion, team), !busy && !isCurrent)}>
 								<span style={{ fontWeight: 600 }}>{team.name}</span>
-								<span style={{ ...commonStyles.textMuted, fontSize: 11.5, marginLeft: 'auto' }}>{current ? (isCurrent ? `already on v${current.version}` : current.version > pickerVersion ? `rollback from v${current.version}` : `upgrade from v${current.version}`) : 'not deployed yet'}</span>
+								<span style={{ ...commonStyles.textMuted, fontSize: 11.5, marginLeft: 'auto' }}>{current ? (isCurrent ? `already on v${current.version}` : current.version > pickerVersion ? `rollback from v${current.version}` : `upgrade from v${current.version}`) : 'not published yet'}</span>
 							</div>
 						);
 					})}
@@ -732,14 +722,14 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			    would fail silently and look inert. */}
 			{pendingDeploy && (
 				<ConfirmDialog
-					title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Deploy v${pendingDeploy.version} to ${pendingDeploy.team.name}?`}
+					title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Publish v${pendingDeploy.version} to ${pendingDeploy.team.name}?`}
 					message={
 						<>
 							{pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version}. Schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`}
 							{error && <div style={S.errorText}>{error}</div>}
 						</>
 					}
-					confirmLabel={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? 'Rollback' : 'Deploy'}
+					confirmLabel={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? 'Rollback' : 'Publish'}
 					cancelLabel="Cancel"
 					onConfirm={() => void run(() => onDeploy(pendingDeploy.version, pendingDeploy.team.id))}
 					onCancel={closeDialogs}
