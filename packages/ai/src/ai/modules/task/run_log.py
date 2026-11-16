@@ -613,12 +613,38 @@ class RunLogWriter:
         try:
             await self._open_stream(trigger, user, pipeline_hash, trace_level)
         except BaseException:
-            if WRITERS.get(key) is self:
-                WRITERS.pop(key, None)
+            self._abandon_open(key)
             raise
         finally:
             self._opening = False
             self._opened.set()
+
+    def _abandon_open(self, key: str) -> None:
+        """
+        Undo a failed or cancelled ``open``: nothing it set up survives, and the writer reports not open.
+
+        ``_open_stream`` marks the writer open and may have opened the spool
+        file and started the worker before the step that failed; a joining
+        engine waiting on ``wait_opened`` must see False, and a later open of
+        the stream must find no stale registration.
+
+        Args:
+            key: This writer's registry key.
+        """
+        self._open = False
+        if WRITERS.get(key) is self:
+            WRITERS.pop(key, None)
+        worker = self._worker
+        if worker is not None:
+            worker.cancel()
+            self._worker = None
+        active = self._active_file
+        if active is not None:
+            try:
+                active.close()
+            except OSError:
+                pass
+            self._active_file = None
 
     async def _open_stream(self, trigger: str, user: str, pipeline_hash: str, trace_level: str) -> None:
         """The body of ``open``: storage recovery, the floor, the run-begin marker, the worker."""
@@ -1433,8 +1459,10 @@ class RunLogReader:
             FileNotFoundError: If the stream has no control (never logged).
         """
         writer = WRITERS.get(writer_key(self._scope_id, self._stream))
-        if writer is not None:
+        if writer is not None and writer.is_live:
             return writer._control
+        # No live writer (or one still opening, whose catalog is not loaded
+        # yet): the persisted copy is the stream's history
         try:
             raw = await self._store.read(self._control_path())
         except StorageNotFoundError as exc:

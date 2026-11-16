@@ -450,9 +450,15 @@ class MiscCommands(DAPConn):
             # errors, on the engine's own errors list.
             config_errors = _config_errors(components)
             # The parameters map (plan 5.4 item 3): the same rules the start
-            # and publish doors enforce, on the same errors list
+            # and publish doors enforce, on the same errors list. The map is
+            # checked as SUBMITTED: a placeholder in a target would be expanded
+            # by the substitution above, and the start and publish doors never
+            # expand it (plan 5.3: params are literal)
             if 'components' in pipeline:
-                config_errors = config_errors + validate_parameters(pipeline)
+                as_written = (
+                    {**pipeline, 'parameters': submitted['parameters']} if 'parameters' in submitted else pipeline
+                )
+                config_errors = config_errors + validate_parameters(as_written)
             if config_errors:
                 if substituted:
                     # A resolver message may quote the resolved value, so under

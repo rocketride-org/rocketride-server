@@ -1259,6 +1259,34 @@ async def test_a_repoint_whose_engine_never_confirms_running_is_rolled_back(cata
 
 
 @pytest.mark.asyncio
+async def test_a_rolled_back_repoint_restores_the_declared_parameters(catalog, engines, monkeypatch):
+    """A submit during the readiness window cached views of the replacement's components; the rollback drops them."""
+    catalog.discard('prompt')
+    ts = _server()
+    exposed = {'tone': 'prompt_1.instructions'}
+    dev = await _start(ts, _pipeline(parameters=exposed), user='user-a')
+
+    async def resolve_then_fail(self):
+        # The window: the new pipeline is installed, a per-call submit resolves against it
+        dev.param_views['prompt_1'] = 'a view of the replacement'
+        raise TimeoutError('silent')
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', resolve_then_fail)
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TimeoutError):
+        await ts.restart_task(
+            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
+            conn=conn,
+            wait_for_running=True,
+        )
+
+    assert dev.pipeline.get('parameters') == exposed
+    assert dev.parameters == exposed
+    assert dev.param_views == {}, 'no view of the replacement serves the restored pipeline'
+
+
+@pytest.mark.asyncio
 async def test_the_old_engine_survives_another_holder_leaving_during_readiness(catalog, engines, monkeypatch):
     """The repointing control keeps its old hold through readiness: the other holder's terminate cannot stop the engine a rollback returns to."""
     catalog.discard('prompt')

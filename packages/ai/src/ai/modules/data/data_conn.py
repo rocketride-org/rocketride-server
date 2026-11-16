@@ -573,6 +573,39 @@ class DataConn(DAPConn):
             self._open_by_correlation.pop(conn_pipe.correlation_id, None)
         return conn_pipe
 
+    def _binding_for(self, pipe_id: Any, args: Dict[str, Any], verb: str) -> DataConnPipe:
+        """
+        The open binding a write/close/tool frame names, checked against the frame's request.
+
+        A slot is the engine's own number and is reused: a binding this
+        connection reaped idle (``_monitor_pipes``) leaves the slot free for
+        another control's open on the same engine, while the first control's
+        record still names it. The server stamps every frame with its request's
+        ``correlationId`` (``_caller``, plan 5.3), so a frame whose request is
+        not the one the slot was opened for is refused here instead of
+        operating on another request's pipe (plan 3.1 P1). A binding the
+        engine opened itself carries no request id and is not checked.
+
+        Args:
+            pipe_id: The slot the frame names.
+            args: The frame's arguments (``_caller`` as the server stamped it).
+            verb: The frame's verb, for the message.
+
+        Returns:
+            The binding on that slot.
+
+        Raises:
+            ValueError: The slot is not open, or is open for another request.
+        """
+        conn_pipe = self._pipe_map.get(pipe_id, None)
+        if not conn_pipe:
+            raise ValueError(f'{verb} pipe with id {pipe_id} not found')
+        caller = args.get('_caller')
+        expected = caller.get('correlationId') if isinstance(caller, dict) else None
+        if expected and conn_pipe.correlation_id and expected != conn_pipe.correlation_id:
+            raise ValueError(f'{verb} pipe with id {pipe_id} is open for another request')
+        return conn_pipe
+
     @staticmethod
     def _record_hold(hold_started: Optional[float], bytes_in: int) -> None:
         """
@@ -913,9 +946,7 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        conn_pipe = self._pipe_map.get(pipe_id, None)
-        if not conn_pipe:
-            raise ValueError(f'Write pipe with id {pipe_id} not found')
+        conn_pipe = self._binding_for(pipe_id, args, 'Write')
 
         if not conn_pipe.is_open:
             raise ValueError(f'Write pipe with id {pipe_id} is not open')
@@ -1050,10 +1081,9 @@ class DataConn(DAPConn):
         if pipe_id is None:
             raise ValueError('No pipe_id specified')
 
-        # Retrieve and remove the DataConnPipe instance from our mapping immediately
+        # The frame's own binding, then removed from our mapping immediately
+        self._binding_for(pipe_id, args, 'Close')
         conn_pipe = self._pop_binding(pipe_id)
-        if not conn_pipe:
-            raise ValueError(f'Close pipe with id {pipe_id} not found')
 
         try:
             # Reset activity timer since close is considered activity
@@ -1215,8 +1245,8 @@ class DataConn(DAPConn):
         # dispatching to the thread (mirrors _write pattern).
         conn_pipe = None
         if pipe_id is not None:
-            conn_pipe = self._pipe_map.get(pipe_id)
-            if not conn_pipe or not conn_pipe.is_open:
+            conn_pipe = self._binding_for(pipe_id, {'_caller': caller}, 'Tool')
+            if not conn_pipe.is_open:
                 raise ValueError(f'Pipe {pipe_id} is not open')
             if conn_pipe.has_failed:
                 raise ValueError(f'Pipe {pipe_id} has failed')

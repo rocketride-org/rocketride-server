@@ -54,6 +54,23 @@ if TYPE_CHECKING:
 # ==== The binding a frame belongs to ===============================================
 
 
+def _object_failed(body: Any) -> bool:
+    """
+    Whether a close body reports the object as failed.
+
+    ``DataConn._close`` answers normally for an object the pipeline failed and
+    puts the completion error on the body (``error``), so the transport's
+    success says nothing about the object's.
+
+    Args:
+        body: The engine's close response body.
+
+    Returns:
+        True when the body carries the object's error.
+    """
+    return isinstance(body, dict) and 'error' in body
+
+
 @dataclass
 class _Frame:
     """
@@ -171,6 +188,7 @@ class DataCommands(DAPConn):
             if opening:
                 control.pending_opens[frame.engine] = control.pending_opens.get(frame.engine, 0) + 1
             succeeded = False
+            body = None
             try:
                 body = await self._forward(control, frame, request, arguments)
                 succeeded = True
@@ -182,7 +200,10 @@ class DataCommands(DAPConn):
                     else:
                         control.pending_opens.pop(frame.engine, None)
                 if subcommand == 'close' and pipe_id is not None:
-                    self._retire(control, pipe_id, succeeded)
+                    # Transport success is not object success: a close the
+                    # engine answered normally still carries the object's error
+                    # when the pipeline failed it
+                    self._retire(control, pipe_id, succeeded and not _object_failed(body))
                 if (opening and not succeeded) or (subcommand == 'close' and pipe_id is not None):
                     await self._settle_drain(control)
 
@@ -363,7 +384,7 @@ class DataCommands(DAPConn):
         Args:
             control: The caller's control.
             pipe_id: The closed slot.
-            succeeded: Whether the engine accepted the close.
+            succeeded: Whether the engine accepted the close AND the object went through.
         """
         record = control.open_pipes.pop(pipe_id, None)
         if record is None:

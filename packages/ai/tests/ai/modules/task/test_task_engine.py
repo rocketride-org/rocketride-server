@@ -2446,3 +2446,14 @@ async def test_wait_terminated_releases_when_teardown_raises():
     with pytest.raises(RuntimeError):
         await t._terminated()
     await asyncio.wait_for(t.wait_terminated(), timeout=1)
+
+
+async def test_start_task_retries_a_run_log_open_that_failed_in_the_previous_run(monkeypatch):
+    """A failed writer open is suppressed for ITS run only: the next launch of the engine tries again."""
+    t, _ = _startable_task(monkeypatch)
+    t._run_log_failed = {'dev.user-1.acme.docBrain.webhook_1'}
+
+    with pytest.raises(_LaunchStop):
+        await TaskEngine.start_task(t)
+
+    assert t._run_log_failed == set()

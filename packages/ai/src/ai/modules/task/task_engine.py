@@ -3185,6 +3185,9 @@ class TaskEngine(DAPBase):
             self.engine_id = self._server.next_engine_id()
             self._is_terminating = False
             self._reset_channel_state()
+            # A writer open that failed is suppressed for the rest of ITS run
+            # only: storage may have recovered by this launch
+            self._run_log_failed.clear()
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value

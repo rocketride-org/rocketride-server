@@ -712,6 +712,21 @@ async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_checks_the_parameters_map_as_submitted(monkeypatch):
+    """A placeholder in a parameters target is the author's text: validate reports what start and publish would."""
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'pipeline': payload['pipeline'], 'errors': []})
+    conn = _validate_conn(monkeypatch, env={**ENV, 'ROCKETRIDE_TARGET': 'llm_1.model'})
+    pipeline = {'components': [_llm('llm_1', 'llm_opnai')], 'parameters': {'model': '${ROCKETRIDE_TARGET}'}}
+
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
+
+    # Under substitution the message is templated and lists the submitted references
+    errors = result['body'].get('errors') or []
+    assert len(errors) == 1, result['body']
+    assert '${ROCKETRIDE_TARGET}' in errors[0]['message']
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch):
     """Nothing expanded, no second pass: the reply is the validator's result as before."""
     calls = []

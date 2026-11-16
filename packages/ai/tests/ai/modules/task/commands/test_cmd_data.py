@@ -323,6 +323,22 @@ async def test_a_close_retires_the_record_even_when_the_engine_fails(catalog, en
     assert control.open_pipes == {}
 
 
+@pytest.mark.asyncio
+async def test_a_close_whose_object_failed_counts_a_failed_binding(catalog, engines, engine_log, monkeypatch):
+    """The engine answers a close normally for an object the pipeline failed; the error on the body is the verdict."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    slot = await _opened(ts, conn)
+    monkeypatch.setattr(TaskEngine, '_send_data', AsyncMock(return_value={'body': {'error': 'node raised'}}))
+
+    body = await _frame(conn, subcommand='close', pipe_id=slot)
+
+    assert body == {'error': 'node raised'}
+    assert control.open_pipes == {}
+    assert (control.stats.completedCount, control.stats.failedCount) == (0, 1)
+
+
 # =============================================================================
 # PARAMS (S3)
 # =============================================================================

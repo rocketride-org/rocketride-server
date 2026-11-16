@@ -915,3 +915,59 @@ async def test_the_run_end_is_numbered_above_everything_the_continuum_recorded(i
     assert state['floor_calls'][-1] == 501
     # The run-end itself carried 501: it is the last sequence the continuum recorded
     assert writer.last_seq == 501
+
+
+@pytest.mark.asyncio
+async def test_a_reader_never_takes_an_opening_writers_empty_catalog(istore, spool_root):
+    """While a writer's open awaits storage, a reader of the stream reads the persisted history, not the
+    writer's not-yet-loaded catalog.
+    """
+    first = await open_writer(istore, spool_root)
+    first.append(first._stamp({'type': 'event', 'event': 'output', 'body': {'output': 'x'}}))
+    await first.end_run('ok', '')
+    stamp, raise_floor, _ = make_stamp()
+    writer = RunLogWriter(
+        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+    )
+    gate = asyncio.Event()
+    real_load = writer._load_control
+
+    async def held_load():
+        await gate.wait()
+        return await real_load()
+
+    writer._load_control = held_load
+    opening = asyncio.create_task(
+        writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
+    )
+    await asyncio.sleep(0)
+    reader = run_log.RunLogReader(make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    catalog = await reader._load_control()
+    assert catalog.get('chapters'), "the persisted history, not the opening writer's empty catalog"
+    gate.set()
+    await opening
+    await writer.end_run('ok', '')
+
+
+@pytest.mark.asyncio
+async def test_a_failed_open_leaves_no_writer_behind(istore, spool_root):
+    """An open that fails after marking the writer open reports not open, deregisters, and closes what it opened."""
+    stamp, raise_floor, _ = make_stamp()
+    writer = RunLogWriter(
+        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+    )
+    real_write = writer._write_control
+    calls = {'n': 0}
+
+    async def failing_write():
+        calls['n'] += 1
+        if calls['n'] == 1:
+            raise RuntimeError('storage refused the control record')
+        return await real_write()
+
+    writer._write_control = failing_write
+    with pytest.raises(RuntimeError):
+        await writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
+    assert writer.is_live is False and await writer.wait_opened() is False
+    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+    assert writer._active_file is None and writer._worker is None

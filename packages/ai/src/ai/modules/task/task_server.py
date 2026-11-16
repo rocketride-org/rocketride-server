@@ -626,6 +626,10 @@ class _EngineTransition:
         """Undo: the control is back on its old pipeline and engine before anything is awaited."""
         control = self._control
         control.pipeline = self.old_pipeline
+        # The declared parameters follow the pipeline: a per-call submit that
+        # ran while the new pipeline was installed cached views of ITS
+        # components (resolve_params), and those must not serve the restored one
+        control.setup_declared_parameters()
         failed = control.task
         control.task = self.old_engine
         if failed is not None and failed is not self.old_engine:

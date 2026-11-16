@@ -524,6 +524,27 @@ async def test_write_text_still_rejects_bytes_that_are_not_utf8(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_frame_for_another_request_never_reaches_a_reused_slot(monkeypatch):
+    """A slot reaped and reopened for another request refuses the first request's write, close and tool frames."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.correlation_id = 'req-b'
+
+    with pytest.raises(ValueError, match='another request'):
+        await conn._write({}, {'pipe_id': 1, 'data': b'x', '_caller': {'correlationId': 'req-a'}})
+    with pytest.raises(ValueError, match='another request'):
+        await conn._close({}, {'pipe_id': 1, '_caller': {'correlationId': 'req-a'}})
+    with pytest.raises(ValueError, match='another request'):
+        await conn._tool({}, {'pipe_id': 1, 'tool': 't', '_caller': {'correlationId': 'req-a'}})
+    assert conn._pipe_map == {1: conn_pipe}, "the other request's binding is untouched"
+
+    # The request the slot was opened for, and a binding the engine opened itself, go through
+    await conn._write({}, {'pipe_id': 1, 'data': b'ok', '_caller': {'correlationId': 'req-b'}})
+    conn_pipe.correlation_id = None
+    await conn._write({}, {'pipe_id': 1, 'data': b'ok', '_caller': {'correlationId': 'req-a'}})
+    assert _written_text(conn_pipe) == 'okok'
+
+
+@pytest.mark.asyncio
 async def test_close_after_whole_text_closes_the_pipe(monkeypatch):
     """A text that ends on a character boundary closes normally."""
     conn, conn_pipe = _make_text_conn(monkeypatch)
