@@ -10,8 +10,8 @@
 </p>
 
 <p>
-  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily" alt="rocketride-org/rocketride-server: Repository Of The Day on Trendshift" width="250" height="55"/></a>&nbsp;&nbsp;
-  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily" alt="rocketride-org/rocketride-server: Repository Of The Day on Trendshift" width="250" height="55"/></a>
 </p>
 
 <p>
@@ -21,7 +21,7 @@
 </p>
 
 <p>
- RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal or your coding agent. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It's the harness for everything behind your AI applications, not just the agents, but the whole stack beneath them.</strong>
+ RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal or your coding agent. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
 </p>
 
 <p>
