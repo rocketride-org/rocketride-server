@@ -472,7 +472,8 @@ class TestDataOperations:
             assert 'text' in result
             assert isinstance(result['text'], list)
             assert len(result['text']) > 0
-            assert result['text'][0] == '\n\n'.join(chunks) + '\n\n'
+            # The text lane delivers the whole body as one text, however many writes carried it
+            assert result['text'][0] == ''.join(chunks) + '\n\n'
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)
@@ -1809,8 +1810,12 @@ Line 3: random data {random.random()}"""
             await pipe.write('Mixed streaming content'.encode())
             stream_result = await pipe.close()
 
-            # Small delay to ensure events are processed
-            await asyncio.sleep(0.5)
+            # Wait for the status events to arrive
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not any(
+                e.get('event') in ('apaevt_status_update', 'apaevt_task') for e in received_events
+            ):
+                await asyncio.sleep(0.05)
 
             # Validate results
             results = [send_result, upload_result, stream_result]

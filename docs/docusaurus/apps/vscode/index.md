@@ -52,7 +52,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Debugging & live traces** - Monitor running pipelines in real time with execution traces, token usage, and memory stats, see exactly what your agents are doing at every step.
 
 - **App Builder** - Scaffold, live-preview, publish, and deploy [Shell Apps](/guides/apps) from a template, without leaving VS Code.
-- **Connection manager** - Connect to a local engine (one click, no setup) or your own on-premises server.
+- **Connection manager** - Connect to a local engine (one click, no setup), Docker, a system service, your own server (Direct Connect) or RocketRide Cloud. [Connection Modes](/clients/vscode/usage#connection-modes) says what runs where in each mode.
 - **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
 Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-org/awesome-rocketride#demos--examples), a collection of example projects built on RocketRide.
@@ -61,10 +61,10 @@ Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-o
 
 | Setting                              | Type       | Default                          | Description                                                                                                                               |
 | ------------------------------------ | ---------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `rocketride.development.connectionMode` | `string` | `"local"`                        | Connection mode: `"local"` (your machine), `"docker"`, `"service"`, `"onprem"` (your own hosted server), or `"cloud"`                     |
-| `rocketride.development.hostUrl`     | `string`   | `""`                             | Host URL for on-prem or direct connections. Host and port will be parsed from this URL.                                                   |
+| `rocketride.development.connectionMode` | `string` | `"local"`                        | Connection mode: `"local"` (your machine), `"docker"`, `"service"`, `"onprem"` (your own hosted server, shown as Direct Connect), or `"cloud"`. See [Connection Modes](/clients/vscode/usage#connection-modes) |
+| `rocketride.development.hostUrl`     | `string`   | `""`                             | Host URL for Direct Connect (`onprem`); the other modes ignore it. Host and port will be parsed from this URL.                            |
 | `rocketride.deployment.connectionMode` | `string \| null` | `null`                   | Deployment connection mode (`null` = same as development)                                                                                 |
-| `rocketride.deployment.hostUrl`      | `string`   | `""`                             | Host URL for the deployment connection                                                                                                    |
+| `rocketride.deployment.hostUrl`      | `string`   | `""`                             | Host URL for the deployment connection; used only by Direct Connect (`onprem`)                                                            |
 | `rocketride.development.local.engineVersion` | `string` | `"latest"`                 | Engine version to download. `"latest"` for newest stable, `"prerelease"` for newest prerelease, or a specific tag like `"server-v3.1.1"`. |
 | `rocketride.deployment.local.engineVersion` | `string` | `"latest"`                  | Engine version for the local deployment target                                                                                            |
 | `rocketride.debug.busTrace`          | `boolean`  | `false`                          | Log every shell-bus message between the extension host and its webviews (very chatty — diagnostics only)                                  |

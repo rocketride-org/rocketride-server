@@ -430,6 +430,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 					);
 					if (stillOpen) continue;
 					const appId = await this.appIdOf(input.uri);
+					// A panel open on this id owns its session (its dispose
+					// stops it). This also covers a tab closed by an app id
+					// move: the folder already names the NEW id, whose panel
+					// may be starting, and a stop here would put it to linger.
+					if (this.panels.has(appId)) continue;
 					void getDevSessionManager()?.stop(appId);
 				} catch { /* unresolvable marker — nothing to stop */ }
 			}

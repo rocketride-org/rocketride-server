@@ -349,6 +349,24 @@ async def test_validate_pipeline_keeps_explicit_version(fake_engine):
 
 
 @pytest.mark.asyncio
+async def test_validate_pipeline_passes_the_component_form_through_wrapped_once(fake_engine):
+    """This is the payload the engine routes to the provider probe; the hints and instructions describe that mode."""
+    component = {'id': 'c1', 'provider': 'llm_openai_api', 'config': {}}
+    registry = ToolRegistry()
+    introspection.register(registry)
+
+    result = await registry.handler('validate_pipeline')(
+        fake_engine, None, {'pipeline': {'version': 1, 'component': component}}
+    )
+
+    assert fake_engine.validate_calls == [
+        {'pipeline': {'pipeline': {'version': 1, 'component': component}}, 'source': None}
+    ]
+    assert result['ok'] is True
+    assert fake_engine.get_services_calls == 0  # no components array, so the provider check is skipped
+
+
+@pytest.mark.asyncio
 async def test_validate_pipeline_ok_false_when_errors(fake_engine):
     fake_engine._validate_result = {'errors': [{'type': 'x', 'message': 'bad', 'id': '1'}], 'warnings': []}
     registry = ToolRegistry()

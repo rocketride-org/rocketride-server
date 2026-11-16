@@ -257,10 +257,10 @@ class Config:
         if not knownKeys:
             return
         for key in userConfig:
-            # The editor supplies this common endpoint/display field even when
-            # services.json does not declare it. It is not a truncated
-            # serverName/accountName/etc. Keep it in the merged config.
-            if key == 'name':
+            # The editor supplies these structural/display fields even when
+            # services.json does not declare them. They are not truncated
+            # authType/serverName/etc. Keep them in the merged config.
+            if key in ('name', 'type'):
                 continue
             suggestion = Config._suggestKey(key, knownKeys)
             if suggestion:

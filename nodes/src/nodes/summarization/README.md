@@ -67,7 +67,7 @@ selected; that is controlled by `numberOfSummaries`.
 
 ## Dependencies
 
-- `langchain`
+- `langchain-text-splitters` `>=1.1.3`
 
 ## Source
 

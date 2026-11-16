@@ -22,8 +22,14 @@
 				"appId": "",
 				"privateKey": "",
 				"installationId": "",
+				"credentialMap": [],
 				"defaultRepo": "",
-				"readOnly": false
+				"readOnly": false,
+				"tools": [],
+				"graphqlAllowMutations": false,
+				"graphqlMaxResponseBytes": 4194304,
+				"rateLimitBudgetSeconds": 60,
+				"rateLimitMaxRetries": 3
 			}
 		}
 	},
@@ -73,9 +79,38 @@
 		"github.installationId": {
 			"type": "string",
 			"title": "Installation ID",
-			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL).",
+			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL). Leave empty to find the installation per repository (GET /repos/{owner}/{repo}/installation), so one pipeline can reach repositories in every organization where the App is installed.",
 			"default": "",
 			"optional": true
+		},
+		"github.credentialRepository": {
+			"type": "string",
+			"title": "Repository or owner",
+			"description": "owner/repo for one repository, owner/* for every repository of that owner, or * for the default used when no other row matches. Not case sensitive.",
+			"default": ""
+		},
+		"github.credentialValue": {
+			"type": "string",
+			"title": "Credential",
+			"description": "A personal access token, a ${ROCKETRIDE_...} placeholder for one, or the JSON text of a GitHub App credential: {\"appId\": ..., \"privateKey\": ..., \"installationId\": optional}.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"github.credentialMap": {
+			"title": "Credential map",
+			"description": "Optional. One row per repository or organization that needs its own credential. Repository or owner: owner/repo, owner/* for all of an owner's repositories, or * for the default. Credential: a personal access token, a ${ROCKETRIDE_...} placeholder, or a GitHub App credential as JSON. A call uses the most specific row for its repository; repositories no row matches use the node's own token, and a * row replaces that token (the node may not have both). Rows are checked when the pipeline starts.",
+			"type": "array",
+			"optional": true,
+			"secure": true,
+			"minItems": 0,
+			"default": [],
+			"items": {
+				"type": "object",
+				"properties": ["github.credentialRepository", "github.credentialValue"]
+			}
 		},
 		"github.defaultRepo": {
 			"type": "string",
@@ -93,13 +128,111 @@
 				[true, "Yes: read only"],
 				[false, "No: allow writes"]
 			]
+		},
+		"github.tools": {
+			"type": "array",
+			"title": "Tools",
+			"description": "Which tools this node publishes to the agent and accepts calls for: pick them from the list, one checkbox per tool, in the order of the README's tool tables. With none picked every tool is published. Fewer tools keep the agent's prompt small. Read-only mode still blocks the write tools whatever is picked.",
+			"uniqueItems": true,
+			"items": {
+				"type": "string",
+				"enum": [
+					["file_get", "Files: file_get"],
+					["file_list", "Files: file_list"],
+					["file_create", "Files: file_create (write)"],
+					["file_edit", "Files: file_edit (write)"],
+					["file_delete", "Files: file_delete (write)"],
+					["issue_get", "Issues: issue_get"],
+					["issue_list", "Issues: issue_list"],
+					["issue_create", "Issues: issue_create (write)"],
+					["issue_comment", "Issues: issue_comment (write)"],
+					["issue_edit", "Issues: issue_edit (write)"],
+					["issue_add_labels", "Issues: issue_add_labels (write)"],
+					["issue_lock", "Issues: issue_lock (write)"],
+					["pr_get", "Pull requests: pr_get"],
+					["pr_list", "Pull requests: pr_list"],
+					["pr_create", "Pull requests: pr_create (write)"],
+					["pr_request_reviewers", "Pull requests: pr_request_reviewers (write)"],
+					["pr_remove_requested_reviewers", "Pull requests: pr_remove_requested_reviewers (write)"],
+					["review_create", "Reviews: review_create (write)"],
+					["review_list", "Reviews: review_list"],
+					["review_get", "Reviews: review_get"],
+					["review_update", "Reviews: review_update (write)"],
+					["repo_get", "Repository: repo_get"],
+					["repo_tree", "Repository: repo_tree"],
+					["repo_contributors", "Repository: repo_contributors"],
+					["repo_languages", "Repository: repo_languages"],
+					["label_list", "Repository: label_list"],
+					["graphql", "GraphQL: graphql (queries; mutations need their switch)"],
+					["release_list", "Releases: release_list"],
+					["release_get", "Releases: release_get"],
+					["release_create", "Releases: release_create (write)"],
+					["release_update", "Releases: release_update (write)"],
+					["release_delete", "Releases: release_delete (write)"],
+					["workflow_list", "Workflows: workflow_list"],
+					["workflow_get", "Workflows: workflow_get"],
+					["workflow_dispatch", "Workflows: workflow_dispatch (write)"],
+					["workflow_enable", "Workflows: workflow_enable (write)"],
+					["workflow_disable", "Workflows: workflow_disable (write)"],
+					["workflow_get_usage", "Workflows: workflow_get_usage"],
+					["org_list_repos", "Organization & users: org_list_repos"],
+					["user_get_repos", "Organization & users: user_get_repos"],
+					["installation_repos", "Organization & users: installation_repos"],
+					["user_get", "Organization & users: user_get"],
+					["user_invite", "Organization & users: user_invite (write)"],
+					["search_code", "Search & commits: search_code"],
+					["search_issues", "Search & commits: search_issues"],
+					["commit_list", "Search & commits: commit_list"],
+					["commit_get", "Search & commits: commit_get"]
+				]
+			},
+			"default": [],
+			"optional": true
+		},
+		"github.graphqlAllowMutations": {
+			"type": "boolean",
+			"title": "GraphQL mutations",
+			"description": "With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says.",
+			"default": false,
+			"enum": [
+				[true, "Yes: run mutations"],
+				[false, "No: queries only"]
+			],
+			"optional": true
+		},
+		"github.graphqlMaxResponseBytes": {
+			"type": "integer",
+			"title": "GraphQL response cap (bytes)",
+			"description": "Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB).",
+			"default": 4194304,
+			"minimum": 1024,
+			"maximum": 104857600,
+			"optional": true
+		},
+		"github.rateLimitBudgetSeconds": {
+			"type": "integer",
+			"title": "Rate-limit wait budget (seconds)",
+			"description": "Total time one call of graphql, a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get, installation_repos) or an envelope write (pr_request_reviewers, pr_remove_requested_reviewers, issue_add_labels) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes).",
+			"default": 60,
+			"minimum": 0,
+			"maximum": 600,
+			"optional": true
+		},
+		"github.rateLimitMaxRetries": {
+			"type": "integer",
+			"title": "Rate-limit retries",
+			"description": "Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. A write is retried only after a rate-limit answer, which GitHub sends instead of processing the request, never after a timeout or any other failure.",
+			"default": 3,
+			"minimum": 0,
+			"maximum": 10,
+			"optional": true
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly"]
+			"properties": ["type", "github.authType", "github.credentialMap", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlAllowMutations", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
 		}
 	]
 }

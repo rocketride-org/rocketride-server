@@ -126,10 +126,13 @@ class Store(DocumentStoreBase):
         self.threshold_search = config.get('score', 0.5)
 
         similarity = config.get('similarity', 'Cosine')
-        if similarity in ['Cosine', 'Euclid', 'Dot', 'Manhattan']:
+        supported = ('Cosine', 'Euclid', 'Dot', 'Manhattan')
+        if similarity in supported:
             self.similarity = similarity
         else:
-            raise Exception('The metric you provided in the config.json does not match required qdrant configurations')
+            raise Exception(
+                f'Qdrant: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
+            )
 
         # If the host already includes a scheme, use it as-is.
         # Otherwise, infer from the profile: cloud -> https://, local -> http://.

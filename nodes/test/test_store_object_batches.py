@@ -14,7 +14,7 @@ object of every batch, so only the last flush survived.
 Each driver is loaded from source with its client library stubbed. The stub
 keeps what a backend would store: an insert adds chunks, a delete removes the
 chunks of its objects, so the tests check what a write order leaves stored. The
-real round trip on pgvector is in ``test_vector_store_writes_full.py``.
+real round trip on pgvector is in ``test_vector_store_writes_live.py``.
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ def _milvus(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
         json.loads(re.search(r'in (\[.*\])$', filter).group(1))
     )
     store.client.upsert.side_effect = lambda collection_name, data: log.stored.extend(
-        (row['meta'].objectId, row['meta'].chunkId) for row in data
+        (row['meta']['objectId'], row['meta']['chunkId']) for row in data
     )
     return store, log
 
