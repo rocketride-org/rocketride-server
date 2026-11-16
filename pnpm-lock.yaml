@@ -712,6 +712,9 @@ importers:
       prop-types:
         specifier: ^15.8.1
         version: 15.8.1
+      tsx:
+        specifier: ~4.23.1
+        version: 4.23.1
 
   apps/shared:
     dependencies:

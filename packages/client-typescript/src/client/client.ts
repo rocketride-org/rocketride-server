@@ -38,6 +38,13 @@ import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
+// Exact text the server sends when it receives an empty credential.
+const NO_AUTH_MESSAGE = 'No authorization provided';
+const NO_AUTH_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. ' +
+	'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. ' +
+	'RocketRide Cloud needs a key: run `rocketride login`.';
+
 // Global counter for generating unique client IDs
 let clientId = 0;
 
@@ -850,6 +857,9 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
+					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
+				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
 			}
 
@@ -1893,6 +1903,9 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('Question cannot be empty');
 			}
 
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
+
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;
@@ -2929,11 +2942,14 @@ export class RocketRideClient extends DAPClient {
 	 * every app id it owns. Readable on both editions (OSS answers the
 	 * fixed namespace its sessions carry; there is no Stripe Connect there).
 	 *
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table, so a late reply is ignored.
 	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
 	 *   `developerId` is null until an org admin registers one
 	 */
-	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	async developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' }, options)) as any;
 	}
 
 	/**
@@ -2942,10 +2958,14 @@ export class RocketRideClient extends DAPClient {
 	 * publish beyond the workspace.
 	 *
 	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table (the claim may still land
+	 *   on the server, so callers should re-check developerStatus()).
 	 * @returns The server's registration record
 	 */
-	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	async registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId }, options)) as any;
 	}
 
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —

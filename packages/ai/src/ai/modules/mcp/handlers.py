@@ -9,7 +9,6 @@ prompt surface -- "knowledge lives in Skills," not MCP prompts.
 
 import json
 import logging
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -35,16 +34,24 @@ from . import tools as tools_pkg
 
 logger = logging.getLogger(__name__)
 
-# `ai` is not published as an installable distribution -- it ships as source
-# copied into `dist/server/ai` by the builder, never `pip install`-ed under
-# any name (see packages/ai/scripts/tasks.js). `importlib.metadata.version`
-# therefore always raises here today; the lookup is kept (rather than a bare
-# constant) so this starts reporting a real version for free if `ai` -- or a
-# renamed successor -- is ever packaged as a proper distribution.
-try:
-    _SERVER_VERSION = _pkg_version('ai')
-except PackageNotFoundError:
-    _SERVER_VERSION = '0.0.0'
+
+def _engine_version() -> str:
+    """Return the engine version, the same value `GET /version` reports.
+
+    `ai` is not published as an installable distribution -- it ships as source
+    copied into `dist/server/ai` by the builder -- so `importlib.metadata`
+    cannot supply a version. The engine knows its own, via `rocketlib.getVersion()`.
+    Resolved per server build (not at import) and falls back to `0.0.0` when the
+    engine library is unavailable, e.g. in plain test environments.
+    """
+    try:
+        from rocketlib import getVersion
+
+        # The binding always returns a dict with `version`, `hash` and `stamp`.
+        return str(getVersion().get('version') or '0.0.0')
+    except Exception:
+        logger.debug('engine version unavailable; reporting 0.0.0', exc_info=True)
+        return '0.0.0'
 
 
 SERVER_INSTRUCTIONS = (
@@ -228,7 +235,7 @@ def build_mcp_server(
 
     server = Server(
         'rocketride-mcp',
-        version=_SERVER_VERSION,
+        version=_engine_version(),
         instructions=SERVER_INSTRUCTIONS,
         on_list_tools=_on_list_tools,
         on_call_tool=_on_call_tool,

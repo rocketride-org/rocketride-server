@@ -45,6 +45,7 @@ import React, { useCallback, useState } from 'react';
 import { Button, Card, InputField } from 'shell';
 import type { FrameOptions } from '../../templates';
 import type { NewAppIdentity } from '../../types';
+import { useDeveloperRegistration } from '../useDeveloperRegistration';
 
 // =============================================================================
 // TYPES
@@ -72,6 +73,10 @@ export interface INewAppFormProps {
 	onCreate: (appName: string, displayName: string, frame: FrameOptions) => void;
 	/** Close the wizard without creating anything. */
 	onCancel: () => void;
+	/** Claim the org's developer id. When set and no org id exists yet, the
+	 *  Developer ID row becomes an editable field instead of the 'local' chip.
+	 *  Rejects with the server's reason, shown under the field. */
+	onRegisterDeveloper?: (developerId: string) => Promise<void>;
 }
 
 // =============================================================================
@@ -82,6 +87,10 @@ export interface INewAppFormProps {
  * lowercase letter, then any mix of letters, digits, underscores, and hyphens
  * (the server accepts digits — e.g. `acme.s3-explorer`, `acme.app2`). */
 const APP_NAME_RE = /^[a-z][a-zA-Z0-9_-]*$/;
+
+/** Developer id (publisher slug) shape: lowercase letters and underscores,
+ * starting with a letter (the server re-validates and has the final word). */
+const DEVELOPER_ID_RE = /^[a-z][a-z_]*$/;
 
 /** Wireframe geometry — the 320x200 preview canvas and its chrome regions. */
 const WF = {
@@ -155,6 +164,10 @@ const styles: Record<string, React.CSSProperties> = {
 	identityValue: { fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11.5 },
 	chip: { display: 'inline-block', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 10, padding: '1px 10px 2px', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11.5, color: 'var(--rr-brand)' },
 	chipSource: { color: 'var(--rr-text-secondary)', fontSize: 11 },
+	devRegister: { paddingBottom: 4 },
+	devInput: { flex: 1, minWidth: 0, boxSizing: 'border-box' },
+	devMsg: { marginLeft: 114 },
+	devHint: { color: 'var(--rr-text-secondary)', fontSize: 11, lineHeight: 1.4, marginLeft: 114, marginTop: 2 },
 	linkage: { color: 'var(--rr-success, var(--rr-brand))' },
 	footer: { display: 'flex', alignItems: 'center', gap: 8 },
 	footerNote: { flex: 1, color: 'var(--rr-text-secondary)', fontSize: 11, lineHeight: 1.4 },
@@ -299,6 +312,99 @@ export function deriveDisplayName(slug: string): string {
 		.trim();
 }
 
+/** What decides the form's footer note. */
+export interface IFooterNoteState {
+	workspaceOpen: boolean;
+	/** The host's own phrasing for a missing scaffold target. */
+	noWorkspaceNote?: string;
+	/** The Developer ID field is editable (no org id, host can claim one). */
+	canRegister: boolean;
+	/** The field holds an id that is not registered yet (Create waits for it). */
+	pendingId: boolean;
+	/** The host could not confirm the org's developer id. */
+	lookupFailed: boolean;
+	source: NewAppIdentity['source'];
+}
+
+/**
+ * The footer note for the form's current state, most specific case first.
+ *
+ * @param state - See {@link IFooterNoteState}.
+ * @returns The note text.
+ */
+export function footerNote(state: IFooterNoteState): string {
+	if (!state.workspaceOpen) {
+		return state.noWorkspaceNote ?? 'Open a workspace folder first. The app is scaffolded into it.';
+	} else if (state.pendingId) {
+		return 'Register the id or clear the field to create the app.';
+	} else if (state.lookupFailed) {
+		return "Could not confirm your organization's developer id with the server. Create checks again; if it still fails, check your connection.";
+	} else if (state.canRegister) {
+		return 'No developer id yet. Register one above, or create the app under "local".';
+	} else if (state.source === 'default') {
+		return 'No organization developer id. Using the "local" default.';
+	}
+	return 'Developer ID is read from the organization account profile.';
+}
+
+/**
+ * Client-side developer id shape check (the server has the final word).
+ *
+ * @param slug - The trimmed id.
+ * @returns True for lowercase letters and underscores, starting with a letter.
+ */
+export function isValidDeveloperId(slug: string): boolean {
+	return DEVELOPER_ID_RE.test(slug);
+}
+
+/** How the Developer ID row renders: an editable field, the id chip, or "not confirmed". */
+export type DeveloperIdRow = 'field' | 'chip' | 'unconfirmed';
+
+/**
+ * Which Developer ID row to show.
+ *
+ * @param identity - The host's identity snapshot.
+ * @param hostCanRegister - The wizard was given a register action.
+ * @returns The row mode.
+ */
+export function developerIdRow(identity: NewAppIdentity, hostCanRegister: boolean): DeveloperIdRow {
+	if (identity.lookupFailed) {
+		return 'unconfirmed';
+	} else if (hostCanRegister && identity.source === 'default') {
+		return 'field';
+	}
+	return 'chip';
+}
+
+/** What decides whether Create is enabled. */
+export interface ICreateState {
+	nameValid: boolean;
+	collision: boolean;
+	displayName: string;
+	workspaceOpen: boolean;
+	creating: boolean;
+	/** A register request is in flight. */
+	registering: boolean;
+	/** The Developer ID field holds an id that is not registered yet. */
+	pendingId: boolean;
+}
+
+/**
+ * Whether Create is enabled. An unregistered id in the field blocks it, so
+ * an app is never silently created as local.<name> when the user meant an id.
+ *
+ * @param state - See {@link ICreateState}.
+ * @returns True when the app can be created now.
+ */
+export function canCreateApp(state: ICreateState): boolean {
+	if (!state.nameValid || state.collision || state.displayName.trim() === '') {
+		return false;
+	} else if (!state.workspaceOpen || state.creating || state.registering) {
+		return false;
+	}
+	return !state.pendingId;
+}
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -310,7 +416,7 @@ export function deriveDisplayName(slug: string): string {
  *
  * @param props - See {@link INewAppFormProps}.
  */
-export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, error, locationPrefix = 'apps/', noWorkspaceNote, onCreate, onCancel }) => {
+export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, error, locationPrefix = 'apps/', noWorkspaceNote, onCreate, onCancel, onRegisterDeveloper }) => {
 	// ── State ────────────────────────────────────────────────────────────
 	/** The three composable frame options (all off = full screen). */
 	const [frame, setFrame] = useState<FrameOptions>({ sidebar: false, statusFooter: false, docTabs: false });
@@ -324,6 +430,9 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	/** True once the user edits the display name directly. */
 	const [displayTouched, setDisplayTouched] = useState(false);
 
+	/** The Developer ID register field (shared with the Deploy tab's form). */
+	const registration = useDeveloperRegistration(onRegisterDeveloper, isValidDeveloperId);
+
 	// ── Derivations ──────────────────────────────────────────────────────
 	// step: validate the slug and check for a live folder collision
 	const nameValid = APP_NAME_RE.test(appName);
@@ -331,12 +440,27 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	const folderName = `${appName}-ui`;
 	const collision = nameValid && identity.existingFolders.includes(folderName);
 	const workspaceOpen = identity.workspaceOpen;
-	const canCreate = nameValid && !collision && displayName.trim() !== '' && workspaceOpen && !creating;
+	// The Developer ID row: an editable field while the org has no id and the
+	// host can claim one, "not confirmed" when the lookup failed, else the chip.
+	const row = developerIdRow(identity, !!onRegisterDeveloper);
+	const canRegister = row === 'field';
+	const regSlug = registration.slug.trim();
+	const regSlugValid = isValidDeveloperId(regSlug);
+	const isSlugInvalid = regSlug !== '' && !regSlugValid;
+	// Text in the field that is not registered yet blocks Create (no silent local).
+	const pendingId = canRegister && regSlug !== '';
+	const canCreate = canCreateApp({ nameValid, collision, displayName, workspaceOpen, creating, registering: registration.busy, pendingId });
 
 	// step: compute the identity summary values
 	const developerId = identity.developerId || 'local';
 	const shownName = nameValid ? appName : '<name>';
-	const linkageName = `${developerId}.${shownName}`;
+	const linkageName = row === 'unconfirmed' ? `<developerId>.${shownName}` : `${developerId}.${shownName}`;
+	let chipText = developerId;
+	let chipSource = identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)';
+	if (row === 'unconfirmed') {
+		chipText = 'not confirmed';
+		chipSource = 'the server lookup failed';
+	}
 	const location = `${locationPrefix}${shownName}-ui/`;
 
 	// ── Callbacks ────────────────────────────────────────────────────────
@@ -353,11 +477,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	// ── Render ───────────────────────────────────────────────────────────
 
 	// step: pick the footer note for the current state
-	const note = !workspaceOpen
-		? (noWorkspaceNote ?? 'Open a workspace folder first. The app is scaffolded into it.')
-		: identity.source === 'default'
-			? 'No organization developer id. Using the "local" default.'
-			: 'Developer ID is read from the organization account profile.';
+	const note = footerNote({ workspaceOpen, noWorkspaceNote, canRegister, pendingId, lookupFailed: row === 'unconfirmed', source: identity.source });
 
 	return (
 		<div style={styles.page}>
@@ -419,11 +539,40 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 				<h3 style={styles.heading}>Identity</h3>
 				<p style={styles.subheading}>How the app is linked and where it is scaffolded</p>
 				<div style={styles.identity}>
-					<div style={styles.identityRow}>
-						<span style={styles.identityKey}>Developer ID</span>
-						<span style={styles.chip}>{developerId}</span>
-						<span style={styles.chipSource}>{identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)'}</span>
-					</div>
+					{canRegister ? (
+						<div style={styles.devRegister}>
+							<div style={styles.identityRow}>
+								<label htmlFor="developerId" style={styles.identityKey}>
+									Developer ID
+								</label>
+								<InputField
+									id="developerId"
+									type="text"
+									spellCheck={false}
+									placeholder="developer id (e.g. acme_labs)"
+									value={registration.slug}
+									disabled={registration.busy || creating}
+									onChange={(e) => registration.setSlug(e.target.value)}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter') void registration.submit();
+									}}
+									style={{ ...styles.devInput, ...(isSlugInvalid ? styles.inputInvalid : {}) }}
+								/>
+								<Button variant="secondary" disabled={registration.busy || creating || !regSlugValid} onClick={() => void registration.submit()}>
+									{registration.busy ? 'Registering...' : 'Register'}
+								</Button>
+							</div>
+							<div style={styles.devHint}>Every app id is &lt;developerId&gt;.&lt;name&gt;. Only an org admin can claim it, and it is permanent (lowercase letters and underscores, starting with a letter).</div>
+							{isSlugInvalid ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>Must start with a lowercase letter; lowercase letters and underscores only.</div> : null}
+							{registration.error ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>{registration.error}</div> : null}
+						</div>
+					) : (
+						<div style={styles.identityRow}>
+							<span style={styles.identityKey}>Developer ID</span>
+							<span style={styles.chip}>{chipText}</span>
+							<span style={styles.chipSource}>{chipSource}</span>
+						</div>
+					)}
 					<div style={styles.identityRow}>
 						<span style={styles.identityKey}>Linkage name</span>
 						<span style={{ ...styles.identityValue, ...styles.linkage }}>{linkageName}</span>
