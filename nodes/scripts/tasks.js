@@ -76,7 +76,7 @@ const SRC_NODE_DIRS = new Map(
 const TEST_DIR = path.join(PACKAGE_DIR, 'test');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'nodes');
 
-// Each Python node ships on its own, as <name>.rrnode beside one index.json
+// The Python nodes ship in one archive, each under <name>/, beside the index.json that names it
 const PACKAGES_DIR = path.join(DIST_ROOT, 'nodes');
 
 // A packaged node's requirement files stay in the server, without its code, for the
@@ -88,12 +88,6 @@ const NODES_CONTRACT = 1;
 
 // The nodes the engine itself needs stay in the server; so do the C++ ones
 const SERVER_NODES = new Set(['core', 'autopipe']);
-
-// Fixed entry times keep a package's digest the same from build to build
-const ZIP_TIME = new Date(1980, 0, 1);
-
-// adm-zip stamps the building OS in each entry; one value keeps the digest the same on every platform
-const ZIP_MADE_BY = 0x0314; // Unix, zip 2.0
 
 // Build inputs or runtime files - none of it belongs in dist.
 const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
@@ -137,17 +131,23 @@ const SYNC = {
 	srcNodeDirs: SRC_NODE_DIRS,
 	distDir: DIST_DIR,
 	packagesDir: PACKAGES_DIR,
+	archiveName: async () => `rocketride-nodes-v${(await loadPackageJson()).version}.zip`,
 	libraryOf: nodeLibrary,
 	copyFile: (src, dest, stats) => syncFile(src, dest, { package: true }, stats),
 	copyNode: (name, src, stats) => syncNode(name, src, stats),
 	forget: (src) => setState(['package', src], null),
 };
 
-// The server keeps core, autopipe and the C++ nodes; every other node becomes <name>.rrnode beside
+// The server keeps core, autopipe and the C++ nodes; every other node goes into the archive beside
 // index.json, and only its requirement files stay in the server. Returns the index's nodes
 async function syncNodes(stats, sync = SYNC) {
-	const { srcNodeDirs, distDir, packagesDir, libraryOf, copyFile, copyNode, forget } = { ...SYNC, ...sync };
+	const { srcNodeDirs, distDir, packagesDir, archiveName, libraryOf, copyFile, copyNode, forget } = {
+		...SYNC,
+		...sync,
+	};
 	const requirementsDir = path.join(distDir, path.basename(REQUIREMENTS_DIR));
+	const archive = await archiveName();
+	const zip = new AdmZip();
 	const packages = {};
 	const sources = {};
 
@@ -165,9 +165,8 @@ async function syncNodes(stats, sync = SYNC) {
 			continue;
 		}
 
-		const { data, entry } = await packageNode(name, src);
-		await fs.promises.mkdir(packagesDir, { recursive: true });
-		await fs.promises.writeFile(path.join(packagesDir, `${name}.rrnode`), data);
+		const { files, entry } = await packageNode(name, src);
+		for (const [file, data] of Object.entries(files)) zip.addFile(`${name}/${file}`, data);
 		packages[name] = entry;
 		sources[name] = src;
 
@@ -192,10 +191,10 @@ async function syncNodes(stats, sync = SYNC) {
 		await forget(path.join(PACKAGE_DIR, 'src', 'nodes', name));
 	}
 
-	// And the package or requirement file of a node that is gone, so it is not published again
+	// And another version's archive, so it is not published again, and the requirement files of a node that is gone
 	for (const file of await readDirSafe(packagesDir)) {
-		if (file.endsWith('.rrnode') && !(path.basename(file, '.rrnode') in packages)) {
-			await fs.promises.rm(path.join(packagesDir, file), { force: true });
+		if (file !== archive && file !== 'index.json') {
+			await fs.promises.rm(path.join(packagesDir, file), { recursive: true, force: true });
 		}
 	}
 	for (const name of await readDirSafe(requirementsDir)) {
@@ -208,34 +207,39 @@ async function syncNodes(stats, sync = SYNC) {
 		}
 	}
 
-	const index = { contract: NODES_CONTRACT, nodes: packages };
+	const index = { contract: NODES_CONTRACT, archive, nodes: packages };
 	await fs.promises.mkdir(packagesDir, { recursive: true });
+	await fs.promises.writeFile(path.join(packagesDir, archive), zip.toBuffer());
 	await fs.promises.writeFile(path.join(packagesDir, 'index.json'), JSON.stringify(index));
 	// The server archive carries its own copy, so an engine reads the index of the build that made it
 	await copyFile(path.join(packagesDir, 'index.json'), path.join(distDir, 'index.json'), stats);
 	return packages;
 }
 
-// Zip a node as <name>/... with its .rrnode marker; return the zip and its index entry
+// The digest of a node's files ({path inside the node: bytes}), as ai.common.node_packages.content_digest:
+// the sha256 of '<path>\0<sha256 hex of the file>\n' for each file in path order
+function contentDigest(files) {
+	const digest = crypto.createHash('sha256');
+	for (const file of Object.keys(files).sort()) {
+		digest.update(`${file}\0${crypto.createHash('sha256').update(files[file]).digest('hex')}\n`);
+	}
+	return digest.digest('hex');
+}
+
+// A node's files with its .rrnode marker, keyed by their path inside the node, and its index entry
 async function packageNode(name, srcDir) {
 	const { glob } = require('glob');
-	const zip = new AdmZip();
-	const add = (entry, data) => {
-		zip.addFile(entry, data);
-		zip.getEntry(entry).header.time = ZIP_TIME;
-		zip.getEntry(entry).header.made = ZIP_MADE_BY;
-	};
 
 	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
 	const services = {};
 	const icons = {};
 	const requires = new Set();
-	// Sorted with '/' on every OS: the entry order is part of the digest
+	const files = {};
+	// Paths with '/' on every OS: they are part of the digest
 	const found = await glob('**', { cwd: srcDir, nodir: true, ignore: IGNORE });
-	const files = found.map((file) => file.replace(/\\/g, '/'));
-	for (const file of files.sort()) {
+	for (const file of found.map((entry) => entry.replace(/\\/g, '/')).sort()) {
 		const data = await fs.promises.readFile(path.join(srcDir, file));
-		add(`${name}/${file}`, data);
+		files[file] = data;
 		// Another node it imports must be on disk beside it
 		if (file.endsWith('.py')) {
 			for (const [, other] of data.toString('utf8').matchAll(/^\s*(?:from|import)\s+nodes\.(\w+)/gm)) {
@@ -249,11 +253,10 @@ async function packageNode(name, srcDir) {
 		services[file] = text;
 		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
 	}
-	add(`${name}/.rrnode`, Buffer.from(JSON.stringify({ name })));
+	files['.rrnode'] = Buffer.from(JSON.stringify({ name }));
 
-	const data = zip.toBuffer();
-	const sha256 = crypto.createHash('sha256').update(data).digest('hex');
-	return { data, entry: { sha256, services, icons, requires: [...requires].sort() } };
+	const sha256 = contentDigest(files);
+	return { files, entry: { sha256, services, icons, requires: [...requires].sort() } };
 }
 
 function makeStartTestServerAction(options = {}) {
@@ -700,5 +703,6 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 module.exports.DIST_DIR = DIST_DIR;
 module.exports.TEST_DIR = TEST_DIR;
 module.exports.packageNode = packageNode;
+module.exports.contentDigest = contentDigest;
 module.exports.syncNodes = syncNodes;
 module.exports.NODES_CONTRACT = NODES_CONTRACT;

@@ -103,6 +103,8 @@ def test_the_digest_is_each_path_with_the_sha256_of_its_file_in_order():
     lines = ''.join(f'{path}\0{hashlib.sha256(files[path]).hexdigest()}\n' for path in ('a/c.json', 'b.py'))
 
     assert node_packages.content_digest(files) == hashlib.sha256(lines.encode()).hexdigest()
+    # The vector nodes/scripts/tasks.test.js checks against the build's contentDigest
+    assert node_packages.content_digest(files) == 'cbd358a9e4e48458634a275f10ca7085f3576d2eba9f9a3d28f224f8d477c200'
 
 
 def test_the_same_files_in_another_zip_match_the_digest(nodes):

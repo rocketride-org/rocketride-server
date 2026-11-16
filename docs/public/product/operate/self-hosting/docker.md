@@ -53,7 +53,7 @@ non-empty one. Widen it only behind TLS and authentication (see
 - **Platform:** `linux/amd64` only. On Apple Silicon add
   `--platform linux/amd64` (Docker runs it under emulation — fine for
   development; the VS Code extension does the same).
-- **Carries the node packages** in `/opt/nodes`, so runs get their nodes without
+- **Carries the node archive** in `/opt/nodes`, so runs get their nodes without
   internet access.
 - **Runs as non-root** (user `rocketride`, uid 1000), listens on **5565**, and starts
   the engine bound to all container interfaces — the port mapping above is

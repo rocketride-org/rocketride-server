@@ -4,8 +4,8 @@
 // =============================================================================
 
 /**
- * A node packages as <name>/... with its .rrnode marker, without build inputs,
- * and with the same digest every time. Run: node --test nodes/scripts/tasks.test.js
+ * A node packages as its files with its .rrnode marker, without build inputs, into one
+ * archive under <name>/, with the digest EaaS computes. Run: node --test nodes/scripts/tasks.test.js
  */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -14,9 +14,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const AdmZip = require('adm-zip');
 
-const crypto = require('node:crypto');
-
-const { packageNode, syncNodes, NODES_CONTRACT } = require('./tasks');
+const { packageNode, contentDigest, syncNodes, NODES_CONTRACT } = require('./tasks');
 
 function makeNode() {
 	const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rr-node-')), 'demo');
@@ -33,9 +31,8 @@ function makeNode() {
 }
 
 test('a package holds the node, its marker, and no build inputs', async () => {
-	const { data } = await packageNode('demo', makeNode());
-	const names = new AdmZip(data).getEntries().map((e) => e.entryName);
-	assert.deepStrictEqual(names.sort(), ['demo/.rrnode', 'demo/IGlobal.py', 'demo/demo.svg', 'demo/services.json']);
+	const { files } = await packageNode('demo', makeNode());
+	assert.deepStrictEqual(Object.keys(files).sort(), ['.rrnode', 'IGlobal.py', 'demo.svg', 'services.json']);
 });
 
 test('the index entry carries each definition as plain JSON text by file, and the icons inline', async () => {
@@ -48,42 +45,29 @@ test('the index entry carries each definition as plain JSON text by file, and th
 	assert.deepStrictEqual(entry.icons, { 'demo.svg': '<svg/>' });
 });
 
-test('the same node gives the same digest on another build', async () => {
-	const first = (await packageNode('demo', makeNode())).entry.sha256;
-	await new Promise((resolve) => setTimeout(resolve, 2100));
-	const second = (await packageNode('demo', makeNode())).entry.sha256;
-	assert.strictEqual(first, second);
+test('the digest is the one EaaS computes over the same files', () => {
+	// The vector test_node_packages.py checks against content_digest
+	const files = { 'b.py': Buffer.from('b'), 'a/c.json': Buffer.from('c') };
+	assert.strictEqual(contentDigest(files), 'cbd358a9e4e48458634a275f10ca7085f3576d2eba9f9a3d28f224f8d477c200');
 });
 
 test('a node packaged on Windows gives the digest built on Linux', async () => {
 	const dir = makeNode();
-	// '\\' and '/' sort differently against digits: util/x.py and util2.py swap if sorted unconverted
 	fs.mkdirSync(path.join(dir, 'util'));
 	fs.writeFileSync(path.join(dir, 'util', 'x.py'), '');
-	fs.writeFileSync(path.join(dir, 'util2.py'), '');
 	const linux = (await packageNode('demo', dir)).entry.sha256;
 
-	// adm-zip reads the platform once, when it loads; load it again as Windows
-	const platform = Object.getOwnPropertyDescriptor(process, 'platform');
-	const fresh = () => {
-		for (const key of Object.keys(require.cache)) {
-			if (key.includes('adm-zip') || key.endsWith(path.join('scripts', 'tasks.js'))) delete require.cache[key];
-		}
-	};
-	// And glob answers with Windows separators
+	// glob answers with Windows separators; packageNode requires it on each call
 	const globPath = require.resolve('glob');
 	const { glob } = require('glob');
 	const windowsGlob = async (...args) => (await glob(...args)).map((file) => file.split('/').join('\\'));
+	const real = require.cache[globPath];
 	try {
-		Object.defineProperty(process, 'platform', { value: 'win32' });
-		fresh();
 		require.cache[globPath] = { id: globPath, filename: globPath, loaded: true, exports: { glob: windowsGlob } };
-		const windows = (await require('./tasks').packageNode('demo', dir)).entry.sha256;
+		const windows = (await packageNode('demo', dir)).entry.sha256;
 		assert.strictEqual(windows, linux);
 	} finally {
-		Object.defineProperty(process, 'platform', platform);
-		delete require.cache[globPath];
-		fresh();
+		require.cache[globPath] = real;
 	}
 });
 
@@ -113,7 +97,9 @@ function makeTree() {
 	write('src/llm_x/requirements.txt', 'requests\n');
 	write('src/embed_y/services.json', '{"protocol": "embed_y://"}');
 	write('src/__init__.py');
-	// What an older build left: a node since removed, and a requirement file llm_x no longer has
+	// What an older build left: another version's archive, a node since removed,
+	// and a requirement file llm_x no longer has
+	write('dist/nodes/rocketride-nodes-v0.zip');
 	write('dist/nodes/gone.rrnode');
 	write('dist/server/nodes/node-requirements/gone/requirements.txt');
 	write('dist/server/nodes/node-requirements/llm_x/requirements_gpu.txt');
@@ -125,6 +111,7 @@ function makeTree() {
 			srcNodeDirs: new Map(names.map((name) => [name, path.join(root, 'src')])),
 			distDir: path.join(root, 'dist', 'server', 'nodes'),
 			packagesDir: path.join(root, 'dist', 'nodes'),
+			archiveName: async () => 'rocketride-nodes-v1.zip',
 			libraryOf: async (name) => (name === 'cpp_x' ? 'cpp_x.so' : null),
 			copyFile: async (src, dest) => copy(src, dest),
 			copyNode: async (name, src) => copy(src, path.join(root, 'dist', 'server', 'nodes', name)),
@@ -133,7 +120,7 @@ function makeTree() {
 	};
 }
 
-test('the server keeps core, autopipe and the C++ nodes; every other node becomes a package', async () => {
+test('the server keeps core, autopipe and the C++ nodes; every other node goes into the archive', async () => {
 	const { root, sync } = makeTree();
 	await syncNodes({}, sync);
 
@@ -146,21 +133,35 @@ test('the server keeps core, autopipe and the C++ nodes; every other node become
 		'index.json',
 		'node-requirements',
 	]);
-	assert.deepStrictEqual(listed('dist/nodes'), ['embed_y.rrnode', 'index.json', 'llm_x.rrnode']);
+	assert.deepStrictEqual(listed('dist/nodes'), ['index.json', 'rocketride-nodes-v1.zip']);
+	const entries = new AdmZip(path.join(root, 'dist', 'nodes', 'rocketride-nodes-v1.zip')).getEntries();
+	assert.deepStrictEqual(entries.map((e) => e.entryName).sort(), [
+		'embed_y/.rrnode',
+		'embed_y/services.json',
+		'llm_x/.rrnode',
+		'llm_x/IGlobal.py',
+		'llm_x/requirements.txt',
+		'llm_x/services.json',
+	]);
 	assert.deepStrictEqual(listed('dist/server/nodes/node-requirements'), ['llm_x']);
 	assert.deepStrictEqual(listed('dist/server/nodes/node-requirements/llm_x'), ['requirements.txt']);
 });
 
-test('the index lists only the packaged nodes, with the digest of the file beside it', async () => {
+test('the index names the archive and lists only the packaged nodes, with the digest of their files', async () => {
 	const { root, sync } = makeTree();
 	await syncNodes({}, sync);
 
 	const index = JSON.parse(fs.readFileSync(path.join(root, 'dist', 'nodes', 'index.json'), 'utf8'));
 	assert.strictEqual(index.contract, NODES_CONTRACT);
+	assert.strictEqual(index.archive, 'rocketride-nodes-v1.zip');
 	assert.deepStrictEqual(Object.keys(index.nodes).sort(), ['embed_y', 'llm_x']);
+	const archive = new AdmZip(path.join(root, 'dist', 'nodes', index.archive));
 	for (const [name, entry] of Object.entries(index.nodes)) {
-		const data = fs.readFileSync(path.join(root, 'dist', 'nodes', `${name}.rrnode`));
-		assert.strictEqual(entry.sha256, crypto.createHash('sha256').update(data).digest('hex'));
+		const files = {};
+		for (const e of archive.getEntries().filter((e) => e.entryName.startsWith(`${name}/`))) {
+			files[e.entryName.slice(name.length + 1)] = e.getData();
+		}
+		assert.strictEqual(entry.sha256, contentDigest(files));
 	}
 	// core and autopipe stay in the server, so only the packaged node it imports is required
 	assert.deepStrictEqual(index.nodes.llm_x.requires, ['embed_y']);

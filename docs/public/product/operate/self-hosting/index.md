@@ -35,11 +35,10 @@ Download a release build, no build toolchain required.
    binary and its `ai/` runtime.
 
 The archive carries the engine and the nodes it needs itself. The other nodes
-are separate `.rrnode` files on the same release: a run downloads the ones its
-pipeline names the first time it uses them, and keeps them. Without internet
-access, download them with the archive and put them in a `nodes/` folder beside
-the runtime directory (`rocketride-engine/../nodes/`); the engine looks there
-first.
+are in `rocketride-nodes-<version>.zip` on the same release. Download it too and
+put it in a `nodes/` folder beside the runtime directory
+(`rocketride-engine/../nodes/`): a run gets the nodes its pipeline names from
+there, and nothing is downloaded at run time.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine

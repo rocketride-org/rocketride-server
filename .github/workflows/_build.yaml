@@ -401,15 +401,15 @@ jobs:
             ${{ github.workspace }}/dist/artifacts/*.json
           if-no-files-found: error
 
-      # One platform only: every node package must match the one index.json
-      - name: Upload node packages
+      # One platform only: the Python nodes are the same on every platform, and each server's index names this archive
+      - name: Upload node archive
         if: inputs.package && matrix.platform == 'ubuntu'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: server-artifacts-nodes
           retention-days: ${{ inputs.retention_days }}
           path: |
-            ${{ github.workspace }}/dist/nodes/*.rrnode
+            ${{ github.workspace }}/dist/nodes/rocketride-nodes-v*.zip
             ${{ github.workspace }}/dist/nodes/index.json
           if-no-files-found: error
 
