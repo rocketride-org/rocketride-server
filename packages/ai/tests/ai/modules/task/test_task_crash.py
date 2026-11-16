@@ -93,13 +93,21 @@ def _pipeline(provider: str) -> dict:
     }
 
 
-def _nodes_dir() -> Path:
-    """Where the engine looks for nodes (services.cpp): the source tree's, when it runs from <repo>/dist/server."""
+def _nodes_dirs() -> list[Path]:
+    """Where the engine reads a node's services.json (services.cpp) and where its Python imports the node (python/init.cpp).
+
+    Both are the source tree's when the engine runs from <repo>/dist/server. When <repo> holds this repo as its
+    rocketride-server submodule, services.cpp still reads dist/server/nodes, but Python imports the submodule's.
+    """
     if _SERVER_DIR.parts[-2:] == ('dist', 'server'):
-        source = _SERVER_DIR.parents[1] / 'nodes' / 'src' / 'nodes'
+        repo = _SERVER_DIR.parents[1]
+        source = repo / 'nodes' / 'src' / 'nodes'
         if source.is_dir():
-            return source
-    return _SERVER_DIR / 'nodes'
+            return [source]
+        submodule = repo / 'rocketride-server' / 'nodes' / 'src' / 'nodes'
+        if submodule.is_dir():
+            return [_SERVER_DIR / 'nodes', submodule]
+    return [_SERVER_DIR / 'nodes']
 
 
 def _write_node(node: Path, provider: str) -> None:
@@ -131,9 +139,10 @@ def server(request, tmp_path_factory):
     workspace = tmp_path_factory.mktemp('crash-node')
     # Its own name: xdist may run both servers at once, in two processes
     provider = f'crash_probe_{os.getpid()}_{int(dumps)}'
-    node = _nodes_dir() / f'_{provider}'
+    nodes = [d / f'_{provider}' for d in _nodes_dirs()]
     try:
-        _write_node(node, provider)
+        for node in nodes:
+            _write_node(node, provider)
 
         port = _free_port()
         # Task ports too, apart from those of the builder's test servers, which start at 20000
@@ -167,7 +176,8 @@ def server(request, tmp_path_factory):
                     proc.kill()
                     proc.wait()
     finally:
-        shutil.rmtree(node, ignore_errors=True)
+        for node in nodes:
+            shutil.rmtree(node, ignore_errors=True)
 
 
 async def _connect(uri: str, on_event) -> RocketRideClient:

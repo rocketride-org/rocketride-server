@@ -93,6 +93,20 @@ class ModelServerOCR(OCRInstance):
         return self._ocr
 
     def _load(self):
+        """Create the engine named by ``self.engine``, its weights counted by the device budget.
+
+        Returns:
+            A ``DocTR``, ``EasyOCR`` or ``Surya`` instance.
+
+        Raises:
+            ValueError: The engine name is unknown.
+        """
+        from ai.common.models.device_budget import loading_model
+
+        # text calls of other worker threads may be inside the device budget meanwhile
+        return loading_model(self._create)
+
+    def _create(self):
         """Create the engine named by ``self.engine``.
 
         Returns:
