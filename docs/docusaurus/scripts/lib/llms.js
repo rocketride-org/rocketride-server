@@ -3,7 +3,7 @@
  *
  *   /nodes            generated catalog of every node page
  *   /llms.txt         per-section index with links to each page's .md sibling
- *   /llms-full.txt    full concatenation of every page's raw markdown
+ *   /llms-full.txt    full concatenation of every page's cleaned markdown
  *
  * Consumes the manifest that docs:gather persists at <contentDir>/.manifest.json.
  */
