@@ -513,6 +513,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	// ── Data — loaded through the host adapter, seeded from the cache ─────
 	const [versions, setVersions] = useState<AppVersionInfo[] | null>(() => railCache.get(app.id)?.versions ?? null);
 	const [pins, setPins] = useState<RungPin[] | null>(() => railCache.get(app.id)?.pins ?? null);
+	// null pins = the where-live lookup has not SUCCEEDED yet (still loading,
+	// or failed); only a successful lookup may say an audience is unpublished.
+	const [pinsFailed, setPinsFailed] = useState(false);
 	// The version whose "Publish to…" audience dialog is open (null = none).
 	const [publishFor, setPublishFor] = useState<AppVersionInfo | null>(null);
 	// The caller's team roster for the publish dialog (null = not loaded).
@@ -576,11 +579,15 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 		const pP = Promise.resolve(host.getWhereLive?.() ?? [])
 			.then((p) => {
 				setPins(p);
+				setPinsFailed(false);
 				patch({ pins: p });
 			})
 			.catch((e) => {
 				console.log('[appdev] whereLive failed:', e);
-				setPins([]);
+				// Keep the pins UNKNOWN (never an empty list, which would read as
+				// "nothing published"); the strip and the dialogs say so.
+				setPins(null);
+				setPinsFailed(true);
 			});
 		await Promise.all([vP, pP]);
 	}, [host, app.id]);
@@ -754,11 +761,12 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	/** The dialog rows' current-state hint: what the audience serves now. */
 	const pinStateOf = useCallback(
 		(handle: string, v: AppVersionInfo): string => {
-			const pin = (pins ?? []).find((p) => p.handle === handle);
+			if (pins === null) return pinsFailed ? 'current state unavailable' : 'loading';
+			const pin = pins.find((p) => p.handle === handle);
 			if (!pin) return 'not published';
 			return pin.registryVersion === v.registryVersion ? `already on v${pin.registryVersion}` : `on v${pin.registryVersion}`;
 		},
-		[pins]
+		[pins, pinsFailed]
 	);
 
 	/** Submit a deployed version for public store review (private → submit). */
@@ -949,7 +957,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					{/* Where this app is live — the reverse index */}
 					<div style={styles.livePanel}>
 						<div style={styles.liveHead}>Where this app is live</div>
-						{(pins ?? []).length === 0 ? (
+						{pins === null ? (
+							<div style={styles.liveFoot}>{pinsFailed ? 'Where this app is live could not be loaded. Refresh to try again.' : 'Loading where this app is live.'}</div>
+						) : pins.length === 0 ? (
 							<div style={styles.liveFoot}>Nothing is deployed yet. Publish a version and deploy it to your personal rung to see it here.</div>
 						) : (
 							<>
@@ -1078,7 +1088,14 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					title={`Publish v${pendingPublish.version.registryVersion} to ${pendingPublish.label}?`}
 					message={(() => {
 						// Pins carry the NAME form of the handle; the target is the wire form.
-						const current = (pins ?? []).find((p) => p.handle === pendingPublish.handle);
+						// Unknown pins (loading or failed) are not "unpublished": say so
+						// rather than promising a first publish over an existing pin.
+						if (pins === null) {
+							return pinsFailed
+								? `What ${pendingPublish.label} serves now could not be loaded, so this may repoint an existing publication. It points ${pendingPublish.label} at v${pendingPublish.version.registryVersion}.`
+								: `What ${pendingPublish.label} serves now is still loading. This points ${pendingPublish.label} at v${pendingPublish.version.registryVersion}.`;
+						}
+						const current = pins.find((p) => p.handle === pendingPublish.handle);
 						if (!current) {
 							return `${pendingPublish.label} is not published yet; this is its first publish, and it serves v${pendingPublish.version.registryVersion} at once.`;
 						}
