@@ -126,11 +126,18 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
 
+	// Only the most recent profile request may update state (see loadProfile).
+	const profileRequestSeq = useRef(0);
+
 	// Keep profile in sync with server-pushed account updates and bump the
-	// reload counter to re-fetch the active section
+	// reload counter to re-fetch the active section. A push is newer than any
+	// profile request already in flight, so it supersedes them: an older
+	// response that lands afterwards is dropped rather than restoring the
+	// state the push just replaced (e.g. the team order before a save).
 	useEffect(
 		() =>
 			ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
+				profileRequestSeq.current++;
 				setProfile(data);
 				setMirrorUser(data);
 				setReloadCounter((n) => n + 1);
@@ -156,9 +163,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 * caller that depends on the refresh (e.g. leaving an org) can tell.
 	 * Only the most recent request may update state: an older response that
 	 * lands after a newer one (e.g. a refresh started before a leave) is
-	 * dropped so it cannot restore a membership that no longer exists.
+	 * dropped so it cannot restore a membership that no longer exists. A
+	 * pushed account update bumps the sequence too (see above).
 	 */
-	const profileRequestSeq = useRef(0);
 	const loadProfile = useCallback(async (): Promise<boolean> => {
 		if (!client) return false;
 		const seq = ++profileRequestSeq.current;
@@ -434,13 +441,20 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		[client]
 	);
 
-	/** Sets the user's dev team (dev-run billing + env layer). */
-	const handleSetDevTeam = useCallback(
-		async (teamId: string) => {
-			if (!client) return;
-			await client.account.setDevTeam(teamId);
+	/** Persists the user's team order in the active org (B39): the `@team`
+	 *  resolution order, home team first. The server pushes the stored order
+	 *  back through shell:accountUpdate; the save also reads it back itself,
+	 *  which supersedes any profile fetch that was underway at the drop, so
+	 *  an older response cannot land after the save and show the old order. */
+	const handleSetTeamOrder = useCallback(
+		async (order: string[]) => {
+			// Throw (not return): the card keeps the dropped order until the
+			// server answers, so a silent no-op would leave it stuck.
+			if (!client) throw new Error('Not connected');
+			await client.account.setTeamOrder(order);
+			await loadProfile();
 		},
-		[client]
+		[client, loadProfile]
 	);
 
 	/** Switches the user's active organization. The guard runs FIRST — a
@@ -606,7 +620,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	/** Sends an invitation to a new organization member. */
 	const handleInviteMember = useCallback(
-		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
+		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }>; devTeamId?: string }) => {
 			if (!client || !orgId) return;
 			await client.account.inviteMember(orgId, params);
 			await loadMembers();
@@ -775,7 +789,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				onDeleteWorkspace={handleDeleteWorkspace}
 				onDeleteWorkspacePrecheck={handleDeleteWorkspacePrecheck}
 				onSaveProfile={handleSaveProfile}
-				onSetDevTeam={handleSetDevTeam}
+				onSetTeamOrder={handleSetTeamOrder}
 				onSetDefaultOrg={handleSetDefaultOrg}
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}

@@ -226,8 +226,8 @@ export interface IAccountViewProps {
 	// -- Callbacks (async, host handles actual server calls) --------------------
 	/** Persists updated profile fields. */
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-	/** Sets the user's dev team (dev-run billing + env layer). */
-	onSetDevTeam: (teamId: string) => Promise<void>;
+	/** Persists the user's team order in the active org (B39): home team first. */
+	onSetTeamOrder: (order: string[]) => Promise<void>;
 	/** Switches the user's active organization. */
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
 	/**
@@ -286,7 +286,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetTeamOrder, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -296,6 +296,15 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isOrgAdmin = useMemo(() => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
+	// The user's HOME team (first of the team order, B39): the API-key mint
+	// form's default scope. Read from ONE snapshot (the current profile, else
+	// the cached auth user) so an empty stored order falls back to that same
+	// snapshot's devTeam rather than to a stale cached order. '' when neither
+	// has arrived.
+	const homeTeamId = useMemo(() => {
+		const snapshot = profile ?? authUser;
+		return snapshot?.teamOrder?.[0] ?? snapshot?.devTeam ?? '';
+	}, [profile, authUser]);
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.
@@ -378,7 +387,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={onSetDevTeam} onSetDefaultOrg={onSetDefaultOrg} />
+							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetTeamOrder={onSetTeamOrder} onSetDefaultOrg={onSetDefaultOrg} />
 						</div>
 					</>
 				),
@@ -399,7 +408,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+							<ApiKeysPanel keys={keys} teams={teams} homeTeamId={homeTeamId} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
 						</div>
 					</>
 				),
@@ -438,7 +447,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetTeamOrder, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin, homeTeamId]
 	);
 
 	// =========================================================================
@@ -479,7 +488,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 								onActiveTeamIdChange={onActiveTeamIdChange}
 								onLoadTeamDetail={onLoadTeamDetail}
 								onSaveProfile={onSaveProfile}
-								onSetDevTeam={async (id) => onSetDevTeam(id)}
+								onSetTeamOrder={onSetTeamOrder}
 								onSetDefaultOrg={async (id) => onSetDefaultOrg(id)}
 								onRenameWorkspace={onRenameWorkspace ?? (async (_orgId, name) => onSaveOrgName(name))}
 								{...(onCreateWorkspace ? { onCreateWorkspace } : {})}
@@ -514,7 +523,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<div style={commonStyles.tabContent}>
 							{chip}
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+							<ApiKeysPanel keys={keys} teams={teams} homeTeamId={homeTeamId} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
 						</div>
 					</>
 				)}

@@ -16,7 +16,8 @@
  *                            (ConfirmDialog-guarded; header X / Escape are
  *                            the exits — keys are immutable, so no [Edit])
  *  - "+ New Key" (header) -> the SAME panel in CREATE mode (name / team
- *                            scope / permissions / expiry), which flips to
+ *                            scope, defaulting to the owner's HOME team and
+ *                            FROZEN at mint (§2.4) / permissions / expiry), which flips to
  *                            the one-time secret reveal (Present mode, [Done]
  *                            only) after the server returns the key
  *
@@ -180,6 +181,12 @@ export interface ApiKeysPanelProps {
 	keys: ApiKeyRecord[];
 	/** Teams available for the create form's scope select. */
 	teams: TeamRecord[];
+	/**
+	 * The owner's HOME team (first of their team order): the create form's
+	 * default scope. A key's team is frozen at mint, so reordering the
+	 * profile never moves a key; '' when unknown (the form opens org-wide).
+	 */
+	homeTeamId: string;
 	/** Creates a key; resolves with the one-time raw key value. */
 	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
 	/** Revokes a key by id. */
@@ -242,6 +249,22 @@ function keyBadgeEl(variant: 'active' | 'expired' | 'member' | 'pending', label:
 	return el;
 }
 
+/** Permissions seeded when the create form opens on the home team (the member defaults). */
+const DEFAULT_KEY_PERMS = ['task.control', 'task.monitor'];
+
+/**
+ * Same permission set (order-insensitive).
+ *
+ * @param a - First permission list.
+ * @param b - Second permission list.
+ * @returns True when both name the same permissions.
+ */
+function samePerms(a: readonly string[], b: readonly string[]): boolean {
+	if (a.length !== b.length) return false;
+	const set = new Set(b);
+	return a.every((p) => set.has(p));
+}
+
 /**
  * Team scope display string for a key record. Keys off teamId (the source of
  * truth): session keys carry no scope; teamId null is genuinely org-wide;
@@ -263,7 +286,7 @@ function teamScope(k: ApiKeyRecord): string {
  * that hosts view, create, and revoke. See the module doc for the standard
  * this file exemplifies.
  */
-export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreateKey, onRevokeKey }) => {
+export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTeamId, onCreateKey, onRevokeKey }) => {
 	// ── Record panel state ──────────────────────────────────────────────────
 	const [panel, setPanel] = useState<PanelState>(null);
 	// Create-form fields (reset on every open of create mode).
@@ -287,10 +310,14 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 	// revoke flipping active -> false) update the open panel in place.
 	const viewedKey = panel?.mode === 'view' ? keys.find((k) => k.id === panel.keyId) ?? null : null;
 
+	// The create form's seeded scope: the owner's home team when it is one of
+	// the listed teams, else org-wide ('').
+	const seededTeamId = teams.some((t) => t.id === homeTeamId) ? homeTeamId : '';
+
 	// Create-form dirty flag: any field differs from its seeded default. It
 	// drives the materializing [Create Key] and arms the discard guard; the
 	// reveal step (Present mode) is never dirty — the record already exists.
-	const createDirty = panel?.mode === 'create' && revealed == null && (formName.trim() !== '' || formTeamId !== '' || formPerms.length > 0 || formExpiry !== 90);
+	const createDirty = panel?.mode === 'create' && revealed == null && (formName.trim() !== '' || formTeamId !== seededTeamId || !samePerms(formPerms, seededTeamId ? DEFAULT_KEY_PERMS : []) || formExpiry !== 90);
 
 	// ── Table rows ──────────────────────────────────────────────────────────
 	const rows = useMemo<KeyRow[]>(
@@ -331,7 +358,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				field: 'team',
 				rrType: 'enum',
 				rrDefault: true,
-				rrDescription: 'Key scope: a named team restricts the key to that team, All Teams inherits every team from the owner at auth time; session keys carry no scope.',
+				rrDescription: 'Key scope, frozen when the key was created: a named team restricts the key to that team and resolves pipeline names through it only; All Teams inherits every team from the owner at auth time and follows the owner\'s team order; session keys carry no scope.',
 				headerSort: true,
 				// Session keys show no team badge; named teams keep the amber badge,
 				// the org-wide scope keeps the neutral badge.
@@ -374,11 +401,12 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 
 	// ── Panel lifecycle ─────────────────────────────────────────────────────
 
-	/** Open the record panel in CREATE mode with a fresh form. */
+	/** Open the record panel in CREATE mode with a fresh form, scoped to the
+	 *  owner's home team by default (§2.4: the mint UI offers the home team). */
 	const openCreate = (): void => {
 		setFormName('');
-		setFormTeamId('');
-		setFormPerms([]);
+		setFormTeamId(seededTeamId);
+		setFormPerms(seededTeamId ? [...DEFAULT_KEY_PERMS] : []);
 		setFormExpiry(90);
 		setError(null);
 		setRevealed(null);
@@ -613,7 +641,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 										</option>
 									))}
 								</select>
-								<div style={commonStyles.textMuted}>{formTeamId ? 'Key is restricted to this team only.' : 'Key inherits all teams from your account.'}</div>
+								<div style={commonStyles.textMuted}>{formTeamId ? `Frozen at creation: the key resolves names through this team only${formTeamId === homeTeamId ? ' (your home team)' : ''}. Reordering your teams never moves it.` : 'Key inherits all teams from your account and resolves names through your team order as it stands at each call.'}</div>
 							</div>
 							{formTeamId && (
 								<div style={{ ...S.field, marginBottom: 14 }}>
