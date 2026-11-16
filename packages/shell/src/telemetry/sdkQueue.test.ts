@@ -16,8 +16,8 @@ function captures(calls: Call[]): CaptureCall[] {
 }
 
 /** A call with the per-entry uuid removed from its options (a fresh v4 each time, asserted separately). */
-function withoutUuid<T extends { options?: unknown }>(call: T): T {
-	if (!call.options || typeof call.options !== 'object') return call;
+function withoutUuid<T extends Call>(call: T): T {
+	if (call.kind !== 'capture' || !call.options || typeof call.options !== 'object') return call;
 	const { uuid, ...rest } = call.options as { uuid?: string };
 	assert.match(uuid ?? '', POSTHOG_UUID, 'every replayed entry carries its mirror uuid');
 	return { ...call, options: Object.keys(rest).length ? rest : undefined };

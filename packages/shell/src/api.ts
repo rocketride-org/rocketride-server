@@ -83,7 +83,7 @@ import { openConsentBanner } from './telemetry/consentUi';
 // consent reads, the consented-capture gateway, the experiment before-send
 // veto, and the replay-resume signal only the home app can time.
 import { consentExpiresAt, getConsentState, subscribeConsent } from './telemetry/consentState';
-import { getConsentedCapture, resumeSignedOutCapture, setAttributionGate } from './telemetry/host';
+import { getConsentedCapture, resumeSignedOutCapture } from './telemetry/host';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
@@ -202,7 +202,7 @@ export { registerSettings, getSettingsContributions, onSettingsContributionsChan
 export type { SettingsContribution } from './components/workspace/settingsContributions';
 export type { TelemetryProviderProps, ConsentApi } from './telemetry/TelemetryContext';
 export type { ConsentState, ConsentChoice, ConsentOrigin } from './telemetry/consent';
-export type { SdkLike } from './telemetry/mode';
+export type { ConsentedCapture, ConsentedReporter } from './telemetry/host';
 export { buildSettingsRegistry, effectiveSettings, settingStoreOf, labelFromKey, SHELL_SECTION_ID } from './components/workspace/settingsRegistry';
 export type { SettingsRegistry, RegistrySection, RegistryEntry, RegistryBuildOptions, ShellKind } from './components/workspace/settingsRegistry';
 // The ONE settings surface: the cloud overlay wraps it (SettingsProvider);
@@ -621,7 +621,6 @@ export const shellApi = {
 	get subscribeConsent() { return subscribeConsent; },
 	get consentExpiresAt() { return consentExpiresAt; },
 	get getConsentedCapture() { return getConsentedCapture; },
-	get setAttributionGate() { return setAttributionGate; },
 	get resumeSignedOutCapture() { return resumeSignedOutCapture; },
 	get useAuthUser() { return useAuthUser; },
 	get useLogout() { return useLogout; },
@@ -785,7 +784,7 @@ export {
 	// Telemetry: the provider + hook the reporter is handed through, consent surface, banner reopen
 	TelemetryProvider, useReport, useConsent, openConsentBanner,
 	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
-	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, setAttributionGate, resumeSignedOutCapture,
+	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, resumeSignedOutCapture,
 };
 
 /**

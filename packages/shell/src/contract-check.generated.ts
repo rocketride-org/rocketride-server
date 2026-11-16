@@ -857,8 +857,10 @@ import type { TelemetryProviderProps as Frozen_TelemetryProviderProps } from '..
 import type { TelemetryProviderProps as Current_TelemetryProviderProps } from './api';
 import type { ConsentApi as Frozen_ConsentApi } from '../contract/versions/v12';
 import type { ConsentApi as Current_ConsentApi } from './api';
-import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v12';
-import type { SdkLike as Current_SdkLike } from './api';
+import type { ConsentedReporter as Frozen_ConsentedReporter } from '../contract/versions/v12';
+import type { ConsentedReporter as Current_ConsentedReporter } from './api';
+import type { ConsentedCapture as Frozen_ConsentedCapture } from '../contract/versions/v12';
+import type { ConsentedCapture as Current_ConsentedCapture } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1721,5 +1723,7 @@ const _t_TelemetryProviderProps: Frozen_TelemetryProviderProps = {} as Current_T
 void _t_TelemetryProviderProps;
 const _t_ConsentApi: Frozen_ConsentApi = {} as Current_ConsentApi;
 void _t_ConsentApi;
-const _t_SdkLike: Frozen_SdkLike = {} as Current_SdkLike;
-void _t_SdkLike;
+const _t_ConsentedReporter: Frozen_ConsentedReporter = {} as Current_ConsentedReporter;
+void _t_ConsentedReporter;
+const _t_ConsentedCapture: Frozen_ConsentedCapture = {} as Current_ConsentedCapture;
+void _t_ConsentedCapture;
