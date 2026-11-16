@@ -6,47 +6,69 @@ sidebar_position: 12
 - [Overview](#overview)
 - [Import](#import)
 - [API](#api)
+- [Capture Options](#capture-options)
 - [Event Names](#event-names)
 - [What This Module Is Not](#what-this-module-is-not)
 
 ## **Overview**
 
-`rocketride/analytics` is the one shared event-report function, bare bones by
-design. Apps call `report(event, props)` with any string event name and a
-free-form props bag. There is no central event list: **each app owns its own
-taxonomy** (home-ui keeps its event names in the home-ui repo, the VS Code
-extension keeps its own, and so on). What the shared layer guarantees is that
-every reported event carries an `app` property identifying the emitting app
-(`home-ui`, `rocket-ui`, …), so downstream analytics can always segment by app.
-The Python mirror lives at `rocketride.analytics` in the Python SDK.
+`rocketride/analytics` mints bound per-app event reporters, bare bones by
+design. A host (the platform shell) creates one reporter per app with
+`createReporter(app, sink)` and hands it over; the app calls
+`report(event, props, options?)` with any string event name and a free-form
+props bag. There is no central event list: **each app owns its own taxonomy**
+(home-ui keeps its event names in its own repo, the VS Code extension keeps
+its own, and so on). What the shared layer guarantees is that every reported
+event carries an `app` property identifying the emitting app, **fixed at
+creation** — there is no module-global "current app" state, so a late event
+from a backgrounded app still names its true emitter. The Python mirror lives
+at `rocketride.analytics` in the Python SDK.
+
+Apps running on the platform shell do not call `createReporter` themselves —
+the shell mints their reporter and hands it over (`useReport()` /
+`getReporter(appId)` from the shell API). Creating reporters directly is for
+hosts and for standalone code with its own transport.
 
 ## **Import**
 
 ```typescript
-import { initReport, report, type ReportSink } from 'rocketride/analytics';
+import { createReporter, type Reporter, type ReportSink, type SendOptions } from 'rocketride/analytics';
 ```
 
 ## **API**
 
 ```typescript
-// Once, at app init: wire the emitting app id + transport.
-initReport('home-ui', (event, props) => posthog.capture(event, props));
-// or, on the product side:
-// Once, at app init: wire the emitting app id + transport. The sink is
-// whatever function your app uses to ship events (HTTP, queue, logger, ...).
-initReport('rocket-ui', (event, props) => mySink.send(event, props));
+// The HOST mints one reporter per app. The sink is whatever function ships
+// events (the shell's capture queue, HTTP, a logger, ...).
+const report = createReporter('rocket-ui', (event, props, options) => mySink.send(event, props, options));
 
-// Anywhere after that:
+// The app just calls it:
 report('nav:click', { target: 'pricing' });
-// → sink receives ('nav:click', { app: 'home-ui', target: 'pricing' })
+// → sink receives ('nav:click', { app: 'rocket-ui', target: 'pricing' }, undefined)
 ```
 
-- `initReport(app, sink)` — stores the app id and transport. Call once per app.
-- `report(event, props?)` — forwards to the sink with `app` stamped into the
-  props. Enforcement is string-ish only: a non-string or empty event name is a
-  silent no-op, and nothing else is validated. Before `initReport` runs (and in
-  builds where telemetry is unconfigured) it is a safe no-op. It never throws —
+- `createReporter(app, sink)` — returns the app's bound `report`. The `app`
+  stamp is closed over for the reporter's lifetime and is stamped last, so
+  caller props can never overwrite it.
+- `report(event, props?, options?)` — forwards to the sink with `app` stamped
+  into the props. Enforcement is string-ish only: a non-string or empty event
+  name is a silent no-op, and nothing else is validated. It never throws —
   telemetry must never break the app.
+
+## **Capture Options**
+
+The optional third argument passes delivery hints to sinks that understand
+them (sinks that don't simply ignore the argument):
+
+```typescript
+type SendOptions = { transport?: 'sendBeacon'; timestamp?: Date; uuid?: string };
+```
+
+- `transport: 'sendBeacon'` — the page may be torn down a moment later (a CTA
+  that starts an OAuth redirect): ask for teardown-surviving delivery.
+- `timestamp` — back-date a replayed event to when it was observed.
+- `uuid` — make the capture idempotent, so an at-least-once replay dedupes
+  instead of double-counting.
 
 ## **Event Names**
 
@@ -59,7 +81,9 @@ list next to its call sites.
 ## **What This Module Is Not**
 
 It is not a taxonomy and not a transport. There is no event-name union, no
-typed property shapes, no PostHog dependency, and no network I/O — the sink an
-app injects does the sending. An earlier revision centralised a strict,
-compile-time-checked cross-app event taxonomy here; that was removed in favour
-of per-app taxonomies and this loose core.
+typed property shapes, no PostHog dependency, and no network I/O — the sink a
+host injects does the sending. Earlier revisions centralised a strict
+cross-app taxonomy and, later, a module-global `initReport(app, sink)`; both
+were removed — the taxonomy in favour of per-app ownership, the global in
+favour of bound reporters whose `app` stamp cannot be re-pointed by whichever
+app initialised last.
