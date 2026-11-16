@@ -27,7 +27,7 @@
  * an example value each) become a `submit()` call in JavaScript, TypeScript
  * and Python, and the HTTP door's request (plan §3.5: the dotted address in
  * one path segment, params on the query string, the account key in the
- * Authorization header). The PARAMS page renders these in live tabs; the
+ * Authorization header). The API Params page renders these in live tabs; the
  * store listing (Step 6) embeds the same block.
  */
 

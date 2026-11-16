@@ -47,7 +47,7 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './panels/
 import { createLiveEventStore, type LiveEventStore } from './panels/development/hooks/liveEventSession';
 import type { ProjectViewMode, ViewState, TaskStatus } from './types';
 import { DeployTab } from './panels/deploy';
-import { ParamsPanel } from './panels/params';
+import { PackagePanel } from './panels/package';
 import type { IPipelineDeploy } from './panels/deploy';
 import { TASK_STATE } from './types';
 
@@ -108,7 +108,7 @@ export interface IProjectViewProps {
 	getNodeSchema?: (provider: string) => Promise<Record<string, any> | undefined>;
 	/**
 	 * The caller's developer id (the first segment of every address, plan
-	 * §2.2), for the PARAMS page's call examples; absent until the host knows
+	 * §2.2), for the API Params page's call examples. absent until the host knows
 	 * it, when the examples show a placeholder.
 	 */
 	developerId?: string;
@@ -222,24 +222,25 @@ interface SourceInfo {
 // =============================================================================
 
 /** Non-canvas pages that render the document {@link ContentHeader}. */
-type DocSubView = 'params' | 'development' | 'deploy';
+type DocSubView = 'development' | 'package' | 'deploy';
 
 /**
  * Per-page header subtitles — "{Page} — {short descriptor}".
  */
 const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
-	params: 'Params: the fields callers may set per request, and how to call the pipeline.',
 	development: 'Development: live monitoring and replay of your dev runs.',
+	package: 'Package: how the pipeline is described and called — its identity and the parameters callers may set per request.',
 	deploy: 'Deploy: the deployed pipeline (scheduled runs, monitoring, and replay).',
 };
 
 /**
- * Map a persisted view mode from BEFORE the environment-page restructure
- * onto the new strip: the old monitoring modes all lived where the
- * DEVELOPMENT page now is.
+ * Map a persisted view mode from BEFORE a strip restructure onto the current
+ * strip: the old monitoring modes all lived where the DEVELOPMENT page now
+ * is, and the former top-level PARAMS page is PACKAGE (its API Params tab).
  */
 function migrateViewMode(mode: string | undefined): ProjectViewMode {
-	if (mode === 'design' || mode === 'params' || mode === 'development' || mode === 'deploy') return mode;
+	if (mode === 'design' || mode === 'development' || mode === 'package' || mode === 'deploy') return mode;
+	if (mode === 'params') return 'package';
 	if (mode === 'status' || mode === 'tokens' || mode === 'flow' || mode === 'trace' || mode === 'errors') {
 		return 'development';
 	}
@@ -457,16 +458,17 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	const totalWarnings = Object.values(statusMap).reduce((sum, ts) => sum + (isLiveRun(ts) ? (ts.warnings?.length ?? 0) : 0), 0);
 
 	// --- ViewMenu declaration (rendered by this view's own TabControl) ---
-	// Strip = DESIGN | DEVELOPMENT | DEPLOY (UI direction v5). The Development
-	// entry carries the live error-severity count so problems stay glanceable
-	// from any page (the old Errors-entry convention, moved up a level).
-	// READONLY hosts (the unknown-task status tabs) get NO Deploy page at
-	// all: publishing snapshots a saved FILE, and a status tab has none — a
-	// permanently-empty page earns no tab.
+	// Strip = DESIGN | DEVELOPMENT | PACKAGE | DEPLOY (named-pipes mockups,
+	// 2026-11-16: the former PARAMS page is PACKAGE › API Params). The
+	// Development entry carries the live error-severity count so problems
+	// stay glanceable from any page (the old Errors-entry convention, moved
+	// up a level). READONLY hosts (the unknown-task status tabs) get NO
+	// Deploy page at all: publishing snapshots a saved FILE, and a status tab
+	// has none — a permanently-empty page earns no tab.
 	const totalIssues = totalErrors + totalWarnings;
 	const viewMenu = useMemo<ViewMenu>(
 		() => ({
-			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'params', label: 'Params' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }])],
+			entries: [{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' }, { id: 'development', label: 'Development', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) }, { id: 'package', label: 'Package' }, ...(isReadonly ? [] : [{ id: 'deploy', label: 'Deploy' }])],
 		}),
 		[isReadonly, totalIssues]
 	);
@@ -598,29 +600,31 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 				</div>
 			),
 		},
-		params: {
-			// The per-call parameters page (plan §5.5): the expose toggle and
-			// public names write the document's parameters map; the canvas
-			// takes the new map through its project reload path.
+		development: {
+			// The dev environment: one self-contained section per source (its
+			// own pills, panes, and player over the dev continuum).
+			content: renderDocPanel(renderSections('dev')),
+		},
+		package: {
+			// The pipeline described (named-pipes mockups 2.3–2.10): Identity and
+			// the per-call API Params (plan §5.5) write the document; the canvas
+			// takes a new map through its project reload path. Assets, Store,
+			// Requirements and Review arrive with publishing (Step 6).
 			content: renderDocPanel(
 				project ? (
-					<ParamsPanel
+					<PackagePanel
 						project={project}
+						sources={sources}
 						servicesJson={servicesJson}
 						getNodeSchema={getNodeSchema ? handleGetNodeSchema : undefined}
 						onContentChanged={isReadonly ? undefined : handleContentChanged}
-						address={`${developerId || '{developerId}'}.${project.project_id ?? '{pipeId}'}`}
+						developerId={developerId ?? ''}
 						serverHost={serverHost}
 					/>
 				) : (
 					<div style={commonStyles.empty}>No pipeline loaded</div>
 				)
 			),
-		},
-		development: {
-			// The dev environment: one self-contained section per source (its
-			// own pills, panes, and player over the dev continuum).
-			content: renderDocPanel(renderSections('dev')),
 		},
 		deploy: {
 			// The deploy LIFECYCLE surface: version strip, where-live, merged

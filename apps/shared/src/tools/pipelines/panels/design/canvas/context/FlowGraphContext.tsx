@@ -195,7 +195,7 @@ export interface IFlowGraphContext {
 
 	/**
 	 * Replaces the `parameters` map (the node config panel's expose chip and
-	 * the PARAMS page write it). The caller follows up with onContentUpdated.
+	 * the API Params page write it). The caller follows up with onContentUpdated.
 	 */
 	setParameters: (parameters: Record<string, string>) => void;
 
@@ -1041,7 +1041,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// its content differs from what's currently on the canvas.
 		if (!projectChanged && incomingSig === loadedContentSig.current) {
 			// The components are what the canvas holds. The parameters map may
-			// still differ: the PARAMS page writes it through the document
+			// still differ: the API Params page writes it through the document
 			// (plan §5.5), and the canvas must serialize THAT map next, not
 			// the one it loaded. Take it without a canvas reload, unless a local
 			// change of the map is still waiting for the serializer: a stale
@@ -1055,7 +1055,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				}
 			}
 			// The document's revision is the allocator for every committed state,
-			// the PARAMS page's included: the next canvas edit must number past
+			// the API Params page's included: the next canvas edit must number past
 			// it, or an undo back to this state would carry the same revision
 			// as that edit and never reload
 			if (incomingVersion > (lastSentVersion.current ?? 0)) lastSentVersion.current = incomingVersion;

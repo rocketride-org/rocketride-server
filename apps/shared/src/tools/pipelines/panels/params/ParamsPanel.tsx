@@ -21,17 +21,19 @@
 // SOFTWARE.
 
 /**
- * The PARAMS page: a MAP EDITOR (mockup `params-alternatives-mockup.html`,
+ * The API Params page: a MAP EDITOR (named-pipes mockup 2.4, option 4C of `params-alternatives-mockup.html`,
  * option 4B; plan §5.5).
  *
  * One row per entry of the pipeline's `parameters` map (public name ->
  * `nodeId.configKey`, plan §5.2): the public name, the target picked from a
  * searchable list grouped by node (a field already exposed is greyed; picking
- * fills the public name with the field's name), one info string from the
- * catalog and the .pipe config ("int 256–4096 · default 1024 · Largest
- * input edge"), and a remove. "+ Add parameter" opens a new row. Defaults
- * are the node's configured values and change on DESIGN, never here. Below
- * the table, the live call examples (M-1.6) use the real public names.
+ * fills the public name with the field's name), the Default as its own
+ * column (the .pipe config value, the node's default when unset — option 4C,
+ * decided 2026-11-16), the type and description from the catalog ("int
+ * 256–4096 · Largest input edge"), and a remove. "+ Add parameter" opens a
+ * new row. Defaults are the node's configured values and change on DESIGN,
+ * never here. Below the table, the live call examples (M-1.6) use the real
+ * public names. The page is the API Params side tab of the PACKAGE page.
  *
  * Built on the shell's controls and style surface: `InputField`, `Button`,
  * `ToggleGroup`, `AnchoredPopup`, `commonStyles` (table header and cells,
@@ -76,6 +78,13 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-text-secondary)',
 		lineHeight: 1.5,
+	} as CSSProperties,
+
+	cellDefault: {
+		...commonStyles.tableCell,
+		verticalAlign: 'top',
+		fontSize: 12,
+		whiteSpace: 'nowrap',
 	} as CSSProperties,
 
 	cellRemove: {
@@ -549,7 +558,7 @@ function TargetPicker({ id, value, options, parameters, autoOpen, disabled, onPi
 // =============================================================================
 
 /**
- * Renders the PARAMS page.
+ * Renders the API Params page.
  *
  * @param props - {@link IParamsPanelProps}.
  * @returns The page body.
@@ -711,7 +720,8 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 					<tr>
 						<th style={commonStyles.tableHeader}>Public name</th>
 						<th style={commonStyles.tableHeader}>Target (node.field)</th>
-						<th style={commonStyles.tableHeader}>Field info (catalog + .pipe config)</th>
+						<th style={commonStyles.tableHeader}>Default</th>
+						<th style={commonStyles.tableHeader}>Type · description</th>
 						<th style={styles.removeHeader} />
 					</tr>
 				</thead>
@@ -752,10 +762,15 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 								<td style={styles.cellTop}>
 									<TargetPicker id={`${rowId}-target`} value={row.target} options={options} parameters={parameters} autoOpen={!row.target} disabled={readonly} onPick={(picked) => pick(row, picked)} />
 								</td>
+								{/* Default is its own column (option 4C, decided 2026-11-16):
+								    the node's config value as set on DESIGN, the node's own
+								    default when unset — what a caller gets when the parameter
+								    is omitted. Type and description stay prose beside it. */}
+								<td style={styles.cellDefault}>{option ? <span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span> : null}</td>
 								<td style={styles.cellInfo}>
 									{option ? (
 										<>
-											<span style={styles.infoStrong}>{typeAndBounds(option.descriptor)}</span> · default <span style={styles.infoStrong}>{showValue(option.stored ?? option.descriptor.default)}</span>
+											<span style={styles.infoStrong}>{typeAndBounds(option.descriptor)}</span>
 											{(option.descriptor.description || option.descriptor.title) && <> · {option.descriptor.description || option.descriptor.title}</>}
 										</>
 									) : row.target ? (
@@ -776,7 +791,7 @@ export default function ParamsPanel({ project, servicesJson, getNodeSchema, onCo
 					})}
 					{rows.length === 0 && (
 						<tr>
-							<td colSpan={4} style={styles.cellEmpty}>
+							<td colSpan={5} style={styles.cellEmpty}>
 								No public parameters yet.
 							</td>
 						</tr>

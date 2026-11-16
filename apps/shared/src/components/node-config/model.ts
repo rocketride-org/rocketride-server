@@ -34,7 +34,7 @@
 // default later flows through (plan §5.6.2 / §5.6.5).
 //
 // This module is pure (no React): the renderer, the validator, the canvas's
-// red-gear check and the PARAMS page all read the same model.
+// red-gear check and the API Params page all read the same model.
 // =============================================================================
 
 import type { ServiceParamDescriptor, ServiceProperty } from 'rocketride';
