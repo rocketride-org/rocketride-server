@@ -349,7 +349,7 @@ async def test_a_close_whose_object_failed_counts_a_failed_binding(catalog, engi
     slot = await _opened(ts, conn)
     monkeypatch.setattr(TaskEngine, '_send_data', AsyncMock(return_value={'body': {'error': 'node raised'}}))
 
-    body = await _frame(conn, subcommand='close', pipe_id=slot)
+    body = await _frame(conn, subcommand='close', pipeId=slot)
 
     assert body == {'error': 'node raised'}
     assert control.open_pipes == {}
