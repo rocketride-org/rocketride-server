@@ -595,7 +595,9 @@ export interface ServerInfoResult {
 	 * The analytics ingestion address telemetry requests go to.
 	 *
 	 * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
-	 * is; defaults server-side to the managed analytics proxy.
+	 * is: the server serves neither unless the operator configured both,
+	 * so a self-hosted engine never sends its users' events to a host it
+	 * did not choose.
 	 */
 	posthogHost?: string;
 

@@ -121,16 +121,37 @@ async def test_on_rrext_public_probe_omits_stripe_key_when_unset(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_public_probe_includes_posthog_config_when_configured(monkeypatch):
+async def test_on_rrext_public_probe_omits_posthog_when_host_unset(monkeypatch):
     """
-    A configured RR_POSTHOG_PUBLISHABLE_KEY is advertised on the probe with
-    its host, so browsers initialise telemetry with the key matching this
-    environment instead of a value baked into app bundles. The host defaults
-    to the managed analytics proxy when RR_POSTHOG_HOST is unset.
+    A key without RR_POSTHOG_HOST serves no telemetry config at all: the host
+    is never defaulted, so a self-hosted engine that only copied a key does
+    not route its users' events through the managed analytics proxy.
     """
     monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
     monkeypatch.setenv('RR_POSTHOG_PUBLISHABLE_KEY', 'phc_test_probe')
     monkeypatch.delenv('RR_POSTHOG_HOST', raising=False)
+
+    account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
+    server = MagicMock()
+    server._server = SimpleNamespace(account=account)
+
+    conn = _make_conn(server=server)
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+
+    assert 'posthogPublishableKey' not in result['body']
+    assert 'posthogHost' not in result['body']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_public_probe_includes_posthog_config_when_configured(monkeypatch):
+    """
+    A configured RR_POSTHOG_PUBLISHABLE_KEY is advertised on the probe with
+    its host, so browsers initialise telemetry with the key matching this
+    environment instead of a value baked into app bundles.
+    """
+    monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    monkeypatch.setenv('RR_POSTHOG_PUBLISHABLE_KEY', 'phc_test_probe')
+    monkeypatch.setenv('RR_POSTHOG_HOST', 'https://e.rocketride.ai')
 
     account = SimpleNamespace(capabilities=[], get_public_apps=AsyncMock(return_value=[]))
     server = MagicMock()
@@ -145,7 +166,7 @@ async def test_on_rrext_public_probe_includes_posthog_config_when_configured(mon
 
 @pytest.mark.asyncio
 async def test_on_rrext_public_probe_posthog_host_passes_through_when_configured(monkeypatch):
-    """A configured RR_POSTHOG_HOST overrides the default proxy address."""
+    """A configured RR_POSTHOG_HOST is served verbatim; there is no fallback address."""
     monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
     monkeypatch.setenv('RR_POSTHOG_PUBLISHABLE_KEY', 'phc_test_probe')
     monkeypatch.setenv('RR_POSTHOG_HOST', 'https://e.staging.example.test')
