@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-13T15:37:25.972Z
-// Source commit: 88fbda7951fca467f53c363991c28d567066ec57
+// Generated:     2026-11-16T08:06:54.293Z
+// Source commit: 9f21ae5c75ca3f0c5f1998b6f5880303c152e12d
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -829,6 +829,13 @@ export interface CreateKeyParams {
     expiresAt?: string;
     /** Optional team UUID to scope this key to. Omit for all teams. */
     teamId?: string;
+    /**
+     * Optional task-address scope: exact `developerId.pipelineId.source` entries or
+     * `developerId.pipelineId.*` for any source of that pipe. Omit for every address
+     * the account may reach. A key created with a scoped key inherits that key's
+     * scope and may only narrow it.
+     */
+    endpoints?: string[];
 }
 /** Parameters for inviting a new member to an organization. */
 export interface InviteMemberParams {
@@ -849,9 +856,9 @@ export interface InviteMemberParams {
         permissions: string[];
     }>;
     /**
-     * Optional development team for the invitee. It must be one of the
-     * `teamAssignments` teams with `task.control` (any org team when `role`
-     * is "admin"). When omitted the server picks one if only one team qualifies.
+     * Optional HOME team for the invitee (first in their team order). It must be
+     * one of the `teamAssignments` teams with `task.control` (any org team when
+     * `role` is "admin"). When omitted the server picks one if only one team qualifies.
      */
     devTeamId?: string;
 }
@@ -867,8 +874,10 @@ export interface InvitedMember {
     role: string;
     /** "pending" until the invitee sets a password, "active" if their account already existed. */
     status: string;
-    /** The team recorded as the invitee's development team, or null when none was recorded. */
+    /** The invitee's HOME team (first in their team order), or null when they were assigned no team. */
     devTeamId: string | null;
+    /** The invitee's team order as recorded. */
+    teamOrder: string[];
 }
 /** Parameters for adding or updating a team member. */
 export interface TeamMemberParams {
@@ -1897,12 +1906,19 @@ export interface ConnectResult {
     /** BCP-47 locale tag (e.g. "en-US") representing the user's preferred locale */
     locale: string;
     /**
-     * ID of the user's development team. It carries NO authorization meaning:
-     * it is the billing and environment-layer context for dev runs and for
-     * `@me` publishes. Team-scoped operations always name their team
-     * explicitly — there is no default-team fallback.
+     * ID of the user's HOME team (the first of `teamOrder`). It carries NO
+     * authorization meaning: it is the billing and environment-layer context
+     * for dev runs and for `@me` publishes. Team-scoped operations always name
+     * their team explicitly — there is no default-team fallback.
      */
     devTeam: string;
+    /**
+     * The user's TEAM ORDER in the active organization: `@team` name
+     * resolution walks it first to last, the first team is the home team.
+     * `account.setTeamOrder()` reorders it. Optional on the type only because
+     * the frozen 1.x contract floors predate it; every current server sends it.
+     */
+    teamOrder?: string[];
     /**
      * The organisation the authenticated user belongs to, with its own
      * permission set and nested team memberships.  Null when the user
@@ -2664,7 +2680,9 @@ export declare enum EVENT_TYPE {
     BILLING = 256,
     /** Deployment change events - pointer/state/schedule/run mutations, scoped by org */
     DEPLOY = 512,
-    /** Convenience combination - ALL events except NONE for comprehensive monitoring */
+    /** Engine-level output of SHARED engines (counts, errors, bare prints, start/stop/crash); sys.admin only */
+    OPS = 1024,
+    /** Convenience combination - every category except OPS (an operator opts into that one explicitly) */
     ALL = 1023
 }
 interface TaskRunningEntry {
@@ -3509,12 +3527,6 @@ export declare const CONST_SOCKET_TIMEOUT = 180;
  * payloads (and every call with onSSE) stream through pipe open/write/close.
  * One shared constant with the server and the Python SDK (1 MiB).
  */
-/**
- * Seconds the TRANSPORT deadline of a submit() request outlives the caller's
- * `timeout` (which the server enforces, pipe open to close): the server's own
- * timeout error, never the transport's, is what the caller sees.
- */
-export declare const SUBMIT_TRANSPORT_MARGIN = 60;
 export declare const SUBMIT_INLINE_MAX: number;
 /**
  * WebSocket ping interval in seconds.
@@ -3757,9 +3769,18 @@ declare class AccountApi {
      */
     updateProfile(fields: ProfileUpdate): Promise<void>;
     /**
-     * Sets the user's DEV team — the team dev-mode runs bill to and whose environment layer applies.
+     * Sets the user's TEAM ORDER in the active organization: the teams `@team` resolution walks.
+     * The first team that publishes a name answers for it; the first team overall is the HOME
+     * team — dev-mode runs bill to it and its environment layer applies. Teams left out follow
+     * in membership order.
      *
-     * @param teamId - The team ID to set as default.
+     * @param order - Team IDs, the home team first (it must carry `task.control`).
+     */
+    setTeamOrder(order: string[]): Promise<void>;
+    /**
+     * Makes a team the user's HOME team: moves it to the front of their team order.
+     *
+     * @param teamId - The team ID to put first.
      */
     setDevTeam(teamId: string): Promise<void>;
     /**
@@ -3842,7 +3863,7 @@ declare class AccountApi {
     /**
      * Creates a new API key and returns the raw key string.
      *
-     * @param params - Key creation parameters (name, permissions, expiresAt).
+     * @param params - Key creation parameters (name, permissions, expiresAt, teamId, endpoints).
      * @returns Object containing the raw key string.
      */
     createKey(params: CreateKeyParams): Promise<{
@@ -5068,6 +5089,12 @@ declare class LogApi {
  * 3. Call write() multiple times with data chunks
  * 4. Call close() to finalize and get results
  *
+ * A request runs until the pipeline answers: neither the SDK nor the server
+ * adds a deadline of its own (a `requestTimeout` configured on the client still
+ * applies, as the caller's own bound). To stop one, call cancel() from another
+ * task; the write in flight then rejects with code `TASK_CANCELLED` at the next
+ * node boundary and close() still runs.
+ *
  * @example
  * ```typescript
  * const pipe = await client.pipe(token, { filename: 'data.json' }, 'application/json');
@@ -5095,13 +5122,6 @@ export declare class DataPipe {
      */
     constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
     /**
-     * Give the pipe up without waiting for the server: the caller's operation is over
-     * (its timeout expired). The SSE subscription is dropped at once, the server-side
-     * pipe is closed best-effort in the background, and a write that was pending when
-     * the timeout fired finds the pipe closed afterwards and does not finalize it again.
-     */
-    abandon(): void;
-    /**
      * Check if the pipe is currently open for writing.
      *
      * @returns true if the pipe has been opened and not yet closed
@@ -5116,6 +5136,15 @@ export declare class DataPipe {
      * @returns The server-assigned pipe ID, or undefined if not yet opened
      */
     get pipeId(): number | undefined;
+    /**
+     * The request tree this pipe started, as the wire names it (`nodeId.engineId.n`).
+     *
+     * Never reused: every event of this request (flow, SSE) carries it. Opaque
+     * to callers.
+     *
+     * @returns The wire traceId, or undefined before open()
+     */
+    get traceId(): string | undefined;
     /**
      * Open the pipe for data transmission.
      *
@@ -5139,6 +5168,38 @@ export declare class DataPipe {
      * @throws PipeException if the server reports a write failure
      */
     write(buffer: Uint8Array): Promise<void>;
+    /**
+     * Cancel the request this pipe is running.
+     *
+     * Sets a flag on the pipe inside the engine. The write (or tool call) in flight
+     * fails at the next node boundary with a PipeException whose `code` is
+     * `TASK_CANCELLED`; a node in the middle of its own work finishes that step
+     * first. The pipe stays open: call close() afterwards as usual, and it
+     * releases the server-side slot. Cancelling a pipe with nothing in flight
+     * makes its next write fail at once. This is how a caller stops a request:
+     * neither the SDK nor the server adds a deadline of its own (a `requestTimeout`
+     * configured on the client still applies, as the caller's own bound).
+     * Cancellation is cooperative: a node in the middle of its step finishes it
+     * first, and a cancel that arrives while the LAST node runs lets that write
+     * complete.
+     *
+     * @throws Error if the pipe is not open
+     * @throws PipeException if the server refuses the cancel
+     *
+     * @example
+     * ```typescript
+     * const timer = setTimeout(() => {
+     *   pipe.cancel().catch((err) => console.warn('cancel refused', err));
+     * }, 60_000);
+     * try {
+     *   await pipe.write(data);
+     * } finally {
+     *   clearTimeout(timer);
+     *   await pipe.close();
+     * }
+     * ```
+     */
+    cancel(): Promise<void>;
     /**
      * Close the pipe and get the processing results.
      *
@@ -5208,7 +5269,13 @@ export type MonitorKey = {
     runKind?: "dev" | "deploy";
 };
 export declare class RocketRideClient extends DAPClient {
-    /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
+    /** SSE callbacks by the request tree's wire traceId (a pipe slot is reused; a traceId never is). */
+    /**
+     * SSE callbacks by pipe SLOT. A slot is reused by the next binding once a
+     * pipe closes, so dispatch by the never-reused `traceId` (which every SSE
+     * body now carries) is the right key; it lands with the 2.0 surface, since
+     * this member's type is part of the frozen 1.x class contract.
+     */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
      * Creates a new RocketRideClient instance.
@@ -5535,7 +5602,6 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
      * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
      * @param options.onChange - `'error'` | `'keep'` | `'auto'` (spec calls)
-     * @param options.timeout - Seconds for the request (pipe open to close)
      * @param options.team - Answer `@team` from this one of your teams
      * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
      * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
@@ -5562,7 +5628,6 @@ export declare class RocketRideClient extends DAPClient {
         env?: Record<string, string>;
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
         onChange?: "error" | "keep" | "auto";
-        timeout?: number;
         team?: string;
     }): Promise<SUBMIT_RESULT>;
     /**
@@ -14833,7 +14898,7 @@ export declare const OAUTH_ROOT_URL: string;
 /**
  * Generic form data record type for dynamic form submissions.
  * Intentionally uses `any` to accommodate the wide variety of field types
- * produced by RJSF forms.
+ * a node's configuration tree holds.
  */
 export type IFormData = Record<string, any>;
 /**
@@ -14856,7 +14921,7 @@ export interface IDimensions {
 }
 /**
  * User-configured form data for a pipeline component.
- * Contains key/value pairs from the RJSF configuration form.
+ * Contains the node's configuration tree, addressed by leaf path.
  */
 export type INodeConfig = Record<string, any>;
 /**
@@ -14883,7 +14948,7 @@ export declare enum IServiceCapabilities {
     Experimental = 65536
 }
 /**
- * Pairs a JSON Schema with its corresponding RJSF UI schema for a single
+ * Pairs a JSON Schema with its corresponding UI schema for a single
  * form section (e.g. Pipe, Source, Target).
  *
  * The schema defines the data shape and validation rules. The ui schema
@@ -14892,7 +14957,7 @@ export declare enum IServiceCapabilities {
 export interface IServiceSchema {
     /** JSON Schema defining the data shape and validation rules. */
     schema: Record<string, any>;
-    /** RJSF UI schema controlling widget rendering and layout. */
+    /** UI schema controlling widget rendering and layout. */
     ui: Record<string, any>;
 }
 interface IInvokeChannel {
@@ -14946,6 +15011,14 @@ export interface IService {
     lanes?: Record<string, IServiceLaneEntry[]>;
     /** Execution plan identifiers. */
     plans?: string[];
+    /**
+     * The resolved configuration properties, every leaf with its `path`
+     * (present on a FULL definition, absent on the bulk summary). The
+     * node-config form renders this tree directly.
+     */
+    properties?: ServiceProperty[];
+    /** Descriptors of the `param`-flagged properties, in schema order. */
+    params?: ServiceParamDescriptor[];
     /** Pipe configuration schema (compiled from fields/shape/preconfig by the engine). */
     Pipe?: IServiceSchema;
     /** Source configuration schema. */
@@ -15258,8 +15331,8 @@ interface IAccountViewProps {
     }>;
     /** Persists updated profile fields. */
     onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
-    /** Sets the user's dev team (dev-run billing + env layer). */
-    onSetDevTeam: (teamId: string) => Promise<void>;
+    /** Persists the user's team order in the active org (B39): home team first. */
+    onSetTeamOrder: (order: string[]) => Promise<void>;
     /** Switches the user's active organization. */
     onSetDefaultOrg: (orgId: string) => Promise<void>;
     /**
