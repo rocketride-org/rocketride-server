@@ -221,19 +221,24 @@ _WMI_OK = re.compile(r'=== wmi query seconds=\d+\.\d{3} ok chars=(\d+) query=(.*
 _WMI_ERR = re.compile(r'=== wmi query seconds=\d+\.\d{3} error=(\w+) winerror=(\S+) query=(.*)\n\n')
 
 
-def _fake_wmi(monkeypatch, exec_query):
+_WMI_SKIPPED = re.compile(r'=== wmi query seconds=\d+\.\d{3} skipped query=(.*)\n\n')
+
+
+def _fake_wmi(monkeypatch, exec_query, skip=False):
     """
-    Put a fake ``_wmi`` module into ``sys.modules``.
+    Put a fake ``_wmi`` module into ``sys.modules`` and set the hook's skip mode.
 
     Args:
-        monkeypatch (pytest.MonkeyPatch): The fixture that restores ``sys.modules``.
+        monkeypatch (pytest.MonkeyPatch): The fixture that restores ``sys.modules`` and ``_WMI_SKIP``.
         exec_query (Callable): The fake ``exec_query``.
+        skip (bool): Value for ``_WMI_SKIP``; False tests the pass-through mode.
 
     Returns:
         types.ModuleType: The fake module.
     """
     module = types.ModuleType('_wmi')
     module.exec_query = exec_query
+    monkeypatch.setattr(dumps, '_WMI_SKIP', skip)
     monkeypatch.setitem(sys.modules, '_wmi', module)
     return module
 
@@ -314,6 +319,7 @@ def test_wmi_wrapper_real_query(tmp_path, monkeypatch):
         pytest.skip('_wmi exists on Windows only')
     import _wmi
 
+    monkeypatch.setattr(dumps, '_WMI_SKIP', False)
     monkeypatch.setattr(_wmi, 'exec_query', _wmi.exec_query)
     dumper, path = _dumper(tmp_path)
     assert dumps._wrap_wmi(dumper) is True
@@ -325,3 +331,42 @@ def test_wmi_wrapper_real_query(tmp_path, monkeypatch):
     text = path.read_text(encoding='utf-8')
     assert _WMI_OK.fullmatch(text) or _WMI_ERR.fullmatch(text), text
     assert text.endswith('query=SELECT Version FROM OS\n\n')
+
+
+def test_wmi_skip_mode_does_not_call_original_and_raises(tmp_path, monkeypatch):
+    calls = []
+
+    def fake(query):
+        calls.append(query)
+        return 'x'
+
+    module = _fake_wmi(monkeypatch, fake, skip=True)
+    dumper, path = _dumper(tmp_path)
+    assert dumps._wrap_wmi(dumper) is True
+    with pytest.raises(OSError, match='skipped'):
+        module.exec_query('SELECT a\nFROM b ' + 'q' * 300)
+    dumper.close()
+    assert calls == []
+    text = path.read_text(encoding='utf-8')
+    assert text.count('=== wmi query') == 1
+    match = _WMI_SKIPPED.fullmatch(text)
+    assert match and match.group(1) == ('SELECT a FROM b ' + 'q' * 300)[:200]
+
+
+def test_wmi_skip_mode_real_platform_falls_back(tmp_path, monkeypatch):
+    if os.name != 'nt':
+        pytest.skip('_wmi exists on Windows only')
+    import platform
+
+    import _wmi
+
+    monkeypatch.setattr(dumps, '_WMI_SKIP', True)
+    monkeypatch.setattr(_wmi, 'exec_query', _wmi.exec_query)
+    dumper, path = _dumper(tmp_path)
+    assert dumps._wrap_wmi(dumper) is True
+    with pytest.raises(OSError):
+        platform._wmi_query('CPU', 'Architecture')
+    machine = platform._get_machine_win32()
+    dumper.close()
+    assert isinstance(machine, str) and machine
+    assert _WMI_SKIPPED.search(path.read_text(encoding='utf-8'))

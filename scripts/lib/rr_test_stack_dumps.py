@@ -60,8 +60,14 @@ fsynced because the process may hang right after::
     === wmi query seconds=<s, 3 decimals> ok chars=<length of the returned text> query=<first 200 chars>
     === wmi query seconds=<s> error=<exception class> winerror=<code or -> query=<first 200 chars>
 
-followed by a blank line. The wrapper returns the original result or re-raises the
-original exception unchanged, and nothing it logs can raise.
+followed by a blank line. With ``_WMI_SKIP`` false the wrapper returns the original result
+or re-raises the original exception unchanged. With ``_WMI_SKIP`` true (the default) it never
+calls ``_wmi``: it appends the block below and raises ``OSError``, which ``platform`` treats
+as "WMI unavailable" and answers from ``sys.getwindowsversion()`` and the environment::
+
+    === wmi query seconds=<s, 3 decimals> skipped query=<first 200 chars>
+
+Nothing the wrapper logs can raise.
 
 A child that exits normally removes a file that holds no dump, so what is left
 belongs to children that ran long or were killed.
@@ -95,6 +101,10 @@ _TEST_MAX = 300
 
 # Longest WMI query text kept in the ``=== wmi query`` line, in characters.
 _WMI_QUERY_MAX = 200
+
+# True: the wrapped ``_wmi.exec_query`` never calls the original and raises ``OSError``
+# after logging a ``skipped`` block. False: it calls the original and logs the outcome.
+_WMI_SKIP = True
 
 # Interpreter options that take the next argument as their value.
 _VALUE_OPTIONS = ('-W', '-X')
@@ -560,8 +570,10 @@ def _wrap_wmi(dumper: '_Dumper') -> bool:
     Wrap ``_wmi.exec_query`` so every call appends one ``=== wmi query`` line to the dump file.
 
     ``platform`` looks ``_wmi.exec_query`` up on the module at call time, so replacing
-    the attribute here covers its first query. The wrapper returns the original result
-    or re-raises the original exception unchanged; a failure to log is swallowed.
+    the attribute here covers its first query. With ``_WMI_SKIP`` false the wrapper returns
+    the original result or re-raises the original exception unchanged. With ``_WMI_SKIP``
+    true it never calls the original: it logs a ``skipped`` block and raises ``OSError``.
+    A failure to log is swallowed in both modes.
 
     Args:
         dumper (_Dumper): The dumper whose file lock and file receive the line.
@@ -581,16 +593,22 @@ def _wrap_wmi(dumper: '_Dumper') -> bool:
     @functools.wraps(original)
     def exec_query(*args, **kwargs):
         """
-        Call the original ``exec_query``, time it and log the outcome.
+        Skip the query (``_WMI_SKIP`` true) or call the original, time it and log the outcome.
 
         Args:
             *args: Positional arguments, passed on unchanged.
             **kwargs: Keyword arguments, passed on unchanged.
 
         Returns:
-            str: The original result.
+            str: The original result; never returns when ``_WMI_SKIP`` is true.
+
+        Raises:
+            OSError: When ``_WMI_SKIP`` is true.
         """
         begin = time.monotonic()
+        if _WMI_SKIP:
+            _log_wmi(dumper, begin, args, kwargs, 'skipped')
+            raise OSError('WMI query skipped by the test hook')
         try:
             result = original(*args, **kwargs)
         except BaseException as exc:
