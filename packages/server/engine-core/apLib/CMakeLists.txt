@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 if(NOT TARGET apLib.lib)
     # Add the apLib library
     rocketride_add_library(apLib LIST_ONLY "json;ipp" *.c *.cpp *.hpp *.h *.json *.ipp *.y)

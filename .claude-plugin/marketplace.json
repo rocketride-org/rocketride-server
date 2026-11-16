@@ -1,0 +1,14 @@
+{
+  "name": "rocketride",
+  "description": "RocketRide agent skills and hosted MCP server for Claude Code",
+  "owner": {
+    "name": "RocketRide"
+  },
+  "plugins": [
+    {
+      "name": "rocketride",
+      "source": "./docs/agents",
+      "description": "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++. Five skills that take a plain-language request to a validated, running RocketRide pipeline, plus the hosted RocketRide MCP server."
+    }
+  ]
+}

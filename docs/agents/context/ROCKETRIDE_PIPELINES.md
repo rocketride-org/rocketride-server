@@ -18,7 +18,7 @@ pipeline components this document does not mention. Always confirm a provider na
 and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
-On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
+On RocketRide Cloud there are no custom nodes (it runs only the catalog's),
 and a pipeline bundled in a store app may use catalog nodes only: see 'Catalog nodes only'
 in `ROCKETRIDE_APPS.md`.
 
