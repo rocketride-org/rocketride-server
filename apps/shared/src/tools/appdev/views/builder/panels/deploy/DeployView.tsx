@@ -960,7 +960,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						{pins === null ? (
 							<div style={styles.liveFoot}>{pinsFailed ? 'Where this app is live could not be loaded. Refresh to try again.' : 'Loading where this app is live.'}</div>
 						) : pins.length === 0 ? (
-							<div style={styles.liveFoot}>Nothing is deployed yet. Publish a version and deploy it to your personal rung to see it here.</div>
+							<div style={styles.liveFoot}>Nothing is published yet. Deploy a version, then publish it to an audience (Me, a team, or the store) to see it here.</div>
 						) : (
 							<>
 								{(pins ?? []).map((p) => (
@@ -988,8 +988,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								))}
 								<div style={styles.liveFoot}>
 									{host.submitForReview
-										? 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. Review gates every version on the store rung; internal rungs never wait.'
-										: 'Deploy pins a rung to an immutable version: first publish, update, promote, and rollback are all this one verb. Personal deploys land on your desktop automatically. No rung waits on review on this server; the store publishes directly.'}
+										? 'Publish points an audience at one deployed version: first publish, update, promote, and rollback are all this one pointer move. Review gates every version on the store rung; internal rungs never wait.'
+										: 'Publish points an audience at one deployed version: first publish, update, promote, and rollback are all this one pointer move. No rung waits on review on this server; the store publishes directly.'}
 								</div>
 							</>
 						)}
