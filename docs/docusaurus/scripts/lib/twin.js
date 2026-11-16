@@ -2,15 +2,16 @@
  * Clean markdown for the LLM surface (the `.md` twins and llms-full.txt).
  *
  * Page sources carry front matter and, for `.mdx` pages, `import` lines and JSX
- * wrappers that mean nothing to an agent reading the raw file. This strips
- * them and keeps the text and the links. Fenced code, inline code and comments
- * are never touched, and `.md` pages (parsed as CommonMark, so `<name>` is
- * literal text) only lose their front matter. Anything this cannot parse with
- * confidence (an unclosed tag, an `export` that never balances) is left
- * exactly as written rather than guessed at.
+ * wrappers that mean nothing to an agent reading the raw file. This removes the
+ * front matter, the imports/exports and the JSX tags, keeps the text and the
+ * links, decodes entities in MDX prose, collapses runs of blank lines outside
+ * code fences, and adds the page title as a heading when the body has none.
+ * Fenced code, inline code and comments are never touched, and `.md` pages
+ * (parsed as CommonMark, so `<name>` is literal text) get no tag or entity
+ * handling. An `import`/`export` that never balances is kept as written.
  */
 
-const { fenceOpener, fenceCloses, codeSpanEnd, frontMatterTitle } = require('./markdown');
+const { fenceOpener, fenceCloses, codeSpanStop, frontMatterTitle } = require('./markdown');
 
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'col']);
@@ -165,6 +166,7 @@ class MdxCleaner {
 		this.lineHadTag = false;
 		this.trimLead = state.depth > 0; // inside a wrapper, the wrapper's indentation would read as code
 		this.frame = null;
+		this.afterStatement = -1; // where the last dropped import/export ended
 	}
 
 	run() {
@@ -201,21 +203,38 @@ class MdxCleaner {
 		const title = collapse(f.title) || collapse(f.rest);
 		if (!title) return;
 		if (f.title.trim()) {
+			let suffix = '';
 			const rest = collapse(f.rest);
-			this.out += `- [${title}](${f.href})${rest ? `: ${rest}` : ''}`; // a card: title span plus body span
+			if (rest) suffix = `: ${rest}`;
+			this.out += `- [${title}](${f.href})${suffix}`; // a card: title span plus body span
 		} else this.out += `[${title}](${f.href})`;
 	}
 
 	/** Drop an import/export statement that starts at the current line. True when it did. */
 	skipStatement() {
 		const { src, i } = this;
-		if (this.frame || !(i === 0 || src[i - 1] === '\n')) return false;
+		if (this.frame || !this.atBlockStart() || /[ \t]/.test(src[i])) return false;
 		const rest = src.slice(i, i + 200);
 		if (!IMPORT_LINE.test(rest) && !EXPORT_LINE.test(rest)) return false;
 		const end = statementEnd(src, i);
 		if (end < 0) return false; // never balances: leave it as written
 		this.i = end + 1;
+		this.afterStatement = this.i;
 		return true;
+	}
+
+	/**
+	 * Whether the current position starts a block: the start of the text, the
+	 * line after a blank one, or the line right after an import/export. MDX only
+	 * reads `import`/`export` as ESM there, so a wrapped prose line that happens
+	 * to start with the word is left alone.
+	 */
+	atBlockStart() {
+		const { src, i } = this;
+		if (i === 0 || i === this.afterStatement) return true;
+		if (src[i - 1] !== '\n') return false;
+		const prev = src.lastIndexOf('\n', i - 2) + 1;
+		return !src.slice(prev, i - 1).trim();
 	}
 
 	/** Handle the newline at the current position. */
@@ -245,12 +264,9 @@ class MdxCleaner {
 		}
 		// Remove only the indentation the wrapper added (that of the first line
 		// at this nesting depth), so a nested list keeps its own indentation.
-		if (state.base == null || state.baseDepth !== state.depth) {
-			state.base = n;
-			state.baseDepth = state.depth;
-		}
+		if (state.bases[state.depth] == null) state.bases[state.depth] = n;
 		if (!n) return false;
-		this.i += Math.min(n, state.base);
+		this.i += Math.min(n, state.bases[state.depth]);
 		return true;
 	}
 
@@ -265,11 +281,7 @@ class MdxCleaner {
 	/** Copy a code span, or just its backtick run when it never closes. */
 	copyCodeSpan() {
 		const { src, i } = this;
-		let end = codeSpanEnd(src, i);
-		if (end < 0) {
-			end = i;
-			while (src[end] === '`') end++;
-		}
+		const end = codeSpanStop(src, i);
 		this.emit(src.slice(i, end));
 		this.i = end;
 	}
@@ -292,8 +304,9 @@ class MdxCleaner {
 	/** A dropped icon or image must not leave `** text**` or `()`. */
 	tidyDroppedTag() {
 		const { src } = this;
-		if (/(\*\*|__)$/.test(this.out)) while (src[this.i] === ' ') this.i++;
-		else if (/(\*\*|__)/.test(src.slice(this.i, this.i + 2)) && /[ \t]$/.test(this.out)) {
+		if (/(\*\*|__)$/.test(this.out)) {
+			while (src[this.i] === ' ') this.i++;
+		} else if (/(\*\*|__)/.test(src.slice(this.i, this.i + 2)) && /[ \t]$/.test(this.out)) {
 			this.out = this.out.replace(/[ \t]+$/, '');
 		}
 		if (this.out.endsWith('(') && src[this.i] === ')') {
@@ -339,8 +352,12 @@ class MdxCleaner {
 			const title = attr(t.attrs, 'title');
 			if (href && title) this.out += `- [${title}](${href})`; // <Card> carries its text in `title`
 		}
-		if (t.closing) this.state.depth = Math.max(0, this.state.depth - 1);
-		else if (!t.selfClosing && !VOID_TAGS.has(name.toLowerCase())) this.state.depth++;
+		const { state } = this;
+		if (t.closing) state.depth = Math.max(0, state.depth - 1);
+		else if (!t.selfClosing && !VOID_TAGS.has(name.toLowerCase())) {
+			state.depth++;
+			state.bases[state.depth] = null; // a new wrapper measures its own indentation
+		}
 	}
 
 	decodeEntity() {
@@ -392,7 +409,7 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 	const fm = FRONT_MATTER.exec(raw);
 	const title = fm ? frontMatterTitle(raw) : null;
 	const segments = splitFences(fm ? raw.slice(fm[0].length) : raw);
-	const state = { depth: 0, base: null, baseDepth: 0 };
+	const state = { depth: 0, bases: [] };
 	const parts = segments.map((s) => (mdx && !s.fence ? cleanMdx(s.text, state) : s.text));
 	// Collapse blank-line runs only outside code fences, where blank lines are part of the code.
 	const fenced = [];
@@ -418,4 +435,4 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 // First line of every published .md twin; llms.js uses it to spot an already-rewritten file.
 const INDEX_LINE_PREFIX = '> Documentation index for agents';
 
-module.exports = { cleanTwin, splitFences, INDEX_LINE_PREFIX };
+module.exports = { cleanTwin, INDEX_LINE_PREFIX };

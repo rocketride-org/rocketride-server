@@ -183,4 +183,35 @@ describe('cleanTwin: code fences, escapes and brace links', () => {
 	it('leaves the text of a link whose href is not a literal, without a link target', () => {
 		assert.equal(mdx('<a href={url}>Start</a>\n'), 'Start\n');
 	});
+
+	it('gives two identical card grids the same unindented list items', () => {
+		const grid = '<CardGrid>\n  <Card href="/a" title="A">\n    Body A.\n  </Card>\n</CardGrid>\n';
+		const out = mdx(`${grid}\n## Next\n\n${grid}`);
+		const items = out.split('\n').filter((l) => /\[A\]\(\/a\)/.test(l));
+		assert.deepEqual(items, ['- [A](/a)', '- [A](/a)']);
+	});
+
+	it('keeps prose as prose in a second wrapper indented four spaces', () => {
+		const src = '<div>\nFirst wrapper text.\n</div>\n\n<details>\n    <summary>More</summary>\n\n    Body of the second wrapper.\n\n</details>\n';
+		assert.equal(cleanTwin(src, { mdx: true, addTitle: false }), 'First wrapper text.\n\nMore\n\nBody of the second wrapper.\n');
+	});
+
+	it('keeps a wrapped prose line that starts with import or export', () => {
+		assert.equal(mdx('With the CLI you can\nimport pipelines from a folder.\n'), 'With the CLI you can\nimport pipelines from a folder.\n');
+		assert.equal(mdx('The engine can\nexport default settings to a file.\n'), 'The engine can\nexport default settings to a file.\n');
+	});
+
+	it('keeps an indented import line in a list item', () => {
+		assert.equal(mdx('- Step one: you\n  import data from S3.\n'), '- Step one: you\n  import data from S3.\n');
+	});
+
+	it('still removes imports at the top of the file, including consecutive ones', () => {
+		assert.equal(mdx("import A from 'a';\nimport B from 'b';\n\nText\n"), 'Text\n');
+		assert.equal(mdx("Intro.\n\nimport A from 'a';\n\nText\n"), 'Intro.\n\nText\n');
+	});
+
+	it('collapses runs of blank lines on .md pages, outside fences', () => {
+		assert.equal(cleanTwin('Para one.\n\n\n\nPara two.\n'), 'Para one.\n\nPara two.\n');
+		assert.equal(cleanTwin('```\na\n\n\n\nb\n```\n'), '```\na\n\n\n\nb\n```\n');
+	});
 });
