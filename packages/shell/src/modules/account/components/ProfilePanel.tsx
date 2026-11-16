@@ -33,7 +33,8 @@ import { StatusBadge } from '../../../components/status-badge/StatusBadge';
 import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 import type { ConnectResult, ProfileUpdate, TeamInfo } from '../types';
 import { S, Badge, Avatar, initials, avatarColor } from './shared';
-import { moveItem, orderTeams, ordinal } from './teamOrder';
+import { moveItem, orderTeams, ordinal, pushRetiresSave } from './teamOrder';
+import type { PendingSave } from './teamOrder';
 
 // =============================================================================
 // STYLES
@@ -299,18 +300,16 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 	const rows = pending ?? ordered;
 	const canReorder = rows.length > 1 && pending == null;
 	// The save in flight: the ids it sent and whether the call has resolved.
-	const saveRef = useRef<{ ids: string[]; resolved: boolean } | null>(null);
+	const saveRef = useRef<PendingSave | null>(null);
 
-	// The server's answer to a saved order arrives as a pushed `order`. The
-	// in-flight rows retire when a push carries the saved order, or when any
-	// push follows the resolved call (the server may normalize the order).
-	// A profile response that was already underway at the drop and comes
-	// back with the old order is neither, so it cannot acknowledge the save.
+	// The server's answer to a saved order arrives as a pushed `order`; see
+	// pushRetiresSave for which pushes retire the in-flight rows. The provider
+	// drops profile responses that a save superseded, so a push that follows
+	// the resolved call is authoritative.
 	useEffect(() => {
 		const save = saveRef.current;
 		if (!save) return;
-		const pushed = ordered.map((t) => t.id);
-		if (save.resolved || (pushed.length === save.ids.length && pushed.every((id, i) => id === save.ids[i]))) {
+		if (pushRetiresSave(ordered.map((t) => t.id), save)) {
 			saveRef.current = null;
 			setPending(null);
 		}

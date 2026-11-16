@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TeamInfo } from 'rocketride';
-import { moveItem, orderTeams, ordinal } from './teamOrder';
+import { moveItem, orderTeams, ordinal, pushRetiresSave } from './teamOrder';
 
 const team = (id: string): TeamInfo => ({ id, name: id.toUpperCase(), permissions: [] });
 const ids = (teams: TeamInfo[]): string[] => teams.map((t) => t.id);
@@ -43,4 +43,17 @@ test('moveItem moves an element down and up, and copies on a no-op', () => {
 	assert.notEqual(same, list);
 	assert.deepEqual(moveItem(list, 1, 9), list);
 	assert.deepEqual(list, ['a', 'b', 'c', 'd']);
+});
+
+test('pushRetiresSave: a push carrying the saved order retires the save', () => {
+	assert.equal(pushRetiresSave(['prod', 'dev'], { ids: ['prod', 'dev'], resolved: false }), true);
+});
+
+test('pushRetiresSave: a stale response with the old order, before the call resolves, does not acknowledge the save', () => {
+	assert.equal(pushRetiresSave(['dev', 'prod'], { ids: ['prod', 'dev'], resolved: false }), false);
+	assert.equal(pushRetiresSave(['prod'], { ids: ['prod', 'dev'], resolved: false }), false);
+});
+
+test('pushRetiresSave: any push after the call resolved retires the save (server-normalized order)', () => {
+	assert.equal(pushRetiresSave(['dev', 'prod', 'qa'], { ids: ['prod', 'dev'], resolved: true }), true);
 });

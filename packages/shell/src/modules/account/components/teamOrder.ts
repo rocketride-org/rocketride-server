@@ -54,6 +54,28 @@ export function orderTeams(teams: TeamInfo[], order: readonly string[]): TeamInf
 	return [...named, ...teams.filter((t) => !named.includes(t))];
 }
 
+/** A team-order save in flight: the ids it sent and whether the call has resolved. */
+export interface PendingSave {
+	ids: readonly string[];
+	resolved: boolean;
+}
+
+/**
+ * Decides whether a pushed order retires a save in flight. It does when the
+ * push carries the saved order, or when it follows the resolved call (the
+ * server may normalize the order). A response that was already underway at
+ * the drop and returns the old order before the call resolves is neither,
+ * so it cannot acknowledge the save.
+ *
+ * @param pushed - The team ids of the pushed order, in display order.
+ * @param save   - The save in flight.
+ * @returns True when the in-flight rows should give way to the push.
+ */
+export function pushRetiresSave(pushed: readonly string[], save: PendingSave): boolean {
+	if (save.resolved) return true;
+	return pushed.length === save.ids.length && pushed.every((id, i) => id === save.ids[i]);
+}
+
 /**
  * Moves one element of a list to another index, returning a new list.
  *

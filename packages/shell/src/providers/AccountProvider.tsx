@@ -436,15 +436,18 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	/** Persists the user's team order in the active org (B39): the `@team`
 	 *  resolution order, home team first. The server pushes the stored order
-	 *  back through shell:accountUpdate. */
+	 *  back through shell:accountUpdate; the save also reads it back itself,
+	 *  which supersedes any profile fetch that was underway at the drop, so
+	 *  an older response cannot land after the save and show the old order. */
 	const handleSetTeamOrder = useCallback(
 		async (order: string[]) => {
 			// Throw (not return): the card keeps the dropped order until the
 			// server answers, so a silent no-op would leave it stuck.
 			if (!client) throw new Error('Not connected');
 			await client.account.setTeamOrder(order);
+			await loadProfile();
 		},
-		[client]
+		[client, loadProfile]
 	);
 
 	/** Switches the user's active organization. The guard runs FIRST — a
