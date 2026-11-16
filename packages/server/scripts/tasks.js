@@ -326,7 +326,7 @@ async function copyPythonEnv(options = {}) {
 		}
 	}
 
-	const rocketridePython = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python');
+	const rocketridePython = path.join(SERVER_DIR, 'python');
 	if (isWindows()) {
 		const pipBat = path.join(rocketridePython, 'pip', 'pip.bat');
 		await syncFile(pipBat, path.join(DIST_DIR, 'pip.bat'), { package: true }, stats);
@@ -351,7 +351,7 @@ async function copyPythonEnv(options = {}) {
 }
 
 async function syncRocketlibPythonLib(options = {}) {
-	const rocketrideLib = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python', 'lib');
+	const rocketrideLib = path.join(SERVER_DIR, 'python', 'src');
 	const pythonLibDest = await getPythonLibDest(options);
 
 	if (!(await exists(rocketrideLib))) {
@@ -480,7 +480,7 @@ async function copyClangRuntimeLibs() {
 // Fedora) hid the bug; EL10 ships none, so the handler died at exec with
 // "libunwind.so.1: cannot open shared object file", crashpad captured nothing, and
 // the crash never produced a minidump. DT_RPATH *is* inherited by transitive
-// lookups (it is what engine/aptest already use), so convert the handler over.
+// lookups (it is what engine/core_tests already use), so convert the handler over.
 async function forceRpath(elfFile) {
 	// Falls back to a system patchelf for a dist tree built elsewhere.
 	const patchelf = await vcpkg.getPatchelf();
@@ -692,7 +692,7 @@ function makeSetupPythonAction(options = {}) {
 				throw new Error(`Failed to copy Python environment: ${copyResult.reason}`);
 			}
 
-			task.output = 'Syncing rocketlib-python lib...';
+			task.output = 'Syncing rocketlib python...';
 			const syncResult = await syncRocketlibPythonLib();
 
 			// Combine stats from both operations
@@ -738,7 +738,7 @@ function makeSetupRuntimeLibsAction(options = {}) {
 			if (!result.copied) console.warn(`WARNING: no clang runtime libs staged — ${result.reason}`);
 
 			// crashpad_handler is a vcpkg tool copied next to the engine. Unlike the
-			// engine/aptest (rpath $ORIGIN/lib), vcpkg gives it rpath $ORIGIN, so it
+			// engine/core_tests (rpath $ORIGIN/lib), vcpkg gives it rpath $ORIGIN, so it
 			// looks for libc++ in dist/server itself, not dist/server/lib. Mirror the
 			// staged libs beside it so it starts on distros without a system libc++
 			// (RHEL/EL). Same files the engine already loads from ./lib — a small dup,
@@ -813,34 +813,35 @@ function makeCompileEngineAction(options = {}) {
 
 			// Copy engine to dist
 			await mkdir(DIST_DIR);
-			const engineDir = path.join(BUILD_ROOT, 'engine');
+			const engineDir = path.join(BUILD_ROOT, 'engine', 'src', 'app');
 			const engineName = getExecName('engine');
 			await syncFile(path.join(engineDir, engineName), path.join(DIST_DIR, engineName), { package: true });
 
 			// Copy the shared engine module the executable loads
-			const engineModName = getSharedName('engine');
-			const engineModSrc = path.join(BUILD_ROOT, 'engine-mod', engineModName);
-			if (await exists(engineModSrc)) {
-				await syncFile(engineModSrc, path.join(DIST_DIR, engineModName), { package: true });
+			const engineAbiName = getSharedName('engine');
+			const engineAbiSrc = path.join(BUILD_ROOT, 'engine', 'src', 'shared', engineAbiName);
+			if (await exists(engineAbiSrc)) {
+				await syncFile(engineAbiSrc, path.join(DIST_DIR, engineAbiName), { package: true });
 			} else {
-				throw new Error(`Engine shared module not found: ${engineModSrc}`);
+				throw new Error(`Engine shared module not found: ${engineAbiSrc}`);
 			}
 
 			// The import library (Windows only)
-			const engineModImport = getImportName('engine');
-			if (engineModImport) {
-				const importSrc = path.join(BUILD_ROOT, 'engine-mod', engineModImport);
+			const engineAbiImport = getImportName('engine');
+			if (engineAbiImport) {
+				const importSrc = path.join(BUILD_ROOT, 'engine', 'src', 'shared', engineAbiImport);
 				if (!(await exists(importSrc))) {
 					throw new Error(`Engine import library not found: ${importSrc}`);
 				}
-				await syncFile(importSrc, path.join(DIST_DIR, engineModImport), { package: true });
+				await syncFile(importSrc, path.join(DIST_DIR, engineAbiImport), { package: true });
 			}
 
 			if (isWindows()) {
 				const engineSym = getSymName(engineName);
-				const engineModSym = getSymName(engineModName);
+				const engineAbiSym = getSymName(engineAbiName);
 				await syncFile(path.join(engineDir, engineSym), path.join(DIST_DIR, engineSym), { package: true });
-				await syncFile(path.join(BUILD_ROOT, 'engine-mod', engineModSym), path.join(DIST_DIR, engineModSym), {
+				const engineAbiDir = path.join(BUILD_ROOT, 'engine', 'src', 'shared');
+				await syncFile(path.join(engineAbiDir, engineAbiSym), path.join(DIST_DIR, engineAbiSym), {
 					package: true,
 				});
 			} else {
@@ -857,10 +858,10 @@ function makeCompileEngineAction(options = {}) {
 				}
 
 				// Retain generated symbols (if dump_syms ran) for later symbolication.
-				// engineMod carries the engine's code, the launcher is a stub
+				// engine_abi carries the engine's code, the launcher is a stub
 				for (const symbolsSrc of [
 					path.join(engineDir, 'symbols'),
-					path.join(BUILD_ROOT, 'engine-mod', 'symbols'),
+					path.join(BUILD_ROOT, 'engine', 'src', 'shared', 'symbols'),
 				]) {
 					if (await exists(symbolsSrc)) {
 						await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
@@ -890,9 +891,9 @@ function makeCompileTestsAction(options = {}) {
 			if (options.force) {
 				task.output = 'Checking for source changes...';
 				const [coreHash, libHash, modHash, cmakeHash] = await Promise.all([
-					fingerprint(path.join(SERVER_DIR, 'engine-core')),
-					fingerprint(path.join(SERVER_DIR, 'engine-lib')),
-					fingerprint(path.join(SERVER_DIR, 'engine-mod')),
+					fingerprint(path.join(SERVER_DIR, 'core')),
+					fingerprint(path.join(SERVER_DIR, 'infra')),
+					fingerprint(path.join(SERVER_DIR, 'engine')),
 					fingerprint(path.join(SERVER_DIR, 'cmake')),
 				]);
 				const combinedHash = require('crypto')
@@ -911,7 +912,7 @@ function makeCompileTestsAction(options = {}) {
 
 			const env = vcpkg.getVcpkgEnv(await getBuildBaseEnv(task));
 
-			for (const target of ['aptest', 'engtest', 'nodetest']) {
+			for (const target of ['core_tests', 'infra_tests', 'engine_tests']) {
 				task.output = `Building ${target}...`;
 				await execCommand('cmake', cmake.getBuildArgs(BUILD_ROOT, cmakeConfig, { target }), {
 					task,
@@ -1032,7 +1033,7 @@ function makeCopyTestDataAction() {
 
 			// Copy cacert.pem on Linux
 			if (isLinux()) {
-				const cacert = path.join(SERVER_DIR, 'engine-core', '3rdparty', 'cacert.pem');
+				const cacert = path.join(SERVER_DIR, '3rdparty', 'cacert.pem');
 				if (await exists(cacert)) {
 					await copyFile(cacert, path.join(DIST_DIR, 'cacert.pem'));
 				}
@@ -1042,16 +1043,16 @@ function makeCopyTestDataAction() {
 			// subdirectory, so each binary is looked for both ways
 			const testExes = [
 				{
-					name: getExecName('aptest'),
-					dir: path.join(BUILD_ROOT, 'engine-core', 'test'),
+					name: getExecName('core_tests'),
+					dir: path.join(BUILD_ROOT, 'core', 'tests'),
 				},
 				{
-					name: getExecName('engtest'),
-					dir: path.join(BUILD_ROOT, 'engine-lib', 'test'),
+					name: getExecName('infra_tests'),
+					dir: path.join(BUILD_ROOT, 'infra', 'tests'),
 				},
 				{
-					name: getExecName('nodetest'),
-					dir: path.join(BUILD_ROOT, 'engine-mod', 'test'),
+					name: getExecName('engine_tests'),
+					dir: path.join(BUILD_ROOT, 'engine', 'tests'),
 				},
 			];
 
@@ -1067,10 +1068,10 @@ function makeCopyTestDataAction() {
 	};
 }
 
-function makeRunAptestAction(options = {}) {
+function makeRunCoreTestsAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			const exe = path.join(DIST_DIR, getExecName('aptest'));
+			const exe = path.join(DIST_DIR, getExecName('core_tests'));
 			const args = [...(options.catch || [])];
 			if (options.trace?.length) {
 				args.push(`--trace=${options.trace.join(',')}`);
@@ -1080,10 +1081,10 @@ function makeRunAptestAction(options = {}) {
 	};
 }
 
-function makeRunEngtestAction(options = {}) {
+function makeRunInfraTestsAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			const exe = path.join(DIST_DIR, getExecName('engtest'));
+			const exe = path.join(DIST_DIR, getExecName('infra_tests'));
 			const args = [...(options.catch || [])];
 			if (options.trace?.length) {
 				args.push(`--trace=${options.trace.join(',')}`);
@@ -1093,10 +1094,10 @@ function makeRunEngtestAction(options = {}) {
 	};
 }
 
-function makeRunNodetestAction(options = {}) {
+function makeRunEngineTestsAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			const exe = path.join(DIST_DIR, getExecName('nodetest'));
+			const exe = path.join(DIST_DIR, getExecName('engine_tests'));
 			const args = [...(options.catch || [])];
 			if (options.trace?.length) {
 				args.push(`--trace=${options.trace.join(',')}`);
@@ -1201,9 +1202,9 @@ function makeCleanServerAction() {
 				path.join(BUILD_ROOT, 'CMakeFiles'),
 				path.join(BUILD_ROOT, 'Testing'),
 				path.join(BUILD_ROOT, 'apps'),
-				path.join(BUILD_ROOT, 'engine-core'),
-				path.join(BUILD_ROOT, 'engine-lib'),
-				path.join(BUILD_ROOT, 'engine-mod'),
+				path.join(BUILD_ROOT, 'core'),
+				path.join(BUILD_ROOT, 'infra'),
+				path.join(BUILD_ROOT, 'engine'),
 				path.join(BUILD_ROOT, 'nodes'),
 				path.join(BUILD_ROOT, 'packages'),
 				path.join(BUILD_ROOT, '_download_temp'),
@@ -1287,9 +1288,9 @@ function makeTestAction() {
 						[
 							'java:submodule-test',
 							'parse:submodule-test',
-							'server:run-aptest',
-							'server:run-engtest',
-							'server:run-nodetest',
+							'server:run-core-tests',
+							'server:run-infra-tests',
+							'server:run-engine-tests',
 							'server:run-rocketlib-test',
 						],
 						'Run tests'
@@ -1301,20 +1302,20 @@ function makeTestAction() {
 }
 
 // Pytest runner for the rocketlib Python package
-// (packages/server/engine-lib/rocketlib-python). Lives in the ``server``
+// (packages/server/python). Lives in the ``server``
 // namespace because ``server:setup-python`` is what makes ``rocketlib``
 // importable in dist — the test step is just the natural follow-up.
 //
 // Mirrors the structure of ``syncRocketlibPythonLib`` above: a single
 // top-level function, source path inlined, early-return on missing source.
-// ``rocketlib-python/lib`` has already been synced into ``dist/server`` by
+// ``python/src`` has already been synced into ``dist/server`` by
 // the time we run, so ``from rocketlib import ...`` resolves at runtime —
 // the only thing pytest still needs from the source tree is the ``tests/``
 // directory itself (not copied to dist).
 function makeRocketlibPythonTestAction(options = {}) {
 	return {
 		run: async (_ctx, task) => {
-			const rocketrideTests = path.join(SERVER_DIR, 'engine-lib', 'rocketlib-python', 'tests');
+			const rocketrideTests = path.join(SERVER_DIR, 'python', 'tests');
 			const engine = path.join(DIST_DIR, getExecName('engine'));
 
 			const extraArgs = ['-v'];
@@ -1410,9 +1411,9 @@ module.exports = {
 		{ name: 'server:setup-pip', action: makeInstallPipAction },
 		{ name: 'server:setup-test-deps', action: makeSetupTestDepsAction },
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
-		{ name: 'server:run-aptest', action: makeRunAptestAction },
-		{ name: 'server:run-engtest', action: makeRunEngtestAction },
-		{ name: 'server:run-nodetest', action: makeRunNodetestAction },
+		{ name: 'server:run-core-tests', action: makeRunCoreTestsAction },
+		{ name: 'server:run-infra-tests', action: makeRunInfraTestsAction },
+		{ name: 'server:run-engine-tests', action: makeRunEngineTestsAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
 		{ name: 'server:clean-run', action: makeCleanServerAction },
 		{

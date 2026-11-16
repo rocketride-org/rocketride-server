@@ -30,7 +30,7 @@ may be a single file or a folder; with ``recursive`` on, subfolders are
 descended as well.
 
 Delivery uses the engine's DIRECT pipeline mode contract (see
-``engine-lib/task/pipe/Pipeline.cpp``: "Connect the scanObjects function to the
+``infra/src/task/pipe/Pipeline.cpp``: "Connect the scanObjects function to the
 renderObject function"): ``scanObjects`` enumerates the configured path and
 reports each file through the engine's scan callback, which feeds the scanner's
 object counter and queues the entry for processing. The engine then opens each

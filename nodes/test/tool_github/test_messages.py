@@ -5,7 +5,7 @@
 
 """No message text the node supplies contains '*': the engine splits error text on it.
 
-The engine writes an error as ``code*message*location`` (engLib/monitor/App.hpp) and the
+The engine writes an error as ``code*message*location`` (infra/src/monitor/App.hpp) and the
 shell splits it with ``split('*')``, so an asterisk in a message cuts it short in the UI
 (the rule in ai/common/config.py, checked by test_credential_resolved.py). Two scans:
 

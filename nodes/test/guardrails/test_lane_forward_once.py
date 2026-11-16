@@ -30,7 +30,7 @@ When a Python node overrides a lane handler (`writeQuestions`, `writeAnswers`,
 `writeDocuments`, ...), the engine still calls the parent implementation after
 the override returns - and the parent forwards the same payload downstream a
 second time. The only way to suppress it is `preventDefault()`, which raises
-`Ec::PreventDefault`; `__checkCallParent` (`engLib/python/call.hpp`) inspects
+`Ec::PreventDefault`; `__checkCallParent` (`infra/src/python/call.hpp`) inspects
 nothing else. So a node that forwards explicitly *and* returns normally
 delivers every payload twice.
 

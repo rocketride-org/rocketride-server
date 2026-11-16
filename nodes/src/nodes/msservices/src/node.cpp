@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <node_api.h>
+#include <rocketride/node_api.h>
 
 #include "msservices.hpp"
 

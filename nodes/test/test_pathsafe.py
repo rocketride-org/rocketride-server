@@ -20,16 +20,7 @@ import pytest
 
 # Load rocketlib/paths.py directly, bypassing rocketlib/__init__ (which imports
 # the native engLib and would fail to import in a raw checkout).
-_PATHS_FILE = (
-    Path(__file__).resolve().parents[2]
-    / 'packages'
-    / 'server'
-    / 'engine-lib'
-    / 'rocketlib-python'
-    / 'lib'
-    / 'rocketlib'
-    / 'paths.py'
-)
+_PATHS_FILE = Path(__file__).resolve().parents[2] / 'packages' / 'server' / 'python' / 'src' / 'rocketlib' / 'paths.py'
 _spec = importlib.util.spec_from_file_location('rocketlib_paths_under_test', _PATHS_FILE)
 paths = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(paths)

@@ -4,7 +4,7 @@ This is a plain depends.py excludes hook (see that module's "Hook files"
 section), so it is testable on its own: no depends.py involved, only the
 hosting module that ships next to it. Discovery itself — that depends.py finds this file wherever it lives, not
 just under its own requirements.txt's directory — is covered in
-packages/server/engine-lib/rocketlib-python/tests/test_depends.py.
+packages/server/python/tests/test_depends.py.
 """
 
 import importlib.util

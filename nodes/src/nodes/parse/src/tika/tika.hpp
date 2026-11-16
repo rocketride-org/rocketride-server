@@ -38,7 +38,7 @@ namespace engine::store::filter::parse::Tika {
 ///		Added to the entry flags passed to tika, per document, for each
 ///		media lane the parse node has no listener on, so tika does not
 ///		extract that media. They sit above the entry flags
-///		(apLib/entry.hpp), which must never grow into them; TikaApi.java
+///		(core/src/entry.hpp), which must never grow into them; TikaApi.java
 ///		declares the same bits.
 //-------------------------------------------------------------------------
 _const uint32_t SKIP_IMAGES = BIT(24);

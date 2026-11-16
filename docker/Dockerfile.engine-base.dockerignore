@@ -10,9 +10,9 @@ dist/server/extension
 dist/server/static
 
 # Test binaries and data, debug symbols.
-dist/server/aptest
-dist/server/engtest
-dist/server/nodetest
+dist/server/core_tests
+dist/server/infra_tests
+dist/server/engine_tests
 dist/server/test_files
 dist/server/datasets
 dist/server/symbols

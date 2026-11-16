@@ -15,7 +15,7 @@
     "**/node_modules"
   ],
   "python.analysis.extraPaths": [
-    "packages/server/engine-lib/rocketlib-python/lib",
+    "packages/server/python/src",
     "packages/ai/src"
   ],
   "search.exclude": {
