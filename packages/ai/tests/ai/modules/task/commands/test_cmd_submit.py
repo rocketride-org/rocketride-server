@@ -396,24 +396,23 @@ async def test_a_repoint_never_interrupts_the_old_engines_other_holder(catalog, 
 
 
 @pytest.mark.asyncio
-async def test_a_second_workspace_on_the_same_address_warns_of_a_collision(catalog, engines, deployments, data_path):
-    """Another origin, another hash: address_collision rides the error (and a repoint's result)."""
+async def test_a_differing_spec_from_anywhere_is_spec_changed_with_no_collision_warning(
+    catalog, engines, deployments, data_path
+):
+    """No cross-workspace collision warning (plan 2.3, 2026-11-16): a spec call meeting a live presence
+    whose engine runs other content is the ordinary spec_changed, whatever workspace it came from, and an
+    identical spec attaches with no warnings at all.
+    """
     ts = _server()
     conn = _conn(ts, _caller())
-    await _submit(conn, pipeline=_pipeline(), origin='C:/ws-one/pipelines/docBrain')
+    await _submit(conn, pipeline=_pipeline())
 
     with pytest.raises(TaskError) as err:
-        await _submit(conn, pipeline=_pipeline(instructions=['x']), origin='C:/ws-two/pipelines/docBrain')
-    assert err.value.warnings == [
-        {
-            'code': 'address_collision',
-            'address': ADDRESS,
-            'origins': ['C:/ws-one/pipelines/docBrain', 'C:/ws-two/pipelines/docBrain'],
-        }
-    ]
+        await _submit(conn, pipeline=_pipeline(instructions=['x']))
+    assert err.value.code == 'TASK_SPEC_CHANGED'
+    assert not err.value.warnings
 
-    # Same origin, or the same hash: no warning
-    same = await _submit(conn, pipeline=_pipeline(), origin='C:/ws-two/pipelines/docBrain')
+    same = await _submit(conn, pipeline=_pipeline())
     assert 'warnings' not in same
 
 

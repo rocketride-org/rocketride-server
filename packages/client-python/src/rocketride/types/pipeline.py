@@ -161,4 +161,4 @@ class SUBMIT_RESULT(TypedDict, total=False):
     specMatch: bool  # False when on_change='keep' delivered to an engine running another spec
     converged: Literal['none', 'started', 'repointed']  # What resolution did to reach an engine
     ignored: List[str]  # Server-controlled arguments a name call passed (threads/args/env/ttl)
-    warnings: List[dict]  # address_collision / repoint_storm warnings, when any
+    warnings: List[dict]  # repoint_storm warnings, when any

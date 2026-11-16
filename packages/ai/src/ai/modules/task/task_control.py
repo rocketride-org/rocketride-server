@@ -27,7 +27,7 @@ A control is what a request resolves to: one per ``(owner, address, rung)``.
 It carries everything that belongs to the caller rather than to the running
 process: the address, the owner (a user or a team, never a service identity),
 the rung that answered, billing attribution, the ``parameters`` admission map,
-the trace level, the idle ttl, the ``origin`` hint, and exactly ONE hold on a
+the trace level, the idle ttl, and exactly ONE hold on a
 ``TaskEngine``. The engine is the process; many controls may hold one engine
 (plan section 1, 7.1). A hold entitles the control to its engine but does not
 keep it running: an engine that stopped on its own inactivity timer, or crashed
@@ -290,7 +290,6 @@ class TaskControl:
             earlier moment its deployment's state was read when a trusted
             dispatch started it: a deployment revoked after this moment makes
             the control unavailable (plan 7.2, the kill switch).
-        origin: The ``origin`` hint the caller sent, recorded as given.
         deployment: The deployment this control resolved through, if any.
         version: The artifact version a published rung started from (None on @dev).
         team_context: The team whose environment this control runs with.
@@ -344,7 +343,6 @@ class TaskControl:
     parameters: Dict[str, Any] = field(default_factory=dict)
     trace_level: Optional[str] = None
     ttl: int = 0
-    origin: Optional[str] = None
 
     # The ROCKETRIDE_* values this control's bindings run with, resolved once
     # from the team context (plan 6.2; filled by C.10); rides _caller.env
