@@ -1,0 +1,93 @@
+//
+// Common field definitions for the Supabase services (nodes/src/nodes/supabase).
+// A file without a "protocol" only defines global fields; each service lists
+// the ones it needs in its "shape". A service may redefine a field locally
+// (e.g. only "description" of supabase.access); the engine deep-merges the
+// local definition over this one.
+//
+// Config keys are the last segment of the field id: supabase.url -> url,
+// supabase.secretKey -> secretKey, supabase.pooler.host -> host. Do not add a
+// service field whose last segment repeats one of these.
+//
+// API connection (Auth, Storage, Messaging, Edge Functions):
+//     supabase.authType, supabase.access
+// Postgres connection (Vector, Cron):
+//     supabase.pooler.host, supabase.pooler.user, supabase.pooler.password,
+//     supabase.pooler.database, supabase.access
+// Database does not use this file (it keeps its postgresdb.* fields).
+//
+// OAuth later: add ["oauth", "Connect Supabase"] to supabase.authType's enum
+// with its own conditional (supabase.connectButton, supabase.userToken,
+// supabase.projectRef). Keep "key" as the value in every service's preconfig
+// profile: a node saved now has authType "key" or none, and the runtime reads
+// a missing authType as "key".
+//
+{
+	"fields": {
+		"supabase.authType": {
+			"type": "string",
+			"title": "Connect with",
+			"default": "key",
+			"hidden": true,
+			"enum": [["key", "Project URL and secret key"]],
+			"conditional": [
+				{
+					"value": "key",
+					"properties": ["supabase.url", "supabase.secretKey"]
+				}
+			]
+		},
+		"supabase.url": {
+			"type": "string",
+			"title": "Project URL",
+			"description": "Your project's API URL, for example https://abcdefghijklmnopqrst.supabase.co (Project Settings -> Data API). The project ref alone also works. Self-hosted Supabase: your API gateway URL."
+		},
+		"supabase.secretKey": {
+			"type": "string",
+			"title": "Secret key",
+			"description": "A secret API key (starts with sb_secret_) from Project Settings -> API Keys. It bypasses row-level security, so the access level below is the guard. Self-hosted Supabase: the service_role key. Publishable and anon keys are refused.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"supabase.access": {
+			"type": "string",
+			"title": "Access level",
+			"default": "read",
+			"description": "What the agent may do. read: look things up only. write: also create and change. admin: also delete and other high-impact actions. Each tool states the level it needs; calls above this level are refused.",
+			"enum": [
+				["read", "Read"],
+				["write", "Write"],
+				["admin", "Admin"]
+			]
+		},
+		"supabase.pooler.host": {
+			"type": "string",
+			"title": "Pooler host",
+			"description": "From the Supabase dashboard (Connect -> Session pooler), optionally with the port, for example aws-0-eu-west-1.pooler.supabase.com:5432. Port 5432 is used when none is given. The direct connection (db.<project-ref>.supabase.co) is IPv6-only. The connection always uses TLS."
+		},
+		"supabase.pooler.user": {
+			"type": "string",
+			"title": "Database user",
+			"description": "For the pooler it must include your project ref: postgres.<project-ref>."
+		},
+		"supabase.pooler.password": {
+			"type": "string",
+			"title": "Database password",
+			"description": "Database password from Project Settings -> Database.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"supabase.pooler.database": {
+			"type": "string",
+			"title": "Database name",
+			"default": "postgres",
+			"minLength": 2,
+			"maxLength": 63,
+			"description": "Name of the database (Supabase default is 'postgres')."
+		}
+	}
+}

@@ -1671,6 +1671,21 @@
     }
   },
   {
+    "name": "supabase_vector",
+    "classType": [
+      "store",
+      "tool"
+    ],
+    "lanes": {
+      "documents": [],
+      "questions": [
+        "documents",
+        "answers",
+        "questions"
+      ]
+    }
+  },
+  {
     "name": "telegram",
     "classType": [
       "source"
@@ -2014,6 +2029,41 @@
   },
   {
     "name": "tool_slack",
+    "classType": [
+      "tool"
+    ],
+    "lanes": {}
+  },
+  {
+    "name": "tool_supabase_auth",
+    "classType": [
+      "tool"
+    ],
+    "lanes": {}
+  },
+  {
+    "name": "tool_supabase_cron",
+    "classType": [
+      "tool"
+    ],
+    "lanes": {}
+  },
+  {
+    "name": "tool_supabase_functions",
+    "classType": [
+      "tool"
+    ],
+    "lanes": {}
+  },
+  {
+    "name": "tool_supabase_messaging",
+    "classType": [
+      "tool"
+    ],
+    "lanes": {}
+  },
+  {
+    "name": "tool_supabase_storage",
     "classType": [
       "tool"
     ],

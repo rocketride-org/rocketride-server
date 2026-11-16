@@ -1,0 +1,56 @@
+{
+	//
+	// Supabase Auth: manage the project's users and check login tokens.
+	// Connects with the Project URL + secret key (core/services.common.supabase.json).
+	//
+	"title": "Supabase Auth",
+	"protocol": "tool_supabase_auth://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.auth",
+	"prefix": "supabase_auth",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/auth",
+	"description": [
+		"Exposes Supabase Auth as agent tools: list, get, create, invite, update and delete the project's users, generate sign-in links, ",
+		"and check who a signed-in user is from their access token. ",
+		"Connects with the project URL and a secret key. The access level (read, write or admin) decides which tools may run."
+	],
+	"tile": ["Supabase Auth (${parameters.supabase.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Auth",
+				"authType": "key",
+				"url": "",
+				"secretKey": "",
+				"access": "read",
+				"pageSize": 50
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. read: list_users, get_user, verify_user. write: also create_user, invite_user, generate_link, update_user. admin: also delete_user."
+		},
+		"supabase_auth.pageSize": {
+			"type": "integer",
+			"title": "Users per page",
+			"default": 50,
+			"minimum": 1,
+			"maximum": 1000,
+			"description": "The most users one list_users call returns, and its default page size. The agent pages through larger user lists."
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Auth",
+			"properties": ["supabase.authType", "supabase.access", "supabase_auth.pageSize"]
+		}
+	]
+}
