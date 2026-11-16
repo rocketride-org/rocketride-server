@@ -50,6 +50,8 @@ claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 
 For every other client and for sign-in details, see
 [Connect a client](https://docs.rocketride.org/connect/mcp/http/connect).
+To run the engine locally and connect a coding agent to it, start at the
+[coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/).
 
 The rest of this page is about the deprecated stdio package. If you must stay
 on it, the install and config commands are in the last section, "Only if you
