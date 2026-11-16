@@ -45,7 +45,7 @@ Architecture:
 """
 
 import time
-from typing import TYPE_CHECKING, Dict, Any, List, Tuple
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Tuple
 from rocketride import EVENT_TYPE
 from rocketlib import ConfigError, resolveConfig, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
@@ -98,20 +98,37 @@ def _template_message(substituted: Dict[str, str], kind: str) -> str:
     return f'Pipeline validation {kind} for config with template references: {references}'
 
 
-def _restored_diagnostics(data: Dict[str, Any], substituted: Dict[str, str], ids: Dict[str, Any]) -> Dict[str, Any]:
+def _restored_diagnostics(
+    data: Dict[str, Any],
+    substituted: Dict[str, str],
+    ids: Dict[str, Any],
+    submitted_pass: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Keep diagnostic counts, numeric codes and submitted component ids.
 
     Node messages may transform or quote only part of a configured value.
     Use fixed text when substitution occurred so every format follows the
-    same template-reference contract.
+    same template-reference contract. The exception is a message that
+    ``submitted_pass``, the validator's result for the submitted config,
+    gives too: it is built from the caller's own text, so it holds no
+    resolved value. The wiring errors keep their text this way unless a
+    reference sits in an id, provider, lane or class they name.
     """
     restored = {}
     for kind in _DIAGNOSTICS:
         if kind not in data:
             continue
+        own = {
+            entry['message']
+            for entry in (submitted_pass or {}).get(kind) or []
+            if isinstance(entry, dict) and isinstance(entry.get('message'), str)
+        }
         restored[kind] = []
         for entry in data[kind]:
-            diagnostic = {'message': _template_message(substituted, 'error' if kind == 'errors' else 'warning')}
+            message = entry.get('message')
+            if not isinstance(message, str) or message not in own:
+                message = _template_message(substituted, 'error' if kind == 'errors' else 'warning')
+            diagnostic = {'message': message}
             if type(entry.get('ccode')) is int:
                 diagnostic['ccode'] = entry['ccode']
             if isinstance(entry.get('id'), str) and entry['id'] in ids:
@@ -309,7 +326,8 @@ class MiscCommands(DAPConn):
         substituted, its config comes from a second pass over the caller's
         own config when its structural types permit it. Diagnostics use fixed
         messages listing the submitted references, with numeric codes and
-        submitted component ids retained.
+        submitted component ids retained. For a whole pipeline, a message the
+        second pass gives too keeps its text.
 
         Source resolution follows the same logic as execute:
         1. Explicit ``source`` argument (if provided)
@@ -454,7 +472,9 @@ class MiscCommands(DAPConn):
                 data = validatePipeline({'pipeline': inner})
                 components = pipeline.get('components') or []
                 submitted_components = submitted.get('components')
-                # Rebuilt from the caller's own input, as above
+                # Rebuilt from the caller's own input, as above. A message the
+                # second pass gives too keeps its text, so the wiring errors
+                # still name the ids, providers and lanes that are wrong.
                 if substituted:
                     echo = {**submitted, 'version': submitted.get('version', 1)}
                     echo_source = args.get('source', None) or submitted.get('source', None)
@@ -462,9 +482,9 @@ class MiscCommands(DAPConn):
                         echo_source = resolve_implied_source(submitted)
                     if echo_source:
                         echo['source'] = echo_source
-                    echoed = validatePipeline({'pipeline': echo})['pipeline'] if _can_validate_echo(echo) else echo
+                    second = validatePipeline({'pipeline': echo}) if _can_validate_echo(echo) else {'pipeline': echo}
                     ids = _submitted_ids(components, submitted_components)
-                    data = {'pipeline': echoed, **_restored_diagnostics(data, substituted, ids)}
+                    data = {'pipeline': second['pipeline'], **_restored_diagnostics(data, substituted, ids, second)}
 
                 # Start refuses a pipeline with no resolvable source. This is a
                 # warning, not an error: validate also runs on partial pipelines
