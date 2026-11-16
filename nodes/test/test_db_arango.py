@@ -669,6 +669,18 @@ class TestUnfilledCredential:
         assert clients == []
         assert len(_WARNING_CALLS) == 1 and 'ROCKETRIDE_ARANGO_PASSWORD' in _WARNING_CALLS[0]
 
+    def test_validate_config_with_no_auth_method_warns_instead_of_raising(self, monkeypatch):
+        # A null auth_method means password sign-in, the same as a missing one.
+        cfg = {'endpoint': 'http://x:8529', 'auth_method': None, 'password': '${ROCKETRIDE_ARANGO_PASSWORD}'}
+        ig = self._global(cfg)
+        monkeypatch.setattr(_IG, 'ArangoClient', lambda *a, **k: pytest.fail('no client may be opened'))
+        monkeypatch.setattr(_IG.Config, 'getNodeConfig', lambda *a, **k: cfg)
+        _reset_logs()
+
+        ig.validateConfig()
+
+        assert len(_WARNING_CALLS) == 1 and 'db_arango: password ' in _WARNING_CALLS[0]
+
     def test_an_unused_placeholder_is_not_checked(self):
         # The token is not sent under password sign-in.
         cfg = {'auth_method': 'userpass', 'password': 's3cret', 'token': '${ROCKETRIDE_ARANGO_TOKEN}'}

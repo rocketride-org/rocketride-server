@@ -232,13 +232,12 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         endpoint = config.get('endpoint', 'http://localhost:8529').strip()
 
-        # Do not send an unfilled ${...} to the server as the password or token.
-        field, value = self._credential(config)
-        if warn_if_credential_unresolved(self.glb.logicalType, field, value, self.glb.connConfig):
-            return
-
         client = None
         try:
+            # Do not send an unfilled ${...} to the server as the password or token.
+            field, value = self._credential(config)
+            if warn_if_credential_unresolved(self.glb.logicalType, field, value, self.glb.connConfig):
+                return
             client = ArangoClient(hosts=endpoint)
             db = self._open_database(client, config, verify=True)
             db.aql.execute('RETURN 1')
@@ -354,7 +353,7 @@ class IGlobal(IGlobalBase):
     @staticmethod
     def _credential(config: Dict[str, Any]) -> Tuple[str, Any]:
         """The ``(field, value)`` that ``_open_database`` signs in with for the chosen auth method."""
-        if config.get('auth_method', 'userpass').strip() == 'token':
+        if str(config.get('auth_method') or 'userpass').strip() == 'token':
             return 'token', config.get('token', '')
         return 'password', config.get('password', '')
 

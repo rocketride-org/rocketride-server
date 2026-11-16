@@ -1401,6 +1401,18 @@ def test_begin_connects_with_filled_credentials(monkeypatch):
     assert len(opened) == 1
 
 
+def test_a_filled_password_field_replaces_an_unfilled_url_password(monkeypatch):
+    # _connect drops the URL's own password when the field is filled, so that one is never sent.
+    config = {'mode': 'url', 'url': 'falkor://user:${ROCKETRIDE_FALKOR_PASSWORD}@h:6379', 'password': 's3cret'}
+    assert len(_begin_with_config(monkeypatch, config)) == 1
+
+
+def test_the_rest_of_the_url_is_still_checked_when_the_password_field_is_filled(monkeypatch):
+    config = {'mode': 'url', 'url': 'falkor://${ROCKETRIDE_FALKOR_USER}:x@h:6379', 'password': 's3cret'}
+    with pytest.raises(ValueError, match='graph_falkordb: url '):
+        _begin_with_config(monkeypatch, config)
+
+
 def test_validate_config_warns_on_an_unfilled_password_and_does_not_probe(monkeypatch):
     config = {'mode': 'manual', 'host': 'localhost', 'password': '${ROCKETRIDE_FALKOR_PASSWORD}'}
     glb = _FakeGlobal(_FakeGraph())

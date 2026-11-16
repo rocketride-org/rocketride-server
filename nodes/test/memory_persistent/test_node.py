@@ -822,6 +822,26 @@ class TestIGlobalLifecycle:
         store_cls = self._begin({'backend': 'memory', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'})
         store_cls.assert_called_once()
 
+    @staticmethod
+    def _save_warnings(config):
+        """Run the save-time validateConfig on ``config``; return its warnings."""
+        iglobal = IGlobal.__new__(IGlobal)
+        iglobal.glb = MagicMock(logicalType='memory_persistent', connConfig=dict(config))
+        warnings = []
+        with (
+            patch('nodes.memory_persistent.IGlobal.Config.getNodeConfig', return_value=dict(config)),
+            patch('ai.common.config.warning', side_effect=warnings.append),
+        ):
+            iglobal.validateConfig()
+        return warnings
+
+    def test_save_warns_on_an_unfilled_redis_password(self):
+        warnings = self._save_warnings({'backend': 'redis', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'})
+        assert len(warnings) == 1 and 'ROCKETRIDE_REDIS_PASSWORD' in warnings[0]
+
+    def test_save_does_not_check_the_redis_password_of_the_memory_backend(self):
+        assert self._save_warnings({'backend': 'memory', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'}) == []
+
     def test_redis_backend_with_a_filled_password_builds_the_store(self):
         store_cls = self._begin({'backend': 'redis', 'redis_password': 's3cret'})
         assert store_cls.call_args.kwargs['redis_password'] == 's3cret'
