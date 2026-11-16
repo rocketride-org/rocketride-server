@@ -171,6 +171,10 @@ jobs:
             ls -la release-assets/ || true
             exit 1
           fi
+          # And the node index: it holds the digest of each node in the node archive
+          if [ -f release-assets/index.json ]; then
+            files+=(release-assets/index.json)
+          fi
           for f in "${files[@]}"; do
             echo "$GPG_SIGNING_PASSPHRASE" | gpg --batch --yes \
               --pinentry-mode loopback --passphrase-fd 0 \
