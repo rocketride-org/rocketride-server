@@ -278,9 +278,10 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		}
 		setValidationError(null);
 		urlGrantApplied.current = true;
+		// Consume the callback NOW: the panel is keyed by node, so a node switch
+		// before a deferred cleanup would hand the same grant to the next panel
+		clearSecureParamsFromUrl();
 		persistGrant((current) => applyGrantToConfig(schema, current, grant));
-		// Strip the token-bearing query string once processed
-		requestAnimationFrame(() => clearSecureParamsFromUrl());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [schema, node.id, isLocked]);
 

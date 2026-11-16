@@ -99,6 +99,19 @@ const styles = {
 		...commonStyles.textMuted,
 		fontStyle: 'italic',
 	} as CSSProperties,
+
+	// Screen-reader-only text (the "Required" note on a required group).
+	srOnly: {
+		position: 'absolute',
+		width: 1,
+		height: 1,
+		padding: 0,
+		margin: -1,
+		overflow: 'hidden',
+		clip: 'rect(0 0 0 0)',
+		whiteSpace: 'nowrap',
+		border: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -142,8 +155,16 @@ export interface IArrayWidgetProps {
 export default function ArrayWidget({ id, property, value, ghost, onChange, envKeys, disabled, describedBy, required }: IArrayWidgetProps): ReactElement {
 	const item = arrayItem(property);
 	const title = String(property.title ?? property.name ?? 'Item');
-	// The frame's label names the group; items are named by title and position
-	const group = { id, role: 'group' as const, 'aria-labelledby': `${id}-label`, 'aria-describedby': describedBy, 'aria-required': required || undefined };
+	// The frame's label names the group; items are named by title and position.
+	// A group carries no required state, so a required array says so in its
+	// description through a screen-reader-only note.
+	const requiredNoteId = `${id}-required`;
+	const group = { id, role: 'group' as const, 'aria-labelledby': `${id}-label`, 'aria-describedby': [describedBy, required ? requiredNoteId : ''].filter(Boolean).join(' ') || undefined };
+	const requiredNote = required ? (
+		<span id={requiredNoteId} style={styles.srOnly}>
+			Required
+		</span>
+	) : null;
 	const itemType = typeof item?.type === 'string' ? item.type : 'string';
 	const list = Array.isArray(value) ? value : [];
 
@@ -152,6 +173,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 		const options = enumOptions(item);
 		return (
 			<div style={styles.list} {...group}>
+				{requiredNote}
 				{options.map(([optionValue, label]) => {
 					const checked = list.includes(optionValue);
 					return (
@@ -187,6 +209,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 
 	return (
 		<div style={styles.list} {...group}>
+			{requiredNote}
 			{list.length === 0 && <span style={styles.ghostNote}>No entries</span>}
 			{list.map((element, index) => (
 				<div key={index} style={styles.row}>

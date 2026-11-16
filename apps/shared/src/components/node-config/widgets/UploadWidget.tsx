@@ -28,7 +28,7 @@
  * Replace / Remove; the stock DropZone carries the pick itself.
  */
 
-import { CSSProperties, ReactElement, useEffect, useRef } from 'react';
+import { CSSProperties, ReactElement, useEffect, useRef, useState } from 'react';
 import { Button, commonStyles } from 'shell';
 
 // =============================================================================
@@ -53,6 +53,12 @@ const styles = {
 	actions: {
 		display: 'flex',
 		gap: 4,
+	} as CSSProperties,
+
+	// The row shows the focus ring on behalf of the visually hidden input.
+	rowFocused: {
+		outline: '2px solid var(--rr-color-primary)',
+		outlineOffset: 2,
 	} as CSSProperties,
 
 	// Visually hidden, NOT display:none: the native file input stays in the
@@ -168,6 +174,7 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 	// Remove, or unmount is dropped when it completes.
 	const generation = useRef(0);
 	useEffect(() => () => { generation.current++; }, []);
+	const [inputFocused, setInputFocused] = useState(false);
 
 	const pick = (): void => inputRef.current?.click();
 	const remove = (): void => {
@@ -176,7 +183,7 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 	};
 
 	return (
-		<div style={{ ...styles.row, position: 'relative', ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}) }}>
+		<div style={{ ...styles.row, position: 'relative', ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}), ...(inputFocused ? styles.rowFocused : {}) }}>
 			<span style={{ ...styles.name, ...(hasFile ? {} : commonStyles.textMuted) }}>{hasFile ? (storedSecurely ? 'Saved securely' : fileNameOf(stored)) : 'No file chosen'}</span>
 			<div style={styles.actions}>
 				{!disabled && (
@@ -200,6 +207,8 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 				aria-describedby={describedBy}
 				aria-required={required || undefined}
 				aria-invalid={invalid || undefined}
+				onFocus={() => setInputFocused(true)}
+				onBlur={() => setInputFocused(false)}
 				onChange={(event) => {
 					const file = event.target.files?.[0];
 					event.target.value = '';
