@@ -126,11 +126,18 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
 
+	// Only the most recent profile request may update state (see loadProfile).
+	const profileRequestSeq = useRef(0);
+
 	// Keep profile in sync with server-pushed account updates and bump the
-	// reload counter to re-fetch the active section
+	// reload counter to re-fetch the active section. A push is newer than any
+	// profile request already in flight, so it supersedes them: an older
+	// response that lands afterwards is dropped rather than restoring the
+	// state the push just replaced (e.g. the team order before a save).
 	useEffect(
 		() =>
 			ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
+				profileRequestSeq.current++;
 				setProfile(data);
 				setMirrorUser(data);
 				setReloadCounter((n) => n + 1);
@@ -156,9 +163,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	 * caller that depends on the refresh (e.g. leaving an org) can tell.
 	 * Only the most recent request may update state: an older response that
 	 * lands after a newer one (e.g. a refresh started before a leave) is
-	 * dropped so it cannot restore a membership that no longer exists.
+	 * dropped so it cannot restore a membership that no longer exists. A
+	 * pushed account update bumps the sequence too (see above).
 	 */
-	const profileRequestSeq = useRef(0);
 	const loadProfile = useCallback(async (): Promise<boolean> => {
 		if (!client) return false;
 		const seq = ++profileRequestSeq.current;
