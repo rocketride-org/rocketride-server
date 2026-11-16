@@ -53,7 +53,7 @@ schedules, server-side file storage, and run-log replay.
 enterprise-grade runtime built on C++. Build, test and publish durable agents that
 scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
 stage, test, release and maintain. Its rapidly growing node library includes agents,
-models, vector/graph/SQL databases, OCR, tools, evals, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
+models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 
 ## Configuration
 

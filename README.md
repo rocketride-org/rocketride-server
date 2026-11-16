@@ -25,7 +25,7 @@
 </p>
 
 <p>
- Under the hood, RocketRide is an open source meta-harness spanning the full AI Development Lifecycle (AIDLC): build, stage, test, release and maintain. With a rapidly growing node library including agents, models, vector/graph/SQL databases, OCR, tools, evals, data stores, NER and more, it coordinates across agent harnesses while running on an enterprise-grade runtime. Self-host on your own infrastructure or deploy to RocketRide Cloud.
+ Under the hood, RocketRide is an open source meta-harness spanning the full AI Development Lifecycle (AIDLC): build, stage, test, release and maintain. With a rapidly growing node library including agents, models, vector/graph/SQL databases, OCR, tools, data stores, NER and more, it coordinates across agent harnesses while running on an enterprise-grade runtime. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 </p>
 
 <p>
