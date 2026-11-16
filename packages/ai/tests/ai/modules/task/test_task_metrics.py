@@ -690,3 +690,41 @@ def test_a_tree_without_a_paying_unit_is_not_posted():
     sink.post(usage, {'hold_time': 1.0})
     sink.post(_usage(2, billing=_attribution(user='')), {'hold_time': 1.0})
     assert sink.pending == {}
+
+
+def test_a_zero_replacement_stays_eligible_until_its_write_succeeds(fake_psutil, no_gpu, monkeypatch):
+    """A line an earlier report charged is written as ZERO once attribution empties it; a failed zero write is
+    retried by the next report, so the owner's old debit never outlives the callers' charge.
+    """
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    status.tokens.custom = {'hold_time': 5.0}
+    debits = []
+    fail = {'on': False}
+
+    async def apply_debit(**row):
+        if fail['on']:
+            raise RuntimeError('ledger down')
+        debits.append((row['description'], row['amount']))
+        return True
+
+    # The autouse fixture installs a mock ai.account module: the report imports through sys.modules
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+
+    asyncio.run(tm._report_to_billing_system())
+    assert ('hold_time', 5.0) in debits and 'hold_time' in tm._debited
+
+    # Every ms of that hold was a caller's: the owner's line is now zero
+    tm._attributed['hold_time'] = 5.0
+    fail['on'] = True
+    asyncio.run(tm._report_to_billing_system())
+    assert 'hold_time' in tm._debited, 'the failed zero write keeps the line eligible'
+
+    fail['on'] = False
+    asyncio.run(tm._report_to_billing_system())
+    assert debits[-1] == ('hold_time', 0.0) and 'hold_time' not in tm._debited
+    # Nothing left to replace: the next report writes no zero
+    asyncio.run(tm._report_to_billing_system())
+    assert debits[-1] == ('hold_time', 0.0) and len([d for d in debits if d == ('hold_time', 0.0)]) == 1

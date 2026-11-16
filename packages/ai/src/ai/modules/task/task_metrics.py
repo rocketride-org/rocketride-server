@@ -753,7 +753,6 @@ class TaskMetrics:
                 # caller was charged meanwhile
                 if amount <= 0 and description not in self._debited:
                     continue
-                self._debited.add(description) if amount > 0 else self._debited.discard(description)
                 idem_key = f'task:{self.billing_run_id}:{description}'
                 await account.apply_debit(
                     org_id=self.org_id,
@@ -765,6 +764,12 @@ class TaskMetrics:
                     context=context,
                     description=description,
                 )
+                # Bookkept only once the write is through: a zero replacement
+                # that failed stays eligible for the next report
+                if amount > 0:
+                    self._debited.add(description)
+                else:
+                    self._debited.discard(description)
         except Exception as e:
             debug(f'[TaskMetrics] Error writing to billing ledger: {e}')
 
