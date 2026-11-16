@@ -521,7 +521,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	const [removePin, setRemovePin] = useState<RungPin | null>(null);
 	// A publish chosen in the dialog, awaiting its confirmation (decided
 	// 2026-11-16: every pointer move is confirmed, on apps as on pipelines).
-	const [pendingPublish, setPendingPublish] = useState<{ version: AppVersionInfo; target: string; label: string } | null>(null);
+	// target is the WIRE form the publish contract takes (@team/<id>); handle is
+	// the NAME form the pins carry (@team/<name>), used to find the current pin.
+	const [pendingPublish, setPendingPublish] = useState<{ version: AppVersionInfo; target: string; handle: string; label: string } | null>(null);
 	// Deploy-message dialog (stock Modal + input — window.prompt is disabled in
 	// the VSCode webview). An empty comment is allowed (it is optional).
 	const [deployOpen, setDeployOpen] = useState(false);
@@ -1045,11 +1047,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
 							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
 					</div>
-					<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@me', label: 'Me' })}>
+					<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@me', handle: '@me', label: 'Me' })}>
 						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
 					</button>
 					{(teams ?? []).map((t) => (
-						<button key={t.id} style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: `@team/${t.id}`, label: t.name })}>
+						<button key={t.id} style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: `@team/${t.id}`, handle: `@team/${t.name}`, label: t.name })}>
 							{t.name}
 							<span style={styles.pubRowState}>{pinStateOf(`@team/${t.name}`, publishFor)}</span>
 						</button>
@@ -1058,7 +1060,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					    any servable version on @public) the store row is as open as
 					    the internal rows; with one, only 'ready' unlocks it. */}
 					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
-						<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@public', label: 'the app store' })}>
+						<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@public', handle: '@public', label: 'the app store' })}>
 							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
 						</button>
 					) : (
@@ -1075,10 +1077,18 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				<ConfirmDialog
 					title={`Publish v${pendingPublish.version.registryVersion} to ${pendingPublish.label}?`}
 					message={(() => {
-						const current = (pins ?? []).find((p) => p.handle === pendingPublish.target);
-						return current
-							? `${pendingPublish.label} serves v${current.registryVersion} now; this repoints it to v${pendingPublish.version.registryVersion}. Nothing is rebuilt, and publishing v${current.registryVersion} again is the rollback.`
-							: `${pendingPublish.label} is not published yet; this is its first publish, and it serves v${pendingPublish.version.registryVersion} at once.`;
+						// Pins carry the NAME form of the handle; the target is the wire form.
+						const current = (pins ?? []).find((p) => p.handle === pendingPublish.handle);
+						if (!current) {
+							return `${pendingPublish.label} is not published yet; this is its first publish, and it serves v${pendingPublish.version.registryVersion} at once.`;
+						}
+						// The current pin may not be serving (not approved, build failed, ...);
+						// say so instead of claiming it serves.
+						const status = pinStatusOf(current);
+						const now = status.tone === 'ok'
+							? `serves v${current.registryVersion} now`
+							: `is on v${current.registryVersion} (not serving: ${status.word})`;
+						return `${pendingPublish.label} ${now}; this repoints it to v${pendingPublish.version.registryVersion}. Nothing is rebuilt, and publishing v${current.registryVersion} again is the rollback.`;
 					})()}
 					confirmLabel="Publish"
 					cancelLabel="Cancel"
