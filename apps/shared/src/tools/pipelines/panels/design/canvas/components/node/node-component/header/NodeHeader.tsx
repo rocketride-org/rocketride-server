@@ -105,6 +105,8 @@ interface INodeHeaderProps {
 	onBadgeClick?: () => void;
 	/** Whether this node's service is flagged as experimental. */
 	isExperimental?: boolean;
+	/** How many of this node's fields are exposed as public parameters (the P·n badge, plan §5.5); 0 or absent shows none. */
+	paramCount?: number;
 }
 
 // =============================================================================
@@ -117,7 +119,7 @@ interface INodeHeaderProps {
  * @param props - Node identity, metadata, and an optional click handler.
  * @returns The fully rendered header bar element.
  */
-export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental }: INodeHeaderProps): ReactElement {
+export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental, paramCount }: INodeHeaderProps): ReactElement {
 	// ========================================================================
 	// FlowContext state and actions
 	// ========================================================================
@@ -223,6 +225,11 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 				)}
 			</span>
 			{isExperimental && <span style={styles.experimentalBadge}>EXPERIMENTAL</span>}
+			{paramCount != null && paramCount > 0 && (
+				<span style={styles.paramBadge} title={`${paramCount} public parameter${paramCount === 1 ? '' : 's'} (Params tab)`}>
+					P·{paramCount}
+				</span>
+			)}
 			<ConditionalRender condition={subtitleText}>
 				<span style={styles.subtitle}>{subtitleText}</span>
 			</ConditionalRender>
@@ -377,6 +384,18 @@ const styles = {
 		padding: '1px 4px',
 		borderRadius: '3px',
 		backgroundColor: 'var(--rr-color-warning)',
+		color: 'var(--rr-fg-button)',
+		lineHeight: '14px',
+	} as React.CSSProperties,
+	// The P·n badge: this node contributes n public parameters (mockup M-1.1).
+	paramBadge: {
+		display: 'inline-block',
+		fontSize: '8px',
+		fontWeight: 600,
+		padding: '1px 4px',
+		marginLeft: 4,
+		borderRadius: '3px',
+		backgroundColor: 'var(--rr-color-primary)',
 		color: 'var(--rr-fg-button)',
 		lineHeight: '14px',
 	} as React.CSSProperties,

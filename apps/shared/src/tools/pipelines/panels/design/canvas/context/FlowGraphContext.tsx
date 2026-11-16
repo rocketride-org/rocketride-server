@@ -1035,6 +1035,15 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// depth exceeded". Content comparison converges; undo/redo still loads because
 		// its content differs from what's currently on the canvas.
 		if (!projectChanged && incomingSig === loadedContentSig.current) {
+			// The components are what the canvas holds. The parameters map may
+			// still differ: the PARAMS page writes it through the document
+			// (plan §5.5), and the canvas must serialize THAT map next, not
+			// the one it loaded. Take it without a canvas reload.
+			const incomingParameters = { ...((currentProject as { parameters?: Record<string, string> }).parameters ?? {}) };
+			if (JSON.stringify(incomingParameters) !== JSON.stringify(parametersRef.current)) {
+				parametersRef.current = incomingParameters;
+				setParametersState(incomingParameters);
+			}
 			return;
 		}
 

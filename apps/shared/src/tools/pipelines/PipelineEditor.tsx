@@ -26,7 +26,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
 import type { IProject } from 'shell';
-import { createMirroredPrefsStore, ConnectionManager, PrefsProvider } from 'shell';
+import { createMirroredPrefsStore, ConnectionManager, PrefsProvider, useAuthUser } from 'shell';
 import ProjectView from './ProjectView';
 import { parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from './hostEvents';
 import { registerServiceIcons } from './panels/design/canvas';
@@ -146,6 +146,12 @@ export interface IPipelineEditorProps {
  */
 export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }) => {
 	const projectId = (project as { project_id?: string } | null)?.project_id ?? '';
+	// The caller's developer id, the first segment of every address (plan §2.2),
+	// for the PARAMS page's call examples. Absent until the org registered one,
+	// and in a host without the shell identity context (the examples then show
+	// a placeholder).
+	const authUser = useAuthUser();
+	const developerId = authUser?.organization?.developerId || undefined;
 
 	// --- Framework state off the bus (mirrors + retained topics) --------------
 
