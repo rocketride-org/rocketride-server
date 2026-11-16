@@ -43,6 +43,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Hand, Monitor, RefreshCw, RotateCw, Settings, Smartphone, Tablet } from 'lucide-react';
 import { AnchoredPopup, ToggleGroup } from 'shell';
+import { AgentWatchSlot } from '../../../../../../components/agent-watch/AgentWatchSlot';
 import { ComponentGallery } from './panels/components';
 import { LogList, LOG_LIST_CAP } from './panels/console/LogList';
 import type { LogListRow } from './panels/console/LogList';
@@ -1079,6 +1080,12 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 									title="Hand tool: drag to pan. Double-click to recenter."
 								/>
 							)}
+							{/* The agent's copy of this app while it uses it, over the
+							    whole preview area: it is always a 1200x800 desktop.
+							    A trailing sibling for the same reason as the Hand
+							    overlay. It takes the clicks, so the user's own preview
+							    under it is never driven. */}
+							{host.agentWatch && <AgentWatchSlot place={host.agentWatch} variant="cover" />}
 						</div>
 					</div>
 				</div>

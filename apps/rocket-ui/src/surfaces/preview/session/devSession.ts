@@ -212,6 +212,16 @@ interface DevRegistrationMeta {
 /** Icon size cap (chars) — mirrors the server dev overlay's discipline. */
 const ICON_MAX_CHARS = 128 * 1024;
 
+/** What settled() saw when it resolved. */
+export interface SettleState {
+	/** The watch status then: `error` means the latest build failed. */
+	readonly watch: WatchStatus;
+	/** Whether the shell had loaded the latest link's descriptor (React commits next). */
+	readonly loaded: boolean;
+	/** True when the wait ended before the session settled: the limit ran out, the signal aborted or the session was disposed. */
+	readonly timedOut: boolean;
+}
+
 export class WebDevSession {
 	/** Workspace-manifest registration meta; refreshed with each deps settle. */
 	private registrationMeta: DevRegistrationMeta | null = null;
@@ -297,6 +307,19 @@ export class WebDevSession {
 	private buildQueued = false;
 	private mounted = false;
 
+	// ── Settling (settled()) ─────────────────────────────────────────────
+	/** File changes being adopted: up in onFsChange, down when the adoption ends. Covers the gap between a write and `building`. */
+	private adopting = 0;
+	/** Links injected into the preview. */
+	private linked = 0;
+	/** The newest link whose loader the shell has called and whose import has finished. */
+	private loadedLink = 0;
+	/** The preview document the latest link went into. A reload replaces it with one that shows nothing until the shell re-attaches. */
+	private linkedDocument: Document | null = null;
+	/** Code changes shown in the preview: every link and every hot swap. */
+	private revisions = 0;
+	private readonly settleWaiters = new Set<() => void>();
+
 	// ── Preview target ───────────────────────────────────────────────────
 	private previewWindow: Window | null = null;
 	private refresh: RefreshTools | null = null;
@@ -321,8 +344,10 @@ export class WebDevSession {
 	 * @param appId - The app id.
 	 * @param folder - The .appdev folder name.
 	 * @param appName - Display name (registerLocalApp meta).
+	 * @param opts - `hidden`: an agent's preview, which never joins the open sessions, so findDevSession
+	 *   only ever returns the user's own.
 	 */
-	constructor(client: RocketRideClient, appId: string, folder: string, appName: string) {
+	constructor(client: RocketRideClient, appId: string, folder: string, appName: string, opts: { hidden?: boolean } = {}) {
 		this.client = client;
 		this.appId = appId;
 		this.folder = folder;
@@ -334,7 +359,7 @@ export class WebDevSession {
 		this.workspace = getWorkspace();
 		this.vfs = scopedFileSystem(this.workspace.view, `apps/${folder}`);
 		// step: join the open sessions (findDevSession); dispose() leaves
-		sessions.add(this);
+		if (!opts.hidden) sessions.add(this);
 	}
 
 	// =========================================================================
@@ -439,6 +464,67 @@ export class WebDevSession {
 		return this.previewWindow !== null && !this.previewWindow.closed && !this.disposed;
 	}
 
+	/** How many code changes the preview has shown (links and hot swaps). An app page compares it around an action to tell that a file change rebuilt the app under it. */
+	get revision(): number {
+		return this.revisions;
+	}
+
+	/**
+	 * Resolves when the preview shows the latest work: no file change is being adopted, no build runs or
+	 * waits, and the shell has loaded the latest link's descriptor. A hot swap needs no load. A failed
+	 * build loads nothing, so it settles at once with watch `error`.
+	 *
+	 * Reliable right after an agent write: the write queues its change notification before its promise
+	 * resolves, and onFsChange counts the adoption, so the count is up before a later call can ask. The
+	 * first read after a boot waits here too: the shell calls the loader only after it connects, so
+	 * `loaded` stays false while it shows its loading screen. So does a read after the page reloads,
+	 * until the new shell re-attaches and the session links the app into it.
+	 *
+	 * @param opts - `limitMs` caps the wait; `signal` ends it early. Either way it resolves, with `timedOut`.
+	 */
+	settled(opts: { signal?: AbortSignal; limitMs: number }): Promise<SettleState> {
+		return new Promise((resolve) => {
+			const check = (): void => {
+				if (this.disposed) finish(true);
+				else if (this.isSettled()) finish(false);
+			};
+			const giveUp = (): void => finish(true);
+			const timer = setTimeout(giveUp, opts.limitMs);
+			// a waiter leaves the set exactly once, so whichever ending comes first is the one that resolves
+			const finish = (timedOut: boolean): void => {
+				if (!this.settleWaiters.delete(check)) return;
+				clearTimeout(timer);
+				opts.signal?.removeEventListener('abort', giveUp);
+				resolve({ watch: this.watchStatus, loaded: this.showsLatestLink(), timedOut });
+			};
+			this.settleWaiters.add(check);
+			opts.signal?.addEventListener('abort', giveUp, { once: true });
+			check();
+			if (opts.signal?.aborted) giveUp();
+		});
+	}
+
+	/** Nothing being adopted, nothing building or queued, and the latest link loaded (or the build failed, which loads nothing). */
+	private isSettled(): boolean {
+		return this.adopting === 0 && !this.building && !this.buildQueued && (this.showsLatestLink() || this.watchStatus.state === 'error');
+	}
+
+	/** Whether the shell has loaded the latest link, in the document the preview shows now. */
+	private showsLatestLink(): boolean {
+		if (this.loadedLink !== this.linked) return false;
+		try {
+			return this.previewWindow?.document === this.linkedDocument;
+		} catch {
+			// a page that went to another origin keeps its document to itself
+			return false;
+		}
+	}
+
+	/** Re-checks the settle waiters; called wherever a settle condition may have changed. */
+	private poke(): void {
+		for (const waiter of [...this.settleWaiters]) waiter();
+	}
+
 	/**
 	 * Routes a preview postMessage (console/error forwarding) into the feeds.
 	 *
@@ -458,6 +544,8 @@ export class WebDevSession {
 	dispose(): void {
 		this.disposed = true;
 		sessions.delete(this);
+		// step: a disposed session never settles, so its waiters end now as timed out
+		this.poke();
 		this.unsubscribeNotify?.();
 		this.unsubscribeNotify = null;
 		if (this.lastLink) revokeLink(this.lastLink.blobUrls);
@@ -565,7 +653,11 @@ export class WebDevSession {
 		const virtual = storePathToVirtual(uri);
 		const prefix = `apps/${this.folder}/`;
 		if (!virtual || !virtual.startsWith(prefix)) return;
-		void this.adoptExternalChange(virtual.slice(prefix.length));
+		this.adopting++;
+		void this.adoptExternalChange(virtual.slice(prefix.length)).finally(() => {
+			this.adopting--;
+			this.poke();
+		});
 	}
 
 	/**
@@ -646,6 +738,7 @@ export class WebDevSession {
 			} while (this.buildQueued && !this.disposed);
 		} finally {
 			this.building = false;
+			this.poke();
 		}
 	}
 
@@ -762,12 +855,21 @@ export class WebDevSession {
 			// meta carries the WORKSPACE manifest (refreshed whenever deps
 			// resettle) so the preview shell's chrome and Settings track it
 			const entryUrl = result.entryUrl;
+			// step: settled() waits for the shell to call this link's loader; a failed import counts as loaded
+			// too, or a crashing app would hold every read for the whole limit
+			const link = ++this.linked;
+			this.linkedDocument = win.document;
+			const loaded = (): void => {
+				this.loadedLink = Math.max(this.loadedLink, link);
+				this.poke();
+			};
 			api.registerLocalApp(
 				this.appId,
-				() => import(/* webpackIgnore: true */ entryUrl).then((m: { default?: unknown }) => m.default ?? m),
+				() => import(/* webpackIgnore: true */ entryUrl).then((m: { default?: unknown }) => m.default ?? m).finally(loaded),
 				this.registrationMeta ?? { name: this.appName, moduleId: this.moduleId },
 			);
 			api.invalidateApp(this.appId);
+			this.revisions++;
 			this.mounted = true;
 
 			// step: retire the previous graph after the swap settles
@@ -818,6 +920,7 @@ export class WebDevSession {
 			}
 			await import(/* webpackIgnore: true */ result.entryUrl);
 			refresh.performRefresh();
+			this.revisions++;
 			this.setWatch({ state: 'ok', durationMs: 0, target: 'hot refresh' });
 			setTimeout(() => revokeLink(result.blobUrls), 5000);
 			return true;
@@ -902,6 +1005,7 @@ export class WebDevSession {
 	private setWatch(status: WatchStatus): void {
 		this.watchStatus = status;
 		for (const listener of this.watchListeners) listener(status);
+		this.poke();
 	}
 
 	/** Console feed subscription (replays the backlog). */

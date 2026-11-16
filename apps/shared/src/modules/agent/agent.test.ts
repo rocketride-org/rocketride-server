@@ -40,7 +40,7 @@ import { Answer, Question } from '../../../../../packages/client-typescript/src/
 import { sha256Hex } from '../vfs/hash';
 import { StagedFileSystem, StaleWriteError } from '../vfs/stagedFileSystem';
 import { AgentSession } from './agent';
-import { setAgentHost, type AgentHost, type AgentLimits, type ApprovalSettings } from './host';
+import { grantsFrom, setAgentHost, type AgentHost, type AgentLimits, type ApprovalSettings } from './host';
 import { DEFAULT_MODEL, ModelFailure, PROVIDER_IDS } from './model';
 import { openChatModel, readModelOffers } from './modelEngine';
 import { PRICES } from './usage';
@@ -247,7 +247,7 @@ test('at the step limit the turn plans no more, answers with the best effort, an
 test('a request that could pass the cost limit is never sent, and the turn pauses for Continue, even in Auto', async () => {
 	const replies = [planReply(['read_file', { path: 'a.txt' }])];
 	store(scripted(replies));
-	const auto: ApprovalSettings = { read: () => ({ mode: 'auto', grants: { schedules: false, deploymentToggles: false } }), subscribe: () => () => undefined, grant: () => undefined };
+	const auto: ApprovalSettings = { read: () => ({ mode: 'auto', grants: grantsFrom(() => false) }), subscribe: () => () => undefined, grant: () => undefined };
 	setAgentHost({ ...hostIn('team-a'), limits: { read: () => ({ steps: 60, costUsd: 0.01 }) }, approvals: { run: auto, controls: { ...auto, setMode: () => undefined } } });
 	const { turn: ended } = await AgentSession.newSession().execute('Read the files.', undefined, turn());
 	assert.equal(replies.length, 1, 'no model request was sent: neither the plan nor the best-effort summary');

@@ -23,8 +23,9 @@
 // =============================================================================
 // TOOLKIT TESTS — the agent never writes over the user's work and a Stop stops,
 // the user says yes first, secrets stay out of the model, deploy_app keeps its
-// version, check_app fails a broken app and builds in a preview it leases, and
-// Auto stops only its own runs
+// version, check_app fails a broken app and builds in a preview it leases,
+// Auto stops only its own runs, and use_app keeps one page per app for the turn
+// and asks before it acts on it
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -44,15 +45,18 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type PreviewLease } from '../host';
+import { grantsFrom, PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelRequest } from '../model';
+import { peek, RunMemory } from '../wave/memory';
 import { done, plan, resultsIn, scriptedModel, type Reply, type ScriptedModel } from '../wave/scripted';
+import { SUMMARY_BUDGET } from '../wave/summary';
 import { AppCheckToolkit, reportVerdict, validateNote, validateSaved, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
+import { AppUseToolkit, USE_APP_TOOL } from './appUse';
 import { isJsonObject, redactText, type ChoiceFn, type JsonObject } from './common';
 import { FilesystemTools } from './filesystem';
 import { RocketRideClientToolkit, RunLedger } from './rocketrideClient';
@@ -179,6 +183,44 @@ const lent = (session: AgentDevSession, release: () => void = () => undefined): 
 /** An agent host over `vfs`, whose previews never start; `extra` adds or replaces its parts. */
 const hostFor = (vfs: IWorkspaceFileSystem, extra: Partial<AgentHost> = {}): AgentHost => ({ vfs, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array([1, 2, 3]), devSession: () => null, leasePreview: async () => NO_PREVIEW, ...extra });
 
+/** An app page that answers each use from `script` and each lend with `lease`, and records what each use was given and how many lends it made. */
+function fakePage(script: (actions: readonly PageAction[], signal: AbortSignal) => Promise<PageUse> = async () => ({ outcomes: [], outline: [], problems: [] }), lease: PreviewLease = NO_PREVIEW): AppPage & { uses: Array<{ actions: readonly PageAction[]; signal: AbortSignal }>; lends: number } {
+	const uses: Array<{ actions: readonly PageAction[]; signal: AbortSignal }> = [];
+	const page = {
+		uses,
+		lends: 0,
+		use: (actions: readonly PageAction[], signal: AbortSignal) => {
+			uses.push({ actions, signal });
+			return script(actions, signal);
+		},
+		lend: async () => {
+			page.lends += 1;
+			return lease;
+		},
+	};
+	return page;
+}
+
+/** A host's openAppPage that answers each open a tick later, so calls can race for it, with the next of `answers` (the last repeats), and keeps what each open was given. */
+function opener(...answers: Array<AppPage | Error>): { open: NonNullable<AgentHost['openAppPage']>; opened: Array<{ app: PreviewApp; lifetime: AbortSignal }> } {
+	const opened: Array<{ app: PreviewApp; lifetime: AbortSignal }> = [];
+	const open: NonNullable<AgentHost['openAppPage']> = async (app, { lifetime }) => {
+		opened.push({ app, lifetime });
+		const answer = (answers.length > 1 ? answers.shift() : answers[0]) as AppPage | Error;
+		await new Promise((resolve) => setTimeout(resolve, 1));
+		if (answer instanceof Error) throw answer;
+		return answer;
+	};
+	return { open, opened };
+}
+
+/** use_app for one turn over `host`; `end()` ends the turn. */
+function appUseFor(host: AgentHost, opts: { callLimitMs?: number; hide?: (text: string) => string } = {}): { toolkit: AppUseToolkit; end(): void } {
+	const ended = new AbortController();
+	const toolkit = new AppUseToolkit(host, { ended: ended.signal, conversationId: 'conv-1', hide: opts.hide ?? ((text) => text), callLimitMs: opts.callLimitMs });
+	return { toolkit, end: () => ended.abort() };
+}
+
 /** A tool, and its call as the loop makes it: prepared, let through by `approvals` (every act, without them), then run. */
 function toolOf(toolkit: { tools(): AgentTool[] }, name: string, approvals?: Approvals): { tool: AgentTool; execute(args: Record<string, unknown>): Promise<string> } {
 	const tool = toolkit.tools().find((t) => t.name === name);
@@ -250,7 +292,7 @@ function fakeAsk(answers: ChatAskAnswer[]): { ask: (card: ChatAskCard) => ChatAs
 /** Approval settings in `mode`; every grant the run turns on is recorded. */
 function fakeSettings(mode: ApprovalPrefs['mode'] = 'ask'): ApprovalSettings & { granted: Grant[] } {
 	const granted: Grant[] = [];
-	return { read: () => ({ mode, grants: { schedules: false, deploymentToggles: false } }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
+	return { read: () => ({ mode, grants: grantsFrom(() => false) }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
 }
 
 /** One run's approvals over a client, in the ALPHA workspace; with no `ask`, every card is denied. */
@@ -265,9 +307,9 @@ function clientTool(client: RocketRideClient, ask = (): ChatAsking => ({ answer:
 }
 
 /** Runs one agent turn as the Agent tab does, minus the browser: the chat's cards go to `ask`, the unsaved-changes dialog to `choose`. */
-async function agentTurn(ws: MemoryWorkspace, model: ScriptedModel, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl> } = {}): Promise<Array<{ type: string; text: string }>> {
-	const { editors } = opts;
-	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
+async function agentTurn(ws: MemoryWorkspace, model: ScriptedModel, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl>; openAppPage?: AgentHost['openAppPage'] } = {}): Promise<Array<{ type: string; text: string }>> {
+	const { editors, openAppPage } = opts;
+	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}), ...(openAppPage ? { openAppPage } : {}) });
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: model, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
@@ -1002,4 +1044,259 @@ test("Auto stops the conversation's own run after a fresh status read, and refus
 		'the status was read again right before the call'
 	);
 	assert.equal(asked.cards.length, 0, 'Auto showed no card');
+});
+
+// =============================================================================
+// USE_APP — one page per app for the turn, refused before any card where it can't run, a view within budget,
+// its limits, a card before it acts, a native call reaching the page, a fresh copy once a page leaves the app,
+// and check_app borrowing the page
+// =============================================================================
+
+test('use_app opens one page per app for the turn: racing calls share one open, its lifetime is the turn, a failed open is tried again, and nothing opens once the turn ended', async () => {
+	const page = fakePage();
+	const { open, opened } = opener(new Error('the preview did not start'), page);
+	const turn = appUseFor(hostFor(new MemoryWorkspace({ ...DAYBOOK, ...ALPHA }), { openAppPage: open }));
+	const use = toolOf(turn.toolkit, USE_APP_TOOL);
+
+	await assert.rejects(use.execute({ app: 'daybook-ui' }), /the preview did not start/);
+	await Promise.all([use.execute({ app: 'daybook-ui' }), use.execute({ app: 'daybook-ui' })]);
+	await use.execute({ app: 'a-ui' });
+	assert.deepEqual(
+		opened.map((o) => o.app.id),
+		['daybook', 'daybook', 'acme.a'],
+		'the failed open was tried again, the racing calls shared one page, and another app got its own'
+	);
+	assert.equal(page.uses.length, 3);
+	assert.ok(!opened.some((o) => o.lifetime.aborted));
+
+	turn.end();
+	assert.ok(
+		opened.every((o) => o.lifetime.aborted),
+		'every page lives until the turn ends'
+	);
+	await assert.rejects(use.execute({ app: 'daybook-ui' }));
+	assert.equal(opened.length, 3, 'nothing opens once the turn ended');
+});
+
+test('use_app refuses before any card on a host with no app preview, and takes the app by its folder only', async () => {
+	const ws = new MemoryWorkspace({ ...DAYBOOK, 'apps/plain-ui/package.json': JSON.stringify({ name: 'plain' }) });
+	const asked = fakeAsk([]);
+	const approvals = approvalsFor(null, asked.ask);
+	await assert.rejects(toolOf(appUseFor(hostFor(ws)).toolkit, USE_APP_TOOL, approvals).execute({ app: 'daybook-ui' }));
+	assert.equal(asked.cards.length, 0, 'no card asked for a call that cannot run');
+
+	const { open, opened } = opener(fakePage());
+	const use = toolOf(appUseFor(hostFor(ws, { openAppPage: open })).toolkit, USE_APP_TOOL, approvals);
+	await assert.rejects(use.execute({ app: 'daybook' }), /daybook-ui/, 'the id is refused, and the error names the folder');
+	await assert.rejects(use.execute({ app: 'Daybook' }), /daybook-ui/, 'the name is refused, and the error names the folder');
+	await assert.rejects(use.execute({ app: 'plain-ui' }), /apps\/plain-ui\/package\.json/, 'an app with no manifest id is refused, naming its package.json');
+	assert.equal(opened.length, 0);
+	await use.execute({ app: 'daybook-ui' });
+	assert.equal(opened.length, 1, 'the folder opens the page');
+	assert.equal(asked.cards.length, 0);
+});
+
+test('use_app hides secrets before it cuts, and its view keeps the errors, then element lines before text lines, within SUMMARY_BUDGET counted as JSON, marking each cut with an offset memory.peek reads from', async () => {
+	const SECRET = `known-value-${'z'.repeat(16)}`;
+	// quotes cost double once the planner sends the view as JSON
+	const outline: OutlineLine[] = [{ depth: 0, role: 'textbox', name: 'key-field-end', ref: 'e1', value: `${'x'.repeat(190)}${SECRET}`, states: [] }];
+	for (let i = 2; i <= 61; i++) outline.push({ depth: 0, role: 'button', name: `button-${i}-end`, ref: `e${i}`, states: [] }, { depth: 1, role: 'text', name: `text-${i}-end ${'"a" '.repeat(30)}`, states: [] });
+	const problems: PageUse['problems'] = [1, 2, 3].map((i) => ({ kind: 'console', text: `error-${i}-end` }));
+	const page = fakePage(async () => ({ outcomes: [], outline, problems }));
+	const hide = (text: string): string => text.replaceAll(SECRET, '«secret:API_KEY»');
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open }), { hide }).toolkit, USE_APP_TOOL);
+
+	const result = await use.execute({ app: 'daybook-ui' });
+	assert.ok(!result.includes(SECRET.slice(0, 8)), 'the cut left no part of the secret');
+
+	const shown = use.tool.show?.(result, { app: 'daybook-ui' }) ?? '';
+	assert.ok(JSON.stringify(shown).length - 2 <= SUMMARY_BUDGET, 'the view fits the budget counted as JSON');
+	const has = (text: string): boolean => shown.includes(text.split(' ')[0]);
+	assert.ok(
+		problems.every((p) => has(p.text)),
+		'every error shows'
+	);
+	assert.ok(
+		outline.filter((l) => l.role !== 'text').every((l) => has(l.name)),
+		'every element line shows'
+	);
+	const texts = outline.filter((l) => l.role === 'text');
+	assert.ok(texts.some((l) => has(l.name)) && !texts.every((l) => has(l.name)), 'text lines get only the room left');
+
+	const memory = new RunMemory();
+	memory.put('wave-0.r0', result);
+	const lines = new Set(result.split('\n'));
+	const markers = shown.split('\n').filter((line) => !lines.has(line));
+	assert.ok(markers.length > 0, 'the cut is marked');
+	for (const marker of markers) {
+		const starts = (marker.match(/\d+/g) ?? []).map((offset) => (JSON.parse(peek(memory, { key: 'wave-0.r0', offset: Number(offset) })) as { preview: string }).preview.split('\n')[0]);
+		assert.ok(
+			starts.some((line) => lines.has(line) && !shown.includes(line)),
+			`a peek from the offset in "${marker}" starts at a line the view cut`
+		);
+	}
+});
+
+test('a use_app call that runs out of time ends as a result: the page sees its deadline abort', async () => {
+	const page = fakePage((_actions, signal) => new Promise((resolve) => signal.addEventListener('abort', () => resolve({ outcomes: [], outline: [], problems: [{ kind: 'not_ready', text: 'ran out of time' }] }), { once: true })));
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open }), { callLimitMs: 20 }).toolkit, USE_APP_TOOL);
+	assert.match(await use.execute({ app: 'daybook-ui' }), /ran out of time/);
+	assert.ok(page.uses[0].signal.aborted);
+});
+
+test('use_app enforces its limits with the fix in each refusal: at most 20 actions, wait_for held to 1-30 s, and a ref shaped like e5', async () => {
+	const asked = fakeAsk([]);
+	const page = fakePage();
+	const { open, opened } = opener(page);
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: open })).toolkit, USE_APP_TOOL, approvalsFor(null, asked.ask));
+	const wait = (timeout_s?: number): Record<string, unknown> => ({ action: 'wait_for', text: 'Saved', timeout_s });
+
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: Array.from({ length: 21 }, () => wait()) }), /20/, 'over 20 actions is refused, naming the limit');
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: [wait(), { action: 'click', ref: 'Save' }] }), /actions\[1\].*e5/, 'a ref that is not one is refused, naming the action and what a ref looks like');
+	assert.equal(opened.length, 0, 'a refused call opens no page');
+	assert.equal(asked.cards.length, 0, 'a refusal comes before any card');
+
+	await use.execute({ app: 'daybook-ui', actions: [wait(999), wait(), wait(0), ...Array.from({ length: 17 }, () => wait())] });
+	const waits = page.uses[0].actions.map((action) => (action.kind === 'wait_for' ? action.timeoutMs : null));
+	assert.equal(waits.length, 20, '20 actions are taken');
+	assert.deepEqual(waits.slice(0, 3), [30_000, 10_000, 1_000], 'wait_for is held to 30 s at most, 10 s by default and 1 s at least');
+});
+
+test('use_app asks before it acts on the page: a read or a wait runs free, a click asks with the use_app card, a declined card never reaches the page, after a failed action the rest are not run, Always allow turns on the appUse grant, and Auto asks nothing', async () => {
+	const page = fakePage(async (actions) => ({ outcomes: actions.length ? [{ status: 'failed', why: 'the first failed' }] : [], outline: [], problems: [] }));
+	const asked = fakeAsk(['approve', 'deny']);
+	const approvals = new Approvals({ client: () => null, vfs: new MemoryWorkspace(DAYBOOK), ask: asked.ask, signal: new AbortController().signal });
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open })).toolkit, USE_APP_TOOL, approvals);
+
+	await use.execute({ app: 'daybook-ui' });
+	await use.execute({ app: 'daybook-ui', actions: [{ action: 'wait_for', text: 'Saved' }] });
+	assert.equal(asked.cards.length, 0, 'a read and a wait ask nothing');
+
+	const result = await use.execute({
+		app: 'daybook-ui',
+		actions: [
+			{ action: 'click', ref: 'e1' },
+			{ action: 'type', ref: 'e2', text: 'hello' },
+			{ action: 'press', key: 'Enter' },
+		],
+	});
+	assert.equal(asked.cards.length, 1, 'a click asks');
+	assert.match(asked.cards[0].title, /Daybook/, 'the use_app card names the app by its manifest name');
+	const statuses = [1, 2, 3].map((n) =>
+		result
+			.split('\n')
+			.find((line) => line.startsWith(`${n}. `))
+			?.split(': ')
+			.at(-1)
+	);
+	assert.ok(
+		statuses.every((status) => status !== undefined),
+		'one line per action, though the page answered only the first'
+	);
+	assert.equal(statuses[1], statuses[2], 'the actions after the failure read the same');
+	assert.notEqual(statuses[1], statuses[0], 'and not as the failure does');
+
+	await assert.rejects(use.execute({ app: 'daybook-ui', actions: [{ action: 'select', ref: 'e3', value: 'b' }] }));
+	assert.equal(asked.cards.length, 2, 'a select asks');
+	assert.equal(page.uses.length, 3, 'the declined call never reached the page');
+
+	const click = { app: 'daybook-ui', actions: [{ action: 'click', ref: 'e1' }] };
+	const usingWith = (ask: (card: ChatAskCard) => ChatAsking, settings: ApprovalSettings): ReturnType<typeof toolOf> =>
+		toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: opener(page).open })).toolkit, USE_APP_TOOL, new Approvals({ client: () => null, vfs: new MemoryWorkspace(DAYBOOK), ask, settings, signal: new AbortController().signal }));
+	const always = fakeAsk(['always']);
+	const settings = fakeSettings();
+	await usingWith(always.ask, settings).execute(click);
+	assert.ok(always.cards[0].alwaysLabel, 'the card offers Always allow');
+	assert.deepEqual(settings.granted, ['appUse'], 'Always allow turns on the appUse grant');
+
+	const auto = fakeAsk([]);
+	await usingWith(auto.ask, fakeSettings('auto')).execute(click);
+	assert.equal(auto.cards.length, 0, 'Auto shows no card');
+	assert.equal(page.uses.length, 5, 'both calls reached the page');
+});
+
+test("a turn sends use_app's whole schema as a native tool, and a native call's actions reach the page as the actions it wrote", async () => {
+	const page = fakePage();
+	const actions = [
+		{ action: 'click', ref: 'e5' },
+		{ action: 'type', ref: 'e6', text: 'hi' },
+		{ action: 'wait_for', text: 'Saved', timeout_s: 5 },
+	];
+	const model = scriptedModel([plan(['use_app', { app: 'daybook-ui', actions }]), done('Tried the form.')]);
+	const ask = (): ChatAsking => ({ answer: Promise.resolve('approve'), approve: () => undefined });
+	await agentTurn(new MemoryWorkspace(DAYBOOK), model, { openAppPage: opener(page).open, ask });
+
+	const [sent] = model.requests;
+	assert.equal(sent.kind, 'turn');
+	const declared = toolOf(appUseFor(hostFor(new MemoryWorkspace({}))).toolkit, USE_APP_TOOL).tool.parameters;
+	assert.deepEqual(sent.kind === 'turn' && sent.tools.find((tool) => tool.name === USE_APP_TOOL)?.inputSchema, declared, 'the model gets the schema whole, its action items included');
+	assert.deepEqual(page.uses[0]?.actions, [
+		{ kind: 'click', ref: 'e5' },
+		{ kind: 'type', ref: 'e6', text: 'hi' },
+		{ kind: 'wait_for', text: 'Saved', timeoutMs: 5000 },
+	]);
+});
+
+test('after the page leaves the app, the next use_app call opens a fresh copy, and calls racing to it share one', async () => {
+	let left = false;
+	const first = fakePage(async () => {
+		if (left) throw new PageGoneError('the page left the app');
+		left = true;
+		return { outcomes: [{ status: 'failed', why: 'the page left the app' }], outline: [], problems: [] };
+	});
+	const fresh = fakePage(async () => ({ outcomes: [], outline: [{ depth: 0, role: 'heading', name: 'fresh-copy', states: [] }], problems: [] }));
+	const { open, opened } = opener(first, fresh);
+	const use = toolOf(appUseFor(hostFor(new MemoryWorkspace(DAYBOOK), { openAppPage: open })).toolkit, USE_APP_TOOL);
+
+	await use.execute({ app: 'daybook-ui', actions: [{ action: 'click', ref: 'e1' }] });
+	const results = await Promise.all([use.execute({ app: 'daybook-ui' }), use.execute({ app: 'daybook-ui' })]);
+	assert.equal(opened.length, 2, 'both calls share one fresh copy');
+	assert.ok(
+		results.every((result) => result.includes('fresh-copy')),
+		"both calls read the fresh copy's page"
+	);
+	await use.execute({ app: 'daybook-ui' });
+	assert.equal(opened.length, 2, 'later calls keep the fresh copy');
+	assert.equal(fresh.uses.length, 3);
+});
+
+test("check_app borrows this turn's use_app page when the user has no preview open, the user's own when they do, and boots its own otherwise", async () => {
+	const source = { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => [], onChange: () => () => undefined };
+	const check = async (page: ReturnType<typeof fakePage>, opts: { attached?: boolean; used?: boolean }): Promise<{ text: string; hostLeases: number }> => {
+		let hostLeases = 0;
+		const host = hostFor(new MemoryWorkspace(DAYBOOK), {
+			devSession: () => (opts.attached ? devSession() : null),
+			leasePreview: async () => {
+				hostLeases += 1;
+				return lent(devSession());
+			},
+			openAppPage: opener(page).open,
+		});
+		const turn = appUseFor(host);
+		if (opts.used) await toolOf(turn.toolkit, USE_APP_TOOL).execute({ app: 'daybook-ui' });
+		const toolkit = new AppCheckToolkit(host, async () => source, () => undefined, { build: { buildWaitMs: 1000, settleMs: 20, runtimeGraceMs: 20 }, types: { quietMs: 10, maxMs: 200 }, lease: turn.toolkit.leaseForCheck });
+		return { text: await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' }), hostLeases };
+	};
+
+	let released = 0;
+	const page = fakePage(
+		undefined,
+		lent(devSession(), () => {
+			released += 1;
+		})
+	);
+	const borrowed = await check(page, { used: true });
+	assert.match(borrowed.text, /^CHECK PASSED: daybook\n/);
+	assert.deepEqual([page.lends, borrowed.hostLeases, released], [1, 0, 1], "the check built in the turn's page and handed it back");
+
+	const usersOwn = await check(page, { used: true, attached: true });
+	assert.deepEqual([page.lends, usersOwn.hostLeases], [1, 1], "with the user's preview open, the check uses it");
+
+	const noPage = await check(page, {});
+	assert.deepEqual([page.lends, noPage.hostLeases], [1, 1], 'with no page this turn, the host boots one for the check');
+
+	const gone = fakePage(undefined, { ok: false, why: 'the page left the app' });
+	const fallback = await check(gone, { used: true });
+	assert.match(fallback.text, /^CHECK PASSED: daybook\n/);
+	assert.deepEqual([gone.lends, fallback.hostLeases], [1, 1], 'a page that cannot lend leaves the check to the host');
 });

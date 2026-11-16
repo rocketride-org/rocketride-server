@@ -234,6 +234,52 @@ both('a read planned after a write of the same file in one wave sees what the wr
 	);
 });
 
+both('use_app waits for an earlier edit of its app in the wave, and a later edit of that app waits for use_app, while an edit of another app runs alongside', async (native) => {
+	const events: string[] = [];
+	const edit = loggedEdit(events, (n) => sleep(n === 0 ? 20 : 0));
+	const use = stub('use_app', async () => {
+		events.push('use start');
+		await sleep(20);
+		events.push('use end');
+		return 'page';
+	});
+	const wave = plan(['edit_file', { path: 'apps/daybook-ui/src/App.tsx', n: 0 }], ['use_app', { app: 'daybook-ui' }], ['edit_file', { path: 'apps/daybook-ui/src/List.tsx', n: 2 }], ['edit_file', { path: 'apps/other-ui/src/App.tsx', n: 3 }]);
+	await loop(scripted([wave, new Error('stop'), done('stopped')], native), [edit, use]);
+	const at = (event: string): number => {
+		assert.ok(events.includes(event), `${event} happened`);
+		return events.indexOf(event);
+	};
+	assert.ok(at('write 0') < at('use start'), 'use_app read the page after the earlier edit');
+	assert.ok(at('use end') < at('start 2'), 'the later edit waited for use_app');
+	assert.ok(at('write 3') < at('write 0'), 'the edit of another app ran alongside');
+});
+
+both('two use_app calls on one app run in planned order, even when the first waits on a card, and calls on two apps overlap', async (native) => {
+	const events: string[] = [];
+	const use = prepared('use_app', async ({ app, n }) => ({
+		act: { name: 'use_app', params: [app, n] },
+		run: async () => {
+			events.push(`start ${n}`);
+			await sleep(10);
+			events.push(`end ${n}`);
+			return 'page';
+		},
+	}));
+	// the first call's card takes 30 ms to answer; the others are answered at once
+	const approve: LoopOptions['approve'] = async (act, run) => {
+		if (act.params[1] === 0) await sleep(30);
+		return run;
+	};
+	const wave = plan(['use_app', { app: 'daybook-ui', n: 0 }], ['use_app', { app: 'daybook-ui', n: 1 }], ['use_app', { app: 'other-ui', n: 2 }]);
+	await loop(scripted([wave, new Error('stop'), done('stopped')], native), [use], { approve });
+	const at = (event: string): number => {
+		assert.ok(events.includes(event), `${event} happened`);
+		return events.indexOf(event);
+	};
+	assert.ok(at('end 0') < at('start 1'), 'the second call on daybook-ui ran after the first');
+	assert.ok(at('start 2') < at('end 0'), 'the call on other-ui overlapped it');
+});
+
 both('waiting for an OK never counts against the limit, and a refused call runs nothing and is no change', async (native) => {
 	const ran: string[] = [];
 	const asking = (name: string): AgentTool =>

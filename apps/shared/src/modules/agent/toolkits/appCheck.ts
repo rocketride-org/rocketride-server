@@ -35,7 +35,7 @@ import type { RocketRideClient, ServiceSummary } from 'rocketride';
 import type { AppErrorRow, ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
 import { getSourceComponents, type PipelineComponent } from '../../../tools/pipelines/utils/parse';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
-import type { AgentDevSession, AgentHost } from '../host';
+import type { AgentDevSession, AgentHost, PreviewApp, PreviewLease } from '../host';
 import { AgentTool, AgentToolkit } from '../tools';
 import { brief, clip, isJsonObject, messageOf, pipelineArg, requireClient, type ClientGetter, type JsonObject } from './common';
 import { findApp, readApps } from './inventory';
@@ -592,6 +592,11 @@ export interface AppCheckOptions {
 	signal?: AbortSignal;
 	/** Hides the values the run's file tools hid; each text goes through it before it is cut. */
 	hide?: (text: string) => string;
+	/**
+	 * Where a check gets its preview. A run passes use_app's leaseForCheck, which can lend the turn's page
+	 * of the app. Absent: the host's leasePreview.
+	 */
+	lease?: (app: PreviewApp, signal?: AbortSignal) => Promise<PreviewLease>;
 }
 
 // =============================================================================
@@ -645,7 +650,7 @@ function noIdEvidence(app: AppEntry): CheckEvidence[] {
 }
 
 /**
- * Checks one app: its types, then a rebuild in a preview the host lends for the check. Returns every step's
+ * Checks one app: its types, then a rebuild in a preview lent for the check (opts.lease, else the host's). Returns every step's
  * evidence in run order.
  * @throws When the app's package.json cannot be read; nothing was checked then.
  */
@@ -656,7 +661,7 @@ async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | n
 
 	const hide = opts.hide ?? ((text: string) => text);
 	const files = await typeScriptFiles(host.vfs, app.path);
-	const lease = await host.leasePreview({ id: app.id, folder: app.folder, name: app.name ?? app.folder }, opts.signal);
+	const lease = await (opts.lease ?? ((a, s) => host.leasePreview(a, s)))({ id: app.id, folder: app.folder, name: app.name ?? app.folder }, opts.signal);
 	try {
 		// step: the lease's session has loaded the app's files as models, which the types step reads
 		const types = await typesStep(app, markers, { ...opts.types, signal: opts.signal }, files, hide);
@@ -699,8 +704,8 @@ const DEFAULT_RUNTIME_GRACE_MS = 1500;
 /** The watch `target` of a hot refresh, which swaps one module into a mounted app without a build. */
 const HOT_REFRESH_TARGET = 'hot refresh';
 
-/** Window errors the shell forwards that a healthy app raises (the browser's ResizeObserver notices), which are not failures. */
-const BENIGN_ERROR = /ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
+/** Window errors the shell forwards that a healthy app raises (the browser's ResizeObserver notices), which are not failures. use_app's page leaves them out too. */
+export const BENIGN_ERROR = /ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
 
 const BUILD_RAN = 'rebuild the app in its Design preview and wait for the build to settle';
 

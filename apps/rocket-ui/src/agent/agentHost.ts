@@ -31,16 +31,19 @@
 
 import type { RocketRideClient } from 'shell';
 import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
-import { DEFAULT_LIMITS, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings, type Grant } from 'shared/modules/agent/host';
+import { DEFAULT_LIMITS, GRANTS, grantsFrom, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings } from 'shared/modules/agent/host';
 import { messageOf } from 'shared/modules/agent/toolkits/common';
 import type { FrameOptions } from 'shared/tools/appdev';
+import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
 import { openWorkspaceFile } from '../surfaces/workspace/vfs/openWorkspaceFile';
 import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
+import { openAppPage } from './appPage';
 import { editorControl } from './editorControls';
 import { bootHiddenPreview } from './hiddenPreview';
+import { watchPlace } from './watch';
 
 // =============================================================================
 // SCAFFOLD DEFAULTS
@@ -49,12 +52,15 @@ import { bootHiddenPreview } from './hiddenPreview';
 /** The frame the New App wizard starts with (NewAppForm's initial options): full screen. */
 const WIZARD_FRAME: FrameOptions = { sidebar: false, statusFooter: false, docTabs: false };
 
+/** Why an app page does not open once another team's workspace is current. */
+const PAGE_TEAM_CHANGED = 'the team changed while the preview was starting';
+
 // =============================================================================
 // DEV SESSIONS
 // =============================================================================
 
-/** Narrows a dev session to what the agent may use. */
-function agentDevSession(session: WebDevSession): AgentDevSession {
+/** Narrows a dev session to what the agent may use: the user's, a hidden one, or use_app's page lent to a check. */
+export function agentDevSession(session: WebDevSession): AgentDevSession {
 	return {
 		appId: session.appId,
 		get previewAttached() {
@@ -71,12 +77,8 @@ function agentDevSession(session: WebDevSession): AgentDevSession {
 // APPROVALS — the user's settings behind the agent's approvals
 // =============================================================================
 
-/** The settings behind the agent's approvals, as shared/tools/toolSettings.ts declares them. Typed by Grant, so a new kind doesn't compile until it has a key. */
-const APPROVAL_KEYS: Readonly<Record<'mode' | Grant, string>> = {
-	mode: 'rocketride.pipeBuilder.agentApproval',
-	schedules: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
-	deploymentToggles: 'rocketride.pipeBuilder.agentAllowDeploymentToggles',
-};
+/** The settings behind the agent's approvals, from shared/tools/toolSettings.ts, where their rows are declared, so a key can't drift from its row. */
+const APPROVAL_KEYS = APPROVAL_SETTING_KEYS;
 
 /** Writes one setting: the workspace's updateSetting. */
 type SettingWriter = (key: string, value: string | boolean) => void;
@@ -88,12 +90,13 @@ type SettingWriter = (key: string, value: string | boolean) => void;
 function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalPrefs {
 	return {
 		mode: settings[APPROVAL_KEYS.mode] === 'auto' ? 'auto' : 'ask',
-		grants: { schedules: settings[APPROVAL_KEYS.schedules] === true, deploymentToggles: settings[APPROVAL_KEYS.deploymentToggles] === true },
+		grants: grantsFrom((grant) => settings[APPROVAL_KEYS[grant]] === true),
 	};
 }
 
+/** Whether two settings agree on the mode and on every grant in GRANTS, so a new grant turned on is never missed as no change. */
 function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
-	return a.mode === b.mode && a.grants.schedules === b.grants.schedules && a.grants.deploymentToggles === b.grants.deploymentToggles;
+	return a.mode === b.mode && GRANTS.every((grant) => a.grants[grant] === b.grants[grant]);
 }
 
 /**
@@ -232,6 +235,10 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 				return { ok: false, why: messageOf(err) };
 			}
 		},
+		// step: always the agent's own hidden copy, in this host's team only
+		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
+		// step: the chat's live view of those copies; UI only, a run never reads it
+		watchFor: (conversationId) => watchPlace({ kind: 'chat', conversationId }),
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
 		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },
