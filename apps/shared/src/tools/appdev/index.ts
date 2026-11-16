@@ -58,6 +58,7 @@ export type {
 	DesignPane,
 	IAppBuilderHost,
 	ListingDraft,
+	ListingPatch,
 	PreflightCheck,
 	BillingPlan,
 	RungKind,

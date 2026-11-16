@@ -580,16 +580,18 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 	/** Persist the package form (identity + assets + build), then re-check —
 	 *  the refresh re-seeds the baseline, so the footer dematerializes.
 	 *  The Store side tab saves the SAME listing (mode, plans) through its own
-	 *  form, so the package fields are overlaid on a FRESH copy of the saved
-	 *  listing, never on the copy loaded at mount: a Store save made since
-	 *  must survive an Identity save. */
+	 *  form, so this save sends ONLY the package-owned fields and the writer
+	 *  leaves the rest as it is on disk: a Store save made since this pane
+	 *  loaded survives an Identity save, with no read-modify-write here. */
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing) return;
 		setSaving(true);
 		setError('');
 		try {
-			const fresh = (await host.loadListing?.()) ?? draft;
-			await host.saveListing({ ...fresh, name: draft.name, description: draft.description, typecheck: draft.typecheck, icon: draft.icon, readme: draft.readme, include: draft.include });
+			// ONLY this pane's fields: the writer leaves what the patch omits
+			// (mode, plans) as it is on disk, so a Store save made since this
+			// pane loaded is never written back stale.
+			await host.saveListing({ name: draft.name, description: draft.description, typecheck: draft.typecheck, icon: draft.icon, readme: draft.readme, include: draft.include });
 			await refresh();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));

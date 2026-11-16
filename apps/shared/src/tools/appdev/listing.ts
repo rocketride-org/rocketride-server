@@ -32,7 +32,7 @@
  * serialize/write halves.
  */
 
-import type { BillingPlan, ListingDraft } from './types';
+import type { BillingPlan, ListingDraft, ListingPatch } from './types';
 
 /** A parsed package.json object carrying an appManifest block. */
 export interface PackageJsonLike {
@@ -71,31 +71,35 @@ export function projectListing(pkg: PackageJsonLike): ListingDraft {
 }
 
 /**
- * Writes the draft back into the parsed package.json's appManifest — name,
- * description, mode, billing.plans, and the packaging fields (icon, readme,
- * include, typecheck). Plan metadata rides along verbatim; other billing
- * keys are preserved. Empty values DELETE their key (an empty plan list
- * removes billing.plans and an emptied billing block entirely; '' icon or
- * readme and an empty include list drop the manifest key) so the manifest
- * never accumulates dead fields. Packaging fields are only touched when the
- * draft carries them (the STORE tab's save omits them; the PACKAGE tab's
- * save owns them).
+ * Writes the fields a save CARRIES back into the parsed package.json's
+ * appManifest — name, description, mode, billing.plans, and the packaging
+ * fields (icon, readme, include, typecheck). A field absent from the patch
+ * is left as it is, so each pane persists only what it owns (the STORE tab:
+ * mode + plans; the PACKAGE tab: the rest) and a Store save can never write
+ * a stale name over a Package save. Plan metadata rides along verbatim;
+ * other billing keys are preserved. Empty values DELETE their key (an empty
+ * plan list removes billing.plans and an emptied billing block entirely; ''
+ * icon or readme and an empty include list drop the manifest key) so the
+ * manifest never accumulates dead fields. The twin of the SDK's
+ * saveAppListing, which the VS Code host uses on the same manifest.
  *
  * @param pkg - The parsed package.json object (mutated in place).
- * @param listing - The draft to persist.
+ * @param listing - The fields to persist.
  */
-export function applyListing(pkg: PackageJsonLike, listing: ListingDraft): void {
+export function applyListing(pkg: PackageJsonLike, listing: ListingPatch): void {
 	if (!pkg.appManifest) pkg.appManifest = {};
 	const manifest = pkg.appManifest as Record<string, unknown>;
-	manifest.name = listing.name;
-	manifest.description = listing.description;
-	manifest.mode = listing.mode;
-	const billing = manifest.billing as Record<string, unknown> | undefined;
-	if (listing.plans.length > 0) {
-		manifest.billing = { ...(billing ?? {}), plans: listing.plans };
-	} else if (billing) {
-		delete billing.plans;
-		if (Object.keys(billing).length === 0) delete manifest.billing;
+	if (listing.name !== undefined) manifest.name = listing.name;
+	if (listing.description !== undefined) manifest.description = listing.description;
+	if (listing.mode !== undefined) manifest.mode = listing.mode;
+	if (listing.plans !== undefined) {
+		const billing = manifest.billing as Record<string, unknown> | undefined;
+		if (listing.plans.length > 0) {
+			manifest.billing = { ...(billing ?? {}), plans: listing.plans };
+		} else if (billing) {
+			delete billing.plans;
+			if (Object.keys(billing).length === 0) delete manifest.billing;
+		}
 	}
 	if (listing.icon !== undefined) {
 		if (listing.icon) manifest.icon = listing.icon;
