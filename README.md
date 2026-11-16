@@ -1,12 +1,12 @@
 <div align="center">
 
 <a href="https://rocketride.org">
-  <img src="docs/public/assets/poster.png" alt="RocketRide: Open Source AI Pipeline Tool" width="100%">
+  <img src="docs/public/assets/poster.png" alt="RocketRide: Open Source AI Meta-Harness" width="100%">
 </a>
 
 <p>
-  <strong>RocketRide is the #1 AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
-  Build, deploy and harness production-ready AI solutions at light speed, from your IDE, your terminal, your code or your coding agent.
+  <strong>RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
+  Build, test and publish durable agents that scale in production.
 </p>
 
 <p>
@@ -25,7 +25,7 @@
 </p>
 
 <p>
- Under the hood, RocketRide is an open source data pipeline builder and runtime built for AI and ML workloads. With 150+ pipeline nodes spanning LLM providers, vector databases, OCR, NER, and more, pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+ Under the hood, RocketRide is an open source meta-harness spanning the full AI Development Lifecycle (AIDLC): build, stage, test, release and maintain. With a rapidly growing node library including agents, models, vector/graph/SQL databases, OCR, tools, evals, data stores, NER and more, it coordinates across agent harnesses while running on an enterprise-grade runtime. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 </p>
 
 <p>
