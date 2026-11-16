@@ -400,9 +400,9 @@ Retrieve the unresolved pipeline for a running task. The pipeline is returned ex
 
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 
-Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
+Validate a pipeline configuration server-side without starting it. It checks what `use()` checks (structure, required fields, component references), then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
 
-`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs. It checks the component's provider but skips the control and lane checks, which need the whole pipeline.
 
 ```python
 result = await client.validate(pipeline, source='webhook_1')

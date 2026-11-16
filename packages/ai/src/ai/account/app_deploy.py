@@ -273,8 +273,13 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     The platform org holds ``rocketride``, so ``rocketride.*`` is reachable
     by nobody else.
 
-    An org with no developer-id owns no namespace and cannot publish apps
-    until an org admin claims one (rrext_app developer_register).
+    An org with no developer-id owns no namespace and cannot deploy or publish
+    apps until an org admin claims one with ``rrext_deploy_app
+    developer_register`` (SaaS only). Users reach that verb through the App
+    Builder's Deploy tab, the npm CLI's ``rocketride app developer register
+    <id>`` or ``client.registerDeveloper(id)`` (Python:
+    ``client.register_developer(id)``), so the error below names those, never
+    the raw verb.
 
     Raises:
         ValueError: no developer-id, or app_id outside the owned namespace.
@@ -282,8 +287,11 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     dev = _developer_id_of(conn)
     if not dev:
         raise ValueError(
-            'Publishing an app requires a registered developer id — an org admin must '
-            'claim one (rrext_app developer_register) before apps can be deployed or published'
+            'Deploying or publishing an app requires a registered developer id, and your organization '
+            'has none. An org admin claims it once, permanently: on the Deploy tab in the App Builder, '
+            'with the npm CLI (rocketride app developer register <id>), or in code with '
+            'client.registerDeveloper(id) (Python: client.register_developer(id)). '
+            'App ids must then be <id>.<name>.'
         )
     if app_id != dev and not app_id.startswith(f'{dev}.'):
         raise ValueError(

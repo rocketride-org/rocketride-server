@@ -545,11 +545,23 @@ async def test_add_rejects_foreign_namespace_app_id(registry, content_store):
 
 @pytest.mark.asyncio
 async def test_add_requires_a_developer_id(registry):
-    """An org with no developer id owns no namespace and cannot deploy apps."""
+    """An org with no developer id owns no namespace and cannot deploy apps.
+
+    The refusal names the ways a user can actually register (the Deploy tab,
+    the npm CLI verb and both SDK spellings), never ``rrext_app
+    developer_register``, a subcommand ``rrext_app`` rejects (#2471).
+    """
     conn = _FakeConn(developer_id=None)
     result = await handle_app_add(conn, _add_request(data=_app_zip()))
     assert result['success'] is False
-    assert 'developer id' in result['message']
+    message = result['message']
+    assert 'developer id' in message
+    assert 'Deploy tab' in message
+    assert 'npm CLI' in message
+    assert 'rocketride app developer register <id>' in message
+    assert 'registerDeveloper(id)' in message
+    assert 'register_developer(id)' in message
+    assert 'rrext_app' not in message
     assert registry.publish_calls == []
 
 

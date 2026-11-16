@@ -46,7 +46,7 @@ _SERVICES_JSON = """{{
 \t"capabilities": [],
 \t"register": "filter",
 \t"node": "python",
-\t"path": "local_nodes.{name}",
+\t"path": "nodes.{name}",
 \t"prefix": "{name}",
 \t"description": ["TODO: describe what this node does."],
 \t"documentation": "https://docs.rocketride.org",
@@ -72,8 +72,6 @@ __all__ = [
     'IInstance',
 ]
 """
-
-_PARENT_INIT_PY = '# Marks local_nodes as a package so the engine can import local_nodes.<name>.\n'
 
 _REQUIREMENTS = '# One pinned dependency per line, installed by depends() in IGlobal.beginGlobal.\n'
 
@@ -173,7 +171,7 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     if not isinstance(name, str) or not _NAME_RE.match(name) or keyword.iskeyword(name):
         return _bad(
             f'name must be a lowercase Python identifier, got {name!r}',
-            'the engine imports local_nodes.<name>, so it has to be importable',
+            'the engine imports nodes.<name>, so it has to be importable',
         )
 
     lane_in = _defaulted(args, 'lane_in', 'text')
@@ -215,16 +213,15 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
     title = name.replace('_', ' ').title()
 
     files = {
-        'local_nodes/__init__.py': _PARENT_INIT_PY,
-        f'local_nodes/{name}/__init__.py': _INIT_PY,
-        f'local_nodes/{name}/services.json': _SERVICES_JSON.format(
+        f'nodes/{name}/__init__.py': _INIT_PY,
+        f'nodes/{name}/services.json': _SERVICES_JSON.format(
             title=title, name=name, class_type=class_type, lane_in=lane_in, lane_out=lane_out
         ),
-        f'local_nodes/{name}/IGlobal.py': _IGLOBAL_PY.format(name=name),
-        f'local_nodes/{name}/IInstance.py': _IINSTANCE_PY.format(
+        f'nodes/{name}/IGlobal.py': _IGLOBAL_PY.format(name=name),
+        f'nodes/{name}/IInstance.py': _IINSTANCE_PY.format(
             name=name, handler=handler, arg=arg, arg_name=arg.split(':')[0], lane_in=lane_in
         ),
-        f'local_nodes/{name}/requirements.txt': _REQUIREMENTS,
+        f'nodes/{name}/requirements.txt': _REQUIREMENTS,
     }
 
     return {
@@ -233,8 +230,8 @@ async def _scaffold_node(client, tasks, args: Dict[str, Any]) -> dict:
         'provider': name,
         'files': files,
         'next_steps': [
-            'Write these files under the workspace passed as --node_path.',
-            'A local node runs only on an engine started with --node_path: RocketRide Cloud loads none, '
+            "Write these paths relative to the folder that holds the engine's nodes/ (nodes/src in a source tree).",
+            'A node written there runs only on that engine: RocketRide Cloud loads none, '
             'and store review rejects pipelines that use one, so an app for the store stays on catalog nodes.',
             f'Reference the node in a .pipe as "provider": "{name}", since the provider is the protocol.',
             'Restart the engine: node manifests are read once at startup.',
@@ -248,7 +245,7 @@ def register(registry: ToolRegistry) -> None:
         'scaffold_node',
         'Emit a local node skeleton that loads on the first try, with the manifest keys and file '
         'layout the engine actually requires. Returns files to write; it writes nothing itself. '
-        'Local nodes run only on an engine started with --node_path (RocketRide Cloud loads none), '
+        'A local node runs only on the engine whose nodes/ directory holds it (RocketRide Cloud loads none), '
         'so never scaffold one for an app headed for the store: store apps use catalog nodes only.',
         {
             'type': 'object',

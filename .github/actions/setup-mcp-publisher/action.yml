@@ -1,0 +1,63 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Composite action that installs cosign and downloads the pinned mcp-publisher
+# release into the working directory (./mcp-publisher), after verifying its
+# Sigstore bundle. Shared by publish-mcp-registry.yml and
+# validate-mcp-server-json.yml so both use the same verified binary.
+name: Setup mcp-publisher
+description: >-
+  Install cosign, then download and verify a pinned mcp-publisher release
+  (modelcontextprotocol/registry). The binary is left at ./mcp-publisher.
+
+inputs:
+  version:
+    description: mcp-publisher release tag to install.
+    required: false
+    default: v1.8.1
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install cosign
+      uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+    - name: Download and verify mcp-publisher
+      shell: bash
+      env:
+        MCP_PUBLISHER_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+        archive="mcp-publisher_${os}_${arch}.tar.gz"
+        base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+        curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+        curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+        cosign verify-blob \
+          --bundle "$archive.sigstore.json" \
+          --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+          "$archive"
+        tar xzf "$archive" mcp-publisher
+        rm -f "$archive" "$archive.sigstore.json"
