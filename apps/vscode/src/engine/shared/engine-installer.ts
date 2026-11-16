@@ -22,6 +22,7 @@
  *   <parentDir>/engine/
  *     engine.exe | engine           — engine binary
  *     ai/eaas.py                    — Python entrypoint
+ *   <parentDir>/nodes/rocketride-nodes-v*.zip — the node archive the server's nodes/index.json names
  *   <parentDir>/version.*.json        — { tag, publishedAt } installed version
  *     install.lock                  — cross-process lockfile
  *     engine-<pid>.pid              — written by EngineManager per running process
@@ -37,6 +38,7 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
+import { nodeArchiveOf } from './node-archive';
 
 // =============================================================================
 // TYPES
@@ -151,6 +153,11 @@ export class EngineInstaller {
 		return path.join(path.dirname(this.engineDir), '.installing');
 	}
 
+	/** The nodes/ directory beside engine/, which holds the release's node archive. */
+	private nodesDir(): string {
+		return path.join(this.parentDir, 'nodes');
+	}
+
 	/** Path to the version tracking file in the parent directory. */
 	private versionJsonPath(): string {
 		return path.join(this.parentDir, this.versionFileName);
@@ -260,6 +267,7 @@ export class EngineInstaller {
 		try {
 			if (fs.existsSync(this.engineDir)) {
 				fs.rmSync(this.engineDir, { recursive: true, force: true });
+				fs.rmSync(this.nodesDir(), { recursive: true, force: true });
 				this.logger.output(`${icons.info} Engine uninstalled from ${this.engineDir}`);
 			}
 		} finally {
@@ -306,6 +314,8 @@ export class EngineInstaller {
 
 		// --- Already up to date? ---
 		if (installed && installed.tag === releaseInfo.tag_name && fs.existsSync(exePath)) {
+			// An engine installed by an extension that did not fetch the node archive
+			await this.installNodeArchive(releaseInfo, progress, token, githubToken);
 			const displayTag = releaseInfo.tag_name.replace(/^server-/, '');
 			this.logger.output(`${icons.success} Engine ${displayTag} already installed`);
 			return exePath;
@@ -367,6 +377,11 @@ export class EngineInstaller {
 			// (Runtime dep check runs in install() after this returns, so it
 			// covers fresh downloads AND "already installed" short-circuits.)
 
+			// A prerelease and its release name the same archive, so the old one goes too.
+			// Before the version file: an install without its nodes is retried
+			fs.rmSync(this.nodesDir(), { recursive: true, force: true });
+			await this.installNodeArchive(release, progress, token, githubToken);
+
 			// Write version file so we know what's installed
 			this.writeVersionJson({ tag: release.tag_name, publishedAt: release.published_at });
 
@@ -384,6 +399,40 @@ export class EngineInstaller {
 				// Ignore cleanup errors
 			}
 		}
+	}
+
+	/**
+	 * Puts the node archive the server's nodes/index.json names in <parentDir>/nodes, beside
+	 * engine/, where EaaS reads the nodes a run asks for. A server whose index names none needs nothing.
+	 */
+	private async installNodeArchive(
+		release: ReleaseInfo,
+		progress?: vscode.Progress<{ message?: string; increment?: number }>,
+		token?: vscode.CancellationToken,
+		githubToken?: string
+	): Promise<void> {
+		const archive = nodeArchiveOf(this.engineDir);
+		if (!archive) return;
+
+		const nodesDir = this.nodesDir();
+		const target = path.join(nodesDir, archive);
+		if (fs.existsSync(target)) return;
+
+		const asset = release.assets.find(a => a.name === archive);
+		if (!asset) throw new Error(`Release ${release.tag_name} has no ${archive}, the node archive its server reads`);
+
+		fs.mkdirSync(nodesDir, { recursive: true });
+		// Renamed into place once whole, so an archive that is there is complete
+		const staging = `${target}.download`;
+		const displayVersion = release.tag_name.replace(/^server-/, '');
+		progress?.report({ message: `Downloading the nodes of ${displayVersion}...` });
+		try {
+			await this.downloadAsset(asset, staging, displayVersion, progress, token, githubToken);
+			fs.renameSync(staging, target);
+		} finally {
+			fs.rmSync(staging, { force: true });
+		}
+		this.logger.output(`${icons.success} Nodes ${archive} installed at ${nodesDir}`);
 	}
 
 	/**
