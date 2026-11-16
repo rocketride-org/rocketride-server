@@ -37,7 +37,7 @@ from arango import ArangoClient
 from arango.exceptions import ArangoError, ServerConnectionError
 
 from rocketlib import IGlobalBase, debug, error, warning
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved, warn_if_credential_unresolved
 
 from .utils import _is_aql_safe, _plan_is_modification
 
@@ -108,6 +108,8 @@ class IGlobal(IGlobalBase):
             )
         except (TypeError, ValueError):
             self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+
+        self._check_credentials(config)
 
         try:
             self.client = ArangoClient(hosts=self.endpoint)
@@ -230,6 +232,11 @@ class IGlobal(IGlobalBase):
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         endpoint = config.get('endpoint', 'http://localhost:8529').strip()
 
+        # Do not send an unfilled ${...} to the server as the password or token.
+        field, value = self._credential(config)
+        if warn_if_credential_unresolved(self.glb.logicalType, field, value, self.glb.connConfig):
+            return
+
         client = None
         try:
             client = ArangoClient(hosts=endpoint)
@@ -343,6 +350,22 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _credential(config: Dict[str, Any]) -> Tuple[str, Any]:
+        """The ``(field, value)`` that ``_open_database`` signs in with for the chosen auth method."""
+        if config.get('auth_method', 'userpass').strip() == 'token':
+            return 'token', config.get('token', '')
+        return 'password', config.get('password', '')
+
+    def _check_credentials(self, config: Dict[str, Any]) -> None:
+        """Raise when the password or token is still a ${...} that no saved variable filled.
+
+        Sent as is, the server's "not authorized" reply would not say which
+        variable is missing.
+        """
+        field, value = self._credential(config)
+        check_credential_resolved(self.glb.logicalType, field, value, self.glb.connConfig)
 
     @staticmethod
     def _open_database(client: ArangoClient, config: Dict[str, Any], *, verify: bool = False) -> Any:

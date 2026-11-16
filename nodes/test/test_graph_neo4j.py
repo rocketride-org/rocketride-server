@@ -71,6 +71,16 @@ class _StubBase:
         pass
 
 
+class _UnresolvedCredentialError(ValueError):
+    pass
+
+
+def _check_credential_resolved(logicalType, field, value, connConfig=None):
+    """Stand-in for ai.common.config.check_credential_resolved: same detection, short message."""
+    if isinstance(value, str) and ('${' in value or '<REDACTED>' in value):
+        raise _UnresolvedCredentialError(f'{logicalType}: {field} is unresolved: {value}')
+
+
 class _StubTable:
     @staticmethod
     def generate_markdown_table(data, headers=None):
@@ -119,6 +129,8 @@ def _install_stubs() -> None:
 
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
+    config.UnresolvedCredentialError = _UnresolvedCredentialError
+    config.check_credential_resolved = _check_credential_resolved
 
     config_utils = _load_from_path('ai.common.config_utils', _CONFIG_UTILS)
     utils = types.ModuleType('ai.common.utils')
@@ -560,3 +572,47 @@ def test_get_data_enforces_limit_and_flags_truncation():
     assert out['valid'] is True
     assert len(out['rows']) == 3
     assert out['truncated'] is True
+
+
+# ---------------------------------------------------------------------------
+# Unfilled ${ROCKETRIDE_*} credentials (#2712)
+# ---------------------------------------------------------------------------
+
+
+def _checked_fields(config):
+    """Which config fields the Neo4j node checks for an unfilled placeholder."""
+    glb = _FakeGlobal(_FakeDriver())
+    return [field for field, _ in glb._credentials(config)]
+
+
+def test_password_sign_in_checks_only_the_password():
+    assert _checked_fields({'auth_method': 'userpass', 'password': 'p', 'token': 't'}) == ['password']
+    assert _checked_fields({}) == ['password']
+
+
+def test_token_sign_in_checks_only_the_token():
+    assert _checked_fields({'auth_method': 'token', 'password': 'p', 'token': 't'}) == ['token']
+
+
+@pytest.mark.parametrize(
+    ('field', 'config'),
+    [
+        ('password', {'password': '${ROCKETRIDE_NEO4J_PASSWORD}'}),
+        ('token', {'auth_method': 'token', 'token': '${ROCKETRIDE_NEO4J_TOKEN}'}),
+    ],
+)
+def test_an_unfilled_credential_is_refused(field, config):
+    glb = _FakeGlobal(_FakeDriver())
+    glb.glb = types.SimpleNamespace(logicalType='graph_neo4j', connConfig=dict(config))
+    # ValueError, the stand-in's base: the graph base module is shared with the
+    # FalkorDB tests, so whichever file loaded it first supplies the stand-in.
+    with pytest.raises(ValueError, match=f'graph_neo4j: {field} '):
+        glb._check_credentials(config)
+
+
+def test_an_unused_placeholder_is_not_checked():
+    # The token field is not sent under password sign-in, so its placeholder does not matter.
+    config = {'auth_method': 'userpass', 'password': 's3cret', 'token': '${ROCKETRIDE_NEO4J_TOKEN}'}
+    glb = _FakeGlobal(_FakeDriver())
+    glb.glb = types.SimpleNamespace(logicalType='graph_neo4j', connConfig=dict(config))
+    glb._check_credentials(config)

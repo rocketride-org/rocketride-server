@@ -13,7 +13,7 @@ makes it available to all instances via ``self.store``.
 from __future__ import annotations
 
 from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 
 
 class IGlobal(IGlobalBase):
@@ -41,6 +41,11 @@ class IGlobal(IGlobalBase):
         from .memory_store import PersistentMemoryStore
 
         backend = self.config.get('backend', 'memory')
+        if backend == 'redis':
+            # Sent as is, Redis would answer "invalid password" without naming the missing variable.
+            check_credential_resolved(
+                self.glb.logicalType, 'redis_password', self.config.get('redis_password'), self.glb.connConfig
+            )
         self.store = PersistentMemoryStore(
             backend=backend,
             max_history=int(self.config.get('max_history', 100)),

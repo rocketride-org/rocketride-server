@@ -42,7 +42,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from rocketlib import IGlobalBase, debug, warning
 
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 from ai.common.utils import config_int, parse_bool
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
@@ -171,6 +171,23 @@ class GraphGlobalBase(IGlobalBase, ABC):
         """
         return self.max_execute_rows
 
+    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
+        """The credentials this config has the driver send, as ``(field, value)``.
+
+        Empty here: a driver that signs in with values from its node config
+        lists them, so ``_check_credentials`` can catch an unfilled placeholder.
+        """
+        return []
+
+    def _check_credentials(self, config: Dict[str, Any]) -> None:
+        """Raise when a credential is still a ${...} that no saved variable filled.
+
+        Sent as is, the server's "authentication failed" reply would not say
+        which variable is missing.
+        """
+        for field, value in self._credentials(config):
+            check_credential_resolved(self.glb.logicalType, field, value, self.glb.connConfig)
+
     # ------------------------------------------------------------------
     # Lifecycle — identical across graph engines
     # ------------------------------------------------------------------
@@ -200,6 +217,7 @@ class GraphGlobalBase(IGlobalBase, ABC):
             max_value=DEFAULT_MAX_EXECUTE_ROWS,
         )
 
+        self._check_credentials(config)
         self._open_driver(config)
 
         # Reflection is a convenience for the LLM prompt, not a prerequisite for a
@@ -224,6 +242,7 @@ class GraphGlobalBase(IGlobalBase, ABC):
         """Save-time validation: probe the server so the user sees errors immediately."""
         try:
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            self._check_credentials(config)
             self._probe_connection(config)
         except Exception as e:
             warning(str(e))

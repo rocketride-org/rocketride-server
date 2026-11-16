@@ -119,6 +119,11 @@ class IGlobal(GraphGlobalBase):
                     f'(available: {available}). Set "Default Graph" to an existing graph name.'
                 )
 
+    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
+        # A URL may carry the password itself, and the password field, when
+        # filled, is sent in its place (see _connect).
+        return [('url', config.get('url')), ('password', config.get('password'))]
+
     def _close_driver(self) -> None:
         if self.client is not None:
             try:

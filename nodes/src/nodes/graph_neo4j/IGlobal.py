@@ -86,6 +86,12 @@ class IGlobal(GraphGlobalBase):
             error(f'Neo4J connection failed: {e}')
             raise
 
+    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
+        # Only the field _build_auth sends for the chosen auth method.
+        if str(config.get('auth_method') or 'userpass').strip() == 'token':
+            return [('token', config.get('token'))]
+        return [('password', config.get('password'))]
+
     def _close_driver(self) -> None:
         if self.driver is not None:
             try:
