@@ -1,0 +1,82 @@
+{
+	//
+	// Supabase Messaging: Realtime broadcast and Queues (pgmq) as agent tools.
+	// Connects with the Project URL + secret key (shared fields in
+	// core/services.common.supabase.json). Every tool needs the write level,
+	// including queue_read (reading hides messages from other readers).
+	//
+	"title": "Supabase Messaging",
+	"protocol": "tool_supabase_messaging://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.messaging",
+	"prefix": "supabase_messaging",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/messaging",
+	"description": ["Send Supabase Realtime broadcast messages and work with Supabase Queues as agent tools.", "Tools: broadcast, queue_send, queue_read, queue_pop, queue_archive, queue_delete. All of them need the write access level. Queues need 'Expose Queues via PostgREST' turned on in the project (Integrations -> Queues -> Settings)."],
+	"tile": ["Supabase Messaging (${parameters.supabase.access})", "Tools need write or admin"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Messaging",
+				// Keep "key": the runtime reads a missing authType as key too (OAuth comes later).
+				"authType": "key",
+				"url": "",
+				"secretKey": "",
+				"access": "read",
+				"maxReadCount": 100,
+				"maxVisibilitySeconds": 3600,
+				"maxDelaySeconds": 3600,
+				"maxPayloadKb": 256
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. Every Messaging tool needs write, including queue_read, because reading a message hides it from other readers. At read (the default) this node offers the agent no tools: set write to turn them on."
+		},
+		"supabase_messaging.maxReadCount": {
+			"type": "integer",
+			"title": "Max messages per read",
+			"description": "Most messages one queue_read call returns. A larger count from the agent is cut to this number.",
+			"default": 100,
+			"minimum": 1,
+			"maximum": 1000
+		},
+		"supabase_messaging.maxVisibilitySeconds": {
+			"type": "integer",
+			"title": "Max visibility timeout (s)",
+			"description": "Longest time queue_read may hide messages from other readers. The tool's default is 30 seconds.",
+			"default": 3600,
+			"minimum": 1,
+			"maximum": 86400
+		},
+		"supabase_messaging.maxDelaySeconds": {
+			"type": "integer",
+			"title": "Max send delay (s)",
+			"description": "Longest delay queue_send may ask for before a message becomes readable.",
+			"default": 3600,
+			"minimum": 1,
+			"maximum": 604800
+		},
+		"supabase_messaging.maxPayloadKb": {
+			"type": "integer",
+			"title": "Max payload size (KB)",
+			"description": "Largest broadcast payload or queue message, as JSON. Supabase's own Realtime limit is 256 KB on the Free plan.",
+			"default": 256,
+			"minimum": 1,
+			"maximum": 3072
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Messaging",
+			"properties": ["supabase.authType", "supabase.access", "supabase_messaging.maxReadCount", "supabase_messaging.maxVisibilitySeconds", "supabase_messaging.maxDelaySeconds", "supabase_messaging.maxPayloadKb"]
+		}
+	]
+}
