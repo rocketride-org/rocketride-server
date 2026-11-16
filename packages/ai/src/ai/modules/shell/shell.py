@@ -51,7 +51,6 @@ request headers.
 """
 
 import hashlib
-import mimetypes
 import os
 import posixpath
 import re
@@ -590,11 +589,11 @@ _DOCUMENT_HEADERS = {'Content-Security-Policy': 'sandbox', 'Content-Disposition'
 _SCRIPT_BUNDLE_TYPES = frozenset({'text/javascript', 'application/javascript', 'application/x-javascript'})
 
 
-# The type of each web file a dist is built from, fixed here rather than read
-# from the host's mimetypes table: on Windows that table comes from the
-# registry, which may not know .mjs or .woff2 and may register .js as
-# text/plain. Either would change the headers above. Other extensions still
-# fall back to mimetypes, and an unknown one is served as a sandboxed download.
+# The type of each file a dist may ship, fixed here rather than read from the
+# host's mimetypes table: on Windows that table comes from the registry, which
+# may not know .mjs or .woff2 and may register .js as text/plain, so the same
+# file would get different headers on different hosts. Any other extension is
+# served as application/octet-stream, which is a sandboxed download.
 _BUNDLE_TYPES_BY_EXTENSION = {
     '.js': 'text/javascript',
     '.mjs': 'text/javascript',
@@ -618,6 +617,14 @@ _BUNDLE_TYPES_BY_EXTENSION = {
     '.html': 'text/html',
     '.htm': 'text/html',
     '.txt': 'text/plain',
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.xml': 'application/xml',
+    '.xhtml': 'application/xhtml+xml',
+    '.pdf': 'application/pdf',
 }
 
 
@@ -625,7 +632,7 @@ def _bundle_media_type(name: str) -> str:
     """The served type of one dist file, the same on every host (see above)."""
     dot = name.rfind('.')
     known = _BUNDLE_TYPES_BY_EXTENSION.get(name[dot:].lower()) if dot > 0 else None
-    return known or mimetypes.guess_type(name)[0] or 'application/octet-stream'
+    return known or 'application/octet-stream'
 
 
 def _bundle_headers(media_type: str) -> dict:

@@ -36,6 +36,7 @@ middleware), so every header asserted here is set by the route itself.
 
 from __future__ import annotations
 
+import mimetypes
 from types import SimpleNamespace
 
 import pytest
@@ -309,7 +310,32 @@ def test_bundle_policy_does_not_depend_on_the_hosts_mime_table(monkeypatch, name
     every host. Windows' registry-backed table must not turn a module script
     into a cached download or a font into an attachment.
     """
-    monkeypatch.setattr(shell_mod.mimetypes, 'guess_type', _windows_like_guess)
+    monkeypatch.setattr(mimetypes, 'guess_type', _windows_like_guess)
+
+    resp = _get(monkeypatch, name, b'payload')
+
+    assert resp.status_code == 200
+    assert resp.headers['content-type'].split(';')[0] == media_type
+    assert ('content-disposition' not in resp.headers) is inline
+    assert resp.headers.get('cache-control') == cache
+
+
+@pytest.mark.parametrize(
+    ('name', 'media_type', 'inline', 'cache'),
+    [
+        ('static/js/APP.JS', 'text/javascript', True, 'no-store'),
+        ('docs/X.HTML', 'text/html', False, 'private, max-age=3600'),
+        ('.js', 'application/octet-stream', False, 'private, max-age=3600'),
+        ('trailing.js.', 'application/octet-stream', False, 'private, max-age=3600'),
+        ('clip.ts', 'application/octet-stream', False, 'private, max-age=3600'),
+    ],
+)
+def test_bundle_type_is_read_from_the_extension_alone(monkeypatch, name, media_type, inline, cache):
+    """Case does not matter, a name that is only an extension or ends in a dot
+    has none, and an extension outside the table is a sandboxed download on
+    every host (the host's table is never consulted).
+    """
+    monkeypatch.setattr(mimetypes, 'guess_type', lambda *_a, **_k: ('text/javascript', None))
 
     resp = _get(monkeypatch, name, b'payload')
 
