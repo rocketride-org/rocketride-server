@@ -119,6 +119,8 @@ _TEST_BILLING_RATES = {
     'gpu_postprocess': 0.0,
     'gpu_queue_wait': 0.0,
     'gpu_inference_count': 0.0,
+    'hold_time': 0.001,  # tokens per ms (the pipe hold, plan 8.1)
+    'bytes_in': 0.0,
 }
 
 
@@ -565,3 +567,114 @@ def test_stop_monitoring_on_idle_is_a_noop(fake_psutil, no_gpu):
         await tm.stop_monitoring()
 
     asyncio.run(run())  # absence of exception is the assertion
+
+
+# ---------------------------------------------------------------------------
+# Request trees -> usage increments (plan 8.2, 8.3)
+# ---------------------------------------------------------------------------
+
+
+def _attribution(org='org-1', user='user-a', team='team-home'):
+    from ai.modules.task.task_control import BillingAttribution
+
+    return BillingAttribution(org_id=org, team_id=team, user_id=user)
+
+
+def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None):
+    return task_metrics.TraceUsage(
+        control_key=control_key,
+        billing=billing or _attribution(),
+        address='acme.docBrain.chat',
+        rung='team',
+    )
+
+
+def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gpu, mock_billing_rates):
+    """The engine's final bucket for a tree is converted at the rates and queued under the caller's day row."""
+    sink = task_metrics.UsageSink(post=None)
+    tm, _ = _make_metrics(fake_psutil)
+    tm._attribute = lambda trace_id: _usage(trace_id)
+    tm.usage_sink = sink
+    tm.merge_subprocess_metrics(
+        {
+            'timers': {'hold_time': 500.0},
+            'counters': {'bytes_in': 10},
+            'traces': {'7': {'timers': {'hold_time': 500.0}, 'counters': {'bytes_in': 10}, 'closed': True}},
+        }
+    )
+    day = task_metrics.UsageSink.day_number()
+    key = f'usage:{day}:acme.docBrain:user-a:hold_time'
+    assert list(sink.pending) == [key]
+    pending = sink.pending[key]
+    assert pending['amount'] == 0.5 and pending['request_count'] == 1  # 500 ms x 0.001; bytes_in bills nothing
+    assert pending['row']['org_id'] == 'org-1' and pending['row']['team_id'] == 'team-home'
+    assert pending['row']['context']['rung'] == 'team' and 7 not in tm.traces
+
+
+def test_an_open_tree_is_tracked_and_an_unclaimed_tree_stays_engine_level(fake_psutil, no_gpu, mock_billing_rates):
+    tm, _ = _make_metrics(fake_psutil)
+    tm._attribute = lambda trace_id: _usage(trace_id) if trace_id == 1 else None
+    tm.usage_sink = task_metrics.UsageSink(post=None)
+    tm.merge_subprocess_metrics(
+        {
+            'timers': {},
+            'counters': {},
+            'traces': {
+                '1': {'timers': {'gpu_compute': 100.0}, 'counters': {}, 'closed': False},
+                '2': {'timers': {'gpu_compute': 100.0}, 'counters': {}, 'closed': True},
+            },
+        }
+    )
+    assert tm.traces[1].timers == {'gpu_compute': 100.0} and 2 not in tm.traces
+    assert tm.usage_sink.pending == {}
+
+
+def test_tokens_for_bills_gpu_under_tokens_and_metered_keys_under_their_own_name(
+    fake_psutil, no_gpu, mock_billing_rates
+):
+    tm, _ = _make_metrics(fake_psutil)
+    usage = _usage(1)
+    usage.timers = {'gpu_compute': 200.0, 'gpu_memory': 1.0, 'hold_time': 1000.0, 'gpu_queue_wait': 999.0}
+    usage.counters = {'bytes_in': 4096}
+    assert tm.tokens_for(usage) == {'tokens': 3.0, 'hold_time': 1.0}
+
+
+@pytest.mark.asyncio
+async def test_the_sink_coalesces_increments_and_keeps_a_failed_write_for_the_next_flush():
+    """Increments of one row add up in the buffer; a confirmed write drops it; a failed one rides the next flush."""
+    writes = []
+    fail = {'on': True}
+
+    async def post(**row):
+        if fail['on']:
+            raise RuntimeError('ledger down')
+        writes.append(row)
+        return True
+
+    sink = task_metrics.UsageSink(post=post)
+    now = 20772 * 86400 + 10
+    sink.post(_usage(1), {'hold_time': 0.5}, now=now)
+    sink.post(_usage(2), {'hold_time': 0.25, 'tokens': 2.0}, now=now)
+    key = 'usage:20772:acme.docBrain:user-a:hold_time'
+    assert sink.pending[key]['amount'] == 0.75 and sink.pending[key]['request_count'] == 2
+    assert sink.pending['usage:20772:acme.docBrain:user-a:tokens']['request_count'] == 1
+
+    await sink.flush()
+    assert writes == [] and len(sink.pending) == 2  # nothing confirmed, nothing lost
+    fail['on'] = False
+    await sink.flush()
+    assert sorted(w['idempotency_key'] for w in writes) == sorted(
+        ['usage:20772:acme.docBrain:user-a:hold_time', 'usage:20772:acme.docBrain:user-a:tokens']
+    )
+    hold = next(w for w in writes if w['resource'] == 'hold_time')
+    assert (hold['amount'], hold['request_count'], hold['user_id'], hold['team_id']) == (0.75, 2, 'user-a', 'team-home')
+    assert sink.pending == {}
+
+
+def test_a_tree_without_a_paying_unit_is_not_posted():
+    sink = task_metrics.UsageSink(post=None)
+    usage = _usage(1)
+    usage.billing = None
+    sink.post(usage, {'hold_time': 1.0})
+    sink.post(_usage(2, billing=_attribution(user='')), {'hold_time': 1.0})
+    assert sink.pending == {}

@@ -39,7 +39,7 @@ ops stream, never to the next holder of the reused slot.
 
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from ai.constants import CONST_BINDING_GRACE_SECONDS
 
@@ -55,11 +55,19 @@ class TraceOwner:
         control_key: The owning control's registry key.
         conn_id: The connection that opened the binding (delivered first).
         late: True when the tree was released and the grace has not lapsed.
+        billing: Who pays for the tree's work (plan 8.3): the CALLER of the
+            request and their home team, which on a team-owned control differ
+            from one request to the next. None for a tree nobody metered.
+        address: The control's address, for the usage row's pipe segment.
+        rung: The rung the control resolved on, for the row's context.
     """
 
     control_key: str
     conn_id: int
     late: bool = False
+    billing: Any = None
+    address: str = ''
+    rung: str = ''
 
 
 # ==== The registry ===============================================================
@@ -80,20 +88,32 @@ class TraceOwners:
         # traceId -> (owner, released_at) for bindings closed within the grace
         self._released: Dict[str, tuple] = {}
 
-    def claim(self, trace_id: str, control_key: str, conn_id: int) -> None:
+    def claim(
+        self,
+        trace_id: str,
+        control_key: str,
+        conn_id: int,
+        *,
+        billing: Any = None,
+        address: str = '',
+        rung: str = '',
+    ) -> None:
         """
-        Record that ``trace_id`` belongs to ``control_key``, opened by ``conn_id``.
+        Record that ``trace_id`` belongs to ``control_key``, opened by ``conn_id``, paid by ``billing``.
 
         Args:
             trace_id: The wire traceId the open answered with.
             control_key: The owning control's registry key.
             conn_id: The opener's connection id.
+            billing: The caller's paying unit for this tree (plan 8.3).
+            address: The control's address.
+            rung: The control's rung.
         """
         if not trace_id:
             return
         # A re-claim (the idempotent open served the same binding twice) keeps
         # the first owner: a tree never changes hands
-        self._live.setdefault(trace_id, TraceOwner(control_key, conn_id))
+        self._live.setdefault(trace_id, TraceOwner(control_key, conn_id, billing=billing, address=address, rung=rung))
 
     def release(self, trace_id: str, now: Optional[float] = None) -> None:
         """
@@ -132,7 +152,9 @@ class TraceOwners:
         now = time.monotonic() if now is None else now
         if now - released_at >= CONST_BINDING_GRACE_SECONDS:
             return None
-        return TraceOwner(owner.control_key, owner.conn_id, late=True)
+        return TraceOwner(
+            owner.control_key, owner.conn_id, late=True, billing=owner.billing, address=owner.address, rung=owner.rung
+        )
 
     def sweep(self, now: Optional[float] = None) -> None:
         """

@@ -375,7 +375,24 @@ class DataCommands(DAPConn):
             engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
         )
         control.stats.totalCount += 1
-        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+        self._claim(control, trace_id)
+
+    def _claim(self, control: 'TaskControl', trace_id: str) -> None:
+        """
+        Claim a request tree for the control, paid by THIS request's caller (plan 7.5, 8.3).
+
+        Args:
+            control: The caller's control.
+            trace_id: The wire traceId the engine answered with.
+        """
+        self._server.trace_owners.claim(
+            trace_id,
+            control.key,
+            self._connection_id,
+            billing=control.caller_billing(self._account_info),
+            address=control.address,
+            rung=control.rung or '',
+        )
 
     def _retire(self, control: 'TaskControl', pipe_id: Any, succeeded: bool) -> None:
         """
@@ -427,7 +444,7 @@ class DataCommands(DAPConn):
             return
         control.stats.totalCount += 1
         control.stats.completedCount += 1
-        self._server.trace_owners.claim(trace_id, control.key, self._connection_id)
+        self._claim(control, trace_id)
         self._server.trace_owners.release(trace_id)
 
     async def _require_credit(self, control: 'TaskControl') -> None:

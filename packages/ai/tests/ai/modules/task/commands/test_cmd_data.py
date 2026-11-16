@@ -90,6 +90,23 @@ async def _opened(ts, conn, **arguments):
 
 
 # =============================================================================
+# CREDIT AT START (plan 0 S9)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_dev_run_whose_org_is_out_of_credit_is_refused_at_start(catalog, engines, monkeypatch):
+    """An owned run's paying unit is checked before anything launches."""
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'check_spend', AsyncMock(return_value='no credit left'), raising=False)
+    ts = _server()
+    with pytest.raises(OutOfCreditsError):
+        await _start(ts, _pipeline())
+    assert engines == []
+
+
+# =============================================================================
 # THE DRAINING ENGINE (plan 7.2 P2)
 # =============================================================================
 
@@ -393,11 +410,13 @@ async def test_out_of_credit_is_refused_before_any_bytes_reach_the_engine(catalo
     """The paying unit is asked on the open; a refusal is out_of_credits and nothing is forwarded."""
     import ai.account
 
-    monkeypatch.setattr(ai.account.account, 'check_spend', AsyncMock(return_value='no credit left'), raising=False)
+    check = AsyncMock(return_value=None)
+    monkeypatch.setattr(ai.account.account, 'check_spend', check, raising=False)
     ts = _server()
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
-
+    # The account ran dry after the start (which asked once, plan 0 S9)
+    check.return_value = 'no credit left'
     with pytest.raises(OutOfCreditsError):
         await _opened(ts, conn)
     assert engine_log == []
@@ -414,6 +433,9 @@ async def test_an_allow_is_trusted_for_the_window_and_a_refusal_never_is(catalog
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
 
+    # The start asked once for the dev run's org (plan 0 S9); the data path's
+    # own questions are what the window bounds
+    asked.reset_mock()
     for _ in range(3):
         await _opened(ts, conn)
     assert asked.await_count == 1

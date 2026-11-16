@@ -94,7 +94,7 @@ from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
 from . import run_log
-from .task_metrics import TaskMetrics
+from .task_metrics import TaskMetrics, TraceUsage
 
 # Serialized-size cap for one trace payload. Trace (and its derived flow)
 # is the only unbounded event payload — a component can attach whole
@@ -445,14 +445,24 @@ def _is_saas_engine() -> bool:
 
 
 async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
-    """Answer a task's credit check: no refusal, or why its org may not open a pipe."""
+    """
+    Answer a task's credit check: no refusal, or why the paying unit may not open a pipe.
+
+    The gate names the binding's CALLER (plan 8.3) when the data path opened
+    it: that caller's org is the paying unit, whoever started the engine. A
+    binding the engine opens itself (a scan source, a listener) names no
+    caller and is the engine owner's. Subscription pricing joins this answer
+    with the store rung (plan 8.4, Step 6).
+    """
     from ai.account import account
 
+    caller = (arguments or {}).get('caller') or {}
+    org_id = str(caller.get('orgId') or '') or task.org_id
     try:
-        refusal = await account.check_spend(task.org_id)
+        refusal = await account.check_spend(org_id)
     except Exception as e:
         # The ledger's error stays in the server log; the task gets a fixed one
-        warning(f'Credit check failed for org {task.org_id}: {e}')
+        warning(f'Credit check failed for org {org_id}: {e}')
         raise ChannelRefused(CONST_BILLING_UNAVAILABLE) from None
     return ChannelReply(body={'refusal': refusal})
 
@@ -2068,6 +2078,29 @@ class TaskEngine(DAPBase):
 
         self.debug_message('Resource cleanup completed successfully')
 
+    def _attribute_trace(self, trace_id: int) -> Optional[TraceUsage]:
+        """
+        Who pays for a request tree the engine metered (plan 8.2, 8.3).
+
+        The engine's bare counter becomes the wire ``traceId`` and the server's
+        trace owners name the control and the caller that opened it; a tree
+        nobody claimed (a scan source's own binding) is None and stays in
+        the engine totals.
+
+        Args:
+            trace_id: The engine's bare traceId.
+
+        Returns:
+            A fresh accumulator seeded with the owner's attribution, or None.
+        """
+        owners = getattr(self._server, 'trace_owners', None)
+        if owners is None:
+            return None
+        owner = owners.owner(self.trace_ref(trace_id))
+        if owner is None:
+            return None
+        return TraceUsage(control_key=owner.control_key, billing=owner.billing, address=owner.address, rung=owner.rung)
+
     def _on_metrics_updated(self) -> None:
         """
         Handle metrics update notification from TaskMetrics.
@@ -3371,6 +3404,7 @@ class TaskEngine(DAPBase):
                     pipeline_name=self._task_name or '',
                     source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
+                    attribute=self._attribute_trace,
                 )
                 self._task_metrics.start_monitoring()
                 self.debug_message(f'Started metrics monitoring for PID {self._engine_process.pid}')

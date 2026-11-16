@@ -23,13 +23,14 @@ import codecs
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 from starlette.websockets import WebSocketDisconnect
 from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
 from ai.web.metrics import metrics
+from .caller_context import set_pending_caller
 from rocketlib import (
     APERR,
     AVI_ACTION,
@@ -607,34 +608,71 @@ class DataConn(DAPConn):
         return conn_pipe
 
     @staticmethod
-    def _record_hold(hold_started: Optional[float], bytes_in: int) -> None:
+    def _record_hold(hold_started: Optional[float], bytes_in: int, trace_id: Optional[int] = None) -> None:
         """
-        Book one binding's hold time and bytes, and flush a metrics snapshot (plan 8.1, 8.2).
+        Book one binding's hold time and bytes to its request tree, close the tree, and flush a snapshot (plan 8.1, 8.2).
 
         The billing period IS the pipe hold: the clock started after the
         semaphore admitted the binding (admission wait is never billed) and
-        stops here, at putPipe. Metric names are STABLE (``hold_time`` in ms,
-        ``bytes_in``); the request identity rides beside the value in the
-        trace usage (C.13), never in the key. The snapshot goes out NOW, so a
-        subprocess killed before the next object end does not lose the hold.
+        stops here, at putPipe. Occupancy, never contention: the model
+        server's queue wait the request sat through is subtracted (P29).
+        Metric names are STABLE (``hold_time`` in ms, ``bytes_in``); the
+        request identity is the tree's bucket, never the key. The snapshot
+        goes out NOW, so a subprocess killed before the next object end does
+        not lose the hold.
 
         Args:
             hold_started: ``perf_counter`` at getPipe, or None when no pipe was taken.
             bytes_in: Bytes the binding received.
+            trace_id: The engine's bare traceId of the binding's tree, when known.
         """
         # Step 1: no pipe was taken (the open failed before getPipe): nothing to bill
         if hold_started is None:
             return
-        # Step 2: the hold in milliseconds, as a TIMER (float ms is what bills
-        # against a metrics_conversions rate row); bytes as a counter
-        metrics.add_time({'hold_time': (time.perf_counter() - hold_started) * 1000})
-        if bytes_in:
-            metrics.counter('bytes_in', int(bytes_in))
+        # Step 2: the hold in milliseconds, less the queue wait the model
+        # server reported inside this request, as a TIMER (float ms is what
+        # bills against a metrics_conversions rate row); bytes as a counter;
+        # both booked to the tree, which is final from here
+        held_ms = (time.perf_counter() - hold_started) * 1000
+        if trace_id is not None:
+            held_ms = max(0.0, held_ms - metrics.trace_timer(trace_id, 'gpu_queue_wait'))
+        previous = metrics.set_current_trace(trace_id)
+        try:
+            metrics.add_time({'hold_time': held_ms})
+            if bytes_in:
+                metrics.counter('bytes_in', int(bytes_in))
+        finally:
+            metrics.set_current_trace(previous)
+        if trace_id is not None:
+            metrics.close_trace(trace_id)
         # Step 3: flush the cumulative snapshot through the >MET* protocol now,
         # not at the next object end
         report = metrics.report()
         if report:
             monitorMetrics(report)
+
+    @staticmethod
+    def _in_trace(trace_id: Optional[int], work: Callable[[], Any]) -> Any:
+        """
+        Run one frame's worker-thread function with the thread bound to the binding's request tree.
+
+        Everything the frame books into ``metrics`` (hold time, model
+        timings, counters) lands in that tree's bucket as well as the
+        engine's totals. Pool threads are reused, so the binding is always
+        restored.
+
+        Args:
+            trace_id: The engine's bare traceId of the binding's tree.
+            work: The frame's synchronous work.
+
+        Returns:
+            Whatever ``work`` returns.
+        """
+        previous = metrics.set_current_trace(trace_id)
+        try:
+            return work()
+        finally:
+            metrics.set_current_trace(previous)
 
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
@@ -667,7 +705,7 @@ class DataConn(DAPConn):
             if conn_pipe.pipe:
                 self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
-                self._record_hold(conn_pipe.hold_started, conn_pipe.written)
+                self._record_hold(conn_pipe.hold_started, conn_pipe.written, conn_pipe.trace_id)
 
             # Release the entry
             if conn_pipe.entry:
@@ -858,15 +896,23 @@ class DataConn(DAPConn):
                     entry = getObject(obj=obj)
 
                     # Get a pipe from the target endpoint: the hold starts here,
-                    # after admission (plan 8.1), with the caller stamped on it
+                    # after admission (plan 8.1), with the caller stamped on it.
+                    # The credit gate inside getPipe asks about THIS caller's
+                    # paying unit (plan 8.3), named for the thread beforehand
                     hold_started = time.perf_counter()
-                    pipe_instance = self._require_target().getPipe(trace_level)
+                    set_pending_caller(caller)
+                    try:
+                        pipe_instance = self._require_target().getPipe(trace_level)
+                    finally:
+                        set_pending_caller(None)
                     pipe_instance.caller = caller
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
-                    # Get the ids and determine the lane
+                    # Get the ids and determine the lane; from here the thread
+                    # works for this binding's request tree (plan 8.2)
                     pipe_id = pipe_instance.pipeId
                     trace_id = pipe_instance.traceId
+                    metrics.set_current_trace(trace_id)
                     lane = self._determine_lane(mime_type, pipe_instance)
                     self._warn_on_unconsumed_lane(mime_type, lane, pipe_instance)
 
@@ -918,8 +964,10 @@ class DataConn(DAPConn):
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
-                        self._record_hold(hold_started, 0)
+                        self._record_hold(hold_started, 0, pipe_instance.traceId)
                     raise
+                finally:
+                    metrics.set_current_trace(None)
 
             # Execute sync operations in thread
             pipe_id, trace_id = await asyncio.to_thread(open_sync)
@@ -1060,7 +1108,7 @@ class DataConn(DAPConn):
         # Execute in thread, marking pipe as in-use so the zombie detector skips it
         conn_pipe.in_use = True
         try:
-            await asyncio.to_thread(write_sync)
+            await asyncio.to_thread(self._in_trace, conn_pipe.trace_id, write_sync)
         finally:
             conn_pipe.in_use = False
         return self.build_response(request)
@@ -1142,7 +1190,7 @@ class DataConn(DAPConn):
                 return results
 
             # Execute close operations in thread
-            results = await asyncio.to_thread(close_sync)
+            results = await asyncio.to_thread(self._in_trace, conn_pipe.trace_id, close_sync)
 
             # Return the complete processing results to the client
             # The close body names the request tree it closed, so EaaS can
@@ -1274,10 +1322,17 @@ class DataConn(DAPConn):
                 pipe = conn_pipe.pipe
             else:
                 # A borrowed pipe is a binding like any other: the caller is
-                # stamped on it and its hold is billed (plan 5.3, 8.1)
+                # stamped on it, its gate asks about this caller's paying unit
+                # and its hold is billed (plan 5.3, 8.1, 8.3)
                 hold_started = time.perf_counter()
-                pipe = self._target.getPipe((caller or {}).get('traceLevel'))
+                set_pending_caller(caller)
+                try:
+                    pipe = self._target.getPipe((caller or {}).get('traceLevel'))
+                finally:
+                    set_pending_caller(None)
                 pipe.caller = caller
+            # The thread works for this binding's request tree (plan 8.2)
+            previous_trace = metrics.set_current_trace(pipe.traceId)
 
             # Open the trace for this call ON ITS REAL PIPE — a plain nested
             # BEGIN/ENTER/LEAVE/END sequence, exactly like a document
@@ -1366,9 +1421,10 @@ class DataConn(DAPConn):
                 # Retire the synthetic document (removes it from byPipe) and
                 # return a borrowed pipe to the pool.
                 self._emit_tool_trace('END', pipe, call_label, {})
+                metrics.set_current_trace(previous_trace)
                 if borrowed:
                     self._target.putPipe(pipe)
-                    self._record_hold(hold_started, 0)
+                    self._record_hold(hold_started, 0, pipe.traceId)
 
         # Execute in thread, marking pipe as in-use so the zombie detector skips it
         if conn_pipe is not None:

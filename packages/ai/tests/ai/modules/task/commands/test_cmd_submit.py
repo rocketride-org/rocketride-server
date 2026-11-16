@@ -160,9 +160,9 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     claims: List[tuple] = []
     real_claim = ts.trace_owners.claim
 
-    def claim(trace_id, control_key, conn_id):
+    def claim(trace_id, control_key, conn_id, **attribution):
         claims.append((trace_id, control_key, conn_id))
-        real_claim(trace_id, control_key, conn_id)
+        real_claim(trace_id, control_key, conn_id, **attribution)
 
     ts.trace_owners.claim = claim
     await _submit(conn, name=ADDRESS, data=b'hello')
@@ -171,6 +171,8 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     # Released at the close: the owner lingers for the grace, stamped late
     owner = ts.trace_owners.owner('99')
     assert owner is not None and owner.control_key == control.key and owner.late is True
+    # The tree is paid by the CALLER (plan 8.3): their org and user, their home team
+    assert (owner.billing.org_id, owner.billing.user_id, owner.address) == ('org-1', 'user-a', ADDRESS)
     assert (control.stats.totalCount, control.stats.completedCount, control.stats.completedSize) == (1, 1, 5)
 
 

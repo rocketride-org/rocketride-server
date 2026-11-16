@@ -434,6 +434,29 @@ class TaskControl:
         """The paying unit of this control: per control, never per engine."""
         return BillingAttribution(org_id=self.orgId, team_id=self.teamId, user_id=self.userId)
 
+    def caller_billing(self, account_info: Any) -> BillingAttribution:
+        """
+        The paying unit of ONE request through this control: the caller (plan 8.3).
+
+        The caller's org balance pays; the row is attributed to the caller
+        and the caller's HOME team (the first of their team order; a scoped
+        key's frozen team), never to the team whose publication answered. On
+        a team-owned control the caller differs from request to request, so
+        this is per request, not per control.
+
+        Args:
+            account_info: The request's account.
+
+        Returns:
+            The attribution for this request's usage.
+        """
+        from ai.account.models import home_team
+
+        organization = getattr(account_info, 'organization', None) or {}
+        org_id = str(organization.get('id') or self.orgId or '')
+        user_id = str(getattr(account_info, 'userId', '') or self.userId or '')
+        return BillingAttribution(org_id=org_id, team_id=home_team(account_info) or self.teamId, user_id=user_id)
+
     # ==== Idle tracking ===========================================================
 
     def touch(self) -> None:

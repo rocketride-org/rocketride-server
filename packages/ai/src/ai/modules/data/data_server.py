@@ -19,7 +19,7 @@ Designed for integration with a FastAPI application and built on top of the ai.w
 
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Optional
 import hashlib
 import hmac
 from fastapi import WebSocket
@@ -32,6 +32,7 @@ from ai.common.dap import DAPBase, TransportWebSocket
 from ai.account.base import OutOfCreditsError
 from ai.constants import CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
 from .channel import ChannelError, ChannelUnavailable, task_channel
+from .caller_context import pending_caller
 from .data_conn import DataConn
 
 if TYPE_CHECKING:
@@ -277,24 +278,42 @@ class DataServer(DAPBase):
             self._on_closed(channel_id)
 
 
-# Until when the last "allowed" answer stands, so a job asks once per window, not per object
+# Until when the last "allowed" answer stands for a binding WITHOUT a caller (a
+# scan source's own getPipe), so a job asks once per window, not per object
 _allowed_until = 0.0
+
+# The same, per PAYING UNIT (orgId, address) for the bindings the data path
+# opens (plan P9): an allow for one caller never answers for another, nor for
+# a paid pipe of identical content on the same engine
+_allowed_units: Dict[tuple, float] = {}
 
 # One question at a time: the threads that open pipes together wait for its answer
 _asking = threading.Lock()
 
 
 def require_credit() -> None:
-    """Engine pipe gate: raise OutOfCreditsError if this task's org may not open a pipe."""
+    """Engine pipe gate: raise OutOfCreditsError if the paying unit of the binding being opened may not."""
     global _allowed_until
+    caller = pending_caller()
+    unit = (str(caller.get('orgId') or ''), str(caller.get('address') or '')) if caller else None
     with _asking:
-        if time.monotonic() < _allowed_until:
+        # Step 1: a recent allow for the same paying unit answers without asking
+        now = time.monotonic()
+        allowed_until = _allowed_units.get(unit, 0.0) if unit is not None else _allowed_until
+        if now < allowed_until:
             return
+        # Step 2: ask EaaS, naming the caller so the answer is about THEIR
+        # paying unit (plan 8.3), not the engine starter's
+        arguments = {'caller': {k: caller.get(k) for k in ('userId', 'orgId', 'address', 'rung')}} if caller else None
         try:
-            reply = task_channel.request_sync('spend.check', timeout=CONST_SPEND_CHECK_TIMEOUT)
+            reply = task_channel.request_sync('spend.check', arguments, timeout=CONST_SPEND_CHECK_TIMEOUT)
         except (ChannelUnavailable, ChannelError) as e:
             # No answer, no pipe
             raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
         if reply.body.get('refusal'):
             raise OutOfCreditsError(reply.body['refusal'])
-        _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
+        # Step 3: remember the allow for this unit only
+        if unit is not None:
+            _allowed_units[unit] = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
+        else:
+            _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS

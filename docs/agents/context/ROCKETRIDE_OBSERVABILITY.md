@@ -319,6 +319,16 @@ subscription time.
 }
 ```
 
+`metrics` and `tokens` are the ENGINE's totals. A holder of a shared engine
+(one serving several controls, plan 7.5) receives them zeroed, with its own
+object counts: what each request cost its caller is accounted per request
+instead. Every request tree's pipe hold (admission to `putPipe`, less the GPU
+queue wait it sat through), bytes and model timings are booked to the tree
+and, when it closes, added to the caller's DAY row in the ledger
+(`usage:{dayNumber}:{developerId.pipeId}:{userId}:{resource}`, one row per
+day, pipe, user and resource, with a `request_count`). Nothing per request
+rides the status body.
+
 `state` enum mapping:
 `0=NONE, 1=STARTING, 2=INITIALIZING, 3=RUNNING, 4=STOPPING, 5=COMPLETED, 6=CANCELLED`.
 
