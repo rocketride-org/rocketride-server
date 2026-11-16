@@ -33,13 +33,6 @@ static application::Opt ServiceCat{"--serviceCategory"};
 
 //-------------------------------------------------------------------------
 /// @details
-///		Optional directory that holds a `local_nodes` folder, scanned in
-///		addition to the built-in nodes, e.g. --node_path=/work
-//-------------------------------------------------------------------------
-static application::Opt NodePath{"--node_path"};
-
-//-------------------------------------------------------------------------
-/// @details
 ///		The most JSON values one definition may expand to: each
 ///		reference copies its field, and each combo its providers' schemas
 //-------------------------------------------------------------------------
@@ -2243,20 +2236,6 @@ Error IServices::init() noexcept {
 
     // Start at the root
     if (auto ccode = loadServices(rootPath, (Text) "*")) return ccode;
-
-    // Also scan a `local_nodes` folder under --node_path=<dir>, if given. The
-    // fixed name keeps these imported as local_nodes.<node>, never clashing
-    // with the built-in `nodes` package. setPaths() puts <dir> on sys.path.
-    if (NodePath) {
-        auto localRoot = _cast<file::Path>(*NodePath) / "local_nodes";
-        if (file::exists(localRoot) && file::isDir(localRoot)) {
-            LOG(Services, "Loading workspace-local nodes from", localRoot);
-            if (auto ccode = loadServices(localRoot, (Text) "*")) return ccode;
-        } else {
-            LOG(Services, "No local_nodes directory under --node_path:",
-                _cast<file::Path>(*NodePath));
-        }
-    }
 
     // Update all the fields
     if (auto ccode = updateDefinitions(m_services)) return ccode;
