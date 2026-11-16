@@ -31,7 +31,8 @@
  */
 
 import type { TurnResult } from '../turn';
-import type { RecordedEvent } from './models';
+import type { Tokens } from '../usage';
+import type { RecordedAnswer } from './models';
 
 // =============================================================================
 // SCENARIOS
@@ -85,11 +86,14 @@ export interface RecordedCall {
 
 /** One model call, measured. */
 export interface ModelCallRecord {
+	wave: number;
+	/** What was asked: a native turn, or a text question. */
+	asked: 'turn' | 'text';
 	ms: number;
 	questionChars: number;
 	answerChars: number;
-	/** Token counts the model call returned, when it returned any. */
-	usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+	/** The tokens the engine's answer reported, read as the product reads them. */
+	usage?: Tokens;
 	error?: string;
 }
 
@@ -118,8 +122,8 @@ export interface TurnRecord {
 	followupKind: null | 'approval' | 'retry';
 	/** How the product says the turn ended (its TurnResult), or null when the turn left none, as a turn the harness cut off may. */
 	result: null | TurnResultRecord;
-	/** L2: the model's replies, in order, which `run.ts record` turns into an L1 recording. */
-	replies: RecordedEvent[];
+	/** L2: the engine's answers, in the order asked, which `run.ts record` turns into an L1 recording. */
+	answers: RecordedAnswer[];
 }
 
 /** A turn's TurnResult as the record keeps it: no ids, no answer (the turn record has it), and the runs it started as a count. */

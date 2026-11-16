@@ -40,7 +40,7 @@ import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { isReferencePath } from '../vfs/referenceTree';
 import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
-import { ModelFailure, type ChatModel, type KeyTrouble, type ModelAsk } from './model';
+import type { ChatModel, KeyTrouble } from './model';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote, validateNote, validateSaved } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource, SaveValidation } from './toolkits/appCheck';
@@ -57,7 +57,8 @@ import { keyRequest, outcomeOf, TurnError, type NeedsInputRequest, type RunRecor
 import { dollars, UsageMeter } from './usage';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
-import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
+import type { AppPrompts, HistoryTurn } from './wave/plan';
+import { openSession } from './wave/session';
 
 // =============================================================================
 // CONSTANTS
@@ -123,8 +124,6 @@ export interface AgentDeps {
 	host: AgentHost;
 	/** The connected RocketRide client, or null when there is none. */
 	client: ClientGetter;
-	/** Asks the model one question (default: `options.chatModel`). */
-	model?: ModelCall;
 	/** Asks the user what to do with unsaved changes the agent wants to change (default: the three-button dialog). */
 	choose?: ChoiceFn;
 	/** Gets Monaco's marker source, or null when there is none (default: the editor's, loaded once). */
@@ -252,7 +251,7 @@ export class CheckRecord implements FinishRule {
 		const parts: string[] = [];
 		if (apps.length > 0) parts.push(`call ${APP_CHECK_TOOL} on ${apps.length > 1 ? 'each of ' : ''}${apps.join(', ')} on its own, after your last change to it, and fix what it reports`);
 		if (pipes.length > 0) parts.push(`${pipes.join(', ')} failed validation on ${pipes.length > 1 ? 'their' : 'its'} last save: fix ${pipes.length > 1 ? 'them' : 'it'} and save again`);
-		return parts.length > 0 ? `Not finished: ${parts.join('; ')} before done=true.` : null;
+		return parts.length > 0 ? `Not finished: ${parts.join('; ')} before you finish.` : null;
 	}
 
 	/**
@@ -482,97 +481,6 @@ function median(values: number[]): number {
 }
 
 // =============================================================================
-// CHAT MODEL — the retry and meter policy around one model call
-// =============================================================================
-
-/** What createChatModel needs. */
-export interface ChatModelOptions {
-	ask: ModelAsk;
-	/** Aborted when the user stops the run: a call that fails after it does not retry, so it cannot restart the task the next turn is about to use. */
-	signal?: AbortSignal;
-	/** Reserves each request before it is sent, the retry included, and takes what it used. */
-	meter?: UsageMeter;
-	/** Hears a request's final failure when a key is the cause. The loop swallows failures once it has gathered something, so it cannot tell the run. */
-	onKeyTrouble?: (trouble: KeyTrouble) => void;
-	/** How long one send waits for an answer (default MODEL_CALL_LIMIT_MS). */
-	limitMs?: number;
-}
-
-/**
- * How long one model call waits for an answer. A provider sometimes holds the connection
- * and never answers, and nothing below the agent gives up. The slowest real answer seen
- * was 65 s, and slower models write big files more slowly.
- */
-export const MODEL_CALL_LIMIT_MS = 180_000;
-
-/**
- * Settles as `asking` does, or fails retryable once `ms` pass with no answer. The fresh
- * retry ends the stuck task, so a late answer is dropped. After Stop it never fails, so
- * it logs nothing.
- */
-function answerWithin(asking: Promise<string>, ms: number, signal?: AbortSignal): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			if (signal?.aborted) return;
-			// step: the eval runs count this line
-			console.log(`[agent] model call had no answer in ${Math.round(ms / 1000)} s`);
-			reject(new ModelFailure(`The model did not answer in ${Math.round(ms / 1000)} s.`, { retryable: true, billed: true }));
-		}, ms);
-		asking.then(
-			(text) => {
-				clearTimeout(timer);
-				resolve(text);
-			},
-			(error: unknown) => {
-				clearTimeout(timer);
-				reject(error);
-			}
-		);
-	});
-}
-
-/**
- * Builds the model call the Wave loop uses. It resolves with the model's text or
- * rejects. A retryable ModelFailure gets one fresh try, none after Stop, and a send
- * with no answer inside the limit is one. Each send is reserved just before it goes:
- * a failure the provider cannot have billed releases its reservation, any other keeps
- * it. A CostLimitError comes from reserve, before anything is sent, and passes through
- * untouched.
- */
-export function createChatModel(o: ChatModelOptions): ModelCall {
-	const send = async (q: QuestionSpec, fresh: boolean): Promise<string> => {
-		const held = o.meter?.reserve(q);
-		try {
-			const text = await answerWithin(o.ask(q, fresh ? { fresh } : undefined), o.limitMs ?? MODEL_CALL_LIMIT_MS, o.signal);
-			held?.settle(text.length);
-			return text;
-		} catch (error) {
-			if (error instanceof ModelFailure && !error.billed) held?.release();
-			else held?.keep();
-			throw error;
-		}
-	};
-	return async (q) => {
-		const started = performance.now();
-		try {
-			try {
-				return await send(q, false);
-			} catch (first) {
-				if (!(first instanceof ModelFailure) || !first.retryable || o.signal?.aborted) throw first;
-				return await send(q, true);
-			}
-		} catch (error) {
-			// step: after Stop a refusal got no fresh try, so it says nothing about the key
-			if (error instanceof ModelFailure && error.key && !o.signal?.aborted) o.onKeyTrouble?.(error.key);
-			throw error;
-		} finally {
-			const ms = Math.round(performance.now() - started);
-			console.log(`[agent] model call ${ms} ms`);
-		}
-	};
-}
-
-// =============================================================================
 // RUN
 // =============================================================================
 
@@ -589,8 +497,6 @@ export async function runAgent(request: string, callback: (type: string, content
 	const limits = host.limits?.read() ?? DEFAULT_LIMITS;
 	const meter = new UsageMeter({ model: options.chatModel.name, limitUsd: limits.costUsd });
 	let keyTrouble: KeyTrouble | undefined;
-	// step: a test's fake and the real model pass through the same retry and meter policy
-	const model = createChatModel({ ask: deps.model ?? options.chatModel.ask, signal: options.signal, meter, onKeyTrouble: (trouble) => (keyTrouble = trouble) });
 	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
@@ -658,8 +564,8 @@ export async function runAgent(request: string, callback: (type: string, content
 			waves,
 			modelRequests: used.requests,
 			toolCalls,
-			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: true } } : {}),
-			...(used.requests > 0 && used.usd !== undefined ? { cost: { usd: used.usd, estimated: true } } : {}),
+			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: used.estimated } } : {}),
+			...(used.requests > 0 && used.usd !== undefined ? { cost: { usd: used.usd, estimated: used.estimated } } : {}),
 		};
 	};
 	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
@@ -688,15 +594,23 @@ export async function runAgent(request: string, callback: (type: string, content
 		return turnOf({ outcome: 'needs_input', reason: 'needs_input', finalText: text }, waves, toolCalls);
 	};
 
+	// step: the turn's conversation with its model, under the meter; a key the user must fix is heard here
+	const session = openSession({
+		model: options.chatModel,
+		prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
+		history: toHistory(options.history),
+		// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
+		request: redactText(request),
+		signal: options.signal,
+		meter,
+		onKeyTrouble: (trouble) => (keyTrouble = trouble),
+	});
+
 	let result: LoopResult;
 	try {
 		result = await runLoop({
-			// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
-			request: redactText(request),
-			history: toHistory(options.history),
-			prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
+			session,
 			tools: composed.tools,
-			model,
 			finish: checks,
 			emit: (type, text) => callback(type, text),
 			timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
@@ -735,6 +649,6 @@ export async function runAgent(request: string, callback: (type: string, content
 	const text = result.stopReason === 'stopped' ? '' : finalText(result, checks, shown);
 	if (result.stopReason !== 'stopped') callback('content', text);
 	else if (checks.changed) callback('thinking', NOT_CHECKED);
-	console.log(`[agent] stop=${result.stopReason} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
+	console.log(`[agent] stop=${result.stopReason} adapter=${session.adapter} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
 	return turnOf({ outcome: outcomeOf(result.stopReason), reason: result.stopReason, finalText: text }, result.waves, result.toolCalls);
 }

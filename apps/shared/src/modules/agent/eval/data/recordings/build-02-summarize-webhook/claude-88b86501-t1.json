@@ -1,0 +1,648 @@
+{
+	"format": 4,
+	"scenario": "build-02-summarize-webhook",
+	"set": "claude-88b86501",
+	"trial": 1,
+	"source": {
+		"head": "88b86501a",
+		"model": "anthropic/claude-sonnet-5-5",
+		"recordedAt": "2026-11-15T23:28:25.219Z"
+	},
+	"turns": [
+		{
+			"request": "Make a pipeline named summarize-text. I post plain text to it over a webhook and get back a short summary, about 80 words. Use OpenAI for the model.",
+			"answers": [
+				{
+					"wave": 0,
+					"asked": "turn",
+					"answering": [],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"path": ".rocketride/docs/ROCKETRIDE_CONCEPTS.md"
+									},
+									"id": "toolu_01PGxbhisbN3282uWu16ZCa9",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01EfUZCjeJ5YrxRp69Qffd34",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {},
+									"id": "toolu_01KzjVgx4YJ96eXm8ZWM6skn",
+									"name": "list_workspace",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 122,
+							"cache_read": 9968,
+							"input": 4,
+							"model": "claude-sonnet-5-5",
+							"output": 169
+						}
+					}
+				},
+				{
+					"wave": 1,
+					"asked": "turn",
+					"answering": [
+						"toolu_01PGxbhisbN3282uWu16ZCa9",
+						"toolu_01EfUZCjeJ5YrxRp69Qffd34",
+						"toolu_01KzjVgx4YJ96eXm8ZWM6skn"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"limit": 112,
+										"offset": 31,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01JwohkJnwVFjvT2ZEv2N7e4",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"limit": 64,
+										"offset": 238,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_014LZFhZH87eduNJqH54yWba",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"limit": 21,
+										"offset": 352,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01UTzsFNe2AX4aQmKbGHJhKB",
+									"name": "read_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 2301,
+							"cache_read": 10090,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 345
+						}
+					}
+				},
+				{
+					"wave": 2,
+					"asked": "turn",
+					"answering": [
+						"toolu_01JwohkJnwVFjvT2ZEv2N7e4",
+						"toolu_014LZFhZH87eduNJqH54yWba",
+						"toolu_01UTzsFNe2AX4aQmKbGHJhKB"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSvgYKEAgTGAI4AUIIdGhpbmtpbmcSDEDlqTmw6+fPFarKmhoMlxwKwIUpOduNLXt7IjDM/iFc8ohLHp7+ZGJU5euajmA/xAI2Qy8Y9BPbT8tpg4kIZTlXy91t06VlH4KXzYQq2wVQDSEwmj3h3Ipmf5oKU1UallxwJu9KwWGjBkCjnBqI5s467ZWOr5Q9u0HCEG9Fd8kJ2W7OJNTYjC8zk2ng41Y4GG+gRB+6Z1yY2JrAKovk7dHWzW1RIMV1nkyGnL5vgAC4uavOhiwgEDbXEbTlfTCJHBbNJxmreOYZ06cf7Dxm2T31Wl4tOPMJHOcgltRv3bHOtitAUgqvgOq1NJIga2oMiAtcdIzo1JDUQYU1JYNSh5L6we96q8s4sBOo0ORMA/JLmyjJ8lsTkXp/NdrOvFtMBw2qL16jgyP+2TCT+mVV9rI8Kvwik4NNq+rhBcC0xPrtoxf2AKYk0AS+QLDJtl/3k8jKg96Xxz4o0C/+ZfU9CZiUD/E6U2p82UAMN1qscQu9fdDid2pXJoTHXe6eUgcNoQ/kCxwcWiL7D6rO+ajLkMSO35oFpZlDLonVL3gLIHiC45IFYe/dp3w04131mFOYhFFwmNdCH42V2Ka1uPxMJfnKVt6RKLHyiV2IMaNO54gByA6SrjMFjLUNrPJwiHzatvhhnCDhUpN5tgSt8QUdn3ssHq3DuRHwNboKnclZrxxLlLzyzXDJo1DUhbXaAmG6ww3oO/zMTfkIPB/BPhBxS7WMqH26rlV2ISSBy/KRgDK9d0pUM3vQqahLJMsw+z7a3KQTaZbIz611cZm8ChRDEafX/LKaNz9f/4zggrtiHiM5YZthVqMAILjF8SQfRrmPpqOWdcDYBCpkoW5Edzrt9514lsfBx93Cq84sevge7WozAPYRGGu+Vv0qWW4alqSgyLU5IwgzrxtFErkElibeJswmmdr6lU5HirmzwvgZm5+9iPe7eRckGDnDPtCpfbW4INTF0QXnd7shvnEZEkEgm123Kx3m7Gh41Bq64On99SSpEjHhilxx4j5pAEJi2qOQK9KKMVEleIMu/OyxBdDAuhhc5dMw+rG+jb1J2yhOhkEBkpXuROLmV++LURgB",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"limit": 36,
+										"offset": 534,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01UmYwTw7dAzUBw61e5rHpCZ",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"webhook"
+										]
+									},
+									"id": "toolu_01XaNbPyH97rD4TULmV95qX5",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"question"
+										]
+									},
+									"id": "toolu_01G3jzjgSUf8sSNSNT5XD1NZ",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"method": "account.getEnvironmentKeys"
+									},
+									"id": "toolu_01DNrAAtbn4hf8eC3thiu32d",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 4494,
+							"cache_read": 12391,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 388
+						}
+					}
+				},
+				{
+					"wave": 3,
+					"asked": "turn",
+					"answering": [
+						"toolu_01UmYwTw7dAzUBw61e5rHpCZ",
+						"toolu_01XaNbPyH97rD4TULmV95qX5",
+						"toolu_01G3jzjgSUf8sSNSNT5XD1NZ",
+						"toolu_01DNrAAtbn4hf8eC3thiu32d"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSyQcKEAgTGAI4AUIIdGhpbmtpbmcSDLQO7DP6dsnOVN5rDRoMZ2OEjr1hJaIQbZmKIjDpJVFFIwQN+57rCM4fBVhQWz6Y8RQtffmLwuXpdH/BWmudfb0WaJHHy3fN1BLhnXwq5gaYLYJzifWwhRU1V/DGoDcvWfZgDEPxR7HL5N4Vm0cvlZOu5CB2XsYpSJ3yqTjcESeEGwwyuhK9kxsefyrwQZxhzx77paImd8M8+UAylJaHBCsBSuGlP15sN9l9C/IXTRrmRYc52ZcW+pKaS8nXJB8LmTKc3x3h/iui1Hg/SD4jqRamxanyNsjIzHb0V96Ffs37/vAMxxmuRZQYYtbkCZrcU+NVtBaUtv/wJ/XTyeoCSxZikM8XIICDeAgZ5O9nW481U3TYb1Zkp4tGP4Gz7QsRYf1cukAOQI0HMw8GiPpu/M+rGMWFoP50UfmxhKUZIWxZuQ2076QU/0cX5hNjb3AzupbL7LLYD/SgHg0+R9uu/cbVu8Ks7nAUpptt7SUWJ0cFWpl45ZOvzFLiOnqtoxcz3p8I4VaX86xJzA60MN509XVJjB3J7uWF5P9sOEx+5bLNZxOYx6IgG8BOvdasEGazvSPiWKNUAxYwhP+KmHSTAnkz6XhI0bCYotVxGDJpBqNcccz/QKHmNS0NlD3MCZFtdfAdxI3UlBRbMYeYekFS01rJBgfTMlcbN7bA1SjScwHozQPlRD+Ooe5DyCAZFPBm5zB7QR8yp/VnEFWQ6wQo9rletVc44tyoeIFR+F7KrCSIaZCA47TBu6U5RXQ25AGjNNSLauCzQNvMtVdTsZIZFOWzHEzHiknkW/WmUD/djkoT8um5P+9RbSZae64TLjGzlFLV1qEyEfOrh2u5h8uv6AYp2VwTL0qUwWPFAWjMxcITCBxQRyh4juoJZuyp0yDZwMWSwkOFrpm2f/DTikujPqzs335ooMZUjzMhx1GwAcNn/hfQHPeDPtNEevmwyvlHNkOC80Pv0818HEs7NngDoWyMaYLamYCDs7jXrEjYacgp2LTHBSlRLZEGfdA/mA+5F06julkrCEEJXvO29W+gxX1hdm234B9xWn15ad6GUUiP/xWrO0z7YiGkibjxjhbkt1xLr3lqgYyz0b+d5hXNZe8hIN/iQ+W8svOABKcHsstqEmE6z9g2SkEowSF+7oQQA/hy3QCy5jtux6fQTnwHsuwML3TLCcaWVJPJpl6gH0eO3LEwrvoIw8A3gD+9YNeA6G+jJ3yo63pMQwLpIeUNh4YNIf6DScDbwOe5t1lNFsmtDGikiKcYAQ==",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"llm_openai"
+										]
+									},
+									"id": "toolu_019zFpJCfq5jnjzHuW2u6RPU",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"maxResults": 30,
+										"path": ".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md",
+										"pattern": "instructions|\"prompt\"|systemPrompt"
+									},
+									"id": "toolu_01NAA2vSG7QXQrBU6khT5mEG",
+									"name": "search_files",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 2028,
+							"cache_read": 16885,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 279
+						}
+					}
+				},
+				{
+					"wave": 4,
+					"asked": "turn",
+					"answering": [
+						"toolu_019zFpJCfq5jnjzHuW2u6RPU",
+						"toolu_01NAA2vSG7QXQrBU6khT5mEG"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQS+QYKEAgTGAI4AUIIdGhpbmtpbmcSDDGry5GEA8Sb+a+X+BoMbk2n/iKJEKqisl3xIjAZFVvFwRjlYYG2syeFeHyF6hhHA7rLJXvs/v3TzxyHLphh1DOKzh3O0LgBBZChcUQqlgYUOzYSdZoPuenvzoMlLEwg7D6Dyie2hLo8jZsE3lEB4YANJYCtQJGerSa5HNNhekzX77fKZs/v9fRBtBjCp8g3OcaagEExgxcimQIEzNuqktukId6KkFUO+TBY46ujRHdUZbtQheFn66571jAo/LUHw2onbS15CwnDyrNfOoWC5qVk95nljxO4ZrUIddozAap12oX5YB9RUx1iDiUMerysFstxLRWeswhMK3fqumogNSSWMk5qvBvkKYEUG6aCwTTqUe0FTMOZ2SVwPVF+WcXu3pKTnLoq+FifUVPouPI2gDJYP43wgKgbT8MNuK5m33H6qcSwwBSVJCcrSx84ZM2Sp4naUnMaKJDy7DnM5bh5jn/7fcCZh5fXepDPp2R370XeP2B2K5ToPwq+/UJIU7ssJsoHrZvyLGflo41E3HsZKdWxS/ZbUxUtuATJ4JZEIg/w3GyYrCc8JA+iYwE1w0GlG8rul6eze3/CkcbzS0vMqF7dH6LwUIw2iDDFoGWWtV69Bkzw1V3rPke+FNKsTsPnZn2PWBgkZ/XTLd+hTjkWavRVZdm+peVE+m9Rwea/znnzGHHIqgCbP2bD+f5tFWxL3Lix+0uL7tapeX8WVe/iDaJA1Qi0frszyGrshE1LIHBVUmvEIlpnUrrRQ7ieCacXjD7WEyIHQui5P9l3VRHR1Fi4FAU6cxsHJBsv6jtfZSIZbjZCS5ON/Cy/6Y8lb0a8l/bNMLMwoJzAvb3XMi8XLlNJokWsJdULTocBVZ/0FjXnmGs2LussGaS10tjW7fB9an7jHNIWAz5SQO10xjPM1Eu7IthpyX+Wg4w6xvT2f3GbPwR+SvrIvmWNrT0vP7x+Fq4QHytA51lI0NBl8twYktY4/c9qmcHIrlqvMdJZorCPY3nto3HOqISK8OcL3xOWFKPQXEA4lTvVvLKHQIjARWiGGtatgOMZWuiHQr+LApaZVNRAwKU7ITYGGZvEGI8Xft7UZK4yhUzKJEUtaykNo5w5uVJZkPmU+QVdnail7gixfqE2lV81TKxOvNOX+qQ22Rep5aTjGAE=",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"method": "getServices"
+									},
+									"id": "toolu_01JQwStqdwbw6pzezjXv63L6",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 3844,
+							"cache_read": 18913,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 84
+						}
+					}
+				},
+				{
+					"wave": 5,
+					"asked": "turn",
+					"answering": [
+						"toolu_01JQwStqdwbw6pzezjXv63L6"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"method": "getService",
+										"params": [
+											"prompt"
+										]
+									},
+									"id": "toolu_0193sYjA53JJ29FN2NuP67F4",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"isRegex": true,
+										"maxResults": 20,
+										"path": ".rocketride/docs",
+										"pattern": "\"prompt\"|### .*prompt|prompt →"
+									},
+									"id": "toolu_01RSqJ2QSrM3asrrvY6fZwLJ",
+									"name": "search_files",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 1627,
+							"cache_read": 22757,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 215
+						}
+					}
+				},
+				{
+					"wave": 6,
+					"asked": "turn",
+					"answering": [
+						"toolu_0193sYjA53JJ29FN2NuP67F4",
+						"toolu_01RSqJ2QSrM3asrrvY6fZwLJ"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"limit": 25,
+										"offset": 195,
+										"path": ".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md"
+									},
+									"id": "toolu_01HUDAC2LUPPEVot7jRg8XAN",
+									"name": "read_file",
+									"type": "tool_call"
+								},
+								{
+									"args": {
+										"limit": 40,
+										"offset": 1123,
+										"path": ".rocketride/docs/ROCKETRIDE_PIPELINES.md"
+									},
+									"id": "toolu_01Hh1VqkCyX1sA6ToXn5EBBa",
+									"name": "read_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 1508,
+							"cache_read": 24384,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 239
+						}
+					}
+				},
+				{
+					"wave": 7,
+					"asked": "turn",
+					"answering": [
+						"toolu_01HUDAC2LUPPEVot7jRg8XAN",
+						"toolu_01Hh1VqkCyX1sA6ToXn5EBBa"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"state": {
+										"block": {
+											"index": 0,
+											"signature": "CAQSsgcKEAgTGAI4AUIIdGhpbmtpbmcSDLgL1GK7JqSp30lMrRoMLNWQBP8lqk7fhvgiIjCJJ9MUWEs7ESii/84heRrqziUj8yfC8W+oDDqT6YJb7ubtDzxyi25P90FqGM/oIKIqzwZ0bCzZ0lfKLdKSgKEFi/mIs8zqtJVnKVo3f62bcdsD/YbyIGhjKMrbjrDT/HlCbsyFA5XE8avWCCosaxVi9VCb/ZRKX6frWn45g4p5gv4ZY7WH8tZebWyWUwjLylfE+5LmmHcapfn4+vTBvyyGP4GjYkN/JYcnGbytkl/931qcOTcfguxVyysgJzraFVU1gXkvHt6ZDtNvNrRPZYV1sygXLjNVXF/QSyK7NzCet3KLwUBRzv2n/0pyoYdPCJWFP+3ragSPxFL8EbBd1kfa3i6CLvImVDC1XlXhqr45bCL/v32cf9sknHUfGyOj3Nz6xa+kOiuvXEFftHSU++Ke5Z9wy4BNOR/D+Urq5Er00e7RuOBXBbyESmnth55IpipODE4TOAf1fa8vj9CwU5SJXVP0IdJ3RC00/OQ+moar2UpB8sIepmz/kiywwd50jDhbE/DI4M1IYtNGrSdAoluV/G0qeaZ5KgXKvp6b+WIMAlrwXn1QlXwcv+6ew2Hl8iAJYM0KVmkhSgAxJDO4b+q8uaZZxJmP8ReU87/YruP6X82dzGYJ5+ZX2gFBdXJnvRFqdEHSx1KKFqsiYKMHh6XEiuukjQcQA29mFnkxxX9Su2Cxi+96aDIpQtfnUytE25cwWuof7WyjhuEsogmReFwLlgloI1N3K8sfJQYELs0Ic12QKdBgMvw+btl4uL81EyL+MFBuIz6oAAfrg/KZfUMRGKJNzEApOy2X3ffx4WUfjokfCRILuzJ8ilz7E3OQcZfJxAMKEKSPlcGG0A0YRzsUwPZDKdhDyp95bxoMt8cH1ESofVex7//kkq91a0rETuD5U1sz9O4NXxl7EP4Uu7Vg71D/iv7tKFekgb6Q3IhWzUHu+Pjuu8FmQ2MQe7F5lD2xwuWQ7VefMwR45NC/ZZxL6qzJ8pThiZ/MH8/5RdKL/6Q+clpaCIP+l0Skk2xj41kWRyZXIkz7NOn4qFvO+jF1yGolUk8OjgzuZJJ7OV3Nif1ocgrXiOoV5iZiYm7iy7+8jC7VsStr9QDFGRbkaRW5APhDsNsjBy8BSpjyn2OwwuIftUQ4f1WfLh8RIeZE8CAsG+ADRddTkcfS/k3rQjkXQDXnPLUidCWq1MMKSYeE/DZfGAE=",
+											"thinking": "",
+											"type": "thinking"
+										},
+										"origin": "_ChatAnthropic"
+									},
+									"text": "",
+									"type": "reasoning"
+								},
+								{
+									"args": {
+										"content": "{\n\t\"components\": [\n\t\t{\n\t\t\t\"id\": \"webhook_1\",\n\t\t\t\"provider\": \"webhook\",\n\t\t\t\"config\": { \"hideForm\": true, \"mode\": \"Source\", \"parameters\": {}, \"type\": \"webhook\" }\n\t\t},\n\t\t{\n\t\t\t\"id\": \"question_1\",\n\t\t\t\"provider\": \"question\",\n\t\t\t\"config\": {},\n\t\t\t\"input\": [{ \"lane\": \"text\", \"from\": \"webhook_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"prompt_1\",\n\t\t\t\"provider\": \"prompt\",\n\t\t\t\"config\": {\n\t\t\t\t\"instructions\": [\n\t\t\t\t\t\"Summarize the following text in about 80 words. Write a single plain-prose paragraph that keeps the key points, and reply with only the summary.\"\n\t\t\t\t],\n\t\t\t\t\"parameters\": {}\n\t\t\t},\n\t\t\t\"input\": [{ \"lane\": \"questions\", \"from\": \"question_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"llm_openai_1\",\n\t\t\t\"provider\": \"llm_openai\",\n\t\t\t\"config\": {\n\t\t\t\t\"profile\": \"openai-5-2\",\n\t\t\t\t\"openai-5-2\": { \"apikey\": \"${ROCKETRIDE_OPENAI_KEY}\" },\n\t\t\t\t\"parameters\": {}\n\t\t\t},\n\t\t\t\"input\": [{ \"lane\": \"questions\", \"from\": \"prompt_1\" }]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"response_answers_1\",\n\t\t\t\"provider\": \"response_answers\",\n\t\t\t\"config\": { \"laneName\": \"answers\" },\n\t\t\t\"input\": [{ \"lane\": \"answers\", \"from\": \"llm_openai_1\" }]\n\t\t}\n\t],\n\t\"project_id\": \"3b7f0c52-6a1e-4d98-9c47-2e8a5d1b7f64\",\n\t\"viewport\": { \"x\": 0, \"y\": 0, \"zoom\": 1 },\n\t\"version\": 1\n}\n",
+										"path": "pipelines/summarize-text.pipe"
+									},
+									"id": "toolu_014gUae3BZYykdhHN2fnreYi",
+									"name": "write_file",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 2104,
+							"cache_read": 25892,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 675
+						}
+					}
+				},
+				{
+					"wave": 8,
+					"asked": "turn",
+					"answering": [
+						"toolu_014gUae3BZYykdhHN2fnreYi"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"args": {
+										"method": "validate",
+										"params": [
+											{
+												"filepath": "pipelines/summarize-text.pipe"
+											}
+										]
+									},
+									"id": "toolu_01T573WyjLBE32bkNkZw7p8i",
+									"name": "rocketride_client",
+									"type": "tool_call"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "tool_use",
+						"tokens": {
+							"cache_creation": 743,
+							"cache_read": 27996,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 97
+						}
+					}
+				},
+				{
+					"wave": 9,
+					"asked": "turn",
+					"answering": [
+						"toolu_01T573WyjLBE32bkNkZw7p8i"
+					],
+					"entry": {
+						"message": {
+							"content": [
+								{
+									"text": "I created `pipelines/summarize-text.pipe`, and it passes validation. I haven't run it, so the summaries themselves are untested.\n\nThe flow is `webhook → question → prompt → llm_openai → response_answers`:\n- **Webhook:** it takes the plain text you post.\n- **Question:** it turns the text into a question the model can read.\n- **Prompt:** it adds the instruction \"Summarize the following text in about 80 words… reply with only the summary.\"\n- **OpenAI:** it uses the `openai-5-2` profile (gpt-5.2), with the key read from `${ROCKETRIDE_OPENAI_KEY}`.\n- **Response:** it returns the summary under the `answers` key.\n\nI couldn't check whether `ROCKETRIDE_OPENAI_KEY` is set as a Variable, because the environment-keys call isn't available here. Add it before the first run. To use a cheaper or faster model, change the profile to `openai-5-4-mini` or `openai-4o-mini`. Both the profile name and the matching key block need to change.",
+									"type": "text"
+								}
+							],
+							"role": "assistant"
+						},
+						"stopReason": "end_turn",
+						"tokens": {
+							"cache_creation": 150,
+							"cache_read": 28739,
+							"input": 2,
+							"model": "claude-sonnet-5-5",
+							"output": 352
+						}
+					}
+				}
+			],
+			"ended": {
+				"outcome": "done",
+				"reason": "done"
+			},
+			"calls": [
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "6d9609e0dbd8369ea38c0ec07f407191f0a7531cf9f5d349b37f5c1c052e4632",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "read_file",
+					"ok": true,
+					"args": "320b62804840e10b9547220b78d88fca46122c34cde682d96b9a828383097e33",
+					"result": ""
+				},
+				{
+					"wave": 0,
+					"tool": "list_workspace",
+					"ok": true,
+					"args": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+					"result": "e3ed6351ceb4c2a2a68f65b4ca45df32ea27b2c8995517c5f9ff2c23c3f23865"
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "ea8d672ddca80f06669cf92b7e37ac2bf1c260f15211006c27cd3cf613cdcb19",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "5f871be00d3f832b62b9865d175c1651bda4e62eb8bb427009aa3f398e488a6b",
+					"result": ""
+				},
+				{
+					"wave": 1,
+					"tool": "read_file",
+					"ok": true,
+					"args": "c420aff950d38b01d7364d866e83918e5235f1e3b28edbf1792f3c5763874d54",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "read_file",
+					"ok": true,
+					"args": "55f5c7f6637aefcd40911ab4dc2a3fdc5703f553cbafd1ceee993bff82e8a882",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "5840a01cb65fdb8e72e07e006180f811f36a6e8b7a0a87b4afeffbcaa76d590c",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "9dfe01f2cf9ec76d31456836d10901fee9891b3b5e7333aac306e6cb588381f5",
+					"result": ""
+				},
+				{
+					"wave": 2,
+					"tool": "rocketride_client",
+					"ok": false,
+					"args": "796884678254b64507313dda9e962d3f0551dc1d91adc48d7d5511e2c82547d6",
+					"result": "7dcc0687ff3fde8254bf74c7df17a4667cd59c6dddf134d968e627f4aa7a771e"
+				},
+				{
+					"wave": 3,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "8907f1380e6885926396990bed03b50434013762d37fb86fb94e5d626aefaedb",
+					"result": ""
+				},
+				{
+					"wave": 3,
+					"tool": "search_files",
+					"ok": true,
+					"args": "50073ced3cf614cc4d3772c29d0cf4b8bd540c0dd1d17984d4835c10c63802a7",
+					"result": ""
+				},
+				{
+					"wave": 4,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "65db211fc84fa4e2bab0c00b5674d83199e33b40f7078b5e6074fcd1dab7d816",
+					"result": ""
+				},
+				{
+					"wave": 5,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "e71cdb3bc221c9d5a76cf0e0203ced91954e0c4b5d7a6b922687f204f95e560d",
+					"result": ""
+				},
+				{
+					"wave": 5,
+					"tool": "search_files",
+					"ok": true,
+					"args": "3a970e257cf68c5f02df16403c6e95e97347bfb53788990edfd9a39af3d7ef2f",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "read_file",
+					"ok": true,
+					"args": "ce396adb57f511cfc94653c938e04b1bc9c271bc501fa1ab36e979aebc66371d",
+					"result": ""
+				},
+				{
+					"wave": 6,
+					"tool": "read_file",
+					"ok": true,
+					"args": "8a2eff84eff2dc66e0c122368bf6bb8a540d97e64fd14f856b6f32cb39630a67",
+					"result": ""
+				},
+				{
+					"wave": 7,
+					"tool": "write_file",
+					"ok": true,
+					"args": "ae154d191c69175e8d926e7408688fa7998e00ce2b1e44541da0d308d5af4919",
+					"result": "e3a4b0c730148158becdb24226131a73f25651ab23430e21eefb892367b9e4c8"
+				},
+				{
+					"wave": 8,
+					"tool": "rocketride_client",
+					"ok": true,
+					"args": "255fd186a3ef39f95137650fc289c7d50c0a538316ff5cf7accff8c8e88928c4",
+					"result": "92f2982cf448d6473ae58182bdfba1f8cb6bcad37a1dffec4e5f6010a29a0c6d"
+				}
+			]
+		}
+	],
+	"limits": {
+		"steps": 60,
+		"costUsd": 2
+	},
+	"expected": {
+		"status": "pass",
+		"checks": {
+			"outcome": "pass",
+			"scope": "pass",
+			"no-leak": "pass",
+			"static-valid": "pass",
+			"engine-valid": "not_in_layer",
+			"placeholders": "pass",
+			"source": "pass",
+			"no-other-llm": "pass",
+			"path": "pass",
+			"runs": "not_in_layer"
+		}
+	},
+	"finalFiles": {
+		"pipelines/summarize-text.pipe": "093a27497574ac94def5cb98a458db8c3aad7237a1b36cf1fa3c92bd9c470399"
+	}
+}

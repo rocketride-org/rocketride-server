@@ -36,6 +36,7 @@ import type { ChatTurn } from 'shell/src/components/chat/types';
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 
+import { Answer, Question } from '../../../../../packages/client-typescript/src/client/schema/Question';
 import { sha256Hex } from '../vfs/hash';
 import { StagedFileSystem, StaleWriteError } from '../vfs/stagedFileSystem';
 import { AgentSession } from './agent';
@@ -52,14 +53,14 @@ import { CONTINUE, CONTINUE_TEXT, OPEN_VARIABLES, UNDO } from './turn';
 // HELPERS
 // =============================================================================
 
-// The run builds a Question for each model call, and the 'rocketride' stub has none.
-(require('rocketride') as { Question?: unknown }).Question = class {
-	addInstruction(): void {}
-	addHistory(): void {}
-	addGoal(): void {}
-	addContext(): void {}
-	addQuestion(): void {}
-};
+// The run builds a Question for each model call and reads each Answer, and the 'rocketride' stub has neither: the client's own run, turn rules included.
+Object.assign(require('rocketride') as object, { Answer, Question });
+
+/** What a node without native tool calling answers a turn question with, before any provider call. */
+const TOOLS_UNSUPPORTED = { answers: [{ error: { code: 'tools_unsupported', message: 'this node has no native tool calling' } }] };
+
+/** Whether a question is a turn (native tool calling) rather than a text question. */
+const isTurn = (question: Question): boolean => question.messages.length > 0;
 
 /** Session ids of the stored conversations. */
 const TEAM_A_SESSION = '11111111-1111-4111-8111-111111111111';
@@ -103,11 +104,12 @@ function store(engine: Record<string, unknown> = {}, extra: AgentSessionFile[] =
 	return written;
 }
 
-/** An engine whose model answers from `replies`, taking each in turn; once they run out, a model call never returns. */
+/** An engine whose model has no native tool calling and answers text questions from `replies`, taking each in turn; once they run out, a model call never returns. */
 function scripted(replies: string[]): Record<string, unknown> {
 	return {
 		use: async () => ({ token: 'tk_model' }),
-		chat: async () => {
+		chat: async ({ question }: { question: Question }) => {
+			if (isTurn(question)) return TOOLS_UNSUPPORTED;
 			const next = replies.shift();
 			return next === undefined ? new Promise(() => undefined) : { answers: [next] };
 		},
@@ -372,7 +374,8 @@ test("auto: a teammate's server edit to a file the agent created refuses the Und
 
 /**
  * An engine as keys behave on it: a task holds the key its Variable had when it started, and asking
- * for a running task hands it back. A key that is not 'good' is refused.
+ * for a running task hands it back. A key that is not 'good' is refused. Its model has no native
+ * tool calling, which the node decides before the key is used.
  */
 function keyedEngine(key: { now: string }, names: string[], replies: string[]): Record<string, unknown> & { started: unknown[] } {
 	const tasks = new Map<string, string>();
@@ -389,7 +392,7 @@ function keyedEngine(key: { now: string }, names: string[], replies: string[]): 
 			return { token };
 		},
 		terminate: async (token: string) => void tasks.delete(token),
-		chat: async ({ token }: { token: string }) => ({ answers: [tasks.get(token) === 'good' ? replies.shift() : "**LLM error** — AuthenticationError: Error code: 401 - {'error': {'message': 'invalid x-api-key'}}"] }),
+		chat: async ({ token, question }: { token: string; question: Question }) => (isTurn(question) ? TOOLS_UNSUPPORTED : { answers: [tasks.get(token) === 'good' ? replies.shift() : "**LLM error** — AuthenticationError: Error code: 401 - {'error': {'message': 'invalid x-api-key'}}"] }),
 	};
 }
 
@@ -437,7 +440,7 @@ test('each provider in the table names the Variable credentials.json suggests fo
 	for (const provider of PROVIDER_IDS) {
 		const ask = (client: unknown) =>
 			openChatModel({ provider, model: 'model.1' }, 'chat', () => client as never)
-				.ask(question)
+				.send({ kind: 'text', spec: question })
 				.catch((error: unknown) => error);
 		const failure = await ask({ account: { getEnvironmentKeys: async () => [] } });
 		assert.ok(failure instanceof ModelFailure && failure.key);
@@ -455,6 +458,20 @@ test('each provider in the table names the Variable credentials.json suggests fo
 		assert.equal(credentials[node.provider].fields.find((field) => field.path === 'llm.apikey')?.suggests, variable, provider);
 		assert.equal(node.config['model.1'].apikey, `\${${variable}}`, 'the browser only ever names the key');
 	}
+});
+
+test('a model that refuses tools is asked in text, and its next turn skips the native try', async () => {
+	const asked: string[] = [];
+	const engine = scripted([doneReply('First.'), doneReply('Second.')]);
+	const answer = engine.chat as (o: { question: Question }) => Promise<unknown>;
+	store({ ...engine, chat: async (o: { question: Question }) => (asked.push(isTurn(o.question) ? 'turn' : 'text'), answer(o)) });
+	setAgentHost(hostOver(workspace({}).vfs));
+	const session = AgentSession.newSession();
+	const { turn: first } = await session.execute('Build it.', undefined, turn());
+	const { turn: second } = await session.execute('And again.', undefined, turn());
+	assert.deepEqual([first.finalText, second.finalText], ['First.', 'Second.']);
+	assert.deepEqual(asked, ['turn', 'text', 'text'], 'one turn question, refused, then only text, in the next turn too');
+	assert.equal(first.usage.cost?.estimated, true, "a text turn's cost is an estimate");
 });
 
 test('every model the picker offers is a profile of its node, with a price', async () => {

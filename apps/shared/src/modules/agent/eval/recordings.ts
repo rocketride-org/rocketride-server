@@ -21,19 +21,20 @@
 // SOFTWARE.
 
 // =============================================================================
-// RECORDINGS: a live L2 trial's model replies, for L1 replay
+// RECORDINGS: a live L2 trial's model answers, for L1 replay
 // =============================================================================
 
 /**
- * L1 replays what a model said in a live L2 trial: every reply in the order
- * the trial asked, with how the trial scored and the files it ended with.
- * `run.ts record` makes one from an L2 run. A replay reproduces when it
- * scores every check the same, ends with the same files, ends each turn with
- * the same TurnResult outcome and reason, makes the same tool calls in the
- * same waves with the same arguments and, outside SERVED_READS, the same
- * results, and uses every reply. Anything else means the agent's loop, its
- * tools, what they read or the scoring changed how the recorded replies play
- * out: record again after a change that should do that.
+ * L1 replays what a model said in a live L2 trial: the engine's answer to
+ * every question, in the order the trial asked, with how the trial scored and
+ * the files it ended with. `run.ts record` makes one from an L2 run. A replay
+ * reproduces when it asks the same kind of question answering the same call
+ * ids each time, scores every check the same, ends with the same files, ends
+ * each turn with the same TurnResult outcome and reason, makes the same tool
+ * calls in the same waves with the same arguments and, outside SERVED_READS,
+ * the same results, and uses every answer. Anything else means the agent's
+ * loop, its tools, what they read or the scoring changed how the recorded
+ * answers play out: record again after a change that should do that.
  */
 
 import fs from 'node:fs';
@@ -56,20 +57,20 @@ export interface CallDigest {
 	result: string;
 }
 
-/** One recorded turn: the replies it got, how the product said it ended, and the calls it made. */
+/** One recorded turn: the answers it got, how the product said it ended, and the calls it made. */
 export interface RecordingTurn extends RecordedTurn {
 	/** The turn's TurnResult outcome and reason, or null when it left none. */
 	ended: { outcome: string; reason: string } | null;
 	calls: CallDigest[];
 }
 
-/** One recording: a live trial's replies, how it scored and the files it ended with. */
+/** One recording: a live trial's answers, how it scored and the files it ended with. */
 export interface Recording {
-	format: 3;
+	format: 4;
 	scenario: string;
 	set: string;
 	trial: number;
-	/** The live trial it came from. */
+	/** The live trial it came from; `model` is the conversation's choice as the setting holds it (`provider/model`). */
 	source: { head: string; model: string; recordedAt: string };
 	turns: RecordingTurn[];
 	/** The step and cost limits the trial ran under (0 is off). */
@@ -181,16 +182,16 @@ export function mismatches(recorded: RecordingTurn[], replayed: TurnRecord[]): s
  */
 export function fromTrial(record: TrialRecord, result: ScenarioResult, set: string, head: string): Recording | string {
 	const label = `${record.scenario} trial ${record.trial}`;
-	if (record.layer !== 'L2') return `${label} ran in ${record.layer}; only an L2 trial keeps its replies`;
+	if (record.layer !== 'L2') return `${label} ran in ${record.layer}; only an L2 trial keeps its answers`;
 	if (result.status === 'error') return `${label} is an error (${result.why}), so it did not run as the model would`;
 	const limits = record.settings.limits as { steps?: number; costUsd?: number } | undefined;
 	return {
-		format: 3,
+		format: 4,
 		scenario: record.scenario,
 		set,
 		trial: record.trial,
 		source: { head, model: record.model, recordedAt: record.startedAt },
-		turns: record.turns.map((t) => ({ request: t.request, events: t.replies, ended: endedOf(t), calls: t.calls.filter((c) => !c.late).map(digestOf) })),
+		turns: record.turns.map((t) => ({ request: t.request, answers: t.answers, ended: endedOf(t), calls: t.calls.filter((c) => !c.late).map(digestOf) })),
 		limits: { steps: limits?.steps ?? 0, costUsd: limits?.costUsd ?? 0 },
 		expected: { status: result.status, checks: Object.fromEntries(result.checks.map((c) => [c.id, c.status])) },
 		finalFiles: Object.fromEntries(Object.entries(record.finalFiles).map(([p, text]) => [p, sha256(text)])),
@@ -224,12 +225,15 @@ export function loadRecordings(): Array<{ file: string; recording: Recording }> 
  */
 export function validateRecording(r: Recording, scenarios: Set<string>): string[] {
 	const problems: string[] = [];
-	if (r.format !== 3) problems.push(`format ${String(r.format)} is not 3; record it again with run.ts record`);
+	if (r.format !== 4) problems.push(`format ${String(r.format)} is not 4; record it again with run.ts record`);
 	if (!scenarios.has(r.scenario)) problems.push(`scenario ${r.scenario} does not exist`);
 	if (!Array.isArray(r.turns) || r.turns.length === 0) problems.push('it has no turns');
 	for (const [i, t] of (r.turns ?? []).entries()) {
 		if (typeof t.request !== 'string' || !t.request) problems.push(`turn ${i + 1} has no request`);
-		if (!Array.isArray(t.events) || t.events.length === 0) problems.push(`turn ${i + 1} has no replies`);
+		if (!Array.isArray(t.answers) || t.answers.length === 0) problems.push(`turn ${i + 1} has no answers`);
+		for (const [k, a] of (Array.isArray(t.answers) ? t.answers : []).entries()) {
+			if ((a.asked !== 'turn' && a.asked !== 'text') || !Array.isArray(a.answering) || a.entry === undefined) problems.push(`turn ${i + 1} answer ${k + 1} needs asked (turn or text), answering and entry`);
+		}
 		if (!Array.isArray(t.calls) || t.ended === undefined) problems.push(`turn ${i + 1} has no calls or no ended`);
 	}
 	if (!r.expected?.checks) problems.push('it has no expected checks');

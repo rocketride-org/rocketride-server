@@ -48,7 +48,8 @@ import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs,
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
-import type { ModelCall, QuestionSpec } from '../wave/plan';
+import type { ModelRequest } from '../model';
+import { done, plan, resultsIn, scriptedModel, type Reply, type ScriptedModel } from '../wave/scripted';
 import { AppCheckToolkit, reportVerdict, validateNote, validateSaved, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
@@ -263,39 +264,14 @@ function clientTool(client: RocketRideClient, ask = (): ChatAsking => ({ answer:
 	return toolOf(new RocketRideClientToolkit(approvals.client, new MemoryWorkspace({})), 'rocketride_client', approvals);
 }
 
-/** A model that answers from a script, made at once or from the question, and keeps every question. */
-function scriptedModel(replies: Array<string | ((q: QuestionSpec) => string)>): ModelCall & { questions: QuestionSpec[] } {
-	const questions: QuestionSpec[] = [];
-	const call: ModelCall = async (q) => {
-		questions.push(q);
-		const next = replies.shift();
-		if (next === undefined) throw new Error('scriptedModel: no reply left');
-		return typeof next === 'function' ? next(q) : next;
-	};
-	return Object.assign(call, { questions });
-}
-
-/** The result entries a question shows the model, oldest first. */
-function resultsIn(q: QuestionSpec): Array<{ tool: string; key: string; summary?: string }> {
-	const head = 'Previous tool results:\n';
-	const block = q.context.find((c) => c.startsWith(head));
-	return block ? JSON.parse(block.slice(head.length)) : [];
-}
-
-/** A reply asking for tool calls. */
-const plan = (...calls: Array<[tool: string, args?: Record<string, unknown>]>): string => JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args: args ?? {} })) });
-
-/** A reply that finishes with `answer`. */
-const done = (answer: string): string => JSON.stringify({ thought: 'finishing', done: true, answer });
-
 /** Runs one agent turn as the Agent tab does, minus the browser: the chat's cards go to `ask`, the unsaved-changes dialog to `choose`. */
-async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl> } = {}): Promise<Array<{ type: string; text: string }>> {
+async function agentTurn(ws: MemoryWorkspace, model: ScriptedModel, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; signal?: AbortSignal; choose?: ChoiceFn; editors?: Record<string, EditorControl> } = {}): Promise<Array<{ type: string; text: string }>> {
 	const { editors } = opts;
 	const host = hostFor(ws, { devSession: () => opts.dev ?? null, leasePreview: async () => (opts.dev ? lent(opts.dev) : NO_PREVIEW), ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
-	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: { name: 'test-model', ask: model }, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
-	await runAgent('Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => null, choose: opts.choose });
+	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: model, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
+	await runAgent('Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, markers: async () => null, choose: opts.choose });
 	return chunks;
 }
 
@@ -386,8 +362,8 @@ test('a read is shown as whole lines under its line header: a .pipe as its text,
 	const ws = new MemoryWorkspace({ 'pipelines/extract.pipe': pipe, 'notes/long.md': lines.join('\n') });
 	const pages: string[] = [];
 	// The model reads on from each page's offset, then copies the first, whole read by reference.
-	const step = (q: QuestionSpec): string => {
-		const results = resultsIn(q);
+	const step = (request: ModelRequest): Reply => {
+		const results = resultsIn(request);
 		const last = results.at(-1);
 		if (last?.tool === 'write_file') return done('Copied.');
 		pages.push(last?.summary ?? '');
@@ -398,7 +374,7 @@ test('a read is shown as whole lines under its line header: a .pipe as its text,
 	const model = scriptedModel([plan(['read_file', { path: 'pipelines/extract.pipe' }], ['read_file', { path: 'notes/long.md' }]), ...Array.from({ length: 40 }, () => step)]);
 	await agentTurn(ws, model);
 
-	const shownPipe = resultsIn(model.questions[1])[0].summary ?? '';
+	const shownPipe = resultsIn(model.asked[1])[0].summary ?? '';
 	assert.equal(shownPipe.slice(shownPipe.indexOf('\n') + 1), pipe, 'the model sees the .pipe as its text, every field in it');
 	assert.ok(pages.length > 1, 'the long file took more than one read');
 	const seen = pages.flatMap((page) => page.split('\n').slice(1, /\n\[Read on with offset=\d+\.\]$/.test(page) ? -1 : undefined));
@@ -411,16 +387,16 @@ test('a whole read of a long Markdown file is shown as its sections with line ra
 	const lines = ['# Guide', ...prose(10), '## Setup', ...prose(20), '## Usage', '### Basics', '```sh', '# not a heading', '```', ...prose(20), '### Advanced', ...prose(20)];
 	const at = (heading: string) => lines.indexOf(heading) + 1;
 	const ws = new MemoryWorkspace({ 'docs/guide.md': lines.join('\n') });
-	const sectionsIn = (q: QuestionSpec): string[][] =>
-		(resultsIn(q)[0].summary ?? '')
+	const sectionsIn = (request: ModelRequest): string[][] =>
+		(resultsIn(request)[0].summary ?? '')
 			.split('\n')
 			.slice(1, -1)
 			.map((row) => /^(\d+)-(\d+) (.+)$/.exec(row)?.slice(1) ?? [row]);
-	const readEach = (q: QuestionSpec): string => plan(...sectionsIn(q).map(([from, to]): [string, Record<string, unknown>] => ['read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 }]));
+	const readEach = (request: ModelRequest): Reply => plan(...sectionsIn(request).map(([from, to]): [string, Record<string, unknown>] => ['read_file', { path: 'docs/guide.md', offset: Number(from), limit: Number(to) - Number(from) + 1 }]));
 	const model = scriptedModel([plan(['read_file', { path: 'docs/guide.md' }]), readEach, done('Read.')]);
 	await agentTurn(ws, model);
 
-	const sections = sectionsIn(model.questions[1]);
+	const sections = sectionsIn(model.asked[1]);
 	const end = lines.length;
 	assert.deepEqual(sections, [
 		['1', `${end}`, '# Guide'],
@@ -429,7 +405,7 @@ test('a whole read of a long Markdown file is shown as its sections with line ra
 		[`${at('### Basics')}`, `${at('### Advanced') - 1}`, '### Basics'],
 		[`${at('### Advanced')}`, `${end}`, '### Advanced'],
 	]);
-	const pages = resultsIn(model.questions[2]).slice(1);
+	const pages = resultsIn(model.asked[2]).slice(1);
 	sections.forEach(([, , heading], i) => assert.equal(pages[i]?.summary?.split('\n')[1], heading, `${heading} reads from its heading`));
 });
 
@@ -572,7 +548,7 @@ test('read_file and search_files put a marker, never the key, in the next questi
 	for (const call of calls) {
 		const model = scriptedModel([plan(call), done('Read.')]);
 		await agentTurn(new MemoryWorkspace(files), model);
-		const next = model.questions[1].context.join('\n');
+		const next = JSON.stringify(model.asked[1]);
 		assert.ok(!next.includes(pipeKey) && !next.includes(envKey), `${call[0]} ${JSON.stringify(call[1])}: a key reached the model`);
 		markerIn(next);
 	}
@@ -683,9 +659,9 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	const history: ChatMessage[] = [{ id: 1, sender: 'user', text: `My old AWS key is ${canaries.history}`, timestamp: '' }];
 	const model = scriptedModel([
 		plan(['read_file', { path: 'pipelines/leak.pipe' }], ['read_file', { path: 'pipelines/quoted.pipe' }], ['read_file', { path: 'notes/setup.md' }], ['search_files', { pattern: 'OPENAI_API_KEY' }], ['rocketride_client', { method: 'getTaskStatus', params: ['tk_run_0001'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/leak.pipe' }] }], ['read_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md' }], ['search_files', { pattern: 'OPENAI_API_KEY', path: '.rocketride/docs' }], ['rocketride_client', { method: 'deploy.setSchedule', params: ['p1', 'webhook_1', '0 9 * * *', 't1'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/broken.pipe' }] }]),
-		(q) => {
+		(request) => {
 			// the first marker is leak.pipe's: its read is the wave's first result
-			const marker = markerIn(JSON.stringify(q));
+			const marker = markerIn(JSON.stringify(request));
 			return plan(['edit_file', { path: 'pipelines/leak.pipe', oldString: `"apikey": "${marker}"`, newString: `"apikey": "${marker}", "model": "gpt-5"` }], ['check_app', { app: 'daybook-ui' }], ['write_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md', content: `{"apikey": "${marker}"}` }]);
 		},
 		done(`Tidied. A model that echoes a key, like ${canaries.answer}, has it redacted.`),
@@ -705,7 +681,7 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	await agentSession.save(rows);
 
 	const seen = {
-		questions: JSON.stringify(model.questions),
+		requests: JSON.stringify(model.requests),
 		thinking: JSON.stringify(chunks.filter((c) => c.type === 'thinking')),
 		answer: JSON.stringify(chunks.filter((c) => c.type === 'content')),
 		cards: JSON.stringify(asked.cards),
@@ -718,11 +694,11 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	assert.deepEqual(leaks, []);
 	assert.ok(!seen.title.includes('sk-proj'), `no part of the pasted key is in the title: ${seen.title}`);
 	// each way in was taken, so no canary is missing for want of a path
-	assert.equal(model.questions.length, 3, 'every planned wave ran');
+	assert.equal(model.asked.length, 3, 'every planned wave ran');
 	assert.deepEqual(store.modelCalls, [], 'the pasted prompt never reached the model');
 	assert.equal(asked.cards.length, 1, 'the schedule card was shown');
-	assert.ok(seen.questions.includes('Use this key for the model instead: [redacted]'), 'the mid-run message reached the model');
-	assert.ok(seen.questions.includes('the store refused the read: postgres://admin:[redacted]@'), 'the model read the prepare error');
+	assert.ok(seen.requests.includes('Use this key for the model instead: [redacted]'), 'the mid-run message reached the model');
+	assert.ok(seen.requests.includes('the store refused the read: postgres://admin:[redacted]@'), 'the model read the prepare error');
 	assert.match(seen.answer, /like \[redacted\], has it redacted/);
 });
 
@@ -841,7 +817,7 @@ test('write_file and edit_file of a two-source pipeline return the validate of e
 	});
 	const model = scriptedModel([plan(['write_file', { path: 'pipelines/two.pipe', content: JSON.stringify({ components: TWO_SOURCES }, null, 1) }]), plan(['edit_file', { path: 'pipelines/two.pipe', oldString: '"config": {},', newString: '"config": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" },' }]), done('Built the pipeline.')]);
 	await agentTurn(ws, model, { client });
-	const [, afterWrite, afterEdit] = model.questions.map((q) => JSON.stringify(q));
+	const [, afterWrite, afterEdit] = model.asked.map((request) => JSON.stringify(request));
 	// the tool results reach the question as text inside JSON, so each line is matched on its own
 	assert.ok(afterWrite.includes('validate: 1 error:') && afterWrite.includes("- llm_1: config is missing 'apikey' (sources webhook_1, chat_1)"), 'the write returned the error each source found');
 	assert.ok(!afterWrite.includes('validate: OK') && afterEdit.includes('validate: OK'), 'the edit returned a clean validate');

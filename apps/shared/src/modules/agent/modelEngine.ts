@@ -31,12 +31,12 @@
  * start. This is the agent's only runtime import of 'rocketride', which is undefined under shared:test.
  */
 
-import { Question } from 'rocketride';
-import type { PipelineConfig, RocketRideClient } from 'rocketride';
+import { Answer, Question } from 'rocketride';
+import type { AnswerError, PIPELINE_RESULT, PipelineConfig, RocketRideClient } from 'rocketride';
 
-import { ModelFailure, PROVIDER_IDS, type ChatModel, type ModelChoice, type ModelOffer, type ProviderId, type ProviderOffer } from './model';
+import { ModelFailure, PROVIDER_IDS, type ChatModel, type ModelChoice, type ModelOffer, type ModelRequest, type ModelResponse, type ProviderId, type ProviderOffer } from './model';
 import { messageOf, NOT_CONNECTED_MESSAGE, type ClientGetter } from './toolkits/common';
-import type { QuestionSpec } from './wave/plan';
+import { readTokens, type Tokens } from './usage';
 
 // =============================================================================
 // PROVIDERS
@@ -173,6 +173,13 @@ class ModelTasks {
 
 const tasks = new ModelTasks();
 
+/**
+ * The model pipelines whose node refused a turn (`tools_unsupported`), by project_id. Each is asked
+ * in text for the rest of its conversation, so later turns skip the refusal's round trip. A model
+ * switch is a new project_id, so it tries native again. Page lifetime, like `tasks`.
+ */
+const textOnly = new Set<string>();
+
 // =============================================================================
 // THE KEY
 // =============================================================================
@@ -223,7 +230,9 @@ const PROVIDER_BUSY = /\b429\b|\b5\d\d\b|overloaded|rate[ _-]?limit|timeout|time
  *   the chat threw                               yes        yes     -
  *   the provider is busy or down                 no         yes     -
  *   any other **LLM error**                      yes        yes     -
- *   an empty answer (answerOf)                   no         yes     -
+ *   an empty answer (readAnswer)                 no         yes     -
+ *   a turn the engine refused (invalid_request)  no         no      -
+ *   a turn the provider failed (provider_error)  as any other answer's text: it names the exception type
  *
  * Retrying refusals is what makes a fixed key work. A Variable reaches a task only at its start
  * (task_engine.py:779), and the browser cannot see a value change, so a refusal is not believed until
@@ -244,29 +253,52 @@ function missingKey(row: ProviderRow): ModelFailure {
 	return new ModelFailure(`${row.variable} is not set in Variables.`, { retryable: false, billed: false, key: { state: 'missing', provider: row.title, variable: row.variable } });
 }
 
-/** What a pipeline answers with. The index signature lets the client's PIPELINE_RESULT fit, which an all-optional type would refuse. */
-type PipelineReply = { answers?: unknown[]; [field: string]: unknown };
-
-/** The text a pipeline result answers with; '' for none. */
-function replyText(result: PipelineReply): string {
-	const first = result.answers?.[0];
-	return typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
+/** A failed turn's error, read as the session's policy needs it; `tokens` is what the provider billed before it failed. */
+function failureOfError(error: AnswerError, row: ProviderRow, tokens: Tokens | undefined): ModelFailure {
+	// step: invalid_request means our own turn broke a rule, so asking again repeats it
+	const failure = error.code === 'invalid_request' ? new ModelFailure(`The engine refused the agent's turn: ${error.message}`, { retryable: false, billed: false }) : failureOfText(error.message, row, 'answer');
+	return tokens ? new ModelFailure(failure.message, { retryable: failure.retryable, billed: failure.billed, key: failure.key, tokens }) : failure;
 }
 
-/** Pulls the model's text out of a pipeline result, or throws the failure it stands for. */
-function answerOf(result: PipelineReply, row: ProviderRow): string {
-	const text = replyText(result);
-	if (text.trim() === '') throw new ModelFailure('The model returned no answer.', { retryable: false, billed: true });
+/**
+ * Reads what a pipeline answered into what the session acts on, or throws the failure it stands
+ * for. A turn answers with the model's message, or an error; a node without native tool calling
+ * refuses before any provider call. A text answer to a turn comes from an engine that predates
+ * turn mode, so that model is asked in text too.
+ */
+function readAnswer(result: PIPELINE_RESULT, asked: ModelRequest['kind'], row: ProviderRow): ModelResponse {
+	const entries: unknown = result.answers;
+	if (!Array.isArray(entries) || entries.length === 0) throw new ModelFailure('The model returned no answer.', { retryable: false, billed: true });
+	const answer = Answer.fromResult(result);
+	const tokens = readTokens(answer.tokens);
+	if (answer.error?.code === 'tools_unsupported') return { kind: 'unsupported' };
+	if (answer.error) throw failureOfError(answer.error, row, tokens);
+	if (asked === 'turn' && answer.message) return { kind: 'turn', message: answer.message, stop: answer.stopReason ?? 'end_turn', ...(tokens ? { tokens } : {}) };
+	const text = answer.getText();
 	if (text.startsWith(LLM_ERROR_PREFIX)) throw failureOfText(text.slice(LLM_ERROR_PREFIX.length), row, 'answer');
-	return text;
+	if (asked === 'turn') return { kind: 'unsupported' };
+	if (text.trim() === '') throw new ModelFailure('The model returned no answer.', { retryable: false, billed: true });
+	return { kind: 'text', text };
 }
 
 // =============================================================================
 // THE MODEL
 // =============================================================================
 
-/** Builds the client's Question from a spec. */
-function toRocketRideQuestion(q: QuestionSpec): Question {
+/**
+ * Builds the client's Question. A turn sets cachePrefix, which the engine's turn-mode cache reads
+ * too (chat.py), and checks the turn rules here, so a broken turn never reaches a pipe.
+ */
+function toRocketRideQuestion(request: ModelRequest): Question {
+	if (request.kind === 'turn') {
+		const question = new Question({ cachePrefix: true, role: request.system.role });
+		for (const { title, text } of request.system.instructions) question.addInstruction(title, text);
+		question.messages = [...request.messages];
+		question.tools = [...request.tools];
+		question.checkTurn();
+		return question;
+	}
+	const q = request.spec;
 	const question = new Question({ expectJson: q.expectJson, cachePrefix: q.cachePrefix, role: q.role });
 	for (const { title, text } of q.instructions) question.addInstruction(title, text);
 	for (const turn of q.history) question.addHistory({ role: turn.role, content: turn.content });
@@ -277,7 +309,7 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 }
 
 /**
- * Opens a model for one turn. Sync, no I/O: nothing starts until the first ask.
+ * Opens a model for one turn. Sync, no I/O: nothing starts until the first send.
  *
  * @param conversationId - Scopes the task behind the model.
  */
@@ -288,7 +320,8 @@ export function openChatModel(choice: ModelChoice, conversationId: string, clien
 	let names: Promise<readonly string[] | null> | undefined;
 	return {
 		name: choice.model,
-		ask: async (q, o) => {
+		send: async (request, o) => {
+			if (request.kind === 'turn' && textOnly.has(pipeline.project_id)) return { kind: 'unsupported' };
 			const c = client();
 			if (!c) throw new ModelFailure(NOT_CONNECTED_MESSAGE, { retryable: false, billed: false });
 			names ??= readKeyNames(c);
@@ -299,13 +332,24 @@ export function openChatModel(choice: ModelChoice, conversationId: string, clien
 			} catch (error) {
 				throw failureOfText(messageOf(error), row, 'start');
 			}
-			let result: PipelineReply;
+			let question: Question;
 			try {
-				result = await c.chat({ token, question: toRocketRideQuestion(q) });
+				question = toRocketRideQuestion(request);
+			} catch (error) {
+				throw new ModelFailure(`The agent broke a turn rule: ${messageOf(error)}`, { retryable: false, billed: false });
+			}
+			let result: PIPELINE_RESULT;
+			try {
+				result = await c.chat({ token, question });
 			} catch (error) {
 				throw failureOfText(messageOf(error), row, 'chat');
 			}
-			return answerOf(result, row);
+			const response = readAnswer(result, request.kind, row);
+			if (response.kind === 'unsupported' && !textOnly.has(pipeline.project_id)) {
+				textOnly.add(pipeline.project_id);
+				console.log(`[agent] ${choice.model} has no native tool calling; asking in text`);
+			}
+			return response;
 		},
 	};
 }

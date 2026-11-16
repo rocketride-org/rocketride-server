@@ -34,9 +34,10 @@
  * rocket-ui workspace with its read-only `.rocketride/` guides.
  *
  * What differs by layer is the client behind all of it:
- * - L1 and L2: the fake engine (engine.ts). Its stand-in chat asks a replay of
- *   recorded replies (L1) or a live provider (L2). The guides come from this
- *   checkout's docs/agents/context, zipped the way the server serves them.
+ * - L1 and L2: the fake engine (engine.ts). Its model pipeline's chat asks a
+ *   replay of recorded engine answers (L1), or runs the product's own model
+ *   pipeline and question on a real local engine (L2). The guides come from
+ *   this checkout's docs/agents/context, zipped the way the server serves them.
  * - L3: a RocketRideClient connected to the branch-built engine, whose
  *   stand-in pipeline calls the model. The guides come from the engine's
  *   /client/docs.
@@ -62,7 +63,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import type { RocketRideClient } from 'rocketride';
+import type { Question, RocketRideClient } from 'rocketride';
 import type { ChatAskAnswer, ChatMessage } from 'shell/src/components/chat/types';
 import { TurnController } from 'shell/src/components/chat/turns/turnController';
 
@@ -70,13 +71,15 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
 import { DEFAULT_LIMITS, setAgentHost, type AgentLimits } from '../host';
+import { modelSetting, parseModelChoice, type ModelChoice } from '../model';
 import { CheckRecord } from '../run';
 import { validateSaved } from '../toolkits/appCheck';
 import { TurnError, type TurnResult } from '../turn';
+import { PRICES, priceOf, readTokens } from '../usage';
 import { CanaryScanner, fingerprint, scrubDeep, syntheticVariables, type Fingerprint } from './canary';
 import { REPO_ROOT } from './catalog';
-import { createFakeEngine, type ModelAnswer, type ModelQuestion } from './engine';
-import { costOf, liveModel, ReplayModel, type LiveModelSpec } from './models';
+import { createFakeEngine, type StandinModel } from './engine';
+import { askedOf, engineModel, ReplayModel } from './models';
 import { callDigest, mismatches, stableJson, type Recording } from './recordings';
 import { endOwnedRuns, runOutputCheck, type OwnedRun } from './runOutput';
 import { CHANGE_TOOLS, sha256 } from './score';
@@ -99,8 +102,12 @@ export interface TrialConfig {
 	out: string;
 	/** L1: the recording file. */
 	recording?: string;
-	/** L2: the live model. */
-	model?: LiveModelSpec;
+	/** L2: the conversation's model. */
+	model?: ModelChoice;
+	/** L2: the engine the model pipeline runs on. Its API key comes in RR_VERIFY_APIKEY; its Variables hold the provider keys. */
+	modelEngine?: string;
+	/** L2: 'text' answers every native turn `tools_unsupported`, so the product's text fallback runs (default 'native'). */
+	adapter?: 'native' | 'text';
 	/** L3: the engine and what the runner knows about it. Its API key comes in RR_VERIFY_APIKEY, so no file holds it. */
 	engine?: { uri: string; variables: string[]; fingerprints?: string };
 	maxWaves: number;
@@ -151,7 +158,7 @@ function newTurn(n: number, request: string): TurnRecord {
 		reply: null,
 		followupKind: null,
 		result: null,
-		replies: [],
+		answers: [],
 	};
 }
 
@@ -241,44 +248,37 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	let variablePrints: Fingerprint[] = [];
 	let replay: ReplayModel | null = null;
 	let recording: Recording | null = null;
-	let liveUsage = false;
+	let live: ReturnType<typeof engineModel> | null = null;
+	// the conversation's model: the recording's (L1) or the run's (L2); L3 keeps the product's default
+	let choice: ModelChoice | undefined;
 	if (cfg.layer === 'L3') {
 		const engine = cfg.engine;
 		if (!engine) throw new Error('L3 needs an engine');
-		const { RocketRideClient: Client } = load('rocketride') as { RocketRideClient: new (o: Record<string, unknown>) => RocketRideClient };
-		// env: {} so the client sends no ROCKETRIDE_* values of its own, as in the browser
-		client = new Client({ uri: engine.uri, env: {}, module: 'eval-runner' });
-		await client.connect(proc.env.RR_VERIFY_APIKEY);
+		client = await connect(engine.uri);
 		variablePrints = engine.fingerprints ? (JSON.parse(fs.readFileSync(engine.fingerprints, 'utf8')) as Fingerprint[]) : [];
 		record.engineVariables = engine.variables;
-		try {
-			record.engine = await (await fetch(`${engine.uri}/version`)).json();
-		} catch {
-			// informational
-		}
+		record.engine = await versionOf(engine.uri);
 	} else {
 		const names = [...new Set(['ROCKETRIDE_ANTHROPIC_KEY', 'ROCKETRIDE_OPENAI_KEY', ...scenario.variables])];
 		const variables = syntheticVariables(names);
 		variablePrints = Object.entries(variables).map(([name, value]) => fingerprint(name, value));
-		let model: (q: ModelQuestion) => Promise<ModelAnswer>;
+		let model: StandinModel;
 		if (cfg.layer === 'L1') {
 			recording = JSON.parse(fs.readFileSync(cfg.recording ?? '', 'utf8')) as Recording;
 			replay = new ReplayModel(recording.turns);
 			model = replay.answer;
+			choice = parseModelChoice(recording.source.model);
+			if (!choice) throw new Error(`the recording names no model the product offers (${recording.source.model})`);
 		} else {
-			if (!cfg.model) throw new Error('L2 needs a model');
-			model = liveModel(cfg.model);
-			liveUsage = true;
-			// the provider key this process holds is scanned for too, though no Variable carries it
-			for (const name of ['ANTHROPIC_API_KEY', 'ROCKETRIDE_ANTHROPIC_KEY', 'OPENAI_API_KEY', 'ROCKETRIDE_OPENAI_KEY']) {
-				const value = proc.env[name];
-				if (value) variablePrints.push(fingerprint(`provider key ${name}`, value));
-			}
+			if (!cfg.model || !cfg.modelEngine) throw new Error('L2 needs a model and the engine its model pipeline runs on');
+			choice = cfg.model;
+			live = engineModel(await connect(cfg.modelEngine), { tools: cfg.adapter !== 'text' });
+			model = live.answer;
 		}
 		const fake = createFakeEngine({ variables, model });
 		client = fake.client;
 		record.engineVariables = names;
-		record.engine = { fake: true, version: 'eval-fake-engine' };
+		record.engine = { fake: true, version: 'eval-fake-engine', ...(cfg.modelEngine ? { modelEngine: { uri: cfg.modelEngine, version: await versionOf(cfg.modelEngine) } } : {}) };
 	}
 	record.variablesMissing = scenario.variables.filter((v) => !record.engineVariables.includes(v));
 	(globalThis as Record<string, unknown>).__evalClient = client;
@@ -327,7 +327,16 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	// step: the turn limits the host serves; without them every turn gets the product's defaults
 	const limits = cfg.limits;
 	record.settings.limits = limits ?? { ...DEFAULT_LIMITS, source: 'product default' };
-	const host = { vfs: view, scaffoldApp: notHere('scaffoldApp'), packApp: notHere('packApp'), devSession: () => null, leasePreview: notHere('leasePreview'), ...(limits ? { limits: { read: () => limits } } : {}) };
+	const chosen = choice;
+	const host = {
+		vfs: view,
+		scaffoldApp: notHere('scaffoldApp'),
+		packApp: notHere('packApp'),
+		devSession: () => null,
+		leasePreview: notHere('leasePreview'),
+		...(limits ? { limits: { read: () => limits } } : {}),
+		...(chosen ? { lastModel: { read: () => chosen, write: () => undefined } } : {}),
+	};
 	setAgentHost(host);
 	AgentSession.configure(SESSIONS_APP_ID);
 	const session = AgentSession.newSession();
@@ -454,10 +463,10 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 		turn.finishedAfter = await isFinished(view, client, result);
 
 		// step: a limit paused the turn. Continue would start a fresh budget, which the user grants, not the scenario.
-		// A replay it cuts short has replies left, which is the limit's doing, not a replay that left its recording
+		// A replay it cuts short has answers left, which is the limit's doing, not a replay that left its recording
 		const paused = result?.reason === 'limited' || result?.reason === 'cost_limit';
 		if (replay && replay.left() > 0 && !replay.diverged) {
-			replay.diverged = paused ? `turn ${n} paused at the ${result.reason === 'limited' ? 'step' : 'cost'} limit with ${replay.left()} recorded replies unused` : `turn ${n} ended with ${replay.left()} recorded replies unused`;
+			replay.diverged = paused ? `turn ${n} paused at the ${result.reason === 'limited' ? 'step' : 'cost'} limit with ${replay.left()} recorded answers unused` : `turn ${n} ended with ${replay.left()} recorded answers unused`;
 			cutByLimit = paused;
 		}
 		if (paused) {
@@ -550,7 +559,7 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 
 	// step: what the record says about itself
 	record.totalModelMs = record.turns.reduce((n, t) => n + t.modelCalls.reduce((m, c) => m + c.ms, 0), 0);
-	if (liveUsage) {
+	if (cfg.layer === 'L2') {
 		const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		for (const t of record.turns) {
 			for (const c of t.modelCalls) {
@@ -561,7 +570,8 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 			}
 		}
 		record.tokens = tokens;
-		record.costUsd = costOf(cfg.model?.model ?? '', tokens);
+		const row = PRICES.find((r) => r.model === cfg.model?.model);
+		record.costUsd = row ? priceOf(row, tokens) : null;
 	}
 	record.shellMissing = ((globalThis as Record<string, unknown>).__evalShellMissing as string[]) ?? [];
 	const infra = record.turns.flatMap((t) => [t.runError ?? '', ...t.modelErrors.map((e) => e.message)]).find((m) => m && INFRA.test(m));
@@ -573,6 +583,7 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	saveRecord(cfg, record);
 	try {
 		if (cfg.layer === 'L3') await client.disconnect();
+		await live?.close();
 	} catch {
 		// exiting anyway
 	}
@@ -593,6 +604,24 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 function turnResultRecord(result: TurnResult): TurnResultRecord {
 	const { turnId: _id, messageId: _row, finalText: _text, runsStarted, ...rest } = result;
 	return { ...rest, runsStarted: runsStarted?.length ?? 0 };
+}
+
+/** A client on a real engine, with the runner's API key (RR_VERIFY_APIKEY). */
+async function connect(uri: string): Promise<RocketRideClient> {
+	const { RocketRideClient: Client } = load('rocketride') as { RocketRideClient: new (o: Record<string, unknown>) => RocketRideClient };
+	// env: {} so the client sends no ROCKETRIDE_* values of its own, as in the browser
+	const client = new Client({ uri, env: {}, module: 'eval-runner' });
+	await client.connect(proc.env.RR_VERIFY_APIKEY);
+	return client;
+}
+
+/** What an engine says it is, for the record. */
+async function versionOf(uri: string): Promise<unknown> {
+	try {
+		return await (await fetch(`${uri}/version`)).json();
+	} catch {
+		return 'unknown';
+	}
 }
 
 /** A host step the eval has no stand-in for. */
@@ -657,12 +686,15 @@ async function wipeStore(client: RocketRideClient, scope: { kind: string; teamId
 }
 
 /**
- * Wraps the client's chat and use: every model question is measured and
- * scanned; the model pipeline is found by its project id, which starts with
- * the session id; every run a `use` started is kept in `owned`, so the trial ends it.
+ * Wraps the client's chat and use: every question is scanned, and a question
+ * to the model pipeline is measured and recorded as a model call, while the
+ * agent's own chats with pipelines it built are not; the model pipeline is
+ * found by its project id, which starts with the session id; every run a
+ * `use` started is kept in `owned`, so the trial ends it.
  */
 function wrapClient(client: RocketRideClient, cfg: TrialConfig, record: TrialRecord, owned: OwnedRun[], turnOf: () => TurnRecord, waveOf: () => number, scan: (surface: string, text: string) => void, conversationId: string): void {
 	const c = client as unknown as Record<string, (o: Record<string, unknown>) => Promise<Record<string, unknown>>>;
+	const modelTokens = new Set<string>();
 	const use = c.use.bind(client);
 	c.use = async (o) => {
 		const pipeline = o?.pipeline as Record<string, unknown> | undefined;
@@ -674,6 +706,7 @@ function wrapClient(client: RocketRideClient, cfg: TrialConfig, record: TrialRec
 		const t = turnOf();
 		try {
 			const r = await use(o);
+			if (isStandin && typeof r?.token === 'string') modelTokens.add(r.token);
 			// as the product's run ledger does (toolkits/rocketrideClient.ts): only a run use did not reuse is this trial's
 			if (r?.reused === false && typeof r.token === 'string') {
 				try {
@@ -692,27 +725,34 @@ function wrapClient(client: RocketRideClient, cfg: TrialConfig, record: TrialRec
 	c.chat = async (o) => {
 		const t = turnOf();
 		const t0 = performance.now();
+		const question = o?.question as unknown as Question;
 		let questionText = '';
 		try {
-			questionText = JSON.stringify(o?.question);
+			questionText = JSON.stringify(question);
 		} catch {
 			// not serializable
 		}
 		scan('model_questions', questionText);
-		const rec: ModelCallRecord = { ms: 0, questionChars: questionText.length, answerChars: 0 };
+		if (!modelTokens.has(String(o?.token))) return chat(o);
+		const { asked, answering } = askedOf(question);
+		const rec: ModelCallRecord = { wave: waveOf(), asked, ms: 0, questionChars: questionText.length, answerChars: 0 };
 		t.modelCalls.push(rec);
 		try {
 			const r = await chat(o);
-			const first = (r?.answers as unknown[] | undefined)?.[0];
-			const text = typeof first === 'string' ? first : JSON.stringify(first ?? '');
+			// the entry Answer.fromResult reads
+			const entry = (r?.answers as unknown[] | undefined)?.at(-1);
+			const text = typeof entry === 'string' ? entry : JSON.stringify(entry ?? '');
 			rec.ms = Math.round(performance.now() - t0);
 			rec.answerChars = text.length;
-			if (r?.usage) rec.usage = r.usage as ModelCallRecord['usage'];
-			// the plan question marks its stable start for caching; the best-effort question does not
-			if (cfg.layer === 'L2') t.replies.push((o?.question as { cachePrefix?: boolean } | undefined)?.cachePrefix === true ? { wave: waveOf(), reply: text } : { bestEffort: text });
-			if (text.startsWith('**LLM error** — ')) {
-				rec.error = text.slice(0, 2000);
-				t.modelErrors.push({ kind: 'llm-error-answer', wave: waveOf(), callIndex: t.modelCalls.length - 1, message: rec.error });
+			const usage = readTokens((entry as { tokens?: unknown } | undefined)?.tokens);
+			if (usage) rec.usage = usage;
+			if (cfg.layer === 'L2') t.answers.push({ wave: rec.wave, asked, answering, entry });
+			// a refusal of tools is how a text-only model answers, not a failure
+			const error = (entry as { error?: { code?: string; message?: string } } | undefined)?.error;
+			const failed = error?.code === 'tools_unsupported' ? undefined : error;
+			if (failed || text.startsWith('**LLM error** — ')) {
+				rec.error = (failed ? `${failed.code}: ${failed.message}` : text).slice(0, 2000);
+				t.modelErrors.push({ kind: failed ? 'answer-error' : 'llm-error-answer', wave: rec.wave, callIndex: t.modelCalls.length - 1, message: rec.error });
 			}
 			return r;
 		} catch (err) {
@@ -742,8 +782,8 @@ function emptyRecord(cfg: TrialConfig): TrialRecord {
 		prompt: '',
 		trial: cfg.trial,
 		startedAt: new Date().toISOString(),
-		model: cfg.layer === 'L1' ? `replay:${path.basename(cfg.recording ?? '')}` : cfg.layer === 'L2' ? `${cfg.model?.provider}:${cfg.model?.model}` : 'stand-in on the engine',
-		settings: { maxWaves: cfg.maxWaves, maxMinutes: cfg.maxMinutes, maxFollowups: cfg.maxFollowups ?? 'scenario', ...(cfg.model ? { provider: cfg.model.provider, maxTokens: cfg.model.maxTokens } : {}) },
+		model: cfg.layer === 'L1' ? `replay:${path.basename(cfg.recording ?? '')}` : cfg.layer === 'L2' && cfg.model ? modelSetting(cfg.model) : 'stand-in on the engine',
+		settings: { maxWaves: cfg.maxWaves, maxMinutes: cfg.maxMinutes, maxFollowups: cfg.maxFollowups ?? 'scenario', ...(cfg.layer === 'L2' ? { adapter: cfg.adapter ?? 'native' } : {}) },
 		engine: null,
 		engineVariables: [],
 		variablesMissing: [],

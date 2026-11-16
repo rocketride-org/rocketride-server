@@ -25,23 +25,20 @@
 // =============================================================================
 
 /**
- * One run of the agent: each wave asks the model for a plan, runs its tool calls, and feeds their
- * summaries into the next question. An answer is accepted only when the host's `FinishRule` finds
- * nothing unchecked; the loop only tells it what each wave ran. A port of Wave's driver
- * (`nodes/src/nodes/agent_rocketride/rocketride_agent.py`) and its executor's bookkeeping. The
- * texts the model reads match Wave's word for word, because Wave's prompt teaches the model to read
- * them. One deviation: the bad-reply note goes in the question's context, not its instructions, so
- * the cached start stays identical.
+ * One run of the agent: each wave gets the model's next reply from the turn's session, runs its
+ * tool calls, and tells the session what came of them. An answer is accepted only when the host's
+ * `FinishRule` finds nothing unchecked; the loop only tells it what each wave ran. A port of Wave's
+ * driver (`nodes/src/nodes/agent_rocketride/rocketride_agent.py`) and its executor's bookkeeping.
+ * The loop never sees a message: the session holds the conversation and talks to the model.
  */
 
 import { isJsonObject, redactText } from '../toolkits/common';
 import { PIPELINE_METHODS } from '../toolkits/rocketrideClient';
 import type { SecretMarkers } from '../toolkits/secretMarkers';
 import { RefusedError, type AgentTool, type ToolAct, type ToolStep, type UserTime } from '../tools';
-import { CostLimitError } from '../usage';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
-import { buildWaveQuestion, heardText, parseReply, type PromptPrefix } from './plan';
-import type { HistoryTurn, ModelCall, PlanReply, QuestionSpec, ResultEntry, StopReason, ToolCall } from './plan';
+import type { ResultEntry, StopReason, ToolCall } from './plan';
+import { NO_ROUND, type CallResult, type ModelSession, type PlannedCall, type Round } from './session';
 import { previewArgs, summarize, withCommas } from './summary';
 
 // =============================================================================
@@ -63,12 +60,11 @@ export interface RanCall {
 
 /**
  * What decides whether the work is checked. The host supplies it; the loop
- * tells it what each wave ran and asks it before accepting a done=true. The
- * loop itself still refuses while a timed-out call runs, and in the wave the
- * check tool is called (the model has not read its result yet).
+ * tells it what each wave ran and asks it before accepting an answer. The
+ * loop itself still refuses while a timed-out call runs.
  */
 export interface FinishRule {
-	/** The tool that checks the work: done=true waits a wave after a call to it, and calling it again is never a repeat. */
+	/** The tool that checks the work: calling it again is never a repeat. */
 	readonly checkTool: string;
 	/** A wave starts; `wave` counts from 0. */
 	beginWave(wave: number): void;
@@ -81,23 +77,17 @@ export interface FinishRule {
 	/**
 	 * Why the run may not finish yet.
 	 *
-	 * @returns A refusal naming what is still unchecked, in Wave's style ("Not finished: … before done=true."), or null when nothing is.
+	 * @returns A refusal naming what is still unchecked, in Wave's style ("Not finished: … before you finish."), or null when nothing is.
 	 */
 	unchecked(): string | null;
 }
 
 /** What a run needs. */
 export interface LoopOptions {
-	/** What the user asked for. */
-	request: string;
-	/** Earlier conversation turns, oldest first. */
-	history: HistoryTurn[];
-	/** The fixed start of every wave question (see buildPrefix). */
-	prefix: PromptPrefix;
+	/** The turn's conversation with its model, which holds the request, the history and the prefix. */
+	session: ModelSession;
 	/** The tools the model may call, the finish rule's check tool among them. */
 	tools: AgentTool[];
-	/** Asks the model one question. */
-	model: ModelCall;
 	finish: FinishRule;
 	/** Sends one chunk of progress text to the user. */
 	emit: (type: 'thinking', text: string) => void;
@@ -115,7 +105,7 @@ export interface LoopOptions {
 	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
 	/** The values the file tools hid this run; any other result that quotes one shows its marker. */
 	secrets?: SecretMarkers;
-	/** Notes for each wave's question (files someone else changed); they go in its context, so the cached start stays the same. */
+	/** Notes for the model each wave (files someone else changed), after what came of the last reply. */
 	notes?: () => string[];
 	/** The time the user spends answering tool questions; no call's time limit runs while one is open. */
 	userTime?: UserTime;
@@ -142,7 +132,7 @@ export interface LoopResult {
 	stopReason: StopReason;
 	/** How many waves ran, counting the one the run stopped in. */
 	waves: number;
-	/** How long each model call took, in milliseconds, in call order. */
+	/** How long each ask of the session took, in milliseconds, in order, its retries and continuations inside. */
 	modelMs: number[];
 	/** How many tool calls the model planned, memory.peek and skipped calls included. */
 	toolCalls: number;
@@ -158,29 +148,19 @@ export const TOOL_TIMEOUT_MS = 300_000;
 /** The tool the loop runs itself. */
 const PEEK_TOOL = MEMORY_PEEK_TOOL.name;
 
-/** Why a done with a check in the same reply is sent back: the model has not read the check's result yet. */
-function readTheCheck(checkTool: string): string {
-	return `Not finished: read the result of ${checkTool} before done=true.`;
-}
-
 const STOPPED_WHILE_RUNNING = 'Still running when the run was stopped; it may still finish.';
 
 const STOPPED_BEFORE_START = 'Not run: the run was stopped first.';
 
-const READ_THE_LATE = 'Not finished: read how the call(s) that timed out ended (the entries marked late) before done=true.';
+const READ_THE_LATE = 'Not finished: read how the call(s) that timed out ended (the entries marked late) before you finish.';
 
 const LATE_NOTE = 'This call timed out and has now ended; this is how it ended. Plan again any call that was not run while it was still running.';
 
 const STILL_RUNNING = 'Still running when you stopped (these may still finish and change the work):';
 
-const READ_THE_USER = 'Not finished: the user wrote to you while you worked. Read "Messages from the user during this run" before done=true.';
+const READ_THE_USER = 'Not finished: the user wrote to you while you worked. Read "Messages from the user during this run" before you finish.';
 
 const ASKED_UNSEEN = 'Not asked: the user wrote to you before they saw your question. Read "Messages from the user during this run", then call ask_user again if you still need to.';
-
-/** The role of the best-effort question: a plain answer, not a plan. */
-const FALLBACK_ROLE = 'You are a helpful assistant.';
-
-const FALLBACK_QUESTION = 'Based on the above, provide a complete and accurate final answer. The work stopped before it was finished: if something the goal needs is still unknown, say what is missing rather than guessing.';
 
 const FALLBACK_PREVIEW_CHARS = 2000;
 
@@ -195,27 +175,18 @@ function heldBackMessage(waitsFor: ToolCall): string {
 	return `Not run: it waits for ${waitsFor.tool}${target ? ` on ${target}` : ''}, which timed out and is still running. You will be told when that call ends; then plan this one again.`;
 }
 
-/** The note that sends an unusable reply back, for that one call. */
-function retryNote(problems: string[]): string {
-	return `Your previous reply was not usable: ${problems.join('; ')}. Reply with exactly one of the two shapes in Response Format.`;
-}
-
-/** The entry telling the model why its done=true was not accepted. */
-function refusal(wave: number, message: string): ResultEntry {
-	return { tool: 'reply-check', key: `wave-${wave}.done`, error: message };
-}
-
-/** The entries for what a usable reply got wrong: a bad remove only tidies memory, so it is a note; anything else was dropped, so it is an error. */
-function problemEntries(wave: number, problems: string[]): ResultEntry[] {
-	return problems.map((problem, i) => {
-		const key = `wave-${wave}.check${i}`;
-		return problem.startsWith('remove') ? { tool: 'reply-check', key, note: `Ignored: ${problem}` } : { tool: 'reply-check', key, error: `Skipped: ${problem}` };
-	});
-}
-
-/** The error for a call left out of required arguments: it names them and shows where arguments go. */
+/** The error for a call left out of required arguments: it names them. */
 function skipMessage(tool: string, missing: string[]): string {
-	return `Skipped: ${tool} is missing required argument(s) ${missing.map((name) => `'${name}'`).join(', ')}. Put arguments under "args": {"tool": "${tool}", "args": {...}}`;
+	return `Skipped: ${tool} is missing required argument(s) ${missing.map((name) => `'${name}'`).join(', ')}.`;
+}
+
+/**
+ * The user's mid-run messages as one note, or none. Each reaches the model once, after it arrives;
+ * the conversation keeps it from then on.
+ */
+function heardNotes(messages: readonly string[]): string[] {
+	if (!messages.length) return [];
+	return [`Messages from the user during this run (oldest first; they come after the request and change it where they differ):\n${messages.map((text, i) => `${i + 1}. ${text}`).join('\n')}`];
 }
 
 /** An error's message, for whatever was thrown. */
@@ -253,10 +224,12 @@ type Prepared = { call: ToolCall; args: Record<string, unknown> } | { call: Tool
 
 /** What a wave's calls left behind, in call order. */
 interface Acted {
-	/** One entry per call. */
-	entries: Entry[];
+	/** One per call, by its id: what the model reads of it. */
+	results: CallResult[];
 	/** The calls the finish rule hears about: all but memory.peek and those left out for missing required arguments, which neither changed the work nor checked it. */
 	ran: RanCall[];
+	/** One thinking line per call. */
+	lines: string[];
 }
 
 /** A call that timed out: what it was, and how it ended once it did. */
@@ -330,10 +303,9 @@ function gatheredLine(entry: Entry): string {
 	return `- ${entry.tool}: ${entry.summary ?? ''}`;
 }
 
-/** The answer when even the best-effort call fails: the cause, then the notes and facts as they stand (Wave's `_partial_report`). */
-function partialReport(cause: string, lines: string[], scratch: string): string {
+/** The answer when even the final answer fails: the cause, then the facts as they stand (Wave's `_partial_report`). */
+function partialReport(cause: string, lines: string[]): string {
 	const parts = [`I could not finish: ${cause}.`];
-	if (scratch) parts.push('', 'My working notes:', scratch);
 	if (lines.length) parts.push('', 'What I gathered:', ...lines);
 	return parts.join('\n');
 }
@@ -369,7 +341,7 @@ export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false
 
 /**
  * Shows each value the file tools hid as its marker, then runs redactText. Every outcome passes
- * here before anything reads it, so no credential reaches the stored result, the next question, a
+ * here before anything reads it, so no credential reaches the stored result, the model, a
  * thinking line or the finish rule.
  */
 function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
@@ -650,123 +622,64 @@ async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (
 // RUN — the state of one run, and its steps
 // =============================================================================
 
-/** Thrown when the run is stopped while a model call is in flight. */
-class RunStopped extends Error {}
-
-/** Settles as `work` does, or rejects with RunStopped once the signal aborts; a later result or failure of `work` is dropped. */
-function untilStopped<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const stop = (): void => reject(new RunStopped());
-		if (signal.aborted) stop();
-		else signal.addEventListener('abort', stop, { once: true });
-		work.then(
-			(value) => {
-				signal.removeEventListener('abort', stop);
-				resolve(value);
-			},
-			(error: unknown) => {
-				signal.removeEventListener('abort', stop);
-				reject(error);
-			}
-		);
-	});
-}
-
 /** One run's memory, results and timed-out calls. */
 class WaveRun {
 	/** Every stored tool result. */
 	readonly memory = new RunMemory();
-	/** How long each model call took. */
+	/** How long each ask of the session took. */
 	readonly modelMs: number[] = [];
 	/** How many tool calls the model planned. */
 	toolCalls = 0;
-	/** The model's working notes, carried from wave to wave. */
-	scratch = '';
-	/** Every message the user sent during this run, oldest first; each later question shows them in its context. */
-	readonly heard: string[] = [];
-	/** What every earlier call left behind, oldest first; what the next question shows. */
-	private results: Entry[] = [];
+	/** What every call left behind, oldest first, for the partial report. */
+	private readonly entries: Entry[] = [];
 	/** The calls that timed out, by the promise that settles when each ends; each stays until lateReturns() hands over how it ended. */
 	private readonly late = new Map<Promise<unknown>, LateCall>();
 	/** Each call (tool and arguments as written) by the key of its first result. */
 	private readonly seenCalls = new Map<string, string>();
 	/** Each stored result's text by the key that first held it. */
 	private readonly seenResults = new Map<string, string>();
-	private readonly removed = new Set<string>();
-	/**
-	 * For each call repeated after its result was removed, the key of its newest result. Remove skips
-	 * that key, so read, remove, read again cannot loop; an older result of the call can go, so copies
-	 * of a file read after each edit don't pile up.
-	 */
-	private readonly kept = new Map<string, string>();
 	private readonly tools: Map<string, AgentTool>;
 
 	constructor(private readonly o: LoopOptions) {
 		this.tools = new Map(o.tools.map((tool) => [tool.name, tool]));
 	}
 
-	/** Whether the run has anything to answer from: a result, or notes. */
+	/** Whether the run has anything to answer from. */
 	get gathered(): boolean {
-		return this.results.length > 0 || this.scratch.length > 0;
+		return this.entries.length > 0;
 	}
 
 	/**
-	 * Takes the messages the user sent since the last take into `heard`, and
-	 * returns how many came. Each passes through redactText first: a mid-run
-	 * message never goes through AgentSession.execute, so a key pasted into
-	 * one would otherwise reach every later question.
+	 * Takes the messages the user sent since the last take. Each passes through redactText first: a
+	 * mid-run message never goes through AgentSession.execute, so a key pasted into one would
+	 * otherwise reach the model.
 	 */
-	hear(): number {
-		const taken = this.o.takeQueued();
-		this.heard.push(...taken.map(redactText));
-		return taken.length;
+	hear(): string[] {
+		return this.o.takeQueued().map(redactText);
 	}
 
-	/** Asks the model, timing the call; a stop rejects at once with RunStopped. */
-	private async ask(q: QuestionSpec): Promise<string> {
+	/** What the model reads before its first reply: the user's queued messages, then the loop's notes. */
+	opening(): Round {
+		return { results: [], notes: [...heardNotes(this.hear()), ...(this.o.notes?.() ?? [])] };
+	}
+
+	/** Asks the session, timing the ask. */
+	async timed<T>(asking: Promise<T>): Promise<T> {
 		const began = performance.now();
 		try {
-			return await untilStopped(this.o.model(q), this.o.signal);
+			return await asking;
 		} finally {
 			this.modelMs.push(Math.round(performance.now() - began));
 		}
 	}
 
 	/**
-	 * Asks for this wave's plan. A reply with nothing to run and no answer is
-	 * sent back once, its problems in a note at the end of the context. The
-	 * retry was asked only to fix its shape, so the first reply's notes stand
-	 * unless the retry writes new ones.
-	 */
-	async plan(): Promise<PlanReply> {
-		const notes = this.o.notes?.() ?? [];
-		const state = { request: this.o.request, scratch: this.scratch, results: this.results, notes, heard: this.heard };
-		const firstText = await this.ask(buildWaveQuestion(this.o.prefix, this.o.history, state));
-		let reply = parseReply(firstText);
-		if (!reply.toolCalls.length && !reply.done) {
-			const first = reply.scratch;
-			try {
-				const retryText = await this.ask(buildWaveQuestion(this.o.prefix, this.o.history, { ...state, notes: [...notes, retryNote(reply.problems)] }));
-				reply = parseReply(retryText);
-			} catch (error) {
-				// The first reply's notes are all this wave produced; keep them for the best-effort answer.
-				if (first.trim()) this.scratch = first;
-				throw error;
-			}
-			if (first && !reply.scratch.trim()) reply = { ...reply, scratch: first };
-		}
-		// An empty scratch never wipes the notes so far.
-		this.scratch = reply.scratch || this.scratch;
-		return reply;
-	}
-
-	/**
-	 * Runs a wave's calls and returns their entries in call order. A call missing a required
-	 * argument is skipped with an error, and a call whose reference names nothing does not run.
-	 * memory.peek reads memory before this wave's results are stored. Calls that ran (not peek,
+	 * Runs a wave's calls and returns a result for each, by its id, in call order. A call missing a
+	 * required argument is skipped with an error, and a call whose reference names nothing does not
+	 * run. memory.peek reads memory before this wave's results are stored. Calls that ran (not peek,
 	 * skipped or unstarted) are also returned as the finish rule hears them.
 	 */
-	async act(wave: number, calls: ToolCall[]): Promise<Acted> {
+	async act(wave: number, calls: readonly PlannedCall[]): Promise<Acted> {
 		const prepared = calls.map((call, i): Prepared => {
 			const key = resultKey(wave, i);
 			const missing = this.missingArgs(call);
@@ -798,7 +711,12 @@ class WaveRun {
 			else if (!outcome.unstarted) ran.push({ tool: p.call.tool, args: p.args, error: outcome.error });
 			return this.withCall(outcome.ok ? this.store(p.call.tool, key, outcome.result, p.args) : { tool: p.call.tool, key, error: outcome.error }, p.call);
 		});
-		return { entries, ran };
+		this.entries.push(...entries);
+		return {
+			results: calls.map((call, i) => ({ id: call.id, entry: entries[i] })),
+			ran,
+			lines: calls.map((call, i) => thinkingLine(call, entries[i])),
+		};
 	}
 
 	/**
@@ -865,7 +783,6 @@ class WaveRun {
 	 * wrote them, and points out a call identical to an earlier one. The note
 	 * informs and never blocks: reading a file again after writing it is
 	 * legitimate. A check run again is what the rules ask for, so it is never a repeat.
-	 * The newest result of a call repeated after its result was removed is kept.
 	 */
 	private withCall(entry: Entry, call: ToolCall): Entry {
 		const { tool, key, ...rest } = entry;
@@ -873,52 +790,10 @@ class WaveRun {
 		if (Object.keys(call.args).length) shown.args = previewArgs(call.args);
 		Object.assign(shown, rest);
 		if (call.tool === this.o.finish.checkTool) return shown;
-		const asCalled = canonical({ tool: call.tool, args: call.args });
-		const first = setDefault(this.seenCalls, asCalled, key);
-		if (first !== key && this.removed.has(first)) {
-			// Read, remove, read again: the model dropped data it still needed.
-			this.kept.set(asCalled, key);
-			shown.note = `Same tool and arguments as ${first}, whose result you removed, so this result stays in memory and remove will not clear it.`;
-		} else if (first !== key) {
-			// A note that the result is identical already says more.
-			shown.note ??= `Same tool and arguments as ${first}.`;
-		}
+		const first = setDefault(this.seenCalls, canonical({ tool: call.tool, args: call.args }), key);
+		// A note that the result is identical already says more.
+		if (first !== key) shown.note ??= `Same tool and arguments as ${first}.`;
 		return shown;
-	}
-
-	/** True for the newest result of a call the model removed and then made again. */
-	isKept(key: string): boolean {
-		for (const kept of this.kept.values()) if (kept === key) return true;
-		return false;
-	}
-
-	/** The keys of the entries from earlier waves. */
-	earlierKeys(): Set<string> {
-		return new Set(this.results.map((entry) => entry.key));
-	}
-
-	/** Adds a wave's entries to what the next question shows. */
-	record(entries: Entry[]): void {
-		this.results.push(...entries);
-	}
-
-	/**
-	 * Forgets which stored results the keys hold, as soon as a reply asks to
-	 * remove them, so no identical-result note made in this wave names a key
-	 * about to go. Which calls they answered is kept: a repeat of a removed call
-	 * is worth pointing out.
-	 */
-	forget(keys: string[]): void {
-		const gone = new Set(keys);
-		for (const [text, key] of this.seenResults) if (gone.has(key)) this.seenResults.delete(text);
-	}
-
-	/** Removes keys from memory and their entries from the next question. */
-	remove(keys: string[]): void {
-		const gone = new Set(keys);
-		this.memory.clear(keys);
-		for (const key of keys) this.removed.add(key);
-		this.results = this.results.filter((entry) => !gone.has(entry.key));
 	}
 
 	/**
@@ -939,14 +814,15 @@ class WaveRun {
 	}
 
 	/**
-	 * The entries that tell the model how timed-out calls ended, one per call
-	 * the last lateReturns() found. A result is stored under its entry's key,
-	 * as a result of this wave is, so memory.peek and references can read it.
+	 * The notes that tell the model how timed-out calls ended, one entry per call the last
+	 * lateReturns() found. No call id is left to tie them to, so each is its entry as text, tool and
+	 * arguments included. A result is stored under its entry's key, as a result of this wave is, so
+	 * memory.peek and references can read it.
 	 *
 	 * @param wave - The wave they are noticed in.
 	 * @param returned - The calls, as lateReturns() handed them over.
 	 */
-	lateEntries(wave: number, returned: RanCall[]): Entry[] {
+	lateNotes(wave: number, returned: RanCall[]): string[] {
 		return returned.map((call, i) => {
 			const key = `wave-${wave}.late${i}`;
 			const entry: Entry = { tool: call.tool, key, args: previewArgs(call.args) };
@@ -956,7 +832,8 @@ class WaveRun {
 				entry.summary = this.summaryOf(call.tool, call.result ?? '', call.args);
 			}
 			entry.note = LATE_NOTE;
-			return entry;
+			this.entries.push(entry);
+			return JSON.stringify(entry, null, 2);
 		});
 	}
 
@@ -998,56 +875,35 @@ class WaveRun {
 	}
 
 	/**
-	 * Ends the run with a best effort from what was gathered; a cost-limit refusal of that question
-	 * ends it at `cost_limit`, and a stop during it ends it stopped. A pausing run takes the user's
-	 * queued messages before and after the question, so none starts its own turn with a fresh
-	 * budget before Continue.
+	 * Ends the run with a final answer asked of the conversation (Wave's `_synthesize`), after `round`,
+	 * what the model has not been told yet. If that ask fails or returns nothing, the answer is the
+	 * gathered facts as they stand; a cost-limit refusal of it ends the run at `cost_limit`, and a
+	 * stop during it ends the run stopped. A pausing run takes the user's queued messages before and
+	 * after the ask, so none starts its own turn with a fresh budget before Continue.
 	 */
-	async answerFromGathered(reason: StopReason, waves: number): Promise<LoopResult> {
-		if (pauses(reason)) this.hear();
-		const { answer, costLimited } = await this.bestEffort();
-		// step: the user stopped the run while the model answered; bestEffort took the stop as a failed call
-		if (this.o.signal.aborted) return this.stopped(waves);
-		const stopReason = costLimited ? 'cost_limit' : reason;
+	async conclude(reason: StopReason, round: Round, waves: number): Promise<LoopResult> {
+		const heard = pauses(reason) ? heardNotes(this.hear()) : [];
+		const concluded = await this.timed(this.o.session.conclude({ results: round.results, notes: [...round.notes, ...heard] }));
+		// step: the user stopped the run while the model answered
+		if (this.o.signal.aborted || concluded.kind === 'stopped') return this.stopped(waves);
+		const lines = this.entries.map(gatheredLine);
+		let stopReason = reason;
+		let answer: string;
+		switch (concluded.kind) {
+			case 'answer':
+				answer = concluded.answer.trim() ? resolveAnswerRefs(concluded.answer, this.memory) : partialReport('the model returned no text', lines);
+				break;
+			case 'cost_limit':
+				// step: the cost limit refused this request too, so it was never sent
+				stopReason = 'cost_limit';
+				answer = partialReport(concluded.error.message, lines);
+				break;
+			case 'failed':
+				answer = partialReport(`the model call failed (${concluded.error.name}: ${concluded.error.message})`, lines);
+				break;
+		}
 		if (pauses(stopReason)) this.hear();
 		return this.finish(stopReason, answer, waves);
-	}
-
-	/**
-	 * Asks for a best-effort answer from what was gathered (Wave's
-	 * `_synthesize`): a plain question, not a plan, with the results as lines
-	 * and the model's notes. If that call fails or returns nothing, the answer
-	 * is the gathered facts as they stand.
-	 *
-	 * @returns The answer, and whether the cost limit refused the question.
-	 */
-	private async bestEffort(): Promise<{ answer: string; costLimited: boolean }> {
-		const lines = this.results.map(gatheredLine);
-		const context = [`Information gathered:\n${lines.length ? lines.join('\n') : '(no results gathered)'}`];
-		// The notes hold what the model worked out (counts, names, conclusions).
-		if (this.scratch) context.push(`Your working notes from the steps so far:\n${this.scratch}`);
-		if (this.heard.length) context.push(heardText(this.heard));
-		const q: QuestionSpec = {
-			role: FALLBACK_ROLE,
-			instructions: [],
-			history: [...this.o.history],
-			goals: [this.o.request],
-			context,
-			question: FALLBACK_QUESTION,
-			expectJson: false,
-			cachePrefix: false,
-		};
-		let answer: string;
-		try {
-			answer = await this.ask(q);
-		} catch (error) {
-			// step: the cost limit refused this request too, so it was never sent
-			if (error instanceof CostLimitError) return { answer: partialReport(error.message, lines, this.scratch), costLimited: true };
-			const name = error instanceof Error ? error.name : 'Error';
-			return { answer: partialReport(`the model call failed (${name}: ${messageOf(error)})`, lines, this.scratch), costLimited: false };
-		}
-		if (!answer.trim()) return { answer: partialReport('the model returned no text', lines, this.scratch), costLimited: false };
-		return { answer, costLimited: false };
 	}
 }
 
@@ -1057,112 +913,76 @@ class WaveRun {
 
 /**
  * Runs waves until the answer is accepted, a call asks the user (`needs_input`), a reply stays
- * unusable after one retry (`empty_plan`), the model cannot be reached (`error`), the run is
- * stopped (`stopped`), the step limit is reached (`limited`), or the cost limit refuses a request
- * (`cost_limit`); the last two answer with a best effort. A done=true is sent back while a timed-
- * out call runs or ended unread, in the wave the check tool is called, while the finish rule finds
- * something unchecked, or while a mid-run user message is unread. @throws The model's error when it
- * fails before anything was gathered.
+ * unusable after the session's one retry (`empty_plan`), the model cannot be reached (`error`), the
+ * run is stopped (`stopped`), the step limit is reached (`limited`), or the cost limit refuses a
+ * request (`cost_limit`); all but the first three and `stopped` end with a final answer asked of the
+ * conversation. An answer is sent back while a timed-out call runs or ended unread, while the
+ * finish rule finds something unchecked, or while a mid-run user message is unread.
+ * @throws The model's error when it fails before anything was gathered.
  */
 export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 	const run = new WaveRun(o);
+	// the one round the session has not been given yet
+	let round = run.opening();
 	for (let wave = 0; ; wave++) {
 		if (o.signal.aborted) return run.stopped(wave);
-		// step: the step limit: no next plan; the answer is the best effort from what was gathered
-		if (o.maxWaves !== undefined && o.maxWaves > 0 && wave >= o.maxWaves) return run.answerFromGathered('limited', wave);
+		// step: the step limit: no next reply; the answer is asked of the conversation
+		if (o.maxWaves !== undefined && o.maxWaves > 0 && wave >= o.maxWaves) return run.conclude('limited', round, wave);
 		o.finish.beginWave(wave);
-		run.hear();
-		let reply: PlanReply;
-		try {
-			reply = await run.plan();
-		} catch (error) {
-			if (error instanceof RunStopped) return run.stopped(wave + 1);
-			// step: the cost limit refused the plan, so it was never sent; the best effort reserves too, and may be refused
-			if (error instanceof CostLimitError) return run.answerFromGathered('cost_limit', wave + 1);
-			// Nothing gathered: the cause (a bad key, a stopped pipeline) is the useful part.
-			if (!run.gathered) throw error;
-			return run.answerFromGathered('error', wave + 1);
-		}
-		const { toolCalls } = reply;
+		const reply = await run.timed(o.session.next(round));
+		round = NO_ROUND;
 
-		// step: done with nothing to run — the answer stands unless the work is unchecked,
-		// or a timed-out call has ended since and the model has not read how
-		if (reply.done && !toolCalls.length) {
-			const late = run.lateReturns();
-			await o.finish.endWave(late);
-			const refused = late.length ? READ_THE_LATE : (run.unfinished() ?? (run.hear() ? READ_THE_USER : null));
-			if (!refused) {
-				return run.finish('done', resolveAnswerRefs(reply.answer, run.memory), wave + 1);
+		switch (reply.kind) {
+			case 'stopped':
+				return run.stopped(wave + 1);
+			case 'cost_limit':
+				return run.conclude('cost_limit', round, wave + 1);
+			case 'failed':
+				// Nothing gathered: the cause (a bad key, a stopped pipeline) is the useful part.
+				if (!run.gathered) throw reply.error;
+				return run.conclude('error', round, wave + 1);
+			case 'unusable':
+				run.think(reply.thought, []);
+				return run.conclude('empty_plan', round, wave + 1);
+
+			case 'answer': {
+				// step: the answer stands unless the work is unchecked, a timed-out call has ended since
+				// and the model has not read how, or the user wrote while it worked
+				const late = run.lateReturns();
+				await o.finish.endWave(late);
+				const heard = run.hear();
+				const refused = late.length ? READ_THE_LATE : (run.unfinished() ?? (heard.length ? READ_THE_USER : null));
+				if (!refused) return run.finish('done', resolveAnswerRefs(reply.answer, run.memory), wave + 1);
+				run.think(reply.thought, []);
+				round = { results: [], notes: [refused, ...run.lateNotes(wave, late), ...heardNotes(heard), ...(o.notes?.() ?? [])] };
+				break;
 			}
-			// Its remove list is not applied: the answer it sends again may still need those keys.
-			run.record([refusal(wave, refused), ...problemEntries(wave, reply.problems), ...run.lateEntries(wave, late)]);
-			run.think(reply.thought, []);
-			continue;
-		}
 
-		// step: still unusable after the retry — record why, then answer from what was gathered
-		if (!toolCalls.length) {
-			run.record(reply.problems.map((problem, i) => ({ tool: 'reply-check', key: `wave-${wave}.check${i}`, error: `Skipped: ${problem}` })));
-			run.think(reply.thought, []);
-			return run.answerFromGathered('empty_plan', wave + 1);
-		}
-
-		// step: run the calls. Only earlier waves' keys can be removed, never a kept one, and a reply
-		// asking to finish keeps its keys in case it is sent back.
-		const earlier = run.earlierKeys();
-		const removing = reply.askedDone ? [] : reply.remove.filter((key) => earlier.has(key) && !run.isKept(key));
-		run.forget(removing);
-		run.toolCalls += toolCalls.length;
-		const { entries, ran } = await run.act(wave, toolCalls);
-		const lines = toolCalls.map((call, i) => thinkingLine(call, entries[i]));
-		entries.push(...problemEntries(wave, reply.problems));
-
-		// step: tell the finish rule what ran, failed calls included (a write may land before its error),
-		// then timed-out calls that ended since; a skipped call never touched the work
-		const late = run.lateReturns();
-		await o.finish.endWave([...ran, ...late]);
-		entries.push(...run.lateEntries(wave, late));
-		if (o.signal.aborted) {
-			run.think(reply.thought, lines);
-			return run.stopped(wave + 1);
-		}
-
-		// step: a call asked the user, so the turn ends here with the question as its answer. A message
-		// sent during this wave was written before the question showed, so it can't answer it.
-		const asked = o.endTurn?.() ?? null;
-		if (asked !== null && !run.hear()) {
-			run.record(entries);
-			run.think(reply.thought, lines);
-			return run.finish('needs_input', asked, wave + 1);
-		}
-		if (asked !== null) {
-			o.withdrawAsk?.();
-			entries.push(refusal(wave, ASKED_UNSEEN));
-		}
-
-		// step: done with calls — the answer stands only if every call worked, the
-		// model has read any check it ran and how any timed-out call ended, and the
-		// work is checked
-		let finished = reply.done && !entries.some((entry) => entry.error !== undefined);
-		if (finished && toolCalls.some((call) => call.tool === o.finish.checkTool)) {
-			finished = false;
-			entries.push(refusal(wave, readTheCheck(o.finish.checkTool)));
-		} else if (finished && late.length) {
-			finished = false;
-			entries.push(refusal(wave, READ_THE_LATE));
-		} else if (finished) {
-			const refused = run.unfinished() ?? (run.hear() ? READ_THE_USER : null);
-			if (refused) {
-				finished = false;
-				entries.push(refusal(wave, refused));
+			case 'calls': {
+				run.toolCalls += reply.calls.length;
+				const { results, ran, lines } = await run.act(wave, reply.calls);
+				// step: tell the finish rule what ran, failed calls included (a write may land before its error),
+				// then timed-out calls that ended since; a skipped call never touched the work
+				const late = run.lateReturns();
+				await o.finish.endWave([...ran, ...late]);
+				const notes = run.lateNotes(wave, late);
+				if (o.signal.aborted) {
+					run.think(reply.thought, lines);
+					return run.stopped(wave + 1);
+				}
+				// step: a call asked the user, so the turn ends here with the question as its answer. A message
+				// sent during this wave was written before the question showed, so it can't answer it.
+				const asked = o.endTurn?.() ?? null;
+				const heard = run.hear();
+				run.think(reply.thought, lines);
+				if (asked !== null && !heard.length) return run.finish('needs_input', asked, wave + 1);
+				if (asked !== null) {
+					o.withdrawAsk?.();
+					notes.push(ASKED_UNSEEN);
+				}
+				round = { results, notes: [...notes, ...heardNotes(heard), ...(o.notes?.() ?? [])] };
+				break;
 			}
 		}
-		run.record(entries);
-		if (finished) {
-			return run.finish('done', resolveAnswerRefs(reply.answer, run.memory), wave + 1);
-		}
-
-		run.think(reply.thought, lines);
-		if (removing.length) run.remove(removing);
 	}
 }

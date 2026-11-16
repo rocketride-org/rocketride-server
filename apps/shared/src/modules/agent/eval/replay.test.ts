@@ -73,12 +73,12 @@ test('every scenario has a recording, and each replays as it was recorded', { ti
 	assert.equal(r.status, 0);
 });
 
-test('a replay that runs out of recorded replies does not reproduce', { timeout: 5 * 60_000 }, () => {
+test('a replay that runs out of recorded answers does not reproduce', { timeout: 5 * 60_000 }, () => {
 	const { file, recording } = loadRecordings()[0];
 	const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'eval-data-'));
 	try {
 		fs.cpSync(DATA_DIR, copy, { recursive: true });
-		const cut: Recording = { ...recording, turns: recording.turns.map((t, i) => (i === 0 ? { ...t, events: t.events.slice(0, -1) } : t)) };
+		const cut: Recording = { ...recording, turns: recording.turns.map((t, i) => (i === 0 ? { ...t, answers: t.answers.slice(0, -1) } : t)) };
 		fs.writeFileSync(path.join(copy, path.relative(DATA_DIR, file)), JSON.stringify(cut));
 		const r = replay(['--scenarios', recording.scenario, '--set', recording.set], copy);
 		assert.equal(r.status, 1);
