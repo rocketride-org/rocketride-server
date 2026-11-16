@@ -471,10 +471,13 @@ export interface NewAppIdentity {
 // VIEW VOCABULARY
 // =============================================================================
 
-/** The activity views. Code editing lives outside the App Builder on every
-    host (VSCode edits natively; the web edits through the workspace
-    Explorer's file tabs) — there is no Code stage. */
-export type AppBuilderStage = 'dashboard' | 'design' | 'package' | 'store' | 'deploy';
+/** The activity views: DESIGN (the landing view) · PACKAGE · DEPLOY. Code
+    editing lives outside the App Builder on every host (VSCode edits
+    natively; the web edits through the workspace Explorer's file tabs) —
+    there is no Code stage. DASHBOARD was retired and STORE became a PACKAGE
+    side tab on 2026-11-16 (named-pipes mockups 1.x); the review thread
+    lives on PACKAGE › Review. */
+export type AppBuilderStage = 'design' | 'package' | 'deploy';
 
 /** The DESIGN pill panes. */
 export type DesignPane = 'preview' | 'components' | 'events' | 'console' | 'errors';

@@ -25,13 +25,14 @@
 // =============================================================================
 
 /**
- * The PACKAGE view: everything EVERY app needs regardless of the store —
- * identity (name, description), the icon and README assets (typed or
- * browsed, with preview), the include paths that make the build work (typed
- * or browsed), and the readiness box narrating whether the app is ready to
- * deploy and publish personally.
- * Commerce (mode, pricing, review) lives on the STORE tab; nothing here is
- * store-specific.
+ * The PACKAGE view (named-pipes mockups 1.3–1.8b): how the app is described,
+ * built, listed and reviewed, as SIDE TABS — Identity (name, description),
+ * Assets (icon and README, typed or browsed, with preview), Build (strict
+ * type checking, the include paths that make the build work), Store (the
+ * commerce card: mode, plans, requirements — {@link StoreView} embedded),
+ * Requirements (the readiness checklist), and Review (the conversation with
+ * the store review team, {@link ReviewView}). STORE stopped being a top-level
+ * tab and DASHBOARD was retired on 2026-11-16.
  *
  * Storage is the app's package.json appManifest via the same
  * loadListing/saveListing round-trip the STORE tab uses — files are truth.
@@ -43,6 +44,7 @@
  */
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ViewMenu } from 'shell';
 import { Banner } from 'shell';
 import { Button } from 'shell';
 import { Card } from 'shell';
@@ -50,7 +52,10 @@ import { ConfirmDialog } from 'shell';
 import { EmptyState } from 'shell';
 import { InputField } from 'shell';
 import { Modal } from 'shell';
-import type { AppSummary, IAppBuilderHost, ListingDraft, PreflightCheck } from '../../../../types';
+import { SidebarMenu } from 'shell';
+import type { AppBuilderStage, AppSummary, IAppBuilderHost, ListingDraft, PreflightCheck } from '../../../../types';
+import { ReviewView } from '../review/ReviewView';
+import { StoreView } from '../store/StoreView';
 
 // Lazy markdown renderer — the gallery's exact pattern (the renderer pulls
 // syntax highlighting; loading it eagerly would bloat every tab switch).
@@ -66,7 +71,29 @@ export interface IPackageViewProps {
 	host: IAppBuilderHost;
 	/** The app being shown. */
 	app: AppSummary;
+	/** Namespace mismatch: the Store and Review side tabs render read-only. */
+	readOnly?: boolean;
+	/** Switch the builder to another stage — the Store tab's deploy handoff. */
+	onNavigate?: (stage: AppBuilderStage) => void;
 }
+
+/** The PACKAGE side tabs, in page order (named-pipes mockups 1.3–1.8b). */
+export type PackageSection = 'identity' | 'assets' | 'build' | 'store' | 'requirements' | 'review';
+
+/** The side-tab menu. */
+const SECTION_MENU: ViewMenu = {
+	entries: [
+		{ id: 'identity', label: 'Identity' },
+		{ id: 'assets', label: 'Assets' },
+		{ id: 'build', label: 'Build' },
+		{ id: 'store', label: 'Store' },
+		{ id: 'requirements', label: 'Requirements' },
+		{ id: 'review', label: 'Review' },
+	],
+};
+
+/** The prefs key holding the active side tab. */
+const SECTION_PREF_KEY = 'packageSection';
 
 // =============================================================================
 // STYLES
@@ -85,6 +112,44 @@ const styles: Record<string, React.CSSProperties> = {
 		flex: 1,
 		minHeight: 0,
 		overflowY: 'auto',
+	},
+	// The side-tab shell under the header: SidebarMenu left, the active
+	// section's pane right (the Settings page's two-column idiom).
+	body: {
+		flex: 1,
+		minHeight: 0,
+		display: 'flex',
+		alignItems: 'stretch',
+	},
+	nav: {
+		width: 200,
+		flexShrink: 0,
+		borderRight: '1px solid var(--rr-border)',
+		padding: '12px 8px',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+		overflowY: 'auto',
+	},
+	pane: {
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+		display: 'flex',
+		flexDirection: 'column',
+		overflowY: 'auto',
+	},
+	paneBody: {
+		padding: '16px 26px 30px',
+		maxWidth: 1060,
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	},
+	paneFill: {
+		flex: 1,
+		minHeight: 0,
+		padding: '16px 26px 20px',
+		display: 'flex',
+		flexDirection: 'column',
 	},
 	head: {
 		padding: '18px 26px 0',
@@ -425,7 +490,18 @@ function packageFields(d: ListingDraft): string {
  *
  * @param props - See {@link IPackageViewProps}.
  */
-export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
+export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly = false, onNavigate }) => {
+	// ── Side tab — persisted like the stage, so the page reopens where it was ──
+	const [section, setSection] = useState<PackageSection>(() => {
+		const raw = host.getPref?.(SECTION_PREF_KEY);
+		return SECTION_MENU.entries.some((e) => e.id === raw) ? (raw as PackageSection) : 'identity';
+	});
+	/** Switch side tabs and persist the selection. */
+	const selectSection = (id: string): void => {
+		setSection(id as PackageSection);
+		host.setPref?.(SECTION_PREF_KEY, id);
+	};
+
 	// ── Data — loaded through the host adapter ───────────────────────────
 	const [draft, setDraft] = useState<ListingDraft | null>(null);
 	// The saved manifest the draft was seeded from — the dirty compare's
@@ -609,52 +685,113 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	// RENDER
 	// =====================================================================
 
+	// ── The side tabs' panes ─────────────────────────────────────────────
+	// Identity, Assets and Build are three pages over ONE draft (the saved
+	// manifest): the anchored Save/Cancel footer below serves all three.
+	const identityPane = (
+		<Card header="Identity">
+			<div style={styles.formRow}>
+				<div style={styles.formLabel}>App ID</div>
+				<div style={styles.formStatic}>{draft?.appId ?? app.id}</div>
+			</div>
+			<div style={styles.formRow}>
+				<div style={styles.formLabel}>Display name</div>
+				<InputField value={draft?.name ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))} />
+			</div>
+			<div style={styles.formRow}>
+				<div style={styles.formLabel}>Description</div>
+				<textarea style={styles.formArea} value={draft?.description ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, description: e.target.value } : d))} />
+			</div>
+		</Card>
+	);
+
+	const buildPane = (
+		<>
+			<Card header="Build">
+				<div style={styles.formRow}>
+					<div style={styles.formLabel}>Strict type checking</div>
+					<label style={styles.checkRowLabel}>
+						<input
+							type="checkbox"
+							checked={draft?.typecheck !== false}
+							onChange={(e) => setDraft((d) => (d ? { ...d, typecheck: e.target.checked } : d))}
+						/>
+						<span style={styles.checkRowText}>The server verifies the app with your own tsconfig before building. Turning this off deploys even with type errors.</span>
+					</label>
+				</div>
+			</Card>
+			<Card header="Include paths">
+				<div style={styles.includeHint}>Workspace directories or files your app imports beyond its own folder (for example <code>apps/shared</code>). They are packed into every deploy and installed by the server build. A missing one fails the build.</div>
+				{(draft?.include ?? []).map((entry, idx) => (
+					<div key={idx} style={styles.includeRow}>
+						<div style={styles.pathInput}>
+							<InputField
+								value={entry}
+								placeholder="apps/shared"
+								onChange={(e) => setDraft((d) => (d ? { ...d, include: (d.include ?? []).map((p, i) => (i === idx ? e.target.value : p)) } : d))}
+							/>
+						</div>
+						{host.pickIncludePath && (
+							<Button variant="secondary" small onClick={() => void onPickInclude(idx)}>Browse</Button>
+						)}
+						{/* ✕ ends a row of an editable list: nothing happens until Save. */}
+						<Button variant="ghost" small title="Remove this path" aria-label={`Remove ${entry || 'this path'}`} onClick={() => setDraft((d) => (d ? { ...d, include: (d.include ?? []).filter((_, i) => i !== idx) } : d))}>✕</Button>
+					</div>
+				))}
+				<div style={styles.actions}>
+					<Button variant="secondary" small onClick={() => setDraft((d) => (d ? { ...d, include: [...(d.include ?? []), ''] } : d))}>Add path</Button>
+					<span style={styles.actionNote}>workspace-relative</span>
+				</div>
+			</Card>
+		</>
+	);
+
+	const requirementsPane = (
+		<Card header="Requirements">
+			{packageChecks.length === 0 ? (
+				<EmptyState title="No checks yet" description="Readiness runs against the app's manifest once it loads." />
+			) : (
+				<>
+					<div style={styles.readyLead}>{readyLead}</div>
+					{packageChecks.map((c, i) => (
+						<div key={c.id} style={i === 0 ? { ...styles.checkRow, ...styles.checkRowFirst } : styles.checkRow}>
+							<div style={{ ...styles.checkMark, background: CHECK_PALETTE[c.state].bg, color: CHECK_PALETTE[c.state].fg }}>{CHECK_PALETTE[c.state].glyph}</div>
+							<div style={styles.checkText}>{c.label}</div>
+							{c.note ? <div style={styles.checkNote} title={c.note}>{c.note}</div> : null}
+						</div>
+					))}
+				</>
+			)}
+		</Card>
+	);
+
 	return (
 		<div style={styles.wrap}>
-			{/* Scrolling content region — every card lives here; only the
-			    footer bar below stays anchored. */}
-			<div style={styles.scroll}>
-				{/* View header — title + one-line purpose */}
-				<div style={styles.head}>
-					<div style={styles.h1}>{app.name}</div>
-					<div style={styles.sub}>Package: everything this app needs to build, deploy, and publish personally (identity, icon, README, and the workspace paths it ships with). Store-only concerns (pricing, review) live on the Store tab.</div>
+			{/* View header — title + one-line purpose */}
+			<div style={styles.head}>
+				<div style={styles.h1}>{app.name}</div>
+				<div style={styles.sub}>Package: how this app is described, built, listed and reviewed — its identity, assets and build settings, the store listing, the requirements checklist, and the conversation with the review team.</div>
+			</div>
+
+			{error ? (
+				<div style={{ margin: '16px 26px 0', maxWidth: 1060 }}>
+					<Banner variant="error">{error}</Banner>
 				</div>
+			) : null}
 
-				{error ? (
-					<div style={{ margin: '16px 26px 0', maxWidth: 1060 }}>
-						<Banner variant="error">{error}</Banner>
-					</div>
-				) : null}
-
-				<div style={styles.grid}>
-					{/* ── Left: identity + assets ─────────────────────────────── */}
-					<div style={styles.col}>
-						<Card header="Identity">
-							<div style={styles.formRow}>
-								<div style={styles.formLabel}>App ID</div>
-								<div style={styles.formStatic}>{draft?.appId ?? app.id}</div>
-							</div>
-							<div style={styles.formRow}>
-								<div style={styles.formLabel}>Display name</div>
-								<InputField value={draft?.name ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))} />
-							</div>
-							<div style={styles.formRow}>
-								<div style={styles.formLabel}>Description</div>
-								<textarea style={styles.formArea} value={draft?.description ?? ''} onChange={(e) => setDraft((d) => (d ? { ...d, description: e.target.value } : d))} />
-							</div>
-							<div style={styles.formRow}>
-								<div style={styles.formLabel}>Strict type checking</div>
-								<label style={styles.checkRowLabel}>
-									<input
-										type="checkbox"
-										checked={draft?.typecheck !== false}
-										onChange={(e) => setDraft((d) => (d ? { ...d, typecheck: e.target.checked } : d))}
-									/>
-									<span style={styles.checkRowText}>The server verifies the app with your own tsconfig before building. Turning this off deploys even with type errors.</span>
-								</label>
-							</div>
-						</Card>
-
+			{/* Side tabs left, the active pane right */}
+			<div style={styles.body}>
+				<nav style={styles.nav} aria-label="Package sections">
+					<SidebarMenu menu={SECTION_MENU} activeId={section} onSelect={selectSection} collapsed={false} />
+				</nav>
+				<div style={styles.pane}>
+					{section === 'identity' && <div style={styles.paneBody}>{identityPane}</div>}
+					{section === 'build' && <div style={styles.paneBody}>{buildPane}</div>}
+					{section === 'requirements' && <div style={styles.paneBody}>{requirementsPane}</div>}
+					{section === 'store' && <StoreView host={host} app={app} readOnly={readOnly} onNavigate={onNavigate} embedded />}
+					{section === 'review' && <div style={styles.paneFill}><ReviewView host={host} app={app} readOnly={readOnly} /></div>}
+					{section === 'assets' && (
+						<div style={styles.paneBody}>
 						<Card header="Assets">
 							<div style={styles.formRow}>
 								<div style={styles.formLabel}>Icon (SVG)</div>
@@ -698,50 +835,8 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 								</div>
 							</div>
 						</Card>
-					</div>
-
-					{/* ── Right: readiness + include paths ───────────────────── */}
-					<div style={styles.col}>
-						<Card header="Readiness">
-							{packageChecks.length === 0 ? (
-								<EmptyState title="No checks yet" description="Readiness runs against the app's manifest once it loads." />
-							) : (
-								<>
-									<div style={styles.readyLead}>{readyLead}</div>
-									{packageChecks.map((c, i) => (
-										<div key={c.id} style={i === 0 ? { ...styles.checkRow, ...styles.checkRowFirst } : styles.checkRow}>
-											<div style={{ ...styles.checkMark, background: CHECK_PALETTE[c.state].bg, color: CHECK_PALETTE[c.state].fg }}>{CHECK_PALETTE[c.state].glyph}</div>
-											<div style={styles.checkText}>{c.label}</div>
-											{c.note ? <div style={styles.checkNote} title={c.note}>{c.note}</div> : null}
-										</div>
-									))}
-								</>
-							)}
-						</Card>
-
-						<Card header="Include paths">
-							<div style={styles.includeHint}>Workspace directories or files your app imports beyond its own folder (for example <code>apps/shared</code>). They are packed into every deploy and installed by the server build. A missing one fails the build.</div>
-							{(draft?.include ?? []).map((entry, idx) => (
-								<div key={idx} style={styles.includeRow}>
-									<div style={styles.pathInput}>
-										<InputField
-											value={entry}
-											placeholder="apps/shared"
-											onChange={(e) => setDraft((d) => (d ? { ...d, include: (d.include ?? []).map((p, i) => (i === idx ? e.target.value : p)) } : d))}
-										/>
-									</div>
-									{host.pickIncludePath && (
-										<Button variant="secondary" small onClick={() => void onPickInclude(idx)}>Browse</Button>
-									)}
-									<Button variant="secondary" small onClick={() => setDraft((d) => (d ? { ...d, include: (d.include ?? []).filter((_, i) => i !== idx) } : d))}>Remove</Button>
-								</div>
-							))}
-							<div style={styles.actions}>
-								<Button variant="secondary" small onClick={() => setDraft((d) => (d ? { ...d, include: [...(d.include ?? []), ''] } : d))}>Add path</Button>
-								<span style={styles.actionNote}>workspace-relative</span>
-							</div>
-						</Card>
-					</div>
+						</div>
+					)}
 				</div>
 			</div>
 

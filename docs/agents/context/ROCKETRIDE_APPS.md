@@ -102,50 +102,47 @@ outside a RocketRide workspace; inside one, import from `'shell'`.)
 The App Builder is where you develop, package, and ship an app. Open it by
 opening your app's `.rrapp` file — a contentless trigger; everything about
 the app (id, name) lives in `package.json`'s `appManifest` block. The
-screen is one tab strip with five activity views, the app's `id · version`
+screen is one tab strip with three activity views, the app's `id · version`
 in the trailing corner:
 
 | Tab | Question it answers |
 |---|---|
-| **Dashboard** | What state is my app in, and what should I do next? |
-| **Design** | Does it look and behave right? (live preview + feeds) |
-| **Package** | Is my app complete and buildable? (identity, assets, includes) |
-| **Store** | Is my public listing ready? (commerce only) |
+| **Design** | Does it look and behave right? (live preview, the console docked under it) |
+| **Package** | How is it described, built, listed and reviewed? (side tabs: Identity, Assets, Build, Store, Requirements, Review) |
 | **Deploy** | Which versions exist, and who serves which one? |
-
-### Dashboard
-
-The landing tab. A lead card narrates the app's state in plain sentences —
-the latest version, its review state, what serves where — and recommends the
-next step with an "Open ..." button. Below it, the **review conversation**:
-the app's entire deployment history as one chronological stream, where
-system events (deploy, publish, submission, verdict) render as timeline
-items and reviewer/developer messages render as chat bubbles. The reply box
-posts into the same thread the store reviewer reads — you can message the
-review team at any time, before or during a review.
 
 ### Design
 
-One workspace with pill-switched panes: **Preview | Code | Components |
-Events | Console | Errors**. Switching a pane never resets the session — the
-dev server, watch state, and accumulated feeds persist. Details in
-[The Dev Loop](#the-dev-loop).
+The landing tab. One workspace with two pill-switched panes, **Preview |
+Components**, and the **console docked under the preview**: console output,
+errors, and platform events as one log, opened and closed from the preview
+toolbar's `>_` button or the pane's own ✕. Switching a pane never resets the
+session — the dev server, watch state, and accumulated feeds persist. Details
+in [The Dev Loop](#the-dev-loop).
 
 ### Package
 
-Everything every app needs regardless of the store: display name and
-description, the icon and README assets (typed or picked, with live
-preview), the `include` paths that make the server build work, and a
-readiness box narrating whether the app is ready to deploy and publish
-personally. Edits stage into a draft with a Save/Cancel bar; storage is
+How the app is described, built, listed and reviewed, as side tabs:
+
+- **Identity** — display name and description.
+- **Assets** — the icon and README (typed or picked, with live preview).
+- **Build** — strict type checking and the `include` paths that make the
+  server build work.
+- **Store** — the public-store paperwork only: billing mode, pricing plans,
+  and the store requirements checklist. Personal and team publishing never
+  touches it. When every requirement passes it hands you to the Deploy
+  tab — submission itself happens there, per version.
+- **Requirements** — the readiness checklist: whether the app can build,
+  deploy and publish personally.
+- **Review** — the conversation with the store review team: the app's
+  deployment history as one chronological stream, filtered by version,
+  where system events (deploy, publish, submission, verdict) render as
+  timeline items and reviewer/developer messages as chat bubbles. The reply
+  box posts into the same thread the reviewer reads — you can message the
+  review team at any time, before or during a review.
+
+Identity, Assets and Build edit one draft with a Save/Cancel bar; storage is
 your app's `package.json` `appManifest` — files are the truth.
-
-### Store
-
-The public-store paperwork only: billing mode, pricing plans, and the store
-requirements checklist. Personal and team publishing never touches this
-tab. When every requirement passes, the tab hands you to the Deploy tab —
-submission itself happens there, per version.
 
 ### Deploy
 
@@ -157,10 +154,10 @@ The version rail and the "Where this app is live" table. Covered in full in
 Every app id is `<developerId>.<name>`. Your organization claims its
 developer id once (self-service, on the Deploy tab: letters and underscores
 only); from then on the org can only deploy apps inside that namespace. If
-an app's id prefix does not match your org's developer id, Store and Deploy
-render read-only with a banner explaining the fix (rename the id in
-`package.json`). Design and Package stay fully editable — local work is
-always allowed.
+an app's id prefix does not match your org's developer id, Deploy and the
+Package tab's Store and Review side tabs render read-only with a banner
+explaining the fix (rename the id in `package.json`). Design and the rest of
+Package stay fully editable — local work is always allowed.
 
 ---
 
@@ -1816,7 +1813,7 @@ While the server works, the version card shows a live build ticker
 (`uploaded`, `installing`, `checking`, `building`, ...). On success it
 clears; on failure the card gets a **failed** badge that is a door — click
 it to open the full phase-by-phase build log, failure reason at the end.
-The Dashboard's status card opens the same log with **View build log**. An
+The Review tab's timeline opens the same log with **View build log**. An
 app whose builds have all failed is missing from the shell, so opening it
 shows your organization a screen that names
 `rocketride deploy log <appId> <version>` instead of "App not found".
@@ -1858,7 +1855,7 @@ that audience again revives it.
   `rejected`, pushed live to your App Builder (`app:statusChanged`), with
   reviewer notes on rejection.
 - The whole exchange — submissions, verdicts, and free-form messages both
-  ways — lives in the Dashboard's review conversation. You can message the
+  ways — lives on the Package tab's **Review** side tab. You can message the
   review team there at any time, including before submitting.
 
 ### Where this app is live
