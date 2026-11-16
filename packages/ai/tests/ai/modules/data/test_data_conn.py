@@ -809,3 +809,43 @@ async def test_any_other_write_error_passes_through_unchanged(monkeypatch):
 
     with pytest.raises(RuntimeError, match='node blew up'):
         await conn._write({}, {'pipeId': 1, 'data': b'x'})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_json_write_keeps_the_cancelled_code(monkeypatch):
+    """The json lane converts only its parse to ValueError: the binder's Cancelled from the write keeps its code."""
+    from rocketlib import Ec
+
+    from ai.modules.data.data_conn import RequestCancelled
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'json'
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeJson.side_effect = refused
+
+    with pytest.raises(RequestCancelled):
+        await conn._write({}, {'pipeId': 1, 'data': b'{"k": 1}'})
+    # A parse failure is still the lane's ValueError
+    conn_pipe.has_failed = False
+    with pytest.raises(ValueError):
+        await conn._write({}, {'pipeId': 1, 'data': b'not json'})
+
+
+@pytest.mark.asyncio
+async def test_close_still_closes_the_pipe_when_end_is_refused(monkeypatch):
+    """After a cancel the END lane write is refused; pipe.close() must still run so the slot is released."""
+    from rocketlib import Ec
+
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'audio'
+    refused = Exception('Cancelled: Pipeline request cancelled')
+    refused.code = int(Ec.Cancelled)
+    conn_pipe.pipe.writeAudio.side_effect = refused
+
+    body = await conn._close({}, {'pipeId': 1})
+
+    conn_pipe.pipe.close.assert_called_once_with()
+    assert conn_pipe.has_failed
+    assert body['objectId'] == 'obj-1'
+    assert 1 not in conn._pipe_map

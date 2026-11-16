@@ -55,8 +55,10 @@ let clientId = 0;
  * 4. Call close() to finalize and get results
  *
  * A request runs until the pipeline answers: neither the SDK nor the server
- * times it out. To stop one, call cancel() from another task; the write in
- * flight then rejects with code `TASK_CANCELLED` and close() still runs.
+ * adds a deadline of its own (a `requestTimeout` configured on the client still
+ * applies, as the caller's own bound). To stop one, call cancel() from another
+ * task; the write in flight then rejects with code `TASK_CANCELLED` at the next
+ * node boundary and close() still runs.
  *
  * @example
  * ```typescript
@@ -260,8 +262,12 @@ export class DataPipe {
 	 * `TASK_CANCELLED`; a node in the middle of its own work finishes that step
 	 * first. The pipe stays open: call close() afterwards as usual, and it
 	 * releases the server-side slot. Cancelling a pipe with nothing in flight
-	 * makes its next write fail at once. This is how a caller bounds a request:
-	 * the SDK and the server never time one out on their own.
+	 * makes its next write fail at once. This is how a caller stops a request:
+	 * neither the SDK nor the server adds a deadline of its own (a `requestTimeout`
+	 * configured on the client still applies, as the caller's own bound).
+	 * Cancellation is cooperative: a node in the middle of its step finishes it
+	 * first, and a cancel that arrives while the LAST node runs lets that write
+	 * complete.
 	 *
 	 * @throws Error if the pipe is not open
 	 * @throws PipeException if the server refuses the cancel
@@ -381,7 +387,7 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const msg = response.message || `Tool "${tool}" invocation failed.`;
-			throw new Error(msg);
+			throw new PipeException({ ...response, message: msg });
 		}
 
 		return (response.body as any)?.result as T;
@@ -1738,9 +1744,11 @@ export class RocketRideClient extends DAPClient {
 		if (inline) {
 			arguments_.data = data;
 		}
-		// No deadline on either side: the request runs until the pipeline
-		// answers or fails. A caller that wants a bound streams through its
-		// own pipe and calls cancel() on it.
+		// submit() adds no deadline of its own and neither does the server:
+		// the request runs until the pipeline answers or fails (a client-level
+		// requestTimeout still applies, as the caller's own bound). A caller
+		// that wants to stop a request streams through its own pipe and calls
+		// cancel() on it.
 		let stamps: SUBMIT_RESULT;
 		try {
 			stamps = (await this.call('rrext_submit', arguments_)) as SUBMIT_RESULT;

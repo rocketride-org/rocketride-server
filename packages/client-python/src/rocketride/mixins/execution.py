@@ -198,8 +198,10 @@ class ExecutionMixin(DAPClient):
             RuntimeError: The server refused (not found, spec changed,
                 permission ...), or does not support ``submit``.
 
-        The request has no deadline on either side: it runs until the
-        pipeline answers or fails. To bound one, stream through your own
+        ``submit()`` adds no deadline of its own and neither does the
+        server: the request runs until the pipeline answers or fails. A
+        ``request_timeout`` configured on the client still applies, as the
+        caller's own bound. To stop a request, stream through your own
         ``pipe()`` and call ``cancel()`` on it.
 
         Example:

@@ -256,7 +256,7 @@ returns the pipeline result.
 | `open` | `open(): Promise<DataPipe>` | `Promise<DataPipe>` | Opens the pipe on the server. Must be called before `write()`. |
 | `write` | `write(buffer: Uint8Array): Promise<void>` | - | Writes a chunk. Pipe must be open. |
 | `close` | `close(): Promise<PIPELINE_RESULT \| undefined>` | `Promise<PIPELINE_RESULT \| undefined>` | Closes the pipe and returns the processing result. No-op if already closed. |
-| `cancel` | `cancel(): Promise<void>` | - | Cancels the request in flight: the pending `write()` rejects with code `TASK_CANCELLED` at the next node boundary. The pipe stays open for `close()`. |
+| `cancel` | `cancel(): Promise<void>` | - | Cancels the request in flight: the pending `write()` rejects with code `TASK_CANCELLED` at the next node boundary. A node mid-step finishes it first, and a cancel during the last node lets that write complete. The pipe stays open for `close()`. |
 | `tool` | `tool<T = any>(tool: string, nodeId = '', input: Record<string, unknown> = {}): Promise<T>` | `Promise<T>` | Invokes a pipeline tool function through the pipe. |
 
 ## Question

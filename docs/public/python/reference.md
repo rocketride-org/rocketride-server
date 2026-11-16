@@ -215,7 +215,7 @@ calls `close()`.
 | `open` | `async def open(self) -> DataPipe` | `self` | Opens the pipe; required before `write()`. |
 | `write` | `async def write(self, buffer: bytes) -> None` | - | Writes a chunk. Pipe must be open; payload must be `bytes`. |
 | `close` | `async def close(self) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Closes the pipe and returns the processing result. |
-| `cancel` | `async def cancel(self) -> None` | - | Cancels the request in flight: the pending `write()` fails with code `TASK_CANCELLED` at the next node boundary. The pipe stays open for `close()`. |
+| `cancel` | `async def cancel(self) -> None` | - | Cancels the request in flight: the pending `write()` fails with code `TASK_CANCELLED` at the next node boundary. A node mid-step finishes it first, and a cancel during the last node lets that write complete. The pipe stays open for `close()`. |
 | `tool` | `async def tool(self, *, tool: str, node_id: str = '', input: dict = None) -> Any` | `Any` | Invokes a pipeline tool function through the pipe. |
 
 `open()` retries once automatically if it hits a transient "Connect call

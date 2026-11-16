@@ -399,8 +399,12 @@ class DataMixin(DAPClient):
             the middle of its own work finishes that step first. The pipe
             stays open: call ``close()`` afterwards as usual, and it releases
             the server-side slot. Cancelling a pipe with nothing in flight
-            makes its next write fail at once. This is how a caller bounds a
-            request: the SDK and the server never time one out on their own.
+            makes its next write fail at once. This is how a caller stops a
+            request: neither the SDK nor the server adds a deadline of its own
+            (a ``request_timeout`` configured on the client still applies, as
+            the caller's own bound). Cancellation is cooperative: a node in the
+            middle of its step finishes it first, and a cancel that arrives
+            while the LAST node runs lets that write complete.
 
             Raises:
                 RuntimeError: If the pipe is not open.
@@ -479,7 +483,9 @@ class DataMixin(DAPClient):
 
             if self._client.did_fail(response):
                 msg = response.get('message') or f'Tool "{tool}" invocation failed.'
-                raise RuntimeError(msg)
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
 
             body = response.get('body', {})
             return body.get('result')

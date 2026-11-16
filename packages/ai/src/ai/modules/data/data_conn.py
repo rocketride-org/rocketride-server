@@ -1072,11 +1072,13 @@ class DataConn(DAPConn):
                         pipe.writeText(string_data)
 
                 elif lane == 'json':
+                    # Only the parse is converted: an error from the write keeps
+                    # its code (the binder's Cancelled is recognised by the frame)
                     try:
                         json_data = json.loads(data.decode('utf-8'))
-                        pipe.writeJson(IJson(json_data))
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeJson(IJson(json_data))
 
                 elif lane == 'audio':
                     pipe.writeAudio(AVI_ACTION.WRITE, mime_type, data)
@@ -1097,9 +1099,9 @@ class DataConn(DAPConn):
                     try:
                         question_str = data.decode('utf-8')
                         question = Question.model_validate_json(question_str)
-                        pipe.writeQuestions(question)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeQuestions(question)
 
                 elif lane == 'documents':
                     try:
@@ -1110,17 +1112,17 @@ class DataConn(DAPConn):
                             docs = [Doc.model_validate(d) for d in doc_data]
                         else:
                             docs = [Doc.model_validate(doc_data)]
-                        pipe.writeDocuments(docs)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeDocuments(docs)
 
                 elif lane == 'answers':
                     try:
                         answer_str = data.decode('utf-8')
                         answer = Answer.model_validate_json(answer_str)
-                        pipe.writeAnswers(answer)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeAnswers(answer)
 
                 elif lane == 'classifications':
                     try:
@@ -1130,9 +1132,9 @@ class DataConn(DAPConn):
                         classifications = class_data.get('classifications', {})
                         policy = class_data.get('classificationPolicy', {})
                         rules = class_data.get('classificationRules', {})
-                        pipe.writeClassifications(classifications, policy, rules)
                     except Exception as e:
                         raise ValueError(str(e))
+                    pipe.writeClassifications(classifications, policy, rules)
 
                 else:
                     raise ValueError(f'Invalid lane {lane}')
@@ -1237,15 +1239,17 @@ class DataConn(DAPConn):
                 # the pipeline produced — so result extraction is OUTSIDE
                 # the try/except.
                 try:
-                    # End the pipe (sends END action to finalize streams)
-                    self._end(conn_pipe)
-
-                    # Close the pipe to finalize all processing.
-                    # This calls closing() which may flush buffered data
-                    # through the pipeline — if a downstream node throws,
-                    # the exception is caught below.
-                    pipe = conn_pipe.pipe
-                    pipe.close()
+                    try:
+                        # End the pipe (sends END action to finalize streams)
+                        self._end(conn_pipe)
+                    finally:
+                        # Close the pipe to finalize all processing, even when
+                        # END was refused (a cancelled request refuses every
+                        # lane but close). This calls closing() which may flush
+                        # buffered data through the pipeline — if a downstream
+                        # node throws, the exception is caught below.
+                        pipe = conn_pipe.pipe
+                        pipe.close()
 
                 except Exception as e:
                     # Pipeline error during end/close — log it but continue

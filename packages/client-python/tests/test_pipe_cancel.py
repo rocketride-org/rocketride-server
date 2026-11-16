@@ -132,3 +132,16 @@ def test_the_write_a_cancel_interrupted_carries_the_cancelled_code():
         assert err.value.code == 'TASK_CANCELLED'
 
     _run(run())
+
+
+def test_a_cancelled_tool_call_carries_the_cancelled_code_too():
+    """tool() on a cancelled pipe fails like write(): a PipeException classified by ``code``."""
+    pipe, _ = _make_pipe([('ok', {'pipeId': 7}), ('fail', ('Pipe 7: the request was cancelled', 'TASK_CANCELLED'))])
+
+    async def run():
+        await pipe.open()
+        with pytest.raises(PipeException) as err:
+            await pipe.tool(tool='lookup')
+        assert err.value.code == 'TASK_CANCELLED'
+
+    _run(run())

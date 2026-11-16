@@ -109,4 +109,22 @@ describe('DataPipe.cancel()', () => {
 		expect(caught).toBeInstanceOf(PipeException);
 		expect((caught as PipeException).code).toBe('TASK_CANCELLED');
 	});
+
+	it('a cancelled tool call carries the TASK_CANCELLED code too', async () => {
+		const { client } = stubClient([
+			{ success: true, body: { pipeId: 7 } },
+			{ success: false, message: 'Pipe 7: the request was cancelled', code: 'TASK_CANCELLED' },
+		]);
+		const pipe = new DataPipe(client, 'tk');
+		await pipe.open();
+
+		let caught: unknown;
+		try {
+			await pipe.tool('lookup');
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(PipeException);
+		expect((caught as PipeException).code).toBe('TASK_CANCELLED');
+	});
 });
