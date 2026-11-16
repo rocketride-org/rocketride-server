@@ -59,7 +59,11 @@ class TraceOwner:
             request and their home team, which on a team-owned control differ
             from one request to the next. None for a tree nobody metered.
         address: The control's address, for the usage row's pipe segment.
-        rung: The rung the control resolved on, for the row's context.
+        rung: The rung the control resolved on, for the row's key and context.
+        team: The audience slot of the publication that answered (a team id,
+            ``user~{uid}`` or ``~public``); ``''`` for a dev run. Part of the
+            usage row's key, so two publications never share a row (plan 8.2).
+        version: The artifact version that answered; None for a dev run.
     """
 
     control_key: str
@@ -68,6 +72,8 @@ class TraceOwner:
     billing: Any = None
     address: str = ''
     rung: str = ''
+    team: str = ''
+    version: Optional[int] = None
 
 
 # ==== The registry ===============================================================
@@ -97,6 +103,8 @@ class TraceOwners:
         billing: Any = None,
         address: str = '',
         rung: str = '',
+        team: str = '',
+        version: Optional[int] = None,
     ) -> None:
         """
         Record that ``trace_id`` belongs to ``control_key``, opened by ``conn_id``, paid by ``billing``.
@@ -108,12 +116,17 @@ class TraceOwners:
             billing: The caller's paying unit for this tree (plan 8.3).
             address: The control's address.
             rung: The control's rung.
+            team: The answering publication's audience slot (``''`` on a dev run).
+            version: The answering artifact version (None on a dev run).
         """
         if not trace_id:
             return
         # A re-claim (the idempotent open served the same binding twice) keeps
         # the first owner: a tree never changes hands
-        self._live.setdefault(trace_id, TraceOwner(control_key, conn_id, billing=billing, address=address, rung=rung))
+        self._live.setdefault(
+            trace_id,
+            TraceOwner(control_key, conn_id, billing=billing, address=address, rung=rung, team=team, version=version),
+        )
 
     def release(self, trace_id: str, now: Optional[float] = None) -> None:
         """
@@ -153,7 +166,14 @@ class TraceOwners:
         if now - released_at >= CONST_BINDING_GRACE_SECONDS:
             return None
         return TraceOwner(
-            owner.control_key, owner.conn_id, late=True, billing=owner.billing, address=owner.address, rung=owner.rung
+            owner.control_key,
+            owner.conn_id,
+            late=True,
+            billing=owner.billing,
+            address=owner.address,
+            rung=owner.rung,
+            team=owner.team,
+            version=owner.version,
         )
 
     def sweep(self, now: Optional[float] = None) -> None:

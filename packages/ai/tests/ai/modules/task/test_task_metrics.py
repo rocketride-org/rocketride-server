@@ -580,12 +580,14 @@ def _attribution(org='org-1', user='user-a', team='team-home'):
     return BillingAttribution(org_id=org, team_id=team, user_id=user)
 
 
-def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None):
+def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None, team='team-1', version=5):
     return task_metrics.TraceUsage(
         control_key=control_key,
         billing=billing or _attribution(),
         address='acme.docBrain.chat',
         rung='team',
+        team=team,
+        version=version,
     )
 
 
@@ -603,12 +605,40 @@ def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gp
         }
     )
     day = task_metrics.UsageSink.day_number()
-    key = f'usage:{day}:acme.docBrain:user-a:hold_time'
+    key = f'usage:{day}:acme.docBrain:team:team-1:5:user-a:hold_time'
     assert list(sink.pending) == [key]
     pending = sink.pending[key]
     assert pending['amount'] == 0.5 and pending['request_count'] == 1  # 500 ms x 0.001; bytes_in bills nothing
     assert pending['row']['org_id'] == 'org-1' and pending['row']['team_id'] == 'team-home'
-    assert pending['row']['context']['rung'] == 'team' and 7 not in tm.traces
+    context = pending['row']['context']
+    assert (context['rung'], context['team'], context['version']) == ('team', 'team-1', 5) and 7 not in tm.traces
+
+
+def test_two_publications_used_by_one_caller_on_one_day_are_two_rows(fake_psutil, no_gpu, mock_billing_rates):
+    """The publication that answered is in the key: Staging and Production never share a row (plan 8.2)."""
+    sink = task_metrics.UsageSink(post=None)
+    now = 20772 * 86400 + 10
+    sink.post(_usage(1, team='staging', version=5), {'hold_time': 0.5}, now=now)
+    sink.post(_usage(2, team='production', version=4), {'hold_time': 0.25}, now=now)
+    sink.post(_usage(3, team='production', version=4), {'hold_time': 0.25}, now=now)
+    assert sorted(sink.pending) == [
+        'usage:20772:acme.docBrain:team:production:4:user-a:hold_time',
+        'usage:20772:acme.docBrain:team:staging:5:user-a:hold_time',
+    ]
+    production = sink.pending['usage:20772:acme.docBrain:team:production:4:user-a:hold_time']
+    assert production['request_count'] == 2 and production['row']['context']['team'] == 'production'
+
+
+def test_a_dev_run_serves_through_no_publication(fake_psutil, no_gpu, mock_billing_rates):
+    """A dev run's row carries '-' where a published rung carries the slot and version, and None in the context."""
+    sink = task_metrics.UsageSink(post=None)
+    usage = task_metrics.TraceUsage(
+        control_key='dev.user-a.acme.docBrain.chat', billing=_attribution(), address='acme.docBrain.chat', rung='dev'
+    )
+    sink.post(usage, {'hold_time': 0.5}, now=20772 * 86400 + 10)
+    key = 'usage:20772:acme.docBrain:dev:-:-:user-a:hold_time'
+    assert list(sink.pending) == [key]
+    assert (sink.pending[key]['row']['context']['team'], sink.pending[key]['row']['context']['version']) == (None, None)
 
 
 def test_an_open_tree_is_tracked_and_an_unclaimed_tree_stays_engine_level(fake_psutil, no_gpu, mock_billing_rates):
@@ -658,9 +688,9 @@ async def test_the_sink_coalesces_increments_and_retries_a_failed_write_under_it
     now = 20772 * 86400 + 10
     sink.post(_usage(1), {'hold_time': 0.5}, now=now)
     sink.post(_usage(2), {'hold_time': 0.25, 'tokens': 2.0}, now=now)
-    key = 'usage:20772:acme.docBrain:user-a:hold_time'
+    key = 'usage:20772:acme.docBrain:team:team-1:5:user-a:hold_time'
     assert sink.pending[key]['amount'] == 0.75 and sink.pending[key]['request_count'] == 2
-    assert sink.pending['usage:20772:acme.docBrain:user-a:tokens']['request_count'] == 1
+    assert sink.pending['usage:20772:acme.docBrain:team:team-1:5:user-a:tokens']['request_count'] == 1
     first_id = sink.pending[key]['increment_id']
 
     await sink.flush()

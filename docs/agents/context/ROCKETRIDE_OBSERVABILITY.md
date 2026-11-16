@@ -325,8 +325,8 @@ object counts: what each request cost its caller is accounted per request
 instead. Every request tree's pipe hold (admission to `putPipe`, less the GPU
 queue wait it sat through), bytes and model timings are booked to the tree
 and, when it closes, added to the caller's DAY row in the ledger
-(`usage:{dayNumber}:{developerId.pipeId}:{userId}:{resource}`, one row per
-day, pipe, user and resource, with a `request_count`). Nothing per request
+(`usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}`, one row per
+day, pipe, publication (rung, team, version), user and resource, with a `request_count`). Nothing per request
 rides the status body.
 
 `state` enum mapping:
