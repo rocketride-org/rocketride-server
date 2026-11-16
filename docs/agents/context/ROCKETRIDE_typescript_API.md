@@ -265,7 +265,7 @@ With `persist: true`, a dropped connection reconnects automatically and replays 
 
 ##### `RocketRideClient.getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>`
 
-Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
+Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, posthogPublishableKey?, posthogHost?, endpoints }`. The PostHog pair is the environment's product-telemetry config (absent = telemetry off); the `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
 
 ```typescript
 const info = await RocketRideClient.getServerInfo('localhost:5565');
