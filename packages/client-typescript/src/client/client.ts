@@ -29,7 +29,7 @@ import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX, SUBMIT_TRANSPORT_MARGIN } from './constants.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
@@ -53,6 +53,10 @@ let clientId = 0;
  * 2. Call open() to establish the pipe
  * 3. Call write() multiple times with data chunks
  * 4. Call close() to finalize and get results
+ *
+ * A request runs until the pipeline answers: neither the SDK nor the server
+ * times it out. To stop one, call cancel() from another task; the write in
+ * flight then rejects with code `TASK_CANCELLED` and close() still runs.
  *
  * @example
  * ```typescript
@@ -109,33 +113,6 @@ export class DataPipe {
 			arguments_.team = this._team;
 		}
 		return arguments_;
-	}
-
-	/**
-	 * Give the pipe up without waiting for the server: the caller's operation is over
-	 * (its timeout expired). The SSE subscription is dropped at once, the server-side
-	 * pipe is closed best-effort in the background, and a write that was pending when
-	 * the timeout fired finds the pipe closed afterwards and does not finalize it again.
-	 */
-	abandon(): void {
-		if (this._closed) {
-			return;
-		}
-		const pipeId = this._pipeId;
-		this._closed = true;
-		this._opened = false;
-		if (pipeId === undefined) {
-			return;
-		}
-		if (this._onSSE !== undefined) {
-			this._client._ssePipeCallbacks.delete(pipeId);
-			void this._client.setEvents(this._token, [], pipeId).catch(() => undefined);
-		}
-		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({ subcommand: 'close', pipeId: pipeId }),
-			token: this._token,
-		});
-		void this._client.request(request).catch(() => undefined);
 	}
 
 	/**
@@ -271,6 +248,52 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const msg = response.message || 'Failed to write to a data pipe.';
+			throw new PipeException({ ...response, message: msg });
+		}
+	}
+
+	/**
+	 * Cancel the request this pipe is running.
+	 *
+	 * Sets a flag on the pipe inside the engine. The write (or tool call) in flight
+	 * fails at the next node boundary with a PipeException whose `code` is
+	 * `TASK_CANCELLED`; a node in the middle of its own work finishes that step
+	 * first. The pipe stays open: call close() afterwards as usual, and it
+	 * releases the server-side slot. Cancelling a pipe with nothing in flight
+	 * makes its next write fail at once. This is how a caller bounds a request:
+	 * the SDK and the server never time one out on their own.
+	 *
+	 * @throws Error if the pipe is not open
+	 * @throws PipeException if the server refuses the cancel
+	 *
+	 * @example
+	 * ```typescript
+	 * const timer = setTimeout(() => void pipe.cancel(), 60_000);
+	 * try {
+	 *   await pipe.write(data);
+	 * } finally {
+	 *   clearTimeout(timer);
+	 *   await pipe.close();
+	 * }
+	 * ```
+	 */
+	async cancel(): Promise<void> {
+		if (!this._opened || this._closed) {
+			throw new Error('Pipe is not open');
+		}
+
+		const request = this._client.buildRequest('rrext_process', {
+			arguments: this._arguments({
+				subcommand: 'cancel',
+				pipeId: this._pipeId,
+			}),
+			token: this._token,
+		});
+
+		const response = await this._client.request(request);
+
+		if (this._client.didFail(response)) {
+			const msg = response.message || 'Failed to cancel a data pipe.';
 			throw new PipeException({ ...response, message: msg });
 		}
 	}
@@ -1638,7 +1661,6 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
 	 * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
 	 * @param options.onChange - `'error'` | `'keep'` | `'auto'` (spec calls)
-	 * @param options.timeout - Seconds for the request (pipe open to close)
 	 * @param options.team - Answer `@team` from this one of your teams
 	 * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
 	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
@@ -1666,11 +1688,10 @@ export class RocketRideClient extends DAPClient {
 			env?: Record<string, string>;
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			onChange?: 'error' | 'keep' | 'auto';
-			timeout?: number;
 			team?: string;
 		} = {}
 	): Promise<SUBMIT_RESULT> {
-		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel, onChange, timeout, team } = options;
+		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel, onChange, team } = options;
 
 		// Step 1: exactly one of name / pipeline / filepath
 		if ([name, pipeline, filepath].filter((value) => value !== undefined).length !== 1) {
@@ -1697,7 +1718,7 @@ export class RocketRideClient extends DAPClient {
 			arguments_.pipeline = JSON.parse(JSON.stringify(spec));
 			arguments_.onChange = onChange ?? 'error';
 		}
-		const optional: Record<string, unknown> = { source, team, params, objinfo, mimetype, threads, args, ttl, pipelineTraceLevel, timeout };
+		const optional: Record<string, unknown> = { source, team, params, objinfo, mimetype, threads, args, ttl, pipelineTraceLevel };
 		for (const [key, value] of Object.entries(optional)) {
 			if (value !== undefined) arguments_[key] = value;
 		}
@@ -1717,13 +1738,12 @@ export class RocketRideClient extends DAPClient {
 		if (inline) {
 			arguments_.data = data;
 		}
-		// ``timeout`` is a SERVER argument (seconds, pipe open to close); the
-		// transport deadline is separate and outlives it, so the server's own
-		// timeout error is what the caller sees.
+		// No deadline on either side: the request runs until the pipeline
+		// answers or fails. A caller that wants a bound streams through its
+		// own pipe and calls cancel() on it.
 		let stamps: SUBMIT_RESULT;
 		try {
-			const transport = timeout === undefined ? undefined : { timeout: (timeout + SUBMIT_TRANSPORT_MARGIN) * 1000 };
-			stamps = (await this.call('rrext_submit', arguments_, transport)) as SUBMIT_RESULT;
+			stamps = (await this.call('rrext_submit', arguments_)) as SUBMIT_RESULT;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			if (message.startsWith('Unsupported command: rrext_submit')) {
@@ -1737,32 +1757,9 @@ export class RocketRideClient extends DAPClient {
 
 		// Step 4: stream to the address the server answered with, through the
 		// team that answered (@team): the data path resolves the address again
-		// and must land on the same control. The pipe is owned here so a
-		// timeout can give it up: the SSE subscription goes at once, the
-		// server-side pipe is closed in the background, and a write that was
-		// pending finds the pipe closed afterwards and does not finalize it.
-		const pipe = await this.pipe(stamps.token, this._objinfoWithSize(objinfo ?? {}, data.length), mimetype, undefined, onSSE, stamps.team, params);
-		const run = (async () => {
-			await pipe.open();
-			await pipe.write(data);
-			return await pipe.close();
-		})();
-		run.catch(() => undefined);
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		try {
-			const expired = new Promise<never>((_, reject) => {
-				if (timeout !== undefined) {
-					timer = setTimeout(() => reject(new Error(`submit() exceeded its timeout of ${timeout}s`)), timeout * 1000);
-				}
-			});
-			const result = timeout === undefined ? await run : await Promise.race([run, expired]);
-			return { ...(result ?? {}), ...stamps };
-		} catch (err) {
-			pipe.abandon();
-			throw err;
-		} finally {
-			if (timer !== undefined) clearTimeout(timer);
-		}
+		// and must land on the same control.
+		const result = await this.send(stamps.token, data, objinfo ?? {}, mimetype, onSSE, stamps.team, params);
+		return { ...(result ?? {}), ...stamps };
 	}
 
 	/**

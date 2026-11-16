@@ -26,14 +26,13 @@ One-of validation; name calls walk the rungs and start a published rung from
 its artifact, ignoring server-controlled arguments into ``ignored``; spec
 calls address the caller's @dev presence and converge per ``onChange``
 (repoint, never kill); inline delivery runs open/write/close in process with
-a server-minted ``correlationId``; ``timeout`` covers open to close; the
-probe advertises ``submit``.
+a server-minted ``correlationId``; the server adds no deadline; the probe
+advertises ``submit``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock
 
@@ -234,8 +233,10 @@ async def test_team_overrides_the_order_for_one_call(catalog, engines, deploymen
 
 
 @pytest.mark.asyncio
-async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, monkeypatch):
-    """A request that outlives the caller's timeout fails with timeout, and its pipe is closed."""
+async def test_a_failed_write_still_closes_its_pipe_and_the_failure_is_what_the_caller_sees(
+    catalog, engines, deployments, monkeypatch
+):
+    """The server adds no deadline: a write fails only when the engine says so, and the pipe is then closed."""
     ts = _server()
     deployments.deploy('team-1')
     closed: List[int] = []
@@ -243,37 +244,32 @@ async def test_the_timeout_covers_open_to_close(catalog, engines, deployments, m
     async def send(self, request):
         sub = request['arguments']['subcommand']
         if sub == 'write':
-            await asyncio.sleep(10)
+            raise TaskError(TaskError.CANCELLED, 'Pipe 1: the request was cancelled')
         if sub == 'close':
             closed.append(request['arguments']['pipeId'])
         return {'body': {'pipeId': 1}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     with pytest.raises(TaskError) as err:
-        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
-    assert err.value.code == TaskError.TIMEOUT
-    assert (err.value.address, err.value.converged) == (ADDRESS, 'started')
+        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x')
+    assert err.value.code == TaskError.CANCELLED
     assert closed == [1]
 
 
 @pytest.mark.asyncio
-async def test_the_close_after_a_timed_out_write_is_bounded(catalog, engines, deployments, monkeypatch):
-    """An engine that does not answer the cleanup close never holds the timed-out request open."""
+async def test_timeout_is_not_a_server_argument(catalog, engines, deployments, monkeypatch):
+    """A ``timeout`` the client sends is not applied: the request runs until the engine answers."""
     ts = _server()
     deployments.deploy('team-1')
-    monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
 
     async def send(self, request):
-        if request['arguments']['subcommand'] in ('write', 'close'):
-            await asyncio.sleep(10)
-        return {'body': {'pipeId': 1}}
+        if request['arguments']['subcommand'] == 'write':
+            await asyncio.sleep(0.2)
+        return {'body': {'pipeId': 1, 'answers': ['late']}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
-    started = time.monotonic()
-    with pytest.raises(TaskError) as err:
-        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.05)
-    assert err.value.code == TaskError.TIMEOUT
-    assert time.monotonic() - started < 2.0
+    result = await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x', timeout=0.01)
+    assert result['answers'] == ['late']
 
 
 @pytest.mark.asyncio

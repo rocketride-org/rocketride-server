@@ -62,6 +62,11 @@ for await (const line of rl) {
 const result = await pipe.close();
 ```
 
+A request has no timeout: a write resolves when the pipeline has processed it, however
+long that takes. To bound one, call `cancel()` from a timer; the pending write then
+rejects with a `PipeException` whose `code` is `TASK_CANCELLED`, and `close()` still
+runs and releases the pipe.
+
 Getters: `isOpened` and `pipeId` (server-assigned after `open()`). `pipe()` and the
 pipe itself accept an `onSSE` callback for server-sent events, and
 `DataPipe.tool()` invokes a pipeline tool function through the pipe — see the

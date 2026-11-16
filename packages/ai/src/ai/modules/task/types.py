@@ -47,6 +47,8 @@ and ensuring consistent event handling across the distributed system.
 from enum import Enum
 from typing import Any
 
+from ai.constants import CONST_TASK_CANCELLED_CODE
+
 
 class EngineState(Enum):
     """
@@ -143,8 +145,9 @@ class TaskError(RuntimeError):
       live sources and no default; ``sources`` lists them
     - TASK_SPEC_CHANGED: a spec call with ``onChange='error'`` met a live
       presence running other content; ``currentHash`` and ``newHash``
-    - TASK_TIMEOUT: a ``submit()`` request exceeded the caller's
-      ``timeout`` (open to close); ``address`` and ``converged``
+    - TASK_CANCELLED: the caller cancelled the request (``pipe.cancel()``);
+      the write or tool call it interrupted fails with it at the next node
+      boundary, and the pipe's close still runs
     - TASK_PAYLOAD_TOO_LARGE: inline ``submit()`` data over
       ``CONST_SUBMIT_INLINE_MAX``; ``limit``
     - TASK_ENGINE_UNAVAILABLE: the engine under the caller's hold was stopped
@@ -168,7 +171,7 @@ class TaskError(RuntimeError):
     SOURCE_REQUIRED = 'TASK_SOURCE_REQUIRED'
     ENGINE_UNAVAILABLE = 'TASK_ENGINE_UNAVAILABLE'
     SPEC_CHANGED = 'TASK_SPEC_CHANGED'
-    TIMEOUT = 'TASK_TIMEOUT'
+    CANCELLED = CONST_TASK_CANCELLED_CODE
     PAYLOAD_TOO_LARGE = 'TASK_PAYLOAD_TOO_LARGE'
     ENGINE_START_FAILED = 'TASK_ENGINE_START_FAILED'
     PARAM_REJECTED = 'TASK_PARAM_REJECTED'

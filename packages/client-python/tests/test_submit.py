@@ -26,7 +26,7 @@ import asyncio
 
 import pytest
 
-from rocketride.core.constants import SUBMIT_INLINE_MAX, SUBMIT_TRANSPORT_MARGIN
+from rocketride.core.constants import SUBMIT_INLINE_MAX
 from rocketride.mixins import execution
 from rocketride.mixins.execution import ExecutionMixin
 
@@ -129,16 +129,14 @@ def test_an_old_server_says_submit_is_not_supported():
         _run(client.submit(name='acme.docBrain'))
 
 
-def test_the_timeout_is_a_server_argument_in_seconds_and_the_transport_deadline_outlives_it():
-    """``timeout`` rides the arguments (the server enforces it, open to close); the transport waits longer."""
-    client = _Client()
-    _run(client.submit(name='acme.docBrain', data=b'x', timeout=30))
-    assert client.calls[0][1]['timeout'] == 30
-    assert client.timeouts == [(30 + SUBMIT_TRANSPORT_MARGIN) * 1000]
-
+def test_submit_has_no_timeout_on_either_side():
+    """No ``timeout`` argument, no transport deadline: the request runs until the pipeline answers."""
     client = _Client()
     _run(client.submit(name='acme.docBrain', data=b'x'))
     assert 'timeout' not in client.calls[0][1] and client.timeouts == [None]
+
+    with pytest.raises(TypeError):
+        _run(client.submit(name='acme.docBrain', data=b'x', timeout=30))
 
 
 def test_a_streamed_payload_is_sent_through_the_team_that_answered():

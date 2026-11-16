@@ -1119,6 +1119,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 &IServiceFilterInstance::cb_writeTagEndObject)
         .PYBIND(close, &IServiceFilterInstance::cb_close)
         .PYBIND(closing, &IServiceFilterInstance::cb_closing)
+        .PYBIND(cancel, &IServiceFilterInstance::cb_cancel)
 
         .PYBIND_PROP_READONLY_CUSTOM(
             currentObject, [](IServiceFilterInstance &obj) -> py::object {

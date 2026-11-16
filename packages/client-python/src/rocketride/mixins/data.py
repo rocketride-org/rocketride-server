@@ -389,6 +389,56 @@ class DataMixin(DAPClient):
                     except Exception:
                         pass  # Best-effort cleanup
 
+        async def cancel(self) -> None:
+            """
+            Cancel the request this pipe is running.
+
+            Sets a flag on the pipe inside the engine. The ``write()`` (or
+            ``tool()``) in flight fails at the next node boundary with a
+            ``PipeException`` whose ``code`` is ``TASK_CANCELLED``; a node in
+            the middle of its own work finishes that step first. The pipe
+            stays open: call ``close()`` afterwards as usual, and it releases
+            the server-side slot. Cancelling a pipe with nothing in flight
+            makes its next write fail at once. This is how a caller bounds a
+            request: the SDK and the server never time one out on their own.
+
+            Raises:
+                RuntimeError: If the pipe is not open.
+                PipeException: If the server refuses the cancel.
+
+            Example:
+                async def bounded(pipe, data, seconds):
+                    writer = asyncio.create_task(pipe.write(data))
+                    done, _ = await asyncio.wait({writer}, timeout=seconds)
+                    if not done:
+                        await pipe.cancel()
+                    try:
+                        await writer
+                    finally:
+                        await pipe.close()
+            """
+            if not self._opened or self._closed:
+                raise RuntimeError('Pipe not opened')
+
+            request = self._client.build_request(
+                'rrext_process',
+                arguments=self._arguments(
+                    {
+                        'subcommand': 'cancel',
+                        'pipeId': self._pipe_id,
+                    }
+                ),
+                token=self._token,
+            )
+
+            response = await self._client.request(request)
+
+            if self._client.did_fail(response):
+                msg = response.get('message') or 'Failed to cancel a data pipe.'
+                response = dict(response)
+                response['message'] = msg
+                raise PipeException(response)
+
         async def tool(self, *, tool: str, node_id: str = '', input: dict = None) -> Any:
             """
             Invoke a @tool_function on a pipeline node using this pipe.

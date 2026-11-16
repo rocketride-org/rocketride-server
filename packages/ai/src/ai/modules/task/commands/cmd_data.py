@@ -142,7 +142,7 @@ class DataCommands(DAPConn):
 
     async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle DAP 'rrext_process': one frame of the data path (open, write, close, tool).
+        Handle DAP 'rrext_process': one frame of the data path (open, write, close, cancel, tool).
 
         Every frame belongs to a BINDING. An ``open`` (or a standalone ``tool``
         call that names no pipe) starts one: it resolves the caller's control,
@@ -293,7 +293,7 @@ class DataCommands(DAPConn):
     @staticmethod
     def _attached_binding(control: 'TaskControl', pipe_id: Any) -> '_Frame':
         """
-        The binding a write/close/tool frame names, from the control's open-pipe record.
+        The binding a write/close/cancel/tool frame names, from the control's open-pipe record.
 
         The record is the ownership check and the engine pin (plan 3.1 P1/P2):
         a slot that is not open on the CALLER's control is refused here, never

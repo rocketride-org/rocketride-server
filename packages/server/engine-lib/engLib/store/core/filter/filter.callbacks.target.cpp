@@ -673,6 +673,22 @@ void IServiceFilterInstance::cb_writeTagEndObject() noexcept(false) {
     }
 };
 
+void IServiceFilterInstance::cb_cancel() noexcept(false) {
+    // Check to make sure target mode
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use cancel");
+
+    // A pipe filter that was never put on a stack has no binding to cancel
+    if (!pipe)
+        throw APERR(Ec::NotOpen, "The pipe is not bound; nothing to cancel");
+
+    // One atomic store, from whichever thread asks: the write that is in
+    // flight on this pipe sees it at its next node boundary and fails with
+    // Ec::Cancelled (Binder::callMethods); close still runs afterwards
+    pipe->cancelled.store(true, std::memory_order_relaxed);
+}
+
 void IServiceFilterInstance::cb_close() noexcept(false) {
     // Check to make sure target mode
     if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)

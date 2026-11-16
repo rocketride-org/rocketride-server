@@ -144,6 +144,23 @@ Error Binder::callMethods(
         return ccode;
     }
 
+    // A cancelled request fails every lane but the two that finalize it:
+    // close and closing must still run so the pipe releases its slot. The
+    // entry carries the code, so the caller sees it in the pipe result, and
+    // no node is called - the pipe is in a stable state between calls, so
+    // this is the one place a cancel can land without node support
+    const bool finalizing = methodName == "close" || methodName == "closing";
+    auto cancelledError = [&]() -> Error {
+        auto ccode =
+            APERR(Ec::Cancelled, "Pipeline request cancelled", methodName);
+        if (pThis->m_pInstance->currentEntry
+            && !pThis->m_pInstance->currentEntry->objectFailed())
+            pThis->m_pInstance->currentEntry->completionCode(ccode);
+        return ccode;
+    };
+    if (!finalizing && pipe->cancelled.load(std::memory_order_relaxed))
+        return cancelledError();
+
     // If pipeline mode is disabled, directly invoke the next driver
     if (!pThis->isPipeline()) {
         auto *pDown = pThis->m_pInstance->pDown.get();
@@ -161,6 +178,11 @@ Error Binder::callMethods(
 
     // Iterate over bound instances and invoke the callback
     for (auto *pInstance : *(it->second)) {
+        // A cancel that arrived while the previous node ran stops the chain
+        // here, at the node boundary, instead of at the next lane
+        if (!finalizing && pipe->cancelled.load(std::memory_order_relaxed))
+            return cancelledError();
+
         // First touch of this instance under the current binding builds
         // its per-binding state (plan 4.1 rule 2). A failure is a node
         // error on the entry, exactly like a failing callback below

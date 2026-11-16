@@ -364,5 +364,36 @@ TEST_CASE("store::bindings") {
         REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
     }
 
+    SECTION("a cancel fails every lane but close, and dies with the binding") {
+        auto pipe = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(pipe);
+        REQUIRE_FALSE((*pipe)->cancelled.load());
+
+        // The request is open and writing when the caller cancels
+        auto entry = test.getDummyEntry("cancelled.txt");
+        REQUIRE_NO_ERROR((*pipe)->open(entry));
+        (*pipe)->cancelled.store(true);
+
+        // The next lane fails with Cancelled and the entry carries the code
+        REQUIRE_ERROR((*pipe)->writeText(u"more text"_tv), Ec::Cancelled,
+                      "Pipeline request cancelled");
+        REQUIRE(entry.objectFailed());
+        REQUIRE(entry.completionCode().code() == Ec::Cancelled);
+
+        // Close still runs, so the pipe releases its slot
+        REQUIRE_NO_ERROR((*pipe)->close());
+        REQUIRE_NO_ERROR(endpoint->putPipe(*pipe));
+
+        // The next holder of the slot starts clean
+        auto again = endpoint->getPipe(PIPELINE_TRACE_LEVEL::NONE);
+        REQUIRE_NO_ERROR(again);
+        REQUIRE_FALSE((*again)->cancelled.load());
+        auto fresh = test.getDummyEntry("fresh.txt");
+        REQUIRE_NO_ERROR((*again)->open(fresh));
+        REQUIRE_NO_ERROR((*again)->close());
+        REQUIRE_FALSE(fresh.objectFailed());
+        REQUIRE_NO_ERROR(endpoint->putPipe(*again));
+    }
+
     REQUIRE_NO_ERROR(test.disconnect());
 }

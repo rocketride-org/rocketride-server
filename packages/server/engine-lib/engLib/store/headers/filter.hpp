@@ -360,6 +360,7 @@ public:
     virtual void cb_writeTagEndObject() noexcept(false);
     virtual void cb_close() noexcept(false);
     virtual void cb_closing() noexcept(false);
+    virtual void cb_cancel() noexcept(false);
 
     //-----------------------------------------------------------------
     /// @details
