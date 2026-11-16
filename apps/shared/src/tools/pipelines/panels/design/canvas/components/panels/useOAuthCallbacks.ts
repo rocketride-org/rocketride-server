@@ -36,7 +36,7 @@
 
 import { useCallback } from 'react';
 
-import { flattenLeaves, setAtPath } from 'shared/components/node-config';
+import { dottedNames, flattenLeaves, setAtPath } from 'shared/components/node-config';
 import type { IConfigTree, INodeSchema } from 'shared/components/node-config';
 
 import { useFlowProject } from '../../context/FlowProjectContext';
@@ -52,6 +52,8 @@ export interface IOAuthGrant {
 	token: string;
 	/** The broker that issued it, from the callback's `state`/`type` when known. */
 	provider: 'google' | 'microsoft' | 'slack';
+	/** The canvas node that started the flow, when the broker echoed it in `state`. */
+	nodeId?: string;
 }
 
 // =============================================================================
@@ -72,9 +74,10 @@ export function applyGrantToConfig(schema: INodeSchema | undefined, config: ICon
 	if (leaves.length === 0) return config;
 	const leaf = leaves.find(({ property }) => String(property.title ?? '').toLowerCase().includes(grant.provider)) ?? leaves[0];
 
-	let next = setAtPath(config, leaf.path, grant.token);
+	const dotted = dottedNames(schema?.properties);
+	let next = setAtPath(config, leaf.path, grant.token, dotted);
 	// The grant lives under a branch ("user"): select it, one key per selector
-	for (const [selectorPath, branch] of leaf.under) next = setAtPath(next, selectorPath, branch);
+	for (const [selectorPath, branch] of leaf.under) next = setAtPath(next, selectorPath, branch, dotted);
 	return next;
 }
 
@@ -106,7 +109,7 @@ export function buildGoogleGrant(tokensParam: string | null, stateParam: string 
 		expiry_date: tokens.expiry_date,
 		oauth_server_url: tokens.oauth_server_url || `${oauth2RootUrl || ''}/refresh`,
 	});
-	return { token, provider: 'google' };
+	return { token, provider: 'google', nodeId: nodeIdFromState(stateParam) };
 }
 
 /** The node the broker's `state` names, when it does. */

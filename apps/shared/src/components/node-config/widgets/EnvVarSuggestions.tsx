@@ -35,11 +35,10 @@ import { AnchoredPopup, commonStyles } from 'shell';
 // =============================================================================
 
 const styles = {
-	// The popup box rides the shell's popup-menu chrome; AnchoredPopup owns the
-	// fixed positioning, so the menu's own `position` is left to it.
+	// The popup box rides the shell's popup-menu chrome (fixed, like the
+	// AnchoredPopup that places it).
 	popup: {
 		...commonStyles.popupMenu,
-		position: undefined,
 	} as CSSProperties,
 
 	list: {
@@ -74,6 +73,8 @@ const styles = {
 export interface IEnvVarSuggestionsProps {
 	/** Whether the list is visible. */
 	open: boolean;
+	/** The listbox element id; options are `${listId}-${index}` (aria-activedescendant). */
+	listId: string;
 	/** The input the list anchors to. */
 	anchorRef: RefObject<HTMLElement | null>;
 	/** Filtered key names. */
@@ -96,7 +97,7 @@ export interface IEnvVarSuggestionsProps {
  * @param props - {@link IEnvVarSuggestionsProps}.
  * @returns The popup, or null while closed / empty.
  */
-export default function EnvVarSuggestions({ open, anchorRef, suggestions, highlightedIndex, onSelect, onDismiss }: IEnvVarSuggestionsProps): ReactElement | null {
+export default function EnvVarSuggestions({ open, listId, anchorRef, suggestions, highlightedIndex, onSelect, onDismiss }: IEnvVarSuggestionsProps): ReactElement | null {
 	const listRef = useRef<HTMLUListElement>(null);
 
 	// Keep the highlighted row in view while the user arrows through the list.
@@ -110,9 +111,9 @@ export default function EnvVarSuggestions({ open, anchorRef, suggestions, highli
 
 	return (
 		<AnchoredPopup anchorRef={anchorRef} open={open} onClose={onDismiss} matchAnchorWidth style={styles.popup}>
-			<ul ref={listRef} style={styles.list} role="listbox" onMouseDown={(event) => event.preventDefault()}>
+			<ul ref={listRef} id={listId} style={styles.list} role="listbox" aria-label="Environment variables" onMouseDown={(event) => event.preventDefault()}>
 				{suggestions.map((key, index) => (
-					<li key={key} role="option" aria-selected={index === highlightedIndex} style={{ ...styles.item, ...(index === highlightedIndex ? styles.itemHighlighted : {}) }} onClick={() => onSelect(key)}>
+					<li key={key} id={`${listId}-${index}`} role="option" aria-selected={index === highlightedIndex} style={{ ...styles.item, ...(index === highlightedIndex ? styles.itemHighlighted : {}) }} onClick={() => onSelect(key)}>
 						{key}
 					</li>
 				))}

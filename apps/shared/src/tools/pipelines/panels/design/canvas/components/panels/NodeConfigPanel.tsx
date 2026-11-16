@@ -62,7 +62,7 @@ import { useFlowPreferences } from '../../context/FlowPreferencesContext';
 import { getComponentFromNode } from '../../util/graph';
 
 import { applyGrantToConfig, buildGoogleGrant, nodeIdFromState, useOAuthCallbacks } from './useOAuthCallbacks';
-import NodeConfigForm, { OAuthEnvProvider, hasConfigurableSchema, validationProblemFromResponse } from 'shared/components/node-config';
+import NodeConfigForm, { OAuthEnvProvider, constantMarkers, hasConfigurableSchema, validateConfig, validationProblemFromResponse } from 'shared/components/node-config';
 import type { IConfigProblem, IConfigTree, INodeConfigExposure, INodeConfigFormHandle, INodeSchema } from 'shared/components/node-config';
 import { Banner, Button, ConfirmDialog, DetailPanel, commonStyles } from 'shell';
 
@@ -205,6 +205,10 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	// --- Form state ---------------------------------------------------------
 	const [name, setName] = useState(node.data.name ?? '');
 	const [config, setConfig] = useState<IConfigTree>(node.data.config ?? {});
+	// The latest local config for the asynchronous OAuth callbacks: a grant
+	// lands on top of edits made while the sign-in was pending, never under them
+	const configRef = useRef(config);
+	configRef.current = config;
 	const [isDirty, setIsDirty] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [validationError, setValidationError] = useState<string | null>(null);
@@ -222,15 +226,19 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Persist an OAuth grant to the node and notify the host -------------
 	// The grant is written straight to the node (no Save step: the user just
-	// came back from the broker); onContentUpdated runs after React has flushed
-	// the node update so the serializer snapshots the new config.
+	// came back from the broker) and its validity recomputed, so a node that
+	// was red only for the missing grant clears. The local form gets the same
+	// grant over its unsaved edits, which stay unsaved. onContentUpdated runs
+	// after React has flushed the node update so the serializer snapshots it.
 	const persistGrant = useCallback(
-		(enriched: IConfigTree) => {
-			setConfig(enriched);
-			updateNode(node.id, { config: enriched });
+		(apply: (config: IConfigTree) => IConfigTree) => {
+			const persisted = apply(node.data.config ?? {});
+			const problems = schema ? validateConfig(schema, persisted) : [];
+			setConfig(apply(configRef.current));
+			updateNode(node.id, { config: persisted, formDataErrors: problems.length > 0 ? problems : undefined, formDataValid: problems.length === 0 });
 			queueMicrotask(() => requestAnimationFrame(() => onContentUpdated()));
 		},
-		[node.id, updateNode, onContentUpdated]
+		[node.id, node.data.config, schema, updateNode, onContentUpdated]
 	);
 
 	// --- Initialise state when a different node is selected -----------------
@@ -259,12 +267,22 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		if (urlGrantApplied.current || !schema) return;
 		const grant = readGrantFromUrl();
 		if (!grant) return;
+		// A grant the broker addressed to another node stays in the URL for
+		// that node's panel; malformed or absent state falls through to this one
+		if (grant.nodeId && grant.nodeId !== node.id) return;
+		// updateNode silently no-ops on a locked graph: keep the grant in the
+		// URL and say so; unlocking re-runs this effect and applies it
+		if (isLocked) {
+			setValidationError('The canvas is locked. Unlock it to apply the sign-in tokens.');
+			return;
+		}
+		setValidationError(null);
 		urlGrantApplied.current = true;
-		persistGrant(applyGrantToConfig(schema, node.data.config ?? {}, grant));
+		persistGrant((current) => applyGrantToConfig(schema, current, grant));
 		// Strip the token-bearing query string once processed
 		requestAnimationFrame(() => clearSecureParamsFromUrl());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [schema, node.id]);
+	}, [schema, node.id, isLocked]);
 
 	// --- Apply a grant delivered out-of-band by the host (VS Code) ----------
 	// Web hosts return tokens in the page URL (handled above); VS Code can't
@@ -289,7 +307,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		setValidationError(null);
 
 		const grant = buildGoogleGrant(tokens, state, oauth2RootUrl ?? '');
-		if (grant) persistGrant(applyGrantToConfig(schema, node.data.config ?? {}, grant));
+		if (grant) persistGrant((current) => applyGrantToConfig(schema, current, grant));
 		clearPendingOAuthTokens?.();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [pendingOAuthTokens, node.id, isLocked, schema]);
@@ -363,10 +381,15 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Save: full form with server validation ----------------------------
 	const onSubmit = useCallback(
-		async (next: IConfigTree) => {
+		async (submitted: IConfigTree) => {
 			setIsSubmitting(true);
 			try {
 				setValidationError(null);
+
+				// The root constant markers (`mode: Source`) ride beneath the
+				// submitted config: a panel opened before the full definition
+				// arrived started from a config without them
+				const next = schema ? { ...constantMarkers(schema), ...submitted } : submitted;
 
 				// Write to node
 				const updatedNode = updateNode(node.id, {
@@ -401,7 +424,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 				setIsSubmitting(false);
 			}
 		},
-		[node.id, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
+		[node.id, name, schema, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
 	);
 
 	// --- Save / Cancel routing ----------------------------------------------

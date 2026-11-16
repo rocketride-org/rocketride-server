@@ -134,6 +134,8 @@ export interface ITextWidgetProps {
 	invalid?: boolean;
 	/** Focus on mount. */
 	autoFocus?: boolean;
+	/** Ids of the message / help elements the control is described by. */
+	describedBy?: string;
 }
 
 // =============================================================================
@@ -146,24 +148,27 @@ export interface ITextWidgetProps {
  * @param props - {@link ITextWidgetProps}.
  * @returns The control.
  */
-export default function TextWidget({ id, type, stored, defaultValue, onChange, multiline, secret, storedSecurely, placeholder, envKeys = [], minimum, maximum, disabled, invalid, autoFocus }: ITextWidgetProps): ReactElement {
+export default function TextWidget({ id, type, stored, defaultValue, onChange, multiline, secret, storedSecurely, placeholder, envKeys = [], minimum, maximum, disabled, invalid, autoFocus, describedBy }: ITextWidgetProps): ReactElement {
 	// The shell InputField forwards no ref, so the wrapper anchors the
 	// suggestion list and the control is found inside it when needed.
 	const wrapperRef = useRef<HTMLDivElement | null>(null);
 	const controlOf = (): HTMLInputElement | HTMLTextAreaElement | null => wrapperRef.current?.querySelector('input, textarea') ?? null;
 	const autocomplete = useEnvVarAutocomplete(type === 'string' ? envKeys : []);
 
-	// A stored secret stays masked until the user chooses to replace it, so an
-	// existing key is never edited by accident. Typing starts fresh.
+	// A SAVED secret stays masked until the user chooses to replace it, so an
+	// existing key is never edited by accident. A value the user is typing in
+	// this session is an edit, not a saved secret: it stays editable.
+	const [editing, setEditing] = useState(false);
 	const hasStoredSecret = Boolean(secret) && (storedSecurely || (typeof stored === 'string' && stored.length > 0));
-	const [replacing, setReplacing] = useState(false);
-	const masked = hasStoredSecret && !replacing;
+	const masked = hasStoredSecret && !editing;
 
 	const text = stored === undefined || stored === null ? '' : String(stored);
 	const ghostText = defaultValue === undefined || defaultValue === null ? '' : String(defaultValue);
+	const listId = `${id}-env-list`;
 
 	const commit = useCallback(
 		(raw: string) => {
+			setEditing(true);
 			if (type === 'string') onChange(raw === '' ? undefined : raw);
 			else onChange(parseNumber(raw));
 		},
@@ -183,7 +188,7 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 			<div style={styles.masked}>
 				<span style={commonStyles.textEllipsis}>{storedSecurely ? 'Saved securely' : maskSecret(text)}</span>
 				{!disabled && (
-					<Button variant="ghost" small onClick={() => { setReplacing(true); onChange(undefined); }} title="Enter a new value">
+					<Button variant="ghost" small onClick={() => { setEditing(true); onChange(undefined); }} title="Enter a new value">
 						Replace
 					</Button>
 				)}
@@ -192,6 +197,17 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 	}
 
 	const style: CSSProperties = { ...fieldStyles.input, ...(invalid ? fieldStyles.inputError : {}) };
+	// Combobox semantics while the env-key list can open: the control owns the
+	// list and names the highlighted option for assistive technology.
+	const combobox = envKeys.length > 0 && type === 'string'
+		? {
+			role: 'combobox' as const,
+			'aria-autocomplete': 'list' as const,
+			'aria-expanded': autocomplete.isOpen,
+			'aria-controls': autocomplete.isOpen ? listId : undefined,
+			'aria-activedescendant': autocomplete.isOpen ? `${listId}-${autocomplete.highlightedIndex}` : undefined,
+		}
+		: {};
 	const shared = {
 		id,
 		value: text,
@@ -199,6 +215,8 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 		disabled,
 		autoFocus,
 		'aria-invalid': invalid || undefined,
+		'aria-describedby': describedBy,
+		...combobox,
 	};
 
 	// --- Textarea ------------------------------------------------------------
@@ -214,7 +232,7 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 					}}
 					onKeyDown={(event) => autocomplete.handleKeyDown(event, pick)}
 				/>
-				<EnvVarSuggestions open={autocomplete.isOpen} anchorRef={wrapperRef} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={pick} onDismiss={autocomplete.handleDismiss} />
+				<EnvVarSuggestions open={autocomplete.isOpen} listId={listId} anchorRef={wrapperRef} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={pick} onDismiss={autocomplete.handleDismiss} />
 			</div>
 		);
 	}
@@ -236,7 +254,7 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 				}}
 				onKeyDown={(event) => autocomplete.handleKeyDown(event, pick)}
 			/>
-			<EnvVarSuggestions open={autocomplete.isOpen} anchorRef={wrapperRef} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={pick} onDismiss={autocomplete.handleDismiss} />
+			<EnvVarSuggestions open={autocomplete.isOpen} listId={listId} anchorRef={wrapperRef} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={pick} onDismiss={autocomplete.handleDismiss} />
 		</div>
 	);
 }

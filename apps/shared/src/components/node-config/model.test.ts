@@ -30,7 +30,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { constantMarkers, deleteAtPath, effectiveValue, flattenLeaves, getAtPath, hasConfigurableSchema, isReachable, setAtPath } from './model';
+import { clearSecure, constantMarkers, deleteAtPath, dottedNames, effectiveValue, flattenLeaves, getAtPath, hasConfigurableSchema, isReachable, setAtPath } from './model';
 import type { ILeafEntry } from './model';
 
 // =============================================================================
@@ -83,6 +83,29 @@ test('a branch switch is one key: the other branch block survives', () => {
 	// Switching back finds the service values intact
 	config = setAtPath(config, 'authType', 'service');
 	assert.equal(getAtPath(config, 'service.customerId'), 'C01');
+});
+
+test('a declared name holding a dot is one key, as the server stores it', () => {
+	const schema = [{ name: 'model', type: 'string', default: 'gpt-5.2', path: 'model', enum: { 'gpt-5.2': { properties: [{ name: 'temperature', type: 'number', path: 'gpt-5.2.temperature' }] }, 'gpt-4': { properties: [] } } }];
+	const dotted = dottedNames(schema);
+	assert.deepEqual([...dotted], ['gpt-5.2']);
+	const config = setAtPath({}, 'gpt-5.2.temperature', 0.7, dotted);
+	assert.deepEqual(config, { 'gpt-5.2': { temperature: 0.7 } });
+	assert.equal(getAtPath(config, 'gpt-5.2.temperature', dotted), 0.7);
+	assert.deepEqual(deleteAtPath(config, 'gpt-5.2.temperature', dotted), {});
+	// Without the schema's names the same path would split naively
+	assert.deepEqual(setAtPath({}, 'gpt-5.2.temperature', 0.7), { 'gpt-5': { '2': { temperature: 0.7 } } });
+});
+
+test('clearSecure removes an encrypted value the engine would otherwise restore', () => {
+	const two = { cloud: { host: 'h' }, secureParameters: { secure: ['cloud.apikey', 'user.userAuth'], readonly: [], token: 't' } };
+	// Another secret remains: the path is written empty so the engine keeps it empty
+	assert.deepEqual(clearSecure(two, 'user.userAuth'), { cloud: { host: 'h' }, user: { userAuth: '' }, secureParameters: { secure: ['cloud.apikey'], readonly: [], token: 't' } });
+	// The last secret: the section goes, no marker needed
+	const one = { cloud: { host: 'h' }, secureParameters: { secure: ['cloud.apikey'], readonly: [], token: 't' } };
+	assert.deepEqual(clearSecure(one, 'cloud.apikey'), { cloud: { host: 'h' } });
+	// Not secured: a plain delete
+	assert.deepEqual(clearSecure({ cloud: { host: 'h', apikey: 'k' } }, 'cloud.apikey'), { cloud: { host: 'h' } });
 });
 
 // =============================================================================

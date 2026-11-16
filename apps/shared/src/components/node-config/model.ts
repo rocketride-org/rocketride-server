@@ -37,7 +37,7 @@
 // red-gear check and the PARAMS page all read the same model.
 // =============================================================================
 
-import type { ServiceParamDescriptor, ServiceProperty } from 'shell';
+import type { ServiceParamDescriptor, ServiceProperty } from 'rocketride';
 
 // =============================================================================
 // Types
@@ -94,8 +94,52 @@ export const UNCHECKED_TYPES: ReadonlySet<string> = new Set(['constant', 'oauth2
  * @param path - A leaf path such as `service.customerId`.
  * @returns The segments, in order.
  */
-export function splitPath(path: string): string[] {
-	return path.split('.').filter((segment) => segment.length > 0);
+export function splitPath(path: string, dotted?: ReadonlySet<string>): string[] {
+	const parts = path.split('.').filter((segment) => segment.length > 0);
+	if (!dotted || dotted.size === 0) return parts;
+	// A declared name that itself holds a dot ("gpt-5.2") is ONE segment: at
+	// each position take the longest run of parts that spells such a name
+	const segments: string[] = [];
+	for (let index = 0; index < parts.length; ) {
+		let taken = 1;
+		for (let end = parts.length; end > index + 1; end--) {
+			if (dotted.has(parts.slice(index, end).join('.'))) {
+				taken = end - index;
+				break;
+			}
+		}
+		segments.push(parts.slice(index, index + taken).join('.'));
+		index += taken;
+	}
+	return segments;
+}
+
+/**
+ * Collects every declared name in the schema that contains a dot (group,
+ * branch or leaf names such as "gpt-5.2"), so paths can be segmented the way
+ * the server walks the stored tree: one key per declared name.
+ *
+ * @param properties - The resolved property list.
+ * @returns The dotted names; empty for the common schema.
+ */
+export function dottedNames(properties: ServiceProperty[] | undefined): ReadonlySet<string> {
+	const names = new Set<string>();
+	const walk = (list: ServiceProperty[] | undefined): void => {
+		for (const property of list ?? []) {
+			if (!property || typeof property !== 'object') continue;
+			if (typeof property.name === 'string' && property.name.includes('.')) names.add(property.name);
+			if (isGroup(property)) {
+				walk(property.properties as ServiceProperty[]);
+				continue;
+			}
+			for (const [value, branch] of selectorBranches(property)) {
+				if (value.includes('.')) names.add(value);
+				walk(branch?.properties);
+			}
+		}
+	};
+	walk(properties);
+	return names;
 }
 
 /**
@@ -105,9 +149,9 @@ export function splitPath(path: string): string[] {
  * @param path - The leaf path.
  * @returns The stored value, or undefined when the key is absent (= default).
  */
-export function getAtPath(config: IConfigTree | undefined, path: string): unknown {
+export function getAtPath(config: IConfigTree | undefined, path: string, dotted?: ReadonlySet<string>): unknown {
 	let current: unknown = config;
-	for (const segment of splitPath(path)) {
+	for (const segment of splitPath(path, dotted)) {
 		if (current === null || typeof current !== 'object' || Array.isArray(current)) return undefined;
 		if (!Object.hasOwn(current as object, segment)) return undefined;
 		current = (current as Record<string, unknown>)[segment];
@@ -125,8 +169,8 @@ export function getAtPath(config: IConfigTree | undefined, path: string): unknow
  * @param value - The value to store.
  * @returns The new tree.
  */
-export function setAtPath(config: IConfigTree | undefined, path: string, value: unknown): IConfigTree {
-	const segments = splitPath(path);
+export function setAtPath(config: IConfigTree | undefined, path: string, value: unknown, dotted?: ReadonlySet<string>): IConfigTree {
+	const segments = splitPath(path, dotted);
 	const root: IConfigTree = { ...(config ?? {}) };
 	let parent: IConfigTree = root;
 	for (let index = 0; index < segments.length - 1; index++) {
@@ -148,9 +192,9 @@ export function setAtPath(config: IConfigTree | undefined, path: string, value: 
  * @param path - The leaf path.
  * @returns The new tree.
  */
-export function deleteAtPath(config: IConfigTree | undefined, path: string): IConfigTree {
-	const segments = splitPath(path);
-	if (!config || segments.length === 0 || getAtPath(config, path) === undefined) return { ...(config ?? {}) };
+export function deleteAtPath(config: IConfigTree | undefined, path: string, dotted?: ReadonlySet<string>): IConfigTree {
+	const segments = splitPath(path, dotted);
+	if (!config || segments.length === 0 || getAtPath(config, path, dotted) === undefined) return { ...(config ?? {}) };
 
 	const prune = (node: IConfigTree, depth: number): IConfigTree | undefined => {
 		const segment = segments[depth];
@@ -362,9 +406,9 @@ export function flattenLeaves(properties: ServiceProperty[] | undefined): ILeafE
  * @param leaf - The leaf descriptor (with `path`).
  * @returns The effective value.
  */
-export function effectiveValue(config: IConfigTree | undefined, leaf: ServiceProperty): unknown {
+export function effectiveValue(config: IConfigTree | undefined, leaf: ServiceProperty, dotted?: ReadonlySet<string>): unknown {
 	if (leaf.type === 'constant') return leaf.default;
-	const stored = typeof leaf.path === 'string' ? getAtPath(config, leaf.path) : undefined;
+	const stored = typeof leaf.path === 'string' ? getAtPath(config, leaf.path, dotted) : undefined;
 	return stored === undefined || stored === null ? leaf.default : stored;
 }
 
@@ -377,11 +421,11 @@ export function effectiveValue(config: IConfigTree | undefined, leaf: ServicePro
  * @param byPath - Leaf lookup by path (for the selectors' own defaults).
  * @returns True when reachable.
  */
-export function isReachable(config: IConfigTree | undefined, entry: ILeafEntry, byPath: Map<string, ILeafEntry>): boolean {
+export function isReachable(config: IConfigTree | undefined, entry: ILeafEntry, byPath: Map<string, ILeafEntry>, dotted?: ReadonlySet<string>): boolean {
 	for (const [selectorPath, branch] of entry.under) {
 		const selector = byPath.get(selectorPath);
 		if (!selector) return false;
-		if (effectiveValue(config, selector.property) !== branch) return false;
+		if (effectiveValue(config, selector.property, dotted) !== branch) return false;
 	}
 	return true;
 }
@@ -456,4 +500,29 @@ export function isStoredSecurely(config: IConfigTree | undefined, path: string):
 	if (section === null || typeof section !== 'object') return false;
 	const names = (section as Record<string, unknown>).secure;
 	return Array.isArray(names) && names.includes(path);
+}
+
+/**
+ * Removes a value the engine holds in the encrypted section. The engine
+ * restores a token value at its path whenever the path has no plaintext, so a
+ * bare delete would bring the credential back on the next load: the path is
+ * written EMPTY (the engine then keeps the empty value) and dropped from the
+ * `secure` list; once no secured name remains the whole section goes, and
+ * with it the need for the empty marker.
+ *
+ * @param config - The node's config.
+ * @param path - The leaf path.
+ * @param dotted - Declared dotted names (see {@link dottedNames}).
+ * @returns The new config.
+ */
+export function clearSecure(config: IConfigTree | undefined, path: string, dotted?: ReadonlySet<string>): IConfigTree {
+	if (!isStoredSecurely(config, path)) return deleteAtPath(config, path, dotted);
+	const section = (config as IConfigTree).secureParameters as Record<string, unknown>;
+	const secure = (section.secure as unknown[]).filter((name) => name !== path);
+	const readonlyNames = Array.isArray(section.readonly) ? section.readonly : [];
+	if (secure.length === 0 && readonlyNames.length === 0) {
+		const { secureParameters: _dropped, ...rest } = config as IConfigTree;
+		return deleteAtPath(rest, path, dotted);
+	}
+	return { ...setAtPath(config, path, '', dotted), secureParameters: { ...section, secure } };
 }

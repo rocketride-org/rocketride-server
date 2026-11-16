@@ -28,7 +28,7 @@
  * Replace / Remove; the stock DropZone carries the pick itself.
  */
 
-import { CSSProperties, ReactElement, useRef } from 'react';
+import { CSSProperties, ReactElement, useEffect, useRef } from 'react';
 import { Button, commonStyles } from 'shell';
 
 // =============================================================================
@@ -134,6 +134,8 @@ export interface IUploadWidgetProps {
 	disabled?: boolean;
 	/** Invalid state. */
 	invalid?: boolean;
+	/** Ids of the message / help elements the control is described by. */
+	describedBy?: string;
 }
 
 // =============================================================================
@@ -146,11 +148,20 @@ export interface IUploadWidgetProps {
  * @param props - {@link IUploadWidgetProps}.
  * @returns The control.
  */
-export default function UploadWidget({ id, stored, storedSecurely, accept, onChange, disabled, invalid }: IUploadWidgetProps): ReactElement {
+export default function UploadWidget({ id, stored, storedSecurely, accept, onChange, disabled, invalid, describedBy }: IUploadWidgetProps): ReactElement {
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const hasFile = storedSecurely || (typeof stored === 'string' && stored.length > 0);
 
+	// Only the latest action commits: a read superseded by another pick, a
+	// Remove, or unmount is dropped when it completes.
+	const generation = useRef(0);
+	useEffect(() => () => { generation.current++; }, []);
+
 	const pick = (): void => inputRef.current?.click();
+	const remove = (): void => {
+		generation.current++;
+		onChange(undefined);
+	};
 
 	return (
 		<div style={{ ...styles.row, ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}) }}>
@@ -161,8 +172,8 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 						{hasFile ? 'Replace' : 'Choose file'}
 					</Button>
 				)}
-				{!disabled && hasFile && !storedSecurely && (
-					<Button variant="ghost" small onClick={() => onChange(undefined)} title="Remove">
+				{!disabled && hasFile && (
+					<Button variant="ghost" small onClick={remove} title="Remove">
 						×
 					</Button>
 				)}
@@ -174,12 +185,16 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 				accept={accept}
 				style={styles.hidden}
 				disabled={disabled}
+				aria-describedby={describedBy}
 				onChange={(event) => {
 					const file = event.target.files?.[0];
 					event.target.value = '';
 					if (!file) return;
+					const mine = ++generation.current;
 					readFile(file)
-						.then((dataURL) => onChange(dataURL))
+						.then((dataURL) => {
+							if (generation.current === mine) onChange(dataURL);
+						})
 						.catch((error: unknown) => console.error('Error reading upload:', error));
 				}}
 			/>

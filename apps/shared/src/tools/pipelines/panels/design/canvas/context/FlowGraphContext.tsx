@@ -424,13 +424,17 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const project: IProject = {
 				...currentProjectRef.current,
 				components,
-				...(Object.keys(parameters).length > 0 ? { parameters } : {}),
 				isLocked: layout.isLocked,
 				snapToGrid: layout.snapToGrid,
 				snapGridSize: layout.snapGridSize,
 				version: PIPELINE_SCHEMA_VERSION,
 				docRevision: nextVersion,
 			};
+			// The map is written when it has entries and REMOVED otherwise, so a
+			// stale copy inherited from the loaded project never survives the
+			// last exposure being dropped
+			if (Object.keys(parameters).length > 0) project.parameters = parameters;
+			else delete project.parameters;
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
@@ -881,12 +885,19 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const connectedSet = new Set(connected.map((e) => e.id));
 			const remaining = edges.filter((e) => !connectedSet.has(e.id));
 			setEdges(remaining);
+			// A deleted node's exposures leave the OWNED map too: node ids are
+			// reused by generateNodeId, so a lingering binding would otherwise
+			// attach itself to the next node of that provider
+			const deletedIds = new Set(deletedNodes.map((node) => node.id));
+			const kept = Object.entries(parametersRef.current).filter(([, target]) => !deletedIds.has(target.split('.')[0]));
+			const droppedBindings = kept.length !== Object.keys(parametersRef.current).length;
+			if (droppedBindings) setParameters(Object.fromEntries(kept));
 			// Notify host so project state stays in sync
-			if (connected.length > 0) {
+			if (connected.length > 0 || droppedBindings) {
 				onContentUpdated();
 			}
 		},
-		[edges, setEdges, onContentUpdated]
+		[edges, setEdges, setParameters, onContentUpdated]
 	);
 
 	// =====================================================================

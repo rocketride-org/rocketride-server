@@ -46,7 +46,7 @@ export { default as NodeConfigForm, default } from './NodeConfigForm';
 export type { INodeConfigFormProps, INodeConfigFormHandle, INodeConfigExposure } from './NodeConfigForm';
 export { OAuthEnvProvider, useOAuthEnv } from './OAuthEnvContext';
 export type { IOAuthEnv } from './OAuthEnvContext';
-export { getAtPath, setAtPath, deleteAtPath, flattenLeaves, effectiveValue, hasConfigurableSchema, constantMarkers, paramDescriptor, isSelector, isGroup, leafKind, enumOptions, enumValues, isStoredSecurely } from './model';
+export { getAtPath, setAtPath, deleteAtPath, clearSecure, splitPath, dottedNames, flattenLeaves, effectiveValue, hasConfigurableSchema, constantMarkers, paramDescriptor, isSelector, isGroup, leafKind, enumOptions, enumValues, isStoredSecurely } from './model';
 export type { IConfigTree, INodeSchema, ILeafEntry, LeafKind } from './model';
 export { validateConfig, validateLeafValue, validateLeafAt } from './validate';
 export type { IConfigProblem } from './validate';

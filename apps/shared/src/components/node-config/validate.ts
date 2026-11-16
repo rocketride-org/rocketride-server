@@ -33,9 +33,9 @@
 // is not selected is tolerated (kept, not validated).
 // =============================================================================
 
-import type { ServiceProperty } from 'shell';
+import type { ServiceProperty } from 'rocketride';
 
-import { EDITOR_OWNED_KEYS, ENGINE_OWNED_KEYS, IConfigTree, ILeafEntry, INodeSchema, UNCHECKED_TYPES, arrayItem, effectiveValue, enumValues, flattenLeaves, hasPlaceholder, isFlagged, isGroup, isReachable, isSelector, isStoredSecurely } from './model';
+import { EDITOR_OWNED_KEYS, ENGINE_OWNED_KEYS, IConfigTree, ILeafEntry, INodeSchema, UNCHECKED_TYPES, arrayItem, dottedNames, effectiveValue, enumValues, flattenLeaves, hasPlaceholder, isFlagged, isGroup, isReachable, isSelector, isStoredSecurely, splitPath } from './model';
 
 // =============================================================================
 // Types
@@ -148,7 +148,8 @@ export function validateConfig(schema: Partial<INodeSchema> | undefined, config:
 
 	const leaves = flattenLeaves(properties);
 	const byPath = new Map<string, ILeafEntry>(leaves.map((entry) => [entry.path, entry]));
-	const { prefixes, names } = collectPrefixes(properties, leaves);
+	const dotted = dottedNames(properties);
+	const { prefixes, names } = collectPrefixes(properties, leaves, dotted);
 
 	// Step 1: unknown keys
 	walkStored(config ?? {}, '', byPath, prefixes, names, problems);
@@ -156,8 +157,8 @@ export function validateConfig(schema: Partial<INodeSchema> | undefined, config:
 	// Step 2: stale selector values
 	const stale = new Set<string>();
 	for (const entry of leaves) {
-		if (!isSelector(entry.property) || !isReachable(config, entry, byPath)) continue;
-		const choice = effectiveValue(config, entry.property);
+		if (!isSelector(entry.property) || !isReachable(config, entry, byPath, dotted)) continue;
+		const choice = effectiveValue(config, entry.property, dotted);
 		const branches = enumValues(entry.property) ?? [];
 		if (!branches.includes(choice)) {
 			stale.add(entry.path);
@@ -167,9 +168,9 @@ export function validateConfig(schema: Partial<INodeSchema> | undefined, config:
 
 	// Step 3: reachable leaves (a stale selector is already reported)
 	for (const entry of leaves) {
-		if (stale.has(entry.path) || !isReachable(config, entry, byPath)) continue;
+		if (stale.has(entry.path) || !isReachable(config, entry, byPath, dotted)) continue;
 		if (isFlagged(entry.property, 'secret') && isStoredSecurely(config, entry.path)) continue;
-		const message = validateLeafValue(entry.property, effectiveValue(config, entry.property));
+		const message = validateLeafValue(entry.property, effectiveValue(config, entry.property, dotted));
 		if (message) problems.push({ path: entry.path, message });
 	}
 
@@ -197,11 +198,11 @@ export function validateLeafAt(schema: Partial<INodeSchema> | undefined, config:
  * ancestor of every leaf path) and every declared OWN name (so a dotted key
  * that IS a declared name, such as a branch "gpt-5.2", is one segment).
  */
-function collectPrefixes(properties: ServiceProperty[], leaves: ILeafEntry[]): { prefixes: Set<string>; names: Set<string> } {
+function collectPrefixes(properties: ServiceProperty[], leaves: ILeafEntry[], dotted: ReadonlySet<string>): { prefixes: Set<string>; names: Set<string> } {
 	const prefixes = new Set<string>();
 	const names = new Set<string>();
 	for (const { path, property } of leaves) {
-		const parts = path.split('.');
+		const parts = splitPath(path, dotted);
 		for (let depth = 1; depth < parts.length; depth++) prefixes.add(parts.slice(0, depth).join('.'));
 		names.add(typeof property.name === 'string' && property.name ? property.name : parts[parts.length - 1]);
 	}

@@ -48,11 +48,11 @@
  * mount it without an OAuthEnvProvider and the login buttons render disabled.
  */
 
-import { CSSProperties, ReactNode, forwardRef, useCallback, useImperativeHandle, useMemo, useState } from 'react';
-import type { ServiceParamDescriptor, ServiceProperty } from 'shell';
+import { CSSProperties, ReactNode, forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { ServiceParamDescriptor, ServiceProperty } from 'rocketride';
 import { Button, commonStyles } from 'shell';
 
-import { IConfigTree, INodeSchema, deleteAtPath, effectiveValue, enumOptions, getAtPath, isFlagged, isGroup, isStoredSecurely, leafKind, paramDescriptor, selectorBranches, setAtPath } from './model';
+import { IConfigTree, INodeSchema, clearSecure, deleteAtPath, dottedNames, effectiveValue, enumOptions, getAtPath, isFlagged, isGroup, isStoredSecurely, leafKind, paramDescriptor, selectorBranches, setAtPath } from './model';
 import { IConfigProblem, validateConfig } from './validate';
 import ArrayWidget from './widgets/ArrayWidget';
 import BooleanWidget from './widgets/BooleanWidget';
@@ -179,6 +179,13 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 
 	const problems = useMemo(() => validateConfig(schema, config), [schema, config]);
 	const problemAt = useMemo(() => new Map(problems.map((problem) => [problem.path, problem.message])), [problems]);
+	// Declared names holding a dot ("gpt-5.2") segment as one key
+	const dotted = useMemo(() => dottedNames(schema.properties), [schema.properties]);
+
+	// Edits apply to the LATEST config, not the one a callback closed over: an
+	// upload finishing after another field changed must not undo that change.
+	const configRef = useRef(config);
+	configRef.current = config;
 
 	useImperativeHandle(
 		ref,
@@ -200,16 +207,22 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 	const set = useCallback(
 		(path: string, value: unknown) => {
 			setTouched((prev) => new Set(prev).add(path));
-			onChange(value === undefined ? deleteAtPath(config, path) : setAtPath(config, path, value));
+			const next = value === undefined ? deleteAtPath(configRef.current, path, dotted) : setAtPath(configRef.current, path, value, dotted);
+			configRef.current = next;
+			onChange(next);
 		},
-		[config, onChange]
+		[onChange, dotted]
 	);
+	// Reset is credential-aware: a value held in the engine's encrypted section
+	// is cleared there too, else it would be restored on the next load.
 	const reset = useCallback(
 		(path: string) => {
 			setTouched((prev) => new Set(prev).add(path));
-			onChange(deleteAtPath(config, path));
+			const next = clearSecure(configRef.current, path, dotted);
+			configRef.current = next;
+			onChange(next);
 		},
-		[config, onChange]
+		[onChange, dotted]
 	);
 
 	/** The inline message for a leaf, honouring the touched / submitted rule. */
@@ -259,8 +272,8 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 			const kind = leafKind(property);
 			if (kind === 'constant' || kind === 'other') continue;
 
-			const stored = getAtPath(config, path);
-			const value = effectiveValue(config, property);
+			const stored = getAtPath(config, path, dotted);
+			const value = effectiveValue(config, property, dotted);
 			const ghost = stored === undefined || stored === null;
 			const hasDefault = property.default !== undefined && property.default !== null;
 			const readonly = disabled || isFlagged(property, 'readonly');
@@ -270,7 +283,10 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 			const description = [typeof property.description === 'string' ? property.description : '', envName ? `Environment variable: \${${envName}}` : ''].filter(Boolean).join(' ');
 			const message = messageFor(path);
 			const id = elementId(path);
-			const frame = { id, title, description, required, ghost: ghost && hasDefault, onReset: !ghost && (hasDefault || !required) ? () => reset(path) : undefined, error: message, expose: exposeFor(path) };
+			// Reset is an edit: it goes with the control when the field is read-only
+			const frame = { id, title, description, required, ghost: ghost && hasDefault, onReset: !readonly && !ghost && (hasDefault || !required) ? () => reset(path) : undefined, error: message, expose: exposeFor(path) };
+			// The message and help the frame renders, announced with the control
+			const describedBy = (shownError: string | null): string | undefined => [shownError ? `${id}-error` : '', description ? `${id}-help` : ''].filter(Boolean).join(' ') || undefined;
 
 			// A selector: its own value, then the chosen branch with the SAME config
 			if (kind === 'selector') {
@@ -279,13 +295,13 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				const stale = value !== undefined && value !== null && !branch;
 				out.push(
 					<PropertyField key={key} {...frame} error={stale ? null : message}>
-						<EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message) || stale} />
+						<EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message) || stale} describedBy={describedBy(stale ? null : message)} />
 						{stale && (
 							<div style={styles.stale}>
 								<span>
 									The file holds <b>{String(value)}</b>, which this node no longer offers.
 								</span>
-								<Button variant="ghost" small onClick={() => reset(path)}>
+								<Button variant="ghost" small disabled={readonly} onClick={() => reset(path)}>
 									Reset
 								</Button>
 							</div>
@@ -303,16 +319,16 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 			let control: ReactNode;
 			switch (kind) {
 				case 'enum':
-					control = <EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message)} />;
+					control = <EnumWidget id={id} options={enumOptions(property)} value={value} ghost={ghost && hasDefault} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				case 'boolean':
-					control = <BooleanWidget id={id} value={value === true} ghost={ghost} onChange={(next) => set(path, next)} disabled={readonly} />;
+					control = <BooleanWidget id={id} value={value === true} ghost={ghost} onChange={(next) => set(path, next)} disabled={readonly} describedBy={describedBy(message)} />;
 					break;
 				case 'array':
-					control = <ArrayWidget id={id} property={property} stored={stored} value={Array.isArray(value) ? value : []} ghost={ghost} onChange={(next) => set(path, next)} envKeys={envKeys} disabled={readonly} />;
+					control = <ArrayWidget id={id} property={property} stored={stored} value={Array.isArray(value) ? value : []} ghost={ghost} onChange={(next) => set(path, next)} envKeys={envKeys} disabled={readonly} describedBy={describedBy(message)} />;
 					break;
 				case 'upload':
-					control = <UploadWidget id={id} stored={stored} storedSecurely={isStoredSecurely(config, path)} accept={typeof (property.options as Record<string, unknown> | undefined)?.accept === 'string' ? ((property.options as Record<string, unknown>).accept as string) : undefined} onChange={(next) => set(path, next)} disabled={readonly} invalid={Boolean(message)} />;
+					control = <UploadWidget id={id} stored={stored} storedSecurely={isStoredSecurely(config, path)} accept={typeof (property.options as Record<string, unknown> | undefined)?.accept === 'string' ? ((property.options as Record<string, unknown>).accept as string) : undefined} onChange={(next) => (next === undefined ? reset(path) : set(path, next))} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				case 'oauth2': {
 					const oauthProvider = oauthProviderOf(title) ?? 'google';
@@ -323,7 +339,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 				case 'object':
 					// A free-form object leaf edits as JSON; the validator reports a
 					// non-object the same way the server would
-					control = <TextWidget id={id} type="string" stored={stored === undefined ? undefined : typeof stored === 'string' ? stored : JSON.stringify(stored, null, 2)} defaultValue={hasDefault ? JSON.stringify(property.default) : undefined} multiline onChange={(next) => set(path, parseJsonOrKeep(next))} disabled={readonly} invalid={Boolean(message)} />;
+					control = <TextWidget id={id} type="string" stored={stored === undefined ? undefined : typeof stored === 'string' ? stored : JSON.stringify(stored, null, 2)} defaultValue={hasDefault ? JSON.stringify(property.default) : undefined} multiline onChange={(next) => set(path, parseJsonOrKeep(next))} disabled={readonly} invalid={Boolean(message)} describedBy={describedBy(message)} />;
 					break;
 				default:
 					control = (
@@ -342,6 +358,7 @@ const NodeConfigForm = forwardRef<INodeConfigFormHandle, INodeConfigFormProps>(f
 							maximum={typeof property.maximum === 'number' ? property.maximum : undefined}
 							disabled={readonly}
 							invalid={Boolean(message)}
+							describedBy={describedBy(message)}
 						/>
 					);
 			}

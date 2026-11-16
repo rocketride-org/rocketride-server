@@ -34,7 +34,7 @@
  */
 
 import { CSSProperties, ReactElement } from 'react';
-import type { ServiceProperty } from 'shell';
+import type { ServiceProperty } from 'rocketride';
 import { Button, commonStyles } from 'shell';
 
 import { arrayItem, enumOptions, isFlagged, isGroup } from '../model';
@@ -123,6 +123,8 @@ export interface IArrayWidgetProps {
 	envKeys?: string[];
 	/** Disabled state. */
 	disabled?: boolean;
+	/** Ids of the message / help elements the control is described by. */
+	describedBy?: string;
 }
 
 // =============================================================================
@@ -135,7 +137,7 @@ export interface IArrayWidgetProps {
  * @param props - {@link IArrayWidgetProps}.
  * @returns The control.
  */
-export default function ArrayWidget({ id, property, value, ghost, onChange, envKeys, disabled }: IArrayWidgetProps): ReactElement {
+export default function ArrayWidget({ id, property, value, ghost, onChange, envKeys, disabled, describedBy }: IArrayWidgetProps): ReactElement {
 	const item = arrayItem(property);
 	const itemType = typeof item?.type === 'string' ? item.type : 'string';
 	const list = Array.isArray(value) ? value : [];
@@ -144,7 +146,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 	if (item && Array.isArray(item.enum)) {
 		const options = enumOptions(item);
 		return (
-			<div style={styles.list} id={id}>
+			<div style={styles.list} id={id} role="group" aria-describedby={describedBy}>
 				{options.map(([optionValue, label]) => {
 					const checked = list.includes(optionValue);
 					return (
@@ -179,7 +181,7 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 	const add = (): void => onChange([...list, objectChildren ? {} : itemType === 'boolean' ? false : itemType === 'number' || itemType === 'integer' ? 0 : '']);
 
 	return (
-		<div style={styles.list} id={id}>
+		<div style={styles.list} id={id} role="group" aria-describedby={describedBy}>
 			{list.length === 0 && <span style={styles.ghostNote}>No entries</span>}
 			{list.map((element, index) => (
 				<div key={index} style={styles.row}>
@@ -203,13 +205,13 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 											{String(child.title ?? name)}
 											{isFlagged(child, 'required') && <span style={fieldStyles.required}> *</span>}
 										</label>
-										{renderScalar(childId, child, record[name], set, envKeys, disabled)}
+										{renderScalar(childId, child, record[name], set, envKeys, disabled || isFlagged(child, 'readonly'))}
 									</div>
 								);
 							})}
 						</div>
 					) : (
-						<div style={styles.rowControl}>{renderScalar(`${id}-${index}`, item ?? { name: 'item', type: 'string' }, element, (next) => update(index, next ?? ''), envKeys, disabled)}</div>
+						<div style={styles.rowControl}>{renderScalar(`${id}-${index}`, item ?? { name: 'item', type: 'string' }, element, (next) => update(index, next ?? ''), envKeys, disabled || (item ? isFlagged(item, 'readonly') : false))}</div>
 					)}
 					{!disabled && (
 						<Button variant="ghost" small onClick={() => remove(index)} title="Remove">
@@ -235,16 +237,19 @@ export default function ArrayWidget({ id, property, value, ghost, onChange, envK
 
 /**
  * Renders one scalar control inside an array (item or object-item child).
- * Items carry no `path`, so they are addressed by position / short name and
- * never ghost: an item exists only because it is stored.
+ * Items carry no `path`, so they are addressed by position / short name. An
+ * absent child key still MEANS the child's default, so a choice control shows
+ * that default without writing it into the item.
  */
 function renderScalar(id: string, descriptor: ServiceProperty, value: unknown, onChange: (next: unknown) => void, envKeys: string[] | undefined, disabled: boolean | undefined): ReactElement {
 	const type = typeof descriptor.type === 'string' ? descriptor.type : 'string';
+	const absent = value === undefined || value === null;
+	const shown = absent ? descriptor.default : value;
 	if (Array.isArray(descriptor.enum)) {
-		return <EnumWidget id={id} options={enumOptions(descriptor)} value={value} onChange={onChange} disabled={disabled} />;
+		return <EnumWidget id={id} options={enumOptions(descriptor)} value={shown} ghost={absent && shown !== undefined} onChange={onChange} disabled={disabled} />;
 	}
 	if (type === 'boolean') {
-		return <BooleanWidget id={id} value={value === true} onChange={onChange} disabled={disabled} />;
+		return <BooleanWidget id={id} value={shown === true} ghost={absent} onChange={onChange} disabled={disabled} />;
 	}
 	const numeric = type === 'number' || type === 'integer';
 	return <TextWidget id={id} type={numeric ? type : 'string'} stored={value} defaultValue={descriptor.default} onChange={onChange} multiline={descriptor.format === 'textarea'} secret={isFlagged(descriptor, 'secret')} envKeys={envKeys} disabled={disabled} placeholder={typeof descriptor.placeholder === 'string' ? descriptor.placeholder : undefined} />;

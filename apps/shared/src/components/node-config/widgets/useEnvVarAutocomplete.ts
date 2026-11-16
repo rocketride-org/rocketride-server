@@ -102,8 +102,17 @@ export function useEnvVarAutocomplete(envKeys: string[]): IEnvVarAutocomplete {
 	const handleSelect = useCallback((key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null): string => {
 		const triggerStart = triggerStartRef.current;
 		const cursorPos = inputEl?.selectionStart ?? currentValue.length;
-		// Replace from the `${` trigger to the cursor with the full reference
-		const newValue = `${currentValue.substring(0, triggerStart)}\${${key}}${currentValue.substring(cursorPos)}`;
+		// The caret must still end the trigger the list opened for; moved away
+		// (Home, a click elsewhere) the pick is dropped and the text kept
+		const trigger = TRIGGER_REGEX.exec(currentValue.substring(0, cursorPos));
+		if (!trigger || trigger.index !== triggerStart) {
+			setIsOpen(false);
+			return currentValue;
+		}
+		// Replace from the `${` trigger to the cursor with the full reference,
+		// consuming a closing brace already sitting after the caret
+		const end = currentValue.charAt(cursorPos) === '}' ? cursorPos + 1 : cursorPos;
+		const newValue = `${currentValue.substring(0, triggerStart)}\${${key}}${currentValue.substring(end)}`;
 		setIsOpen(false);
 		// Restore the caret after the inserted reference (3 = "${" + "}")
 		const newCursorPos = triggerStart + key.length + 3;

@@ -65,6 +65,8 @@ export interface IEnumWidgetProps {
 	disabled?: boolean;
 	/** Invalid state (error border). */
 	invalid?: boolean;
+	/** Ids of the message / help elements the control is described by. */
+	describedBy?: string;
 }
 
 // =============================================================================
@@ -77,7 +79,7 @@ export interface IEnumWidgetProps {
  * @param props - {@link IEnumWidgetProps}.
  * @returns The control.
  */
-export default function EnumWidget({ id, options, value, ghost, onChange, disabled, invalid }: IEnumWidgetProps): ReactElement {
+export default function EnumWidget({ id, options, value, ghost, onChange, disabled, invalid, describedBy }: IEnumWidgetProps): ReactElement {
 	const keys = options.map(([optionValue]) => JSON.stringify(optionValue));
 	const current = value === undefined ? '' : JSON.stringify(value);
 	const stale = current !== '' && !keys.includes(current);
@@ -89,6 +91,7 @@ export default function EnumWidget({ id, options, value, ghost, onChange, disabl
 			value={current}
 			disabled={disabled}
 			aria-invalid={invalid || undefined}
+			aria-describedby={describedBy}
 			onChange={(event) => {
 				const index = keys.indexOf(event.target.value);
 				if (index >= 0) onChange(options[index][0]);

@@ -31,7 +31,7 @@
  */
 
 import { CSSProperties, ReactElement, useMemo, useState } from 'react';
-import type { ServiceParamDescriptor } from 'shell';
+import type { ServiceParamDescriptor } from 'rocketride';
 import { Button, InputField, Modal, commonStyles } from 'shell';
 
 import { fieldStyles } from './PropertyField';
@@ -107,7 +107,8 @@ export function describeParam(descriptor: ServiceParamDescriptor): string {
 export function publicNameProblem(name: string, target: string, parameters: Record<string, string>, describeTarget: (target: string) => string): string | null {
 	if (!name) return 'Enter a public name.';
 	if (!PUBLIC_NAME_PATTERN.test(name)) return 'Letters, digits and underscore only.';
-	const owner = parameters[name];
+	// Own entries only: "constructor" or "toString" must read as free names
+	const owner = Object.hasOwn(parameters, name) ? parameters[name] : undefined;
 	if (owner !== undefined && owner !== target) return `Already used by ${describeTarget(owner)} — pick another name.`;
 	return null;
 }

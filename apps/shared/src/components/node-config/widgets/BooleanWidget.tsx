@@ -71,6 +71,8 @@ export interface IBooleanWidgetProps {
 	onChange: (value: boolean) => void;
 	/** Disabled state. */
 	disabled?: boolean;
+	/** Ids of the message / help elements the control is described by. */
+	describedBy?: string;
 }
 
 // =============================================================================
@@ -83,10 +85,10 @@ export interface IBooleanWidgetProps {
  * @param props - {@link IBooleanWidgetProps}.
  * @returns The control.
  */
-export default function BooleanWidget({ id, value, ghost, caption, onChange, disabled }: IBooleanWidgetProps): ReactElement {
+export default function BooleanWidget({ id, value, ghost, caption, onChange, disabled, describedBy }: IBooleanWidgetProps): ReactElement {
 	return (
 		<label style={{ ...styles.row, ...(ghost ? fieldStyles.ghostControl : {}), ...(disabled ? { cursor: 'default', opacity: 0.6 } : {}) }}>
-			<input id={id} type="checkbox" style={styles.box} checked={value} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+			<input id={id} type="checkbox" style={styles.box} checked={value} disabled={disabled} aria-describedby={describedBy} onChange={(event) => onChange(event.target.checked)} />
 			<span>{caption ?? (value ? 'Enabled' : 'Disabled')}</span>
 		</label>
 	);

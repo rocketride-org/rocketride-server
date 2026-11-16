@@ -190,8 +190,17 @@ export default function PropertyField({ id, title, description, required, ghost,
 				{expose && (expose.publicName ? <span role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={expose.onClick} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); expose.onClick(); } }}><Chip label={`⤴ ${expose.publicName}`} /></span> : <ChipAdd label="Expose" onClick={expose.onClick} />)}
 			</div>
 			{children}
-			{error && <div style={fieldStyles.error}>{error}</div>}
-			{description && <div style={fieldStyles.help}>{sanitizeAndParseHtmlToReact(description)}</div>}
+			{/* Both carry ids so the control can name them in aria-describedby. */}
+			{error && (
+				<div id={`${id}-error`} style={fieldStyles.error}>
+					{error}
+				</div>
+			)}
+			{description && (
+				<div id={`${id}-help`} style={fieldStyles.help}>
+					{sanitizeAndParseHtmlToReact(description)}
+				</div>
+			)}
 		</div>
 	);
 }
