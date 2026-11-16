@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** The PARAMS page (plan §5.5, mockups M-1.3 and M-1.6). */
+/** The API Params page (plan §5.5; a PACKAGE side tab, named-pipes mockup 2.4). */
 
 export { default as ParamsPanel, typeAndBounds, proposePublicName } from './ParamsPanel';
 export type { IParamsPanelProps, IParamsProject } from './ParamsPanel';

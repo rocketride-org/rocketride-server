@@ -147,7 +147,7 @@ export interface IPipelineEditorProps {
 export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }) => {
 	const projectId = (project as { project_id?: string } | null)?.project_id ?? '';
 	// The caller's developer id, the first segment of every address (plan §2.2),
-	// for the PARAMS page's call examples. Absent until the org registered one,
+	// for the API Params page's call examples. Absent until the org registered one,
 	// and in a host without the shell identity context (the examples then show
 	// a placeholder).
 	const authUser = useAuthUser();

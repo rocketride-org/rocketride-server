@@ -57,13 +57,15 @@ export interface ViewState {
 
 /**
  * Top-level document pages (UI direction v5): DESIGN edits the canvas,
- * PARAMS exposes per-call parameters (plan §5.5), DEVELOPMENT monitors +
- * replays the dev continuum, DEPLOY the deploy continuum (plus, when the
- * deploy feature lands, its lifecycle card). The former per-view modes
- * (status/tokens/flow/trace/errors) became per-source pills inside each
- * page's SourcePanels.
+ * DEVELOPMENT monitors + replays the dev continuum, PACKAGE describes the
+ * pipeline (Identity, the per-call API Params of plan §5.5, and from Step 6
+ * Assets, Store, Requirements, Review, as side tabs), DEPLOY the deploy
+ * continuum (plus, when the deploy feature lands, its lifecycle card). The
+ * former per-view modes (status/tokens/flow/trace/errors) became per-source
+ * pills inside each page's SourcePanels; the former top-level PARAMS page
+ * is PACKAGE › API Params (decided 2026-11-16).
  */
-export type ProjectViewMode = 'design' | 'params' | 'development' | 'deploy';
+export type ProjectViewMode = 'design' | 'development' | 'package' | 'deploy';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {
