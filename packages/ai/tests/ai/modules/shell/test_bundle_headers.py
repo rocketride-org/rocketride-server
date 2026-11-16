@@ -270,3 +270,50 @@ def test_non_script_files_keep_the_bundle_cache(monkeypatch, name):
     resp = _get(monkeypatch, name)
 
     assert resp.headers.get('cache-control') == 'private, max-age=3600'
+
+
+# =============================================================================
+# THE HOST'S MIME TABLE DOES NOT DECIDE THE POLICY
+# =============================================================================
+
+# What Python's mimetypes can answer on a Windows host, where it reads the
+# registry: .mjs and .woff2 unknown, .js registered as text/plain, .svg as
+# a plain XML document. On Linux and macOS it answers the standard types.
+_WINDOWS_LIKE_TYPES = {
+    '.mjs': None,
+    '.woff2': None,
+    '.js': 'text/plain',
+    '.css': None,
+    '.svg': 'text/xml',
+}
+
+
+def _windows_like_guess(name, strict=True):
+    """A mimetypes.guess_type stand-in with a Windows-registry-like table."""
+    ext = '.' + name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    return (_WINDOWS_LIKE_TYPES.get(ext), None)
+
+
+@pytest.mark.parametrize(
+    ('name', 'media_type', 'inline', 'cache'),
+    [
+        ('remoteEntry.js', 'text/javascript', True, 'no-store'),
+        ('static/js/async/123.mjs', 'text/javascript', True, 'no-store'),
+        ('static/css/index.css', 'text/css', True, 'private, max-age=3600'),
+        ('static/font/inter.woff2', 'font/woff2', True, 'private, max-age=3600'),
+        ('icon.svg', 'image/svg+xml', False, 'private, max-age=3600'),
+    ],
+)
+def test_bundle_policy_does_not_depend_on_the_hosts_mime_table(monkeypatch, name, media_type, inline, cache):
+    """The web types a dist is built from get the same type and headers on
+    every host. Windows' registry-backed table must not turn a module script
+    into a cached download or a font into an attachment.
+    """
+    monkeypatch.setattr(shell_mod.mimetypes, 'guess_type', _windows_like_guess)
+
+    resp = _get(monkeypatch, name, b'payload')
+
+    assert resp.status_code == 200
+    assert resp.headers['content-type'].split(';')[0] == media_type
+    assert ('content-disposition' not in resp.headers) is inline
+    assert resp.headers.get('cache-control') == cache
