@@ -205,28 +205,30 @@ function IdentitySection({ project, sources, developerId, onContentChanged }: IP
 		onContentChanged?.({ ...project, ...patch, docRevision: (project.docRevision ?? 0) + 1 });
 	};
 
+	// Every caption is a <label htmlFor> of its control, so assistive
+	// technology names the field the way the eye does.
 	return (
 		<Card header="Identity">
 			<div style={styles.formRow}>
-				<div style={styles.formLabel}>Pipeline id</div>
-				<InputField type="text" style={styles.mono} value={shortId} disabled={readonly} pattern={SHORT_ID_PATTERN.source} aria-invalid={idProblem ? true : undefined} placeholder="docBrain" onChange={(event) => write({ project_id: event.target.value })} />
-				{idProblem ? <div style={styles.problem}>{idProblem}</div> : null}
+				<label htmlFor="rr-package-id" style={styles.formLabel}>Pipeline id</label>
+				<InputField id="rr-package-id" type="text" style={styles.mono} value={shortId} disabled={readonly} pattern={SHORT_ID_PATTERN.source} aria-invalid={idProblem ? true : undefined} aria-describedby={idProblem ? 'rr-package-id-problem' : undefined} placeholder="docBrain" onChange={(event) => write({ project_id: event.target.value })} />
+				{idProblem ? <div id="rr-package-id-problem" style={styles.problem}>{idProblem}</div> : null}
 				<div style={styles.help}>
 					Short name, no dots. Published as <span style={{ ...styles.mono, ...styles.helpStrong }}>{publishedAs}</span>
 					{developerId ? '' : ' once your organization claims a developer id'} — the publisher is whoever publishes; it is never typed here. Renaming after publish starts a new lineage.
 				</div>
 			</div>
 			<div style={styles.formRow}>
-				<div style={styles.formLabel}>Display name</div>
-				<InputField type="text" value={project.name ?? ''} disabled={readonly} placeholder="Doc brain" onChange={(event) => write({ name: event.target.value })} />
+				<label htmlFor="rr-package-name" style={styles.formLabel}>Display name</label>
+				<InputField id="rr-package-name" type="text" value={project.name ?? ''} disabled={readonly} placeholder="Doc brain" onChange={(event) => write({ name: event.target.value })} />
 			</div>
 			<div style={styles.formRow}>
-				<div style={styles.formLabel}>Description</div>
-				<textarea style={styles.formArea} value={project.description ?? ''} disabled={readonly} onChange={(event) => write({ description: event.target.value })} />
+				<label htmlFor="rr-package-description" style={styles.formLabel}>Description</label>
+				<textarea id="rr-package-description" style={styles.formArea} value={project.description ?? ''} disabled={readonly} onChange={(event) => write({ description: event.target.value })} />
 			</div>
 			<div style={styles.formRow}>
-				<div style={styles.formLabel}>Default source</div>
-				<select style={styles.select} value={project.source ?? ''} disabled={readonly || sources.length === 0} onChange={(event) => write({ source: event.target.value || undefined })}>
+				<label htmlFor="rr-package-source" style={styles.formLabel}>Default source</label>
+				<select id="rr-package-source" style={styles.select} value={project.source ?? ''} disabled={readonly || sources.length === 0} onChange={(event) => write({ source: event.target.value || undefined })}>
 					<option value="">{sources.length > 1 ? 'None — callers must name a source' : 'The only source'}</option>
 					{sources.map((src) => (
 						<option key={src.id} value={src.id}>
