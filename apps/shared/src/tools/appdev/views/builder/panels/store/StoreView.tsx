@@ -355,15 +355,21 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 		void refresh();
 	}, [refresh]);
 
-	/** Persist the WHOLE form (mode + plans) through the host, then reload —
-	 *  the refresh re-seeds the baseline (the footer dematerializes) and
-	 *  reruns pre-flight so the plan-count check tracks the save. */
+	/** Persist the Store-owned fields (mode + plans) through the host, then
+	 *  reload — the refresh re-seeds the baseline (the footer dematerializes)
+	 *  and reruns pre-flight so the plan-count check tracks the save.
+	 *
+	 *  The draft was seeded when this pane loaded; the Package pane beside it
+	 *  may have saved name/description/assets since. So the save overlays only
+	 *  this pane's fields on the listing as it is NOW — the mirror of the
+	 *  Package save — instead of writing the whole stale draft back. */
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing || readOnly) return;
 		setSaving(true);
 		setError('');
 		try {
-			await host.saveListing(draft);
+			const fresh = (await host.loadListing?.()) ?? draft;
+			await host.saveListing({ ...fresh, mode: draft.mode, plans: draft.plans });
 			await refresh();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
