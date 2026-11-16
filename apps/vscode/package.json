@@ -1,7 +1,7 @@
 {
 	"name": "rocketride",
 	"displayName": "RocketRide",
-	"description": "RocketRide is the leading AI meta-harness with the only enterprise-grade runtime built on C++.",
+	"description": "RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.",
 	"version": "1.6.0",
 	"publisher": "rocketride",
 	"repository": {
