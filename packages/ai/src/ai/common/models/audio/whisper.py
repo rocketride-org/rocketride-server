@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..extract import raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.whisper')
 
@@ -1215,7 +1216,7 @@ class Whisper:
             self._model,
             raw_output,
             1,
-            self._fields_with_error(),
+            with_error_field(self.output_fields),
             language=language,
         )
         t_post = (time.perf_counter() - t0) * 1000
@@ -1234,19 +1235,12 @@ class Whisper:
 
         return self._checked_result(results[0]) if results else {}
 
-    def _fields_with_error(self) -> List[str]:
-        """Preserve per-item failures through the loader's requested-field filter."""
-        return self.output_fields if 'error' in self.output_fields else [*self.output_fields, 'error']
-
     def _checked_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """Raise when the loader reported a failed inference; otherwise return the result.
 
         The result carries ``error`` only when the caller asked for it.
         """
-        error = result.get('error')
-        # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
-        if error is not None:
-            raise RuntimeError(f'Whisper inference failed: {error or "no message"}')
+        raise_on_error('Whisper', result)
         if 'error' not in self.output_fields:
             return {key: value for key, value in result.items() if key != 'error'}
         return result
@@ -1275,7 +1269,7 @@ class Whisper:
                 'vad_parameters': vad_parameters,
                 'language': language,
                 'word_timestamps': word_timestamps,
-                'output_fields': self._fields_with_error(),
+                'output_fields': with_error_field(self.output_fields),
                 **kwargs,
             },
         )

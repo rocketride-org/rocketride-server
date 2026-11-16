@@ -383,3 +383,23 @@ def build_batch_result(raw_outputs: List[Any], output_fields: List[str], batch_s
         results.append({field: None for field in output_fields})
 
     return results
+
+
+def with_error_field(output_fields: List[str]) -> List[str]:
+    """
+    Add the plain ``error`` field to the fields a wrapper requests.
+
+    The loaders catch a failed inference per item (an image, an audio clip) and set ``error``
+    on that item, so one failure in a model-server batch does not fail the other tasks'
+    items; the field only reaches the wrapper when it is requested. Any model server returns
+    it as it is.
+    """
+    return output_fields if 'error' in output_fields else [*output_fields, 'error']
+
+
+def raise_on_error(engine: str, result: Dict[str, Any]) -> None:
+    """Raise when the loader reported a failed inference for this item (e.g. CUDA out of memory)."""
+    error = result.get('error')
+    # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
+    if error is not None:
+        raise RuntimeError(f'{engine} inference failed: {error or "no message"}')

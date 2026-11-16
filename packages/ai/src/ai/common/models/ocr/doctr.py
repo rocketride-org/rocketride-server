@@ -30,7 +30,8 @@ from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from ..device_budget import device_budget
-from .utils import preprocess_image_transparency, raise_on_error, with_error_field
+from ..extract import raise_on_error, with_error_field
+from .utils import preprocess_image_transparency
 
 logger = logging.getLogger('rocketlib.models.doctr')
 
