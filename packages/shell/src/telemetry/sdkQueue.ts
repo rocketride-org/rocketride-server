@@ -204,8 +204,10 @@ export class SdkQueue {
 		}
 		const stamped = { ...this.superProps, ...props };
 		// ONE uuid for the entry and its mirror: the delivery at the start and a next load's replay of
-		// the mirror (a page that stopped between the two) are then the same event to posthog-js.
-		const id = newEventUuid();
+		// the mirror (a page that stopped between the two) are then the same event to posthog-js. A
+		// caller's own uuid (its idempotency key, e.g. a deterministic exposure id) is that uuid when
+		// it has the shape posthog-js keeps, so a retry of the same event before the start dedupes too.
+		const id = isEventUuid(options?.uuid) ? options.uuid : newEventUuid();
 		this.pending.push({ event, props: stamped, options, id });
 		// Mirror AT ENQUEUE: a redirect or crash a moment later still finds the entry.
 		const ts = this.now();

@@ -357,6 +357,21 @@ test('a legacy non-uuid id in the inherited hold is normalized once at hydrate: 
 	assert.deepEqual(sent, rewritten.map((e) => e.id));
 });
 
+test("a caller's uuid-shaped uuid before the start is the entry's and its mirror's uuid; any other caller value is replaced", () => {
+	const storage = memoryStorage();
+	const h = heldHarness(storage, () => 1_000_000);
+	const own = '123e4567-e89b-42d3-a456-426614174000';
+	h.queue.capture('homepage_roulette_viewed', {}, { uuid: own });
+	h.queue.capture('cta:click', {}, { uuid: 'not-a-uuid' });
+	const mirrored = JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ id: string }>;
+	assert.equal(mirrored[0].id, own, 'the mirror carries the caller uuid');
+	assert.match(mirrored[1].id, POSTHOG_UUID, 'a non-uuid caller value is replaced by a minted one');
+	assert.notEqual(mirrored[1].id, 'not-a-uuid');
+	h.queue.start();
+	const sent = captures(h.calls).map((c) => (c.options as { uuid?: string }).uuid);
+	assert.deepEqual(sent, mirrored.map((e) => e.id), 'the delivery at the start uses the same uuids as the mirror');
+});
+
 test('a uuid-shaped inherited id is kept as is', () => {
 	const storage = memoryStorage();
 	const id = '123e4567-e89b-42d3-a456-426614174000';
