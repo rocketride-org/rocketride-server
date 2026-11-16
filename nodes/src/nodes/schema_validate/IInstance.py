@@ -29,6 +29,10 @@ from .validate import validate_payload
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal  # Reference to the global context holding the normalised validation settings
 
     # Validated payloads collected during the object, emitted at closing.
@@ -67,7 +71,7 @@ class IInstance(IInstanceBase):
                 payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append((True, validate_payload(payload, self.IGlobal.validation)))
+            self.pending.append((True, validate_payload(payload, self.IGlobal.validation_rules())))
         else:
             # Plain text, empty, or non-fact JSON scalar — pass through verbatim.
             self.pending.append((False, answer.getText() if answer is not None else ''))

@@ -87,6 +87,7 @@ class IGlobal(IGlobalBase):
 
         self._closing = False
         self._pending = set()
+        self._pending_lock = threading.Lock()
         self._connect_lock = threading.Lock()
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, name='tool_laserdata_memory-loop', daemon=True)
@@ -112,7 +113,8 @@ class IGlobal(IGlobalBase):
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         pending = self._pending
         if pending is not None:
-            pending.add(future)
+            with self._pending_lock:
+                pending.add(future)
         try:
             return future.result(budget)
         except concurrent.futures.CancelledError:
@@ -122,7 +124,8 @@ class IGlobal(IGlobalBase):
             raise RuntimeError(f'laserdata: operation timed out after {budget}s') from None
         finally:
             if pending is not None:
-                pending.discard(future)
+                with self._pending_lock:
+                    pending.discard(future)
 
     def get_laser(self) -> Any:
         """Return the shared Laser connection, opening it on first use."""

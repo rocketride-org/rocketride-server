@@ -34,6 +34,10 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
 
     text: str = ''
@@ -57,12 +61,12 @@ class IInstance(IInstanceBase):
         #   }
 
         # If we are using the new stye:
-        if self.IGlobal.laneName is not None:
+        if self.IGlobal.lane_name() is not None:
             # Grab the key name
-            key = self.IGlobal.laneName
-        elif self.IGlobal.lanes:
+            key = self.IGlobal.lane_name()
+        elif self.IGlobal.lane_map():
             # If we are using the old style, grab the key
-            key = self.IGlobal.lanes.get(type, type)
+            key = self.IGlobal.lane_map().get(type, type)
         else:
             key = type
 

@@ -54,6 +54,10 @@ _RETURN_TYPE_DESCRIPTIONS = {
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
 
     @tool_function(
@@ -76,7 +80,7 @@ class IInstance(IInstanceBase):
                 'result': {
                     'type': 'string',
                     'description': _RETURN_TYPE_DESCRIPTIONS.get(
-                        self.IGlobal.return_type,
+                        self.settings.return_type,
                         'Result from the pipeline.',
                     ),
                 },
@@ -115,9 +119,9 @@ class IInstance(IInstanceBase):
                 'tool_pipe: sub-pipeline returned no data — ensure a response node is connected at the end of the sub-pipeline'
             )
 
-        result = _extract_return_value(response, self.IGlobal.return_type)
+        result = _extract_return_value(response, self.settings.return_type)
 
-        debug(f'tool_pipe: returning result return_type={self.IGlobal.return_type!r} result_len={len(result)}')
+        debug(f'tool_pipe: returning result return_type={self.settings.return_type!r} result_len={len(result)}')
         return {'result': result}
 
     # ------------------------------------------------------------------

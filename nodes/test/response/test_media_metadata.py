@@ -45,10 +45,16 @@ class _Inst:
 
 
 class _Glob:
-    """laneName=None + empty lanes -> _getkey falls back to the lane name itself."""
+    """laneName=None + empty lanes -> _getkey falls back to the lane name itself (read through the accessors)."""
 
     laneName = None
     lanes = None
+
+    def lane_name(self):
+        return self.laneName
+
+    def lane_map(self):
+        return self.lanes
 
 
 def _descriptor_payload(kind, source_mime):

@@ -46,6 +46,10 @@ class IGlobal(IGlobalBase):
         self.chunk_bytes = config.chunk_kb * 1024
         self.max_input_bytes = config.max_input_mb * 1024 * 1024
 
+    def input_limit(self) -> int:
+        """The largest input one object may carry, in bytes (an accessor: instances read IGlobal through methods)."""
+        return self.max_input_bytes
+
     def endGlobal(self):
         """No persistent media or storage binding is retained by the global."""
         pass

@@ -136,7 +136,7 @@ class IInstance(IInstanceBase):
             self.document_data = b''
             return
 
-        text, tables = self.IGlobal.parser.parse(document_data, file_name)
+        text, tables = self.IGlobal.parser().parse(document_data, file_name)
 
         if has_text_listener:
             if text:

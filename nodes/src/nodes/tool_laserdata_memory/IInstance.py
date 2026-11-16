@@ -282,7 +282,12 @@ class IInstance(IInstanceBase):
             raise ValueError(
                 f'laserdata.{tool_name}: a namespace is required — pass it on the call or set it in node config'
             )
-        return ns
+        # The memory is the CALLER's (plan 4.1 rule 3, 12 B): on a shared engine
+        # two callers naming one namespace must never read each other's facts,
+        # so the stored namespace is qualified by the caller. A binding without
+        # a caller (the owner's own engine) keeps the bare name.
+        owner = str((getattr(self, '_caller', None) or {}).get('userId') or '')
+        return f'{owner}:{ns}' if owner else ns
 
     def _laser(self, tool_name: str) -> Any:
         """Fetch the shared connection, mapping connect failures to RuntimeError."""

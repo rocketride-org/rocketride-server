@@ -139,6 +139,11 @@ def _load_iinstance_class():
         def preventDefault(self):
             pass
 
+        @property
+        def settings(self):
+            # With no caller the real settings view IS the global's resolved config (rocketlib/filters.py)
+            return self.IGlobal.config
+
     class FakeEntry:
         pass
 

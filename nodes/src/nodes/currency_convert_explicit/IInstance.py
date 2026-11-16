@@ -29,6 +29,10 @@ from .convert import convert_payload
 
 
 class IInstance(IInstanceBase):
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal  # Reference to the global context holding the conversion settings
 
     # Converted payloads collected during the object, emitted at closing.
@@ -64,7 +68,7 @@ class IInstance(IInstanceBase):
                 payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append((True, convert_payload(payload, self.IGlobal.conversion)))
+            self.pending.append((True, convert_payload(payload, self.IGlobal.conversion_table())))
         else:
             # Plain text / scalar JSON carries no currency — pass through verbatim.
             self.pending.append((False, answer.getText() if answer is not None else ''))

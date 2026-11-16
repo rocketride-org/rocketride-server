@@ -2105,3 +2105,21 @@ async def test_a_crashed_request_response_engine_waits_for_a_request(catalog, en
 
     assert control.dormant and restarts.slept == []
     assert ts._engine_restarts == {}
+
+
+# =============================================================================
+# THE SHARING DECISION AS A WORD (plan 4.4, shown at validate and publish)
+# =============================================================================
+
+
+def test_engine_sharing_names_the_decision(catalog):
+    """A request/response source with certified nodes shares across users; a listener-shaped source per owner;
+    an unkeyable spec has no answer (its start is refused).
+    """
+    from ai.modules.task.task_engine import engine_sharing
+
+    assert engine_sharing(_pipeline()) == 'users'
+    assert engine_sharing(_pipeline(), source='prompt_1') == 'owner'
+    unknown = _pipeline()
+    unknown['components'][1]['provider'] = 'no_such_node'
+    assert engine_sharing(unknown) is None

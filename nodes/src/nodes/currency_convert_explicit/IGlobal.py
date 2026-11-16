@@ -56,5 +56,9 @@ class IGlobal(IGlobalBase):
                 'must be set; answers will pass through unchanged.'
             )
 
+    def conversion_table(self):
+        """The compiled conversion table."""
+        return self.conversion
+
     def endGlobal(self):
         self.conversion = None

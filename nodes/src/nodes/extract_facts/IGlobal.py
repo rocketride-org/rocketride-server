@@ -48,5 +48,9 @@ class IGlobal(IGlobalBase):
                 continue
             self.fields.append(field)
 
+    def field_definitions(self):
+        """The well-formed field definitions kept from the config."""
+        return self.fields
+
     def endGlobal(self) -> None:
         pass

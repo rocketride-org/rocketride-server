@@ -46,5 +46,9 @@ class IGlobal(IGlobalBase):
             'mapping': build_mapping(config.label_to_metric),
         }
 
+    def normalization_rules(self):
+        """The compiled normalization rules."""
+        return self.rules
+
     def endGlobal(self):
         self.rules = None

@@ -89,7 +89,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .engine_key import CONST_CATALOG_NODE_PREFIX
+from .engine_key import CONST_CATALOG_NODE_PREFIX, engine_content
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
@@ -506,6 +506,27 @@ def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, An
     certified = bool(int(schema.get('capabilities') or 0) & MULTITENANT_BIT)
     catalog = str(service.get('path') or '').startswith(CONST_CATALOG_NODE_PREFIX)
     return config, certified and catalog
+
+
+def engine_sharing(pipeline: Dict[str, Any], source: Optional[str] = None) -> Optional[str]:
+    """
+    How an engine for ``pipeline`` is shared (plan 4.4), for the doors that show it before a publish.
+
+    Args:
+        pipeline: The pipeline spec (its ``source`` key is the default entry).
+        source: The entry component, or None for the spec's own.
+
+    Returns:
+        ``'users'`` when the engine may be held by controls of different users
+        (a request/response source and every node certified ``multitenant``),
+        ``'owner'`` when each user gets an engine of their own, None when the
+        spec cannot be keyed at all (an unknown node; the start refuses it).
+    """
+    try:
+        content = engine_content(pipeline, source or pipeline.get('source'), component_facts)
+    except Exception:
+        return None
+    return 'users' if content.shareable else 'owner'
 
 
 class TaskEngine(DAPBase):

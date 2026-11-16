@@ -490,6 +490,16 @@ class MiscCommands(DAPConn):
                 data = dict(data)
                 data['errors'] = list(data.get('errors') or []) + placeholder_errors
 
+            # The engine-key decision the publisher will get (plan 4.4): across
+            # users, or one engine per user, by the entry source and the nodes'
+            # certification; absent when the spec cannot be keyed (its errors say why)
+            if 'components' in pipeline:
+                from ..task_engine import engine_sharing  # the engine module imports this package: lazy
+
+                sharing = engine_sharing(pipeline)
+                if sharing is not None:
+                    data = dict(data)
+                    data['engineSharing'] = sharing
             # Return the results
             return self.build_response(request, body=data)
 

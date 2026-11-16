@@ -104,11 +104,24 @@ DEFAULTS = resolveConfig(_schema(), {}).to_dict()
 def node(request=None, config=None):
     """Create an isolated node instance with a JSON request."""
     instance = IInstance()
+    max_input_bytes = (config or {}).get('max_input_bytes', 16 * 1024**3)
     instance.IGlobal = SimpleNamespace(
         config={**DEFAULTS, 'request': json.dumps(request or {}), **(config or {})},
         chunk_bytes=65536,
-        max_input_bytes=(config or {}).get('max_input_bytes', 16 * 1024**3),
+        max_input_bytes=max_input_bytes,
+        # The instance reads the limit through the accessor (methods-only IGlobal, plan 4.2)
+        input_limit=lambda: max_input_bytes,
     )
+    # The instance reads its per-call values through settings (plan 5.3): the
+    # view the engine would build, resolved by the real resolver over the same
+    # stored config (chunk_kb 64 matches the stand-in's 65536-byte chunks;
+    # max_input_bytes is the stand-in's own knob, not a schema key)
+    stored = {
+        'request': json.dumps(request or {}),
+        **{k: v for k, v in (config or {}).items() if k != 'max_input_bytes'},
+    }
+    stored.setdefault('chunk_kb', 64)
+    instance._settings = resolveConfig(_schema(), stored)
     instance.instance = Output()
     instance.open(SimpleNamespace(name='source.mp4'))
     return instance
@@ -300,7 +313,9 @@ def test_duplicate_stream_names_rejected(media):
 def test_invalid_request_fails_and_cleans(media, invalid_request):
     """Verify invalid request fails and cleans."""
     instance = node()
-    instance.IGlobal.config['request'] = json.dumps(invalid_request)
+    # The request the instance reads is its settings view (plan 5.3): the
+    # invalid one replaces the view the helper built (a list is a valid JSON text)
+    instance._settings = resolveConfig(_schema(), {'request': json.dumps(invalid_request), 'chunk_kb': 64})
     root = instance._workspace.root
     feed(instance, media)
     with pytest.raises(ValueError):

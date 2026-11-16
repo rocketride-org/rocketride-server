@@ -153,7 +153,8 @@ def _make_instance(node_module):
     """
     instance_class = node_module.IInstance
     inst = instance_class.__new__(instance_class)
-    inst.IGlobal = types.SimpleNamespace(fields=[])
+    # The instance reads the kept field definitions through the accessor (methods-only IGlobal, plan 4.2)
+    inst.IGlobal = types.SimpleNamespace(fields=[], field_definitions=lambda: [])
     inst.instance = MagicMock()
     inst.table = []
     inst.chunkId = 0

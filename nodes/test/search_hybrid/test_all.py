@@ -57,7 +57,7 @@ import copy
 import importlib.util
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -921,19 +921,34 @@ def search_hybrid_pkg():
     """
     import types
 
+    patchers = []
+
     def make_instance(engine, top_k=10, rrf_k=60):
-        """Build an IInstance with a mock IGlobal/engine and a mock pipeline."""
+        """Build an IInstance with a mock IGlobal/engine and a mock pipeline.
+
+        The instance is certified multitenant (plan 4.2): it reaches the engine
+        through the global's accessor and its knobs through ``settings``, so
+        the mock answers ``search_engine()`` and the settings view is patched
+        on the class for the fixture's lifetime.
+        """
         inst = IInstance.__new__(IInstance)
         iglobal = MagicMock(spec=IGlobal)
         iglobal.engine = engine
-        iglobal.top_k = top_k
-        iglobal.rrf_k = rrf_k
+        iglobal.search_engine.return_value = engine
         inst.IGlobal = iglobal
+        patcher = patch.object(
+            IInstance,
+            'settings',
+            new_callable=PropertyMock,
+            return_value=types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k),
+        )
+        patcher.start()
+        patchers.append(patcher)
         mock_instance = MagicMock()
         inst.instance = mock_instance
         return inst, mock_instance
 
-    return types.SimpleNamespace(
+    pkg = types.SimpleNamespace(
         IInstance=IInstance,
         Doc=Doc,
         Question=Question,
@@ -942,6 +957,9 @@ def search_hybrid_pkg():
         SubQuestion=QuestionText,
         make_instance=make_instance,
     )
+    yield pkg
+    for patcher in patchers:
+        patcher.stop()
 
 
 class TestIInstanceIntegration:

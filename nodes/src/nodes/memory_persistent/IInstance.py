@@ -21,6 +21,25 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
+    """One request's view of the shared memory store: its sessions are the caller's (plan 12 B)."""
+
+    def _scoped(self, session_id):
+        """
+        The caller's session: a session id a client names is qualified by the
+        caller, so on a shared engine two callers naming one id never read
+        each other's memory. A binding without a caller keeps the bare id.
+
+        Args:
+            session_id: The id from the message metadata, or None.
+
+        Returns:
+            The scoped id, or None when none was given.
+        """
+        if not session_id:
+            return session_id
+        owner = str((getattr(self, '_caller', None) or {}).get('userId') or '')
+        return f'{owner}__{session_id}' if owner else session_id
+
     """Pipeline instance for the memory_persistent node.
 
     preventDefault() raises immediately, so no code may follow it — anything
@@ -59,7 +78,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from question metadata (if present)
         session_id = None
         if hasattr(question, 'metadata') and isinstance(question.metadata, dict):
-            session_id = question.metadata.get('session_id')
+            session_id = self._scoped(question.metadata.get('session_id'))
         self._current_session_id = session_id
 
         if session_id:
@@ -118,7 +137,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from answer metadata
         session_id = None
         if hasattr(answer, 'metadata') and isinstance(answer.metadata, dict):
-            session_id = answer.metadata.get('session_id')
+            session_id = self._scoped(answer.metadata.get('session_id'))
         if not session_id:
             session_id = self._current_session_id
 

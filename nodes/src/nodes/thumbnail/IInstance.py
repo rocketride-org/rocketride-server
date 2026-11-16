@@ -44,6 +44,10 @@ class IInstance(IInstanceBase):
     then forwards the processed documents or images to appropriate listeners.
     """
 
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal  # Reference to the global singleton instance
 
     def open(self, object: Entry):

@@ -2,7 +2,7 @@
 	"title": "Chart (Chart.js)",
 	"protocol": "tool_chartjs://",
 	"classType": ["tool"],
-	"capabilities": ["invoke"],
+	"capabilities": ["invoke", "multitenant"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_chartjs",

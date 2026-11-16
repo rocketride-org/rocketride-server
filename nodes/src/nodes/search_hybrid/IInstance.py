@@ -35,6 +35,10 @@ from .IGlobal import IGlobal
 class IInstance(IInstanceBase):
     """Instance that performs hybrid search (vector + BM25) over question documents."""
 
+    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
+    # instance is an accessor method; per-call values come from self.settings
+    iglobal_methods_only = True
+
     IGlobal: IGlobal
 
     # Set once the missing-vector-score warning has been emitted, so a pipeline
@@ -81,7 +85,7 @@ class IInstance(IInstanceBase):
         3. Merge vector + BM25 results via Reciprocal Rank Fusion.
         4. Emit reranked documents to the output.
         """
-        if self.IGlobal.engine is None:
+        if self.IGlobal.search_engine() is None:
             raise RuntimeError('Hybrid search engine not initialized')
 
         # Deep copy to prevent mutation corruption in fan-out branches
@@ -128,12 +132,12 @@ class IInstance(IInstanceBase):
         self._warn_about_missing_vector_scores(vector_scores)
 
         # Run hybrid search
-        results = self.IGlobal.engine.search(
+        results = self.IGlobal.search_engine().search(
             query=query_text,
             documents=doc_dicts,
             vector_scores=vector_scores,
-            top_k=self.IGlobal.top_k,
-            rrf_k=self.IGlobal.rrf_k,
+            top_k=int(self.settings.top_k),
+            rrf_k=int(self.settings.rrf_k),
         )
 
         # Map results back to Doc objects, preserving original metadata

@@ -45,3 +45,11 @@ class IGlobal(IGlobalBase):
 
         # This will create a local copy
         self.laneName, self.lanes = configured_keys(config)
+
+    def lane_name(self):
+        """The one configured key name (new style), or None."""
+        return self.laneName
+
+    def lane_map(self):
+        """The lane -> key map (old style), or None."""
+        return self.lanes
