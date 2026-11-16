@@ -34,7 +34,7 @@ from the base class.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from redis.exceptions import RedisError
 
@@ -444,7 +444,9 @@ def _url_without_password(url: str) -> str:
 
     query = parts.query
     if query:
-        query = urlencode([(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k != 'password'])
+        # Drop only the password pair and keep every other pair as written:
+        # decoding and re-encoding them would turn a ${...} into %24%7B...%7D.
+        query = '&'.join(pair for pair in query.split('&') if unquote_plus(pair.split('=', 1)[0]) != 'password')
 
     rebuilt = urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
     # urlunsplit drops the '//' when the authority is empty, turning a unix:///path

@@ -1183,6 +1183,8 @@ def test_password_field_fills_in_a_url_without_credentials(recording_client):
         ('falkor://:pw@host:6379', 'falkor://host:6379'),
         # unix:// carries its password in the query string instead.
         ('unix:///tmp/f.sock?db=0&password=pw', 'unix:///tmp/f.sock?db=0'),
+        # Other query pairs stay as written, so a ${...} in one is not percent-encoded.
+        ('unix:///tmp/f.sock?username=${ROCKETRIDE_U}&password=pw', 'unix:///tmp/f.sock?username=${ROCKETRIDE_U}'),
         ('falkor://host:6379', 'falkor://host:6379'),
     ],
 )
@@ -1407,8 +1409,15 @@ def test_a_filled_password_field_replaces_an_unfilled_url_password(monkeypatch):
     assert len(_begin_with_config(monkeypatch, config)) == 1
 
 
-def test_the_rest_of_the_url_is_still_checked_when_the_password_field_is_filled(monkeypatch):
-    config = {'mode': 'url', 'url': 'falkor://${ROCKETRIDE_FALKOR_USER}:x@h:6379', 'password': 's3cret'}
+@pytest.mark.parametrize(
+    'url',
+    [
+        'falkor://${ROCKETRIDE_FALKOR_USER}:x@h:6379',
+        'unix:///tmp/f.sock?username=${ROCKETRIDE_FALKOR_USER}&password=x',
+    ],
+)
+def test_the_rest_of_the_url_is_still_checked_when_the_password_field_is_filled(monkeypatch, url):
+    config = {'mode': 'url', 'url': url, 'password': 's3cret'}
     with pytest.raises(ValueError, match='graph_falkordb: url '):
         _begin_with_config(monkeypatch, config)
 

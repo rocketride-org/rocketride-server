@@ -681,6 +681,13 @@ class TestUnfilledCredential:
 
         assert len(_WARNING_CALLS) == 1 and 'db_arango: password ' in _WARNING_CALLS[0]
 
+    def test_no_auth_method_opens_with_the_password(self):
+        # A null auth_method signs in with the (resolved) password, as a missing one does.
+        calls = []
+        client = SimpleNamespace(db=lambda database, **kw: calls.append((database, kw)))
+        IGlobal._open_database(client, {'database': 'd', 'auth_method': None, 'user': 'u', 'password': 's3cret'})
+        assert calls == [('d', {'username': 'u', 'password': 's3cret', 'verify': False})]
+
     def test_an_unused_placeholder_is_not_checked(self):
         # The token is not sent under password sign-in.
         cfg = {'auth_method': 'userpass', 'password': 's3cret', 'token': '${ROCKETRIDE_ARANGO_TOKEN}'}

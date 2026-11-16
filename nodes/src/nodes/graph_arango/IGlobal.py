@@ -375,7 +375,7 @@ class IGlobal(IGlobalBase):
         raising ``ServerConnectionError`` on failure.
         """
         database = config.get('database', '_system').strip() or '_system'
-        auth_method = config.get('auth_method', 'userpass').strip()
+        auth_method = str(config.get('auth_method') or 'userpass').strip()
         if auth_method == 'token':
             return client.db(database, user_token=config.get('token', ''), verify=verify)
         user = config.get('user', 'root').strip() or 'root'
