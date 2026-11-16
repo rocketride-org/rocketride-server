@@ -10,29 +10,14 @@
  * exactly as written rather than guessed at.
  */
 
+const { fenceOpener, fenceCloses, codeSpanEnd, frontMatterTitle } = require('./markdown');
+
 const FRONT_MATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
-const FENCE_OPEN = /^\s*(`{3,}|~{3,})(.*)$/;
 const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'source', 'wbr', 'col']);
 const IMPORT_LINE = /^[ \t]*import\s+(?:['"]|\*|\{|[\w$]+\s*(?:,|from\b))/;
 const EXPORT_LINE = /^[ \t]*export\s+(?:const|let|var|function|class|default|async|type|interface|\{|\*)/;
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 const BLANK_LINE = /\n[ \t]*\n/;
-
-/**
- * The fence a line opens, as `{ ch, len }`, or null. This is the one fence rule
- * for the twins and the meta descriptions. A backtick fence cannot carry a
- * backtick in its info string (that line is an inline code span, not a fence).
- */
-function fenceOpener(line) {
-	const m = FENCE_OPEN.exec(line.replace(/\r$/, ''));
-	return m && !(m[1][0] === '`' && m[2].includes('`')) ? { ch: m[1][0], len: m[1].length } : null;
-}
-
-/** Whether `line` closes `fence`: the same character, at least as many marks, and nothing after them. */
-function fenceCloses(line, fence) {
-	const m = FENCE_OPEN.exec(line.replace(/\r$/, ''));
-	return !!m && m[1][0] === fence.ch && m[1].length >= fence.len && !m[2].trim();
-}
 
 /**
  * Split text into fenced and unfenced segments. A fence closes only on the same
@@ -159,45 +144,6 @@ function statementEnd(src, i) {
 		}
 	}
 	return depth <= 0 ? src.length : -1;
-}
-
-/**
- * Where a code span opened at `from` (after its backtick run) must stop looking
- * for a closer: a blank line ends it, and so does the end of an ATX heading line.
- */
-function codeSpanLimit(src, i, from) {
-	let limit = src.length;
-	const blank = /\n[ \t\r]*(?:\n|$)/g;
-	blank.lastIndex = from;
-	const gap = blank.exec(src);
-	if (gap) limit = gap.index;
-	const lineBegin = src.lastIndexOf('\n', i - 1) + 1;
-	if (/^ {0,3}#{1,6}[ \t]/.test(src.slice(lineBegin, i))) {
-		const eol = src.indexOf('\n', from);
-		if (eol >= 0 && eol < limit) limit = eol;
-	}
-	return limit;
-}
-
-/**
- * End index of the code span opened by the backtick run at `i`, or -1. The span
- * ends at the next run of exactly the same length, and cannot cross a block
- * boundary (see codeSpanLimit).
- */
-function codeSpanEnd(src, i) {
-	let len = 0;
-	while (src[i + len] === '`') len++;
-	const limit = codeSpanLimit(src, i, i + len);
-	let from = i + len;
-	while (from < limit) {
-		const at = src.indexOf('`', from);
-		if (at < 0 || at >= limit) break;
-		let run = 1;
-		while (src[at + run] === '`') run++;
-		if (run === len) return at + run;
-		from = at + run;
-	}
-	return -1;
 }
 
 const collapse = (s) => s.replace(/\s+/g, ' ').trim();
@@ -405,9 +351,17 @@ class MdxCleaner {
 			this.i++;
 			return;
 		}
-		const code = m[2] ? +m[2] : m[3] ? parseInt(m[3], 16) : null;
-		this.emit(m[1] ? ENTITIES[m[1]] : code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m[0]);
 		this.i += m[0].length;
+		if (m[1]) {
+			this.emit(ENTITIES[m[1]]);
+			return;
+		}
+		const code = m[2] ? +m[2] : parseInt(m[3], 16);
+		if (code > 0 && code <= 0x10ffff) {
+			this.emit(String.fromCodePoint(code));
+			return;
+		}
+		this.emit(m[0]);
 	}
 }
 
@@ -419,15 +373,14 @@ function cleanMdx(src, state) {
 	return new MdxCleaner(src, state).run();
 }
 
-/** Extract a `title:` from a leading YAML front-matter block, if present. */
-function frontMatterTitle(content) {
-	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
-	if (!m) return null;
-	const t = /(^|\n)title:\s*(.+?)\s*(\n|$)/.exec(m[1]);
-	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
+/** Whether offset `at` falls inside one of the `[start, end)` fenced ranges. */
+function isInsideFence(at, fenced) {
+	return fenced.some(([a, b]) => at >= a && at < b);
 }
 
 /**
+ * Clean a page source into markdown for the LLM surface.
+ *
  * @param {string} raw - page source (md/mdx), generated or authored.
  * @param {object} [opts]
  * @param {boolean} [opts.mdx] - the source is MDX: drop imports and JSX tags.
@@ -449,14 +402,20 @@ function cleanTwin(raw, { mdx = false, indexUrl = '', addTitle = true } = {}) {
 		if (segments[i].fence) fenced.push([joined.length, joined.length + part.length]);
 		joined += part;
 	});
-	let body = joined.replace(/\n{3,}/g, (run, at) => (fenced.some(([a, b]) => at >= a && at < b) ? run : '\n\n')).trim();
+	const collapseRun = (run, at) => {
+		if (isInsideFence(at, fenced)) return run;
+		return '\n\n';
+	};
+	let body = joined.replace(/\n{3,}/g, collapseRun).trim();
 	// A `# comment` inside a code fence is not a title.
 	const hasTitle = segments.some((s, i) => !s.fence && /^# /m.test(parts[i]));
 	if (addTitle && title && !hasTitle) body = `# ${title}\n\n${body}`;
-	return `${indexUrl ? `${INDEX_LINE_PREFIX}: ${indexUrl}\n\n` : ''}${body}\n`;
+	let prefix = '';
+	if (indexUrl) prefix = `${INDEX_LINE_PREFIX}: ${indexUrl}\n\n`;
+	return `${prefix}${body}\n`;
 }
 
 // First line of every published .md twin; llms.js uses it to spot an already-rewritten file.
 const INDEX_LINE_PREFIX = '> Documentation index for agents';
 
-module.exports = { cleanTwin, splitFences, fenceOpener, fenceCloses, codeSpanEnd, frontMatterTitle, INDEX_LINE_PREFIX };
+module.exports = { cleanTwin, splitFences, INDEX_LINE_PREFIX };

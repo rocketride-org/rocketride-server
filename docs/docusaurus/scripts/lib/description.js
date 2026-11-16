@@ -8,7 +8,7 @@
  * Text inside inline code is kept as written, so `<your-api-key>` survives.
  */
 
-const { fenceOpener, fenceCloses, codeSpanEnd } = require('./twin');
+const { fenceOpener, fenceCloses, codeSpanEnd } = require('./markdown');
 
 const MAX = 160;
 const SKIP_LINE = /^(#{1,6}\s|:::|\||[<{]|import\s|export\s|-{3,}|[-*+]\s|\d+[.)]\s|>|!\[)/;
@@ -72,7 +72,9 @@ function stripComments(text) {
 		}
 		const ch = text[i];
 		lineStart = false;
-		const stop = ch === '\\' ? Math.min(i + 2, text.length) : ch === '`' ? codeSpanStop(text, i) : -1;
+		let stop = -1;
+		if (ch === '\\') stop = Math.min(i + 2, text.length);
+		else if (ch === '`') stop = codeSpanStop(text, i);
 		if (stop >= 0) {
 			out += text.slice(i, stop);
 			i = stop;
@@ -135,6 +137,8 @@ function stripMarkup(raw) {
 }
 
 /**
+ * Shorten one paragraph to a description of at most 160 characters.
+ *
  * @param {string} paragraph - the lines of one paragraph, joined by spaces, markup still in.
  * @return {string} a description of at most 160 characters, or '' when there is no prose.
  */
@@ -160,6 +164,8 @@ function describeText(paragraph) {
 }
 
 /**
+ * Build the meta description for a page from its first prose paragraph.
+ *
  * @param {string} body - page content without front matter.
  * @return {string} a description of at most 160 characters, or '' when the page has no prose.
  */
@@ -167,4 +173,4 @@ function describePage(body) {
 	return describeText(firstParagraph(body));
 }
 
-module.exports = { describePage, describeText, firstParagraph };
+module.exports = { describePage, firstParagraph };

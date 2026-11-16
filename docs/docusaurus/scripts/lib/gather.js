@@ -17,8 +17,8 @@ const path = require('path');
 const { glob } = require('glob');
 const { exists, mkdir, rm, copyFile, writeFileEnsure, readFile, readDir, symlink } = require('../../../../scripts/lib');
 const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('./spine');
-const { describeText, firstParagraph } = require('./description');
-const { frontMatterTitle } = require('./twin');
+const { describePage } = require('./description');
+const { frontMatterTitle } = require('./markdown');
 
 // A node's co-located doc is README.md when it carries the generated
 // markers (GitHub-standard naming); legacy READMEs without markers are ignored.
@@ -322,9 +322,8 @@ function toPosix(p) {
  * `description:` wins when the page declares one, as it does for the meta
  * description tag. Otherwise the first prose paragraph is used, skipping HTML
  * comments, MDX imports, JSX, headings, code fences, tables and admonitions, and
- * it is shortened by describeText in description.js, the same function the meta
- * description uses. The paragraph itself is found by firstParagraph in
- * description.js too, so both outputs agree on every page. Node pages get their
+ * it is built by describePage in description.js, the same function the meta
+ * description uses, so both outputs agree on every page. Node pages get their
  * description from services*.json instead (see extractDescription).
  * @param {string} content - raw page content (md/mdx).
  * @return {string} description, or '' when the page has no leading prose.
@@ -353,7 +352,7 @@ function pageDescription(content) {
 		}
 	}
 	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-	return describeText(firstParagraph(body));
+	return describePage(body);
 }
 
 /** First markdown heading, as a title fallback. */
