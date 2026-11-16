@@ -841,7 +841,7 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth, fit: fitMode, console: consoleOpen };
 		host.setPref?.(PREVIEW_PREFS_KEY, bag);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- host is stable; persist on value changes only
-	}, [layout, orientation, previewZoom, presetIdx, inheritAuth, fitMode]);
+	}, [layout, orientation, previewZoom, presetIdx, inheritAuth, fitMode, consoleOpen]);
 
 	// In-flight pan drag; pointer capture on the backdrop keeps move events
 	// coming even while the pointer crosses the preview iframe.
@@ -1054,9 +1054,10 @@ export const DesignView: React.FC<IDesignViewProps> = ({ host, previewPane }) =>
 						<button
 							style={consoleOpen ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
 							title={consoleOpen ? 'Hide the console under the preview' : 'Show the console under the preview'}
+							aria-label="Console"
 							aria-pressed={consoleOpen}
 							onClick={() => setConsoleOpen((o) => !o)}
-						><span style={styles.consoleGlyph}>&gt;_</span></button>
+						><span style={styles.consoleGlyph} aria-hidden="true">&gt;_</span></button>
 						{/* Gear — the devtools-style overflow menu for the options
 						    that are not part of the geometry cluster. */}
 						<button

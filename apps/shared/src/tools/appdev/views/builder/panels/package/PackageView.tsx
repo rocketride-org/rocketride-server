@@ -496,9 +496,12 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 		const raw = host.getPref?.(SECTION_PREF_KEY);
 		return SECTION_MENU.entries.some((e) => e.id === raw) ? (raw as PackageSection) : 'identity';
 	});
+	// Store mounts on its first visit and stays mounted (see the render).
+	const [storeMounted, setStoreMounted] = useState(() => section === 'store');
 	/** Switch side tabs and persist the selection. */
 	const selectSection = (id: string): void => {
 		setSection(id as PackageSection);
+		if (id === 'store') setStoreMounted(true);
 		host.setPref?.(SECTION_PREF_KEY, id);
 	};
 
@@ -574,14 +577,19 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 		void refresh();
 	}, [refresh]);
 
-	/** Persist the WHOLE form (identity + assets + include), then re-check —
-	 *  the refresh re-seeds the baseline, so the footer dematerializes. */
+	/** Persist the package form (identity + assets + build), then re-check —
+	 *  the refresh re-seeds the baseline, so the footer dematerializes.
+	 *  The Store side tab saves the SAME listing (mode, plans) through its own
+	 *  form, so the package fields are overlaid on a FRESH copy of the saved
+	 *  listing, never on the copy loaded at mount: a Store save made since
+	 *  must survive an Identity save. */
 	const onSave = useCallback(async (): Promise<void> => {
 		if (!draft || !host.saveListing) return;
 		setSaving(true);
 		setError('');
 		try {
-			await host.saveListing(draft);
+			const fresh = (await host.loadListing?.()) ?? draft;
+			await host.saveListing({ ...fresh, name: draft.name, description: draft.description, typecheck: draft.typecheck, icon: draft.icon, readme: draft.readme, include: draft.include });
 			await refresh();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));
@@ -788,7 +796,15 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 					{section === 'identity' && <div style={styles.paneBody}>{identityPane}</div>}
 					{section === 'build' && <div style={styles.paneBody}>{buildPane}</div>}
 					{section === 'requirements' && <div style={styles.paneBody}>{requirementsPane}</div>}
-					{section === 'store' && <StoreView host={host} app={app} readOnly={readOnly} onNavigate={onNavigate} embedded />}
+					{/* Store is mounted on its first visit and KEPT mounted (hidden)
+					    afterwards: its own draft (mode, staged plans) survives a
+					    trip to another side tab instead of reloading the saved
+					    listing and discarding the edits. */}
+					{storeMounted && (
+						<div style={{ display: section === 'store' ? 'contents' : 'none' }}>
+							<StoreView host={host} app={app} readOnly={readOnly} onNavigate={onNavigate} embedded />
+						</div>
+					)}
 					{section === 'review' && <div style={styles.paneFill}><ReviewView host={host} app={app} readOnly={readOnly} /></div>}
 					{section === 'assets' && (
 						<div style={styles.paneBody}>

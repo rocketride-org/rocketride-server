@@ -363,12 +363,17 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 	const [replyError, setReplyError] = useState('');
 
 	// ── Build-log viewer (opened from a failed event's button) ───────────
+	// logRequest: the request that owns the modal; a response from an older
+	// request (a slow v1 log after the user opened v2, or closed the modal)
+	// is dropped, never written under the wrong title.
 	const [logFor, setLogFor] = useState<number | null>(null);
 	const [logText, setLogText] = useState<string | null>(null);
+	const logRequest = useRef(0);
 
 	/** Open the build-log viewer for one version and fetch its log. */
 	const openBuildLog = useCallback(
 		(version: number): void => {
+			const requestId = ++logRequest.current;
 			setLogFor(version);
 			setLogText(null);
 			if (!host.loadBuildLog) {
@@ -377,20 +382,33 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 			}
 			void host
 				.loadBuildLog(version)
-				.then((text) => setLogText(text || 'No build log exists for this version.'))
-				.catch((e) => setLogText(`Could not load the build log: ${e instanceof Error ? e.message : String(e)}`));
+				.then((text) => { if (logRequest.current === requestId) setLogText(text || 'No build log exists for this version.'); })
+				.catch((e) => { if (logRequest.current === requestId) setLogText(`Could not load the build log: ${e instanceof Error ? e.message : String(e)}`); });
 		},
 		[host]
 	);
 
-	/** Batched refresh: the history stream and the version rail. */
+	/** Close the build-log viewer and orphan any read still in flight. */
+	const closeBuildLog = useCallback((): void => {
+		logRequest.current += 1;
+		setLogFor(null);
+	}, []);
+
+	/** Batched refresh: the history stream and the version rail. Only the
+	 *  newest refresh commits: the mount load finishing after a reply's or a
+	 *  deploy event's refresh must not replace a newer snapshot with an older
+	 *  one (the reply would vanish until the next refresh). */
+	const refreshGeneration = useRef(0);
 	const refresh = useCallback(async (): Promise<void> => {
+		const generation = ++refreshGeneration.current;
 		setLoadError('');
 		try {
 			const [h, v] = await Promise.all([host.loadHistory?.() ?? Promise.resolve([]), host.listVersions?.() ?? Promise.resolve([])]);
+			if (refreshGeneration.current !== generation) return;
 			setHistory(h);
 			setVersions(v);
 		} catch (e) {
+			if (refreshGeneration.current !== generation) return;
 			setHistory((prev) => prev ?? []);
 			setLoadError(e instanceof Error ? e.message : String(e));
 		}
@@ -442,14 +460,18 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 		if (el) el.scrollTop = el.scrollHeight;
 	}, [visible]);
 
-	/** Send the reply, then reload so the row renders from the server's serialization. */
+	/** Send the reply, then reload so the row renders from the server's
+	 *  serialization. One submission at a time on every path (the button and
+	 *  Enter alike). A reply written while a version is selected is stored
+	 *  under that version, so the filter that is showing keeps showing it;
+	 *  under "All versions" it is a thread-level reply. */
 	const sendReply = useCallback(async (): Promise<void> => {
 		const message = reply.trim();
-		if (!host.sendReply || message.length === 0 || readOnly) return;
+		if (!host.sendReply || message.length === 0 || readOnly || sending) return;
 		setSending(true);
 		setReplyError('');
 		try {
-			await host.sendReply(message);
+			await host.sendReply(message, filter === 'all' ? undefined : filter);
 			setReply('');
 			await refresh();
 		} catch (e) {
@@ -457,7 +479,7 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 		} finally {
 			setSending(false);
 		}
-	}, [host, reply, readOnly, refresh]);
+	}, [host, reply, readOnly, sending, filter, refresh]);
 
 	// =====================================================================
 	// RENDER
@@ -538,7 +560,7 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 									<InputField
 										placeholder={readOnly ? 'Replies disabled' : versions.length === 0 ? 'Ask the review team a question...' : 'Reply to the reviewer...'}
 										value={reply}
-										disabled={readOnly}
+										disabled={readOnly || sending}
 										maxLength={4000}
 										onChange={(e) => setReply(e.target.value)}
 										onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendReply(); } }}
@@ -567,9 +589,9 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) 
 				<Modal
 					title={`v${logFor} build log`}
 					width={Math.floor(window.innerWidth * 0.8)}
-					onClose={() => setLogFor(null)}
+					onClose={closeBuildLog}
 					footer={
-						<Button variant="secondary" onClick={() => setLogFor(null)}>
+						<Button variant="secondary" onClick={closeBuildLog}>
 							Close
 						</Button>
 					}
