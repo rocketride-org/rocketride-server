@@ -164,14 +164,26 @@ class DataCommands(DAPConn):
                 frame = self._attached_binding(control, pipe_id)
 
             # Step 3: forward with the caller stamped, as activity of this control;
-            # a close retires its record whatever the engine answered
+            # an open is in flight until the engine answers (a repoint meanwhile
+            # keeps that engine); a close retires its record whatever the
+            # engine answered
+            opening = subcommand == 'open'
+            if opening:
+                control.pending_opens[frame.engine] = control.pending_opens.get(frame.engine, 0) + 1
             succeeded = False
             try:
                 body = await self._forward(control, frame, request, arguments)
                 succeeded = True
             finally:
+                if opening:
+                    left = control.pending_opens.get(frame.engine, 0) - 1
+                    if left > 0:
+                        control.pending_opens[frame.engine] = left
+                    else:
+                        control.pending_opens.pop(frame.engine, None)
                 if subcommand == 'close' and pipe_id is not None:
                     self._retire(control, pipe_id, succeeded)
+                if (opening and not succeeded) or (subcommand == 'close' and pipe_id is not None):
                     await self._settle_drain(control)
 
             # Step 4: a successful open is a binding the control now has open;
@@ -236,7 +248,7 @@ class DataCommands(DAPConn):
         # a client names are one engine's (plan 7.2 P2)
         engine = await engine_for(self, control, 'task.data')
         draining = control.draining
-        if draining is not None and draining.is_live and any(r.engine is draining for r in control.open_pipes.values()):
+        if draining is not None and draining.is_live and control.pipes_on(draining):
             engine = draining
 
         # Step 2: per-call params enter by the open: admitted by public name
@@ -374,7 +386,7 @@ class DataCommands(DAPConn):
             control: The caller's control.
         """
         draining = control.draining
-        if draining is None or any(r.engine is draining for r in control.open_pipes.values()):
+        if draining is None or control.pipes_on(draining):
             return
         await self._server.release_draining(control, 'repointed')
 

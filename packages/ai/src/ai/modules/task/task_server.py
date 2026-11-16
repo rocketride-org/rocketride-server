@@ -580,6 +580,10 @@ class _EngineTransition:
         def _hold(engine: TaskEngine) -> None:
             if control.task is engine:
                 return
+            if control.draining is engine:
+                # Back onto the engine still draining this control's pipes:
+                # its hold is already ours and becomes the current one
+                control.draining = None
             engine.acquire(control.key, control.ttl)
             control.task = engine
 
@@ -606,9 +610,10 @@ class _EngineTransition:
         """The move is final: the old hold goes (once its open pipes drained), and the old engine with it when that was its last."""
         control = self._control
         if self.moved and self.old_engine is not None:
-            if any(record.engine is self.old_engine for record in control.open_pipes.values()):
-                # The in-flight requests finish where they started; the data
-                # path releases this hold at the last close (cmd_data)
+            if control.pipes_on(self.old_engine):
+                # The in-flight requests (an open not yet answered included)
+                # finish where they started; the data path releases this hold
+                # at the last close (cmd_data)
                 control.draining = self.old_engine
             else:
                 await self._server.release_hold(self.old_engine, control.key, 'repointed')

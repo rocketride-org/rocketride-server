@@ -272,9 +272,11 @@ export function useEventCapture(): IUseEventCaptureResult {
 
 	/** Select every subscription category. */
 	const selectAllTypes = useCallback(() => {
-		// Every category but OPS, as the SDK's ALL: the ops stream is an
-		// operator's opt-in on the wildcard and is refused on a task address
-		setConfig((c) => ({ ...c, types: EVENT_TYPE_NAMES.filter((name) => name !== 'OPS') }));
+		// Every task-scoped category. The platform-wide streams (DASHBOARD, OPS)
+		// are an operator's explicit toggle on the wildcard: the server refuses
+		// them on a task address, and on the wildcard without sys.admin, and
+		// this hook cannot know the caller's operator state
+		setConfig((c) => ({ ...c, types: EVENT_TYPE_NAMES.filter((name) => name !== 'OPS' && name !== 'DASHBOARD') }));
 	}, []);
 
 	/** Clear the subscription category selection. */

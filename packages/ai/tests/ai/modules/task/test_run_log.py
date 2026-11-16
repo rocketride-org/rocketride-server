@@ -838,3 +838,22 @@ class TestWriterControlLoad:
         monkeypatch.setattr(FileStore, 'read', failing_read)
         with pytest.raises(StorageError, match='boom'):
             await open_writer(istore, spool_root)
+
+
+# =============================================================================
+# ONE LIVE WRITER PER STREAM
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_an_older_writer_closing_leaves_the_newer_one_registered(istore, spool_root):
+    """Two writers opened on one stream (a control draining on the engine it left while the new engine serves it):
+    the registry names the newer one, and the older one's end_run deregisters only itself.
+    """
+    older = await open_writer(istore, spool_root)
+    newer = await open_writer(istore, spool_root)
+    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
+    await older.end_run('ok', '', reason='repointed')
+    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
+    await newer.end_run('ok', '', reason='user')
+    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None

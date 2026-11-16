@@ -190,10 +190,12 @@ get the result back synchronously.
 
 - **Parameters:** `pipeline` (object, required); `inputs` (string, optional —
   data to send immediately after start); plus the shared start parameters.
-- **Returns:** `{ok, address, projectId, source, result?, terminated?}` —
-  `result` (and `terminated`, the one-shot run is ended once it answered) only
-  when `inputs` was passed. Keep `projectId` and `source`: they key the
-  [replay tools](#replay-past-runs).
+- **Returns:** `{ok, address, projectId, source, result?, terminated?,
+  terminate_error?}` — `result` only when `inputs` was passed. A run this
+  call started is then ended: `terminated: true` says it was; `terminated:
+  false` with `terminate_error` says the terminate failed and the task may
+  still be running until its ttl (call `terminate` yourself). Keep
+  `projectId` and `source`: they key the [replay tools](#replay-past-runs).
 - **Notable:** if the initial send times out, the error hint still reports the
   address so you can `monitor` the task instead of losing it.
 

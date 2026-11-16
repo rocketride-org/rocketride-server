@@ -31,6 +31,7 @@ window. The engine is a recorded ``_send_data``.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
@@ -60,13 +61,15 @@ EXPOSED = {'tone': 'prompt_1.instructions'}
 
 @pytest.fixture
 def engine_log(monkeypatch) -> List[Dict[str, Any]]:
-    """The engine's data path, recorded: an open answers slot 1 on tree 7, everything else ok."""
+    """The engine's data path, recorded: opens answer slots 1, 2, ... on trees 7, 8, ...; everything else ok."""
     sent: List[Dict[str, Any]] = []
+    opened = {'count': 0}
 
     async def send(self, request):
         sent.append({'engine': self, **request['arguments']})
         if request['arguments'].get('subcommand') == 'open':
-            return {'body': {'pipe_id': 1, 'traceId': '1.1.7'}}
+            opened['count'] += 1
+            return {'body': {'pipe_id': opened['count'], 'traceId': f'1.1.{6 + opened["count"]}'}}
         return {'body': {'ok': True}}
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
@@ -109,17 +112,82 @@ async def test_a_repoint_with_open_pipes_keeps_the_control_on_the_old_engine_unt
 
     # Every frame of the control, a new open included, still lands on the old engine
     engine_log.clear()
-    await _opened(ts, conn)
+    second = await _opened(ts, conn)
     await _frame(conn, subcommand='write', pipe_id=slot, data=b'x')
-    assert [entry['engine'] for entry in engine_log] == [old, old]
+    assert second != slot and [entry['engine'] for entry in engine_log] == [old, old]
 
-    # The last close drains it: the hold goes and, as its last, stops the old engine
+    # The first close leaves the other binding open: the old engine stays held
     await _frame(conn, subcommand='close', pipe_id=slot)
+    assert control.draining is old and set(control.open_pipes) == {second} and old.is_live
+
+    # The LAST close drains it: the hold goes and, as its last, stops the old engine
+    await _frame(conn, subcommand='close', pipe_id=second)
     assert control.draining is None and control.open_pipes == {}
     assert (old, 'repointed') in engines
     engine_log.clear()
     await _opened(ts, conn)
     assert engine_log[-1]['engine'] is control.task
+
+
+@pytest.mark.asyncio
+async def test_a_repoint_back_onto_the_draining_engine_makes_it_current_again(catalog, engines, engine_log):
+    """A -> B -> A before the pipe closes: A's hold is the current one, nothing is left to drain, and the
+    last close releases nothing.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    first = control.task
+    slot = await _opened(ts, conn)
+
+    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
+    second = control.task
+    await ts._repoint(control, _pipeline(), launch_args={}, env=None, env_source=None)
+    assert control.task is first and control.draining is None
+    # The engine the control passed through lost its only hold
+    assert (second, 'repointed') in engines
+
+    await _frame(conn, subcommand='close', pipe_id=slot)
+    assert first.is_live and control.task is first and (first, 'repointed') not in engines
+
+
+@pytest.mark.asyncio
+async def test_an_open_still_in_flight_keeps_the_old_engine_through_a_repoint(catalog, engines, monkeypatch):
+    """An open the engine has not answered has no record yet; a repoint meanwhile must not release the
+    engine that is about to answer it.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    old = control.task
+    gate = asyncio.Event()
+    sent: List[Dict[str, Any]] = []
+
+    async def send(self, request):
+        sent.append({'engine': self, **request['arguments']})
+        if request['arguments'].get('subcommand') == 'open':
+            await gate.wait()
+            return {'body': {'pipe_id': 1, 'traceId': '1.1.7'}}
+        return {'body': {'ok': True}}
+
+    monkeypatch.setattr(TaskEngine, '_send_data', send)
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock())
+
+    opening = asyncio.create_task(_opened(ts, conn))
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if control.pending_open_count == 1:
+            break
+    assert control.pending_opens == {old: 1}
+
+    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
+    assert control.draining is old and old.is_live
+
+    gate.set()
+    slot = await opening
+    assert control.open_pipes[slot].engine is old and control.pending_opens == {}
+    await _frame(conn, subcommand='close', pipe_id=slot)
+    assert control.draining is None and (old, 'repointed') in engines
 
 
 # =============================================================================

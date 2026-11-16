@@ -302,8 +302,11 @@ class SubmitCommands(DAPConn):
                     await self._close_quietly(task, _stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
                     raise
                 closed = await task._send_data(_stamped({'subcommand': 'close', 'pipe_id': pipe_id}))
-                succeeded = True
-                return dict(closed.get('body') or {})
+                closed_body = dict(closed.get('body') or {})
+                # A close answers normally for an object the pipeline failed:
+                # its error rides the body, and the binding counts as failed
+                succeeded = 'error' not in closed_body
+                return closed_body
             finally:
                 if succeeded:
                     control.stats.completedCount += 1

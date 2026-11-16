@@ -93,6 +93,7 @@ from .engine_key import CONST_CATALOG_NODE_PREFIX
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
+from . import run_log
 from .task_metrics import TaskMetrics
 
 # Serialized-size cap for one trace payload. Trace (and its derived flow)
@@ -2411,7 +2412,49 @@ class TaskEngine(DAPBase):
         async with self._run_log_open_lock:
             writer = self._run_logs.get(key)
             if writer is None and key not in self._run_log_failed:
+                # A control draining its open pipes on the engine it left has
+                # that engine's writer open on its continuum: append through
+                # it rather than open a competitor (one writer per stream);
+                # this engine's own writer opens once that one has closed
+                shared = self._shared_run_log(key)
+                if shared is not None:
+                    return shared
                 writer = await self._open_run_log(key)
+        return writer
+
+    def _shared_run_log(self, key: str) -> Optional[RunLogWriter]:
+        """
+        Another engine's live writer on the control ``key``'s continuum, if one is open.
+
+        This engine's own numbering is lifted above what that continuum has
+        recorded, so the lines it appends never fall below them.
+
+        Args:
+            key: The control's registry key.
+
+        Returns:
+            The live writer, or None.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return None
+        owner_is_team = control.owner_kind == 'team'
+        try:
+            writer = run_log.live_writer(
+                control.run_kind,
+                control.teamId if owner_is_team else control.userId,
+                control.teamId,
+                control.owner_kind or 'user',
+                control.project_id or self.project_id,
+                control.source or self.source,
+            )
+        except (TypeError, ValueError):
+            # A control whose identity is not string-shaped names no stream
+            return None
+        if writer is None or writer in self._run_logs.values():
+            return None
+        self.raise_log_seq_floor(writer.last_seq + 1)
         return writer
 
     def _chapter_begin_seq(self) -> Optional[int]:

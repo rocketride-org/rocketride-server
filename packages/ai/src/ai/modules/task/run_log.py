@@ -263,6 +263,35 @@ def writer_key(scope_id: str, stream: str) -> str:
     return f'{scope_id}/{stream}'
 
 
+def live_writer(
+    run_kind: str, client_id: str, team_id: str, owner_kind: str, project_id: str, source: str
+) -> 'Optional[RunLogWriter]':
+    """
+    The writer currently open on a control's continuum, whoever opened it, or None.
+
+    A control's continuum has ONE live writer. While a control drains its open
+    pipes on the engine it repointed away from, both engines emit events for
+    it; the second engine appends through this writer instead of opening a
+    competitor on the same stream (two writers would rewrite one control
+    record and issue sequences from one stored lastSeq).
+
+    Args:
+        run_kind: The control's run kind.
+        client_id: The store anchor (the team of a team-owned run, else the user).
+        team_id: The control's team.
+        owner_kind: ``'team'`` or ``'user'``.
+        project_id: The control's project.
+        source: The control's source.
+
+    Returns:
+        The open writer, or None.
+    """
+    scope_team = team_id if owner_kind == 'team' else ''
+    _prefix, scope_id = scope_paths(run_kind, client_id, scope_team)
+    writer = WRITERS.get(writer_key(scope_id, stream_name(project_id, source, run_kind)))
+    return writer if writer is not None and writer.is_live else None
+
+
 # =============================================================================
 # STARTUP HYGIENE
 # =============================================================================
@@ -521,6 +550,16 @@ class RunLogWriter:
     # =========================================================================
     # OPEN / RECOVERY
     # =========================================================================
+
+    @property
+    def is_live(self) -> bool:
+        """Whether this writer is open (between ``open`` and ``end_run``)."""
+        return self._open
+
+    @property
+    def last_seq(self) -> int:
+        """The highest ``logSeq`` this continuum has recorded so far."""
+        return int(self._control.get('lastSeq', 0))
 
     async def open(
         self,
@@ -1230,8 +1269,11 @@ class RunLogWriter:
                 pass
             self._worker = None
 
-        # Deregister as the stream's live writer.
-        WRITERS.pop(writer_key(self._scope_id, self._stream), None)
+        # Deregister as the stream's live writer, and only when it is still
+        # this writer: a replacement that registered meanwhile keeps its entry
+        key = writer_key(self._scope_id, self._stream)
+        if WRITERS.get(key) is self:
+            WRITERS.pop(key, None)
 
     # =========================================================================
     # CONTROL FILE

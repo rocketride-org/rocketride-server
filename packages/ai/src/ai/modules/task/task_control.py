@@ -355,6 +355,10 @@ class TaskControl:
     # it until the last of them closes, then its hold goes (plan 7.2 P2)
     draining: Optional['TaskEngine'] = None
 
+    # Opens forwarded and not yet answered, by the engine they went to: they
+    # hold no record yet, and a repoint must not let that engine go
+    pending_opens: Dict[Any, int] = field(default_factory=dict, repr=False, compare=False)
+
     # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
     # bindings did so far (plan 7.5)
     open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
@@ -405,6 +409,25 @@ class TaskControl:
         """
         kind = self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
         return self.teamId if kind == 'team' else self.userId
+
+    def pipes_on(self, engine: 'TaskEngine') -> bool:
+        """
+        Whether any binding of this control is open, or opening, on ``engine``.
+
+        Args:
+            engine: The engine to check.
+
+        Returns:
+            True while a recorded pipe or an unanswered open is on it.
+        """
+        if any(record.engine is engine for record in self.open_pipes.values()):
+            return True
+        return self.pending_opens.get(engine, 0) > 0
+
+    @property
+    def pending_open_count(self) -> int:
+        """How many opens of this control the engines have not answered yet."""
+        return sum(self.pending_opens.values())
 
     @property
     def billing(self) -> BillingAttribution:
