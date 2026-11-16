@@ -188,8 +188,10 @@ export default function TextWidget({ id, type, stored, defaultValue, onChange, m
 
 	// --- Masked stored secret ------------------------------------------------
 	if (masked) {
+		// The masked value and its Replace action are one group, described by the
+		// field's message and help (the shell Button carries no aria-describedby)
 		return (
-			<div style={styles.masked}>
+			<div style={styles.masked} role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy}>
 				<span style={commonStyles.textEllipsis}>{storedSecurely ? 'Saved securely' : maskSecret(text)}</span>
 				{!disabled && (
 					<Button variant="ghost" small onClick={() => { setEditing(true); onChange(undefined); }} title="Enter a new value">

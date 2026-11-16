@@ -182,8 +182,10 @@ export default function UploadWidget({ id, stored, storedSecurely, accept, onCha
 		onChange(undefined);
 	};
 
+	// The visible actions and the hidden input are one group, described by the
+	// field's message and help (the shell Button carries no aria-describedby)
 	return (
-		<div style={{ ...styles.row, position: 'relative', ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}), ...(inputFocused ? styles.rowFocused : {}) }}>
+		<div role="group" aria-labelledby={`${id}-label`} aria-describedby={describedBy} style={{ ...styles.row, position: 'relative', ...(invalid ? { borderColor: 'var(--rr-color-error)' } : {}), ...(inputFocused ? styles.rowFocused : {}) }}>
 			<span style={{ ...styles.name, ...(hasFile ? {} : commonStyles.textMuted) }}>{hasFile ? (storedSecurely ? 'Saved securely' : fileNameOf(stored)) : 'No file chosen'}</span>
 			<div style={styles.actions}>
 				{!disabled && (
