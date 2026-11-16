@@ -332,8 +332,11 @@ export const TeamOrderCard: React.FC<TeamOrderCardProps> = ({ teams, order, onSe
 			await onSetTeamOrder(ids);
 			if (saveRef.current?.ids === ids) saveRef.current.resolved = true;
 		} catch (err) {
+			// A rejection of a save that a newer one has superseded says nothing
+			// about the rows on screen: leave them and the newer save alone.
+			if (saveRef.current?.ids !== ids) return;
 			setError(err instanceof Error ? err.message : 'Could not save the team order');
-			if (saveRef.current?.ids === ids) saveRef.current = null;
+			saveRef.current = null;
 			setPending(null);
 		}
 	};
