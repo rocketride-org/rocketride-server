@@ -71,9 +71,12 @@ void deRegisterFatalityHandler(size_t slot) noexcept {
     g_fatalityHandlers.erase(slot);
 }
 
-void onFatality(Location location, const Error &ccode) noexcept {
+bool onFatality(Location location, const Error &ccode) noexcept {
     auto handlers = g_fatalityHandlers;
     for (auto &[slot, handler] : handlers) _call(handler, location, ccode);
+
+    // Whether a handler was ever registered: the monitor registers the only one
+    return g_nextSlot > 1;
 }
 
 Text &crashDumpPrefix() noexcept {

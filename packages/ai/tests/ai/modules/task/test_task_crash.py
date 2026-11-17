@@ -296,6 +296,19 @@ async def test_a_crash_past_the_handlers_stops_its_task_unexpectedly(server):
 
 
 @pytest.mark.asyncio
+async def test_a_fatal_error_before_the_monitor_stops_its_task(server):
+    """A log file that cannot be opened ends the engine before its monitor starts: the start fails, but no crash."""
+    client = await _connect(server['uri'], None)
+    try:
+        # A folder the engine's own folder lacks; no space, which the server would split on
+        with pytest.raises(RuntimeError) as stopped:
+            await client.use(pipeline=_pipeline(server['provider']), args=['--log.file=missing/task.log'])
+        assert str(stopped.value) == 'Stopped', server['log'].read_text(errors='replace')
+    finally:
+        await client.disconnect()
+
+
+@pytest.mark.asyncio
 async def test_a_node_that_exits_stops_its_task(server):
     """exit(-1) is no crash, although on Windows its code 0xffffffff looks like an exception's."""
     token, status, lines = await _run(server, 'exit')

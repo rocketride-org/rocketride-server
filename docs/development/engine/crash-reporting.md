@@ -94,9 +94,9 @@ fast fail's `0xc0000602`: these skip the engine's handlers. Its console then
 shows `Unexpected termination: <name> (code <N>)`, for example
 `Unexpected termination: SIGKILL (code 9)`. Any other exit code, such as
 `exit(-1)` or Ctrl+C, reads `Stopped`. A start that fails with a fatal error
-before the monitor is up, such as a log file that cannot be opened, differs by
-platform: on Windows it exits with code 1 and reads `Stopped`; on Linux and
-macOS it ends in `abort()` and reads `Unexpected termination: SIGABRT (code 6)`.
+before the monitor is up, such as a log file that cannot be opened, exits with
+code 1 on every platform, writes no dump and reads `Stopped`; a crash before the
+monitor is up still ends as a crash.
 
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
