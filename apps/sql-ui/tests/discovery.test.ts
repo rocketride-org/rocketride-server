@@ -19,15 +19,14 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
 // =============================================================================
-// DISCOVERY — unit tests for endpoint enumeration over a fake client
+// DISCOVERY — database endpoints by address and node over `interfaces()`
 // =============================================================================
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RocketRideClient } from 'shell';
-import { DATABASE_PROVIDERS, discoverSqlEndpoints } from '../src/connect/discovery';
+import { DATABASE_CLASS_TYPE, describeSqlAddress, discoverSqlEndpoints } from '../src/connect/discovery';
 
 // =============================================================================
 // FAKE CLIENT
@@ -35,194 +34,174 @@ import { DATABASE_PROVIDERS, discoverSqlEndpoints } from '../src/connect/discove
 
 /** One row of the fake `listTasks` response. */
 interface IFakeTask {
-	/** Project (pipeline) id. */
-	projectId: string;
-	/** Source component id of the task. */
-	source: string;
+	/** The control's address. */
+	address?: string;
+	/** Project id (direct connections are skipped by prefix). */
+	projectId?: string;
 	/** Task display name. */
-	name: string;
+	name?: string;
 	/** Task state (>= 4 is stopping / finished). */
-	state: number;
+	state?: number;
 	/** Completion flag. */
-	completed: boolean;
+	completed?: boolean;
 }
 
-/** How the fake client should answer for one task. */
-interface IFakeTaskBehaviour {
-	/** Token to return, or null to simulate "no running task". */
-	token?: string | null;
-	/** Components of the task's pipeline. */
-	components?: { id?: string; provider?: string; name?: string }[];
-	/** Throw from getTaskPipeline instead of answering. */
-	fail?: boolean;
-}
+/** One node under a classType in the fake `interfaces()` answer. */
+type FakeNode = { nodeId: string; name: string };
+
+/** The fake `interfaces()` answer per address: pipe address -> classType -> nodes, or a thrown error. */
+type FakeInterfaces = Record<string, Record<string, Record<string, FakeNode[]>> | Error>;
 
 /**
- * Build a fake RocketRide client over a task list and per-task behaviour.
+ * Build a fake RocketRide client over a task list and per-address interface maps.
  *
  * @param rows - The tasks `listTasks` reports.
- * @param behaviour - Per `projectId:source` behaviour (default: one db node).
- * @returns The fake client and the token lookups it received.
+ * @param interfaces - Per queried address, the `interfaces` map to answer (or an Error to throw).
+ * @returns The fake client and the addresses `interfaces` was asked about.
  */
-function fakeClient(rows: IFakeTask[], behaviour: Record<string, IFakeTaskBehaviour> = {}): { client: RocketRideClient; tokenLookups: string[] } {
-	const tokenLookups: string[] = [];
+function fakeClient(rows: IFakeTask[], interfaces: FakeInterfaces = {}): { client: RocketRideClient; asked: string[] } {
+	const asked: string[] = [];
 	const client = {
 		listTasks: async () => ({ rows }),
-		getTaskToken: async ({ projectId, source }: { projectId: string; source: string }) => {
-			const id = `${projectId}:${source}`;
-			tokenLookups.push(id);
-			const spec = behaviour[id];
-			return spec && 'token' in spec ? spec.token : `token-${id}`;
-		},
-		getTaskPipeline: async (token: string) => {
-			const id = token.replace(/^token-/, '');
-			const spec = behaviour[id];
-			if (spec?.fail) throw new Error('task went away');
-			return { components: spec?.components ?? [{ id: 'db_1', provider: 'db_mysql', name: 'Orders DB' }] };
+		interfaces: async (address: string) => {
+			asked.push(address);
+			const answer = interfaces[address];
+			if (answer instanceof Error) throw answer;
+			if (!answer) throw new Error(`TASK_NOT_REGISTERED ${address}`);
+			return { address, rung: 'team', version: 1, interfaces: answer };
 		},
 	} as unknown as RocketRideClient;
-	return { client, tokenLookups };
+	return { client, asked };
 }
 
-/**
- * Build a task row over a running default.
- *
- * @param over - Fields to override.
- * @returns The task row.
- */
+/** A live task row for `acme.p1.s1`. */
 function task(over: Partial<IFakeTask> = {}): IFakeTask {
-	return { projectId: 'p1', source: 's1', name: 'Pipeline A', state: 2, completed: false, ...over };
+	return { address: 'acme.p1.s1', projectId: 'p1', name: 'Pipeline A', state: 2, completed: false, ...over };
+}
+
+/** A one-database-node answer for a pipe address. */
+function dbPipe(pipeAddress: string, nodes: FakeNode[] = [{ nodeId: 'db_1', name: 'Orders DB' }]) {
+	return { [pipeAddress]: { [DATABASE_CLASS_TYPE]: nodes, tool: nodes } };
 }
 
 // =============================================================================
-// PROVIDER SET
+// describeSqlAddress
 // =============================================================================
 
-describe('DATABASE_PROVIDERS', () => {
-	it('covers exactly the four relational node providers', () => {
-		assert.deepEqual([...DATABASE_PROVIDERS].sort(), ['db_clickhouse', 'db_mysql', 'db_postgres', 'rocketride_sql']);
+describe('describeSqlAddress', () => {
+	it('turns every database node of the answer into an endpoint keyed by address and node', async () => {
+		const { client } = fakeClient([], {
+			'acme.p1': {
+				'acme.p1.chat': { source: [{ nodeId: 'chat', name: 'chat' }], chat: [{ nodeId: 'chat', name: 'chat' }] },
+				'acme.p1': {
+					database: [{ nodeId: 'pg_1', name: 'Analytics' }, { nodeId: 'ch_1', name: 'ch_1' }],
+					tool: [{ nodeId: 'pg_1', name: 'Analytics' }],
+					llm: [{ nodeId: 'llm_1', name: 'GPT' }],
+				},
+			},
+		});
+		const endpoints = await describeSqlAddress(client, 'acme.p1');
+		assert.deepEqual(endpoints, [
+			{ key: 'acme.p1:pg_1', address: 'acme.p1', pipelineName: 'p1', nodeId: 'pg_1', nodeName: 'Analytics' },
+			{ key: 'acme.p1:ch_1', address: 'acme.p1', pipelineName: 'p1', nodeId: 'ch_1', nodeName: 'ch_1' },
+		]);
+	});
+
+	it('keeps a node under the source address it was answered under', async () => {
+		const { client } = fakeClient([], {
+			'acme.p1.chat': { 'acme.p1.chat': { database: [{ nodeId: 'db_main', name: 'Ops DB' }] } },
+		});
+		const [endpoint] = await describeSqlAddress(client, 'acme.p1.chat', 'Doc brain');
+		assert.equal(endpoint!.address, 'acme.p1.chat');
+		assert.equal(endpoint!.pipelineName, 'Doc brain');
+	});
+
+	it('answers nothing for a pipe without a database node', async () => {
+		const { client } = fakeClient([], { 'acme.p1': { 'acme.p1': { llm: [{ nodeId: 'llm_1', name: 'GPT' }] } } });
+		assert.deepEqual(await describeSqlAddress(client, 'acme.p1'), []);
+	});
+
+	it('lets the server error through for an address the caller cannot use', async () => {
+		const { client } = fakeClient([], {});
+		await assert.rejects(describeSqlAddress(client, 'zeta.secret'), /TASK_NOT_REGISTERED/);
 	});
 });
 
 // =============================================================================
-// TASK FILTERING
+// discoverSqlEndpoints
 // =============================================================================
 
 describe('discoverSqlEndpoints task filtering', () => {
 	it('skips tasks whose state has reached the stopping threshold', async () => {
-		const { client, tokenLookups } = fakeClient([
-			task({ projectId: 'live' }),
-			task({ projectId: 'stopping', state: 4 }),
-			task({ projectId: 'cancelled', state: 6 }),
-		]);
+		const { client, asked } = fakeClient(
+			[task({ address: 'acme.live.s1' }), task({ address: 'acme.stopping.s1', state: 4 }), task({ address: 'acme.cancelled.s1', state: 6 })],
+			{ 'acme.live.s1': dbPipe('acme.live') },
+		);
 		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => e.projectId), ['live']);
-		assert.deepEqual(tokenLookups, ['live:s1']);
+		assert.deepEqual(endpoints.map((e) => e.address), ['acme.live']);
+		assert.deepEqual(asked, ['acme.live.s1']);
 	});
 
 	it('skips tasks already flagged completed even below the state threshold', async () => {
-		const { client } = fakeClient([task({ projectId: 'done', state: 2, completed: true }), task({ projectId: 'live' })]);
-		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => e.projectId), ['live']);
+		const { client, asked } = fakeClient(
+			[task({ address: 'acme.done.s1', completed: true }), task({ address: 'acme.live.s1' })],
+			{ 'acme.live.s1': dbPipe('acme.live') },
+		);
+		await discoverSqlEndpoints(client);
+		assert.deepEqual(asked, ['acme.live.s1']);
 	});
 
-	it('resolves each project and source pair only once across restart rows', async () => {
-		const { client, tokenLookups } = fakeClient([
-			task({ name: 'Pipeline A (restart 2)' }),
-			task({ name: 'Pipeline A (restart 1)' }),
-			task({ source: 's2', name: 'Pipeline B' }),
-		]);
-		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(tokenLookups, ['p1:s1', 'p1:s2']);
-		assert.equal(endpoints.length, 2);
-		// The FIRST row of a duplicated pair wins — the list arrives newest first.
-		assert.equal(endpoints.find((e) => e.source === 's1')!.pipelineName, 'Pipeline A (restart 2)');
+	it('skips rows without an address and sql-ui\'s own direct connections', async () => {
+		const { client, asked } = fakeClient(
+			[task({ address: undefined }), task({ address: 'acme.sqlconn-x.tools_1', projectId: 'sqlconn-x' }), task()],
+			{ 'acme.p1.s1': dbPipe('acme.p1') },
+		);
+		await discoverSqlEndpoints(client);
+		assert.deepEqual(asked, ['acme.p1.s1']);
 	});
 
-	it('skips a task whose token no longer resolves', async () => {
-		const { client } = fakeClient([task({ projectId: 'gone' })], { 'gone:s1': { token: null } });
-		assert.deepEqual(await discoverSqlEndpoints(client), []);
-	});
-
-	it('keeps discovering after one task throws', async () => {
-		const { client } = fakeClient(
-			[task({ projectId: 'bad' }), task({ projectId: 'good' })],
-			{ 'bad:s1': { fail: true } },
+	it('describes each address once across restart rows and keeps the first name', async () => {
+		const { client, asked } = fakeClient(
+			[task({ name: 'Pipeline A (restart 2)' }), task({ name: 'Pipeline A (restart 1)' }), task({ address: 'acme.p1.s2', name: 'Pipeline B' })],
+			{ 'acme.p1.s1': dbPipe('acme.p1'), 'acme.p1.s2': dbPipe('acme.p1', [{ nodeId: 'db_2', name: 'db_2' }]) },
 		);
 		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => e.projectId), ['good']);
+		assert.deepEqual(asked, ['acme.p1.s1', 'acme.p1.s2']);
+		assert.equal(endpoints.find((e) => e.nodeId === 'db_1')!.pipelineName, 'Pipeline A (restart 2)');
+	});
+
+	it('keeps discovering after one address fails to describe', async () => {
+		const { client } = fakeClient(
+			[task({ address: 'acme.bad.s1' }), task({ address: 'acme.good.s1', name: 'Good' })],
+			{ 'acme.bad.s1': new Error('went away'), 'acme.good.s1': dbPipe('acme.good') },
+		);
+		const endpoints = await discoverSqlEndpoints(client);
+		assert.deepEqual(endpoints.map((e) => e.address), ['acme.good']);
+	});
+
+	it('lists a node once when two addresses answer the same pipe', async () => {
+		const { client } = fakeClient(
+			[task({ address: 'acme.p1.s1' }), task({ address: 'acme.p1.s2' })],
+			{ 'acme.p1.s1': dbPipe('acme.p1'), 'acme.p1.s2': dbPipe('acme.p1') },
+		);
+		const endpoints = await discoverSqlEndpoints(client);
+		assert.deepEqual(endpoints.map((e) => e.key), ['acme.p1:db_1']);
 	});
 });
 
-// =============================================================================
-// COMPONENT SELECTION
-// =============================================================================
-
-describe('discoverSqlEndpoints component selection', () => {
-	it('keeps only database-provider components and describes each fully', async () => {
-		const { client } = fakeClient([task()], {
-			'p1:s1': {
-				components: [
-					{ id: 'llm_1', provider: 'llm_openai', name: 'GPT' },
-					{ id: 'pg_1', provider: 'db_postgres', name: 'Analytics' },
-					{ id: 'ch_1', provider: 'db_clickhouse' },
-				],
-			},
-		});
-		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => e.nodeId), ['ch_1', 'pg_1']);
-		const pg = endpoints.find((e) => e.nodeId === 'pg_1')!;
-		assert.deepEqual(pg, {
-			key: 'p1:s1:pg_1',
-			projectId: 'p1',
-			pipelineName: 'Pipeline A',
-			source: 's1',
-			nodeId: 'pg_1',
-			nodeName: 'Analytics',
-			provider: 'db_postgres',
-			running: true,
-		});
-		// A component without a display name falls back to its id.
-		assert.equal(endpoints.find((e) => e.nodeId === 'ch_1')!.nodeName, 'ch_1');
-	});
-
-	it('keeps a RocketRide SQL node but not its vector or graph siblings', async () => {
-		const { client } = fakeClient([task()], {
-			'p1:s1': {
-				components: [
-					{ id: 'rrsql_1', provider: 'rocketride_sql', name: 'Tenant DB' },
-					{ id: 'rrvec_1', provider: 'rocketride_vector' },
-					{ id: 'rrgraph_1', provider: 'rocketride_graph' },
-				],
-			},
-		});
-		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => [e.nodeId, e.provider]), [['rrsql_1', 'rocketride_sql']]);
-	});
-
-	it('ignores components missing an id or a provider', async () => {
-		const { client } = fakeClient([task()], {
-			'p1:s1': { components: [{ provider: 'db_mysql' }, { id: 'x' }, { id: 'ok', provider: 'db_mysql' }] },
-		});
-		const endpoints = await discoverSqlEndpoints(client);
-		assert.deepEqual(endpoints.map((e) => e.nodeId), ['ok']);
-	});
-
-	it('returns nothing when the pipeline reports no components at all', async () => {
-		const { client } = fakeClient([task()], { 'p1:s1': { components: undefined } });
-		// `components: undefined` falls back to the fake's default single node,
-		// so assert the genuinely empty case explicitly.
-		const { client: empty } = fakeClient([task()], { 'p1:s1': { components: [] } });
-		assert.equal((await discoverSqlEndpoints(client)).length, 1);
-		assert.deepEqual(await discoverSqlEndpoints(empty), []);
+describe('discoverSqlEndpoints shape and order', () => {
+	it('describes each endpoint fully, with no running flag and no provider', async () => {
+		const { client } = fakeClient([task()], { 'acme.p1.s1': dbPipe('acme.p1', [{ nodeId: 'pg_1', name: 'Analytics' }]) });
+		const [pg] = await discoverSqlEndpoints(client);
+		assert.deepEqual(pg, { key: 'acme.p1:pg_1', address: 'acme.p1', pipelineName: 'Pipeline A', nodeId: 'pg_1', nodeName: 'Analytics' });
 	});
 
 	it('sorts by pipeline name, then node id', async () => {
 		const { client } = fakeClient(
-			[task({ projectId: 'p2', name: 'Zeta' }), task({ projectId: 'p1', name: 'Alpha' })],
+			[task({ address: 'acme.p2.s1', name: 'Zeta' }), task({ address: 'acme.p1.s1', name: 'Alpha' })],
 			{
-				'p2:s1': { components: [{ id: 'z1', provider: 'db_mysql' }] },
-				'p1:s1': { components: [{ id: 'b', provider: 'db_mysql' }, { id: 'a', provider: 'db_mysql' }] },
+				'acme.p2.s1': dbPipe('acme.p2', [{ nodeId: 'z1', name: 'z1' }]),
+				'acme.p1.s1': dbPipe('acme.p1', [{ nodeId: 'b', name: 'b' }, { nodeId: 'a', name: 'a' }]),
 			},
 		);
 		const endpoints = await discoverSqlEndpoints(client);

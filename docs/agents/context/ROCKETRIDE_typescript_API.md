@@ -326,6 +326,7 @@ Start a RocketRide pipeline. Returns the server response body; `token` is the ta
 - `pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full'` — when set, captures every lane write and invoke call in the response under `_trace`
 - `name?: string` — display name for the task (shown in dashboards); derived from the filename when `filepath` is used
 - `env?: Record<string, string>` — per-call substitution values merged over the client's filtered `ROCKETRIDE_*` environment (per-call values are not filtered)
+- `onChange?: 'error' | 'keep' | 'auto'` — a spec call's answer to your live `@dev` run already running OTHER content: `error` (server default) fails with `spec_changed`, `keep` delivers to the running engine, `auto` repoints the run to the new content. The IDEs pass their restart-behavior setting
 
 ```typescript
 // From a .pipe file / from a flat config / reusing an existing pipeline:
@@ -409,6 +410,16 @@ const token = await client.getTaskToken({ projectId: 'proj-123', source: 'webhoo
 ### `getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>`
 
 Return the **unresolved** pipeline configuration for a running task — `${ROCKETRIDE_*}` placeholders are not substituted, so no secrets are included. Returns `undefined` if the task is not found.
+
+### `interfaces(address: string, options?: { team?: string }): Promise<PipeInterfaces>`
+
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool({ address, nodeId, tool, input })` — a standalone tool call starts a dormant engine. Your own `@dev` run (Play in the Builder) answers first with the spec it submitted and `version: null`; nothing has to be running on any rung. Throws `TASK_NOT_REGISTERED` when no rung serves you.
+
+```typescript
+const { rung, version, interfaces } = await client.interfaces('acme.docBrain');
+const databases = interfaces['acme.docBrain']?.database ?? [];   // [{ nodeId: 'db_main', name: 'Ops DB' }]
+const dialect = await client.tool({ address: 'acme.docBrain', nodeId: databases[0].nodeId, tool: 'dialect' });
+```
 
 ### `validate(options): Promise<ValidationResult>`
 

@@ -27,6 +27,7 @@
 
 import React, { useState, useCallback, useRef, useMemo, useEffect, CSSProperties, ReactNode } from 'react';
 import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 
 import { TabPanel } from 'shell';
 import { ContentHeader } from 'shell';
@@ -87,6 +88,12 @@ export interface IProjectViewProps {
 	serverHost?: string;
 	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
 	onCreateEndpointKey?: EndpointKeyMinter;
+	/** The org's developer id as KNOWN: '' = none claimed yet (the onboarding banner shows), undefined = unknown (no banner). */
+	knownDeveloperId?: string;
+	/** Claims the org's developer id (org admins); absent = this host cannot claim. */
+	onRegisterDeveloper?: (developerId: string) => Promise<string>;
+	/** Whether the viewer may claim (org admin): false shows the member guidance, undefined = unknown (the form shows, the server decides). */
+	canRegisterDeveloper?: boolean;
 	/** Whether the document has unsaved changes. */
 	isDirty?: boolean;
 	/** Whether the document is a new (never-saved) file. */
@@ -257,7 +264,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -656,6 +663,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			{/* Page strip — the view renders its own tabs at the very top, above
 			    any ContentHeader (the title lives inside each page, below it). */}
 			<TabControl menu={viewMenu} activeId={activeMode} onSelect={handleModeChange} />
+			{/* Developer-id onboarding (plan §2.1): while the org has no id the
+			    server refuses every run, deploy and publish; claim it here. */}
+			{!isReadonly && <DeveloperIdBanner developerId={knownDeveloperId} onRegister={onRegisterDeveloper} canRegister={canRegisterDeveloper} />}
 			{/* Page title, PINNED with the strip — canvas (Design) has none;
 			    only the panel bodies below scroll. */}
 			{documentTitle && activeMode !== 'design' && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[activeMode as DocSubView]} />}

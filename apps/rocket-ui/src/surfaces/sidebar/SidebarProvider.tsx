@@ -46,6 +46,7 @@ import { registerBuiltinTools } from 'shared/tools/builtins';
 import { appdevFrames } from '../preview/session/appdevFrames';
 import { BxExport, useSidebarCollapsed, useSidebarActiveView } from 'shell';
 import type { ProjectEntry } from 'shared/tools/pipelines/sidebar/types';
+import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { SidebarMode, ToolTabsSidebar } from 'shared/tools/core/chrome/types';
 import type { AppListItem } from 'shared/tools/appdev/sidebarTypes';
 import { useDevToolPins } from '../devtools/devToolPins';
@@ -240,6 +241,9 @@ const SidebarProvider: React.FC = () => {
 
 	// --- Callbacks -----------------------------------------------------------
 
+	// Action error state — shown as a dialog when a file action or a run/stop fails
+	const [actionError, setActionError] = useState<string | null>(null);
+
 	/**
 	 * Handles navigation button clicks.
 	 */
@@ -248,7 +252,9 @@ const SidebarProvider: React.FC = () => {
 		const docs = getDocs();
 		if (!docs) return;
 		if (target === 'new') {
-			docs.createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
+			// No id yet: the untitled document opens as the New Pipeline form,
+			// which asks the name (the pipeline's id) and creates the bundle.
+			docs.createDocument(undefined, { components: [] });
 		}
 	}, []);
 
@@ -317,14 +323,33 @@ const SidebarProvider: React.FC = () => {
 					case 'createFolder':
 						await projectVfs.mkdir(path);
 						break;
-					case 'createFile':
-						await projectVfs.write(path, { project_id: crypto.randomUUID(), components: [] });
+					case 'createFile': {
+						// The Explorer's inline create: a new pipeline is born as a BUNDLE
+						// (plan §9, B7), the pipe in a folder of the typed FILE name. The
+						// name is not the id: the identity lives inside the file, minted
+						// fresh here and chosen on PACKAGE › Identity (the New Pipeline
+						// form is the path that asks the id up front).
+						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
+						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+						const bundle = bundlePathsFor(dir, stem);
+						// The Explorer checked the typed path; the bundle's pipe is another
+						// path, and an existing pipeline there is never truncated.
+						const existing = await projectVfs.list(bundle.folder).catch(() => []);
+						if (existing.some((e) => e.type !== 'dir' && e.name === `${stem}.pipe`)) {
+							throw new Error(`"${bundle.file}" already exists; choose another name.`);
+						}
+						await projectVfs.mkdir(bundle.folder);
+						await projectVfs.write(bundle.file, { project_id: crypto.randomUUID(), components: [] });
 						break;
+					}
 				}
 				refresh();
 			} catch (err) {
 				// Constant format string (SAST rule): the action rides as an arg.
 				console.error('[SidebarProvider] action failed:', action, err);
+				// The user asked for this action; a refusal (a bundle that already
+				// exists, a failed rename) is told in the dialog, not only logged.
+				setActionError(err instanceof Error ? err.message : String(err));
 			}
 		},
 		[client, refresh, projectVfs]
@@ -350,8 +375,6 @@ const SidebarProvider: React.FC = () => {
 		[client, projectVfs]
 	);
 
-	// Action error state — shown as a dialog when run/stop fails
-	const [actionError, setActionError] = useState<string | null>(null);
 
 	// The run call honors the pipeline settings (it hard-coded 'full' before
 	// the settings unification — the one reader that bypassed the setting).

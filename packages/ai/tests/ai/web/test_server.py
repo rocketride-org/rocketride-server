@@ -153,10 +153,8 @@ class TestAllowedModules:
 
     def test_allowed_modules_contains_expected_entries(self):
         expected = {
-            'chat',
             'clients',
             'data',
-            'dropper',
             'mcp',
             'pipe',
             'services',
@@ -198,9 +196,9 @@ class TestUseMethod:
         mock_import.return_value = mock_module
 
         server = _make_server()
-        server.use('chat')
+        server.use('services')
 
-        mock_import.assert_called_once_with('ai.modules.chat')
+        mock_import.assert_called_once_with('ai.modules.services')
         mock_module.initModule.assert_called_once_with(server, {})
 
     @patch('ai.web.server.importlib.import_module')
@@ -209,17 +207,17 @@ class TestUseMethod:
         mock_import.return_value = mock_module
 
         server = _make_server()
-        server.use('  CHAT  ')
+        server.use('  SERVICES  ')
 
-        mock_import.assert_called_once_with('ai.modules.chat')
+        mock_import.assert_called_once_with('ai.modules.services')
 
     @patch('ai.web.server.importlib.import_module')
     def test_use_does_not_reload_already_loaded_module(self, mock_import):
         server = _make_server()
         cached_module = MagicMock(initModule=MagicMock())
-        server.app.state.modules['chat'] = cached_module
+        server.app.state.modules['services'] = cached_module
 
-        server.use('chat')
+        server.use('services')
 
         mock_import.assert_not_called()
         cached_module.initModule.assert_not_called()

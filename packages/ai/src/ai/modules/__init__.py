@@ -1,10 +1,8 @@
 # Explicit list of supported modules
 ALL = frozenset(
     {
-        'chat',
         'clients',
         'data',
-        'dropper',
         'mcp',
         'pipe',
         'services',

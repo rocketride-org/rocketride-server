@@ -8,8 +8,6 @@ These modules are mostly registry / CLI / facade glue:
 - ``ai.modules.services.services`` — list / lookup a service definition
 - ``ai.modules.clients.clients`` — find-latest-file helper + download
   endpoints (Python wheel, TypeScript tgz, VSCode vsix)
-- ``ai.modules.dropper.dropper`` — static-file SPA fallback with path-traversal
-  guard
 
 Each file is small (9–34 statements), so the tests focus on the public
 function bodies and the error / fallback paths, not on import-time wiring.
@@ -17,7 +15,6 @@ function bodies and the error / fallback paths, not on import-time wiring.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -400,72 +397,3 @@ async def test_client_vscode_serves_latest_extension(monkeypatch, tmp_path):
 
     result = await clients_mod.client_vscode(MagicMock())
     assert Path(getattr(result, 'path', '')) == ext
-
-
-# ---------------------------------------------------------------------------
-# dropper.dropper — path traversal + SPA fallback
-# ---------------------------------------------------------------------------
-
-
-import ai.modules.dropper.dropper  # noqa: F401 (ensure the submodule is loaded)
-
-# The package's __init__.py does `from .dropper import dropper`, so the
-# attribute `ai.modules.dropper.dropper` is the *function*, not the submodule.
-# Reach for the submodule via sys.modules to get back to the real module.
-dropper_mod = sys.modules['ai.modules.dropper.dropper']
-
-
-@pytest.mark.asyncio
-async def test_dropper_serves_existing_file(monkeypatch, tmp_path):
-    """A requested file that exists under dropper_root is served directly."""
-    monkeypatch.setattr(dropper_mod, 'dropper_root', str(tmp_path))
-    (tmp_path / 'index.html').write_text('<html></html>')
-    (tmp_path / 'app.js').write_text('console.log()')
-
-    req = MagicMock()
-    req.path_params = {'file_path': 'app.js'}
-    result = await dropper_mod.dropper(req)
-    assert getattr(result, 'path', None) is not None
-    assert 'app.js' in str(result.path)
-
-
-@pytest.mark.asyncio
-async def test_dropper_falls_back_to_index_when_file_missing(monkeypatch, tmp_path):
-    """A request for a missing file returns the SPA fallback (index.html)."""
-    monkeypatch.setattr(dropper_mod, 'dropper_root', str(tmp_path))
-    (tmp_path / 'index.html').write_text('<html>SPA</html>')
-
-    req = MagicMock()
-    req.path_params = {'file_path': 'route/that/spa/handles'}
-    result = await dropper_mod.dropper(req)
-    assert 'index.html' in str(result.path)
-
-
-@pytest.mark.asyncio
-async def test_dropper_returns_index_for_root_request(monkeypatch, tmp_path):
-    """An empty file_path serves index.html."""
-    monkeypatch.setattr(dropper_mod, 'dropper_root', str(tmp_path))
-    (tmp_path / 'index.html').write_text('<html></html>')
-
-    req = MagicMock()
-    req.path_params = {}
-    result = await dropper_mod.dropper(req)
-    assert 'index.html' in str(result.path)
-
-
-@pytest.mark.asyncio
-async def test_dropper_blocks_path_traversal(monkeypatch, tmp_path):
-    """A '..' in the path is rejected — falls back to index.html within dropper_root."""
-    monkeypatch.setattr(dropper_mod, 'dropper_root', str(tmp_path))
-    (tmp_path / 'index.html').write_text('<html></html>')
-    # Create a sibling directory that the attacker is trying to read.
-    sibling = tmp_path.parent / 'secrets'
-    sibling.mkdir(exist_ok=True)
-    (sibling / 'secret.txt').write_text('top-secret')
-
-    req = MagicMock()
-    req.path_params = {'file_path': '../secrets/secret.txt'}
-    result = await dropper_mod.dropper(req)
-    # The fallback path must be within dropper_root.
-    path_str = str(getattr(result, 'path', ''))
-    assert 'secret.txt' not in path_str

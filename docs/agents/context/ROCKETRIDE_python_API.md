@@ -327,6 +327,7 @@ Start a RocketRide pipeline for processing data.
 - `pipelineTraceLevel` (str, optional): Trace level: `'none'`, `'metadata'`, `'summary'`, or `'full'`. When set, captures every lane write and invoke call in the response under `_trace`.
 - `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`/`.pipe.json`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
+- `on_change` (str, optional): A spec call's answer to your live `@dev` run already running OTHER content: `'error'` (server default) fails with `spec_changed`, `'keep'` delivers to the running engine, `'auto'` repoints the run to the new content. The IDEs pass their restart-behavior setting.
 
 **Returns:** Dictionary containing `token` (the full task address `developerId.pipelineId[.source]`) and other startup metadata.
 
@@ -417,6 +418,16 @@ The scope IS the kind: pass `team_id` to resolve the team's DEPLOYED run; omit i
 ### `async get_task_pipeline(token: str) -> dict | None`
 
 Retrieve the unresolved pipeline for a running task. The pipeline is returned exactly as stored on the task — `${ROCKETRIDE_*}` placeholders are NOT substituted, so no secrets are included in the response. Returns `None` if the task is not found.
+
+### `async interfaces(address: str, *, team: str = None) -> dict`
+
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@dev` run (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
+
+```python
+answer = await client.interfaces('acme.docBrain')
+databases = answer['interfaces'].get('acme.docBrain', {}).get('database', [])   # [{'nodeId': 'db_main', 'name': 'Ops DB'}]
+dialect = await client.tool(address='acme.docBrain', node_id=databases[0]['nodeId'], tool='dialect')
+```
 
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 

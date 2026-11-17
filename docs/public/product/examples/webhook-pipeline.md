@@ -89,21 +89,18 @@ HTTP endpoint, no `curl` required:
 { "id": "source_1", "provider": "chat" }
 ```
 
-Restart the pipeline. The engine prints a chat URL:
+Restart the pipeline. The engine reports the source ready:
 
 ```text
 Chat ready - system is ready to accept questions
-  URL: http://localhost:5567/chat/webhook-example/source_1?auth=<public-auth-key>
 ```
 
-Open that URL in a browser and start typing. The `?auth=` query parameter is a
-convenience for supplying the credential to the browser; the Chat UI stores it
-in session storage for subsequent page loads. Webhook requests use the same key
-in an `Authorization: Bearer <public-auth-key>` header.
-
-Each displayed URL includes the project and source identifiers, so it remains
-specific to this pipeline. The legacy `/webhook`, `/task/data`, `/chat`, and
-`/dropper` URLs continue to work for existing integrations.
+Press **Open Chat** on the chat node in the Builder: the chat app opens
+beside the canvas, bound to this pipeline's address. Once the pipeline is
+published, anyone you share it with reaches the same chat by signing in and
+opening `?appid=rocketride.chat&pipe=<developerId>.webhook-example.source_1`.
+No credential rides a URL; webhook requests use an `rr_` key in an
+`Authorization: Bearer` header.
 
 ## Add a system prompt
 

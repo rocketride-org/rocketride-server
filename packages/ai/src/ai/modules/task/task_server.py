@@ -84,7 +84,7 @@ from contextlib import asynccontextmanager
 from typing import Deque, List
 from fastapi import WebSocket
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Awaitable, Callable, Dict, Any, Optional, Set, Tuple
+from typing import AsyncIterator, Awaitable, Callable, Dict, Any, Optional, Set, Tuple, Union
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -1368,16 +1368,71 @@ class TaskServer(DAPBase):
             TaskError: As ``resolve_control``; TASK_NOT_REGISTERED lists the rungs tried.
             PermissionError: As ``resolve_control``.
         """
-        # Step 1: a live control on any rung
+        parsed, rungs, candidates = await self.resolve_candidates(address, account_info, require, team=team)
+        for candidate in candidates:
+            if isinstance(candidate, TaskControl):
+                return self._check_engine_available(candidate), False
+            # A pinned artifact without the named source yields nothing; the
+            # next candidate in the order answers
+            control, started = await self._start_from_pin(candidate, parsed, account_info, require)
+            if control is not None:
+                return control, started
+        raise self._not_registered(address, rungs)
+
+    async def resolve_candidates(
+        self,
+        address: str,
+        account_info: AccountInfo,
+        require: Optional[str] = None,
+        *,
+        team: Optional[str] = None,
+    ) -> Tuple[Address, List[str], List[Union[TaskControl, Pin]]]:
+        """
+        THE decision of a NAME call: what answers ``address`` for this caller, in the ladder's order.
+
+        A pure read — nothing starts, nothing is held. Every verb that must
+        agree on "which rung answers" asks this: ``resolve_name`` acts on the
+        first candidate that can serve (starting a pin's engine when needed),
+        ``interfaces`` reads the first candidate's spec. One order, one
+        implementation (plan 3.2):
+
+        - The caller's registered ``@dev`` or ``@me`` control, when there is
+          one, is the whole answer: ``@dev`` has no publication to compare
+          with, and nothing outranks ``@me``.
+        - Otherwise the serving publications and the caller's registered
+          control (``@team`` or ``@public``) are merged by rung rank — ``@me``,
+          each team in the caller's team order, ``@public`` — a pin before a
+          control of a LATER rung, the control before any pin of a later
+          rung. A dormant control (engine stopped on its idle timer) counts
+          as registered: its spec stays readable and its next request
+          restarts it.
+
+        Args:
+            address: ``developerId.pipelineId[.source]``.
+            account_info: The request's account (required).
+            require: The permission the request needs.
+            team: Per-call ``@team`` override.
+
+        Returns:
+            The parsed address, the rungs the control walk tried (for the
+            not-registered message) and the candidates in answer order, each
+            a ``TaskControl`` or a ``Pin``; empty when no rung has anything.
+
+        Raises:
+            TaskError: Bad address grammar, or TASK_SOURCE_REQUIRED.
+            PermissionError: Unauthenticated, no permission, or outside the
+                key's endpoints scope.
+        """
+        # Step 1: the caller's registered control on any rung
         if account_info is None:
             raise PermissionError('Not authenticated')
         parsed = parse_address(address)
         rungs: List[str] = []
         live = self._walk_rungs(parsed, address, account_info, require, True, rungs, team)
         if live is not None and live.rung in ('dev', 'me'):
-            return self._check_engine_available(live), False
+            return parsed, rungs, [live]
 
-        # Step 2: the publications that may come before it
+        # Step 2: the publications, merged with the control by rung rank
         pins = await resolve_pins('pipe', account_info, address, team=team)
         probe = teams_to_probe(account_info, team)
 
@@ -1389,20 +1444,22 @@ class TaskServer(DAPBase):
                 return 1 + (probe.index(team_id) if team_id in probe else len(probe))
             return 2 + len(probe)
 
+        candidates: List[Union[TaskControl, Pin]] = []
         live_rank = _rank(live.rung, live.owner_id) if live is not None else None
-
-        # Step 3: the earlier of the live control and each pin answers
+        placed = False
         for pin in pins.pins:
-            if live_rank is not None and live_rank <= _rank(pin.rung, pin.deployment.team_id):
-                break
-            control, started = await self._start_from_pin(pin, pins.address, account_info, require)
-            if control is not None:
-                return control, started
-        if live is not None:
-            return self._check_engine_available(live), False
-
-        # Step 4: nothing on any rung
-        raise self._not_registered(address, rungs)
+            if (
+                live is not None
+                and not placed
+                and live_rank is not None
+                and live_rank <= _rank(pin.rung, pin.deployment.team_id)
+            ):
+                candidates.append(live)
+                placed = True
+            candidates.append(pin)
+        if live is not None and not placed:
+            candidates.append(live)
+        return parsed, rungs, candidates
 
     def _walk_rungs(
         self,

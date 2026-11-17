@@ -22,6 +22,8 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GenericEvent, ConnectionState, ConnectionStatus, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { PIPELINE_PARTITION } from 'shared/tools/pipelines/types';
+import { resolveDefaultPipelineDir } from '../shared/util/pipelineSave';
+import { SHORT_ID_PATTERN } from '../shared/util/pipeFileDecision';
 import type { TaskStatus } from 'shared/tools/pipelines/types';
 import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
@@ -32,6 +34,7 @@ import { getLogger } from '../shared/util/output';
 // into the extension-host compile; parse.ts is pure.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -407,6 +410,85 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				if (!client) throw new Error('Not connected to server');
 				return mintEndpointKey(client, p.address);
 			},
+			// Developer-id onboarding (plan §2.1): the webview has no shell
+			// identity, so the extension answers the org's id and the claim.
+			'host.pipeline.developerId': async () => {
+				const client = this.connectionManager.getClient();
+				if (!client) throw new Error('Not connected to server');
+				const status = await client.developerStatus();
+				return { developerId: status.developerId ?? '' };
+			},
+			'host.pipeline.registerDeveloper': async (p) => {
+				const client = this.connectionManager.getClient();
+				if (!client) throw new Error('Not connected to server');
+				const res = await client.registerDeveloper(p.developerId);
+				return { developerId: typeof res.developerId === 'string' ? res.developerId : p.developerId };
+			},
+			// The New Pipeline form (plan §2.1, §9): the untitled document asks
+			// the name (the pipeline's id); the extension creates the bundle
+			// `<pipelines dir>/<name>/<name>.pipe` and swaps the documents.
+			'host.pipeline.newIdentity': async () => {
+				const folder = vscode.workspace.workspaceFolders?.[0];
+				const developerId = this.connectionManager.getClient()?.getAccountInfo()?.organization?.developerId ?? '';
+				if (!folder) return { developerId, workspaceOpen: false, existingNames: [] };
+				const dir = resolveDefaultPipelineDir();
+				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
+				let existingNames: string[] = [];
+				try {
+					existingNames = (await vscode.workspace.fs.readDirectory(dirUri)).map(([name, type]) => (type === vscode.FileType.Directory ? name : name.replace(/\.pipe(?:\.json)?$/i, '')));
+				} catch {
+					existingNames = [];
+				}
+				return { developerId, workspaceOpen: true, existingNames };
+			},
+			'host.pipeline.create': async (p) => {
+				const folder = vscode.workspace.workspaceFolders?.[0];
+				if (!folder) throw new Error('Open a workspace folder first. The pipeline is created in it.');
+				// The name is the id AND two path segments: the grammar is enforced
+				// here, not only in the form (a caller that bypasses the form must
+				// not reach the file system with `..`).
+				if (!SHORT_ID_PATTERN.test(p.name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
+				const dir = resolveDefaultPipelineDir();
+				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
+				const bundleDir = vscode.Uri.joinPath(dirUri, p.name);
+				const bundleFile = vscode.Uri.joinPath(bundleDir, `${p.name}.pipe`);
+				try {
+					await vscode.workspace.fs.stat(bundleDir);
+					throw new Error(`"${vscode.workspace.asRelativePath(bundleDir)}" already exists. Choose another name.`);
+				} catch (error) {
+					if (error instanceof Error && error.message.endsWith('Choose another name.')) throw error;
+				}
+				await vscode.workspace.fs.createDirectory(bundleDir);
+				// The untitled document's content rides along (its components stay);
+				// only the identity is set here.
+				const base = p.project && typeof p.project === 'object' ? (p.project as Record<string, unknown>) : {};
+				const content = JSON.stringify({ ...base, project_id: p.name, name: p.displayName, components: Array.isArray(base.components) ? base.components : [] }, null, 2);
+				try {
+					await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
+				} catch (error) {
+					// A failed write must leave the name retryable: the folder THIS
+					// attempt made goes if it is still empty (never anyone else's content).
+					try {
+						if ((await vscode.workspace.fs.readDirectory(bundleDir)).length === 0) await vscode.workspace.fs.delete(bundleDir);
+					} catch {
+						// nothing to clean, or not ours to clean
+					}
+					throw error;
+				}
+				// Retire the untitled form document and open the file in its place.
+				const editorState = this.findLiveEditorState(p.doc);
+				if (editorState) {
+					editorState.webviewPanel.reveal(undefined, false);
+					await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+				}
+				await vscode.commands.executeCommand('vscode.openWith', bundleFile, 'rocketride.page.project');
+			},
+			'host.pipeline.cancelNew': async (p) => {
+				const editorState = this.findLiveEditorState(p.doc);
+				if (!editorState) return;
+				editorState.webviewPanel.reveal(undefined, false);
+				await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+			},
 		};
 		registerOpHandlers<PipelineHostOpMap>(this.busHost.rootBus, impls);
 	}
@@ -452,7 +534,11 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// save-for-run suppression must follow it.
 				savedKey = runTarget.toString();
 				this.savesForRun.add(savedKey);
-				const parsed = JSON.parse(text);
+				// An untitled save stamps the file's name as the id (and may
+				// place it in a bundle), so the run uses what was SAVED, not the
+				// text captured before the save.
+				const savedText = document.isUntitled ? Buffer.from(await vscode.workspace.fs.readFile(runTarget)).toString('utf8') : text;
+				const parsed = JSON.parse(savedText);
 				const pipeName = path.basename(runTarget.fsPath, '.pipe');
 				await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
 			}
@@ -855,6 +941,9 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
+				// The restart setting is also this Play's answer to a live run of
+				// other content (plan §3.4).
+				...onChangeArgs(cfg.pipelineRestartBehavior),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

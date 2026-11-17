@@ -20,16 +20,9 @@
  * file on the way. Every write the watcher makes now goes through here first.
  */
 
-import * as path from 'path';
 
 /** Which watcher event the text was read for. */
 export type PipeFileEvent = 'created' | 'changed';
-
-/** The slice of the sidebar's parsed-file cache the decision needs. */
-export interface KnownPipeFile {
-	filePath: string;
-	projectId?: string;
-}
 
 /** What the watcher knows at the moment it has to decide. */
 export interface PipeFileDecisionInput {
@@ -38,8 +31,6 @@ export interface PipeFileDecisionInput {
 	filePath: string;
 	/** The file's text as read from disk. */
 	text: string;
-	/** Every cached file. The event's own file may be in here; it is excluded. */
-	known: readonly KnownPipeFile[];
 	/**
 	 * True on the second look at a file that first read as empty: the caller
 	 * waited EMPTY_FILE_SETTLE_MS and read it again.
@@ -59,8 +50,15 @@ export type PipeFileDecision =
 	| { kind: 'seed-empty' }
 	/** A pipeline with no usable project_id: write one. */
 	| { kind: 'assign-id' }
-	/** The id is in use by `otherPath`: tell the user, write nothing. */
-	| { kind: 'ask-duplicate'; projectId: string; otherPath: string };
+	/** The id carries a dot (an address, not a short id): tell the user, write nothing (B5). */
+	| { kind: 'refuse-dotted'; projectId: string };
+
+/**
+ * A pipeline's SHORT id: one dot-free address segment (plan §2.1, B5), the
+ * grammar the server's address module enforces on every segment. It is the
+ * grammar of the id INSIDE the file; the file itself may be named anything.
+ */
+export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Decide what the watcher should do with one file.
@@ -68,7 +66,7 @@ export type PipeFileDecision =
  * @param input The event, the file, its text and the cached files.
  */
 export function decidePipeFile(input: PipeFileDecisionInput): PipeFileDecision {
-	const { event, filePath, text, known, settled = false } = input;
+	const { event, text, settled = false } = input;
 
 	// An empty read is the dangerous case: it is what a file looks like while
 	// another program is still writing it. A changed file is never seeded. A
@@ -84,15 +82,15 @@ export function decidePipeFile(input: PipeFileDecisionInput): PipeFileDecision {
 
 	const projectId = projectIdOf(parsed.target);
 	if (projectId === null) return { kind: 'assign-id' };
+	// A dotted id is an ADDRESS (developerId.pipeId), never the short id a file
+	// carries: the namespace is derived from the publisher, not typed (plan
+	// §2.1). Refused, never rewritten: the user chose it and is told why.
+	if (!SHORT_ID_PATTERN.test(projectId)) return { kind: 'refuse-dotted', projectId };
 
-	// The file's own cache entry is never a clash. That was the #2466 defect:
-	// a create event for a file the cache already knew found its own id here.
-	const other = known.find((f) => f.projectId === projectId && !samePath(f.filePath, filePath));
-	if (!other) return { kind: 'leave', reason: 'id-ok' };
-
-	// A genuine duplicate is never rewritten unasked (that was the behaviour
-	// before #2466): the user is told and chooses.
-	return { kind: 'ask-duplicate', projectId, otherPath: other.filePath };
+	// Two files carrying one id are the publisher's own pipeline (Rod,
+	// 2026-11-16): the id is chosen by the author now, so the duplicate prompt
+	// that guarded minted GUIDs is gone; the server resolves by address.
+	return { kind: 'leave', reason: 'id-ok' };
 }
 
 /**
@@ -179,16 +177,3 @@ function projectIdOf(target: Record<string, unknown>): string | null {
 	return typeof id === 'string' && id.trim() !== '' ? id : null;
 }
 
-/**
- * Path equality as the file system sees it. Case is folded on Windows only.
- * macOS volumes are usually case-insensitive too, but VS Code reports one
- * consistent casing per file, and a mismatch would at worst cost one false
- * warning (the handler re-checks the other file on disk before asking).
- */
-function samePath(a: string, b: string): boolean {
-	const na = path.normalize(a);
-	const nb = path.normalize(b);
-	// path.sep, not process.platform: this module is also type-checked under
-	// the webview config, where process is a stub without platform.
-	return path.sep === '\\' ? na.toLowerCase() === nb.toLowerCase() : na === nb;
-}

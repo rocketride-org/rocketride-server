@@ -32,7 +32,7 @@
 // this tool's business alone.
 // =============================================================================
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
 import { BxChevronDown, BxChevronRight, BxNote, BxPlus, BxStop } from 'shell';
@@ -41,6 +41,7 @@ import type { ExplorerConfig, ExplorerEntry, ExplorerStatus, ViewMenu } from 'sh
 import type { ExplorerFileAction } from 'shell';
 import { PANEL_HOVER_BG, panelStyles } from '../../core/chrome/panelStyles';
 import type { ActiveTaskState, ProjectEntry, UnknownTask } from './types';
+import { collapseBundles, entryPathOfFile, fileOfEntry } from './bundles';
 import type { IntroMode } from '../../introCatalog';
 
 /** Default configuration for the pipeline Explorer panel. */
@@ -71,7 +72,7 @@ export interface IPipelinesSidebarPanelProps {
 	/** Open a pipeline file. */
 	onOpenFile: (path: string) => void;
 	/** File management, hosts that support it. */
-	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void;
+	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void | Promise<void>;
 	/** Extra per-file actions (e.g. Export). */
 	fileActions?: ExplorerFileAction[];
 	/** Run/stop a source component. */
@@ -99,19 +100,52 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 		entries: [...(onShowIntro ? [{ id: 'intro', label: 'Introduction to Pipelines', icon: <BxNote size={16} /> }] : []), { id: 'new', label: 'New pipeline', icon: <BxPlus size={16} /> }],
 	};
 
-	const explorerEntries: ExplorerEntry[] = entries.map((e) => ({
+	// A pipeline bundle (`dir/name/name.pipe`, plan §9) is ONE entry at its
+	// folder's path; what the Explorer hands back for it is mapped to the
+	// `.pipe` inside before any host callback sees it.
+	const shown = useMemo(() => collapseBundles(entries), [entries]);
+	const explorerEntries: ExplorerEntry[] = shown.map((e) => ({
 		path: e.path,
 		type: e.type,
 		documentId: e.projectId,
 		children: e.sources?.map((s) => ({ id: s.id, name: s.name, provider: s.provider })),
 	}));
 
+	const handleOpenFile = useCallback((path: string) => onOpenFile(fileOfEntry(shown, path)), [onOpenFile, shown]);
+
 	const handleChildAction = useCallback(
 		(action: 'run' | 'stop', filePath: string, childId: string, documentId?: string) => {
-			onSourceAction(action, filePath, childId, documentId);
+			onSourceAction(action, fileOfEntry(shown, filePath), childId, documentId);
 		},
-		[onSourceAction],
+		[onSourceAction, shown],
 	);
+
+	/** File management on a bundle acts on the folder; a rename renames the
+	 *  pipe inside first so the folder stays a bundle (same name, plan §9). */
+	const handleFileManage = useCallback(
+		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string): Promise<void> => {
+			if (!onFileManage) return;
+			const entry = shown.find((e) => e.path === path);
+			if (entry?.file && action === 'rename' && newName) {
+				// The pipe first, then the folder: the inner rename must land before
+				// its parent path changes under it.
+				await onFileManage('rename', entry.file, newName);
+			}
+			await onFileManage(action, path, newName);
+		},
+		[onFileManage, shown],
+	);
+
+	/** Host file actions (Export, …) receive the FILE a bundle entry stands for. */
+	const mappedFileActions = useMemo(() => {
+		const map = (actions: ExplorerFileAction[]): ExplorerFileAction[] =>
+			actions.map((a) => ({
+				...a,
+				...(a.onSelect ? { onSelect: (path: string) => a.onSelect!(fileOfEntry(shown, path)) } : {}),
+				...(a.children ? { children: typeof a.children === 'function' ? (path: string) => map((a.children as (p: string) => ExplorerFileAction[])(fileOfEntry(shown, path))) : map(a.children) } : {}),
+			}));
+		return fileActions ? map(fileActions) : fileActions;
+	}, [fileActions, shown]);
 
 	return (
 		<div style={panelStyles.panelColumn}>
@@ -129,7 +163,7 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 
 			{/* ── Explorer (file tree) — vfs is the typed no-op (frozen shell
 			    contract shape; unused here) ───────────────────────────────── */}
-			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={activeTasks as Map<string, ExplorerStatus>} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={activeTasks as Map<string, ExplorerStatus>} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath ? entryPathOfFile(shown, activeFilePath) : activeFilePath} onOpenFile={handleOpenFile} onFileManage={onFileManage ? handleFileManage : undefined} fileActions={mappedFileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
 			{/* ── Ad-hoc — server tasks with no local .pipe file ──────────── */}
 			{hasUnknown && (

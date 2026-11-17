@@ -286,6 +286,7 @@ class ExecutionMixin(DAPClient):
         pipelineTraceLevel: str = None,
         name: str = None,
         env: Dict[str, str] = None,
+        on_change: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -326,6 +327,11 @@ class ExecutionMixin(DAPClient):
             pipelineTraceLevel: Pipeline trace level ('none', 'metadata', 'summary',
                 'full'). When set, captures every lane write and invoke call in the
                 response under '_trace'.
+            on_change: A spec call's answer to a live ``@dev`` presence running
+                OTHER content (plan 3.4): ``'error'`` fails with ``spec_changed``
+                (the server default), ``'keep'`` delivers to the running engine,
+                ``'auto'`` repoints the control to the new content. The IDEs pass
+                their restart-behavior setting.
 
         Returns:
             Dict containing:
@@ -424,6 +430,8 @@ class ExecutionMixin(DAPClient):
             arguments['threads'] = threads
         if use_existing is not None:
             arguments['useExisting'] = use_existing
+        if on_change is not None:
+            arguments['onChange'] = on_change
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
         # Build ROCKETRIDE_* env from client's .env + caller overrides

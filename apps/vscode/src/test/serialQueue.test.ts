@@ -25,8 +25,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { SerialQueue } from '../shared/util/serialQueue';
-import { decidePipeFile, readPipeProjectId } from '../shared/util/pipeFileDecision';
-import type { KnownPipeFile, PipeFileDecision } from '../shared/util/pipeFileDecision';
 
 /** A promise the test settles by hand, so nothing here depends on timers. */
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -84,40 +82,26 @@ test('a failed job neither stops the queue nor loses its failure', async () => {
 
 const FILE = '/ws/pipelines/a.pipe';
 const OTHER = '/ws/pipelines/b.pipe';
-const ID = '11111111-1111-4111-8111-111111111111';
 
-test('queued, the second of two files created together is judged against the first', async () => {
-	// A model of handleFileCreated: judge the file against the cache, then
-	// parse the file into the cache. Both files already carry the same id, as
-	// after a checkout or a copied folder.
-	const disk = new Map<string, string>([
-		[FILE, JSON.stringify({ components: [], project_id: ID })],
-		[OTHER, JSON.stringify({ components: [], project_id: ID })],
-	]);
-	const cache = new Map<string, KnownPipeFile>();
-	const decisions: PipeFileDecision[] = [];
+test('queued, the second of two files created together sees what the first cached', async () => {
+	// A model of handleFileCreated: look at the cache, then (after the read
+	// and the write) add the file to it. What each handler SAW is recorded.
+	const cache = new Set<string>();
+	const seen: string[][] = [];
 	const handleCreated = async (filePath: string): Promise<void> => {
-		const text = disk.get(filePath) ?? '';
-		decisions.push(decidePipeFile({ event: 'created', filePath, text, known: [...cache.values()] }));
+		seen.push([...cache]);
 		await tick(); // the read and the write of the real handler
-		cache.set(filePath, { filePath, projectId: readPipeProjectId(text) ?? undefined });
+		cache.add(filePath);
 	};
 
-	// Side by side, each handler judges a cache that has neither file: the
-	// shared id passes twice and nothing re-judges afterwards.
+	// Side by side, each handler looks at a cache that has neither file.
 	await Promise.all([handleCreated(FILE), handleCreated(OTHER)]);
-	assert.deepEqual(decisions, [
-		{ kind: 'leave', reason: 'id-ok' },
-		{ kind: 'leave', reason: 'id-ok' },
-	]);
+	assert.deepEqual(seen, [[], []]);
 
 	// Queued, the second handler sees the file the first added.
-	decisions.length = 0;
+	seen.length = 0;
 	cache.clear();
 	const queue = new SerialQueue();
 	await Promise.all([queue.enqueue(() => handleCreated(FILE)), queue.enqueue(() => handleCreated(OTHER))]);
-	assert.deepEqual(decisions, [
-		{ kind: 'leave', reason: 'id-ok' },
-		{ kind: 'ask-duplicate', projectId: ID, otherPath: FILE },
-	]);
+	assert.deepEqual(seen, [[], [FILE]]);
 });

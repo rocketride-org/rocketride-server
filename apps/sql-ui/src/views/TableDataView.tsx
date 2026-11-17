@@ -264,7 +264,7 @@ export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table })
 						fetchPage={env.ready ? fetchPage : undefined}
 						remoteSort
 						onLoadError={handleLoadError}
-						tableId={`sql-data-${endpoint.provider}`}
+						tableId={`sql-data-${endpoint.provider ?? 'database'}`}
 						height="100%"
 						emptyTitle="No rows"
 						emptyDescription="The table is empty (or nothing matches the current search/filters)."
