@@ -79,9 +79,7 @@ def test_default_profile_exists_and_matches_serverless():
     profiles = svc['preconfig']['profiles']
     default = svc['preconfig']['default']
     assert default in profiles, f'default profile {default!r} is not defined'
-    assert default == 'serverless-dense', (
-        f'default profile should be serverless-dense, got {default!r}'
-    )
+    assert default == 'serverless-dense', f'default profile should be serverless-dense, got {default!r}'
     assert profiles[default].get('mode') == 'serverless-dense'
 
 
