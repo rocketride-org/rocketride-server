@@ -158,13 +158,13 @@ def _allowed_domains(raw) -> list[str]:
         # The rule before any entry: the engine cuts a startup error at its first asterisk.
         one = len(positions) == 1
         raise ValueError(
-            f'tenki.allow_domains has {"an entry" if one else "entries"} Tenki refuses '
+            f'tenki.allow_domains has {"an entry" if one else "entries"} Luxor refuses '
             f'({"entry" if one else "entries"} {", ".join(positions)}). Use bare hostnames such as pypi.org, '
             'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
             f'Refused: {", ".join(refused)}'
         )
     if len(domains) > _MAX_DOMAINS:
-        raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Tenki accepts up to {_MAX_DOMAINS}')
+        raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Luxor accepts up to {_MAX_DOMAINS}')
     return domains
 
 
@@ -244,12 +244,12 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
     if isinstance(secret, str) and _looks_like_a_credential(secret.strip()):
         raise ValueError(
             'tenki.git_auth_secret looks like a credential value (it begins the way issued tokens do), not the name '
-            'of a Tenki secret. The node never holds a secret value: create the secret in Tenki '
+            'of a Luxor secret. The node never holds a secret value: create the secret in Luxor '
             'and put its name here. If this is the name of a secret, rename the secret.'
         )
     if not isinstance(secret, str) or not _SECRET_NAME.fullmatch(secret.strip()):
         raise ValueError(
-            'tenki.git_auth_secret must be the name of a Tenki secret, as a placeholder names it: a letter or '
+            'tenki.git_auth_secret must be the name of a Luxor secret, as a placeholder names it: a letter or '
             'underscore, then up to 127 letters, digits, underscores and hyphens'
         )
     raw = cfg.get('git_auth_url')
@@ -258,7 +258,7 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
     prefix = _git_auth_url((raw or '').strip() or _DEFAULT_GIT_AUTH_URL)
     if not policies:
         raise ValueError(
-            'tenki.git_auth_secret is set but tenki.secret_policies is empty. Tenki adds the secret only to '
+            'tenki.git_auth_secret is set but tenki.secret_policies is empty. Luxor adds the secret only to '
             'requests an attached policy allows: name the policy that covers the repositories under '
             f'{prefix} in tenki.secret_policies.'
         )
@@ -299,7 +299,7 @@ def _outlives_the_session(exec_timeout_secs: int, max_duration_minutes: int) -> 
         return None
     return (
         f'tool_tenki: exec_timeout_secs ({exec_timeout_secs}s) is not shorter than max_duration_minutes '
-        f'({max_duration_minutes} min). Tenki pauses the session at max_duration and the pause cuts a running '
+        f'({max_duration_minutes} min). Luxor pauses the session at max_duration and the pause cuts a running '
         'command off, so a command that needs the full execution timeout can never finish. Raise '
         'max_duration_minutes or lower exec_timeout_secs.'
     )
@@ -702,11 +702,11 @@ class IGlobal(IGlobalBase):
             if not self._secrets_refusal_logged:
                 self._secrets_refusal_logged = True
                 warning(
-                    'tool_tenki: Tenki refused to attach tenki.secret_policies: the API key needs Secrets access, '
+                    'tool_tenki: Luxor refused to attach tenki.secret_policies: the API key needs Secrets access, '
                     f'which is chosen when the key is created ({e})'
                 )
             raise SessionUnavailableError(
-                f'Tenki refused to attach the secret policies named in tenki.secret_policies: {e}. The Tenki '
+                f'Luxor refused to attach the secret policies named in tenki.secret_policies: {e}. The Luxor '
                 'API key this pipeline uses needs Secrets access, which only its operator can grant; '
                 'repeating the call will not help.'
             ) from e
@@ -715,13 +715,13 @@ class IGlobal(IGlobalBase):
             if not self._quota_refusal_logged:
                 self._quota_refusal_logged = True
                 warning(
-                    f"tool_tenki: Tenki refused to create a sandbox session at the workspace's limit ({e}). Every "
+                    f"tool_tenki: Luxor refused to create a sandbox session at the workspace's limit ({e}). Every "
                     'running session in the workspace counts against it, whichever pipeline started it.'
                 )
             raise SessionUnavailableError(
-                f'Tenki refused to create a sandbox session: {e}. That is a limit of the Tenki workspace this '
+                f'Luxor refused to create a sandbox session: {e}. That is a limit of the Luxor workspace this '
                 'pipeline uses, not of this call: a call works again once another session in the workspace has '
-                'ended, and the operator can raise the limit with Tenki.'
+                'ended, and the operator can raise the limit with Luxor.'
             ) from e
         except (WaitReadyFailedError, TemplateRuntimeFailedError) as e:
             self._close_left_running(e)
@@ -736,7 +736,7 @@ class IGlobal(IGlobalBase):
         except AttributeError as e:
             # An SDK whose file API changed shape: its file calls could hang for good, so the session is not used.
             message = (
-                'tool_tenki cannot put a deadline on file calls with this version of the Tenki SDK, '
+                'tool_tenki cannot put a deadline on file calls with this version of the Luxor SDK, '
                 'so the new sandbox session was closed without being used'
             )
             warning(f'tool_tenki: {message} ({e})')

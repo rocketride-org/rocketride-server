@@ -738,7 +738,7 @@ def test_an_allowlist_entry_tenki_refuses_stops_startup_naming_the_rule_first(mo
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
     with pytest.raises(ValueError) as refused:
         glb.beginGlobal()
-    assert str(refused.value).startswith('tenki.allow_domains has an entry Tenki refuses (entry 2). Use bare hostnames')
+    assert str(refused.value).startswith('tenki.allow_domains has an entry Luxor refuses (entry 2). Use bare hostnames')
 
 
 def test_an_allowlist_entry_that_may_carry_a_credential_is_not_repeated(monkeypatch, logs):
@@ -818,7 +818,7 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_url': 'http://github.com/'}, 'must be an https URL'),
         ({'git_auth_url': 'https://github.com/a/../b'}, 'must be an https URL'),
         ({'git_auth_url': 7}, 'must be a URL'),
-        ({'git_auth_secret': '9lives'}, 'must be the name of a Tenki secret'),
+        ({'git_auth_secret': '9lives'}, 'must be the name of a Luxor secret'),
         ({'git_auth_secret': 'ghp_' + 'a' * 36}, 'looks like a credential value'),
         ({'git_auth_secret': 'sk-ant-api03-abcdefgh12345678'}, 'looks like a credential value'),
         ({'git_auth_secret': 'lx_' + 'a1' * 12}, 'looks like a credential value'),
@@ -1225,7 +1225,7 @@ def test_a_create_that_left_a_sandbox_running_closes_it(monkeypatch, logs):
     ('error', 'cfg', 'says', 'logged'),
     [
         (mod.PermissionDeniedError('API key requires Secrets access'), _PRIVATE, 'needs Secrets access', 'Secrets'),
-        (mod.QuotaExceededError('max concurrent jobs reached (limit: 5)'), {}, 'limit of the Tenki', "workspace's"),
+        (mod.QuotaExceededError('max concurrent jobs reached (limit: 5)'), {}, 'limit of the Luxor', "workspace's"),
         (mod.PermissionDeniedError('API key requires Secrets access'), {}, 'API key requires Secrets access', None),
     ],
 )
@@ -1932,7 +1932,7 @@ def test_tool_descriptions_state_the_configured_limits_and_that_a_lifetime_pause
     tools = inst._collect_tool_methods()
     descriptions = {name: method.__tool_meta__['description'](inst) for name, method in tools.items()}
     assert 'Execution timeout: 77s.' in descriptions['run_command'] and '1234 characters' in descriptions['read_file']
-    assert all('Tenki pauses a session that reaches its maximum lifetime' in text for text in descriptions.values())
+    assert all('Luxor pauses a session that reaches its maximum lifetime' in text for text in descriptions.values())
 
 
 def test_the_session_field_lists_every_value_the_node_reports():

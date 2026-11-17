@@ -52,10 +52,10 @@ _HOME = '/home/tenki'  # the home and working directory, and the only root Tenki
 
 # Tenki-specific: unlike Daytona's, a Tenki session persists and is paused, not ended, at its lifetime.
 _SESSION_NOTE = (
-    'All Tenki Sandbox tools share one Linux VM, with /home/tenki as the home and working '
+    'All Luxor Sandbox tools share one Linux VM, with /home/tenki as the home and working '
     'directory; files and installed packages persist between calls. A paused session is resumed '
     'on the next call: memory and files under /home/tenki survive, but /tmp is cleared and open '
-    'network connections drop, so keep work under /home/tenki. Tenki pauses a session that reaches '
+    'network connections drop, so keep work under /home/tenki. Luxor pauses a session that reaches '
     'its maximum lifetime, and the next call resumes it the same way, which can take a minute. Only '
     'a session that has been terminated is replaced by a fresh, empty one.'
 )
@@ -111,7 +111,7 @@ _CUT_NOTICE = (
 # Tenki's documented answer (HTTP 403) when its proxy refuses to put a secret into a request; measured 2026-10-10.
 _INJECTION_DENIED = 'secret_injection_denied'
 _DENIED_NOTICE = (
-    '[tool_tenki: this output contains "secret_injection_denied". Tenki documents that as its answer '
+    '[tool_tenki: this output contains "secret_injection_denied". Luxor documents that as its answer '
     '(HTTP 403) when it refuses to put a secret into a request, for example because no attached secret '
     'policy allows that secret for that host, method and path. If that is what happened here, repeating '
     'the request will not help: the policy is for the operator of this pipeline to change.]'
@@ -330,7 +330,7 @@ def _private_clone_note(glb) -> str:
     if not glb.git_auth_secret:
         return 'Private repositories cannot be cloned: this node holds no git credentials.'
     return (
-        f'Private repositories under {glb.git_auth_url} can be cloned with an https URL: Tenki adds the '
+        f'Private repositories under {glb.git_auth_url} can be cloned with an https URL: Luxor adds the '
         'credential outside the sandbox, and a later fetch or pull in the clone, run_command included, '
         'authenticates the same way. Other private repositories cannot be cloned.'
     )
@@ -573,7 +573,7 @@ def _run_process(session, argv, timeout: int, once: _Once):
     except TimeoutError as e:
         raise ResultTimeoutError(
             f'the sandbox reported no result within {limit}s, {_RESULT_GRACE_SECS}s past the execution timeout '
-            'at which Tenki stops a command. A kill was sent as well, but over a stalled connection it may '
+            'at which Luxor stops a command. A kill was sent as well, but over a stalled connection it may '
             'not have arrived.'
         ) from e
     finally:
@@ -659,7 +659,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_EXEC_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Run a shell command in the remote Tenki sandbox (isolated from this machine): install '
+            'Run a shell command in the remote Luxor sandbox (isolated from this machine): install '
             'dependencies, build, run tests. On the default image commands run as user tenki with '
             'passwordless sudo, so install system packages with sudo apt-get. The call waits until '
             "the command's output streams close, so start a long-running server in the background "
@@ -699,7 +699,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_EXEC_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Execute a code snippet in the remote Tenki sandbox (isolated from this machine) and return '
+            'Execute a code snippet in the remote Luxor sandbox (isolated from this machine) and return '
             'its output. The code is saved to a temporary file under /home/tenki, run, and the file is '
             'removed afterwards. '
             f'{_SESSION_NOTE} Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
@@ -745,7 +745,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Write a text file in the remote Tenki sandbox, creating it or replacing its content, '
+            'Write a text file in the remote Luxor sandbox, creating it or replacing its content, '
             f'along with any missing parent directories. Content over {_READ_LIMIT_BYTES:,} bytes is refused. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
@@ -796,7 +796,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Edit a text file in the remote Tenki sandbox by replacing one exact, unique occurrence of old_text '
+            'Edit a text file in the remote Luxor sandbox by replacing one exact, unique occurrence of old_text '
             'with new_text. Refused, and nothing written, when old_text occurs zero times or more than once. '
             f'Use it for a small change instead of rewriting the whole file with write_file. {_PATH_NOTE} '
             f'{_SESSION_NOTE}'
@@ -861,7 +861,7 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            'Read a text file from the remote Tenki sandbox, decoded as UTF-8. At most '
+            'Read a text file from the remote Luxor sandbox, decoded as UTF-8. At most '
             f'{self.IGlobal.max_output_chars} characters are returned, and a file over '
             f'{_READ_LIMIT_BYTES:,} bytes is refused. {_PATH_NOTE} {_SESSION_NOTE}'
         ),
@@ -926,7 +926,7 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            "List a directory in the remote Tenki sandbox: each entry's name, whether it is a "
+            "List a directory in the remote Luxor sandbox: each entry's name, whether it is a "
             f'directory, and its size, sorted by name. {_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
@@ -957,7 +957,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Create a directory in the remote Tenki sandbox, including any missing parent directories. '
+            'Create a directory in the remote Luxor sandbox, including any missing parent directories. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
     )
@@ -981,7 +981,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_CHANGE_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Delete a file or directory in the remote Tenki sandbox. A directory is deleted recursively, '
+            'Delete a file or directory in the remote Luxor sandbox. A directory is deleted recursively, '
             'with everything inside it, and cannot be recovered. /home/tenki itself cannot be deleted. '
             f'{_PATH_NOTE} {_SESSION_NOTE}'
         ),
@@ -1039,7 +1039,7 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            "Clone a git repository into the remote Tenki sandbox, returning git's output and the folder "
+            "Clone a git repository into the remote Luxor sandbox, returning git's output and the folder "
             f'it was cloned into. {_private_clone_note(self.IGlobal)} '
             f'The clone must finish within {self.IGlobal.rpc_timeout_secs}s, so use depth for large '
             f'repositories. {_SESSION_NOTE}'
@@ -1087,7 +1087,7 @@ class IInstance(IInstanceBase):
                     output = f'{_CUT_NOTICE.format(limit=_OUTPUT_LIMIT_BYTES)} git printed: {output}'
                 if result.timed_out:
                     return failed(
-                        f'the clone did not finish within {glb.rpc_timeout_secs}s, when Tenki stopped it; use '
+                        f'the clone did not finish within {glb.rpc_timeout_secs}s, when Luxor stopped it; use '
                         f'depth for a large repository. git printed: {output}'
                     )
                 if result.exit_code != 0:
@@ -1112,7 +1112,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Check out a branch, tag or commit in a git repository in the remote Tenki sandbox, or create '
+            'Check out a branch, tag or commit in a git repository in the remote Luxor sandbox, or create '
             f'a new branch. {_SESSION_NOTE}'
         ),
     )
@@ -1148,7 +1148,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Show a git diff for a repository in the remote Tenki sandbox. Choose the revisions with a '
+            'Show a git diff for a repository in the remote Luxor sandbox. Choose the revisions with a '
             f'range, or with base and head, and narrow it with path. {_SESSION_NOTE}'
         ),
     )
@@ -1189,7 +1189,7 @@ class IInstance(IInstanceBase):
         },
         output_schema=_GIT_OUTPUT_SCHEMA,
         description=lambda self: (
-            'Show the commit log of a git repository in the remote Tenki sandbox, newest first, '
+            'Show the commit log of a git repository in the remote Luxor sandbox, newest first, '
             f'{_DEFAULT_LOG_COUNT} commits unless max_count says otherwise. {_SESSION_NOTE}'
         ),
     )
