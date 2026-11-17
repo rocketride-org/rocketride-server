@@ -161,22 +161,22 @@ ${body}`,
 		};
 	}
 
-	// A chat / dropper page is a browser surface: open it and sign in. No
-	// credential rides the URL (plan §3.6: the shell owns sign-in).
+	// A chat / dropper page is a browser surface. No credential rides the URL
+	// (plan §3.6: the signed-in shell apps own sign-in).
 	const curlUiBash = `curl -sS "${endpointUrl}"`;
-	const curlUiCmd = `REM A browser page: open it and sign in; curl fetches the HTML only
+	const curlUiCmd = `REM A browser page; curl fetches the HTML only
 curl.exe -sS "${endpointUrl}"`;
 	const psUiGet = `Invoke-RestMethod -Uri '${endpointUrl.replace(/'/g, "''")}' -Method Get`;
 
 	return {
-		curl: `# Open in a browser and sign in:
+		curl: `# Open in a browser:
 # ${endpointUrl}
 
 ${curlUiBash}`,
 		curlCmd: curlUiCmd,
 		powershell: psUiGet,
 		wget: `wget -qO- "${endpointUrl}"`,
-		typescript: `// Open the page; the shell asks for sign-in
+		typescript: `// Open the page
 window.open("${endpointUrl}", "_blank");
 
 // Optional: fetch the HTML (usually not needed for a chat page)

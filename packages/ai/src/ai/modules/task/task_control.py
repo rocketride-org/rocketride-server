@@ -51,6 +51,45 @@ from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
 from .types import EngineState, LAUNCH_TYPE, TaskError
 
+
+# ==== Status notes ============================================================
+
+
+def expand_note(note: Any, address: str, project_id: str) -> Any:
+    """
+    Expand a status note's identity placeholders for ONE control.
+
+    A node emits its readiness notes once per engine with the placeholders
+    ``{token}`` / ``{address}`` (the control's address), ``{project_id}`` and
+    ``{source}``; the engine stores them as emitted because it may serve
+    several controls. Strings are expanded, dict values are expanded one
+    level deep, anything else passes through.
+
+    Args:
+        note: One stored note (str, dict or other).
+        address: The control's ``developerId.pipelineId.source``.
+        project_id: The control's short pipeline id.
+
+    Returns:
+        The note with this control's identity in place of the placeholders.
+    """
+    source = address.rsplit('.', 1)[-1] if address else ''
+
+    def fill(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        return (
+            value.replace('{token}', address)
+            .replace('{address}', address)
+            .replace('{project_id}', project_id)
+            .replace('{source}', source)
+        )
+
+    if isinstance(note, dict):
+        return {key: fill(value) for key, value in note.items()}
+    return fill(note)
+
+
 if TYPE_CHECKING:
     from .task_conn import TaskConn
     from .task_engine import TaskEngine
@@ -591,6 +630,12 @@ class TaskControl:
         body = dict(status)
         # Step 1: the availability projection every holder is entitled to
         body['engine'] = {'availability': self.engine_state}
+        # Step 1b: the notes name THIS control's identity. The engine stores
+        # them as the node emitted them (placeholders intact) because two
+        # controls of one owner may hold one private engine under different
+        # addresses; each sees its own door, never the first holder's.
+        if isinstance(body.get('notes'), list):
+            body['notes'] = [expand_note(note, self.address, self.project_id) for note in body['notes']]
         if not shared:
             return body
         # Step 2: a shared engine's counters are replaced by this control's own

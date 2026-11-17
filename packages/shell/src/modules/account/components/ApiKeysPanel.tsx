@@ -281,14 +281,17 @@ function teamScope(k: ApiKeyRecord): string {
 
 /**
  * Endpoint scope display string for a key record (plan §2.4): the address
- * patterns the key may send to, 'all' for an unscoped key, '' for session keys.
+ * patterns the key may send to; 'all' for an UNSCOPED key (null or absent);
+ * 'none' for a scoped key whose list is empty (the server's check admits no
+ * address then); '' for session keys.
  *
  * @param k - The key record.
  * @returns The display string.
  */
 function endpointScope(k: ApiKeyRecord): string {
 	if (k.isSession) return '';
-	return k.endpoints?.length ? k.endpoints.join(', ') : 'all';
+	if (k.endpoints == null) return 'all';
+	return k.endpoints.length > 0 ? k.endpoints.join(', ') : 'none';
 }
 
 /**

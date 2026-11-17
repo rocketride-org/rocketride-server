@@ -267,6 +267,9 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const [minted, setMinted] = useState<IMintedEndpointKey | null>(null);
 	const [minting, setMinting] = useState(false);
 	const [mintError, setMintError] = useState<string | null>(null);
+	// Bumped per mint and per endpoint change; a mint whose generation is no
+	// longer current belongs to a previous endpoint and is ignored.
+	const mintGenerationRef = React.useRef(0);
 	const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<IntegrationTabId>('curl');
 	// The picked payload is an OVERRIDE, not the value itself: the modal stays
@@ -284,6 +287,8 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 		setPayloadOverride(null);
 		setMinted(null);
 		setMintError(null);
+		setMinting(false);
+		mintGenerationRef.current++;
 	}, [endpointKey]);
 
 	if (!endpointInfo || !isOpen) return null;
@@ -299,17 +304,24 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	// The snippets carry the minted key once there is one, the placeholder before.
 	const examples = buildIntegrationExamples({ endpointUrl, authKey: minted?.key, isWebhook: isWebhookEndpoint, payloadId });
 
-	/** Create API key: task.data on this address, frozen to the home team, shown once. */
+	/** Create API key: task.data on this address, frozen to the home team, shown once.
+	 *  A mint is tied to the endpoint it started for: the modal stays mounted
+	 *  between endpoints, so a result that lands after the endpoint changed is
+	 *  dropped rather than shown as the new endpoint's key. */
 	const handleMint = async (): Promise<void> => {
 		if (!onCreateEndpointKey || !address) return;
+		const mine = ++mintGenerationRef.current;
 		setMinting(true);
 		setMintError(null);
 		try {
-			setMinted(await onCreateEndpointKey(address));
+			const result = await onCreateEndpointKey(address);
+			if (mine !== mintGenerationRef.current) return;
+			setMinted(result);
 		} catch (e) {
+			if (mine !== mintGenerationRef.current) return;
 			setMintError(e instanceof Error ? e.message : String(e));
 		} finally {
-			setMinting(false);
+			if (mine === mintGenerationRef.current) setMinting(false);
 		}
 	};
 	const payload = getWebhookPayload(payloadId);
@@ -332,7 +344,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 		...(copyFeedback === label ? styles.iconBtnSuccess : {}),
 	});
 
-	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : isLocalEndpoint ? 'Local URL. Open it in a browser and sign in.' : 'Open the URL in a browser and sign in.';
+	// A chat / dropper PAGE has no sign-in of its own and the task tokens it
+	// took on the URL are gone (plan §2.4); the signed-in rocketride.chat and
+	// rocketride.dropper apps replace it (plan §3.6, Step 5b). Say so rather
+	// than promise a flow the page cannot complete.
+	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : 'This page is being replaced by the signed-in Chat and Dropper apps; until they ship it cannot be opened with a key, since no credential rides a URL any more.';
 
 	return createPortal(
 		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
@@ -426,7 +442,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					{/* Integration examples */}
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
-						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: open the URL in a browser and sign in.'}</div>
+						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: the page URL, for when the signed-in Chat and Dropper apps take it over; it carries no credential.'}</div>
 						{isWebhookEndpoint && (
 							<>
 								<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
