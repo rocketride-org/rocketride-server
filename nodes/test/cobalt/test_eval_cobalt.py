@@ -1355,8 +1355,8 @@ class TestFormatCheckersShareOneListDefinition:
 
     The two checkers used to carry separate copies of the list-line regex and
     disagreed at exactly half list lines (``prose`` penalised at > 0.5, ``list``
-    accepted at >= 0.5), so a half-list output was both acceptable prose and a
-    well-formed list.
+    accepted at >= 0.5), so they disagreed about whether a half-list output is
+    list-shaped.
     """
 
     HALF_LIST = 'Intro sentence here.\n- first item\n- second item\nClosing sentence.'

@@ -39,9 +39,10 @@ from . import clamp_threshold
 _LIST_LINE_RE = re.compile(r'^\s*[-*•]\s|^\s*\d+[.)]\s')
 
 # The fraction of list lines at which an output counts as list-shaped. One
-# boundary for both checkers: at exactly this ratio ``list`` accepts the output
-# and ``prose`` penalises it, so no output is both acceptable prose and a
-# well-formed list.
+# boundary for both checkers: at or above this ratio ``list`` rewards the
+# output and ``prose`` applies its list penalty, so the two profiles agree on
+# which outputs are list-shaped. The prose penalty is a deduction, not a
+# failure on its own.
 _LIST_SHAPED_RATIO = 0.5
 
 
