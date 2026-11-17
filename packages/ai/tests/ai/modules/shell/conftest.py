@@ -36,14 +36,16 @@ def _public_pages_state(monkeypatch):
     it). ``_built_at = inf`` keeps the refresh backstop from scheduling a
     rebuild against the real account singleton. No web server is wired, so no
     live route check is installed. The render caches start empty and are
-    dropped on every swap, as after startup; swap listeners a test adds are
-    dropped with the page map. The artifact store is the hostile fixture's
-    in-memory ``FILES`` (empty unless a test seeds it), so unit tests never
-    touch a real store. The render and snapshot caches, the
-    unusable-snapshot memory, the storage-warning and storage-failure
-    memories and the snapshot reads in flight start empty, with their
-    production budgets, and the store read slots start free.
+    dropped on every swap and data-source invalidation, as after startup;
+    swap and data-source listeners a test adds are dropped with the page map.
+    The artifact store is the hostile fixture's in-memory ``FILES`` (empty
+    unless a test seeds it), so unit tests never touch a real store. The
+    render, snapshot and feed caches, the unusable-snapshot memory, the
+    storage-warning and storage-failure memories and the snapshot reads in
+    flight start empty, with their production budgets, and the store read
+    slots start free.
     """
+    import ai.modules.shell.data_sources as ds
     import ai.modules.shell.pages as pages
     import ai.modules.shell.public_pages as pp
 
@@ -57,6 +59,7 @@ def _public_pages_state(monkeypatch):
         pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
     )
     monkeypatch.setattr(pages, '_snapshot_cache', pages._FifoCache(pages._SNAPSHOT_CACHE_MAX_BYTES))
+    monkeypatch.setattr(pages, '_atom_cache', {})
     monkeypatch.setattr(
         pages, '_unusable_snapshots', pages._FifoCache(pages._UNUSABLE_SNAPSHOTS_MAX, pages._UNUSABLE_SNAPSHOTS_MAX)
     )
@@ -70,7 +73,10 @@ def _public_pages_state(monkeypatch):
     # A semaphore binds to the event loop it first waits on; TestClient runs each request on a fresh one.
     monkeypatch.setattr(pages, '_snapshot_read_slots', asyncio.Semaphore(pages._SNAPSHOT_READ_SLOTS))
     monkeypatch.setattr(pages, '_documents', {})
-    pp.on_swap(pages._clear_rendered)  # as register_public_pages installs it
+    monkeypatch.setattr(ds, '_listeners', [])
+    # As register_public_pages installs them.
+    pp.on_swap(pages._clear_rendered)
+    ds.on_invalidate(pages._drop_rendered_for)
     FILES.clear()
     monkeypatch.setattr(pp, 'read_artifact_file', read_file)
     monkeypatch.setattr(pp, 'artifact_file_info', file_info)
