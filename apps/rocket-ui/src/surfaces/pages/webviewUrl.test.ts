@@ -91,12 +91,17 @@ test('refuses app bundles on the shell server only', () => {
 	}
 });
 
-test('a shell without an http(s) origin (VS Code webview, file://) has no own server: external rule only', () => {
-	for (const shell of ['vscode-webview://abc123', 'null', 'file://']) {
-		for (const url of ['https://docs.example', 'https://github.com/apps/x', 'http://localhost:5565/chat/p/s']) {
+test('a shell without an http(s) origin (VS Code webview, file://) still refuses app bundles and the engine shell', () => {
+	for (const shell of ['vscode-webview://abc123', 'file://', 'null']) {
+		// External https pages are framed as before.
+		for (const url of ['https://docs.example', 'https://docs.example/a?b=c']) {
 			assert.equal(isAllowedWebviewUrl(url, shell), true, `${shell} -> ${url}`);
 		}
-		for (const url of ['http://evil.example', 'javascript:alert(1)', 'vscode-webview://abc123/x', 'file:///etc/passwd', 'https://u:p@x.example']) {
+		// The engine is on some loopback port: only its chat and dropper pages.
+		for (const url of ['http://localhost:5565/chat/p/s', 'http://127.0.0.1:5565/dropper/p/s', 'http://[::1]:5565/chat/p/s']) {
+			assert.equal(isAllowedWebviewUrl(url, shell), true, `${shell} -> ${url}`);
+		}
+		for (const url of ['http://localhost:5565/', 'http://localhost:5565/shell/index.html', 'http://127.0.0.1:5565/pricing', 'http://localhost:3000/', 'http://localhost:5565/chat/..%2fapps/x', 'http://localhost:5565/apps/x/v1/a.html', 'https://docs.example/apps/x/v1/a.html', 'https://github.com/apps/x', 'http://evil.example', 'javascript:alert(1)', 'vscode-webview://abc123/x', 'file:///etc/passwd', 'https://u:p@x.example']) {
 			assert.equal(isAllowedWebviewUrl(url, shell), false, `${shell} -> ${url}`);
 		}
 	}

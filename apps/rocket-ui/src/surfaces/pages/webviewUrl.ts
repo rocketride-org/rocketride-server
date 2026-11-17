@@ -36,7 +36,7 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** The only shell-origin paths a webview may frame: the engine's chat and dropper pages. */
 const SHELL_ORIGIN_PREFIXES = ['/chat/', '/dropper/'];
 
-/** App bundles (`/apps/...`) on the shell's server are never framed: they belong in the shell's own loader. */
+/** App bundles (`/apps/...`) on the engine are never framed: they belong in the shell's own loader. */
 const APPS_PATH = /^\/apps(\/|$)/;
 
 /** Percent-encoded dot, slash or backslash: a traversal the URL parser leaves for the server to decode. */
@@ -79,6 +79,17 @@ function isSameServer(a: Endpoint, b: Endpoint): boolean {
 }
 
 /**
+ * Whether a URL on the engine is one of its first-party chat or dropper pages.
+ *
+ * @param url - A parsed URL already known to be on the engine.
+ * @returns True for /chat/ or /dropper/ paths with no app-bundle prefix and no encoded separator left.
+ */
+function isEngineChatPage(url: URL): boolean {
+	if (APPS_PATH.test(url.pathname) || ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
+	return SHELL_ORIGIN_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+}
+
+/**
  * Decide whether a `webview:` document may frame a URL.
  *
  * Only absolute http(s) URLs without credentials are considered (relative and
@@ -88,9 +99,13 @@ function isSameServer(a: Endpoint, b: Endpoint): boolean {
  * /dropper/ (never /apps/), after the parser has normalised `.` and `..`
  * segments and with no encoded separator left in its path, over whatever
  * scheme the shell itself uses. Any other URL must be https, or http on a
- * loopback host. A shell without an http(s) origin (a VS Code webview, a
- * file:// page, an opaque or unparsable origin) has no own server, so only
- * that external rule applies.
+ * loopback host.
+ *
+ * A shell without an http(s) origin (a VS Code webview, a file:// page, an
+ * opaque or unparsable origin) cannot tell which server is the engine, so it
+ * treats every loopback URL as possibly the engine (only /chat/ and /dropper/
+ * are framed there), refuses /apps/ on any host, and frames other https
+ * URLs.
  *
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
@@ -112,9 +127,12 @@ export function isAllowedWebviewUrl(raw: string, shellOrigin: string): boolean {
 	} catch {
 		// Opaque ('null') or unparsable: no http(s) URL can share its authority.
 	}
-	if (shell && isSameServer(target, shell)) {
-		if (APPS_PATH.test(url.pathname) || ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
-		return SHELL_ORIGIN_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+	if (!shell) {
+		// No own server to compare with: the engine may be on any loopback port.
+		if (APPS_PATH.test(url.pathname)) return false;
+		if (LOOPBACK_HOSTS.has(target.host)) return isEngineChatPage(url);
+		return target.protocol === 'https:';
 	}
+	if (isSameServer(target, shell)) return isEngineChatPage(url);
 	return target.protocol === 'https:' || LOOPBACK_HOSTS.has(target.host);
 }
