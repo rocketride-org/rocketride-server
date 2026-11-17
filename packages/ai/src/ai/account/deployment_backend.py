@@ -50,6 +50,7 @@ Uses IStore directly (the trusted, in-server layer): paths are constructed
 here from validated ids, never from caller-supplied path strings.
 """
 
+import asyncio
 import hashlib
 import json
 import time
@@ -1419,12 +1420,31 @@ class FileDeploymentBackend:
         return meta
 
     async def _mutate_meta(self, org_id: str, project_id: str, mutate) -> Any:
-        """CAS read-modify-write of meta.json with bounded retries.
+        """Read-modify-write of meta.json, one mutate at a time per project.
 
         ``mutate(meta)`` edits the dict in place and returns the caller's
-        result. On version conflict the whole cycle re-runs against fresh
-        state, so concurrent publish/deploy/schedule calls serialize
-        correctly on any backend that honors expected_version.
+        result. Mutates of one project are serialized in this process by a
+        per-project lock: the CREATE path has no store precondition (the
+        store contract has no create-if-absent), so two first publishes of
+        one name could otherwise both accept their kind and both take
+        version 1 (plan 2.3). The CAS cycle inside still guards the update
+        path against writers outside this process.
+        """
+        locks = self.__dict__.setdefault('_meta_locks', {})
+        key = f'{org_id}/{project_id}'
+        lock = locks.get(key)
+        if lock is None:
+            lock = locks[key] = asyncio.Lock()
+        async with lock:
+            return await self._mutate_meta_unlocked(org_id, project_id, mutate)
+
+    async def _mutate_meta_unlocked(self, org_id: str, project_id: str, mutate) -> Any:
+        """The CAS read-modify-write cycle of meta.json with bounded retries.
+
+        On version conflict the whole cycle re-runs against fresh state, so
+        concurrent publish/deploy/schedule calls serialize correctly on any
+        backend that honors expected_version. Only a MISSING meta is a new
+        project; any other storage failure propagates.
         """
         last: Exception | None = None
         for _ in range(_CAS_ATTEMPTS):
@@ -1432,7 +1452,7 @@ class FileDeploymentBackend:
             try:
                 data, cas_version = await self._store.read_file_with_metadata(path)
                 meta = json.loads(data)
-            except StorageError:
+            except StorageNotFoundError:
                 meta, cas_version = None, None
             if meta is None:
                 meta = {'projectId': project_id, 'orgId': org_id, 'versions': [], 'publishes': {}, 'history': []}

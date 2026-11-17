@@ -929,15 +929,18 @@ async def test_submit_is_latest_only(registry, quiet_push):
 
 @pytest.mark.asyncio
 async def test_submit_and_withdraw_take_a_pipe_whose_json_carries_no_kind(registry, quiet_push):
-    """A pipe's JSON has no kind (the backend defaults it to 'pipe'): it walks the ladder like an app (plan S8), with no BUILT gate."""
+    """A pipe's JSON has no kind (the backend defaults it to 'pipe'): it walks the ladder like an app (plan S8), with no BUILT gate.
+
+    The registry key is the SHORT id; the namespace check uses the derived full name (plan 2.1).
+    """
     registry.add_version(1, '1.0.0', publisher_id='u1', kind=None, state='private', build=None)
     dev = _FakeConn(teams=_TEAMS, developer_id='acme')
 
-    result = await handle_deploy_app(dev, _request('submit', version=1))
+    result = await handle_deploy_app(dev, _request('submit', version=1, appId='proj-1'))
     assert result['success'] is True, result
     assert registry.versions[0]['state'] == 'submit'
 
-    result = await handle_deploy_app(dev, _request('withdraw', version=1))
+    result = await handle_deploy_app(dev, _request('withdraw', version=1, appId='proj-1'))
     assert result['success'] is True, result
     assert registry.versions[0]['state'] == 'private'
 

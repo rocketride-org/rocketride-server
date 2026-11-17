@@ -778,8 +778,31 @@ class TestNameRow:
             async def read_file(self, filename):
                 raise StorageError('storage unavailable')
 
+            async def read_file_with_metadata(self, filename):
+                raise StorageError('storage unavailable')
+
         backend = FileDeploymentBackend(_DownStore(f'filesystem://{store._root_path}'))
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.publish_of_app('org-1', 'pipe', 'proj-1')
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.get('org-1', 'team-1', 'proj-1')
+        # A publish never treats a broken read as a fresh project
+        with pytest.raises(StorageError, match='storage unavailable'):
+            await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+
+    @pytest.mark.asyncio
+    async def test_concurrent_first_publishes_cannot_both_take_the_name(self, backend):
+        """Two first publishes of one name race: one fixes the kind and takes v1, the other kind is refused."""
+        import asyncio
+
+        app_under_the_pipes_name = {'kind': 'app', 'appId': 'proj-1', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        results = await asyncio.gather(
+            backend.publish('org-1', 'proj-1', PIPE, ACTOR),
+            backend.publish('org-1', 'proj-1', app_under_the_pipes_name, ACTOR),
+            return_exceptions=True,
+        )
+        winners = [r for r in results if isinstance(r, dict)]
+        refused = [r for r in results if isinstance(r, ValueError)]
+        assert len(winners) == 1 and len(refused) == 1
+        assert 'already a' in str(refused[0])
+        assert [v['version'] for v in await backend.versions('org-1', 'proj-1')] == [1]
