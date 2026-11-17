@@ -43,7 +43,8 @@ class _TestConfig(TypedDict):
 
 # Test configuration (same env vars as client-python and nodes)
 TEST_CONFIG: _TestConfig = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565') or 'http://localhost:5565',
+    # An IP, not 'localhost': on Windows the name tries ::1 first, ~2 s per connect.
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565') or 'http://127.0.0.1:5565',
     'auth': os.getenv('ROCKETRIDE_APIKEY') or os.getenv('ROCKETRIDE_AUTH', 'MYAPIKEY') or '',
     'timeout': float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0')),
 }

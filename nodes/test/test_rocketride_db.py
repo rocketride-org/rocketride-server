@@ -861,6 +861,7 @@ def _graph_iglobal(monkeypatch):
 
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.warning = warnings.append
+    rocketlib.debug = lambda *_a, **_k: None
     monkeypatch.setitem(sys.modules, 'rocketlib', rocketlib)
 
     psycopg2_mod = types.ModuleType('psycopg2')
@@ -994,6 +995,28 @@ class TestRocketrideGraphValidateQuery:
 
     def test_a_socket_level_error_raises(self, monkeypatch):
         glb, _, unavailable = self._glb(monkeypatch, ConnectionResetError('reset'))
+
+        with pytest.raises(unavailable):
+            glb._validate_query('MATCH (n) RETURN n')
+
+    def test_an_outage_rolls_back_the_aborted_transaction_before_raising(self, monkeypatch):
+        """SQLSTATE 53200 leaves the connection open in an aborted transaction: roll it back, then raise."""
+        failure = self._driver_error('OperationalError', '53200')
+        glb, _, unavailable = self._glb(monkeypatch, failure)
+
+        with pytest.raises(unavailable):
+            glb._validate_query('MATCH (n) RETURN n')
+        assert glb.client.rollbacks == 1
+
+    def test_an_outage_on_a_closed_connection_still_raises_unavailable(self, monkeypatch):
+        """A closed connection refuses the rollback too; the caller still gets the outage, not the rollback error."""
+        failure = self._driver_error('InterfaceError')
+        glb, module, unavailable = self._glb(monkeypatch, failure)
+
+        def closed_rollback():
+            raise module.psycopg2.InterfaceError('connection already closed')
+
+        glb.client.rollback = closed_rollback
 
         with pytest.raises(unavailable):
             glb._validate_query('MATCH (n) RETURN n')

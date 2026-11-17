@@ -229,7 +229,18 @@ class MissingLlmError(RuntimeError):
     """
 
 
-class RunInterrupted(RuntimeError):
+class RunFailedError(RuntimeError):
+    """A query run ended for a reason that is not the statement's fault.
+
+    Interrupted, cancelled, or still running when ``job_timeout_secs`` ran out.
+    No rewrite of the SQL can fix it, so ``_is_sql_fixable`` returns False, the
+    retry loop in ``get_data`` re-raises it with this type intact, and the
+    questions lane fails the step (``HotdataLaneError``) instead of reporting it
+    on the lanes. A RuntimeError so that existing callers keep treating it as one.
+    """
+
+
+class RunInterrupted(RunFailedError):
     """Hotdata interrupted the run before it finished; the statement is untouched.
 
     The spec's example is the server handling the run being replaced, and it
@@ -700,7 +711,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
                     # rewritten query cannot un-interrupt or un-cancel a run, and
                     # classifying it as fixable would spend an LLM turn finding
                     # that out.
-                    ended = RunInterrupted if status == 'interrupted' else RuntimeError
+                    ended = RunInterrupted if status == 'interrupted' else RunFailedError
                     raise ended(f'db_hotdata: query run ended as {status!r}: {message}')
                 # A `failed` run is handed to the model as a statement failure even
                 # behind a truncated preview, where the statement has visibly
@@ -719,7 +730,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             if status in _TERMINAL_OK:
                 return run
             if time.monotonic() + delay > deadline:
-                raise RuntimeError(f'db_hotdata: query did not finish within {glb.job_timeout_secs}s')
+                raise RunFailedError(f'db_hotdata: query did not finish within {glb.job_timeout_secs}s')
             time.sleep(delay)
             delay = min(delay * 2, _POLL_MAX_S)
 
@@ -865,13 +876,14 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 raise
             self._emitError(str(e), lanes)
             return
-        except HotdataError as e:
+        except (HotdataError, RunFailedError) as e:
             # `get_data` raises a `HotdataError` only for a failure no rewrite of the
             # SQL can fix (an unreachable API, a 5xx, a rejected key, an exhausted
-            # 429 budget); a statement the server rejected is retried there and
-            # surfaces as a plain `RuntimeError` below. Reporting such a failure on
-            # the lanes let the pipeline finish as though the question had been
-            # answered, so fail the step.
+            # 429 budget), and a `RunFailedError` for a run that was interrupted,
+            # cancelled or timed out; a statement the server rejected is retried
+            # there and surfaces as a plain `RuntimeError` below. Reporting such a
+            # failure on the lanes let the pipeline finish as though the question
+            # had been answered, so fail the step.
             error(f'db_hotdata: error handling question: {e}')
             status = getattr(e, 'status_code', None)
             detail = f' (HTTP {status})' if status else ''

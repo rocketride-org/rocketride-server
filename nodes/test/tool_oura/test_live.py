@@ -20,10 +20,8 @@ from pathlib import Path
 import pytest
 
 # Load oura_client.py directly under a unique module name instead of touching
-# sys.path. Importing through the `nodes` package is not possible here because
-# nodes/__init__.py depends on the engine-only `depends` bootstrapper, and
-# injecting the node directory into sys.path would shadow top-level module
-# names and duplicate the module if it is also imported through the package.
+# sys.path: injecting the node directory into sys.path would shadow top-level
+# module names and duplicate the module if it is also imported through the package.
 _CLIENT_PATH = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_oura' / 'oura_client.py'
 
 # oura_client imports the engine-only `ai.common.utils` for the shared

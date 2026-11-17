@@ -32,12 +32,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE YES)
 
 # Release: optimized for runtime performance
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_RELEASE
-	"/O2 /Ob2 /Oi /Gy /Gw -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /DNDEBUG=1 /std:c++20"
+	"/O2 /Ob2 /Oi /Gy /Gw -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /DNDEBUG=1"
 )
 
 # RelWithDebInfo: links the release vcpkg deps, but unoptimized + full pdbs for debugging
 set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_RELWITHDEBINFO
-	"/Od -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /Ob2 /DNDEBUG=1 /std:c++20"
+	"/Od -D_ITERATOR_DEBUG_LEVEL=0 /MD /GS- /Zi /Ob2 /DNDEBUG=1"
 )
 
 # Debug, pdb's, iterator debug level 2
@@ -47,7 +47,7 @@ set(ROCKETRIDE_TOOLCHAIN_DEFINITIONS_DEBUG
 
 # C++ specific options
 set(MSVC_TOOLCHAIN_DEFAULT_CXX_DEFINITIONS
-	"/await /D_HAS_DEPRECATED_RESULT_OF=1 /Zc:twoPhase- /permissive- -D_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS=1 -D_ENABLE_ATOMIC_ALIGNMENT_FIX=1"
+	"/Zc:twoPhase- /permissive- -D_ENABLE_ATOMIC_ALIGNMENT_FIX=1"
 )
 
 # Platform options and settings

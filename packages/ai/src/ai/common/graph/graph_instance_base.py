@@ -36,6 +36,7 @@ inherits the rest. See ``nodes/src/nodes/graph_falkordb/IInstance.py``.
 from __future__ import annotations
 
 import json
+import traceback
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
@@ -646,7 +647,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
         try:
             return runner(statement)
         except Exception as e:
-            error(f'Error executing graph query: {e}')
+            error(f'Error executing graph query: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise GraphLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _emitError(self, message: str, lanes) -> None:

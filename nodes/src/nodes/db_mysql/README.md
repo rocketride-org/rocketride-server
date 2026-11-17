@@ -161,11 +161,33 @@ from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
-rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
-each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
-next attempt. If the LLM decides a question is not a database query, its text
+`EXPLAIN`, and rejects a `SELECT` with `INTO` (`INTO OUTFILE` and
+`INTO DUMPFILE` included) or a row lock. It masks literals and comments before
+checking, under MySQL rules (backslash escapes, `#` and `-- ` comments) as well
+as PostgreSQL's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
+hints (`/*+ */`), and rejects multi-statement input and CTEs.
+It validates each safe candidate with `EXPLAIN` and feeds the database's
+rejection to the LLM for the next attempt. If the LLM decides a question is not a database query, its text
 answer is emitted instead of executing SQL.
+
+When the database cannot be reached, nothing goes back to the LLM: the
+`questions` lane fails the step with a generic message and writes nothing to
+`text`, `table` or `answers`, and the driver's own text is in the server log.
+The same holds when the generated query passes `EXPLAIN` and then fails when it
+runs. Failures that are not about the database (an `EXPLAIN` rejection after
+the last attempt, unsafe SQL, an LLM reply with neither a query nor an answer)
+are still reported as an error on the `text` and `answers` lanes. The `get_sql`
+and `get_data` tools never raise for an outage or a failed query: they return
+`valid: false` with an `error`, so check `valid`.
+
+The `EXPLAIN` and the query run in a read-only session
+(`SET SESSION TRANSACTION READ ONLY`), which refuses writes and DDL, with
+`max_execution_time` (`max_statement_time` on MariaDB) set to 60 seconds; both
+get back the values the session had before, not the server defaults, before the
+connection is reused. The shape check is a first pass, not
+the guarantee, and a read-only session does not stop `LOAD_FILE()` or
+`SELECT ... INTO OUTFILE`, because a file is not a table: connect as a user that
+has `SELECT` on the tables it should answer from and no `FILE` privilege.
 
 ### Inserting answers
 

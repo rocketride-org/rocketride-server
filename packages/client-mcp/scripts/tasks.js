@@ -142,8 +142,8 @@ function makeRunPytestAction(options = {}) {
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
 			const bracket = ctx.brackets?.['mcp-test-server'];
-			if (!bracket?.port) throw new Error('mcp-test-server bracket missing — server did not start');
-			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
+			if (!bracket?.serverUri) throw new Error('mcp-test-server bracket missing — server did not start');
+			const serverUri = bracket.serverUri;
 
 			// MCP and python-dotenv are installed by server:setup-pip
 
@@ -225,7 +225,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${result.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server, apikey };
+			return { port: result.port, server: result.server, serverUri: result.uri, apikey };
 		},
 	};
 }

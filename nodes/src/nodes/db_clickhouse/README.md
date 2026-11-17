@@ -172,10 +172,35 @@ server from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
-rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
-each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
-next attempt.
+`EXPLAIN`. It masks literals and comments, and rejects multi-statement input
+and CTEs plus a `SELECT` with `INTO`, a row lock or a `SETTINGS` clause. It
+validates each safe candidate with `EXPLAIN` and feeds database errors to the
+LLM for the next attempt.
+
+The `EXPLAIN` and the query are sent with the settings `readonly=1` and
+`max_execution_time=60`: ClickHouse refuses writes, DDL, setting changes inside
+the query and table functions such as `url()` and `file()`, and stops a query
+that runs longer. ClickHouse refuses a query that carries a setting the user
+may not change, so the node reads the user's settings before each query, which
+also picks up a profile changed while the node runs, and sends only what the
+user may change. A profile with `readonly=1` or `readonly=2` already refuses
+writes, and the node does not send `readonly`. It keeps the time limit within the
+setting's `MIN`/`MAX` constraint, and keeps a stricter `max_execution_time` from
+the profile. `readonly=1` locks every setting, so the profile's own
+`max_execution_time` applies unless a `CHANGEABLE_IN_READONLY` constraint lets
+the user change it. When a query would run with no limit or a longer one than
+the node's (the user may not change it, or a `MIN` constraint is higher), the
+node writes a warning to the log that says what to change in the profile.
+
+A user who may change `max_execution_time` (a `readonly=2` profile, or a
+`CHANGEABLE_IN_READONLY` constraint) could also lift the limit from a
+`SETTINGS` clause in the query. The shape check rejects that clause; to have the
+server refuse it too, constrain the setting in the profile, for example
+`max_execution_time MIN 1 MAX 60`. With `readonly=2` the node cannot send
+`readonly=1`, so table functions such as `url()` and `file()` run when the user
+holds the grants for them: do not grant them to this user. The shape check is a
+first pass, not the guarantee; connect as a user with `SELECT` on the tables it
+should answer from.
 
 ### ClickHouse schema details
 

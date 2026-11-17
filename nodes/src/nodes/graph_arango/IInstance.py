@@ -32,6 +32,7 @@ and returns rows. Read-only by design.
 from __future__ import annotations
 
 import json
+import traceback
 from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase, tool_function, error, warning
@@ -324,7 +325,7 @@ class IInstance(IInstanceBase):
         try:
             return runner(statement)
         except Exception as e:
-            error(f'Error executing AQL: {e}')
+            error(f'Error executing AQL: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise ArangoLaneError('ArangoDB query failed (details are in the engine log)') from None
 
     # ------------------------------------------------------------------

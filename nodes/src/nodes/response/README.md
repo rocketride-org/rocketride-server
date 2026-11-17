@@ -68,6 +68,8 @@ Choose the generic HTTP Results service when one response needs several lane typ
 
 For HTTP Results, each `lanes` entry maps a lane identifier to a result key of one to 32 characters. Use distinct keys when a client needs to distinguish returned types without consulting `result_types`; leave a lane unmapped to use its lane type as the key. In a single-lane service, the top-level `laneName` takes precedence over the `lanes` mapping, so set it only when every arriving result should use the same key.
 
+A result key cannot be `result_types`, `name`, `path`, `metadata`, `objectId`, `error` or `status`: the result object already holds those, so lane data under one of them would be overwritten or break the node. Validating the configuration warns about such a key, and the node refuses to start with one.
+
 ---
 
 ## Notes

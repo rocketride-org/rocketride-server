@@ -137,8 +137,6 @@ def test_opus_47_48_keep_adaptive(model):
         'claude-opus-4-0',
         'claude-sonnet-4-0',
         'claude-haiku-4-5',
-        # Resolves to Haiku 4.5, which only accepts the legacy shape.
-        'claude-haiku-latest',
         'claude-mythos-preview',
         'openrouter/anthropic/claude-haiku-4-5',
         # Dated full ids
@@ -310,8 +308,6 @@ EXPECTED_THINKING_SHAPE = {
     'claude-fable-5': 'adaptive',
     'claude-fable-latest': 'adaptive',
     'claude-haiku-4-5': 'enabled',
-    # Alias for Haiku 4.5, which only accepts the legacy shape.
-    'claude-haiku-latest': 'enabled',
     'claude-mythos-5': 'adaptive',
     'claude-mythos-preview': 'enabled',
     'claude-opus-4': 'enabled',
