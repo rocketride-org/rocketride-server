@@ -97,6 +97,22 @@ that loaded a dev bundle — the panel or a plain browser tab — updates on sav
 through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
 server push is involved.
 
+**Framing and credentials.** The engine serves shell documents with
+`Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
+and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. Only the shell's
+own origin and the desktop VS Code webview can frame the shell. A page that
+opens the shell with `window.open` gets no `window.opener` handle to it. The
+dev proxy passes these headers through, so the preview panel is covered too.
+Web-hosted VS Code (vscode.dev, github.dev, code-server) frames the preview
+from https origins such as `https://*.vscode-cdn.net` and the code-server
+host. Add those to `RR_SHELL_FRAME_ANCESTORS_EXTRA` (whitespace-separated
+host sources or non-web schemes; an invalid value stops engine startup).
+Apps no longer receive the session token: `identity.userToken`,
+`useAuthUser().userToken` and the `user.userToken` of the `shell:init` and
+`shell:login` iframe messages are `''`, and `shell:init` omits `RR_APIKEY`.
+This is not isolation yet: app code still runs on the shell origin until
+third-party apps move off-origin (#1022).
+
 ## `appdev:call` — the app-control message
 
 The webview drives all app lifecycle actions through one correlated message:
