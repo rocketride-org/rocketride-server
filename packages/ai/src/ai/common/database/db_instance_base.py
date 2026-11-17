@@ -42,6 +42,7 @@ from typing import Any, Dict, List
 
 import json
 import threading
+import traceback
 
 from rocketlib import IInstanceBase, debug, error, warning, tool_function
 from sqlalchemy import MetaData, Table as SQLTable, insert, text
@@ -1043,7 +1044,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # including when readonly=1 refuses a write
             if not _isDbFailure(e):
                 raise
-            error(f'Error executing SQL query: {e}')
+            error(f'Error executing SQL query: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict:
@@ -1244,7 +1245,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         except Exception as e:
             # Fail the step. Returning normally here reported success for rows
             # that were never written.
-            error(f'Error inserting table data: {e}')
+            error(f'Error inserting table data: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
                 f'{self._db_display_name()} table write failed; no rows were saved (details are in the engine log)'
             ) from None
@@ -1261,7 +1262,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             self._insertData(items)
         except Exception as e:
             # Fail the step, same as `writeTable`.
-            error(f'Error in writeAnswers: {e}')
+            error(f'Error in writeAnswers: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
                 f'{self._db_display_name()} answers write failed; no rows were saved (details are in the engine log)'
             ) from None
