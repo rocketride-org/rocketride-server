@@ -49,6 +49,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, List, Mapping, NamedTuple, Optional, Tuple
 
 MODES = ('off', 'optin', 'enforce')
@@ -61,10 +62,10 @@ _APP_ID = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}')
 # Appendix C: https://{label}.<host>, or plain http only on apps.localhost
 # with an explicit port.
 _TEMPLATE_HTTPS = re.compile(r'https://\{label\}\.([a-z0-9-]+(?:\.[a-z0-9-]+)*)')
-_TEMPLATE_LOCAL = re.compile(r'http://\{label\}\.(apps\.localhost):(\d{1,5})')
+_TEMPLATE_LOCAL = re.compile(r'http://\{label\}\.(apps\.localhost):([0-9]{1,5})')
 
 # A frame-ancestors source: a plain http(s) origin, nothing else.
-_ORIGIN = re.compile(r'https?://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:\d{1,5})?')
+_ORIGIN = re.compile(r'https?://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?')
 
 # A key id is a token segment, so it never contains the separator.
 _KID = re.compile(r'[A-Za-z0-9_-]{1,32}')
@@ -198,6 +199,17 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
     if not shell_origins:
         raise _refuse('RR_SHELL_ORIGINS (or RR_FRONTEND_ORIGIN) must name the shell origin')
 
+    # The app domain must be a separate site from the shell: a suffix equal to,
+    # below or above a shell host (or RR_APP_URL's) lets app code toss cookies
+    # onto the shell (or the reverse). The local template may sit beside a
+    # localhost shell (development only: apps.localhost is plain http).
+    for host in _shell_hosts(env, shell_origins):
+        if _same_site(suffix, host) and not (local and host == 'localhost'):
+            raise _refuse(
+                f'RR_APP_ORIGIN_TEMPLATE: the app domain {suffix!r} is same-site with the shell host {host!r};'
+                ' use a separate registrable domain'
+            )
+
     host_source = env.get('RR_APP_HOST_SOURCE')
     host_source = 'host' if host_source is None else host_source
     if host_source not in HOST_SOURCES:
@@ -221,6 +233,33 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         app_suffix=suffix,
         app_port=port,
     )
+
+
+def _same_site(a: str, b: str) -> bool:
+    """Whether two host names are equal or one is below the other (cookies can cross between them)."""
+    return a == b or a.endswith('.' + b) or b.endswith('.' + a)
+
+
+def _shell_hosts(env: Mapping[str, str], shell_origins: Optional[Tuple[str, ...]] = None) -> List[str]:
+    """
+    The host names the shell is served from: the shell origins and ``RR_APP_URL``.
+
+    ``shell_origins`` are the validated origins; without them the raw
+    ``RR_SHELL_ORIGINS`` (or ``RR_FRONTEND_ORIGIN``) is read leniently, so the
+    answer is available in every mode.
+    """
+    if shell_origins is None:
+        raw = env.get('RR_SHELL_ORIGINS') or env.get('RR_FRONTEND_ORIGIN') or ''
+        shell_origins = tuple(t for t in re.split(r'[\s,]+', raw.strip()) if t)
+    hosts = []
+    for value in (*shell_origins, env.get('RR_APP_URL') or ''):
+        try:
+            host = (urlsplit(value.strip().lower()).hostname or '').rstrip('.')
+        except ValueError:
+            host = ''
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
 
 
 def current_config() -> IsolationConfig:
@@ -693,7 +732,7 @@ FRAME_RATE_WINDOW = 60.0
 
 # appManifest.network (Appendix C): strict https origins, at most 8.
 _NETWORK = re.compile(
-    r'https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+)(:(\d{1,5}))?'
+    r'https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+)(:([0-9]{1,5}))?'
 )
 _NETWORK_MAX = 8
 _ORG_OF_DIST = re.compile(r'orgs/([^/]+)/files/')
@@ -705,7 +744,8 @@ def validate_network(entries: Any) -> List[str]:
 
     Refused: anything but a list of strings, a scheme other than https, a
     path, query, user or whitespace, an uppercase host, an IP literal,
-    ``localhost``, a port outside 1-65535, and the app domain itself.
+    ``localhost``, a port outside 1-65535, the app domain itself and the
+    shell's hosts (the shell origins and ``RR_APP_URL``).
 
     Returns:
         The entries, as a list.
@@ -734,6 +774,8 @@ def validate_network(entries: Any) -> List[str]:
             raise ValueError(f'network entry {entry!r} has a port outside 1-65535')
         if suffix and (host == suffix or host.endswith('.' + suffix)):
             raise ValueError(f'network entry {entry!r} is on the app domain')
+        if any(host == shell or host.endswith('.' + shell) for shell in _shell_hosts(os.environ)):
+            raise ValueError(f'network entry {entry!r} is on a shell host')
     return list(entries)
 
 

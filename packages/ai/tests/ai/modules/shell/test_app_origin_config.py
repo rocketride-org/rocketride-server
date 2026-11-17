@@ -370,3 +370,38 @@ def test_invalid_optin_app_ids_refuse_start(apps, isolation_env):
     """T8: RR_APP_ISOLATION_APPS entries follow the app-id segment grammar."""
     isolation_env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS=apps)
     _refuses('RR_APP_ISOLATION_APPS')
+
+
+# ---------------------------------------------------------------------------
+# T8b the app domain is never same-site with the shell (G4 M2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'template,origins',
+    [
+        ('https://{label}.app.example', 'https://app.example'),  # suffix == shell host
+        ('https://{label}.apps.app.example', 'https://app.example'),  # suffix below the shell host
+        ('https://{label}.example', 'https://app.example'),  # suffix above the shell host
+        ('https://{label}.apps.example', 'https://other.example https://x.apps.example'),  # a shell inside the suffix
+    ],
+)
+def test_template_same_site_with_a_shell_origin_refuses_start(template, origins, isolation_env):
+    """T8b: app code on the app domain must not toss cookies onto a shell host (or the reverse)."""
+    isolation_env.set(RR_APP_ORIGIN_TEMPLATE=template, RR_SHELL_ORIGINS=origins)
+    _refuses('RR_APP_ORIGIN_TEMPLATE')
+
+
+@pytest.mark.parametrize('app_url', ['https://apps.example', 'https://www.apps.example/', 'https://example'])
+def test_template_same_site_with_rr_app_url_refuses_start(app_url, isolation_env):
+    """T8b: the same for the public SaaS URL (RR_APP_URL)."""
+    isolation_env.set(RR_APP_URL=app_url)
+    _refuses('RR_APP_ORIGIN_TEMPLATE')
+
+
+def test_separate_app_domain_starts(isolation_env):
+    """T8b control: a separate domain is fine, and the local template may sit beside a localhost shell."""
+    isolation_env.set(RR_APP_URL='https://app.example')
+    _validate()
+    isolation_env.set(RR_APP_ORIGIN_TEMPLATE=sup.LOCAL_TEMPLATE, RR_SHELL_ORIGINS='http://localhost:5565')
+    _validate()

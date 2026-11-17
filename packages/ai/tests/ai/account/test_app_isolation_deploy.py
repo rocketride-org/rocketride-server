@@ -294,6 +294,8 @@ BAD_NETWORK = [
     'https://a-.example.com',
     'https://a..example.com',
     'https://' + 'a' * 64 + '.example.com',  # a label of 64 characters
+    'https://a.example.com:\u0668\u0660',  # Unicode digits are not a port (G4 L6)
+    'https://a.example.com:\u00b2',
     '',
     None,
     5,
@@ -307,6 +309,18 @@ def test_network_grammar_negatives(entry):
     validate = sup.need(_ao(), 'validate_network')
     with pytest.raises(ValueError):
         validate([entry])
+
+
+@pytest.mark.parametrize(
+    'entry', ['https://app.example', 'https://api.app.example', 'https://saas.example', 'https://x.saas.example']
+)
+def test_network_refuses_the_shell_hosts(entry, monkeypatch):
+    """T37 (G4 M2): a network origin on a shell host (or RR_APP_URL's) is refused, in every mode."""
+    validate = sup.need(_ao(), 'validate_network')
+    sup.apply_env(monkeypatch, {'RR_SHELL_ORIGINS': 'https://app.example', 'RR_APP_URL': 'https://saas.example'})
+    with pytest.raises(ValueError):
+        validate([entry])
+    assert validate(['https://api.example.com']) == ['https://api.example.com']
 
 
 def test_network_grammar_positives_and_limits():
