@@ -21,39 +21,58 @@
 // SOFTWARE.
 
 // =============================================================================
-// rocketride/analytics — the one shared event-report function
+// rocketride/analytics — bound per-app event reporters
 // =============================================================================
 //
-// Bare bones. Every app calls `report(event, props)` with any string event and a
-// free-form props bag — event names are NOT constrained to a central list; each
-// app owns its own taxonomy. The transport and the emitting app's id are
-// injected once per app via `initReport(app, sink)` — home-ui wires
-// `posthog.capture`, the product/VS Code side wires `client.report()`. Every
-// reported event carries `app` so downstream can tell which app emitted it.
+// Bare bones. A HOST (the shell) mints one reporter per app with
+// `createReporter(app, sink)` and hands it over; the app calls
+// `report(event, props, options?)` with any string event and a free-form props
+// bag — event names are NOT constrained to a central list; each app owns its
+// own taxonomy. Every reported event carries `app`, closed over at creation,
+// so a late event from a backgrounded app still names its true emitter —
+// there is deliberately NO module-global "current app" state to re-point.
 // Nothing else lives here.
 // =============================================================================
 
-export type ReportSink = (event: string, props?: Record<string, unknown>) => void;
+/**
+ * Per-call capture options a sink may honor. `transport: 'sendBeacon'` asks
+ * for delivery that survives the page being torn down a moment later (a CTA
+ * that starts an OAuth redirect); `timestamp` back-dates a replayed event to
+ * when it was observed; `uuid` makes a capture idempotent so an at-least-once
+ * replay dedupes instead of double-counting.
+ */
+export type SendOptions = { transport?: 'sendBeacon'; timestamp?: Date; uuid?: string };
 
-let _sink: ReportSink = () => {};
-let _app = '';
+/** The transport a host wires a reporter to (e.g. the shell's capture queue). */
+export type ReportSink = (event: string, props?: Record<string, unknown>, options?: SendOptions) => void;
 
-/** Wire the emitting app id + transport once, at app init (e.g. `initReport('home-ui', posthog.capture)`). */
-export function initReport(app: string, sink: ReportSink): void {
-	_app = app;
-	_sink = sink;
-}
+/** The bound report function an app receives: its `app` stamp is fixed at creation. */
+export type Reporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => void;
 
 /**
- * The shared loose event report — any non-empty string event, free-form props.
- * Stamps `app` (from initReport) on every event. Never throws.
+ * Mint the bound reporter for one app.
+ *
+ * The returned function stamps `app` last (caller props can never overwrite
+ * the emitting-app id), ignores non-string or empty event names, and never
+ * throws — telemetry must never break the app.
+ *
+ * @param app - The emitting app's id, fixed for the reporter's lifetime.
+ * @param sink - The transport events go to.
+ * @returns The app's `report(event, props?, options?)`.
  */
-export function report(event: string, props?: Record<string, unknown>): void {
-	if (typeof event !== 'string' || !event) return; // string-ish enforcement, nothing stricter
-	try {
-		// Stamp last so caller props can never overwrite the emitting-app id.
-		_sink(event, { ...props, app: _app });
-	} catch {
-		// Telemetry must never break the app.
-	}
+// The analytics-consent RECORD contract (key, shape, pure parser) — the one
+// cross-boundary storage format sign-in-path readers parse without booting
+// any analytics. Writing consent stays the shell's alone.
+export { CONSENT_KEY, CONSENT_TTL_MS, CONSENT_VERSION, parseConsent, privacySignalOn, type ConsentChoice, type ConsentRecord, type ConsentState } from './consent.js';
+
+export function createReporter(app: string, sink: ReportSink): Reporter {
+	return (event, props, options) => {
+		if (typeof event !== 'string' || !event) return; // string-ish enforcement, nothing stricter
+		try {
+			// Stamp last so caller props can never overwrite the emitting-app id.
+			sink(event, { ...props, app }, options);
+		} catch {
+			// Telemetry must never break the app.
+		}
+	};
 }
