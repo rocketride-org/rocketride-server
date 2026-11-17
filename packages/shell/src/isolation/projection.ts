@@ -25,8 +25,11 @@
 // PROJECTION — the `rr:bridge:init` message built from allowlisted inputs (PR2a-2)
 // =============================================================================
 //
-// COMMIT A STUB: returns an empty object. The implementation (plan sections
-// 4.1 and 4.4) replaces it.
+// Every key is copied by name from an allowlisted input (plan section 4.1):
+// the frame grant gives `entryPrefix` (the frame token, the one N1 exemption,
+// plan section 4.4), `expiresAt` and the identity aliases the server minted;
+// nothing else of the grant (origin, ticket, network) is part of the init.
+// The root never computes an identity alias: it copies the grant's.
 // =============================================================================
 
 import type { BridgeInit, FrameOk, RealmInfo } from './types';
@@ -45,9 +48,27 @@ export interface IBridgeInitInput {
 /**
  * Builds the guest's `rr:bridge:init`.
  *
- * @param _input - The realm, its frame grant and the shell's view of the session.
- * @returns The message (an empty object in commit A).
+ * @param input - The realm, its frame grant and the shell's view of the session.
+ * @returns The message, with exactly the `BridgeInit` keys.
  */
-export function buildBridgeInit(_input: IBridgeInitInput): BridgeInit {
-	return {} as BridgeInit;
+export function buildBridgeInit(input: IBridgeInitInput): BridgeInit {
+	const { info, frame, props } = input;
+	const identity = frame.identity;
+	const theme: Record<string, string> = {};
+	for (const [k, v] of Object.entries(input.theme)) if (typeof v === 'string') theme[k] = v;
+	return {
+		type: 'rr:bridge:init',
+		proto: input.proto,
+		entryPrefix: frame.entryPrefix,
+		expiresAt: frame.expiresAt,
+		theme,
+		identity: identity ? { userId: identity.userId, displayName: input.displayName, organizations: identity.organizations.map((o) => ({ id: o.id, name: o.name })) } : null,
+		props: { isConnected: props.isConnected, activeView: props.activeView, activeActivity: props.activeActivity, sidePanelOpen: props.sidePanelOpen, theme: props.theme },
+		capabilities: [...info.caps],
+		appId: info.appId,
+		appKey: info.appKey,
+		moduleId: info.moduleId,
+		viewId: info.viewId,
+		engineHttpUrl: input.engineHttpUrl,
+	};
 }
