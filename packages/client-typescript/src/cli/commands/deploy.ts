@@ -391,6 +391,38 @@ Examples:
 		});
 	addDeployConnectionOptions(artifactCmd);
 
+	// ── deploy interfaces ────────────────────────────────────────────────
+	// What the publication that answers an address offers a front end: its
+	// callable nodes by address and catalog classType (plan 3.6). A pure read
+	// on the server — no engine is started, nothing is billed.
+	const interfacesCmd = deployCmd
+		.command('interfaces <address>')
+		.description("The callable nodes of the publication that answers an address, by classType (no engine started)")
+		.option('--team <teamId>', 'Resolve the @team rung through this one of your teams')
+		.action(async (address, options) => {
+			await runCliCommand(options, async (out) => {
+				const client = await connectDeploy(options, out);
+				if (!client) return 1;
+				// `--team` takes a name or an id like the sibling verbs; an omitted
+				// override stays omitted (the caller's team order decides)
+				const team = options.team ? teamArgOf(client, String(options.team)) : '';
+				const answer = await client.interfaces(address, team ? { team } : {});
+				if (!out.jsonRequested) {
+					const where = answer.rung === 'team' ? `@team ${answer.teamId}` : `@${answer.rung}`;
+					out.line(`${answer.address}  v${answer.version}  ${where}`);
+					for (const [pipeAddress, byClass] of Object.entries(answer.interfaces)) {
+						out.line(`  ${pipeAddress}`);
+						for (const [classType, nodes] of Object.entries(byClass)) {
+							out.line(`    ${classType}: ${nodes.map((n) => (n.name === n.nodeId ? n.nodeId : `${n.nodeId} (${n.name})`)).join(', ')}`);
+						}
+					}
+				}
+				out.result(answer);
+				return 0;
+			});
+		});
+	addDeployConnectionOptions(interfacesCmd);
+
 	// ── deploy enable / disable / remove ─────────────────────────────────
 	for (const [verb, description] of [
 		['enable', 'Enable a disabled deployment'],

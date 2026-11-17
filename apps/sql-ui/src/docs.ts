@@ -132,7 +132,7 @@ export function endpointKeyFromUri(uri: string): string | null {
 /**
  * Extract the endpoint key from ANY SQL Explorer document URI, so the sidebar
  * schema tree stays bound while a query/table/design/diagram tab is active.
- * The key itself contains colons (`projectId:source:nodeId`), so the suffixed
+ * The key itself contains a colon (`address:nodeId`), so the suffixed
  * schemes strip exactly ONE trailing `:segment` instead of splitting on ':'.
  *
  * That split is only sound because every suffix is colon-free: query and

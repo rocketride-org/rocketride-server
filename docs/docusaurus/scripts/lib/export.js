@@ -44,7 +44,6 @@ const FILE_EXPORTS = [
 	{ source: 'docs/public/python/README.md', dest: 'packages/client-python/README.md' },
 	{ source: 'docs/public/mcp/stdio/README.md', dest: 'packages/client-mcp/README.md' },
 	{ source: 'docs/public/n8n/README.md', dest: 'packages/n8n-nodes/README.md' },
-	{ source: 'docs/public/chat-widget/README.md', dest: 'packages/chat-widget/README.md' },
 ];
 
 /**

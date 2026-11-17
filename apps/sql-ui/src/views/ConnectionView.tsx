@@ -266,7 +266,7 @@ export const ConnectionView: React.FC<ConnectionViewProps> = ({ endpoint }) => {
 	// recently we asked. Saying "schema read HH:MM" for both would let the
 	// second case pass for the first, which is exactly the confusion that
 	// makes a Refresh button look broken after a CREATE TABLE.
-	const dialectLabel = snapshot.dialect !== 'unknown' ? snapshot.dialect : endpoint.provider;
+	const dialectLabel = snapshot.dialect !== 'unknown' ? snapshot.dialect : (endpoint.provider ?? 'database');
 	const stampTime = snapshot.refreshedAt ? new Date(snapshot.refreshedAt).toLocaleTimeString() : '';
 	const refreshed = snapshot.refreshedAt
 		? (snapshot.stale

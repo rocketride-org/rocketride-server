@@ -290,6 +290,7 @@ Further public methods, present in both SDKs, in brief:
 | --- | --- |
 | Generic invoke | `call(command, ...)` — any DAP command; `tool(...)` — invoke a pipeline tool function <!-- language-specific --> |
 | Task helpers | `get_task_token`, `get_task_pipeline`, `restart` |
+| Pipe interfaces | `interfaces(address)` — the callable nodes of the publication that answers an address, by catalog classType; a pure read, no engine started |
 | Identity | `get_account_info`; static `get_server_info`, `normalize_uri` |
 | Monitors | `clear_all_monitors`, `identify` (plus `add_monitor`/`remove_monitor` above) |
 | Template storage | `save_template`, `get_template`, `delete_template`, `get_all_templates` |

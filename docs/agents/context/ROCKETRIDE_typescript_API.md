@@ -410,6 +410,16 @@ const token = await client.getTaskToken({ projectId: 'proj-123', source: 'webhoo
 
 Return the **unresolved** pipeline configuration for a running task — `${ROCKETRIDE_*}` placeholders are not substituted, so no secrets are included. Returns `undefined` if the task is not found.
 
+### `interfaces(address: string, options?: { team?: string }): Promise<PipeInterfaces>`
+
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool({ address, nodeId, tool, input })` — a standalone tool call starts a dormant engine. Your own `@dev` run (Play in the Builder) answers first with the spec it submitted and `version: null`; nothing has to be running on any rung. Throws `TASK_NOT_REGISTERED` when no rung serves you.
+
+```typescript
+const { rung, version, interfaces } = await client.interfaces('acme.docBrain');
+const databases = interfaces['acme.docBrain']?.database ?? [];   // [{ nodeId: 'db_main', name: 'Ops DB' }]
+const dialect = await client.tool({ address: 'acme.docBrain', nodeId: databases[0].nodeId, tool: 'dialect' });
+```
+
 ### `validate(options): Promise<ValidationResult>`
 
 Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.

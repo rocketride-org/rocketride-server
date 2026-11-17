@@ -797,9 +797,10 @@ max 3600s), `path` stays fetchable later via the SDK's `fs_*` methods (Pattern 1
 dropper → parse → ...processing... → filestore → response_json
 ```
 
-`dropper` serves its own drag-and-drop upload page (URL and auth key are printed to the
-Project Log on start, form `{host}/dropper/{project_id}/{source}?auth=...`); it also accepts
-`client.send()` / `client.send_files()`. Uploads flow through the pipeline as raw objects on
+`dropper` is a drag-and-drop upload source: its front end is the platform app `rocketride.dropper`
+(the **Open Dropper** button on the node in the Builder; a signed-in deep link
+`?appid=rocketride.dropper&pipe=<address>` once published — no credential rides a URL); it also
+accepts `client.send()` / `client.send_files()`. Uploads flow through the pipeline as raw objects on
 `tags` — **the dropper does not save them anywhere**. Anything you want to keep must be
 written explicitly, and the sink for that is `filestore`, config
 `{ "profile": "default", "default": { "targetDir": "output/", "emitUrl": true }, "parameters": {} }`:

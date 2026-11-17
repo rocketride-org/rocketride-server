@@ -51,6 +51,7 @@ export interface SqlOps extends ToolOpMap {
 	/** Discover database endpoints across the server's running pipelines
 	 *  (the New Connection dialog's pipeline path). */
 	'sql.discoverEndpoints': ToolOpSpec<Record<string, never>, SqlEndpoint[]>;
+	'sql.describeAddress': ToolOpSpec<{ address: string }, SqlEndpoint[]>;
 }
 
 /** The sql tool's state topics (controller → documents). */

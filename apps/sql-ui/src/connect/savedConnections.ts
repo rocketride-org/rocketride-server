@@ -68,19 +68,20 @@ interface SavedConnectionBase {
 	name: string;
 }
 
-/** A connection bound to a database node inside a user pipeline. */
+/**
+ * A connection bound to a database node of a pipe the caller can reach
+ * (plan 3.6): the ADDRESS the tool call is made on and the NODE to call.
+ */
 export interface PipelineBoundConnection extends SavedConnectionBase {
 	mode: 'pipeline';
-	/** Project (pipeline) identifier the node lives in. */
-	projectId: string;
+	/** The pipe address (`developerId.pipelineId[.source]`). */
+	address: string;
 	/** Pipeline display name (shown as the row's detail line). */
 	pipelineName: string;
-	/** Source component id of the pipeline's task. */
-	source: string;
 	/** The database component id inside the pipeline. */
 	nodeId: string;
-	/** Component provider, e.g. 'db_mysql'. */
-	provider: string;
+	/** Component provider when it was known at save time (a node found by classType has none). */
+	provider?: string;
 }
 
 /** A connection that owns its node config (temp tool pipeline on open). */
@@ -159,7 +160,17 @@ export async function loadSavedConnections(client: RocketRideClient): Promise<vo
 	let list: SavedSqlConnection[] = [];
 	try {
 		const raw = (await client.fsReadJson(STORE_PATH)) as SavedSqlConnection[] | null | undefined;
-		if (Array.isArray(raw)) list = raw;
+		if (Array.isArray(raw)) {
+			// A pipeline-bound record from before addresses (projectId + source,
+			// no address) cannot be reached any more: there is no developer id
+			// to build its address from. It is dropped from the loaded list and
+			// said so; the next commit writes the list without it.
+			list = raw.filter((conn) => {
+				if (conn.mode !== 'pipeline' || typeof conn.address === 'string') return true;
+				console.log('[sql-ui] dropped a saved connection without an address (pre-address record)', conn.id, conn.name);
+				return false;
+			});
+		}
 	} catch (err) {
 		// Only a PROVEN-missing file is first run (the store raises
 		// StorageError('File not found: …')). Any other failure — transport

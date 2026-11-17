@@ -10,7 +10,6 @@
 	// the one scripts/lib/uiAudit.js requires of every app. Keeping it over
 	// src/** alone leaves it describing what this remote actually ships,
 	// with the tests checked beside it by `typecheck:tests`.
-	// packages/chat-widget/tsconfig.test.json already carries this shape;
 	// apps/shared goes the other way and excludes its tests outright.
 	//
 	// This is a file boundary, not a type boundary. tsconfig.json declares

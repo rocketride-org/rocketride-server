@@ -1,169 +1,132 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+// =============================================================================
+
 /**
- * MIT License
+ * Chat — the shell app (browser mode, plan 3.6).
  *
- * Copyright (c) 2026 Aparavi Software AG
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * The shell has already signed the person in (or consumed a one-shot `auth=`
+ * hand-off) before this mounts; the account on the connection is the caller
+ * and pays. With `pipe=<address>` in the URL the app binds to that pipe. With
+ * no `pipe=` there is nothing to talk to yet: the landing view says so and
+ * takes an address by hand. The publication picker (own-org `@me`/`@team`
+ * rows, store search) lands with the merged publication table (plan C.16c).
  */
 
-import React, { useEffect, useState } from 'react';
-import { ThemeProvider } from './hooks/useTheme';
-import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
-import { ChatContainer } from './components/ChatContainer';
-import { API_CONFIG, setAPIConfig } from './config/apiConfig';
-import { startClient } from './hooks/clientSingleton';
+import React, { useCallback, useState } from 'react';
+import type { ShellAppProps } from 'shell';
+import { AppLayout, Button, EmptyState, InputField } from 'shell';
+import { ChatDocument } from './ChatDocument';
+import { looksLikeAddress, pipeFromLocation, writePipeToLocation } from './pipeParam';
 
-const App: React.FC = () => {
-	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
-	const [authToken, setAuthToken] = useState<string | null>(null);
+// =============================================================================
+// STYLES
+// =============================================================================
 
-	// Initialize VSCode state
-	const [vscodeState, setVscodeState] = useState<VSCodeContextType>(() => {
-		if (!isVSCode) {
-			// Dummy state for non-VSCode mode
-			return {
-				theme: null,
-				isVSCode: false,
-				isReady: true,
-			};
-		} else {
-			// VSCode mode - not ready yet
-			return {
-				theme: null,
-				isVSCode: true,
-				isReady: false,
-			};
+const styles: Record<string, React.CSSProperties> = {
+	landing: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		height: '100%',
+		padding: 40,
+		fontFamily: 'var(--rr-font-family, system-ui)',
+	},
+	form: {
+		display: 'flex',
+		gap: 8,
+		alignItems: 'center',
+		marginTop: 12,
+	},
+	input: {
+		minWidth: 280,
+		fontFamily: 'var(--rr-font-mono, monospace)',
+	},
+	error: {
+		marginTop: 8,
+		fontSize: 12,
+		color: 'var(--rr-error, #d33)',
+	},
+};
+
+// =============================================================================
+// LANDING — no pipe named yet
+// =============================================================================
+
+/** Props for {@link Landing}. */
+interface ILandingProps {
+	/** Called with a syntactically valid address the person typed. */
+	onOpen: (address: string) => void;
+}
+
+/**
+ * The no-`pipe=` view: how to get here with a pipe, and an address field.
+ *
+ * @param props - {@link ILandingProps}.
+ */
+const Landing: React.FC<ILandingProps> = ({ onOpen }) => {
+	const [draft, setDraft] = useState('');
+	const [error, setError] = useState('');
+
+	const submit = useCallback(() => {
+		const value = draft.trim();
+		if (!looksLikeAddress(value)) {
+			setError('An address is developerId.pipelineId or developerId.pipelineId.source');
+			return;
 		}
-	});
-
-	// Bridge copy to parent VS Code webview so Cmd/Ctrl+C works in the iframe
-	useEffect(() => {
-		if (!isVSCode) return;
-
-		const handleCopy = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key === 'c') {
-				const selection = window.getSelection()?.toString();
-				if (selection) {
-					e.preventDefault();
-					window.parent.postMessage({ type: 'copyText', text: selection }, '*');
-				}
-			}
-		};
-
-		document.addEventListener('keydown', handleCopy);
-		return () => document.removeEventListener('keydown', handleCopy);
-	}, [isVSCode]);
-
-	useEffect(() => {
-		// Handle authentication
-		const urlParams = new URLSearchParams(window.location.search);
-
-		// Init
-		let token = '';
-
-		// The server is always wherever this page was served from — no
-		// address is baked into the bundle. In dev the dev server proxies
-		// the engine, so origin holds there too.
-		const uri = window.location.origin;
-
-		// URL param always wins — it carries the freshly-minted pk for the
-		// current task and must not be shadowed by a stale sessionStorage value
-		// left over from a previous task on the same origin.
-		token = urlParams.get('auth') || '';
-		if (token) {
-			window.history.replaceState({}, '', window.location.pathname);
-		} else if (!isVSCode) {
-			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
-			token = sessionStorage.getItem('auth') || '';
-		}
-		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
-			token = API_CONFIG.ROCKETRIDE_APIKEY;
-		}
-
-		// A token is the one thing that cannot be derived — fail loudly.
-		if (!token) {
-			throw new Error('Failed to start RocketRide client: No token found');
-		}
-
-		// Set the config
-		setAPIConfig({
-			ROCKETRIDE_APIKEY: token,
-			ROCKETRIDE_URI: uri,
-		});
-
-		// Start the client with persistent connection
-		startClient(token).catch((error) => {
-			console.error('Failed to start client:', error);
-		});
-
-		// Save the token in session storage (skip in VSCode) and our state
-		if (!isVSCode) {
-			sessionStorage.setItem('auth', token);
-		}
-		setAuthToken(token);
-
-		// Handle VSCode integration
-		if (isVSCode) {
-			// Listen for combined host and theme data from parent
-			const handleVSCodeData = (event: MessageEvent) => {
-				const message = event.data;
-
-				if (message.type === 'vscodeData') {
-					// Validate that we have both host and theme
-					if (!message.theme) {
-						console.error('[App] Invalid VSCode data - missing host or theme');
-						return;
-					}
-
-					// Update VSCode state with received data
-					setVscodeState({
-						theme: message.theme,
-						isVSCode: true,
-						isReady: true,
-					});
-				}
-			};
-
-			window.addEventListener('message', handleVSCodeData);
-
-			// Send ready message to parent
-			window.parent.postMessage({ type: 'view:ready' }, '*');
-
-			return () => window.removeEventListener('message', handleVSCodeData);
-		} else {
-			// For non-VSCode environments, add loaded class immediately
-			return undefined;
-		}
-	}, [isVSCode]);
-
-	// CRITICAL: Absolutely do not render anything until ready
-	if (!vscodeState.isReady) {
-		return null;
-	}
+		setError('');
+		onOpen(value);
+	}, [draft, onOpen]);
 
 	return (
-		<VSCodeProvider value={vscodeState}>
-			<ThemeProvider>
-				<ChatContainer authToken={authToken} />
-			</ThemeProvider>
-		</VSCodeProvider>
+		<div style={styles.landing}>
+			<EmptyState
+				title="Nothing to chat with yet"
+				description="Open this app from a pipeline's Open Chat button in the Builder, or from a link that names a pipe (?appid=rocketride.chat&pipe=<address>). You can also enter an address."
+				action={
+					<div>
+						<div style={styles.form}>
+							<InputField
+								style={styles.input}
+								value={draft}
+								placeholder="acme.docBrain.chat"
+								spellCheck={false}
+								onChange={(e) => setDraft(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter') submit();
+								}}
+							/>
+							<Button variant="primary" onClick={submit} disabled={draft.trim().length === 0}>
+								Open
+							</Button>
+						</div>
+						{error && <div style={styles.error}>{error}</div>}
+					</div>
+				}
+			/>
+		</div>
 	);
+};
+
+// =============================================================================
+// APP
+// =============================================================================
+
+/**
+ * Root view: one AppLayout, the bound conversation or the landing view.
+ *
+ * @param props - The shell's app props (connection state, identity).
+ */
+const App: React.FC<ShellAppProps> = () => {
+	const [address, setAddress] = useState<string | null>(() => pipeFromLocation());
+
+	const handleOpen = useCallback((value: string) => {
+		writePipeToLocation(value);
+		setAddress(value);
+	}, []);
+
+	return <AppLayout showStatus>{address ? <ChatDocument address={address} /> : <Landing onOpen={handleOpen} />}</AppLayout>;
 };
 
 export default App;

@@ -1,5 +1,5 @@
-// =============================================================================
 // MIT License
+//
 // Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,28 +19,18 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
 // =============================================================================
-// CONNECT — RESOLVER (saved connection → live endpoint)
-// =============================================================================
+// RESOLVER — saved connection -> endpoint (plan 3.6)
 //
-// Attach-mechanics live here on purpose (see types.ts). Both connection modes
-// resolve to the same SqlEndpoint the session layer already speaks:
-//
-//  - 'pipeline': a pure mapping onto the stored (projectId, source, nodeId) —
-//    the session resolves the running task's token as it always has.
-//  - 'direct': materialises a REAL two-component pipeline over `client.use`:
-//    a `tools` endpoint source (the webhook-family invoke host — no data
-//    lane, it keeps the task alive for direct tool calls) with the database
-//    node attached through the control-plane invoke channel. `useExisting`
-//    reattaches within the TTL instead of spawning a second task, and the
-//    standard 15-minute idle TTL reaps it. The session then resolves its
-//    token by (projectId='sqlconn-<id>', source='tools_1') exactly like any
-//    other endpoint.
-//
-// The TTL means a direct task can idle out mid-session; resolveEndpoint
-// registers a REVIVAL for its key, and the session consults it when token
-// resolution comes up empty (one re-`use`, then one retry).
+// A PIPELINE-BOUND connection already is its endpoint: the address and the
+// node it saved. A DIRECT connection has no pipe of its own, so this module
+// starts one for it — a two-node spec (a `tools` source hosting the
+// configured database node) through `client.use()`, which answers the
+// address the caller's @dev control took. That address is what every tool
+// call on the direct endpoint is made on; it is remembered per endpoint key
+// along with the start procedure (revival) and a holder count, so the temp
+// pipeline is torn down when its last document closes and revived if its
+// idle ttl ended it between two statements.
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
@@ -51,138 +41,135 @@ import type { DirectConnection, SavedSqlConnection } from './savedConnections';
 // CONSTANTS
 // =============================================================================
 
-/** Idle time-to-live for direct-mode temp pipelines (the standard default). */
+/** Idle ttl of a direct connection's temp pipeline (seconds). */
 const DIRECT_TTL_SECONDS = 15 * 60;
-
-/** The invoke-host endpoint service (webhook family, `tools://`). */
+/** The source that hosts tool nodes without moving data. */
 const TOOLS_PROVIDER = 'tools';
-
-/** The tools source COMPONENT id inside a direct temp pipeline — also the
- *  `source` the task is addressed by (getTaskToken / endpoint keys). */
+/** The source component id of a direct connection's temp pipeline. */
 const TOOLS_SOURCE_ID = 'tools_1';
-
-/** Prefix of direct-mode project ids (colon-free: endpoint keys split on ':'). */
+/** Project-id prefix of the temp pipelines (also what discovery skips). */
 const DIRECT_PROJECT_PREFIX = 'sqlconn-';
 
 // =============================================================================
 // KEYS
 // =============================================================================
 
-/** The temp pipeline's project id for one direct connection. */
+/**
+ * The temp pipeline's project id for a direct connection.
+ *
+ * @param conn - The direct connection.
+ * @returns `sqlconn-<id>`.
+ */
 function directProjectId(conn: DirectConnection): string {
 	return `${DIRECT_PROJECT_PREFIX}${conn.id}`;
 }
 
-/** The single database component's id inside a direct temp pipeline. */
+/**
+ * The database node id inside a direct connection's temp pipeline.
+ *
+ * @param conn - The direct connection.
+ * @returns `<provider>_1`.
+ */
 function directNodeId(conn: DirectConnection): string {
 	return `${conn.provider}_1`;
 }
 
 /**
- * The endpoint key a saved connection resolves to — DETERMINISTIC, no server
- * round trip, so the sidebar can match rows against the active document
- * without resolving anything.
+ * The endpoint key a saved connection resolves to — derivable BEFORE anything
+ * starts, so documents and history can be keyed by it.
  *
  * @param conn - The saved connection.
- * @returns The endpoint key.
+ * @returns `${address}:${nodeId}` for a pipeline-bound connection,
+ *          `sqlconn-<id>:<provider>_1` for a direct one.
  */
 export function endpointKeyForConnection(conn: SavedSqlConnection): string {
-	if (conn.mode === 'pipeline') return `${conn.projectId}:${conn.source}:${conn.nodeId}`;
-	return `${directProjectId(conn)}:${TOOLS_SOURCE_ID}:${directNodeId(conn)}`;
+	if (conn.mode === 'pipeline') return `${conn.address}:${conn.nodeId}`;
+	return `${directProjectId(conn)}:${directNodeId(conn)}`;
 }
 
 /**
- * Whether an endpoint key names a direct-mode temp pipeline.
+ * Whether an endpoint key names a direct connection's temp pipeline.
  *
  * @param key - An endpoint key.
- * @returns True for direct-mode keys.
+ * @returns True for a direct connection.
  */
 export function isDirectEndpointKey(key: string): boolean {
 	return key.startsWith(DIRECT_PROJECT_PREFIX);
 }
 
 // =============================================================================
-// REVIVAL REGISTRY — direct tasks idle out; sessions revive them on demand
+// DIRECT CONNECTION STATE (per realm)
 // =============================================================================
 
+/** Direct endpoint key -> the address its temp pipeline answers on. */
+const addresses = new Map<string, string>();
+/** Direct endpoint key -> how to start the temp pipeline again. */
 const revivals = new Map<string, () => Promise<void>>();
-
-/** Live holders per direct endpoint key (resolve +1, release -1) — a
- *  re-resolve of the same key must not be killed by the previous holder's
- *  late release. */
+/** Direct endpoint key -> open documents holding it. */
 const holders = new Map<string, number>();
 
 /**
- * The revival for an endpoint key, when one is registered (direct endpoints
- * only). The session layer calls it when token resolution finds no task.
+ * The revival procedure of a direct endpoint, when one is registered.
  *
  * @param key - The endpoint key.
- * @returns The revival function, or undefined.
+ * @returns The start procedure, or undefined for a pipeline-bound endpoint.
  */
 export function revivalFor(key: string): (() => Promise<void>) | undefined {
 	return revivals.get(key);
 }
 
 // =============================================================================
-// RESOLVE / RELEASE
+// RESOLUTION
 // =============================================================================
 
 /**
- * The endpoint a saved connection maps to — a PURE mapping (no server round
- * trip), so any mount can compute it for highlights, schema reads, and keys.
- * For a direct connection the endpoint is only USABLE while its temp
- * pipeline runs (see {@link resolveEndpoint}).
+ * The endpoint of a saved connection, without starting anything.
  *
  * @param conn - The saved connection.
- * @returns The endpoint shape.
+ * @returns The endpoint; a direct connection's `address` is the one its
+ *          temp pipeline last answered on, or '' before it was started.
  */
 export function endpointForConnection(conn: SavedSqlConnection): SqlEndpoint {
 	if (conn.mode === 'pipeline') {
 		return {
 			key: endpointKeyForConnection(conn),
-			projectId: conn.projectId,
+			address: conn.address,
 			pipelineName: conn.pipelineName,
-			source: conn.source,
 			nodeId: conn.nodeId,
 			nodeName: conn.name,
-			provider: conn.provider,
-			running: true,
+			...(conn.provider ? { provider: conn.provider } : {}),
 		};
 	}
+	const key = endpointKeyForConnection(conn);
 	return {
-		key: endpointKeyForConnection(conn),
-		projectId: directProjectId(conn),
+		key,
+		address: addresses.get(key) ?? '',
 		pipelineName: `SQL: ${conn.name}`,
-		source: TOOLS_SOURCE_ID,
 		nodeId: directNodeId(conn),
 		nodeName: conn.name,
 		provider: conn.provider,
-		running: true,
 	};
 }
 
 /**
- * Resolves a saved connection to a live endpoint. Direct mode starts (or
- * reattaches to) the connection's temp tool pipeline; pipeline mode is a pure
- * mapping and never touches the server.
+ * Resolve a saved connection to a usable endpoint. A direct connection's
+ * temp pipeline is started here (or re-attached with `useExisting`), and
+ * the address it answers on becomes the endpoint's address.
  *
- * @param client - The shell's RocketRide client.
+ * @param client - The realm's client.
  * @param conn - The saved connection.
- * @returns The endpoint to open documents against.
+ * @returns The endpoint.
+ * @throws When the temp pipeline cannot start.
  */
 export async function resolveEndpoint(client: RocketRideClient, conn: SavedSqlConnection): Promise<SqlEndpoint> {
 	if (conn.mode === 'pipeline') {
 		return endpointForConnection(conn);
 	}
-
-	// Direct: a real two-component pipeline — the `tools` invoke host as the
-	// source, the database node attached through the control-plane invoke
-	// channel (the same wiring a tool uses to attach to an agent).
-	// useExisting reattaches within the TTL instead of spawning a second task.
+	const key = endpointKeyForConnection(conn);
 	const projectId = directProjectId(conn);
 	const nodeId = directNodeId(conn);
 	const start = async (): Promise<void> => {
-		await client.use({
+		const started = await client.use({
 			pipeline: {
 				project_id: projectId,
 				source: TOOLS_SOURCE_ID,
@@ -195,28 +182,21 @@ export async function resolveEndpoint(client: RocketRideClient, conn: SavedSqlCo
 			ttl: DIRECT_TTL_SECONDS,
 			name: `SQL: ${conn.name}`,
 		});
+		// The token slot carries the address the control took
+		addresses.set(key, started.token);
 	};
 	await start();
-
-	const endpoint = endpointForConnection(conn);
-	// The idle TTL can reap the task mid-session: register the re-`use` so
-	// the session can revive it when token resolution comes up empty.
-	revivals.set(endpoint.key, start);
-	holders.set(endpoint.key, (holders.get(endpoint.key) ?? 0) + 1);
-
-	return endpoint;
+	revivals.set(key, start);
+	holders.set(key, (holders.get(key) ?? 0) + 1);
+	return endpointForConnection(conn);
 }
 
 /**
- * Releases one holder of a direct endpoint — called when a connection
- * document closes, and before deleting a direct connection. The temp
- * pipeline is stopped (best effort) and its revival dropped only when the
- * LAST holder releases: a resolve that reused the key (same connection
- * re-opened) must survive the previous holder's late release. A no-op for
- * non-direct keys.
+ * Release one holder of a direct endpoint; the last one terminates its temp
+ * pipeline. Pipeline-bound endpoints have nothing to release.
  *
- * @param client - The shell's RocketRide client.
- * @param endpointKey - The endpoint key whose temp pipeline to stop.
+ * @param client - The realm's client.
+ * @param endpointKey - The endpoint key.
  */
 export async function releaseDirectEndpoint(client: RocketRideClient, endpointKey: string): Promise<void> {
 	if (!isDirectEndpointKey(endpointKey)) return;
@@ -227,14 +207,12 @@ export async function releaseDirectEndpoint(client: RocketRideClient, endpointKe
 	}
 	holders.delete(endpointKey);
 	revivals.delete(endpointKey);
-	// Key shape `${projectId}:tools_1:${nodeId}` with a colon-free project id.
-	const projectId = endpointKey.split(':')[0];
-	if (!projectId) return;
+	const address = addresses.get(endpointKey);
+	addresses.delete(endpointKey);
+	if (!address) return;
 	try {
-		const token = await client.getTaskToken({ projectId, source: TOOLS_SOURCE_ID });
-		if (token) await client.terminate(token);
+		await client.terminate(address);
 	} catch (err) {
-		// Best effort: the TTL reaps whatever a failed terminate leaves behind.
 		console.log('[sql-ui] releaseDirectEndpoint failed', endpointKey, err);
 	}
 }

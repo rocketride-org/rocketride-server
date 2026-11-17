@@ -35,8 +35,6 @@ updates:
       - "/"
       - "/packages/client-typescript"
       - "/packages/shared-ui"
-      - "/apps/dropper-ui"
-      - "/apps/chat-ui"
     schedule:
       interval: "monthly"
       time: "06:00"
@@ -61,10 +59,9 @@ updates:
       # Block major-version PRs — handle via manual `pnpm outdated` cycles.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # rsbuild/rspack: shared-ui is on 1.x while apps/{chat,dropper}-ui
-      # are pinned to 0.4.x. Bumps strand the apps at intermediate versions
-      # (see #855, #860, #866). Coordinate via manual PRs across all three
-      # locations together.
+      # rsbuild/rspack: the apps pin their own rsbuild line; bumps strand
+      # them at intermediate versions (see #855, #860, #866). Coordinate via
+      # manual PRs across every location together.
       - dependency-name: "@rsbuild/*"
       - dependency-name: "@rspack/*"
       # @types/vscode is constrained by apps/vscode/package.json's

@@ -47,26 +47,31 @@ export type SqlDialect = 'mysql' | 'postgres' | 'clickhouse' | 'neo4j' | 'unknow
 // =============================================================================
 
 /**
- * One reachable database tool node inside a running pipeline task — the unit
- * a "connection" binds to. Purely descriptive: holds no token or client state.
+ * One database node of a pipe the caller can reach — the unit a "connection"
+ * binds to (plan 3.6). Two facts matter: the ADDRESS to call and the NODE to
+ * call on it. Nothing here says whether an engine is running: a standalone
+ * tool call starts a dormant one. Purely descriptive: holds no client state.
  */
 export interface SqlEndpoint {
-	/** Stable identity for lists/maps: `${projectId}:${source}:${nodeId}`. */
+	/** Stable identity for lists/maps: `${address}:${nodeId}`. */
 	key: string;
-	/** Project (pipeline) identifier the task was started from. */
-	projectId: string;
-	/** Task display name (pipeline filename or config name). */
+	/**
+	 * The pipe address the tool call is made on (`developerId.pipelineId` or
+	 * `developerId.pipelineId.source`) — what `client.tool()` takes.
+	 */
+	address: string;
+	/** Display name of the pipeline (its task name, else the pipe id). */
 	pipelineName: string;
-	/** Source component id of the task — needed to resolve the task token. */
-	source: string;
 	/** The database component id inside the pipeline (tool call target). */
 	nodeId: string;
 	/** Display name of the database component (falls back to nodeId). */
 	nodeName: string;
-	/** Component provider, e.g. 'db_mysql', 'db_postgres', 'db_clickhouse', 'rocketride_sql'. */
-	provider: string;
-	/** Whether the owning task was running at discovery time. */
-	running: boolean;
+	/**
+	 * Component provider when known: a direct connection names the node it
+	 * configures; a node learned from `interfaces()` is known only by its
+	 * catalog classType (`database`) until `dialect` answers.
+	 */
+	provider?: string;
 }
 
 // =============================================================================
