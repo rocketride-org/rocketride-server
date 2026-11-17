@@ -44,8 +44,8 @@ _GENERIC_TOKENS = frozenset(
 HOSTED_MODELS_CAPABILITY = 'hosted-models:openai'
 HOSTED_INTEGRATIONS = frozenset({'llm_openai'})
 HOSTED_NOTE = (
-    "Runs on RocketRide-hosted models with no key of your own, using this workspace's compute credits. "
-    'Leave apikey empty, or set it to use your own OpenAI key.'
+    "Runs on RocketRide-hosted models without a key of your own, using this workspace's compute credits. "
+    'Leave apikey empty, or set it to your own OpenAI key.'
 )
 
 SETUP_HOW = (
