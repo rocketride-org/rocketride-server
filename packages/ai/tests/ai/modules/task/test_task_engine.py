@@ -783,6 +783,25 @@ def test_db_access_empty_without_db_nodes():
     assert Task._db_access(_task(), pipeline) == ([], True)
 
 
+def test_db_access_resolves_a_db_node_only_eaas_serves(monkeypatch):
+    """A DB node the server does not carry is resolved with the definition EaaS serves."""
+    import ai.modules.task.task_engine as engine
+    from ai.common.config import Config
+
+    served = {'protocol': 'rocketride_sql://'}
+    monkeypatch.setattr(engine.node_store, 'served', lambda provider: served if provider == 'rocketride_sql' else None)
+    seen = []
+    monkeypatch.setattr(
+        Config, 'getNodeConfig', staticmethod(lambda provider, config, service=None: seen.append(service) or {})
+    )
+
+    assert Task._db_access(_task(), {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}) == (
+        [('org', '')],
+        False,
+    )
+    assert seen == [served]
+
+
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
     assert Task._db_access(_task(), {}) == ([], False)

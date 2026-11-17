@@ -929,7 +929,11 @@ class Task(DAPBase):
             if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
                 continue
             try:
-                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+                pair = db_target(
+                    Config.getNodeConfig(
+                        component['provider'], component.get('config') or {}, node_store.served(component['provider'])
+                    )
+                )
             except ValueError as e:
                 raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
             if pair not in targets:
