@@ -33,7 +33,6 @@ import type { IBusEndpoint } from '../ops/busBridge';
 import type { IOpBus } from '../ops/busOps';
 import type { IRetainedRegistry } from '../ops/retained';
 import type { ConnectionStatus } from '../types/connection';
-import type { DenyCode } from './capabilityDenied';
 
 export type { DenyCode } from './capabilityDenied';
 

@@ -22,40 +22,487 @@
 // =============================================================================
 
 // =============================================================================
-// APP ROOT — PR2a-1 red-before PASS-THROUGH STUB
+// APP ROOT — the shell side of every isolated app frame (PR2a-1)
 // =============================================================================
 //
-// An UNGATED router over the real client ops: no checks, no handles, no
-// `shell.*` ops, no events. It exists so the PR2a-1 tests fail on their
-// behavioural assertions, never on an import error. The implementation
-// commit replaces it. Nothing outside `src/isolation/` may import this file.
+// One root per shell. `attach` gives each frame (realm) its own handler bus,
+// ledger, rate limiter and outbound backstop on a gated router; the realm can
+// resolve exactly these ops and nothing else:
+//
+//   client.request, client.addMonitor, client.removeMonitor,
+//   shell.frameToken.refresh, shell.notify, shell.statusMessage,
+//   shell.loginRequest, shell.openExternal, bus.topic.read (router),
+//   and the emitOps shell.prefs.attach, shell.setPref.
+//
+// Engine credentials stay here: a run is known to the app by an `rh_` handle
+// and an `rp_` project alias, and the real `tk_`/`pk_`/project id are
+// substituted on the way to the engine only. `shell.event.*` is the only
+// connection state an app sees, as allowlisted payloads.
+//
+// INERT in PR2a-1: nothing outside `src/isolation/` imports this module
+// (T30 guards it) until PR2b wires it in `Shell.tsx`.
 // =============================================================================
 
-import { createBusRouter } from '../ops/busBridge';
+import type { DAPMessage } from 'rocketride';
+import { encodeMessageData } from '../connection/binaryWire';
+import { serializeError } from '../connection/errorWire';
+import type { IWireEnvelope } from '../connection/errorWire';
+import { createGatedBusRouter } from '../ops/busBridge';
 import type { IBusEndpoint } from '../ops/busBridge';
 import { createOpBus } from '../ops/busOps';
-import { registerClientOps } from '../ops/clientOps';
-import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId } from './types';
+import type { IOpBus } from '../ops/busOps';
+import { appKeyOf } from './appKey';
+import { KNOWN_CAPS } from './capabilities';
+import { CapabilityDeniedError } from './capabilityDenied';
+import type { DenyCode } from './capabilityDenied';
+import { deniedEnvelope, deniedMessage, deny, sanitizeEnvelope } from './denial';
+import { asDenial, DAP_TIMEOUT_MAX_MS, gateClientRequest, gateOp } from './gate';
+import type { IGateContext, IGatedRequest } from './gate';
+import { base64url, createLedger } from './ledger';
+import type { ILedger, IRunEntry } from './ledger';
+import { createRateLimiter, QUOTAS, SIZES } from './rate';
+import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
+import { isWireBinary, measure } from './walk';
+
+/** `is_canonical_app_id` (`modules/shell/app_origin.py`). */
+const CANONICAL_APP_ID = /^[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_][A-Za-z0-9_-]*)*$/;
+/** The outbound backstop's credential pattern (Appendix L). */
+const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
+/** Root-internal frame refresh retries (ms). */
+const REFRESH_RETRY_MS = [2000, 4000, 8000];
+/** `/apps/frame` answers that end the session instead of being retried. */
+const REFRESH_FINAL_STATUS: ReadonlySet<number> = new Set([401, 404, 409]);
+
+/** One attached realm. */
+interface IRealmState {
+	info: RealmInfo;
+	ledger: ILedger;
+	gate: IGateContext;
+	inflight: number;
+	/** Pref keys this realm has written. */
+	prefKeys: Set<string>;
+	/** Ops whose drop was already logged (once per realm per op). */
+	loggedDrops: Set<string>;
+	detachRouter: () => void;
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Calls `cb` for every string (values and keys), skipping binary members. Throws what `cb` throws. */
+function scanStrings(value: unknown, cb: (s: string) => void): void {
+	const seen = new Set<object>();
+	const stack: unknown[] = [value];
+	while (stack.length > 0) {
+		const v = stack.pop();
+		if (typeof v === 'string') cb(v);
+		else if (typeof v === 'object' && v !== null && !seen.has(v) && !isWireBinary(v) && !ArrayBuffer.isView(v)) {
+			seen.add(v);
+			if (Array.isArray(v)) stack.push(...v);
+			else
+				for (const [k, x] of Object.entries(v)) {
+					cb(k);
+					stack.push(x);
+				}
+		}
+	}
+}
+
+/** `.apps.example.com` for `https://{label}.apps.example.com`. */
+function appSuffixOf(template: string): string {
+	try {
+		const host = new URL(template.replace('{label}', 'x')).hostname;
+		return host.slice(1);
+	} catch {
+		return '';
+	}
+}
 
 /**
- * Creates the app root (pass-through stub).
+ * Creates the app root.
  *
  * @param cm - The slice of the ConnectionManager the root uses.
- * @param _opts - Root options (unused by the stub).
+ * @param opts - Clock, randomness, frame fetch, UI hooks and log.
  * @returns The root.
  */
-export function createAppRoot(cm: IAppRootCm, _opts: IAppRootOptions): IAppRoot {
-	const bus = createOpBus();
-	registerClientOps(bus, cm);
-	const router = createBusRouter(bus, { retained: cm.retained() });
-	let seq = 0;
+export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
+	const router = createGatedBusRouter(createOpBus(), { retained: cm.retained() });
+	const realms = new Map<RealmId, IRealmState>();
+	const appSuffix = appSuffixOf(opts.originTemplate);
+	const shellOrigins = new Set<string>();
+	for (const o of opts.shellOrigins) {
+		try {
+			shellOrigins.add(new URL(o).origin);
+		} catch {
+			/* an unparsable origin matches nothing */
+		}
+	}
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const client = (): any => {
+		const c = cm.getClient();
+		if (!c || !cm.isConnected()) throw new Error('Not connected to server');
+		return c;
+	};
+
+	/** A denied request op: the bus rejects with `RR_DENIED:` + fields. */
+	const rejectWith = (err: unknown, op: string): never => {
+		throw new Error(deniedMessage(asDenial(err, op)));
+	};
+
+	const logDrop = (st: IRealmState, op: string, code: DenyCode): void => {
+		if (st.loggedDrops.has(op)) return;
+		st.loggedDrops.add(op);
+		opts.log('warn', `[isolation] ${st.info.appId} (${st.info.realmId}): dropped ${op} (${code})`);
+	};
+
+	// ── Command handling inside client.request (plan section 4.2) ──────────
+
+	/** A response body with the run's opaque values in place of the real ones. */
+	const runBody = (body: Record<string, unknown>, run: IRunEntry): Record<string, unknown> => {
+		const { publicToken: _dropped, ...rest } = body;
+		void _dropped;
+		return { ...rest, token: run.handle, projectId: run.projectAlias, id: run.taskIdAlias };
+	};
+
+	/** Records what the engine answered and rewrites what the realm may see. */
+	const record = (st: IRealmState, req: IGatedRequest, response: DAPMessage): DAPMessage => {
+		if (opts.__throwIn === 'ledger') throw new Error('test hook: ledger');
+		if (!isPlainObject(response) || response.success === false) return response;
+		const body = isPlainObject(response.body) ? response.body : undefined;
+		const withBody = (next: Record<string, unknown>): DAPMessage => ({ ...response, body: next });
+		switch (req.command) {
+			case 'execute': {
+				if (!body || typeof body.token !== 'string') return response;
+				const pipeline = req.args.pipeline as Record<string, unknown>;
+				const run = st.ledger.addRun({
+					token: body.token,
+					publicToken: typeof body.publicToken === 'string' ? body.publicToken : '',
+					projectId: typeof body.projectId === 'string' ? body.projectId : req.mintedProject!,
+					source: String(body.source ?? req.args.source ?? pipeline.source ?? ''),
+					taskId: typeof body.id === 'string' ? body.id : '',
+				});
+				return withBody(runBody(body, run));
+			}
+			case 'restart': {
+				const run = req.run!;
+				run.completedAt = undefined;
+				if (!body) return response;
+				if (typeof body.token === 'string') run.token = body.token;
+				if (typeof body.publicToken === 'string') run.publicToken = body.publicToken;
+				if (typeof body.id === 'string') run.taskId = body.id;
+				return withBody(runBody(body, run));
+			}
+			case 'rrext_get_token': {
+				if (!body) return response;
+				const { token, ...rest } = body;
+				const run = typeof token === 'string' ? st.ledger.runByToken(token) : undefined;
+				return withBody(run ? { ...rest, token: run.handle } : rest);
+			}
+			case 'terminate':
+				st.ledger.dropRun(req.run!.handle);
+				return response;
+			case 'rrext_get_task_status':
+				if (body && (body.completed === true || body.final === true)) st.ledger.complete(req.run!.handle);
+				return response;
+			case 'rrext_process':
+				if (req.subcommand === 'open' && body && Number.isSafeInteger(body.pipe_id)) req.run!.pipeIds.add(body.pipe_id as number);
+				if (req.subcommand === 'close') req.run!.pipeIds.delete(req.args.pipe_id as number);
+				return response;
+			case 'rrext_store':
+				if (req.subcommand === 'fs_open' && body && typeof body.handle === 'string') st.ledger.addFs(body.handle, req.fs!.mode);
+				if (req.subcommand === 'fs_close') st.ledger.dropFs(req.args.handle as string);
+				return response;
+			default:
+				return response;
+		}
+	};
+
+	// ── Outbound backstop (the scrubber is PR2a-2) ──────────────────────────
+
+	const outboundFor =
+		(st: IRealmState) =>
+		(message: unknown): unknown => {
+			if (opts.__throwIn === 'outbound') throw new Error('test hook: outbound');
+			const needles = [cm.loadToken(), ...st.ledger.secrets()].filter((s) => typeof s === 'string' && s.length >= 8);
+			// The pattern is not applied to the app's own file content (plan section 4.4); exact matches still are.
+			const m = message as { __rrbus?: string; result?: { ok?: boolean; value?: { command?: string } } };
+			const storeReply = m?.__rrbus === 'response' && m.result?.ok === true && m.result.value?.command === 'rrext_store';
+			scanStrings(message, (s) => {
+				for (const needle of needles) if (s.includes(needle)) throw deny('credential', 'outbound');
+				if (!storeReply && BACKSTOP_RE.test(s)) throw deny('credential', 'outbound');
+			});
+			return message;
+		};
+
+	// ── Per-realm handlers ──────────────────────────────────────────────────
+
+	const fetchFrame = async (appId: string, version: number): Promise<{ entryPrefix: string; expiresAt: number }> => {
+		for (let attempt = 0; ; attempt++) {
+			try {
+				const frame = await opts.fetchFrame(appId, version);
+				return { entryPrefix: frame.entryPrefix, expiresAt: frame.expiresAt };
+			} catch (err) {
+				const status = (err as { status?: unknown } | null)?.status;
+				if (typeof status === 'number' && REFRESH_FINAL_STATUS.has(status)) throw new Error('Session ended');
+				if (attempt >= REFRESH_RETRY_MS.length) throw new Error('Frame refresh failed');
+				await new Promise((resolve) => setTimeout(resolve, REFRESH_RETRY_MS[attempt]));
+			}
+		}
+	};
+
+	const checkOpenUrl = (raw: string): string | null => {
+		let url: URL;
+		try {
+			url = new URL(raw);
+		} catch {
+			return null;
+		}
+		if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') return null;
+		if (shellOrigins.has(url.origin)) return null;
+		const host = url.hostname.toLowerCase();
+		if (appSuffix !== '' && (host.endsWith(appSuffix) || host === appSuffix.slice(1))) return null;
+		return url.href;
+	};
+
+	const buildHandlers = (st: IRealmState): IOpBus => {
+		const bus = createOpBus();
+		const op = (name: string, impl: (raw: unknown) => Promise<unknown>, onRefuse: (err: unknown) => unknown): void => {
+			bus.handle(name, async (raw) => {
+				if (st.inflight >= QUOTAS.inflight) return onRefuse(deny('rate', name));
+				st.inflight++;
+				try {
+					return await impl(raw);
+				} finally {
+					st.inflight--;
+				}
+			});
+		};
+		const requestOp = (name: string, impl: (params: Record<string, unknown>, run?: IRunEntry) => unknown): void =>
+			op(
+				name,
+				async (raw) => {
+					let checked: ReturnType<typeof gateOp>;
+					try {
+						checked = gateOp(st.gate, name, raw);
+					} catch (err) {
+						return rejectWith(err, name);
+					}
+					return impl(checked.params, checked.run);
+				},
+				(err) => rejectWith(err, name)
+			);
+		const emitOp = (name: string, impl: (params: Record<string, unknown>) => void): void => {
+			bus.handle(name, (raw) => {
+				try {
+					impl(gateOp(st.gate, name, raw).params);
+				} catch (err) {
+					logDrop(st, name, asDenial(err, name).code);
+				}
+			});
+		};
+
+		op(
+			'client.request',
+			async (raw) => {
+				let req: IGatedRequest;
+				try {
+					req = gateClientRequest(st.gate, raw);
+				} catch (err) {
+					return deniedEnvelope(asDenial(err, 'client.request'));
+				}
+				try {
+					const response = (await client().request(req.message, req.timeout)) as DAPMessage;
+					const encoded = encodeMessageData(record(st, req, response));
+					const size = measure(encoded);
+					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
+					return { ok: true, value: encoded } satisfies IWireEnvelope;
+				} catch (err) {
+					if (err instanceof CapabilityDeniedError) return deniedEnvelope(err);
+					return sanitizeEnvelope({ ok: false, error: serializeError(err) });
+				}
+			},
+			(err) => deniedEnvelope(asDenial(err, 'client.request'))
+		);
+
+		requestOp('client.addMonitor', async (params, run) => {
+			const types = [...new Set(params.types as string[])];
+			const counts = st.ledger.monitors.get(run!.handle) ?? new Map<string, number>();
+			const added = types.filter((t) => !counts.has(t)).length;
+			if (st.ledger.monitorPairCount() + added > QUOTAS.monitorKeys) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
+			await client().addMonitor({ token: run!.token }, types);
+			for (const t of types) counts.set(t, (counts.get(t) ?? 0) + 1);
+			st.ledger.monitors.set(run!.handle, counts);
+		});
+
+		requestOp('client.removeMonitor', async (params, run) => {
+			const types = [...new Set(params.types as string[])];
+			await client().removeMonitor({ token: run!.token }, types);
+			const counts = st.ledger.monitors.get(run!.handle);
+			if (!counts) return;
+			for (const t of types) {
+				const n = (counts.get(t) ?? 0) - 1;
+				if (n > 0) counts.set(t, n);
+				else counts.delete(t);
+			}
+			if (counts.size === 0) st.ledger.monitors.delete(run!.handle);
+		});
+
+		requestOp('shell.frameToken.refresh', () => fetchFrame(st.info.appId, st.info.version));
+
+		requestOp('shell.notify', (params) => {
+			const text = params.message as string;
+			if (text.length > SIZES.notify) rejectWith(deny('schema', 'shell.notify'), 'shell.notify');
+			opts.ui.strip(st.info.realmId, { kind: 'notify', text });
+		});
+
+		requestOp('shell.statusMessage', (params) => {
+			const text = params.message as string;
+			if (text.length > SIZES.status) rejectWith(deny('schema', 'shell.statusMessage'), 'shell.statusMessage');
+			opts.ui.strip(st.info.realmId, { kind: 'status', text });
+		});
+
+		requestOp('shell.loginRequest', () => {
+			// Signed in = the root holds a session token.
+			if (cm.loadToken() !== '') rejectWith(deny('capability', 'shell.loginRequest'), 'shell.loginRequest');
+			cm.emit('shell:loginRequest', { appId: st.info.appId });
+		});
+
+		requestOp('shell.openExternal', async (params) => {
+			const url = checkOpenUrl(params.url as string);
+			if (url === null) return rejectWith(deny('schema', 'shell.openExternal'), 'shell.openExternal');
+			if ((await opts.ui.confirmOpen(st.info.realmId, url)) === true) opts.openWindow(url, '_blank', 'noopener,noreferrer');
+		});
+
+		emitOp('shell.prefs.attach', (params) => {
+			cm.ops().emitOp('shell.prefs.attach', { partition: params.partition });
+		});
+
+		emitOp('shell.setPref', (params) => {
+			const key = params.key as string;
+			if (key === '' || key.length > SIZES.prefKey) throw deny('schema', 'shell.setPref');
+			if (measure(params.value).json > SIZES.prefValue) throw deny('too_large', 'shell.setPref');
+			if (!st.prefKeys.has(key) && st.prefKeys.size >= SIZES.prefKeys) throw deny('quota', 'shell.setPref');
+			st.prefKeys.add(key);
+			// A plain (not null-prototype) copy for the prefs store.
+			cm.ops().emitOp('shell.setPref', { partition: params.partition, key, value: JSON.parse(JSON.stringify(params.value)) });
+		});
+
+		return bus;
+	};
+
+	// ── shell.event.* (plan section 4.8): allowlisted payloads only ─────────
+
+	const deliverAll = (op: string, payload: unknown, only?: (st: IRealmState) => boolean): void => {
+		for (const st of realms.values()) if (!only || only(st)) router.deliver(st.info.realmId, op, payload);
+	};
+	cm.on('shell:connected', () => deliverAll('shell.event.connected', {}));
+	// The root's own reason is not forwarded.
+	cm.on('shell:disconnected', () => deliverAll('shell.event.disconnected', { reason: 'root disconnected', hasError: false }));
+	cm.on('shell:statusChange', (status: unknown) => {
+		const s = isPlainObject(status) ? status : {};
+		const out: Record<string, unknown> = {};
+		for (const key of ['state', 'connectionMode', 'authPhase']) {
+			if (typeof s[key] === 'string' || typeof s[key] === 'number') out[key] = s[key];
+		}
+		deliverAll('shell.event.statusChange', out);
+	});
+	cm.on('shell:themeChange', (payload: unknown) => {
+		const raw = isPlainObject(payload) && isPlainObject(payload.tokens) ? payload.tokens : {};
+		const tokens: Record<string, string> = {};
+		for (const [k, v] of Object.entries(raw)) if (typeof v === 'string') tokens[k] = v;
+		deliverAll('shell.event.themeChange', { tokens });
+	});
+	cm.on('shell:viewActivated', (payload: unknown) => {
+		const viewId = isPlainObject(payload) ? payload.viewId : undefined;
+		if (typeof viewId !== 'string') return;
+		deliverAll('shell.event.viewActivated', { viewId }, (st) => st.info.viewId === viewId);
+	});
+	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
+	cm.on('shell:logout', () => {
+		for (const st of realms.values()) st.ledger.clear();
+	});
+
 	return {
-		attach(entry: IsolatedEntry, endpoint: IBusEndpoint, _grant?: IRealmGrant): RealmId {
-			const realmId = `realm-${++seq}`;
-			router.addRealm(endpoint, entry.id);
+		attach(entry: IsolatedEntry, endpoint: IBusEndpoint, grant: IRealmGrant = {}): RealmId {
+			if (!entry || entry.isolated !== true || entry.firstParty === true || typeof entry.id !== 'string' || entry.id.length > 128 || !CANONICAL_APP_ID.test(entry.id)) {
+				throw new Error('appRoot.attach: only an isolated, third-party entry can be attached');
+			}
+			const realmId = `realm-${base64url(opts.random(12))}`;
+			const caps = new Set(['core', ...(grant.capabilities ?? []).filter((c) => KNOWN_CAPS.has(c))]);
+			const info: RealmInfo = {
+				realmId,
+				label: `${entry.id}#${realmId}`,
+				appId: entry.id,
+				appKey: appKeyOf(entry.id),
+				moduleId: entry.moduleId,
+				viewId: grant.viewId ?? '',
+				version: grant.version ?? entry.registryVersion ?? 1,
+				caps,
+			};
+			const ledger = createLedger({ now: opts.now, random: opts.random });
+			const st: IRealmState = {
+				info,
+				ledger,
+				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
+				inflight: 0,
+				prefKeys: new Set(),
+				loggedDrops: new Set(),
+				detachRouter: () => {},
+			};
+			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st) });
+			realms.set(realmId, st);
 			return realmId;
 		},
-		detach(): void {},
-		async teardownAll(): Promise<void> {},
+
+		detach(realmId: RealmId): void {
+			const st = realms.get(realmId);
+			if (!st) return;
+			realms.delete(realmId);
+			st.detachRouter();
+			st.ledger.clear();
+		},
+
+		async teardownAll(timeoutMs: number): Promise<void> {
+			let failed = 0;
+			const work: Promise<unknown>[] = [];
+			const send = (command: string, args: Record<string, unknown>): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, Math.min(timeoutMs, DAP_TIMEOUT_MAX_MS)) as Promise<DAPMessage>);
+			for (const st of realms.values()) {
+				for (const run of st.ledger.runs()) {
+					work.push(
+						send('terminate', { token: run.token }).then(
+							(r) => {
+								if (r?.success === false) failed++;
+							},
+							() => {
+								failed++;
+							}
+						)
+					);
+					const counts = st.ledger.monitors.get(run.handle);
+					if (counts) {
+						const left = new Map(counts);
+						while (left.size > 0) {
+							const types = [...left.keys()];
+							work.push(
+								Promise.resolve()
+									.then(() => client().removeMonitor({ token: run.token }, types))
+									.catch(() => undefined)
+							);
+							for (const t of types) {
+								const n = left.get(t)! - 1;
+								if (n > 0) left.set(t, n);
+								else left.delete(t);
+							}
+						}
+					}
+				}
+				for (const fs of st.ledger.fsHandles()) work.push(send('rrext_store', { subcommand: 'fs_close', handle: fs.handle, mode: fs.mode }).catch(() => undefined));
+			}
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const timedOut = await Promise.race([Promise.allSettled(work).then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
+			if (timer !== undefined) clearTimeout(timer);
+			if (failed > 0 || timedOut) opts.log('warn', `[isolation] teardown: ${failed} terminate request(s) failed${timedOut ? '; timed out' : ''}`);
+			for (const st of realms.values()) st.ledger.clear();
+		},
 	};
 }
