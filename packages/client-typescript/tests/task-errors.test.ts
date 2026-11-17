@@ -204,4 +204,41 @@ describe('call() keeps the server code', () => {
 		const client = clientAnswering({ type: 'response', success: false });
 		await expect(client.call('rrext_get_tasks')).rejects.toThrow('rrext_get_tasks failed');
 	});
+
+	const stopped = { type: 'response', success: false, message: 'Task is stopped', code: 'TASK_STOPPED' };
+	const rewrapping: Array<[string, (client: RocketRideClient) => Promise<unknown>, string]> = [
+		['terminate()', (c) => c.terminate('tk_task'), 'Task is stopped'],
+		['restart()', (c) => c.restart({ token: 'tk_task', projectId: 'p', source: 's', pipeline: {} }), 'Task is stopped'],
+		['getTaskStatus()', (c) => c.getTaskStatus('tk_task'), 'Task is stopped'],
+		['ping()', (c) => c.ping('tk_task'), 'Ping failed: Task is stopped'],
+		['validate()', (c) => c.validate({ pipeline: {} }), 'Pipeline validation failed: Task is stopped'],
+		['setEvents()', (c) => c.setEvents('tk_task', ['summary']), 'Event subscription failed: Task is stopped'],
+	];
+	for (const [name, invoke, message] of rewrapping) {
+		it(`${name} keeps the DAPException and its code under its own message`, async () => {
+			const caught = await invoke(clientAnswering(stopped)).then(
+				() => {
+					throw new Error(`expected ${name} to reject`);
+				},
+				(e: unknown) => e
+			);
+
+			expect(caught).toBeInstanceOf(DAPException);
+			expect((caught as DAPException).code).toBe('TASK_STOPPED');
+			expect((caught as DAPException).message).toBe(message);
+		});
+	}
+
+	it('a re-worded failure that is not a DAPException is still a plain Error', async () => {
+		const client = new RocketRideClient({ env: {} });
+		(client as unknown as Record<string, unknown>).request = async () => {
+			throw new Error('socket closed');
+		};
+
+		const caught = await client.ping('tk_task').catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(Error);
+		expect(caught).not.toBeInstanceOf(DAPException);
+		expect((caught as Error).message).toBe('Ping failed: socket closed');
+	});
 });

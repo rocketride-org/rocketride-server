@@ -15,8 +15,8 @@ What the SDK throws, when, and how to catch it.
 | Transport loss and connection failures (including during login) | `ConnectionException` |
 | Data-pipe errors (open / write / close) | `PipeException` |
 | A login superseded, logged out, or detached mid-flight | `LoginAttemptCancelledError` |
-| A command the server rejects, through `call()`: `tool()`, `use()`, `getService()`, `getTasks()`, `getTaskToken()`, `getTaskPipeline()` and the other methods that do not re-wrap errors | `DAPException` (an `Error`; `code` set when the server sent one) |
-| Argument errors (such as `getService('')`), and server rejections in methods that re-wrap them: `terminate()`, `restart()`, `getTaskStatus()`, `validate()`, `ping()`, the deprecated `setEvents()`, and `fsRead()` / `fsReadMany()` (which bypass `call()`); `use()` when the server returns no task token | plain `Error` (no `code`) |
+| A command the server rejects, through `call()`: `tool()`, `use()`, `getService()`, `getTasks()`, `getTaskToken()`, `getTaskPipeline()`, `terminate()`, `restart()`, `getTaskStatus()` and the other typed methods; `validate()`, `ping()` and the deprecated `setEvents()` prefix the message (`Ping failed: ...`) but keep the class and `code` | `DAPException` (an `Error`; `code` set when the server sent one) |
+| Argument errors (such as `getService('')`), `fsRead()` / `fsReadMany()` failures (they bypass `call()`), and `use()` when the server returns no task token | plain `Error` (no `code`) |
 | `sendFiles` with a non-positive `maxConcurrent` | `RangeError` |
 | `Answer.getJson()` on non-JSON content | throws |
 
@@ -111,8 +111,9 @@ try {
 }
 ```
 
-Failures in methods that re-wrap errors still surface as plain `Error` with a
-descriptive message — write handlers that catch the specific
+Failures that do not come from the server (argument checks, `fsRead()`, a
+non-DAP transport error inside a method that re-words its message) surface as
+plain `Error` with a descriptive message — write handlers that catch the specific
 classes above first and fall back to `Error`. `ExecutionException` and
 `ValidationException` exist and are exported but the SDK does not currently throw
 them; don't write handlers that rely on them.
