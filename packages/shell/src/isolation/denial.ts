@@ -43,6 +43,11 @@ export const DENIED_PREFIX = 'RR_DENIED:';
 /** The only error fields that reach an app. */
 export const DENIAL_FIELDS: readonly string[] = ['code', 'op', 'command', 'subcommand', 'capability'];
 
+/** Longest realm-supplied name (op, command, subcommand) a denial echoes, in characters. */
+export const DENIAL_NAME_MAX = 128;
+
+const clip = (s: string | undefined): string | undefined => (typeof s === 'string' && s.length > DENIAL_NAME_MAX ? s.slice(0, DENIAL_NAME_MAX) : s);
+
 /**
  * A refusal.
  *
@@ -52,8 +57,10 @@ export const DENIAL_FIELDS: readonly string[] = ['code', 'op', 'command', 'subco
  * @returns The error (thrown by the gate, formatted by the callers below).
  */
 export function deny(code: DenyCode, op: string, extra: { command?: string; subcommand?: string; capability?: string } = {}): CapabilityDeniedError {
-	const what = [op, extra.command, extra.subcommand].filter((s) => typeof s === 'string' && s !== '').join(' ');
-	return new CapabilityDeniedError(`${what}: denied (${code})`, { code, op, ...extra });
+	// Op, command and subcommand come from the realm: never echoed beyond DENIAL_NAME_MAX.
+	const fields = { code, op: clip(op) ?? '', ...(extra.command !== undefined ? { command: clip(extra.command) } : {}), ...(extra.subcommand !== undefined ? { subcommand: clip(extra.subcommand) } : {}), ...(extra.capability !== undefined ? { capability: extra.capability } : {}) };
+	const what = [fields.op, fields.command, fields.subcommand].filter((s) => typeof s === 'string' && s !== '').join(' ');
+	return new CapabilityDeniedError(`${what}: denied (${code})`, fields);
 }
 
 /** The allowlisted fields of a denial. */

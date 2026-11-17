@@ -712,17 +712,34 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 		};
 		const interestFull = (): boolean => realm.topics.size + realm.privTopics!.size >= QUOTAS.topics;
 
+		/** Charges the rate bucket for a refused or dropped message; returns the rate denial if the bucket is empty. */
+		const charge = (lane: string): CapabilityDeniedError | null => {
+			const charged = tryAdmit(lane, undefined);
+			return charged.ok ? null : charged.denial;
+		};
+		/** A realm-supplied name (id, op, topic) is absent or within `MAX_NAME`. */
+		const nameOk = (v: unknown): boolean => v === undefined || (typeof v === 'string' && v.length <= MAX_NAME);
+
 		realm.unsubscribe = endpoint.subscribe((message) => {
 			const m = asBusMessage(message);
 			if (!m) return;
+			// Oversized names are dropped before anything else reads, echoes or scans them (and still charged).
+			const named = m as { id?: unknown; op?: unknown; topic?: unknown; ops?: unknown };
+			if (!nameOk(named.id) || !nameOk(named.op) || !nameOk(named.topic) || (named.ops !== undefined && (!Array.isArray(named.ops) || named.ops.length > QUOTAS.registeredOps))) {
+				charge('bus.dropped');
+				return;
+			}
 			switch (m[ENVELOPE]) {
 				case 'request': {
-					if (typeof m.id !== 'string' || typeof m.op !== 'string') return;
+					if (typeof m.id !== 'string' || typeof m.op !== 'string') {
+						charge('bus.dropped');
+						return;
+					}
 					const timeoutMs = clampBusTimeout(m.timeoutMs);
 					const respond = (resp: IBusResponseMessage): void => post({ ...resp, id: m.id });
 					if (m.op.startsWith('app.')) {
-						if (!m.op.startsWith(ns)) return refuse(m.id, m.op, 'namespace');
-						if (realm.appInflight! >= QUOTAS.inflight) return refuse(m.id, m.op, deny('rate', m.op));
+						if (!m.op.startsWith(ns)) return refuse(m.id, m.op, charge(m.op) ?? 'namespace');
+						if (realm.appInflight! >= QUOTAS.inflight) return refuse(m.id, m.op, charge(m.op) ?? deny('rate', m.op));
 						const admitted = tryAdmit(m.op, m.params);
 						if (!admitted.ok) return refuse(m.id, m.op, admitted.denial);
 						const owner = appOwners.get(m.op);
@@ -753,10 +770,7 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 						if (typeof topic === 'string' && topic.startsWith(ns)) return respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result: appRegistry().read(topic) });
 						return refuse(m.id, m.op, 'namespace');
 					}
-					if (!ctx.handlers.hasHandler(m.op)) {
-						const charged = tryAdmit(m.op, undefined);
-						return refuse(m.id, m.op, charged.ok ? 'unknown_op' : charged.denial);
-					}
+					if (!ctx.handlers.hasHandler(m.op)) return refuse(m.id, m.op, charge(m.op) ?? 'unknown_op');
 					ctx.handlers.request(m.op, m.params, { timeoutMs }).then(
 						(result) => respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result }),
 						(err: unknown) => respond({ [ENVELOPE]: 'response', id: m.id, ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -764,15 +778,16 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					return;
 				}
 				case 'emitOp': {
-					if (typeof m.op !== 'string') return;
+					if (typeof m.op !== 'string') return void charge('bus.dropped');
 					if (m.op.startsWith('app.')) {
 						const owner = m.op.startsWith(ns) ? appOwners.get(m.op) : undefined;
-						if (!owner) return;
+						if (!owner) return void charge(m.op);
 						const admitted = tryAdmit(m.op, m.params);
 						if (admitted.ok) owner.post({ [ENVELOPE]: 'emitOp', op: m.op, params: admitted.value } satisfies IBusEmitOpMessage);
 						return;
 					}
 					if (ctx.handlers.hasHandler(m.op)) ctx.handlers.emitOp(m.op, m.params);
+					else charge(m.op);
 					return;
 				}
 				case 'register': {
@@ -788,15 +803,16 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					return;
 				}
 				case 'unregister':
-					if (!Array.isArray(m.ops)) return;
+					// Charged like a registration; the array is bounded above.
+					if (charge('unregister') || !Array.isArray(m.ops)) return;
 					for (const op of m.ops) {
 						if (appOwners.get(op) === realm) appOwners.delete(op);
 						realm.ops.delete(op);
 					}
 					return;
 				case 'response': {
-					const entry = realm.inflight.get(m.id);
-					if (!entry) return;
+					const entry = typeof m.id === 'string' ? realm.inflight.get(m.id) : undefined;
+					if (!entry) return void charge('bus.response');
 					realm.inflight.delete(m.id);
 					clearTimeout(entry.timer);
 					entry.respond(m);
@@ -805,7 +821,7 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 				case 'publish': {
 					// Only the private registry, only the app's namespace, bounded per app.
 					// Snapshots and signals are walked, size-capped and rate-charged like any inbound value.
-					if (typeof m.topic !== 'string' || m.topic.length > MAX_NAME || !m.topic.startsWith(ns)) return;
+					if (typeof m.topic !== 'string' || !m.topic.startsWith(ns)) return void charge('publish');
 					const admitted = tryAdmit('publish', m.snapshot);
 					if (!admitted.ok) return;
 					const registry = appRegistry();
@@ -815,7 +831,7 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					return;
 				}
 				case 'subscribeTopic': {
-					if (typeof m.topic !== 'string' || m.topic.length > MAX_NAME || !tryAdmit('subscribeTopic', undefined).ok) return;
+					if (typeof m.topic !== 'string' || charge('subscribeTopic')) return;
 					if (sharedTopics.has(m.topic)) {
 						if (!realm.topics.has(m.topic) && interestFull()) return;
 						realm.topics.add(m.topic);
@@ -830,9 +846,11 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					return;
 				}
 				case 'unsubscribeTopic':
-					realm.topics.delete(m.topic);
-					realm.privTopics!.delete(m.topic);
+					if (!realm.topics.delete(m.topic) && !realm.privTopics!.delete(m.topic)) charge('unsubscribeTopic');
 					return;
+				default:
+					// A kind a realm never sends (e.g. 'topic').
+					charge('bus.dropped');
 			}
 		});
 		realms.add(realm);
