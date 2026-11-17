@@ -379,7 +379,8 @@ async function withGlobals(globals: Record<string, unknown>, run: () => void | P
 	try {
 		await run();
 	} finally {
-		process.env.NODE_ENV = originalNodeEnv;
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);
@@ -923,7 +924,8 @@ test('token methods use frame-local memory in embedded dev shells', () => {
 		// injected session must not replace their bundle credentials.
 		assert.deepEqual(fetchCalls, []);
 	} finally {
-		process.env.NODE_ENV = originalNodeEnv;
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -970,7 +972,8 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		assert.equal(manager.loadToken(), 'rr_proxy-token');
 		assert.deepEqual(fetchCalls, ['/apps/session']);
 	} finally {
-		process.env.NODE_ENV = originalNodeEnv;
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
@@ -1057,7 +1060,8 @@ test('initialize ignores cross-context token churn in embedded dev shells', () =
 		assert.equal(tokenCleared, false);
 		assert.equal(reloaded, false);
 	} finally {
-		process.env.NODE_ENV = originalNodeEnv;
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		RocketRideClient.prototype.attach = originalAttach;
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);

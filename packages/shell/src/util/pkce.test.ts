@@ -52,7 +52,8 @@ async function staged(win: Record<string, unknown>, run: (data: Map<string, stri
 	try {
 		await run(data);
 	} finally {
-		process.env.NODE_ENV = originalNodeEnv;
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
 		resetDevGateForTests();
 		for (const [key, original] of originals) {
 			if (original) Object.defineProperty(globalThis, key, original);

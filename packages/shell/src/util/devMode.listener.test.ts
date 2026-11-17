@@ -180,7 +180,8 @@ afterEach(() => {
 	console.warn = NATIVE_CONSOLE.warn;
 	console.error = NATIVE_CONSOLE.error;
 	globalThis.fetch = NATIVE_FETCH;
-	process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+	if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+	else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
 	gate.resetDevGateForTests();
 	clearBrowser();
 });
