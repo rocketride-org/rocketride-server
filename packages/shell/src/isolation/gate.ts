@@ -310,6 +310,9 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 		if (typeof params.timeout !== 'number' || !Number.isFinite(params.timeout)) throw deny('schema', op, where);
 		timeout = Math.min(DAP_TIMEOUT_MAX_MS, Math.max(DAP_TIMEOUT_MIN_MS, Math.round(params.timeout)));
 	}
+	// A run must never start unseen: execute and restart wait the root's full
+	// budget, whatever the app asked (its own bus call may give up earlier).
+	if (command === 'execute' || command === 'restart') timeout = DAP_TIMEOUT_MAX_MS;
 	// (6) row — an unknown command or subcommand has no row: refused as a capability
 	const row = matchRow(op, command, subcommand);
 	if (!row) throw deny('capability', op, where);

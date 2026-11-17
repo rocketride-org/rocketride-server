@@ -83,6 +83,8 @@ interface IRealmState {
 	prefKeys: Set<string>;
 	/** Ops whose drop was already logged (once per realm per op). */
 	loggedDrops: Set<string>;
+	/** Set by detach: late answers are ended, not recorded. */
+	detached: boolean;
 	detachRouter: () => void;
 }
 
@@ -142,6 +144,80 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		const c = cm.getClient();
 		if (!c || !cm.isConnected()) throw new Error('Not connected to server');
 		return c;
+	};
+
+	/** Teardowns in progress: every realm request is refused meanwhile. */
+	let closing = 0;
+	/** Bumped by teardown and logout: an answer to a request started earlier is ended, not recorded. */
+	let epoch = 0;
+
+	/** One DAP request on the root's own behalf (teardown, recovery). */
+	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> =>
+		Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
+
+	/** Best-effort end of what an answer started when it cannot be recorded (late, detached, or a record failure). */
+	const endOrphan = (req: IGatedRequest, response: DAPMessage): void => {
+		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
+		if (!body) return;
+		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
+			sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run'));
+		}
+		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
+			sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined);
+		}
+	};
+
+	/**
+	 * An execute whose answer was lost (the engine call threw, e.g. a timeout):
+	 * the run may exist anyway, so look it up by its minted project and end it.
+	 */
+	const recoverLostRun = (req: IGatedRequest): void => {
+		if (req.command !== 'execute' || !req.mintedProject) return;
+		const pipeline = req.args.pipeline as Record<string, unknown>;
+		const source = req.args.source ?? pipeline.source;
+		sendEngine('rrext_get_token', { projectId: req.mintedProject, ...(typeof source === 'string' ? { source } : {}) })
+			.then((r) => {
+				const token = isPlainObject(r) && r.success !== false && isPlainObject(r.body) ? r.body.token : undefined;
+				if (typeof token === 'string') return sendEngine('terminate', { token });
+				return undefined;
+			})
+			.catch(() => opts.log('warn', '[isolation] could not recover a lost run'));
+	};
+
+	/** Starts ending one realm's runs, store handles and monitors; returns the work. */
+	const teardownRealm = (st: IRealmState, tally: { failed: number }): Promise<unknown>[] => {
+		const work: Promise<unknown>[] = [];
+		for (const run of st.ledger.runs()) {
+			work.push(
+				sendEngine('terminate', { token: run.token }).then(
+					(r) => {
+						if (r?.success === false) tally.failed++;
+					},
+					() => {
+						tally.failed++;
+					}
+				)
+			);
+			const counts = st.ledger.monitors.get(run.handle);
+			if (counts) {
+				const left = new Map(counts);
+				while (left.size > 0) {
+					const types = [...left.keys()];
+					work.push(
+						Promise.resolve()
+							.then(() => client().removeMonitor({ token: run.token }, types))
+							.catch(() => undefined)
+					);
+					for (const t of types) {
+						const n = left.get(t)! - 1;
+						if (n > 0) left.set(t, n);
+						else left.delete(t);
+					}
+				}
+			}
+		}
+		for (const fs of st.ledger.fsHandles()) work.push(sendEngine('rrext_store', { subcommand: 'fs_close', handle: fs.handle, mode: fs.mode }).catch(() => undefined));
+		return work;
 	};
 
 	/** A denied request op: the bus rejects with `RR_DENIED:` + fields. */
@@ -268,6 +344,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		const bus = createOpBus();
 		const op = (name: string, impl: (raw: unknown) => Promise<unknown>, onRefuse: (err: unknown) => unknown): void => {
 			bus.handle(name, async (raw) => {
+				if (closing > 0 || st.detached) return onRefuse(deny('capability', name));
 				if (st.inflight >= QUOTAS.inflight) return onRefuse(deny('rate', name));
 				st.inflight++;
 				try {
@@ -310,9 +387,28 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				} catch (err) {
 					return deniedEnvelope(asDenial(err, 'client.request'));
 				}
+				const startedIn = epoch;
 				try {
-					const response = (await client().request(req.message, req.timeout)) as DAPMessage;
-					const encoded = encodeMessageData(record(st, req, response));
+					let response: DAPMessage;
+					try {
+						response = (await client().request(req.message, req.timeout)) as DAPMessage;
+					} catch (err) {
+						recoverLostRun(req);
+						throw err;
+					}
+					// Teardown, logout or detach happened meanwhile: end what the answer started.
+					if (st.detached || epoch !== startedIn) {
+						endOrphan(req, response);
+						throw deny('capability', 'client.request', { command: req.command });
+					}
+					let recorded: DAPMessage;
+					try {
+						recorded = record(st, req, response);
+					} catch (err) {
+						endOrphan(req, response);
+						throw err;
+					}
+					const encoded = encodeMessageData(recorded);
 					const size = measure(encoded);
 					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
 					return { ok: true, value: encoded } satisfies IWireEnvelope;
@@ -427,6 +523,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	});
 	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
 	cm.on('shell:logout', () => {
+		epoch++;
 		for (const st of realms.values()) st.ledger.clear();
 	});
 
@@ -455,9 +552,14 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				inflight: 0,
 				prefKeys: new Set(),
 				loggedDrops: new Set(),
+				detached: false,
 				detachRouter: () => {},
 			};
-			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st), admit: (lane, value) => admitValue(st.gate, lane, value) });
+			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st), admit: (lane, value) => {
+					if (closing > 0) throw deny('capability', lane);
+					return admitValue(st.gate, lane, value);
+				},
+			});
 			realms.set(realmId, st);
 			return realmId;
 		},
@@ -466,51 +568,33 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const st = realms.get(realmId);
 			if (!st) return;
 			realms.delete(realmId);
+			st.detached = true;
 			st.detachRouter();
+			// Best effort: the frame is gone, so nothing waits for this.
+			const tally = { failed: 0 };
+			void Promise.allSettled(teardownRealm(st, tally)).then(() => {
+				if (tally.failed > 0) opts.log('warn', `[isolation] detach: ${tally.failed} terminate request(s) failed`);
+			});
 			st.ledger.clear();
 		},
 
 		async teardownAll(timeoutMs: number): Promise<void> {
-			let failed = 0;
-			const work: Promise<unknown>[] = [];
-			const send = (command: string, args: Record<string, unknown>): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, Math.min(timeoutMs, DAP_TIMEOUT_MAX_MS)) as Promise<DAPMessage>);
-			for (const st of realms.values()) {
-				for (const run of st.ledger.runs()) {
-					work.push(
-						send('terminate', { token: run.token }).then(
-							(r) => {
-								if (r?.success === false) failed++;
-							},
-							() => {
-								failed++;
-							}
-						)
-					);
-					const counts = st.ledger.monitors.get(run.handle);
-					if (counts) {
-						const left = new Map(counts);
-						while (left.size > 0) {
-							const types = [...left.keys()];
-							work.push(
-								Promise.resolve()
-									.then(() => client().removeMonitor({ token: run.token }, types))
-									.catch(() => undefined)
-							);
-							for (const t of types) {
-								const n = left.get(t)! - 1;
-								if (n > 0) left.set(t, n);
-								else left.delete(t);
-							}
-						}
-					}
-				}
-				for (const fs of st.ledger.fsHandles()) work.push(send('rrext_store', { subcommand: 'fs_close', handle: fs.handle, mode: fs.mode }).catch(() => undefined));
+			// New requests are refused while this runs, and answers to requests
+			// started before it are terminated instead of recorded (epoch).
+			closing++;
+			epoch++;
+			try {
+				const tally = { failed: 0 };
+				const work: Promise<unknown>[] = [];
+				for (const st of realms.values()) work.push(...teardownRealm(st, tally));
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				const timedOut = await Promise.race([Promise.allSettled(work).then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
+				if (timer !== undefined) clearTimeout(timer);
+				if (tally.failed > 0 || timedOut) opts.log('warn', `[isolation] teardown: ${tally.failed} terminate request(s) failed${timedOut ? '; timed out' : ''}`);
+				for (const st of realms.values()) st.ledger.clear();
+			} finally {
+				closing--;
 			}
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			const timedOut = await Promise.race([Promise.allSettled(work).then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
-			if (timer !== undefined) clearTimeout(timer);
-			if (failed > 0 || timedOut) opts.log('warn', `[isolation] teardown: ${failed} terminate request(s) failed${timedOut ? '; timed out' : ''}`);
-			for (const st of realms.values()) st.ledger.clear();
 		},
 	};
 }
