@@ -1350,6 +1350,36 @@ class TestFormatEvaluation:
         assert result['passed'] is True
 
 
+class TestFormatCheckersShareOneListDefinition:
+    """``prose`` and ``list`` must agree on what a list line is and where list-shaped starts.
+
+    The two checkers used to carry separate copies of the list-line regex and
+    disagreed at exactly half list lines (``prose`` penalised at > 0.5, ``list``
+    accepted at >= 0.5), so a half-list output was both acceptable prose and a
+    well-formed list.
+    """
+
+    HALF_LIST = 'Intro sentence here.\n- first item\n- second item\nClosing sentence.'
+
+    def test_half_list_output_is_list_shaped_for_both_checkers(self):
+        from eval_cobalt.evaluators.format_check import _check_list_format, _check_prose_format
+
+        listed = _check_list_format(self.HALF_LIST)
+        prose = _check_prose_format(self.HALF_LIST)
+        assert listed['score'] == 0.7
+        assert prose['score'] == 0.7
+        assert '2/4 lines appear to be list items' in prose['reasoning']
+
+    def test_both_checkers_use_the_same_list_line_pattern(self):
+        from eval_cobalt.evaluators import format_check
+
+        text = '* star\n• bullet\n3) paren\n4. dot\nplain line'
+        listed_lines, ratio = format_check._list_line_ratio([ln for ln in text.split('\n') if ln.strip()])
+        assert (listed_lines, ratio) == (4, 0.8)
+        assert format_check._check_list_format(text)['reasoning'].startswith('4/5')
+        assert '4/5 lines appear to be list items' in format_check._check_prose_format(text)['reasoning']
+
+
 class TestValidEvalTypesArePinnedToTheSchema:
     """_VALID_EVAL_TYPES and services.json preconfig.profiles must not drift.
 

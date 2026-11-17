@@ -33,6 +33,32 @@ import re
 
 from . import clamp_threshold
 
+# What both format checkers count as a list line. One definition: ``prose``
+# penalises these and ``list`` rewards them, so the two must never disagree
+# about which lines they are.
+_LIST_LINE_RE = re.compile(r'^\s*[-*•]\s|^\s*\d+[.)]\s')
+
+# The fraction of list lines at which an output counts as list-shaped. One
+# boundary for both checkers: at exactly this ratio ``list`` accepts the output
+# and ``prose`` penalises it, so no output is both acceptable prose and a
+# well-formed list.
+_LIST_SHAPED_RATIO = 0.5
+
+
+def _list_line_ratio(non_empty_lines: list[str]) -> tuple[int, float]:
+    """Return the count and the fraction of lines that look like list items.
+
+    Args:
+        non_empty_lines: The output's lines with blank ones already removed;
+            must be non-empty (both callers return early when it is not).
+
+    Returns:
+        A ``(list_lines, ratio)`` pair; ``ratio`` is ``list_lines`` over the
+        number of lines given.
+    """
+    list_lines = sum(1 for line in non_empty_lines if _LIST_LINE_RE.match(line))
+    return list_lines, list_lines / len(non_empty_lines)
+
 
 def _check_prose_format(output: str) -> dict:
     """Check if output follows prose format (continuous sentences).
@@ -51,9 +77,7 @@ def _check_prose_format(output: str) -> dict:
 
     has_punctuation = bool(re.search(r'[.!?]', output))
 
-    list_pattern = re.compile(r'^\s*[-*•]\s|^\s*\d+[.)]\s')
-    list_lines = sum(1 for line in non_empty_lines if list_pattern.match(line))
-    list_ratio = list_lines / len(non_empty_lines) if non_empty_lines else 0
+    list_lines, list_ratio = _list_line_ratio(non_empty_lines)
 
     has_code_blocks = '```' in output
 
@@ -64,7 +88,7 @@ def _check_prose_format(output: str) -> dict:
         score -= 0.3
         reasons.append('Missing sentence-ending punctuation')
 
-    if list_ratio > 0.5:
+    if list_ratio >= _LIST_SHAPED_RATIO:
         score -= 0.3
         reasons.append(f'{list_lines}/{len(non_empty_lines)} lines appear to be list items')
 
@@ -93,11 +117,9 @@ def _check_list_format(output: str) -> dict:
     if not non_empty_lines:
         return {'score': 0.0, 'reasoning': 'Output is empty.'}
 
-    list_pattern = re.compile(r'^\s*[-*•]\s|^\s*\d+[.)]\s')
-    list_lines = sum(1 for line in non_empty_lines if list_pattern.match(line))
-    list_ratio = list_lines / len(non_empty_lines) if non_empty_lines else 0
+    list_lines, list_ratio = _list_line_ratio(non_empty_lines)
 
-    if list_ratio >= 0.5:
+    if list_ratio >= _LIST_SHAPED_RATIO:
         score = min(1.0, list_ratio + 0.2)
         reasoning = f'{list_lines}/{len(non_empty_lines)} lines are list items'
     else:
