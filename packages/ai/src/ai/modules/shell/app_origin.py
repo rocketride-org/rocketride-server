@@ -634,6 +634,23 @@ async def public_version_dirs(app_id: str) -> dict:
     return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
 
 
+PUBLIC_LOOKUP_LIMIT = 120  # registry walks per client address per minute
+_lookup_rate_cache: dict = {}
+
+
+def public_lookup_ok(app_id: str, client: str) -> bool:
+    """
+    Whether an anonymous ``/_p`` request for ``app_id`` may proceed.
+
+    A known answer (cached) always may; a registry walk for an id not cached
+    yet counts against the client's budget (120 a minute), so ids nobody
+    published cannot drive unbounded lookups.
+    """
+    if _cached(_entitlement_cache, ('public', app_id)) is not None:
+        return True
+    return _rate_ok(_lookup_rate_cache, client, PUBLIC_LOOKUP_LIMIT)
+
+
 async def entitlement_ok(user_id: str, org_id: str, app_id: str, version: int) -> bool:
     """
     Whether a frame token of ``(user_id, org_id)`` may still serve ``app_id`` v``version``.

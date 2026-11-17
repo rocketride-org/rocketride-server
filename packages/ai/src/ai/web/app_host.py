@@ -39,9 +39,13 @@ App-host dispatch (#1022, design section 5).
 App-host routes:
     GET /_rr/frame.html               — the guest frame, shell origins injected as a meta tag
     GET /_rr/<guest>                  — the guest bundle named by runtime.json (immutable)
-    GET /_rr/clear                    — Clear-Site-Data: "storage" (loaded on logout)
+    GET /_rr/clear                    — Clear-Site-Data: "storage" (a same-site navigation only, on logout)
     GET /_t/<token>/v<N>/<file>       — one version's dist behind a frame token (private, no-store)
-    GET /_p/<appId>/v<N>/<file>       — a public ready version's dist (anonymous)
+    GET /_p/<appId>/v<N>/<file>       — a public ready version's dist (anonymous; registry
+                                        walks are budgeted per client)
+
+HTML and SVG from a dist get ``frame-ancestors 'none'``: frame.html is the
+only framable document on an app host.
 
 The host comes from ``Host`` (lowercased, one trailing dot stripped, port
 compared with the template), or with ``RR_APP_HOST_SOURCE=edge-header`` from
@@ -60,9 +64,11 @@ from starlette.responses import Response
 from ai.modules.shell.app_origin import (
     FrameTokenError,
     IsolationConfig,
+    client_ip,
     current_config,
     guest_dir,
     label_of,
+    public_lookup_ok,
     public_version_dirs,
     read_runtime_marker,
     token_version_dirs,
@@ -195,19 +201,31 @@ class AppHostMiddleware:
             return _not_found()
         parts = path.split('/')[1:]
         if parts[:1] == ['_rr'] and len(parts) == 2:
-            return self._serve_rr(parts[1])
+            return self._serve_rr(parts[1], headers)
         if parts[:1] in (['_t'], ['_p']) and len(parts) >= 4:
             version = _VERSION.fullmatch(parts[2])
             rest = parts[3:]
             if version and all(seg and seg not in ('.', '..') and '\\' not in seg and ':' not in seg for seg in rest):
                 if parts[0] == '_t':
                     return await self._serve_token(parts[1], int(version.group(1)), rest, label)
+                peer = (scope.get('client') or ('',))[0] or ''
+                if not public_lookup_ok(parts[1], client_ip(headers, peer, self.config)):
+                    return Response('Too many requests', status_code=429, media_type='text/plain')
                 return await self._serve_public(parts[1], int(version.group(1)), rest, label)
         return _not_found()
 
-    def _serve_rr(self, name: str) -> Response:
+    def _serve_rr(self, name: str, headers: Headers) -> Response:
         """``/_rr/frame.html``, ``/_rr/<guest>`` and ``/_rr/clear``."""
         if name == 'clear':
+            # Only a same-site navigation wipes the origin's storage (the guest
+            # navigates its own frame here on logout); another site loading it
+            # as a frame or subresource gets the plain 404. No fetch metadata
+            # at all fails closed.
+            same_site = headers.get('sec-fetch-site') in ('same-origin', 'same-site', 'none')
+            navigation = headers.get('sec-fetch-dest') in ('document', 'iframe')
+            foreign = 'origin' in headers and headers['origin'] not in self._own_origins(headers)
+            if not (same_site and navigation) or foreign:
+                return _not_found()
             return Response(b'', headers={'Clear-Site-Data': '"storage"', 'Cache-Control': 'no-store'})
         try:
             marker = read_runtime_marker()
@@ -232,6 +250,11 @@ class AppHostMiddleware:
                 'Content-Security-Policy': f'{_CSP}; frame-ancestors {origins}',
             },
         )
+
+    def _own_origins(self, headers: Headers) -> tuple:
+        """The origin this app host answers as (the request's own label under the template)."""
+        _, label = self._classify(headers)
+        return (self.config.origin_template.replace('{label}', label),) if label else ()
 
     async def _serve_token(self, token: str, version: int, rest: list, label: str) -> Response:
         """``/_t/<token>/v<N>/<file>``: the token's own app and version, on its own host, while entitled."""
@@ -263,4 +286,9 @@ async def _read_dist(dist_dir: Optional[str], rest: list, cache_control: str) ->
     except Exception:
         return _not_found()
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(data, media_type=media_type, headers={'Cache-Control': cache_control})
+    headers = {'Cache-Control': cache_control}
+    if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
+        # A document from a dist is never framed by anyone: the guest frame
+        # (frame.html) is the only framable page on an app host.
+        headers['Content-Security-Policy'] = f"{_CSP}; frame-ancestors 'none'"
+    return Response(data, media_type=media_type, headers=headers)

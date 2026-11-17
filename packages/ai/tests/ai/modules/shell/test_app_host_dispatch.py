@@ -348,12 +348,77 @@ def test_h8_shell_routes_are_404_on_an_app_host(method, path, isolation_env):
 # ---------------------------------------------------------------------------
 
 
-def test_h9_clear_sends_clear_site_data(isolation_env):
-    """T16: ``/_rr/clear`` empties the app origin's storage (the shell loads it on logout)."""
-    resp = _client(isolation_env).get('/_rr/clear', headers={'host': HOST})
+SAME_ORIGIN_FRAME = {'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate'}
+
+
+@pytest.mark.parametrize(
+    'fetch',
+    [
+        SAME_ORIGIN_FRAME,
+        {'sec-fetch-site': 'same-site', 'sec-fetch-dest': 'document'},
+        {'sec-fetch-site': 'none', 'sec-fetch-dest': 'document'},  # typed into the address bar
+    ],
+)
+def test_h9_clear_sends_clear_site_data(fetch, isolation_env):
+    """T16: ``/_rr/clear`` empties the app origin's storage on a same-site navigation (the guest navigates to it on logout)."""
+    resp = _client(isolation_env).get('/_rr/clear', headers={'host': HOST, **fetch})
     assert resp.status_code == 200
     assert resp.headers['clear-site-data'] == '"storage"'
     assert resp.headers['cache-control'] == 'no-store'
+
+
+@pytest.mark.parametrize(
+    'fetch',
+    [
+        {},  # no fetch metadata: fail closed
+        {'sec-fetch-site': 'cross-site', 'sec-fetch-dest': 'iframe'},  # another site frames it
+        {'sec-fetch-site': 'cross-site', 'sec-fetch-dest': 'document'},
+        {'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'image'},  # a subresource, not a navigation
+        {'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'script'},
+        {**SAME_ORIGIN_FRAME, 'origin': 'https://evil.example'},
+    ],
+)
+def test_h9_clear_refuses_cross_site_and_subresource_loads(fetch, isolation_env):
+    """T16 (G4 SEC L3): another site cannot wipe an app's storage by loading ``/_rr/clear``."""
+    resp = _client(isolation_env).get('/_rr/clear', headers={'host': HOST, **fetch})
+    assert resp.status_code == 404
+    assert 'clear-site-data' not in resp.headers
+
+
+def test_public_lookups_are_rate_limited_per_client(served_app, monkeypatch):
+    """T19 (G4 SEC L2): ``/_p`` for ids nobody published costs a registry walk each; a client gets a bounded number."""
+    from ai.account import account
+
+    walks = []
+    real = account.publish_list
+
+    async def counting(*args, **kwargs):
+        walks.append(args)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(account, 'publish_list', counting)
+    statuses = []
+    for i in range(200):
+        app_id = f'acme.random{i}'
+        statuses.append(
+            served_app.get(f'/_p/{app_id}/v1/remoteEntry.js', host=app_host_of(label_for(app_id))).status_code
+        )
+    assert set(statuses[:50]) == {404}
+    assert statuses[-1] == 429
+    assert len(walks) < 200
+    # a published app whose answer is already known keeps serving
+    assert served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js').status_code in (200, 429)
+
+
+def test_html_from_a_dist_cannot_be_framed(served_app):
+    """T19 (G4 NIT): an HTML file of an app's dist (``/_t``, ``/_p``) gets ``frame-ancestors 'none'``; frame.html is the only framable document."""
+    for resp in (
+        served_app.get_bundle(file='index.html'),
+        served_app.get('/_p/acme.thirdparty/v1/index.html'),
+    ):
+        assert resp.status_code == 200
+        assert csp_directives(resp.headers['content-security-policy'])['frame-ancestors'] == ["'none'"]
+    assert 'frame-ancestors' not in csp_directives(served_app.get_bundle().headers['content-security-policy'])
 
 
 # ---------------------------------------------------------------------------
