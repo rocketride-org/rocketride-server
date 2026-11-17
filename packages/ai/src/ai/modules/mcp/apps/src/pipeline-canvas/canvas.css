@@ -39,12 +39,17 @@ body {
 }
 .rr-canvas-meta {
 	display: flex;
+	align-items: baseline;
 	gap: 10px;
 	min-width: 0;
 	font-size: 12px;
 	color: var(--rr-text-secondary);
 }
+.rr-canvas-count {
+	flex: none;
+}
 .rr-canvas-path {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -57,6 +62,10 @@ body {
 	color: var(--rr-text-secondary);
 }
 
+.rr-canvas-empty {
+	color: var(--rr-text-secondary);
+}
+
 .rr-canvas-error {
 	border-left: 3px solid var(--rr-flame);
 }
@@ -65,27 +74,80 @@ body {
 	color: var(--rr-text-secondary);
 }
 
-/* Zoom controls: 32 px touch targets that follow the theme. */
-.rr-canvas .react-flow__controls {
-	box-shadow: none;
+/* The drawing area. Its height is set in px by CanvasApp.tsx. */
+.rr-canvas-frame {
+	position: relative;
+	border-radius: 10px;
+	overflow: hidden;
+	border: 1px solid var(--rr-line);
+	background: var(--rr-bg-default);
+}
+
+/* The builder's node CSS assumes the app's global border-box sizing (MUI's
+   baseline); without it a node header is wider than its node. */
+.rr-canvas-frame,
+.rr-canvas-frame *,
+.rr-canvas-frame *::before,
+.rr-canvas-frame *::after {
+	box-sizing: border-box;
+}
+
+/* Under the drawing: the hint and the view buttons (32 px targets). */
+.rr-canvas-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 6px;
+	min-width: 0;
+}
+.rr-canvas-howto {
+	min-width: 0;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.rr-canvas-tools {
+	display: flex;
+	flex: none;
 	border: 1px solid var(--rr-line-strong);
 	border-radius: 8px;
 	overflow: hidden;
 }
-.rr-canvas .react-flow__controls-button {
+.rr-canvas-tool {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	width: 32px;
 	height: 32px;
-	background: var(--rr-bg-paper);
+	padding: 0;
+	border: none;
+	border-right: 1px solid var(--rr-line);
+	background: transparent;
 	color: var(--rr-text-primary);
-	border-bottom: 1px solid var(--rr-line);
+	cursor: pointer;
 }
-.rr-canvas .react-flow__controls-button:hover {
-	background: var(--rr-bg-surface-alt);
+.rr-canvas-tool:last-child {
+	border-right: none;
 }
-.rr-canvas .react-flow__controls-button svg {
+.rr-canvas-tool:hover {
+	background: var(--rr-inset);
+}
+.rr-canvas-tool:focus-visible {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: -2px;
+}
+.rr-canvas-tool svg {
+	width: 16px;
+	height: 16px;
 	fill: currentColor;
-	max-width: 14px;
-	max-height: 14px;
+}
+
+/* Full screen: the page is the canvas. */
+.rr-canvas-full {
+	margin: 0;
 }
 
 /* Read only: no handle invites a connection. */

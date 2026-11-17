@@ -19,7 +19,7 @@ import { INodeType } from '@app-shared/tools/pipelines/panels/design/canvas/type
 import type { INode, IProject, IProjectComponent, IService, IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 import { IServiceCapabilities } from 'shell';
 
-import { layoutLayers, type LayoutSize } from './layout';
+import { layoutPipeline, type LayoutSize } from './layout';
 
 /** The `_meta` key the tool puts the drawing payload under. */
 export const CANVAS_META_KEY = 'rocketride/canvas';
@@ -29,6 +29,9 @@ export const UNKNOWN_ICON = 'rocketride-unknown-provider';
 
 /** Size used to lay out a node before the browser has measured it. */
 export const ESTIMATED_NODE_SIZE: LayoutSize = { width: 180, height: 90 };
+
+/** Size of a saved group with no recorded size. */
+export const DEFAULT_GROUP_SIZE: LayoutSize = { width: 320, height: 200 };
 
 export interface SummaryNode {
 	id: string;
@@ -208,19 +211,38 @@ export function parentsFirst(nodes: INode[]): INode[] {
 }
 
 /**
- * Places every node with `layoutLayers` when the saved pipeline has no
+ * Places every node with `layoutPipeline` when the saved pipeline has no
  * positions at all. A pipeline with any saved position is drawn as saved.
  * Without positions there is no saved grouping either, so a child is drawn
  * at the top level instead of inside a group at 0,0.
  */
 export function placeNodes(nodes: INode[], edges: Edge[], hadPositions: boolean, sizeOf: (id: string) => LayoutSize = () => ESTIMATED_NODE_SIZE): INode[] {
 	if (hadPositions) return nodes;
-	const positions = layoutLayers(
+	const positions = layoutPipeline(
 		nodes.map((node) => node.id),
-		edges.map((edge) => ({ source: edge.source, target: edge.target })),
+		edges.map((edge) => ({ source: edge.source, target: edge.target, control: !!edge.sourceHandle?.startsWith('invoke-source') })),
 		sizeOf
 	);
 	return nodes.map((node) => ({ ...node, parentId: undefined, position: positions[node.id] ?? { x: 0, y: 0 } }));
+}
+
+/**
+ * React Flow measures each node in the browser. The builder's graph code
+ * presets a size from the file (or 150x36), which would make React Flow
+ * report the nodes as measured before they are. Drop it, except for a group:
+ * a group's box is its saved size, so it becomes the group's width and height.
+ */
+export function sizeForReactFlow(node: INode): INode {
+	const { measured, ...rest } = node;
+	if (node.type !== INodeType.Group) return rest as INode;
+	const width = measured?.width && measured.width > 40 ? measured.width : DEFAULT_GROUP_SIZE.width;
+	const height = measured?.height && measured.height > 40 ? measured.height : DEFAULT_GROUP_SIZE.height;
+	return { ...rest, width, height } as INode;
+}
+
+/** A note with no text would show the builder's "Double-click to add content" prompt, an edit the widget cannot do. */
+function isEmptyNote(node: INode): boolean {
+	return node.type === INodeType.Annotation && !String(node.data.config?.content ?? '').trim();
 }
 
 function anyPosition(components: unknown[] = [], depth = 0): boolean {
@@ -251,10 +273,11 @@ export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown)
 	const pipeline = payload?.pipeline ?? pipelineFromSummary(summary);
 	if (!pipeline.components?.length) return { kind: 'empty', summary };
 
-	const projectNodes = parentsFirst(getNodesFromProject(pipeline) as INode[]);
+	const projectNodes = parentsFirst(getNodesFromProject(pipeline) as INode[]).filter((node) => !isEmptyNote(node));
 	const edges = getEdgesFromNodes(projectNodes).map(readOnly);
 	const hadPositions = anyPosition(pipeline.components as unknown[]);
-	const nodes = placeNodes(projectNodes, edges, hadPositions).map(readOnly);
+	const nodes = placeNodes(projectNodes, edges, hadPositions).map(sizeForReactFlow).map(readOnly);
+	if (!nodes.length) return { kind: 'empty', summary };
 
 	return {
 		kind: 'graph',
@@ -266,4 +289,14 @@ export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown)
 		laidOut: !hadPositions,
 		summaryOnly: !payload,
 	};
+}
+
+/** The file's path inside the workspace (what the builder's file tree shows), else the full path. */
+export function displayPath(path?: string, workspace?: string): string {
+	if (!path) return '';
+	for (const root of [workspace, '.projects'].filter(Boolean) as string[]) {
+		if (path.startsWith(`${root}/`)) return path.slice(root.length + 1);
+	}
+	const team = /^@\/Team\/=[^/]+\/\.projects\//.exec(path);
+	return team ? path.slice(team[0].length) : path;
 }

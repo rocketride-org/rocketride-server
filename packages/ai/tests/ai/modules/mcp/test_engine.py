@@ -890,6 +890,11 @@ def _async_value(value):
             {'devTeam': 'team_A1', 'organization': {'teams': [{'id': 'team_A1'}, {'id': 'team_B'}]}},
             '@/Team/=team_A1/.projects',
         ),
+        # The open source engine's sign-in result (account/oss): the single 'local' team.
+        (
+            {'devTeam': 'local', 'organization': {'id': 'local', 'teams': [{'id': 'local', 'name': 'Development'}]}},
+            '@/Team/=local/.projects',
+        ),
         # No development team.
         ({'organization': {'teams': [{'id': 'team_A1'}]}}, '.projects'),
         ({'devTeam': '', 'organization': {'teams': [{'id': ''}]}}, '.projects'),

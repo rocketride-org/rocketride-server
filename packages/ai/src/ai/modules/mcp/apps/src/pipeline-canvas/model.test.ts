@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, type ToolResultLike, type ViewPipelineSummary } from './model';
+import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, type ToolResultLike, type ViewPipelineSummary } from './model';
 
 const SERVICES = {
 	webhook: { title: 'Webhook', classType: ['source'], lanes: { _source: ['tags'] }, invoke: {}, capabilities: 0, icon: 'webhook.svg' },
@@ -84,9 +84,38 @@ describe('buildCanvasModel', () => {
 		expect(model.laidOut).toBe(true);
 		const spots = new Set(model.nodes.map((n) => `${n.position.x},${n.position.y}`));
 		expect(spots.size).toBe(3);
-		const x = Object.fromEntries(model.nodes.map((n) => [n.id, n.position.x]));
-		expect(x.webhook_1).toBeLessThan(x.agent_1);
-		expect(x.agent_1).toBeLessThan(x.llm_1);
+		const at = Object.fromEntries(model.nodes.map((n) => [n.id, n.position]));
+		// Data flows left to right; the LLM the agent invokes sits under the agent.
+		expect(at.webhook_1.x).toBeLessThan(at.agent_1.x);
+		expect(at.llm_1.x).toBe(at.agent_1.x);
+		expect(at.llm_1.y).toBeGreaterThan(at.agent_1.y);
+	});
+
+	it('drops the preset size React Flow would mistake for a measurement, and sizes a group from its file', () => {
+		const components = [
+			{ id: 'group_1', provider: 'group', config: {}, ui: { nodeType: 'group', position: { x: 0, y: 0 }, measured: { width: 420, height: 220 } } },
+			{ id: 'n1', provider: 'webhook', config: {}, ui: { position: { x: 500, y: 0 }, measured: { width: 150, height: 36 } } },
+		];
+		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
+		if (model.kind !== 'graph') throw new Error(model.kind);
+
+		const [group, node] = model.nodes as unknown as Array<Record<string, unknown>>;
+		expect(group).toMatchObject({ width: 420, height: 220 });
+		expect(group.measured).toBeUndefined();
+		expect(node.measured).toBeUndefined();
+		expect(node.width).toBeUndefined();
+	});
+
+	it('leaves out a note with no text, which would only show an edit prompt', () => {
+		const components = [
+			...COMPONENTS,
+			{ id: 'note_1', provider: 'annotation', config: {}, ui: { nodeType: 'annotation', position: { x: 0, y: 400 } } },
+			{ id: 'note_2', provider: 'annotation', config: { content: 'Keep me' }, ui: { nodeType: 'annotation', position: { x: 300, y: 400 } } },
+		];
+		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
+		if (model.kind !== 'graph') throw new Error(model.kind);
+
+		expect(model.nodes.map((n) => n.id)).toEqual(['webhook_1', 'agent_1', 'llm_1', 'note_2']);
 	});
 
 	it('draws from the summary when the host dropped _meta', () => {
@@ -167,5 +196,16 @@ describe('buildCanvasModel', () => {
 		if (model.kind !== 'graph') throw new Error(model.kind);
 
 		expect(model.summaryOnly).toBe(true);
+	});
+});
+
+describe('displayPath', () => {
+	it('shows the file as the builder lists it: relative to the workspace', () => {
+		expect(displayPath('@/Team/=team_A/.projects/sub/invoices.pipe', '@/Team/=team_A/.projects')).toBe('sub/invoices.pipe');
+		expect(displayPath('.projects/invoices.pipe', '.projects')).toBe('invoices.pipe');
+		// Another team's file, opened by its full path.
+		expect(displayPath('@/Team/=team_B/.projects/shared.pipe', '@/Team/=team_A/.projects')).toBe('shared.pipe');
+		expect(displayPath('odd/path.pipe', '.projects')).toBe('odd/path.pipe');
+		expect(displayPath(undefined, '.projects')).toBe('');
 	});
 });

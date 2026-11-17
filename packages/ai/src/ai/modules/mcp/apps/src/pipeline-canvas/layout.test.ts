@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { LAYER_GAP, NODE_GAP, layoutLayers, type LayoutSize } from './layout';
+import { LAYER_GAP, NODE_GAP, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -97,6 +97,104 @@ describe('layoutLayers', () => {
 		const positions = layoutLayers(ids, [], fixed);
 
 		expect(new Set(ids.map((id) => positions[id].x))).toEqual(new Set([0]));
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+});
+
+describe('layoutPipeline', () => {
+	it('puts what an agent invokes in a row under the agent', () => {
+		const positions = layoutPipeline(
+			['chat', 'agent', 'llm', 'memory', 'tool', 'answers'],
+			[
+				{ source: 'chat', target: 'agent' },
+				{ source: 'agent', target: 'answers' },
+				{ source: 'agent', target: 'llm', control: true },
+				{ source: 'agent', target: 'memory', control: true },
+				{ source: 'agent', target: 'tool', control: true },
+			],
+			fixed
+		);
+
+		const rowY = positions.chat.y + SIZE.height + LAYER_GAP;
+		expect([positions.llm, positions.memory, positions.tool]).toEqual([
+			{ x: positions.agent.x, y: rowY },
+			{ x: positions.agent.x + SIZE.width + NODE_GAP, y: rowY },
+			{ x: positions.agent.x + 2 * (SIZE.width + NODE_GAP), y: rowY },
+		]);
+		expect(positions.answers.x).toBeGreaterThan(positions.agent.x);
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+
+	it('keeps two agents\' rows apart', () => {
+		const ids = ['chat', 'a1', 'a2', 'l1', 't1', 'l2'];
+		const positions = layoutPipeline(
+			ids,
+			[
+				{ source: 'chat', target: 'a1' },
+				{ source: 'chat', target: 'a2' },
+				{ source: 'a1', target: 'l1', control: true },
+				{ source: 'a1', target: 't1', control: true },
+				{ source: 'a2', target: 'l2', control: true },
+			],
+			fixed
+		);
+
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+
+	it('follows an invoked node that invokes another back to the agent', () => {
+		const positions = layoutPipeline(
+			['agent', 'subagent', 'llm'],
+			[
+				{ source: 'agent', target: 'subagent', control: true },
+				{ source: 'subagent', target: 'llm', control: true },
+			],
+			fixed
+		);
+
+		expect(positions.subagent.y).toBe(positions.llm.y);
+		expect(positions.subagent.x).toBe(positions.agent.x);
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+
+	it('treats a node with a data input as part of the data flow even when it is invoked', () => {
+		const positions = layoutPipeline(
+			['a', 'b'],
+			[
+				{ source: 'a', target: 'b' },
+				{ source: 'a', target: 'b', control: true },
+			],
+			fixed
+		);
+
+		expect(positions.b).toEqual({ x: SIZE.width + LAYER_GAP, y: 0 });
+	});
+
+	it('keeps an invoked node that sends data in the data flow, after its invoker', () => {
+		// The shape of a pipeline tool: the agent invokes it, and it feeds a sub-flow.
+		const positions = layoutPipeline(
+			['chat', 'agent', 'llm', 'pipe_tool', 'branch', 'answers'],
+			[
+				{ source: 'chat', target: 'agent' },
+				{ source: 'agent', target: 'llm', control: true },
+				{ source: 'agent', target: 'pipe_tool', control: true },
+				{ source: 'pipe_tool', target: 'branch' },
+				{ source: 'branch', target: 'answers' },
+			],
+			fixed
+		);
+
+		expect(positions.pipe_tool.x).toBeGreaterThan(positions.agent.x);
+		expect(positions.branch.x).toBeGreaterThan(positions.pipe_tool.x);
+		expect(positions.llm.x).toBe(positions.agent.x);
+		expect(positions.llm.y).toBeGreaterThan(positions.agent.y);
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+
+	it('lays out a graph of invoked nodes only', () => {
+		const positions = layoutPipeline(['x', 'y'], [{ source: 'x', target: 'y', control: true }, { source: 'y', target: 'x', control: true }], fixed);
+
+		expect(Object.keys(positions).sort()).toEqual(['x', 'y']);
 		expect(overlaps(positions, fixed)).toBe(false);
 	});
 });
