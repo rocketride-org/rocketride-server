@@ -569,3 +569,20 @@ def test_server_installs_the_middleware_only_when_not_off(monkeypatch, isolation
     isolation_env.set(RR_APP_ISOLATION=None)
     off = WebServer()
     assert all(m.cls is not middleware_cls for m in off.app.user_middleware)
+
+
+def test_app_host_scripts_keep_their_type_when_the_os_maps_js_differently(served_app, monkeypatch):
+    """Windows can map '.js' to text/plain, which a nosniff browser refuses to run; the app host pins the type like the shell."""
+    import mimetypes
+
+    real_guess = mimetypes.guess_type
+
+    def registry_guess(url, strict=True):
+        if str(url).lower().endswith(('.js', '.mjs', '.css')):
+            return ('text/plain', None)
+        return real_guess(url, strict)
+
+    monkeypatch.setattr(mimetypes, 'guess_type', registry_guess)
+    for resp in (served_app.get_bundle(), served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js')):
+        assert resp.status_code == 200
+        assert resp.headers['content-type'].startswith('text/javascript')

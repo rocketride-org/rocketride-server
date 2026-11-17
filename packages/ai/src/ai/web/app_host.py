@@ -54,7 +54,6 @@ compared with the template), or with ``RR_APP_HOST_SOURCE=edge-header`` from
 
 import hmac
 import html
-import mimetypes
 import re
 from typing import Optional
 
@@ -286,7 +285,11 @@ async def _read_dist(dist_dir: Optional[str], rest: list, cache_control: str) ->
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         return _not_found()
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
+    from ai.modules.shell.shell import _media_type
+
+    # The pinned table: on Windows the registry can map .js to text/plain,
+    # which a nosniff browser then refuses to run.
+    media_type = _media_type(rest[-1]) or 'application/octet-stream'
     headers = {'Cache-Control': cache_control}
     if media_type in ('text/html', 'application/xhtml+xml', 'image/svg+xml'):
         # A document from a dist is never framed by anyone: the guest frame
