@@ -23,14 +23,20 @@
 # =============================================================================
 
 """
-How a hosted engine started this task: the two flags on its command line.
+How the engine started this task: the flags on its command line.
 
 ``--hosted``: the task belongs to a hosted engine. Its rules hold wherever the
-task runs: a credit check before every pipe, no torch install or import.
+task runs: a credit check before every pipe.
 
 ``--shared-host``: the task runs on the engine's own host (spawn), so the
 guards for a shared machine apply: the sandbox keeps to its default modules,
 ``tool_python`` ignores ``allowed_modules``, stdio MCP is refused.
+
+``--modelserver=<address>``: GPU inference is delegated to a model server, so
+this task neither installs nor imports torch and the other tensor runtimes
+(``ai.common.models.gpu_guard``, ``ai/common/torch/_depends_hooks.py``). This
+is the only flag that keeps torch off a task; a hosted engine without a model
+server loads it itself.
 
 The engine passes them as it starts the task (task_engine). A pipeline's own
 args can add one, which only makes the task stricter. Standard library only: nodes and ``_depends_hooks.py`` files import this,
@@ -38,9 +44,11 @@ and importing ``ai`` or ``ai.common`` would run ``depends()``.
 """
 
 import sys
+from typing import Optional
 
 HOSTED_FLAG = '--hosted'
 SHARED_HOST_FLAG = '--shared-host'
+MODEL_SERVER_FLAG = '--modelserver='
 
 
 def is_hosted() -> bool:
@@ -51,3 +59,22 @@ def is_hosted() -> bool:
 def is_shared_host() -> bool:
     """True when this task shares its host with the engine."""
     return SHARED_HOST_FLAG in sys.argv
+
+
+def model_server_address() -> Optional[str]:
+    """
+    The address after ``--modelserver=``, exactly as given; None when absent or empty.
+
+    The first occurrence wins. No parsing and no protocol prefixing: the client
+    SDK normalises the URI (ws vs wss, default ports).
+    """
+    for arg in sys.argv:
+        if arg.startswith(MODEL_SERVER_FLAG):
+            value = arg[len(MODEL_SERVER_FLAG) :]
+            return value if value else None
+    return None
+
+
+def delegates_to_model_server() -> bool:
+    """True when this task runs its GPU inference on a model server (``--modelserver=<address>``)."""
+    return model_server_address() is not None

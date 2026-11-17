@@ -35,11 +35,11 @@ import contextlib
 import threading
 import hashlib
 import json
-import sys
 import asyncio
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import hosting
 from rocketride import RocketRideClient
 from ai import node as ai_node
 
@@ -239,11 +239,7 @@ def get_model_server_address() -> Optional[str]:
     Returns:
         Address string if --modelserver is set, None otherwise.
     """
-    for arg in sys.argv:
-        if arg.startswith('--modelserver='):
-            value = arg.split('=', 1)[1]
-            return value if value else None
-    return None
+    return hosting.model_server_address()
 
 
 def is_model_server_enabled() -> bool:
