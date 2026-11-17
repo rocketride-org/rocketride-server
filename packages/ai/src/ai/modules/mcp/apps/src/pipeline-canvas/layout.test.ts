@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { LAYER_GAP, NODE_GAP, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
+import { BAND_GAP, LAYER_GAP, NODE_GAP, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -195,6 +195,61 @@ describe('layoutPipeline', () => {
 		const positions = layoutPipeline(['x', 'y'], [{ source: 'x', target: 'y', control: true }, { source: 'y', target: 'x', control: true }], fixed);
 
 		expect(Object.keys(positions).sort()).toEqual(['x', 'y']);
+		expect(overlaps(positions, fixed)).toBe(false);
+	});
+});
+
+describe('layoutPipeline in a frame', () => {
+	const chain = (n: number) => Array.from({ length: n }, (_, i) => `n${i}`);
+	const links = (ids: string[]) => ids.slice(1).map((id, i) => ({ source: ids[i], target: id }));
+	const zoomIn = (positions: Record<string, { x: number; y: number }>, frame: LayoutSize) => {
+		const w = Math.max(...Object.values(positions).map((p) => p.x)) + SIZE.width;
+		const h = Math.max(...Object.values(positions).map((p) => p.y)) + SIZE.height;
+		return Math.min(frame.width / w, frame.height / h);
+	};
+
+	it('wraps a long flow into bands so it is drawn larger', () => {
+		const ids = chain(12);
+		const frame = { width: 360, height: 560 };
+		const one = layoutPipeline(ids, links(ids), fixed);
+		const wrapped = layoutPipeline(ids, links(ids), fixed, frame);
+
+		expect(zoomIn(wrapped, frame)).toBeGreaterThan(zoomIn(one, frame) * 2);
+		expect(new Set(Object.values(wrapped).map((p) => p.y)).size).toBeGreaterThan(1);
+		expect(overlaps(wrapped, fixed)).toBe(false);
+	});
+
+	it('keeps a short flow in one band', () => {
+		const ids = chain(3);
+		const positions = layoutPipeline(ids, links(ids), fixed, { width: 740, height: 420 });
+
+		expect(new Set(Object.values(positions).map((p) => p.y))).toEqual(new Set([0]));
+	});
+
+	it('puts bands one under the other with the band gap', () => {
+		const ids = chain(6);
+		const positions = layoutPipeline(ids, links(ids), fixed, { width: 300, height: 2000 });
+		const rows = [...new Set(Object.values(positions).map((p) => p.y))].sort((a, b) => a - b);
+
+		expect(rows.length).toBeGreaterThan(1);
+		expect(rows[1] - rows[0]).toBe(SIZE.height + BAND_GAP);
+	});
+
+	it('keeps an agent\'s row under its own band', () => {
+		const ids = ['chat', 'agent', 'llm', 'a2', 'a3', 'a4', 'a5', 'a6'];
+		const edges = [
+			{ source: 'chat', target: 'agent' },
+			{ source: 'agent', target: 'a2' },
+			{ source: 'a2', target: 'a3' },
+			{ source: 'a3', target: 'a4' },
+			{ source: 'a4', target: 'a5' },
+			{ source: 'a5', target: 'a6' },
+			{ source: 'agent', target: 'llm', control: true },
+		];
+		const positions = layoutPipeline(ids, edges, fixed, { width: 360, height: 900 });
+
+		expect(positions.llm.x).toBe(positions.agent.x);
+		expect(positions.llm.y).toBe(positions.agent.y + SIZE.height + LAYER_GAP);
 		expect(overlaps(positions, fixed)).toBe(false);
 	});
 });
