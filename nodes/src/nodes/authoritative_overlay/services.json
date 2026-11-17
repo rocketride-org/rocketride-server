@@ -74,5 +74,17 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "basic",
+		"profiles": {
+			"basic": {
+				"title": "Basic: US SEC (EDGAR)",
+				"regulator_type": "sec",
+				"cik": "320193"
+			}
+		},
+		"dropped": []
+	}
 }

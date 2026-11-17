@@ -186,5 +186,32 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "cloud",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own Milvus server",
+				"host": "localhost",
+				"port": 19530,
+				"collection": "ROCKETRIDE",
+				"serverName": "milvus"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Milvus cloud server",
+				"host": "",
+				"port": 443,
+				"apikey": "",
+				"collection": "ROCKETRIDE",
+				"serverName": "milvus"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

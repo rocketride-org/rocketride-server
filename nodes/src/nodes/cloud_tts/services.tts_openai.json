@@ -146,5 +146,30 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "gpt-4o-mini-tts",
+		"profiles": {
+			"gpt-4o-mini-tts": {
+				"title": "GPT-4o mini TTS - Fast, steerable, multilingual",
+				"model": "gpt-4o-mini-tts",
+				"voice": "alloy",
+				"apikey": ""
+			},
+			"tts-1": {
+				"title": "TTS-1          - Low latency, standard quality",
+				"model": "tts-1",
+				"voice": "alloy",
+				"apikey": ""
+			},
+			"tts-1-hd": {
+				"title": "TTS-1 HD       - Higher quality, slower",
+				"model": "tts-1-hd",
+				"voice": "alloy",
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

@@ -152,5 +152,15 @@
 		"rocketridegraph.allow_execute",
 		"rocketridegraph.scope",
 		"rocketridegraph.target"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"graph": "rocketride"
+			}
+		},
+		"dropped": []
+	}
 }

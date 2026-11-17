@@ -196,5 +196,26 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "n8n",
+				"baseUrl": "http://localhost:5678",
+				"apiKey": "",
+				"workflow": "",
+				"mode": "sync",
+				"payloadMode": "simple",
+				"syncTimeout": 30,
+				"asyncTimeout": 120,
+				"webhookAuth": "none",
+				"webhookToken": "",
+				"verifyTls": true,
+				"readOnly": true
+			}
+		},
+		"dropped": []
 	}
 }

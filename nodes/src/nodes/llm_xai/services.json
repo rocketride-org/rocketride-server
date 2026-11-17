@@ -255,5 +255,211 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "grok-3",
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 131072
+			},
+			"grok-4-1-fast-reasoning": {
+				"title": "Grok 4.1 Fast",
+				"model": "grok-4-1-fast-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096
+			},
+			"grok-4-1-fast-non-reasoning": {
+				"title": "Grok 4.1 Fast Non-Reasoning",
+				"model": "grok-4-1-fast-non-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096
+			},
+			"grok-code-fast-1": {
+				"title": "Grok Code Fast 1",
+				"model": "grok-code-fast-1",
+				"modelSource": "manual",
+				"modelTotalTokens": 256000,
+				"modelOutputTokens": 10000
+			},
+			"grok-4-fast-reasoning": {
+				"title": "Grok 4 Fast",
+				"model": "grok-4-fast-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096
+			},
+			"grok-4-fast-non-reasoning": {
+				"title": "Grok 4 Fast Non-Reasoning",
+				"model": "grok-4-fast-non-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 4096
+			},
+			"grok-4": {
+				"title": "Grok 4",
+				"model": "grok-4-0709",
+				"modelSource": "manual",
+				"modelTotalTokens": 256000,
+				"modelOutputTokens": 256000
+			},
+			"grok-3-mini": {
+				"title": "Grok 3 Mini",
+				"model": "grok-3-mini",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072
+			},
+			"grok-3": {
+				"title": "Grok 3",
+				"model": "grok-3",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072
+			},
+			"grok-3-beta": {
+				"title": "xAI: Grok 3 Beta",
+				"model": "grok-3-beta",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"grok-3-mini-beta": {
+				"title": "xAI: Grok 3 Mini Beta",
+				"model": "grok-3-mini-beta",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"grok-4-1-fast": {
+				"title": "xAI: Grok 4.1 Fast",
+				"model": "grok-4.1-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 30000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"grok-4-20": {
+				"title": "xAI: Grok 4.20",
+				"model": "grok-4.20",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 1800000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"grok-4-20-multi-agent": {
+				"title": "xAI: Grok 4.20 Multi-Agent",
+				"model": "grok-4.20-multi-agent",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 1800000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"grok-4-fast": {
+				"title": "xAI: Grok 4 Fast",
+				"model": "grok-4-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 2000000,
+				"modelOutputTokens": 30000,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"grok-4-3": {
+				"title": "xAI: Grok 4.3",
+				"model": "grok-4.3",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 900000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-5": {
+				"title": "xAI: Grok 4.5",
+				"model": "grok-4.5",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000,
+				"modelOutputTokens": 450000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-build-0-1": {
+				"title": "xAI: Grok Build 0.1",
+				"model": "grok-build-0.1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 256000,
+				"modelOutputTokens": 230400,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-latest": {
+				"title": "xAI: Grok Latest",
+				"model": "grok-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000,
+				"modelOutputTokens": 450000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-3-batch": {
+				"title": "SpaceXAI: Grok 4.3 (batch)",
+				"model": "grok-4.3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 900000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the xAI API serves no model with this ID. Please use 'grok-4.3' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-6": {
+				"title": "SpaceXAI: Grok 4.6",
+				"model": "grok-4.6",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000,
+				"modelOutputTokens": 450000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"migration",
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

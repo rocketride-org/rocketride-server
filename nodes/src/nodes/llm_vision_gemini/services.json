@@ -178,5 +178,42 @@
 		"llm_vision_gemini.apikey",
 		"llm_vision_gemini.systemPrompt",
 		"llm_vision_gemini.prompt"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "gemini-2_5-flash",
+		"profiles": {
+			"gemini-2_5-flash": {
+				"title": "Gemini 2.5 Flash - Fast Vision (1M tokens)",
+				"model": "models/gemini-2.5-flash",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2_5-pro": {
+				"title": "Gemini 2.5 Pro - High Quality Vision (1M tokens)",
+				"model": "models/gemini-2.5-pro",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-2_5-flash-lite": {
+				"title": "Gemini 2.5 Flash Lite - Fastest & Cheapest (1M tokens)",
+				"model": "models/gemini-2.5-flash-lite",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-3_1-pro-preview": {
+				"title": "Gemini 3.1 Pro - Latest Vision (1M tokens)",
+				"model": "models/gemini-3.1-pro-preview",
+				"modelTotalTokens": 1048576,
+				"apikey": ""
+			},
+			"gemini-3_1-flash-image-preview": {
+				"title": "Gemini 3.1 Flash Image Preview (131k tokens)",
+				"model": "models/gemini-3.1-flash-image-preview",
+				"modelTotalTokens": 131072,
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

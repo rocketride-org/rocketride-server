@@ -31,5 +31,23 @@
 			]
 		}
 	},
-	"properties": ["type", "google.authType", "access"]
+	"properties": ["type", "google.authType", "access"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Docs",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

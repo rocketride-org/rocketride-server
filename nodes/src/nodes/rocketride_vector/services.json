@@ -166,5 +166,27 @@
 		"rrvector.serverName",
 		"rrvector.expose_tools",
 		"rrvector.allow_write"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "cloud",
+		"profiles": {
+			"cloud": {
+				"mode": "cloud",
+				"title": "RocketRide cloud",
+				"collection": "rocketride",
+				"score": 0.5,
+				"similarity": "cosine",
+				"hnsw_m": 16,
+				"hnsw_ef_construction": 64,
+				"serverName": "rrvector",
+				"expose_tools": false,
+				"allow_write": false
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

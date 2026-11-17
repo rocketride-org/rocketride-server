@@ -37,5 +37,16 @@
 				"text": "test query"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Notion",
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

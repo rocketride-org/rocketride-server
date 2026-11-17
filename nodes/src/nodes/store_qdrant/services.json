@@ -179,5 +179,32 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "cloud",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own Qdrant server",
+				"host": "localhost",
+				"port": 6333,
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Qdrant cloud server",
+				"host": "",
+				"port": 6333,
+				"apikey": "",
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

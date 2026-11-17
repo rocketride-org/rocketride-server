@@ -81,5 +81,13 @@
 	// Required:
 	//		Defines the fields shown in the node's config panel, in order
 	//
-	"properties": ["laneName"]
+	"properties": ["laneName"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

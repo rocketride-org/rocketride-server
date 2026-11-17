@@ -81,5 +81,20 @@
 		"normalize_facts.default_currency",
 		"normalize_facts.decimal_format",
 		"normalize_facts.label_to_metric"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Deterministic financial fact normalization",
+				"label_field": "label",
+				"value_field": "value",
+				"default_currency": "",
+				"decimal_format": "auto",
+				"label_to_metric": {}
+			}
+		},
+		"dropped": []
+	}
 }

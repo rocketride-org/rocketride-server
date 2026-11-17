@@ -139,5 +139,17 @@
 		"reducto.options",
 		"reducto.advanced_options",
 		"reducto.experimental_options"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"parse_mode": false
+			}
+		},
+		"dropped": [
+			"advanced_documentation"
+		]
+	}
 }

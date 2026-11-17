@@ -142,5 +142,72 @@
 		"schema_validate.category_metric_map",
 		"schema_validate.sign",
 		"schema_validate.require_provenance"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Flag inconsistencies, preserve provenance",
+				"amount_field": "amount",
+				"currency_field": "currency",
+				"metric_field": "metric",
+				"category_field": "category",
+				"category_metric_map": {
+					"revenue": [
+						"revenue",
+						"revenues",
+						"sales",
+						"net sales",
+						"turnover",
+						"income",
+						"net income",
+						"gross profit",
+						"operating income",
+						"earnings",
+						"proceeds",
+						"bookings"
+					],
+					"expense": [
+						"cost",
+						"costs",
+						"expense",
+						"expenses",
+						"cogs",
+						"cost of goods",
+						"cost of revenue",
+						"opex",
+						"operating expense",
+						"depreciation",
+						"amortization",
+						"impairment",
+						"interest expense",
+						"tax",
+						"spend"
+					],
+					"asset": [
+						"asset",
+						"assets",
+						"cash",
+						"receivable",
+						"receivables",
+						"inventory",
+						"goodwill"
+					],
+					"liability": [
+						"liability",
+						"liabilities",
+						"payable",
+						"payables",
+						"debt",
+						"loan",
+						"borrowing"
+					]
+				},
+				"sign": "warning",
+				"require_provenance": "error"
+			}
+		},
+		"dropped": []
+	}
 }

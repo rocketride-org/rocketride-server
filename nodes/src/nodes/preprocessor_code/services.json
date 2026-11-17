@@ -121,5 +121,36 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "auto",
+		"profiles": {
+			"auto": {
+				"language": "auto",
+				"strlen": 512
+			},
+			"c": {
+				"language": "c",
+				"strlen": 512
+			},
+			"cpp": {
+				"language": "cpp",
+				"strlen": 512
+			},
+			"python": {
+				"language": "python",
+				"strlen": 512
+			},
+			"javascript": {
+				"language": "javascript",
+				"strlen": 512
+			},
+			"typescript": {
+				"language": "typescript",
+				"strlen": 512
+			}
+		},
+		"dropped": []
 	}
 }

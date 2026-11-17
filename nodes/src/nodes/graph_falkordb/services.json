@@ -249,5 +249,22 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Manual configuration (host and port)",
+				"mode": "manual",
+				"graph": "agent"
+			},
+			"url": {
+				"title": "FalkorDB URL (connection string)",
+				"mode": "url",
+				"graph": "agent"
+			}
+		},
+		"dropped": []
+	}
 }

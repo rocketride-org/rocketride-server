@@ -134,5 +134,13 @@
 		"rocketridesql.allow_execute",
 		"rocketridesql.scope",
 		"rocketridesql.target"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

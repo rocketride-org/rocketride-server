@@ -71,5 +71,15 @@
 			}
 		}
 	},
-	"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"]
+	"properties": ["type", "filesystem.targetDir", "filesystem.onConflict", "filesystem.emitUrl", "filesystem.urlExpiresIn", "filesystem.pathWhitelist"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
+	}
 }

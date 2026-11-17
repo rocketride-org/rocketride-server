@@ -49,5 +49,16 @@
 			}
 		}
 	},
-	"properties": ["type", "tool_python.serverName", "tool_python.timeout", "tool_python.allowedModules"]
+	"properties": ["type", "tool_python.serverName", "tool_python.timeout", "tool_python.allowedModules"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "python"
+			}
+		},
+		"dropped": []
+	}
 }

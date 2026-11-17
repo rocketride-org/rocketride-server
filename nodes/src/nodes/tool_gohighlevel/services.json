@@ -80,5 +80,20 @@
 			]
 		}
 	},
-	"properties": ["type", "gohighlevel.privateIntegrationToken", "gohighlevel.locationId", "gohighlevel.readOnly", "gohighlevel.toolGroups", "gohighlevel.allowRawRequest"]
+	"properties": ["type", "gohighlevel.privateIntegrationToken", "gohighlevel.locationId", "gohighlevel.readOnly", "gohighlevel.toolGroups", "gohighlevel.allowRawRequest"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "GoHighLevel",
+				"privateIntegrationToken": "",
+				"locationId": "",
+				"readOnly": false,
+				"toolGroups": [],
+				"allowRawRequest": true
+			}
+		},
+		"dropped": []
+	}
 }

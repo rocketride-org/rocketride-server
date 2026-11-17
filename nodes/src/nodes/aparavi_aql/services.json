@@ -114,5 +114,15 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["aparavi.db_description", "aparavi.url", "aparavi.user", "aparavi.password"]
+	"properties": ["aparavi.db_description", "aparavi.url", "aparavi.user", "aparavi.password"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"url": ""
+			}
+		},
+		"dropped": []
+	}
 }

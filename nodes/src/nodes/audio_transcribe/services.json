@@ -221,5 +221,45 @@
 		"transcribe.vad_min_silence_duration_ms",
 		"transcribe.vad_speech_pad_ms",
 		"transcribe.vad_max_speech_duration_s"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default (Base)",
+				"model": "base",
+				"language": "en"
+			},
+			"tiny": {
+				"title": "Tiny",
+				"model": "tiny",
+				"language": "en"
+			},
+			"base": {
+				"title": "Base",
+				"model": "base",
+				"language": "en"
+			},
+			"small": {
+				"title": "Small",
+				"model": "small",
+				"language": "en"
+			},
+			"medium": {
+				"title": "Medium",
+				"model": "medium",
+				"language": "en"
+			},
+			"large-v3": {
+				"title": "Large v3",
+				"model": "large-v3",
+				"language": "en"
+			}
+		},
+		"dropped": [],
+		"profileMap": {
+			"default": "base"
+		}
+	}
 }

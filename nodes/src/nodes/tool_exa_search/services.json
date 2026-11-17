@@ -76,5 +76,20 @@
 				"text": "test query"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Exa Search",
+				"apikey": "",
+				"numResults": 10,
+				"useAutoprompt": true,
+				"searchType": "auto",
+				"includeText": true
+			}
+		},
+		"dropped": []
 	}
 }

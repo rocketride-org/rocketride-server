@@ -160,5 +160,16 @@
 				"text": "test query"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Tenki Sandbox",
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

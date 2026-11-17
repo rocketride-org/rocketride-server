@@ -149,5 +149,12 @@
 			"description": "Example path: [bucket_name]/[folder]/*",
 			"item": "Pipe.exclude.path"
 		}
-	]
+	],
+	"legacy": {
+		"profiles": {},
+		"dropped": [
+			"exclude.path",
+			"include.path"
+		]
+	}
 }

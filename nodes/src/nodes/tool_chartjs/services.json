@@ -31,5 +31,16 @@
 			"default": "chartjs"
 		}
 	},
-	"properties": ["type", "tool_chartjs.serverName"]
+	"properties": ["type", "tool_chartjs.serverName"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "chartjs"
+			}
+		},
+		"dropped": []
+	}
 }

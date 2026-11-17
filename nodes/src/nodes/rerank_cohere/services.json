@@ -203,5 +203,33 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "rerank-english-v3.0",
+		"profiles": {
+			"rerank-v3.5": {
+				"title": "Rerank v3.5",
+				"model": "rerank-v3.5",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			},
+			"rerank-english-v3.0": {
+				"title": "Rerank v3.0",
+				"model": "rerank-english-v3.0",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			},
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"top_n": 5,
+				"min_score": 0.0,
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

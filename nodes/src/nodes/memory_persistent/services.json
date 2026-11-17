@@ -133,5 +133,36 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "memory",
+		"profiles": {
+			"redis": {
+				"backend": "redis",
+				"redis_host": "localhost",
+				"redis_port": 6379,
+				"redis_password": "",
+				"session_ttl_hours": 24,
+				"max_history": 100,
+				"auto_summarize": true
+			},
+			"memory": {
+				"backend": "memory",
+				"session_ttl_hours": 0,
+				"max_history": 100,
+				"auto_summarize": true
+			},
+			"custom": {
+				"backend": "redis",
+				"redis_host": "",
+				"redis_port": 6379,
+				"redis_password": "",
+				"session_ttl_hours": 0,
+				"max_history": 100,
+				"auto_summarize": true
+			}
+		},
+		"dropped": []
 	}
 }

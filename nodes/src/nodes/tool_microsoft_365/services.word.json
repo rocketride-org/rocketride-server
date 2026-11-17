@@ -29,5 +29,25 @@
 			]
 		}
 	},
-	"properties": ["type", "microsoft.authType", "word.access"]
+	"properties": ["type", "microsoft.authType", "word.access"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Word",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

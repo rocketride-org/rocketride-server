@@ -337,5 +337,42 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "album",
+		"profiles": {
+			"album": {
+				"title": "Album page - photos mounted together",
+				"maxDepth": 4,
+				"texture": 4.0,
+				"minRelative": 0.4
+			},
+			"loose": {
+				"title": "Loose prints on the scanner bed",
+				"maxDepth": 0,
+				"texture": 4.0,
+				"minRelative": 0.2
+			},
+			"textured": {
+				"title": "Textured or patterned page",
+				"maxDepth": 4,
+				"texture": 9.0,
+				"minRelative": 0.4
+			},
+			"detail": {
+				"title": "Maximum detail (slower)",
+				"detectSize": 4500,
+				"maxDepth": 6,
+				"texture": 4.0,
+				"minRelative": 0.4
+			}
+		},
+		"dropped": [
+			"album.tune",
+			"detail.tune",
+			"loose.tune",
+			"textured.tune"
+		]
 	}
 }

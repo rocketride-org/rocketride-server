@@ -186,5 +186,32 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own Weaviate server",
+				"host": "localhost",
+				"port": 8080,
+				"collection": "ROCKETRIDE",
+				"serverName": "weaviate"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Weaviate cloud server",
+				"host": "",
+				"port": 443,
+				"apikey": "",
+				"collection": "ROCKETRIDE",
+				"serverName": "weaviate"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

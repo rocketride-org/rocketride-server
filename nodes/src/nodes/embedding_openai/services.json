@@ -103,5 +103,91 @@
 			}
 		},
 		"openai_embed.apikey"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "text-embedding-3-small",
+		"profiles": {
+			"text-embedding-3-small": {
+				"title": "Text Small   - A highly efficient model",
+				"model": "text-embedding-3-small",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 0,
+				"tokens": 8191,
+				"apikey": ""
+			},
+			"text-embedding-3-large": {
+				"title": "Text Large   - A larger and more powerful model",
+				"model": "text-embedding-3-large",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 0,
+				"tokens": 8191,
+				"apikey": ""
+			},
+			"text-embedding-ada-002": {
+				"title": "Text Ada     - First OpenAI embeddings model",
+				"model": "text-embedding-ada-002",
+				"modelSource": "manual",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 0,
+				"tokens": 8191
+			},
+			"text-embedding-004": {
+				"title": "Text Embedding 004",
+				"model": "text-embedding-004",
+				"modelSource": "litellm",
+				"modelTotalTokens": 2048,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			},
+			"text-embedding-005": {
+				"title": "Text Embedding 005",
+				"model": "text-embedding-005",
+				"modelSource": "litellm",
+				"modelTotalTokens": 2048,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			},
+			"text-embedding-3-small-inference": {
+				"title": "Text Embedding 3 Small Inference",
+				"model": "text-embedding-3-small-inference",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			},
+			"text-embedding-ada-002-v2": {
+				"title": "Text Embedding Ada 002 V2",
+				"model": "text-embedding-ada-002-v2",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			},
+			"text-embedding-large-exp-03-07": {
+				"title": "Text Embedding Large Exp 03.07",
+				"model": "text-embedding-large-exp-03-07",
+				"modelSource": "litellm",
+				"modelTotalTokens": 8192,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			},
+			"text-embedding-preview-0409": {
+				"title": "Text Embedding Preview 0409",
+				"model": "text-embedding-preview-0409",
+				"modelSource": "litellm",
+				"modelTotalTokens": 3072,
+				"modelOutputTokens": 0,
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"modelOutputTokens",
+			"modelSource",
+			"modelTotalTokens",
+			"tokens"
+		]
+	}
 }

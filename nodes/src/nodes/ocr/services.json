@@ -350,5 +350,84 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "latin",
+		"profiles": {
+			"latin": {
+				"title": "Latin (English)",
+				"engine": "easyocr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			},
+			"latin-extended": {
+				"title": "Latin Extended (European)",
+				"engine": "easyocr",
+				"script_family": "latin-extended",
+				"table_engine": "doctr"
+			},
+			"cyrillic": {
+				"title": "Cyrillic (Russian, etc.)",
+				"engine": "easyocr",
+				"script_family": "cyrillic",
+				"table_engine": "doctr"
+			},
+			"arabic": {
+				"title": "Arabic/Persian/Urdu",
+				"engine": "easyocr",
+				"script_family": "arabic",
+				"table_engine": "doctr"
+			},
+			"devanagari": {
+				"title": "Devanagari (Hindi, etc.)",
+				"engine": "easyocr",
+				"script_family": "devanagari",
+				"table_engine": "doctr"
+			},
+			"chinese-simplified": {
+				"title": "Chinese (Simplified)",
+				"engine": "easyocr",
+				"script_family": "chinese-simplified",
+				"table_engine": "doctr"
+			},
+			"chinese-traditional": {
+				"title": "Chinese (Traditional)",
+				"engine": "easyocr",
+				"script_family": "chinese-traditional",
+				"table_engine": "doctr"
+			},
+			"japanese": {
+				"title": "Japanese",
+				"engine": "easyocr",
+				"script_family": "japanese",
+				"table_engine": "doctr"
+			},
+			"korean": {
+				"title": "Korean",
+				"engine": "easyocr",
+				"script_family": "korean",
+				"table_engine": "doctr"
+			},
+			"doctr": {
+				"title": "DocTR (Language-agnostic)",
+				"engine": "doctr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			},
+			"surya": {
+				"title": "Surya (Multi-language)",
+				"engine": "surya",
+				"script_family": "latin",
+				"table_engine": "surya"
+			},
+			"trocr": {
+				"title": "TrOCR (Transformer)",
+				"engine": "trocr",
+				"script_family": "latin",
+				"table_engine": "doctr"
+			}
+		},
+		"dropped": []
+	}
 }

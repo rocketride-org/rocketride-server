@@ -87,5 +87,29 @@
 			]
 		}
 	},
-	"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"]
+	"properties": ["type", "pipedrive.apiToken", "pipedrive.companyDomain", "pipedrive.readOnly", "pipedrive.toolGroups", "pipedrive.allowRawRequest"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Pipedrive",
+				"apiToken": "",
+				"companyDomain": "",
+				"readOnly": false,
+				"toolGroups": [
+					"deals",
+					"persons",
+					"organizations",
+					"activities",
+					"pipelines",
+					"stages",
+					"notes",
+					"search"
+				],
+				"allowRawRequest": true
+			}
+		},
+		"dropped": []
+	}
 }

@@ -88,5 +88,15 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["hydradb.api_key", "hydradb.database", "hydradb.collection", "hydradb.max_results"]
+	"properties": ["hydradb.api_key", "hydradb.database", "hydradb.collection", "hydradb.max_results"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"collection": "default"
+			}
+		},
+		"dropped": []
+	}
 }

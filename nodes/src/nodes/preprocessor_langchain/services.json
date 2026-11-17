@@ -187,5 +187,58 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"splitter": "RecursiveCharacterTextSplitter",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"recursive": {
+				"splitter": "RecursiveCharacterTextSplitter",
+				"separators": "",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"character": {
+				"splitter": "CharacterTextSplitter",
+				"separator": "",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"markdown": {
+				"splitter": "MarkdownTextSplitter",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"latex": {
+				"splitter": "LatexTextSplitter",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"nltk": {
+				"splitter": "NLTKTextSplitter",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"spacy": {
+				"splitter": "SpacyTextSplitter",
+				"model": "en_core_web_sm",
+				"pipeline": "",
+				"mode": "strlen",
+				"strlen": 512
+			},
+			"custom": {
+				"splitter": "RecursiveCharacterTextSplitter",
+				"mode": "strlen",
+				"strlen": 512
+			}
+		},
+		"dropped": [
+			"pipeline"
+		]
 	}
 }

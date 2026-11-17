@@ -161,5 +161,16 @@
 				"questions": "test query"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Hotdata",
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

@@ -109,5 +109,25 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Guild.ai",
+				"baseUrl": "https://app.guild.ai",
+				"apiKeyId": "",
+				"apiKeySecret": "",
+				"owner": "",
+				"workspace": "",
+				"agent": "",
+				"resultMode": "wait",
+				"timeout": 300,
+				"maxSessions": 10,
+				"verifyTls": true
+			}
+		},
+		"dropped": []
 	}
 }

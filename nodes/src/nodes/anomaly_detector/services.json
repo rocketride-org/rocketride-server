@@ -149,5 +149,39 @@
 			}
 		},
 		"anomaly_detector.metric"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "z_score",
+		"profiles": {
+			"z_score": {
+				"title": "Z-Score - Standard deviation based detection",
+				"method": "z_score",
+				"sensitivity": 2.0,
+				"windowSize": 100,
+				"metric": "value",
+				"warningThreshold": 2.0,
+				"criticalThreshold": 3.0
+			},
+			"iqr": {
+				"title": "IQR - Interquartile range based detection",
+				"method": "iqr",
+				"sensitivity": 1.5,
+				"windowSize": 100,
+				"metric": "value",
+				"warningThreshold": 1.5,
+				"criticalThreshold": 3.0
+			},
+			"rolling_avg": {
+				"title": "Rolling Average - Moving average deviation detection",
+				"method": "rolling_avg",
+				"sensitivity": 2.0,
+				"windowSize": 50,
+				"metric": "value",
+				"warningThreshold": 2.0,
+				"criticalThreshold": 3.0
+			}
+		},
+		"dropped": []
+	}
 }

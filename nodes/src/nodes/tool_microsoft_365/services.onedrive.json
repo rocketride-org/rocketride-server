@@ -41,5 +41,25 @@
 			"default": false
 		}
 	},
-	"properties": ["type", "microsoft.authType", "onedrive.access", "onedrive.allowPublicSharing", "onedrive.allowHardDelete"]
+	"properties": ["type", "microsoft.authType", "onedrive.access", "onedrive.allowPublicSharing", "onedrive.allowHardDelete"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "OneDrive",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

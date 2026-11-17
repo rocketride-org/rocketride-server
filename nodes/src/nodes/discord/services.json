@@ -504,5 +504,13 @@
 				"discord.pipelineTimeoutSeconds"
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

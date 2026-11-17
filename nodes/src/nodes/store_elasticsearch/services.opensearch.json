@@ -207,5 +207,41 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Local OpenSearch",
+				"provider": "opensearch"
+			}
+		},
+		"dropped": [
+			"index_label",
+			"provider",
+			"vstore_label"
+		],
+		"renamed": {
+			"auth.enabled": {
+				"to": "auth",
+				"values": {
+					"true": "basic",
+					"false": "none"
+				}
+			},
+			"auth.username": "basic.username",
+			"auth.password": "basic.password",
+			"mode": {
+				"to": "mode",
+				"values": {
+					"true": "vstore",
+					"false": "index"
+				}
+			},
+			"dim": "vstore.dim",
+			"score": "vstore.score"
+		}
 	}
 }

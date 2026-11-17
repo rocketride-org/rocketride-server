@@ -84,5 +84,15 @@
 			}
 		}
 	},
-	"properties": ["type", "filesystem.allowRead", "filesystem.allowWrite", "filesystem.allowList", "filesystem.allowMkdir", "filesystem.allowStat", "filesystem.allowDelete", "filesystem.pathWhitelist"]
+	"properties": ["type", "filesystem.allowRead", "filesystem.allowWrite", "filesystem.allowList", "filesystem.allowMkdir", "filesystem.allowStat", "filesystem.allowDelete", "filesystem.pathWhitelist"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
+	}
 }

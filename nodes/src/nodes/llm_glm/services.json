@@ -216,5 +216,122 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "glm-5-2",
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": ""
+			},
+			"glm-5-2": {
+				"title": "GLM-5.2",
+				"model": "glm-5.2",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5-1": {
+				"title": "GLM-5.1",
+				"model": "glm-5.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5": {
+				"title": "GLM-5",
+				"model": "glm-5",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-5-turbo": {
+				"title": "GLM-5 Turbo",
+				"model": "glm-5-turbo",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-7": {
+				"title": "GLM-4.7",
+				"model": "glm-4.7",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-6": {
+				"title": "GLM-4.6",
+				"model": "glm-4.6",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-5": {
+				"title": "GLM-4.5",
+				"model": "glm-4.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"glm-4-5-air": {
+				"title": "GLM-4.5 Air",
+				"model": "glm-4.5-air",
+				"modelSource": "provider",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 32768,
+				"serverbase": "https://api.z.ai/api/paas/v4",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

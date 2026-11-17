@@ -177,5 +177,29 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "serverless-dense",
+		"profiles": {
+			"pod-based": {
+				"mode": "pod-based",
+				"title": "Pinecone Pod-Based Index",
+				"apikey": "",
+				"collection": "rocketride",
+				"serverName": "pinecone"
+			},
+			"serverless-dense": {
+				"mode": "serverless-dense",
+				"title": "Pinecone Serverless Dense Index",
+				"apikey": "",
+				"collection": "rocketride",
+				"serverName": "pinecone"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

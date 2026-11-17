@@ -102,5 +102,23 @@
 		},
 		"git.safeMode",
 		"git.readOnlyMode"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Git",
+				"repoPath": "",
+				"authType": "none",
+				"username": "",
+				"token": "",
+				"sshKey": "",
+				"sshPassphrase": "",
+				"safeMode": true,
+				"readOnlyMode": true
+			}
+		},
+		"dropped": []
+	}
 }

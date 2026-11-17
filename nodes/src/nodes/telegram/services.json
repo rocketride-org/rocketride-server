@@ -53,5 +53,13 @@
 			"title": "Bot Configuration",
 			"properties": ["telegram.botToken", "telegram.mode", "telegram.webhookUrl"]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

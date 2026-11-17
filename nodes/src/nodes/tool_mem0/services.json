@@ -108,5 +108,28 @@
 				"text": "test"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Mem0",
+				"api_key": "",
+				"user_id": "",
+				"show_advanced": false,
+				"base_url": "https://api.mem0.ai",
+				"agent_id": "",
+				"run_id": "",
+				"app_id": "",
+				"infer": true,
+				"wait": true,
+				"ingest_timeout": 30,
+				"search_limit": 10
+			}
+		},
+		"dropped": [
+			"show_advanced"
+		]
 	}
 }

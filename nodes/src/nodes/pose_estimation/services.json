@@ -102,5 +102,32 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "rtmpose-medium",
+		"profiles": {
+			"rtmpose-tiny": {
+				"title": "RTMPose Tiny",
+				"profile": "rtmpose-tiny",
+				"threshold": 0.3,
+				"max_persons": 20
+			},
+			"rtmpose-medium": {
+				"title": "RTMPose Medium",
+				"profile": "rtmpose-medium",
+				"threshold": 0.3,
+				"max_persons": 20
+			},
+			"rtmpose-large": {
+				"title": "RTMPose Large",
+				"profile": "rtmpose-large",
+				"threshold": 0.3,
+				"max_persons": 20
+			}
+		},
+		"dropped": [
+			"profile"
+		]
 	}
 }

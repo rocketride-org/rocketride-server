@@ -134,5 +134,28 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "rfdetr",
+		"profiles": {
+			"rfdetr": {
+				"title": "RF-DETR — Common Objects (COCO, 80 classes, default)",
+				"engine": "rfdetr",
+				"model": "PekingU/rtdetr_r50vd",
+				"threshold": 0.3,
+				"prompt": ""
+			},
+			"mmgdino": {
+				"title": "MM-Grounding-DINO — Open-Vocabulary (any prompt)",
+				"engine": "mmgdino",
+				"model": "IDEA-Research/grounding-dino-tiny",
+				"threshold": 0.3,
+				"prompt": ""
+			}
+		},
+		"dropped": [
+			"model"
+		]
+	}
 }

@@ -366,5 +366,308 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "cloud-reasoner",
+		"profiles": {
+			"cloud-reasoner": {
+				"title": "Cloud Reasoner",
+				"model": "deepseek-reasoner",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://api.deepseek.com/v1",
+				"apikey": ""
+			},
+			"cloud-chat": {
+				"title": "Cloud Chat",
+				"model": "deepseek-chat",
+				"modelSource": "manual",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 16384,
+				"serverbase": "https://api.deepseek.com/v1",
+				"apikey": ""
+			},
+			"deepseek-r1-1_5b": {
+				"model": "deepseek-r1:1.5b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-7b": {
+				"model": "deepseek-r1:7b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-8b": {
+				"model": "deepseek-r1:8b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-14b": {
+				"model": "deepseek-r1:14b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-32b": {
+				"model": "deepseek-r1:32b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-70b": {
+				"model": "deepseek-r1:70b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-r1-671b": {
+				"model": "deepseek-r1:671b",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-v3": {
+				"model": "deepseek-v3",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "http://localhost:11434/v1"
+			},
+			"deepseek-chat-v3-0324": {
+				"title": "DeepSeek: DeepSeek V3 0324",
+				"model": "deepseek-chat-v3-0324",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 147456,
+				"apikey": ""
+			},
+			"deepseek-chat-v3-1": {
+				"title": "DeepSeek: DeepSeek V3.1",
+				"model": "deepseek-chat-v3.1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 144900,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-r1": {
+				"title": "DeepSeek: R1",
+				"model": "deepseek-r1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 64000,
+				"modelOutputTokens": 16000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-r1-0528": {
+				"title": "DeepSeek: R1 0528",
+				"model": "deepseek-r1-0528",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 32768,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-r1-distill-llama-70b": {
+				"title": "DeepSeek: R1 Distill Llama 70B",
+				"model": "deepseek-r1-distill-llama-70b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 8192,
+				"modelOutputTokens": 7372,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-r1-distill-qwen-32b": {
+				"title": "DeepSeek: R1 Distill Qwen 32B",
+				"model": "deepseek-r1-distill-qwen-32b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"deepseek-r1t2-chimera": {
+				"title": "TNG: DeepSeek R1T2 Chimera",
+				"model": "deepseek-r1t2-chimera",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 163840,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"deepseek-v3-1-nex-n1": {
+				"title": "Nex AGI: DeepSeek V3.1 Nex N1",
+				"model": "deepseek-v3.1-nex-n1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 163840,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"deepseek-v3-1-terminus": {
+				"title": "DeepSeek: DeepSeek V3.1 Terminus",
+				"model": "deepseek-v3.1-terminus",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 32768,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-v3-2": {
+				"title": "DeepSeek: DeepSeek V3.2",
+				"model": "deepseek-v3.2",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 65536,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-v3-2-exp": {
+				"title": "DeepSeek: DeepSeek V3.2 Exp",
+				"model": "deepseek-v3.2-exp",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 65536,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-v3-2-speciale": {
+				"title": "DeepSeek: DeepSeek V3.2 Speciale",
+				"model": "deepseek-v3.2-speciale",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 163840,
+				"modelOutputTokens": 163840,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"deepseek-v4-flash": {
+				"title": "DeepSeek: DeepSeek V4 Flash",
+				"model": "deepseek-v4-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 384000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-v4-pro": {
+				"title": "DeepSeek: DeepSeek V4 Pro",
+				"model": "deepseek-v4-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 384000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"deepseek-v4-flash-0731": {
+				"title": "DeepSeek: DeepSeek V4 Flash 0731",
+				"model": "deepseek-v4-flash-0731",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720,
+				"modelOutputTokens": 131072,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-0731-batch": {
+				"title": "DeepSeek: DeepSeek V4 Flash 0731 (batch)",
+				"model": "deepseek-v4-flash-0731:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 943718,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-flash-0731' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-latest": {
+				"title": "DeepSeek V4 Flash Latest",
+				"model": "deepseek-v4-flash-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1310720,
+				"modelOutputTokens": 393216,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-flash-vision-exp": {
+				"title": "DeepSeek: DeepSeek V4 Flash Vision Exp",
+				"model": "deepseek-v4-flash-vision-exp",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 384000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-pro-0813": {
+				"title": "DeepSeek: DeepSeek V4 Pro 0813",
+				"model": "deepseek-v4-pro-0813",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 384000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"deepseek-v4-pro-0813-batch": {
+				"title": "DeepSeek: DeepSeek V4 Pro 0813 (batch)",
+				"model": "deepseek-v4-pro-0813:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 943718,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-pro-0813' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"migration",
+			"modelSource"
+		]
 	}
 }

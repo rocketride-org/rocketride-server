@@ -124,5 +124,30 @@
 				"text": "test"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "xTrace Memory",
+				"api_key": "",
+				"org_id": "",
+				"user_id": "",
+				"group_ids": "",
+				"show_advanced": false,
+				"base_url": "https://api.production.xtrace.ai",
+				"agent_id": "",
+				"app_id": "",
+				"wait": true,
+				"ingest_timeout": 30,
+				"extract_artifacts": false,
+				"search_mode": "compose",
+				"search_limit": 10
+			}
+		},
+		"dropped": [
+			"show_advanced"
+		]
 	}
 }

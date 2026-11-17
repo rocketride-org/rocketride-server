@@ -86,5 +86,21 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"]
+	"properties": ["type", "agent_description", "instructions", "max_waves", "require_tool_call", "tool_timeout", "verify_tool", "verify_args"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"agent_description": "",
+				"instructions": [],
+				"max_waves": 10,
+				"require_tool_call": false,
+				"tool_timeout": 300,
+				"verify_tool": "",
+				"verify_args": ""
+			}
+		},
+		"dropped": []
+	}
 }

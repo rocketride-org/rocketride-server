@@ -29,5 +29,25 @@
 			]
 		}
 	},
-	"properties": ["type", "microsoft.authType", "outlook_calendar.access"]
+	"properties": ["type", "microsoft.authType", "outlook_calendar.access"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Outlook Calendar",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

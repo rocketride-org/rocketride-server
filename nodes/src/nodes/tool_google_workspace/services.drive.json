@@ -50,5 +50,23 @@
 			"default": false
 		}
 	},
-	"properties": ["type", "google.authType", "access", "allowPublicSharing", "allowHardDelete"]
+	"properties": ["type", "google.authType", "access", "allowPublicSharing", "allowHardDelete"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Drive",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

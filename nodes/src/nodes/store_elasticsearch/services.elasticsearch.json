@@ -219,5 +219,59 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "self-managed",
+		"profiles": {
+			"self-managed": {
+				"mode": "self-managed",
+				"title": "Self-managed Elasticsearch",
+				"host": "localhost",
+				"port": 9200,
+				"index": "rocketride",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			},
+			"cloud-hosted": {
+				"mode": "cloud-hosted",
+				"title": "Elastic Cloud Hosted",
+				"host": "",
+				"port": 9243,
+				"apikey": "",
+				"index": "rocketride",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			},
+			"cloud-serverless": {
+				"mode": "cloud-serverless",
+				"title": "Elastic Cloud Serverless",
+				"host": "",
+				"port": 443,
+				"apikey": "",
+				"index": "rocketride",
+				"type": "vector_database",
+				"store_enabled": true,
+				"provider": "elasticsearch"
+			}
+		},
+		"dropped": [
+			"index_label",
+			"provider",
+			"store_enabled",
+			"type",
+			"vstore_label"
+		],
+		"renamed": {
+			"store_mode": {
+				"to": "mode",
+				"values": {
+					"true": "vstore",
+					"false": "index"
+				}
+			}
+		}
+	}
 }

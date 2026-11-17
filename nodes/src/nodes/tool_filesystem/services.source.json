@@ -38,5 +38,15 @@
 			"name": "parameters",
 			"properties": ["filesystem.path", "filesystem.recursive"]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
+	}
 }

@@ -193,5 +193,31 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "cloud",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Local test server",
+				"api_endpoint": "http://localhost:8080",
+				"application_token": "test-token",
+				"collection": "ROCKETRIDE",
+				"serverName": "astra"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "Astra DB cloud server",
+				"api_endpoint": "",
+				"application_token": "",
+				"collection": "ROCKETRIDE",
+				"serverName": "astra"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

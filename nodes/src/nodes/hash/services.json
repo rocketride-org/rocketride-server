@@ -69,5 +69,13 @@
 	//		Defines the properties shown in the pipeline builder side panel, in
 	//		order. The fingerprinter has no configuration.
 	//
-	"properties": []
+	"properties": [],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

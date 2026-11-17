@@ -38,5 +38,15 @@
 			"description": "Reject downloads larger than this many bytes (default 50 MiB). Protects server disk from oversized objects."
 		}
 	},
-	"properties": ["type", "gcp.authType", "gcp.projectId", "gcs.bucketName", "gcs.prefix", "gcs.maxDownloadBytes"]
+	"properties": ["type", "gcp.authType", "gcp.projectId", "gcs.bucketName", "gcs.prefix", "gcs.maxDownloadBytes"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"maxDownloadBytes": 52428800
+			}
+		},
+		"dropped": []
+	}
 }

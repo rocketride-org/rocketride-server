@@ -148,5 +148,42 @@
 		},
 		"llm_openai_api.apikey",
 		"llm_openai_api.base_url"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "llama-3-3-70b",
+		"profiles": {
+			"llama-3-3-70b": {
+				"title": "Llama 3.3 70B Instruct",
+				"model": "meta-llama/Llama-3.3-70B-Instruct",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"qwen3-235b": {
+				"title": "Qwen3 235B",
+				"model": "Qwen/Qwen3-235B-A22B",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"deepseek-v3": {
+				"title": "DeepSeek V3",
+				"model": "deepseek-ai/DeepSeek-V3",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"custom": {
+				"model": "",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			}
+		},
+		"dropped": [],
+		"renamed": {
+			"custom.model": "customModel"
+		}
+	}
 }
