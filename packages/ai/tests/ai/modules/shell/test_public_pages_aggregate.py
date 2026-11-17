@@ -62,15 +62,15 @@ def warnings(monkeypatch):
 
 
 def _store_timeout(monkeypatch, app_id='rocketride.home'):
-    """Fail every manifest read of ``app_id``'s versions, with a ``StorageError``, as a transient store error does; return the real reader."""
-    read = pp.read_artifact_text
+    """Fail every store read of ``app_id``'s versions, with a ``StorageError``, as a transient store error does; return the real reader."""
+    read = pp.read_artifact_file
 
     async def flaky(path):
         if f'/.deployments/{app_id}/' in path:
             raise StorageError('store timeout')
         return await read(path)
 
-    monkeypatch.setattr(pp, 'read_artifact_text', flaky)
+    monkeypatch.setattr(pp, 'read_artifact_file', flaky)
     return read
 
 
@@ -401,7 +401,7 @@ async def test_an_unreadable_app_keeps_its_current_pages_until_it_reads_again(mo
     # The same pages, from the same version's build output: their snapshots still resolve.
     assert pp.current() is before
     assert warnings == ['[public_pages] rocketride.home: unreadable this build, keeping its current pages']
-    monkeypatch.setattr(pp, 'read_artifact_text', read)
+    monkeypatch.setattr(pp, 'read_artifact_file', read)
     assert await pp.rebuild(acct)
     assert _paths(pp.current()) == ['/', '/about']
     assert pp.current().exact['/'].dist_dir == dist_of('00000000-platform', 'rocketride.home', 2)

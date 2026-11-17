@@ -384,11 +384,11 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
     if not dist_dir:
         return fallback
     try:
-        raw = await read_artifact_text(f'{dist_dir}/{MANIFEST_FILE}')
+        raw = await read_artifact_file(f'{dist_dir}/{MANIFEST_FILE}')
     except StorageNotFoundError:
         return fallback
     try:
-        emitted = json.loads(raw)
+        emitted = json.loads(raw.decode('utf-8'))
     except ValueError:
         emitted = None
     if not isinstance(emitted, dict):
@@ -397,7 +397,7 @@ async def page_manifest(metadata_manifest: Any, dist_dir: str) -> Mapping[str, A
 
 
 async def read_artifact_file(path: str) -> bytes:
-    """Read one file of a version's store tree as bytes (the snapshots under ``dist/``).
+    """Read one file of a version's store tree (snapshots and the emitted manifest live under ``dist/``).
 
     Args:
         path: The file's store path.
@@ -414,30 +414,6 @@ async def read_artifact_file(path: str) -> bytes:
     from ai.account.store import Store
 
     return await Store.instance().raw_store().read_bytes(path)
-
-
-async def read_artifact_text(path: str) -> str:
-    """Read one UTF-8 text file of a version's store tree (the emitted manifest).
-
-    ``read_file`` decodes UTF-8 on every store. ``read_bytes`` does not: a
-    store without its own (Azure) inherits ``IStore``'s, which re-encodes
-    that text as latin-1 and fails on any character above U+00FF.
-
-    Args:
-        path: The file's store path.
-
-    Returns:
-        The file's text.
-
-    Raises:
-        StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure the store reports as one.
-        Exception: the provider's own error where the store does not wrap it
-            (the S3 and Azure stores, once their retries run out).
-    """
-    from ai.account.store import Store
-
-    return await Store.instance().raw_store().read_file(path)
 
 
 async def artifact_file_info(path: str) -> Dict[str, Any]:
