@@ -13,6 +13,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 
 import { mountBrandHeader } from '../shared/brand';
+import { applyHostTheme } from '../shared/host-theme';
 import '../shared/theme.css';
 
 interface TaskRow {
@@ -22,6 +23,7 @@ interface TaskRow {
 }
 
 const app = new App({ name: 'RocketRide pipelines table', version: '0.1.0' });
+applyHostTheme(app);
 const root = document.getElementById('root') as HTMLElement;
 // Announce refresh/terminate re-renders to assistive technology.
 root.setAttribute('aria-live', 'polite');
@@ -54,12 +56,27 @@ function parseRows(result: unknown): TaskRow[] {
 	return payload.tasks;
 }
 
-/** Error state that keeps Refresh available — assigning root.textContent
- * would wipe every child including the button, dead-ending the widget. */
+/** A one-sentence state with Refresh below it, so the widget can always
+ * recover. The sentence gets its own line; the button keeps full strength. */
+function showMessage(message: string, kind: 'empty' | 'error'): void {
+	root.classList.remove('empty');
+	const text = document.createElement('p');
+	text.className = kind === 'error' ? 'rr-message rr-message-error' : 'rr-message';
+	text.textContent = message;
+	root.replaceChildren(text, makeRefreshButton());
+}
+
 function showError(message: string): void {
-	root.classList.add('empty');
-	root.replaceChildren();
-	root.append(message, makeRefreshButton());
+	showMessage(message, 'error');
+}
+
+/** A failed row action: one sentence between the table and Refresh. */
+function showRowError(message: string): void {
+	root.querySelector('.rr-status')?.remove();
+	const text = document.createElement('p');
+	text.className = 'rr-message rr-message-error rr-status';
+	text.textContent = message;
+	root.insertBefore(text, root.lastElementChild);
 }
 
 function makeRefreshButton(): HTMLButtonElement {
@@ -74,14 +91,13 @@ function makeRefreshButton(): HTMLButtonElement {
 function render(rows: TaskRow[]): void {
 	root.classList.remove('empty');
 	if (rows.length === 0) {
-		root.classList.add('empty');
 		// Keep Refresh available in the empty state too, so the widget can
 		// recover once pipelines start.
-		root.replaceChildren();
-		root.append('No pipelines running.', makeRefreshButton());
+		showMessage('No pipelines are running.', 'empty');
 		return;
 	}
 	const table = document.createElement('table');
+	table.className = 'rr-table';
 	table.innerHTML = '<thead><tr><th>Name</th><th>Description</th><th>Token</th><th></th></tr></thead>';
 	const tbody = document.createElement('tbody');
 	for (const row of rows) {
@@ -98,6 +114,7 @@ function render(rows: TaskRow[]): void {
 		stop.textContent = 'Terminate';
 		stop.onclick = async () => {
 			stop.disabled = true;
+			stop.textContent = 'Stopping…';
 			try {
 				// terminate's schema requires task_token (see execution.py _TERMINATE_SCHEMA).
 				const result = await app.callServerTool({ name: 'terminate', arguments: { task_token: row.token } });
@@ -110,7 +127,8 @@ function render(rows: TaskRow[]): void {
 				await refresh();
 			} catch (err) {
 				stop.disabled = false;
-				stop.textContent = 'Terminate (failed — retry)';
+				stop.textContent = 'Retry';
+				showRowError(`Could not stop "${row.name}". It is still running.`);
 				console.error('terminate failed', err);
 			}
 		};
@@ -131,8 +149,8 @@ async function refresh(): Promise<void> {
 		const result = await app.callServerTool({ name: 'list_running_pipelines', arguments: {} });
 		render(parseRows(result));
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		showError(`Failed to refresh pipelines: ${msg}`);
+		// The reason (often a raw tool message) goes to the console, not the card.
+		showError('Could not refresh the list. Check that the engine is running, then press Refresh.');
 		console.error('refresh failed', err);
 	}
 }
@@ -144,12 +162,11 @@ app.ontoolresult = (result) => {
 	try {
 		render(parseRows(result));
 	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		showError(`Failed to render pipelines: ${msg}`);
+		showError('Could not load the running pipelines.');
 		console.error('render failed', err);
 	}
 };
 app.connect().catch((err) => {
-	const msg = err instanceof Error ? err.message : String(err);
-	showError(`Could not connect to the MCP host: ${msg}`);
+	showError('Could not connect to the MCP host.');
+	console.error('connect failed', err);
 });
