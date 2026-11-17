@@ -251,6 +251,11 @@ def test_the_retry_lives_on_the_connect_hook_not_the_statement_path():
         # SQLSTATE on these, so the message is all there is to go on.
         'connection to server at "127.0.0.1", port 55432 failed: FATAL:  too many connections for role "tenant"',
         'connection to server at "pooler", port 6432 failed: FATAL:  sorry, too many clients already',
+        'connection to server at "db", port 5432 failed: FATAL:  too many connections for database "tenant"',
+        'connection to server at "db", port 5432 failed: FATAL:  remaining connection slots are reserved for roles with the SUPERUSER attribute',
+        "(1040, 'Too many connections')",
+        '(1203, "User tenant already has more than \'max_user_connections\' active connections")',
+        "(1226, \"User 'tenant' has exceeded the 'max_user_connections' resource (current value: 10)\")",
         'connection to server at "pooler", port 6432 failed: ERROR:  pgbouncer cannot connect to server',
         'connection to server at "pooler", port 6432 failed: ERROR:  server login has been failing, try again later (server_login_retry)',
         'ERROR:  server login retry',

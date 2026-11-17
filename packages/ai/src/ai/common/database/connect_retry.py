@@ -111,7 +111,9 @@ _TRANSIENT_FRAGMENTS = (
     'server login has been failing',  # PgBouncer after a failed backend login
     'server login retry',  # PgBouncer server_login_retry
     'query_wait_timeout',  # PgBouncer: no server connection became free in time
-    'too many connections for role',  # PostgreSQL 53300 for a per-role limit
+    'too many connections',  # PostgreSQL 53300 per role or per database; MySQL/MariaDB 1040
+    'max_user_connections',  # MySQL/MariaDB 1203, and 1226 when the limit is set on the account
+    'remaining connection slots are reserved',  # PostgreSQL 53300: only reserved slots are left
     'sorry, too many clients already',  # PostgreSQL 53300 at max_connections
     'the database system is starting up',
     'the database system is shutting down',

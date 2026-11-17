@@ -211,11 +211,11 @@ what is not:
 - **Opening a connection**, handshake and authentication included: each attempt
   gives up after `connect_timeout` seconds (default 5, at most 60). An attempt that
   fails because the server is unreachable or not ready (connection refused, timed
-  out, the pooler at its client limit or unable to reach its backend, a role or
-  server at its connection limit, the database starting up) is retried with
-  exponential backoff and jitter, at most `connect_retries` attempts in total
-  (default 3, at most 10) within `connect_retry_budget` seconds (default 10, at most
-  60), so one connect takes at most the budget plus one `connect_timeout`. A bad
+  out, the pooler at its client limit or unable to reach its backend, a user,
+  role, database or server at its connection limit, the database starting up) is
+  retried with exponential backoff and jitter, at most `connect_retries` attempts
+  in total (default 3, at most 10) within `connect_retry_budget` seconds (default
+  10, at most 60), so one connect takes at most the budget plus one `connect_timeout`. A bad
   role, password or database is reported at once, even when it comes back beside a
   refused address from a multi-host DSN. `connect_timeout` set here takes precedence
   over one written in the connection URL.
