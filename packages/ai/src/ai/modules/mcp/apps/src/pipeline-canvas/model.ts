@@ -16,7 +16,7 @@ import type { Edge } from '@xyflow/react';
 
 import { getEdgesFromNodes, getNodesFromProject } from '@app-shared/tools/pipelines/panels/design/canvas/util/graph';
 import { INodeType } from '@app-shared/tools/pipelines/panels/design/canvas/types';
-import type { INode, IProject, IProjectComponent, IService, IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
+import type { INode, INodeData, IProject, IProjectComponent, IService, IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 import { IServiceCapabilities } from 'shell';
 
 import { layoutPipeline, type LayoutFrame, type LayoutSize } from './layout';
@@ -232,7 +232,11 @@ export function placeNodes(nodes: INode[], edges: Edge[], hadPositions: boolean,
 		sizeOf,
 		frame
 	);
-	return nodes.map((node) => ({ ...node, parentId: undefined, position: positions[node.id] ?? { x: 0, y: 0 } }));
+	// A wrapped flow tags each node with its band, which routes the connections between bands.
+	return nodes.map((node) => {
+		const { x, y, band } = positions[node.id] ?? { x: 0, y: 0 };
+		return { ...node, parentId: undefined, position: { x, y }, data: { ...node.data, layoutBand: band } as INodeData };
+	});
 }
 
 /**

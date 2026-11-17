@@ -12,7 +12,10 @@
  * The data flow runs left to right in layers (columns). The nodes an agent
  * only invokes (its LLM, memory and tools) sit in a row under their agent.
  * A long flow wraps into bands, one under the other, so the drawing keeps a
- * shape that fits the widget's frame instead of becoming a thin line.
+ * shape that fits the widget's frame instead of becoming a thin line. A data
+ * connection from one band to a later one runs right, down into the gap
+ * above the later band, across it, and down into its target, so it never
+ * crosses the drawing (see WrapEdge).
  */
 
 /** Gap between two layers (columns), in px. */
@@ -21,6 +24,8 @@ export const LAYER_GAP = 80;
 export const NODE_GAP = 60;
 /** Gap between two bands of a wrapped flow, in px. */
 export const BAND_GAP = 100;
+/** How far a connection between bands runs out of its source and into its target before it turns, in px. */
+export const WRAP_OFFSET = 20;
 /**
  * A flow wraps into bands only when one band would be drawn smaller than this
  * zoom. The overview labels keep names readable down to about here, and
@@ -46,7 +51,27 @@ export interface LayoutFrame {
 	height: number;
 }
 
-export type Positions = Record<string, { x: number; y: number }>;
+/** Top-left of each node, and the band it is in when the flow wraps. */
+export type Positions = Record<string, { x: number; y: number; band?: number }>;
+
+/** The middle of the gap above each band after the first, keyed by band. */
+export function bandGaps(positions: Positions): Map<number, number> {
+	const tops = new Map<number, number>();
+	for (const { y, band } of Object.values(positions)) {
+		if (band !== undefined) tops.set(band, Math.min(tops.get(band) ?? Infinity, y));
+	}
+	const gaps = new Map<number, number>();
+	for (const [band, top] of tops) if (band > 0) gaps.set(band, top - BAND_GAP / 2);
+	return gaps;
+}
+
+/** Where a data connection into a later band runs across: the gap above its target's band. */
+export function wrapCenterY(positions: Positions, edge: LayoutEdge, gaps: Map<number, number>): number | undefined {
+	const from = positions[edge.source]?.band;
+	const to = positions[edge.target]?.band;
+	if (edge.control || from === undefined || to === undefined || to <= from) return undefined;
+	return gaps.get(to);
+}
 
 /**
  * The layers of a graph, in order, each in file order. A node's layer is the
@@ -132,7 +157,9 @@ function placeBands(bands: string[][][], satellites: Map<string, string[]>, size
 	const positions: Positions = {};
 	const columnHeight = (column: string[]) => column.reduce((sum, id) => sum + sizeOf(id).height, 0) + NODE_GAP * Math.max(column.length - 1, 0);
 	let top = 0;
-	for (const band of bands) {
+	bands.forEach((band, index) => {
+		// A single band has no band index: nothing wraps.
+		const tag = bands.length > 1 ? { band: index } : {};
 		const tallest = Math.max(0, ...band.map(columnHeight));
 		let x = 0;
 		const anchors: string[] = [];
@@ -140,7 +167,7 @@ function placeBands(bands: string[][][], satellites: Map<string, string[]>, size
 			let y = top + (tallest - columnHeight(column)) / 2;
 			let width = 0;
 			for (const id of column) {
-				positions[id] = { x, y };
+				positions[id] = { x, y, ...tag };
 				y += sizeOf(id).height + NODE_GAP;
 				width = Math.max(width, sizeOf(id).width);
 				if (satellites.has(id)) anchors.push(id);
@@ -155,7 +182,7 @@ function placeBands(bands: string[][][], satellites: Map<string, string[]>, size
 			for (const anchor of anchors.sort((a, b) => positions[a].x - positions[b].x)) {
 				let sx = Math.max(positions[anchor].x, cursor);
 				for (const id of satellites.get(anchor)!) {
-					positions[id] = { x: sx, y: rowY };
+					positions[id] = { x: sx, y: rowY, ...tag };
 					sx += sizeOf(id).width + NODE_GAP;
 					rowHeight = Math.max(rowHeight, sizeOf(id).height);
 				}
@@ -164,19 +191,22 @@ function placeBands(bands: string[][][], satellites: Map<string, string[]>, size
 			bottom = rowY + rowHeight;
 		}
 		top = bottom + BAND_GAP;
-	}
+	});
 	return positions;
 }
 
 /**
  * How many connections pass through a node that is not one of their two
- * ends. Each is followed along the curve React Flow's getBezierPath draws for
- * it (the builder's edge): a data connection from the source's right side to
- * the target's left side, an invoke from the invoker's bottom to the invoked
- * node's top. Handles are taken at the middle of each side.
+ * ends. Each is followed along the path the canvas draws for it. Within a
+ * band that is React Flow's getBezierPath curve (the builder's edge): a data
+ * connection from the source's right side to the target's left side, an
+ * invoke from the invoker's bottom to the invoked node's top. A data
+ * connection into a later band runs through the gap above that band.
+ * Handles are taken at the middle of each side.
  */
 export function edgesThroughNodes(positions: Positions, edges: LayoutEdge[], sizeOf: (id: string) => LayoutSize): number {
 	const boxes = Object.entries(positions).map(([id, p]) => ({ id, ...p, ...sizeOf(id) }));
+	const gaps = bandGaps(positions);
 	let count = 0;
 	for (const edge of edges) {
 		const a = positions[edge.source];
@@ -185,20 +215,33 @@ export function edgesThroughNodes(positions: Positions, edges: LayoutEdge[], siz
 		const sa = sizeOf(edge.source);
 		const sb = sizeOf(edge.target);
 		const [x1, y1, x2, y2] = edge.control ? [a.x + sa.width / 2, a.y + sa.height, b.x + sb.width / 2, b.y] : [a.x + sa.width, a.y + sa.height / 2, b.x, b.y + sb.height / 2];
-		// The curve React Flow's getBezierPath draws (curvature 0.25), which the builder's edge uses.
-		const offset = (distance: number) => (distance >= 0 ? 0.5 * distance : 0.25 * 25 * Math.sqrt(-distance));
-		const [c1x, c1y, c2x, c2y] = edge.control ? [x1, y1 + offset(y2 - y1), x2, y2 - offset(y2 - y1)] : [x1 + offset(x2 - x1), y1, x2 - offset(x2 - x1), y2];
-		const hit = boxes.some((box) => {
-			if (box.id === edge.source || box.id === edge.target) return false;
+		const points: Array<[number, number]> = [];
+		const centerY = wrapCenterY(positions, edge, gaps);
+		if (centerY !== undefined) {
+			const corners: Array<[number, number]> = [
+				[x1, y1],
+				[x1 + WRAP_OFFSET, y1],
+				[x1 + WRAP_OFFSET, centerY],
+				[x2 - WRAP_OFFSET, centerY],
+				[x2 - WRAP_OFFSET, y2],
+				[x2, y2],
+			];
+			for (let i = 1; i < corners.length; i++) {
+				const [px, py] = corners[i - 1];
+				const [qx, qy] = corners[i];
+				for (let j = 0; j < 24; j++) points.push([px + ((qx - px) * j) / 24, py + ((qy - py) * j) / 24]);
+			}
+		} else {
+			// The curve React Flow's getBezierPath draws (curvature 0.25), which the builder's edge uses.
+			const offset = (distance: number) => (distance >= 0 ? 0.5 * distance : 0.25 * 25 * Math.sqrt(-distance));
+			const [c1x, c1y, c2x, c2y] = edge.control ? [x1, y1 + offset(y2 - y1), x2, y2 - offset(y2 - y1)] : [x1 + offset(x2 - x1), y1, x2 - offset(x2 - x1), y2];
 			for (let i = 1; i < 48; i++) {
 				const t = i / 48;
 				const u = 1 - t;
-				const x = u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2;
-				const y = u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2;
-				if (x > box.x + 2 && x < box.x + box.width - 2 && y > box.y + 2 && y < box.y + box.height - 2) return true;
+				points.push([u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2, u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2]);
 			}
-			return false;
-		});
+		}
+		const hit = boxes.some((box) => box.id !== edge.source && box.id !== edge.target && points.some(([x, y]) => x > box.x + 2 && x < box.x + box.width - 2 && y > box.y + 2 && y < box.y + box.height - 2));
 		if (hit) count += 1;
 	}
 	return count;

@@ -16,7 +16,7 @@
  * gesture goes to the canvas.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactElement } from 'react';
-import { Background, MiniMap, ReactFlow, ReactFlowProvider, getViewportForBounds, useNodesInitialized, useNodesState, useReactFlow, useStore, type NodeChange, type Viewport } from '@xyflow/react';
+import { Background, BaseEdge, MiniMap, ReactFlow, ReactFlowProvider, getSmoothStepPath, getViewportForBounds, useNodesInitialized, useNodesState, useReactFlow, useStore, type EdgeProps, type NodeChange, type Viewport } from '@xyflow/react';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import '@xyflow/react/dist/style.css';
 
@@ -32,7 +32,7 @@ import { ReadOnlyFlowGraphProvider, type FlowNode } from './stand-ins/FlowGraphC
 import { ReadOnlyFlowProjectProvider } from './stand-ins/FlowProjectContext';
 import { ReadOnlyFlowPreferencesProvider } from './stand-ins/FlowPreferencesContext';
 import { ESTIMATED_NODE_SIZE, displayPath, mainFlow, placeNodes, type CanvasModel } from './model';
-import { LAYER_GAP, edgesThroughNodes } from './layout';
+import { LAYER_GAP, WRAP_OFFSET, bandGaps, edgesThroughNodes, wrapCenterY, type Positions } from './layout';
 
 /**
  * Canvas height bounds, in px. The height follows the drawing's shape inside
@@ -71,25 +71,35 @@ const NODE_HEADER_HEIGHT = 46;
 /** The smallest label heights, one line and two lines, in px. */
 const LABEL_MIN_HEIGHT = 20;
 const LABEL_MIN_HEIGHT_TWO_LINES = 30;
+/** The tallest label: two lines in the label font. */
+const LABEL_TALLEST = 33;
 /** Full screen fits the whole drawing while nodes stay at least this wide on screen. */
 const FULL_FIT_MIN_NODE_WIDTH = 90;
 /** Otherwise full screen opens at the zoom that draws a typical node this wide. */
 const FULL_READ_NODE_WIDTH = 120;
+const FULL_READ_NODE_WIDTH_NARROW = 100;
 /** Under this frame width the full-screen minimap would cover too much of the drawing. */
-const MINIMAP_MIN_FRAME_WIDTH = 480;
+const MINIMAP_MIN_FRAME_WIDTH = 320;
 /** The inline canvas of a truncated pipeline stays short: 200 thumbnails are an overview, not a read. */
 const TRUNCATED_MAX_HEIGHT = 320;
 
 const FIT_PADDING = 0.04;
 const FIT_MAX_ZOOM = 1.25;
-/** Room around the nodes for the overview labels, in flow units: their side overhang and their upward growth. */
+/** Room beside the drawing for the overview labels' side overhang, in flow units. */
 const LABEL_MARGIN_X = 30;
-const LABEL_MARGIN_TOP = 6;
+
+/**
+ * Room above the top row, in flow units, for overview labels at `zoom`: a
+ * label's bottom sits on its node's header bottom and it grows up from there.
+ */
+function labelHeadroom(zoom: number): number {
+	return zoom < OVERVIEW_ZOOM ? Math.max(0, LABEL_TALLEST - NODE_HEADER_HEIGHT * zoom) / zoom : 0;
+}
 
 /**
  * Fit the whole drawing, nodes and their overview labels, into the frame.
  * React Flow's fitView fits the nodes only, so a label wider than its node
- * would be cut by the frame's edge.
+ * would be cut by the frame's edge, and one on the top row by its top.
  */
 function useFitAll(): (options?: { duration?: number }) => void {
 	const { getNodes, getNodesBounds, setViewport } = useReactFlow();
@@ -99,8 +109,11 @@ function useFitAll(): (options?: { duration?: number }) => void {
 		(options?: { duration?: number }) => {
 			const box = getNodesBounds(getNodes());
 			if (!box.width || !width || !height) return;
-			const padded = { x: box.x - LABEL_MARGIN_X, y: box.y - LABEL_MARGIN_TOP, width: box.width + 2 * LABEL_MARGIN_X, height: box.height + LABEL_MARGIN_TOP };
-			setViewport(getViewportForBounds(padded, width, height, 0.02, FIT_MAX_ZOOM, FIT_PADDING), options);
+			const fit = (top: number) => getViewportForBounds({ x: box.x - LABEL_MARGIN_X, y: box.y - top, width: box.width + 2 * LABEL_MARGIN_X, height: box.height + top }, width, height, 0.02, FIT_MAX_ZOOM, FIT_PADDING);
+			// The headroom depends on the zoom it leads to; two rounds settle it.
+			let view = fit(0);
+			for (let i = 0; i < 2; i++) view = fit(labelHeadroom(view.zoom));
+			setViewport(view, options);
 		},
 		[getNodes, getNodesBounds, setViewport, width, height]
 	);
@@ -136,7 +149,23 @@ const NODE_TYPES = {
 	[INodeType.Annotation]: ReadOnlyAnnotation,
 };
 
-const EDGE_TYPES = { default: FlowEdge };
+/** The builder's edge pulls each end 8 px into its handle (FlowEdge HANDLE_OFFSET). */
+const HANDLE_OFFSET = 8;
+
+/**
+ * A connection into a later band of a flow the widget wrapped. It has the
+ * builder edge's stroke, but runs right out of its source, down into the gap
+ * above its target's band, across, and down into the target, so it never
+ * crosses the drawing. Only a layout the widget made has bands.
+ */
+function WrapEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data }: EdgeProps): ReactElement | null {
+	if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) return null;
+	const centerY = (data as { centerY?: number } | undefined)?.centerY;
+	const [path] = getSmoothStepPath({ sourceX: sourceX - HANDLE_OFFSET, sourceY, sourcePosition, targetX: targetX + HANDLE_OFFSET, targetY, targetPosition, centerY, offset: WRAP_OFFSET + HANDLE_OFFSET, borderRadius: 8 });
+	return <BaseEdge path={path} markerEnd={markerEnd} style={style} />;
+}
+
+const EDGE_TYPES = { default: FlowEdge, wrap: WrapEdge };
 
 type GraphModel = Extract<CanvasModel, { kind: 'graph' }>;
 type DisplayMode = 'inline' | 'fullscreen' | 'pip';
@@ -172,8 +201,8 @@ function estimatedBounds(nodes: GraphModel['nodes']): Bounds {
 /** The inline canvas height that shows the whole drawing at its fitted zoom without empty bands. */
 function inlineHeight(width: number, bounds: Bounds, max: number): number {
 	const inner = width * (1 - 2 * FIT_PADDING);
-	const padded = { width: bounds.width + 2 * LABEL_MARGIN_X, height: bounds.height + LABEL_MARGIN_TOP };
-	const wanted = (inner * padded.height) / padded.width + width * 2 * FIT_PADDING;
+	const zoom = inner / (bounds.width + 2 * LABEL_MARGIN_X);
+	const wanted = zoom * (bounds.height + labelHeadroom(zoom)) + width * 2 * FIT_PADDING;
 	return Math.round(Math.min(max, Math.max(CANVAS_MIN_HEIGHT, wanted)));
 }
 
@@ -343,19 +372,31 @@ function headerBottom(id: string): number {
 
 type Neighbour = { id: string; gap: number } | null;
 
+/** One overview label before the row pass settles its height, font and icon. */
+type Draft = { id: string; row: number; down: boolean; nodeTop: number; service?: { icon?: string }; title: string; experimental: boolean; left: number; width: number; height: number; lines: number; font: number; icon: boolean; short: boolean; headerBottomY: number };
+
 /**
  * The nearest node on each side of every node whose label band it shares,
  * and the gap to it in flow units. A label band is the node's header, or the
- * height of a two-line label when that is taller at this zoom. `blocked`
+ * height of a two-line label when that is taller at this zoom, ending on the
+ * header bottom (or starting at the node's top for an invoked node, see
+ * OverviewLabels). `blocked`
  * marks a node that overlaps another in its band, whose label stays as wide
  * as the node. Worked out once per placement and zoom step.
  */
-function useNeighbours(zoom: number): Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }> {
+function useNeighbours(zoom: number, invoked: Set<string>): Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }> {
 	const nodes = useStore((s) => s.nodes);
 	const nodeLookup = useStore((s) => s.nodeLookup);
 	const step = Math.round(zoom * 50) / 50;
 	return useMemo(() => {
-		const boxes = [...nodeLookup.values()].filter((node) => node.type === INodeType.Default && node.measured?.width).map((node) => ({ id: node.id, x: node.internals.positionAbsolute.x, y: node.internals.positionAbsolute.y, w: node.measured!.width!, h: Math.max(headerBottom(node.id), LABEL_MIN_HEIGHT_TWO_LINES / Math.max(step, 0.02)) }));
+		const boxes = [...nodeLookup.values()]
+			.filter((node) => node.type === INodeType.Default && node.measured?.width)
+			.map((node) => {
+				const top = node.internals.positionAbsolute.y;
+				const h = Math.max(headerBottom(node.id), LABEL_TALLEST / Math.max(step, 0.02));
+				const y = invoked.has(node.id) ? top : top + headerBottom(node.id) - h;
+				return { id: node.id, x: node.internals.positionAbsolute.x, y, w: node.measured!.width!, h };
+			});
 		const result = new Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }>();
 		for (const box of boxes) {
 			let left: Neighbour = null;
@@ -374,7 +415,7 @@ function useNeighbours(zoom: number): Map<string, { left: Neighbour; right: Neig
 			result.set(box.id, { left, right, blocked });
 		}
 		return result;
-	}, [nodes, nodeLookup, step]);
+	}, [nodes, nodeLookup, step, invoked]);
 }
 
 /** Width of `text` in the labels' font, measured once per text and size. */
@@ -414,9 +455,13 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 	const frameWidth = useStore((s) => s.width);
 	const frameHeight = useStore((s) => s.height);
 	const nodeLookup = useStore((s) => s.nodeLookup);
-	const neighbours = useNeighbours(zoom);
+	// Nodes an invoke connection enters from the top (an agent's LLM, memory and tools).
+	const edges = useStore((s) => s.edges);
+	const invoked = useMemo(() => new Set(edges.filter((edge) => edge.sourceHandle?.startsWith('invoke-source')).map((edge) => edge.target)), [edges]);
+	const neighbours = useNeighbours(zoom, invoked);
 	const labels: ReactElement[] = [];
 	const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+	const drafts: Draft[] = [];
 	const ordered = [...nodeLookup.values()].filter((node) => zoom < OVERVIEW_ZOOM && node.type === INodeType.Default && node.measured?.width).sort((a, b) => a.internals.positionAbsolute.y - b.internals.positionAbsolute.y || a.internals.positionAbsolute.x - b.internals.positionAbsolute.x);
 	// What each label wants past its node's width: as wide as its title on one line.
 	const items = ordered.map((node) => {
@@ -452,42 +497,74 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 		const width = nodeWidth + toLeft + toRight;
 		if (width < LABEL_MIN_WIDTH) continue;
 		// A title that does not fit one line takes two, broken between words (or
-		// after a hyphen), never inside one: in the label font when the longest
-		// word fits, else the smaller one, else without the icon. When it still
-		// does not fit, the label is one line cut short with an ellipsis (the
-		// node's tooltip has the whole title).
-		let narrow = needed > width;
+		// after a hyphen): in the label font with the icon when its longest word
+		// fits, else in the smaller font, else without the icon. When only the
+		// first word fits, a longer word breaks at the end of line two, which
+		// ends in an ellipsis. When not even the first word fits, the label is
+		// one line cut short (the node's tooltip has the whole title).
+		let lines = needed > width ? 2 : 1;
 		let font = LABEL_FONT;
 		let icon = !!service?.icon;
-		let short = false;
-		if (narrow) {
-			const words = title.split(/\s+|(?<=-)/);
-			const fits = (size: number, withIcon: boolean) => Math.max(...words.map((word) => textWidth(word, size))) <= width - LABEL_CHROME_NARROW - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
-			if (width < LABEL_WIDE || !fits(LABEL_FONT, icon)) font = LABEL_FONT_NARROW;
-			if (!fits(font, icon)) {
+		if (lines === 2) {
+			const words = title.split(/\s+|(?<=-)/).filter(Boolean);
+			const room = (withIcon: boolean) => width - LABEL_CHROME_NARROW - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
+			const longest = (size: number) => Math.max(...words.map((word) => textWidth(word, size)));
+			const first = (size: number) => textWidth(words[0] ?? title, size);
+			const choices: Array<[number, boolean, (size: number) => number]> = [
+				[LABEL_FONT, true, longest],
+				[LABEL_FONT_NARROW, true, longest],
+				[LABEL_FONT_NARROW, false, longest],
+				[LABEL_FONT_NARROW, true, first],
+				[LABEL_FONT_NARROW, false, first],
+			];
+			const choice = choices.find(([size, withIcon, measure]) => (width >= LABEL_WIDE || size === LABEL_FONT_NARROW) && (withIcon || icon) && measure(size) <= room(withIcon && icon));
+			if (choice) {
+				font = choice[0];
+				icon = icon && choice[1];
+			} else {
+				lines = 1;
+				font = LABEL_FONT_NARROW;
 				icon = false;
-				if (!fits(font, false)) {
-					narrow = false;
-					short = true;
-				}
 			}
 		}
-		const { x, y } = node.internals.positionAbsolute;
-		const header = headerBottom(node.id) * zoom;
-		const height = Math.max(header, narrow ? (font === LABEL_FONT ? LABEL_MIN_HEIGHT_TWO_LINES + 3 : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
+		const short = lines === 1 && needed > width;
+		const headerBottomY = (node.internals.positionAbsolute.y + headerBottom(node.id)) * zoom + ty;
+		const height = Math.max(headerBottom(node.id) * zoom, lines === 2 ? (font === LABEL_FONT ? LABEL_TALLEST : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
 		// Inside the frame: a label wider than its node must not be cut by the edge.
-		const left = Math.max(2, Math.min(x * zoom + tx - toLeft, frameWidth - width - 2));
-		// A label taller than a node at the bottom of the frame moves up to stay inside it.
-		const nodeTop = y * zoom + ty;
-		const top = nodeTop < frameHeight ? Math.min(nodeTop, frameHeight - height - 2) : nodeTop;
-		const box = { left, top, right: left + width, bottom: top + height };
+		const left = Math.max(2, Math.min(nodeLeft - toLeft, frameWidth - width - 2));
+		const down = invoked.has(node.id);
+		const nodeTop = node.internals.positionAbsolute.y * zoom + ty;
+		drafts.push({ id: node.id, row: Math.round(down ? nodeTop : headerBottomY), down, service, title, experimental, left, width, height, lines, font, icon, short, headerBottomY, nodeTop });
+	}
+	// One row reads as one: the same height, font and icon choice for every
+	// label whose node header ends on the same line.
+	const rows = new Map<number, Draft[]>();
+	for (const draft of drafts) rows.set(draft.row, [...(rows.get(draft.row) ?? []), draft]);
+	for (const row of rows.values()) {
+		const height = Math.max(...row.map((d) => d.height));
+		const font = Math.min(...row.map((d) => d.font));
+		const icons = row.every((d) => d.icon || !d.service?.icon);
+		for (const draft of row) {
+			draft.height = height;
+			draft.font = font;
+			draft.icon = draft.icon && icons;
+		}
+	}
+	for (const draft of drafts) {
+		// The label's bottom sits on its node's header bottom: it covers the
+		// header and grows up, so the lanes and their connections stay in view.
+		// An invoked node's invoke connection comes in from above, so its label
+		// starts at the node's top and grows down over its own lanes instead.
+		const top = Math.max(2, Math.min(draft.down ? draft.nodeTop : draft.headerBottomY - draft.height, frameHeight - draft.height - 2));
+		const box = { left: draft.left, top, right: draft.left + draft.width, bottom: top + draft.height };
 		if (placed.some((p) => box.left < p.right && p.left < box.right && box.top < p.bottom && p.top < box.bottom)) continue;
 		placed.push(box);
+		const kind = draft.lines === 2 ? ' rr-overview-narrow' : draft.short ? ' rr-overview-short' : '';
 		labels.push(
-			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : short ? 'rr-overview-label rr-overview-short' : 'rr-overview-label'} style={{ left, top, width, height, fontSize: short ? LABEL_FONT_NARROW : font }}>
-				{icon && service?.icon && <Icon name={service.icon} width="12" height="12" className="rr-overview-icon" />}
-				<span className="rr-overview-title">{title}</span>
-				{experimental && <i className="rr-overview-badge" title="Experimental" />}
+			<div key={draft.id} className={`rr-overview-label${kind}`} style={{ left: draft.left, top, width: draft.width, height: draft.height, fontSize: draft.font }}>
+				{draft.icon && draft.service?.icon && <Icon name={draft.service.icon} width="12" height="12" className="rr-overview-icon" />}
+				<span className="rr-overview-title">{draft.title}</span>
+				{draft.experimental && <i className="rr-overview-badge" title="Experimental" />}
 			</div>
 		);
 	}
@@ -554,9 +631,11 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 			const measured = getInternalNode(id)?.measured;
 			return { width: measured?.width ?? ESTIMATED_NODE_SIZE.width, height: measured?.height ?? ESTIMATED_NODE_SIZE.height };
 		};
-		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf, { width: frameWidth, height: active ? frameHeight : CANVAS_MAX_HEIGHT }) as unknown as FlowNode[]);
+		// Inline, the layout aims at the height the frame can grow to.
+		const inlineMax = model.summary.truncated ? TRUNCATED_MAX_HEIGHT : frameWidth < NARROW_FRAME ? NARROW_MAX_HEIGHT : CANVAS_MAX_HEIGHT;
+		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf, { width: frameWidth, height: active ? frameHeight : inlineMax }) as unknown as FlowNode[]);
 		setPlacement((n) => n + 1);
-	}, [initialized, model.edges, getInternalNode, setNodes, frameWidth, frameHeight, active]);
+	}, [initialized, model.edges, model.summary.truncated, getInternalNode, setNodes, frameWidth, frameHeight, active]);
 
 	// Once the final placement is measured, report the drawing's real size,
 	// which sets the frame's height.
@@ -604,10 +683,11 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 					.filter((w) => w > 0)
 					.sort((a, b) => a - b);
 				const typical = widths[Math.floor(widths.length / 2)] ?? ESTIMATED_NODE_SIZE.width;
-				// A phone-width frame fits the whole drawing (the labels keep it readable); a wider one
-				// opens at a reading zoom when the fit would draw nodes too small.
-				if (frameWidth >= NARROW_FRAME && fitZoom * typical < FULL_FIT_MIN_NODE_WIDTH) {
-					const zoom = Math.min(1.25, FULL_READ_NODE_WIDTH / typical);
+				// When the fit would draw nodes too small, full screen opens at a reading
+				// zoom (a bit smaller on a phone, so about three columns show) and the
+				// minimap shows the rest. Fit is one tap away.
+				if (fitZoom * typical < FULL_FIT_MIN_NODE_WIDTH) {
+					const zoom = Math.min(1.25, (frameWidth < NARROW_FRAME ? FULL_READ_NODE_WIDTH_NARROW : FULL_READ_NODE_WIDTH) / typical);
 					setViewport({ x: 24 - all.x * zoom, y: 24 - all.y * zoom, zoom });
 					return;
 				}
@@ -617,23 +697,29 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 		return () => cancelAnimationFrame(frame);
 	}, [ready, frameWidth, frameHeight, active, placement, fitAll, getNodes, getNodesBounds, getInternalNode, getViewport, setViewport, moved]);
 
-	// A connection that cannot avoid crossing a node (a long flow wrapped in a
-	// narrow frame) is drawn over it, not hidden behind it, so it never looks
+	// A connection into a later band of a wrapped flow runs through the gap
+	// above that band. A connection that still crosses a node (a saved layout
+	// can have one) is drawn over it, not hidden behind it, so it never looks
 	// like it ends there.
 	const edges = useMemo(() => {
 		if (!initialized) return model.edges;
-		const positions: Record<string, { x: number; y: number }> = {};
+		const positions: Positions = {};
 		const sizes: Record<string, { width: number; height: number }> = {};
 		for (const node of nodes) {
 			const internal = getInternalNode(node.id);
 			if (node.type !== INodeType.Default || !internal?.measured?.width || !internal.measured.height) continue;
-			positions[node.id] = internal.internals.positionAbsolute;
+			const band = (node.data as { layoutBand?: number }).layoutBand;
+			// A top-level node's position from this render's state: the store's copy lags a placement by one render.
+			positions[node.id] = { ...(node.parentId ? internal.internals.positionAbsolute : node.position), band };
 			sizes[node.id] = { width: internal.measured.width, height: internal.measured.height };
 		}
 		const sizeOf = (id: string) => sizes[id];
+		const gaps = bandGaps(positions);
 		return model.edges.map((edge) => {
-			const control = !!edge.sourceHandle?.startsWith('invoke-source');
-			return edgesThroughNodes(positions, [{ source: edge.source, target: edge.target, control }], sizeOf) ? { ...edge, zIndex: 1 } : edge;
+			const link = { source: edge.source, target: edge.target, control: !!edge.sourceHandle?.startsWith('invoke-source') };
+			const centerY = wrapCenterY(positions, link, gaps);
+			const routed = centerY === undefined ? edge : { ...edge, type: 'wrap', data: { ...edge.data, centerY } };
+			return edgesThroughNodes(positions, [link], sizeOf) ? { ...routed, zIndex: 1 } : routed;
 		});
 	}, [initialized, nodes, model.edges, getInternalNode]);
 

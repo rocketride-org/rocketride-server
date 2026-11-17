@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { BAND_GAP, LAYER_GAP, NODE_GAP, WRAP_BELOW_ZOOM, edgesThroughNodes, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
+import { BAND_GAP, LAYER_GAP, NODE_GAP, WRAP_BELOW_ZOOM, bandGaps, edgesThroughNodes, layoutLayers, layoutPipeline, wrapCenterY, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -380,6 +380,7 @@ describe('edges and nodes', () => {
 
 	it.each([
 		[760, 560],
+		[390, 420],
 		[1100, 700],
 	])('draws no connection behind a node in a %i x %i frame', (width, height) => {
 		const positions = layoutPipeline(ids, edges, sizeOf, { width, height });
@@ -388,16 +389,29 @@ describe('edges and nodes', () => {
 		expect(overlaps(positions, sizeOf)).toBe(false);
 	});
 
-	it('wraps in a 390 x 420 frame with the fewest connections across a node', () => {
-		// Every way to wrap this pipeline that narrow sends one connection across a
-		// node; the canvas draws such a connection over the node, not behind it.
+	it('wraps in a 390 x 420 frame, and the connection between bands runs through the gap above the later band', () => {
 		const positions = layoutPipeline(ids, edges, sizeOf, { width: 390, height: 420 });
 		const width = Math.max(...ids.map((id) => positions[id].x + sizes[id].width));
 		const height = Math.max(...ids.map((id) => positions[id].y + sizes[id].height));
+		const gaps = bandGaps(positions);
+		const across = edges.filter((edge) => wrapCenterY(positions, edge, gaps) !== undefined);
 
-		expect(new Set(Object.values(positions).map((p) => p.y)).size).toBeGreaterThan(1);
+		expect(new Set(Object.values(positions).map((p) => p.band)).size).toBeGreaterThan(1);
 		expect(Math.min(390 / width, 420 / height)).toBeGreaterThanOrEqual(WRAP_BELOW_ZOOM);
-		expect(edgesThroughNodes(positions, edges, sizeOf)).toBe(1);
-		expect(overlaps(positions, sizeOf)).toBe(false);
+		expect(across.length).toBeGreaterThan(0);
+		for (const edge of across) {
+			const centerY = wrapCenterY(positions, edge, gaps)!;
+			const target = positions[edge.target];
+			// In the gap: below every node of the earlier bands, above the target's band.
+			expect(centerY).toBe(
+				Math.min(
+					...Object.values(positions)
+						.filter((p) => p.band === target.band)
+						.map((p) => p.y)
+				) -
+					BAND_GAP / 2
+			);
+			for (const id of ids.filter((id) => positions[id].band! < target.band!)) expect(positions[id].y + sizes[id].height).toBeLessThan(centerY);
+		}
 	});
 });
