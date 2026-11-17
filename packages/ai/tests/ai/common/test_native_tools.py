@@ -677,6 +677,30 @@ def test_a_failed_turn_is_a_typed_error_and_a_text_question_keeps_its_text_error
     assert text_answer.getText().startswith('**LLM error**') and text_answer.error is None
 
 
+def test_a_hosted_refusal_reaches_the_caller_as_its_sentence():
+    """The refusal's sentence is our own text, so a turn and a text answer both carry it, without a class name."""
+    from ai.common.model_gateway import HostedModelError
+
+    sentence = 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.'
+
+    class _Refused:
+        supports_tools = True
+
+        def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
+            raise HostedModelError(sentence)
+
+    node = _node(_Refused())
+    text = Question()
+    text.addQuestion('hi')
+
+    node.writeQuestions(_turn())
+    node.writeQuestions(text)
+
+    turn_answer, text_answer = node.instance.written
+    assert (turn_answer.error.code, turn_answer.error.message) == ('provider_error', sentence)
+    assert text_answer.getText() == f'**LLM error** — {sentence}'
+
+
 def test_chat_refuses_a_turn_on_a_driver_without_native_tools():
     from ai.common.chat import ChatBase
 
