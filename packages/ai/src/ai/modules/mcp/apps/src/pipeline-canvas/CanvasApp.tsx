@@ -687,7 +687,8 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 
 	const headBottom = headRef.current?.getBoundingClientRect().bottom ?? 90;
 	const inlineMax = model.summary.truncated ? TRUNCATED_MAX_HEIGHT : CANVAS_MAX_HEIGHT;
-	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 40 - host.safeBottom) : width ? inlineHeight(width, bounds, inlineMax) : CANVAS_MIN_HEIGHT;
+	// Full screen leaves room under the drawing for the hint (up to two lines) and the host's safe area.
+	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 56 - host.safeBottom) : width ? inlineHeight(width, bounds, inlineMax) : CANVAS_MIN_HEIGHT;
 	const cue = host.canFullScreen ? (coarse ? 'Tap to expand and read the names' : 'Expand or zoom in to read the names') : 'Zoom in to read the names';
 	// On a touch screen a tap on the inline canvas opens full screen, where every gesture works.
 	const onTap = () => {
@@ -702,7 +703,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 			? host.canFullScreen
 				? 'Tap to expand. Two fingers move or zoom here.'
 				: 'Two fingers move or zoom.'
-			: 'Drag to move. Pinch, Ctrl + scroll or double-click to zoom.';
+			: 'Drag to move. Pinch or Ctrl + scroll to zoom.';
 	// On a phone the drawing is small: one line says what the pipeline does.
 	const flowLine = useMemo(() => mainFlow(model.summary), [model.summary]);
 
