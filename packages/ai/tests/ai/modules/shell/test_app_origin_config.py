@@ -543,9 +543,10 @@ def _client_ip(cfg, peer, *pairs):
     'value,expected',
     [
         ('198.51.100.10:46532', '198.51.100.10'),  # CloudFront-Viewer-Address, IPv4
-        ('2001:db8:3333:4444:5555:6666:7777:8888:46532', '2001:db8:3333:4444:5555:6666:7777:8888'),  # IPv6
-        ('[2001:db8::1]:443', '2001:db8::1'),
-        ('2001:db8::1', '2001:db8::1'),
+        ('2001:db8:3333:4444:5555:6666:7777:8888:46532', '2001:db8:3333:4444::/64'),  # IPv6 keys by /64
+        ('[2001:db8::1]:443', '2001:db8::/64'),
+        ('2001:db8::1', '2001:db8::/64'),
+        ('2a01:db8::1:443', '2a01:db8::/64'),  # ambiguous unbracketed v6:port: the /64 makes the port moot
         ('203.0.113.7', '203.0.113.7'),
         ('1.1.1.1, 2.2.2.2', '2.2.2.2'),  # the last hop
         ('evil', 'peer-fallback'),
@@ -612,3 +613,36 @@ def test_cryptography_is_a_declared_engine_requirement():
 
     requirements = (Path(ai.__file__).parent / 'requirements.txt').read_text(encoding='utf-8').splitlines()
     assert any(line.strip().startswith('cryptography>=') for line in requirements)
+
+
+def test_ipv6_clients_share_a_bucket_per_64_whatever_the_port_or_address(isolation_env):
+    """T8d (G4 round 3 R3-L1): rotating the low 64 bits or the source port never yields a new bucket."""
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='CloudFront-Viewer-Address')
+    cfg = isolation_env.config()
+    keys = {
+        _client_ip(cfg, '10.0.0.1', ('cloudfront-viewer-address', value))
+        for value in (
+            '2a01:db8:1:2::1:443',
+            '2a01:db8:1:2::1:8080',
+            '2a01:db8:1:2::ffff:1234',
+            '[2a01:db8:1:2:aaaa:bbbb:cccc:dddd]:1',
+            '2a01:db8:1:2:aaaa:bbbb:cccc:dddd:46532',
+        )
+    }
+    assert keys == {'2a01:db8:1:2::/64'}
+    # IPv4 keeps one address per bucket, and an IPv6 peer is bucketed the same way
+    assert _client_ip(cfg, '10.0.0.1', ('cloudfront-viewer-address', '198.51.100.10:1')) == '198.51.100.10'
+    assert _client_ip(isolation_env.config(), '2a01:db8:9::5', ('x-other', '1.1.1.1')) == '2a01:db8:9::/64'
+
+
+def test_trusted_header_without_proxy_cidrs_warns_at_startup(isolation_env, monkeypatch):
+    """T8d (R3-L2): a header trusted from any peer is spoofable by whoever reaches the engine directly: say so."""
+    lines = []
+    monkeypatch.setattr(_ao(), 'debug', lambda message: lines.append(str(message)), raising=False)
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='CloudFront-Viewer-Address')
+    _validate()
+    assert any('WARNING' in line and 'RR_TRUSTED_PROXY_CIDRS' in line for line in lines), lines
+    lines.clear()
+    isolation_env.set(RR_TRUSTED_PROXY_CIDRS='10.0.0.0/8')
+    _validate()
+    assert not any('RR_TRUSTED_PROXY_CIDRS' in line and 'WARNING' in line for line in lines), lines
