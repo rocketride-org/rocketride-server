@@ -49,6 +49,8 @@ export const SIZES = {
 	string: 4096,
 	/** Names, sources, modes and subcommands, in UTF-8 bytes. */
 	name: 128,
+	/** One private app topic snapshot (`app.<appKey>.*`); with 256 topics, at most 4 MiB per app at the root. */
+	appTopic: 16 * 1024,
 	/** Largest `fs_read.length` (the SDK default; the server clamps to it too). */
 	fsRead: 4 * 1024 * 1024,
 	/** Any one inbound string, in characters, checked before it is scanned (an 8 MiB base64 payload plus slack). */

@@ -430,7 +430,7 @@ function clampBusTimeout(timeoutMs: unknown): number {
 	return typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.min(timeoutMs, DEFAULT_BUS_REQUEST_TIMEOUT_MS) : DEFAULT_BUS_REQUEST_TIMEOUT_MS;
 }
 
-/** Private retained topics one app may hold at the root. */
+/** Private retained topics one app may hold at the root (each at most `SIZES.appTopic`). */
 const MAX_APP_TOPICS = 256;
 /** Longest op or topic name a gated realm may use, in characters. */
 const MAX_NAME = 256;
@@ -824,6 +824,10 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					if (typeof m.topic !== 'string' || !m.topic.startsWith(ns)) return void charge('publish');
 					const admitted = tryAdmit('publish', m.snapshot);
 					if (!admitted.ok) return;
+					if (admitted.value !== undefined) {
+						const size = measure(admitted.value);
+						if (size.json + size.bin > SIZES.appTopic) return;
+					}
 					const registry = appRegistry();
 					if (m.transient) return registry.signal(m.topic, admitted.value);
 					if (admitted.value !== undefined && registry.read(m.topic) === undefined && registry.entries().filter(([t]) => t.startsWith(ns)).length >= MAX_APP_TOPICS) return;
