@@ -268,7 +268,22 @@ export function useStatementRunner<TRun extends IStatementRunBase, TSend, TResul
 			},
 		};
 
-		await runStatementBatch(targets, { ...cfg, record }, view, ticket);
+		try {
+			await runStatementBatch(targets, { ...cfg, record }, view, ticket);
+		} finally {
+			// A batch can end without `finished` while its ticket is still current:
+			// dropped on a session-level stale marker, or rejected by a hook that
+			// threw. Release the runner then, or it stays busy until a remount; the
+			// statement that was waiting is marked abandoned (its answer was never
+			// taken, so it MAY have run) and the unsent ones skipped. A rejection
+			// still propagates.
+			if (ticket.isCurrent() && runningRef.current) {
+				runningRef.current = false;
+				setRunning(false);
+				const ms = (cfg.now ?? ((): number => performance.now()))() - runStartedRef.current;
+				publishRuns(abandonRuns(runsRef.current, ms).runs);
+			}
+		}
 	}, [publishRuns, record]);
 
 	const stopWaiting = useCallback((): void => {

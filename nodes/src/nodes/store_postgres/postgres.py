@@ -136,11 +136,13 @@ class Store(PgVectorStoreBase):
 
         # check if the similarity matches milvus configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'l2', 'inner_product']:
+        supported = tuple(self.similarityDict)
+        if similarity in supported:
             self.similarity = self.similarityDict[similarity]
         else:
             raise Exception(
-                'The metric you provided in the config.json does not match required postgres configurations'
+                f'PostgreSQL (pgvector): unsupported similarity {similarity!r}. '
+                f'Set "similarity" to: {", ".join(supported)}.'
             )
 
         self.client = psycopg2.connect(

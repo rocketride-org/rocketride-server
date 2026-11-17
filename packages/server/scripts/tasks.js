@@ -60,6 +60,7 @@ const {
 	copyFile,
 	removeFile,
 	loadPackageJson,
+	DOWNLOADS_DIR,
 	downloadGitHubFile,
 	createArchive,
 	extractArchive,
@@ -135,6 +136,81 @@ async function getPackageInfo(options = {}) {
 		distFilename,
 		distFile,
 	};
+}
+
+// =============================================================================
+// Prebuilt Downloads
+// =============================================================================
+
+// One release holding the engines CI compiled, named by the source hash they
+// were built from (prerelease.yaml publishes develop's and stage's). The two
+// release slots only ever hold the latest build; this holds the recent ones
+const ENGINE_CACHE_TAG = 'engine-cache';
+const ENGINE_CACHE_PREFIX = `${ENGINE_CACHE_TAG}_rocketride-engine-`;
+
+/**
+ * The releases a prebuilt server may come from, in the order they are tried.
+ *
+ * @param {string} localHash - Content hash of the local server source
+ * @param {Object} [options] - Build options (suffix, arch)
+ * @returns {Promise<Array<Object>>} Each {tag, label, manifestFilename,
+ *   distFilename}, and `cache: true` on the engine-cache one
+ */
+async function getDownloadSources(localHash, options = {}) {
+	const { releaseTag, prereleaseTag, manifestFilename, distFilename } = await getPackageInfo(options);
+	const release = (tag) => ({ tag, label: `Release ${tag}`, manifestFilename, distFilename });
+
+	// A named release is the only one tried
+	if (options.suffix) return [release(prereleaseTag)];
+
+	// The engine built from exactly this source, when CI has published one,
+	// then the stable release, then the prerelease
+	const sources = [release(releaseTag), release(prereleaseTag)];
+	if (localHash) {
+		const { name, ext } = getPlatformInfo(options);
+		const baseName = `rocketride-engine-${localHash.slice(0, 16)}-${name}`;
+		sources.unshift({
+			tag: ENGINE_CACHE_TAG,
+			label: `Engine cache ${localHash.slice(0, 16)}`,
+			manifestFilename: `${baseName}.manifest.json`,
+			distFilename: `${baseName}.${ext}`,
+			cache: true,
+		});
+	}
+	return sources;
+}
+
+/**
+ * The first source whose manifest was built from this source and vcpkg.
+ *
+ * The cache's names carry only part of the hash, so the whole one is compared
+ * here like any release's.
+ *
+ * @returns {Promise<{available: boolean, match: Object|null}>} available: any
+ *   source had a manifest; match: the source that fits, with its manifest
+ */
+async function findPrebuilt(sources, localHash, localVcpkgVersion, task) {
+	let available = false;
+
+	for (const source of sources) {
+		task.output = `Checking ${source.label}...`;
+
+		const manifestPath = await downloadGitHubFile(source.tag, source.manifestFilename, task);
+		const manifest = manifestPath ? await readJson(manifestPath) : null;
+		if (!manifest) {
+			task.output = `${source.label} not available`;
+			continue;
+		}
+
+		task.output = `${source.label} available`;
+		available = true;
+
+		if (manifest.server?.buildHash === localHash && manifest.vcpkg?.version === localVcpkgVersion) {
+			return { available, match: { ...source, manifest } };
+		}
+	}
+
+	return { available, match: null };
 }
 
 // =============================================================================
@@ -465,55 +541,23 @@ function makeDownloadAction(options = {}) {
 				return;
 			}
 
-			const { releaseTag, prereleaseTag, manifestFilename, distFilename } = await getPackageInfo(options);
+			const sources = await getDownloadSources(localHash, options);
+			const { available, match } = await findPrebuilt(sources, localHash, localVcpkgVersion, task);
 
-			const tagsToTry = options.suffix
-				? // A named release is the only one tried
-					[prereleaseTag]
-				: // Try stable release first, then prerelease
-					[releaseTag, prereleaseTag];
-			let releaseAvailable = false;
-			let releaseHash = null;
-			let matchedTag = null;
-			let matchedManifest = null;
-
-			for (const tag of tagsToTry) {
-				task.output = `Checking release ${tag}...`;
-
-				let manifest = null;
-				const manifestPath = await downloadGitHubFile(tag, manifestFilename, task);
-				if (manifestPath) {
-					manifest = await readJson(manifestPath);
-				}
-
-				if (manifest) {
-					task.output = `Release ${tag} available`;
-					releaseAvailable = true;
-				} else {
-					task.output = `Release ${tag} not available`;
-					continue;
-				}
-
-				releaseHash = manifest?.server?.buildHash;
-				const releaseVcpkgVersion = manifest?.vcpkg?.version;
-				if (localHash === releaseHash && localVcpkgVersion === releaseVcpkgVersion) {
-					matchedTag = tag;
-					matchedManifest = manifest;
-					break;
-				}
-			}
-
-			if (!releaseAvailable) {
+			if (!available) {
 				task.output = 'No releases available - will compile';
 				await setState('server.downloadHash', null);
 				return;
 			}
 
-			if (!matchedTag) {
+			if (!match) {
 				task.output = 'Source differs from all releases — will compile';
 				await setState('server.downloadHash', null);
 				return;
 			}
+
+			const releaseHash = match.manifest.server.buildHash;
+			const { tag: matchedTag, distFilename } = match;
 
 			if ((await getState('server.downloadHash')) === releaseHash) {
 				task.output = 'Server already downloaded';
@@ -535,13 +579,24 @@ function makeDownloadAction(options = {}) {
 			await extractArchive(distPath, DIST_DIR);
 			task.output = `Extracted ${distFilename}`;
 
+			// A release's archive replaces the last one under the same name;
+			// the cache's are named by hash, so drop the ones this replaced
+			if (match.cache) {
+				const keep = path.basename(distPath);
+				await removeMatching(
+					DOWNLOADS_DIR,
+					(name) => name.startsWith(ENGINE_CACHE_PREFIX) && !name.endsWith('.manifest.json') && name !== keep,
+					{ recursive: false }
+				);
+			}
+
 			task.output = `Downloaded server from ${matchedTag}`;
 			await setState('server.buildHash', releaseHash);
 			await setState('server.downloadHash', releaseHash);
 			// TEMPORARY: what the nodes shipped here were built from, which
 			// only the manifest says. Goes when the nodes get a distribution
 			// of their own and carry it themselves
-			for (const [name, node] of Object.entries(matchedManifest?.nodes ?? {})) {
+			for (const [name, node] of Object.entries(match.manifest.nodes ?? {})) {
 				await setState(`nodes.${name}.buildHash`, node.buildHash);
 				await setState(`nodes.${name}.buildType`, node.buildType);
 				await setState(`nodes.${name}.from`, 'release');

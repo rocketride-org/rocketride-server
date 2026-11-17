@@ -7,7 +7,7 @@
 
 Concurrency, prepared-statement cleanup, session hygiene, reconnect and
 shutdown, against the same disposable database and fixtures as
-``test_rocketride_graph_full.py`` (whose ``rr_env`` / ``age_graph`` fixtures
+``test_rocketride_graph_live.py`` (whose ``rr_env`` / ``age_graph`` fixtures
 are reused). Synchronisation uses barriers plus server-side ``pg_sleep`` so
 the overlapping windows are real, not scheduler luck.
 
@@ -30,16 +30,27 @@ import types
 
 import pytest
 
-from .test_rocketride_graph_full import ADMIN_DSN, TEST_DSN, _begin, _db_reachable, age_graph, psycopg2, rr_env
+from .test_rocketride_graph_live import (
+    _DB_MISSING,
+    ADMIN_DSN,
+    TEST_DSN,
+    _begin,
+    _db_reachable,
+    _own_modules_isolated,
+    age_graph,
+    psycopg2,
+    rr_env,
+)
 
-# The shared fixtures are requested by name in the tests below; binding them
-# here is what registers them with pytest for this module.
-_SHARED_FIXTURES = (rr_env, age_graph)
+# The shared fixtures are requested by name in the tests below (rr_env requests
+# _own_modules_isolated); binding them here is what registers them with pytest
+# for this module.
+_SHARED_FIXTURES = (rr_env, age_graph, _own_modules_isolated)
 
 # A pooler sits between the node and the database when the two DSNs differ.
 BEHIND_POOLER = ADMIN_DSN != TEST_DSN
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide AGE test database not reachable at {TEST_DSN}')
+pytestmark = pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING)
 
 
 # ---------------------------------------------------------------------------
@@ -521,7 +532,7 @@ def _age_state():
     Scoped to the test's own graph (other runs may create graphs concurrently);
     the graph must still exist, so a dropped graph also shows up as a change.
     """
-    from .test_rocketride_graph_full import GRAPH
+    from .test_rocketride_graph_live import GRAPH
 
     conn = _admin()
     try:
@@ -542,7 +553,7 @@ def _age_state():
 
 
 def _cypher_admin(statement):
-    from .test_rocketride_graph_full import GRAPH
+    from .test_rocketride_graph_live import GRAPH
 
     conn = _admin()
     try:
@@ -1105,7 +1116,7 @@ class TestRetryDeadline:
 
 class TestSchemaAndDialect:
     def test_refresh_contents_and_estimated_counts(self, rr_env, age_graph):
-        from .test_rocketride_graph_full import GRAPH
+        from .test_rocketride_graph_live import GRAPH
 
         _cypher_admin(
             "MATCH (a:Person {name: 'carol'}) CREATE (a)-[:WORKS_AT {since: 2024}]->(:Company {name: 'Beta'})"

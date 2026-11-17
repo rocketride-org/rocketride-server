@@ -28,6 +28,12 @@
 #   STORE_DIR     disposable engine store for the test servers the builder starts
 #                 (default: a new temporary directory). Without RR_STORE_URL the
 #                 engine writes into ~/.rocketlib/store.
+#   RR_TEST_AGE_DSN  the AGE test database the node suites use (default: the
+#                 gx-age container from README.md,
+#                 postgresql://rruser:rrpass@127.0.0.1:55433/rrtenant). The suites
+#                 have no built-in default, so the script always exports one.
+#   RR_TEST_PG_DSN  the PostgreSQL test database (default: the gx-pgvector
+#                 container, postgresql://rruser:rrpass@127.0.0.1:55432/rrtenant).
 #   RR_TEST_AGE_POOLER_DSN  the transaction-mode pooler in front of AGE (default:
 #                 the gx-pgbouncer container from README.md,
 #                 postgresql://rruser:rrpass@127.0.0.1:56433/rrtenant). CI always
@@ -44,6 +50,8 @@ STORE_DIR=${STORE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/rr-validate-store.XXXXXX")}
 mkdir -p "$LOGS"
 export CI=${CI:-true}
 export RR_STORE_URL=filesystem://$STORE_DIR
+export RR_TEST_AGE_DSN=${RR_TEST_AGE_DSN:-postgresql://rruser:rrpass@127.0.0.1:55433/rrtenant}
+export RR_TEST_PG_DSN=${RR_TEST_PG_DSN:-postgresql://rruser:rrpass@127.0.0.1:55432/rrtenant}
 export RR_TEST_AGE_POOLER_DSN=${RR_TEST_AGE_POOLER_DSN:-postgresql://rruser:rrpass@127.0.0.1:56433/rrtenant}
 SUMMARY=$LOGS/SUMMARY.txt
 : > "$SUMMARY"
