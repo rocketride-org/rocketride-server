@@ -25,7 +25,7 @@
 		"tenki.apikey": {
 			"type": "string",
 			"title": "API Key",
-			"description": "Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki dashboard.",
+			"description": "Luxor workspace API key (starts with lx_), from the API Keys screen in the Luxor dashboard. A Tenki key (tk_) still works until 2027-01-01.",
 			"default": "",
 			"secure": true,
 			"ui": {
@@ -35,7 +35,7 @@
 		"tenki.base_url": {
 			"type": "string",
 			"title": "API URL",
-			"description": "Tenki Sandbox API endpoint. Leave empty for the default (https://api.tenki.cloud).",
+			"description": "Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). A tenki.cloud endpoint still works until 2027-01-01.",
 			"default": "",
 			"optional": true
 		},

@@ -66,8 +66,9 @@ _WARM_UP_TIMEOUT_SECS = 10
 _WARM_UP_WAIT_SECS = 40
 # How long endGlobal waits for a call holding the session lock before it closes the session anyway.
 _END_LOCK_WAIT_SECS = 10
-# Given an empty endpoint the SDK reads TENKI_API_ENDPOINT / TENKI_API_URL, so the default is passed explicitly.
-_DEFAULT_BASE_URL = 'https://api.tenki.cloud'
+# Given an empty endpoint the SDK reads LUXORAI_API_ENDPOINT, TENKI_API_ENDPOINT and the like, so the default is passed
+# explicitly.
+_DEFAULT_BASE_URL = 'https://api.luxor.ai'
 # USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
@@ -184,8 +185,9 @@ def _secret_settings(cfg) -> tuple[tuple[str, ...], tuple[str, ...]]:
 _SECRET_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_-]{0,127}')
 # How GitHub, GitLab and Slack tokens begin: no secret's name does.
 _TOKEN_PREFIXES = ('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_', 'github_pat_', 'glpat-', 'xoxb-', 'xoxp-')
-# How Tenki, Anthropic, OpenAI and AWS keys begin, but names can too (tk_github_basic), so length and a digit decide.
-_SHARED_PREFIXES = ('tk_', 'sk-', 'AKIA')
+# How Luxor, Tenki, Anthropic, OpenAI and AWS keys begin, but names can too (lx_github_basic), so length and a digit
+# decide.
+_SHARED_PREFIXES = ('lx_', 'tk_', 'sk-', 'AKIA')
 
 
 def _looks_like_a_credential(value: str) -> bool:
@@ -270,6 +272,25 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
             f'not reach it: add {host} to tenki.allow_domains.'
         )
     return prefix, secret.strip()
+
+
+def _retired_names(apikey: str, base_url: str) -> list[str]:
+    """A warning for each Tenki-era name configured: Luxor retires tk_ keys and tenki.cloud hosts on 2027-01-01."""
+    retired = []
+    if apikey.startswith('tk_'):
+        retired.append(
+            'apikey is a Tenki key (tk_), which stops working on 2027-01-01: create a Luxor key (lx_) in the Luxor '
+            'dashboard and use it instead'
+        )
+    try:
+        host = (urllib.parse.urlsplit(base_url if '://' in base_url else f'https://{base_url}').hostname or '').lower()
+    except ValueError:
+        host = ''  # not a URL: building the SDK's client reports that
+    if host == 'tenki.cloud' or host.endswith('.tenki.cloud'):
+        retired.append(
+            f'tenki.base_url points at {host}, which stops working on 2027-01-01: clear it to use {_DEFAULT_BASE_URL}'
+        )
+    return retired
 
 
 def _outlives_the_session(exec_timeout_secs: int, max_duration_minutes: int) -> str | None:
@@ -410,6 +431,8 @@ class IGlobal(IGlobalBase):
             warning(outlives)
         self.rpc_timeout_secs = max(self.exec_timeout_secs, _MIN_RPC_TIMEOUT_SECS)
         base_url = str(cfg.get('base_url') or '').strip() or _DEFAULT_BASE_URL
+        for retired in _retired_names(apikey, base_url):
+            warning(f'tool_tenki: {retired}')
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def validateConfig(self) -> None:
@@ -418,8 +441,10 @@ class IGlobal(IGlobalBase):
             apikey = str(cfg.get('apikey') or '').strip()
             if not apikey:
                 warning('apikey is required')
-            elif not apikey.startswith('tk_'):
-                warning('apikey must be a Tenki workspace API key, which starts with tk_')
+            elif not apikey.startswith(('lx_', 'tk_')):
+                warning('apikey must be a Luxor workspace API key, which starts with lx_')
+            for retired in _retired_names(apikey, str(cfg.get('base_url') or '').strip()):
+                warning(retired)
             outlives = _outlives_the_session(*_exec_limits(cfg))
             if outlives:
                 warning(outlives)

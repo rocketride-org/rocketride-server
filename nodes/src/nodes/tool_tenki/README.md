@@ -119,8 +119,8 @@ That access can change every secret and policy in the workspace, so give the nod
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `tenki.allow_domains` | `array` | **Allowed outbound domains**<br/>Restricts the sandbox's outbound traffic to these hostnames, such as pypi.org, on any port; one leading *. wildcard is accepted. Leave empty for open outbound access to any host and port. List every host the agent's work needs (pip needs pypi.org and files.pythonhosted.org, for example), and no more: a listed host is somewhere data can be sent. An entry Tenki would refuse (a URL, a port, an underscore) stops the pipeline at startup. | `[]` |
-| `tenki.apikey` | `string` | **API Key**<br/>Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki dashboard. | `""` |
-| `tenki.base_url` | `string` | **API URL**<br/>Tenki Sandbox API endpoint. Leave empty for the default (https://api.tenki.cloud). | `""` |
+| `tenki.apikey` | `string` | **API Key**<br/>Luxor workspace API key (starts with lx_), from the API Keys screen in the Luxor dashboard. A Tenki key (tk_) still works until 2027-01-01. | `""` |
+| `tenki.base_url` | `string` | **API URL**<br/>Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). A tenki.cloud endpoint still works until 2027-01-01. | `""` |
 | `tenki.cpu_cores` | `integer` | **CPU Cores**<br/>Virtual CPUs for the sandbox VM, 1 to 16. 0 leaves it to Tenki: 2, or what the Image sets. | `0` |
 | `tenki.disk_size_gb` | `integer` | **Disk Size (GB)**<br/>Root disk size, 5 to 100 GB. 0 leaves it to Tenki: 5, or the Image's own disk. Tenki recommends 20 for agents that clone repositories and install dependencies. | `0` |
 | `tenki.exec_timeout_secs` | `integer` | **Execution Timeout (seconds)**<br/>Max seconds a single run_command/run_code call may take. | `120` |

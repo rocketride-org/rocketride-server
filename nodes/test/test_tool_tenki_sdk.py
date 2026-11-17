@@ -156,11 +156,13 @@ def test_the_error_mapping_the_node_is_designed_around(code, details, expected):
 # ---------------------------------------------------------------------------
 
 
-def test_the_client_takes_an_explicit_key_endpoint_and_deadline_and_refuses_a_key_without_tk():
-    client = tenki.Client(
-        auth_token='tk_mock-placeholder', base_url='https://api.tenki.cloud', timeout=60, rpc=object()
-    )
-    assert client.base_url == 'https://api.tenki.cloud' and callable(client.get) and callable(client.close)
+def test_the_client_takes_an_explicit_key_endpoint_and_deadline_and_refuses_a_key_without_lx_or_tk():
+    for key, url in (
+        ('lx_mock-placeholder', 'https://api.luxor.ai'),
+        ('tk_mock-placeholder', 'https://api.tenki.cloud'),
+    ):
+        client = tenki.Client(auth_token=key, base_url=url, timeout=60, rpc=object())
+        assert client.base_url == url and callable(client.get) and callable(client.close)
     with pytest.raises(tenki.InvalidAuthTokenError):
         tenki.Client(auth_token='mock-placeholder', rpc=object())
     # The client's deadline applies to unary control-plane calls only; git has no data-plane call.

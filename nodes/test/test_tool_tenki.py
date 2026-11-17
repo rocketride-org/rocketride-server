@@ -53,7 +53,7 @@ _NODES_SRC = _ROOT / 'nodes' / 'src'
 _UTILS = _ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
-_KEY = 'tk_mock-tenki-placeholder-for-tests'  # the real SDK refuses a key without tk_ before any request
+_KEY = 'lx_mock-tenki-placeholder-for-tests'  # the real SDK refuses a key without lx_ or tk_ before any request
 
 
 class _SandboxError(Exception):
@@ -576,9 +576,31 @@ def test_a_missing_key_stops_startup_before_a_client_exists(monkeypatch, logs):
 
 def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(monkeypatch, logs):
     _, built = _started(monkeypatch, {'apikey': f'  {_KEY} ', 'exec_timeout_secs': 300})
-    assert built == [{'auth_token': _KEY, 'base_url': 'https://api.tenki.cloud', 'timeout': 300}]
+    assert built == [{'auth_token': _KEY, 'base_url': 'https://api.luxor.ai', 'timeout': 300}]
     _, built = _started(monkeypatch, {'base_url': 'https://tenki.example', 'exec_timeout_secs': 5})
     assert built == [{'auth_token': _KEY, 'base_url': 'https://tenki.example', 'timeout': 60}]
+    assert not any('2027-01-01' in line for line in logs)
+    # Unparseable: the real SDK's client refuses it, so no retired-name check stands in the way.
+    _, built = _started(monkeypatch, {'base_url': 'https://[api.tenki.cloud'})
+    assert built[0]['base_url'] == 'https://[api.tenki.cloud' and not any('2027-01-01' in line for line in logs)
+
+
+@pytest.mark.parametrize(
+    ('cfg', 'retired'),
+    [
+        ({'apikey': 'tk_mock-tenki-placeholder-for-tests'}, 'Tenki key (tk_)'),
+        ({'base_url': 'https://api.tenki.cloud'}, 'points at api.tenki.cloud'),
+        ({'base_url': 'API.Tenki.Cloud:443'}, 'points at api.tenki.cloud'),
+    ],
+)
+def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retires_it(monkeypatch, logs, cfg, retired):
+    _, built = _started(monkeypatch, cfg)
+    assert built and built[0]['auth_token'] == cfg.get('apikey', _KEY)
+    assert built[0]['base_url'] == cfg.get('base_url', 'https://api.luxor.ai')
+    assert any(retired in line and 'stops working on 2027-01-01' in line for line in logs), logs
+    logs.clear()
+    _global(monkeypatch, {'apikey': _KEY, **cfg})[0].validateConfig()
+    assert any(retired in line and 'stops working on 2027-01-01' in line for line in logs), logs
 
 
 def test_the_editor_opens_the_node_without_a_key(monkeypatch, logs):
@@ -623,7 +645,7 @@ def test_a_command_allowed_to_outlive_the_session_is_warned_about(monkeypatch, l
     ('cfg', 'warning'),
     [
         ({}, 'apikey is required'),
-        ({'apikey': 'mock-key'}, 'starts with tk_'),
+        ({'apikey': 'mock-key'}, 'starts with lx_'),
         ({'toolGroups': ['nope']}, 'will fail to start: tenki.toolGroups matched no known'),
         ({'toolGroups': ['git', 'nope']}, 'unknown tool group(s): nope'),
         ({'label': 'My_Agent'}, 'will fail to start: tenki.label must be'),
@@ -799,6 +821,7 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_secret': '9lives'}, 'must be the name of a Tenki secret'),
         ({'git_auth_secret': 'ghp_' + 'a' * 36}, 'looks like a credential value'),
         ({'git_auth_secret': 'sk-ant-api03-abcdefgh12345678'}, 'looks like a credential value'),
+        ({'git_auth_secret': 'lx_' + 'a1' * 12}, 'looks like a credential value'),
         ({'secret_policies': []}, 'secret_policies is empty'),
         ({'allow_domains': ['gitlab.com']}, 'which tenki.allow_domains does not list'),
         ({'allow_domains': ['*.github.com']}, 'which tenki.allow_domains does not list'),  # one label only
@@ -811,7 +834,7 @@ def test_a_private_clone_setting_that_cannot_work_stops_startup(monkeypatch, log
     assert 'ghp_' not in str(refused.value) and 'abcdefgh' not in str(refused.value)
 
 
-@pytest.mark.parametrize('name', ['tk_github_basic', 'sk-shared-github', 'AKIA_LEGACY_POLICY'])
+@pytest.mark.parametrize('name', ['lx_github_basic', 'tk_github_basic', 'sk-shared-github', 'AKIA_LEGACY_POLICY'])
 def test_a_secret_name_that_merely_begins_like_a_token_is_accepted(monkeypatch, logs, name):
     assert _started(monkeypatch, {**_PRIVATE, 'git_auth_secret': name})[0].git_auth_secret == name
 
