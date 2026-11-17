@@ -79,6 +79,8 @@ export interface DashboardTask {
 	id: string;
 	/** Display name (pipeline filename, config name, or source ID). */
 	name: string;
+	/** The control's address (`developerId.pipelineId.source`) — what `tool()` and `interfaces()` take. */
+	address?: string;
 	/** Project identifier. */
 	projectId: string;
 	/** Source component identifier. */

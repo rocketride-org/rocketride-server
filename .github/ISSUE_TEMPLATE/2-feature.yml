@@ -38,7 +38,6 @@ body:
         - label: client-mcp
         - label: nodes (pipeline)
         - label: ai
-        - label: chat-ui
-        - label: dropper-ui
+        - label: apps (chat, dropper, sql, rocket-ui)
         - label: vscode
         - label: tika

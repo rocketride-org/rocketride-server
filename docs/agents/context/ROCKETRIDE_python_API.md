@@ -418,6 +418,16 @@ The scope IS the kind: pass `team_id` to resolve the team's DEPLOYED run; omit i
 
 Retrieve the unresolved pipeline for a running task. The pipeline is returned exactly as stored on the task — `${ROCKETRIDE_*}` placeholders are NOT substituted, so no secrets are included in the response. Returns `None` if the task is not found.
 
+### `async interfaces(address: str, *, team: str = None) -> dict`
+
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@dev` run (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
+
+```python
+answer = await client.interfaces('acme.docBrain')
+databases = answer['interfaces'].get('acme.docBrain', {}).get('database', [])   # [{'nodeId': 'db_main', 'name': 'Ops DB'}]
+dialect = await client.tool(address='acme.docBrain', node_id=databases[0]['nodeId'], tool='dialect')
+```
+
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 
 Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.

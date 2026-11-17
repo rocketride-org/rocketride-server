@@ -43,7 +43,7 @@
 import { createContext, useContext } from 'react';
 import type { RocketRideClient } from 'rocketride';
 import type { ISqlOpsClient } from './ops';
-import { createSqlSession, discoverSqlEndpoints, releaseDirectEndpoint, resolveEndpoint } from './connect';
+import { createSqlSession, describeSqlAddress, discoverSqlEndpoints, releaseDirectEndpoint, resolveEndpoint } from './connect';
 import type { SqlEndpoint, SqlSession, SavedSqlConnection } from './connect';
 
 // =============================================================================
@@ -64,6 +64,8 @@ export interface SqlEnv {
 	releaseEndpoint(key: string): void;
 	/** Discover database endpoints in the server's running pipelines. */
 	discoverEndpoints(): Promise<SqlEndpoint[]>;
+	/** The database nodes of one pipe address (`interfaces()`), typed or linked — no engine starts. */
+	describeAddress(address: string): Promise<SqlEndpoint[]>;
 	/** One service definition (the direct path's config schema). */
 	getService(provider: string): Promise<unknown>;
 	/** Server-side single-component pipeline validation. */
@@ -150,6 +152,7 @@ export function createLocalSqlEnv(client: RocketRideClient | null): SqlEnv {
 			if (client) void releaseDirectEndpoint(client, key);
 		},
 		discoverEndpoints: () => discoverSqlEndpoints(need()),
+		describeAddress: (address) => describeSqlAddress(need(), address),
 	};
 }
 
@@ -178,5 +181,6 @@ export function createRemoteSqlEnv(ops: ISqlOpsClient, client: RocketRideClient 
 		resolveEndpoint: (conn) => ops.resolveEndpoint(conn.id),
 		releaseEndpoint: (key) => ops.releaseEndpoint(key),
 		discoverEndpoints: () => ops.discoverEndpoints(),
+		describeAddress: (address) => ops.describeAddress(address),
 	};
 }

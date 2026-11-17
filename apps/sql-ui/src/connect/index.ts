@@ -39,7 +39,7 @@ export type {
 	SqlSession,
 	SqlProbeResult,
 } from './types';
-export { DATABASE_PROVIDERS, discoverSqlEndpoints } from './discovery';
+export { DATABASE_CLASS_TYPE, describeSqlAddress, discoverSqlEndpoints } from './discovery';
 export { createSqlSession, probeSqlEndpoint } from './session';
 export { refreshEndpoints, useSqlEndpoints } from './endpointStore';
 export type { EndpointStatus, EndpointState } from './endpointStore';

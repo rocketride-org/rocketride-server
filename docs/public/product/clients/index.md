@@ -55,13 +55,7 @@ pip install rocketride
 pip install rocketride-mcp
 ```
 
-The chat widget is **not on a public registry yet**; build it from this repository and self-host the bundle:
-
-```bash
-./builder chat-widget:build   # -> packages/chat-widget/dist/rocketride-chat.js
-```
-
-See the [chat widget README](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/public/chat-widget/README.md#getting-the-bundle) for the embed snippets and for what changes once `rocketride-chat-widget` is published.
+There is no embeddable chat widget: a pipeline's chat and dropper front ends are the platform apps `rocketride.chat` and `rocketride.dropper`, opened from the pipe's node in the Builder or by a signed-in deep link (`?appid=rocketride.chat&pipe=<address>`).
 
 ### From the Engine (self-hosted download)
 

@@ -26,7 +26,6 @@ packages:
   - 'packages/shell'
 
   # Client libraries
-  - 'packages/chat-widget'
   - 'packages/client-typescript'
 
   # Documentation site

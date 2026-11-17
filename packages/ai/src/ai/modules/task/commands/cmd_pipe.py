@@ -35,6 +35,8 @@
 #   source_config one source's execution settings (trace level + debug output)
 #   run           start one deployed source NOW (the smoke-test / run-now path)
 #   preview       THE single cron evaluator (validate + next-N occurrences)
+#   interfaces    the callable nodes of the publication that answers an address
+#                 for the caller, by classType — a pure read, no engine (plan 3.6)
 #
 # Scheduling and run dispatch are PIPE-only, which is why they live here and
 # not on rrext_deploy (the generic rail door — add + rail reads). Uploading is
@@ -138,6 +140,7 @@ class DeployPipeCommands(_DeployBase):
             'schedule_resume': self._deploy_schedule_resume,
             'preview': self._deploy_preview,
             'run': self._deploy_run,
+            'interfaces': self._deploy_interfaces,
         }
 
     # =========================================================================
@@ -150,8 +153,10 @@ class DeployPipeCommands(_DeployBase):
         Subcommands: ``deploy`` (point a team at a version), ``list``/``get``,
         ``enable``/``disable``/``remove``, the scheduling verbs
         (``schedule_set``/``schedule_pause``/``schedule_resume``/
-        ``source_config``), ``preview`` and ``run``. Scheduling and run dispatch
-        are pipe-only, which is why they live here and not on ``rrext_deploy``.
+        ``source_config``), ``preview``, ``run`` and ``interfaces`` (the
+        callable nodes of the publication that answers an address, plan 3.6).
+        Scheduling and run dispatch are pipe-only, which is why they live here
+        and not on ``rrext_deploy``.
         """
         return await self._dispatch_deploy(request, self._deploy_pipe_subcommand_handlers, 'Pipe deploy')
 
@@ -566,3 +571,117 @@ class DeployPipeCommands(_DeployBase):
             except Exception as e:
                 return self.build_response(request, body={'valid': False, 'error': str(e), 'next': []})
         return self.build_response(request, body={'valid': True, 'next': occurrences})
+
+    # =========================================================================
+    # INTERFACES — what the publication that answers an address offers (plan 3.6)
+    # =========================================================================
+
+    async def _deploy_interfaces(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """The interface map of the publication that would answer ``address`` for this caller.
+
+        ONE pure read, no engine, no hold, no billing: the address is resolved
+        the way ``submit()`` resolves a name (the caller's ``@me`` row, their
+        teams in team order, the publisher's ``@public`` row — plan 3.2), the
+        pinned version's artifact is read SERVER-SIDE (the spec never leaves
+        the server), and the components are projected through the node
+        catalog's ``classType`` words. A caller learns nothing about a pipe it
+        could not call: a scoped key is refused outside its ``endpoints``, and
+        an address no rung serves is ``TASK_NOT_REGISTERED``.
+
+        Arguments: ``address`` (``developerId.pipelineId[.source]``; the
+        source segment is accepted and ignored — the map covers the whole
+        pipe), optional ``team`` (the per-call ``@team`` override).
+
+        Body: ``{address, rung, version, teamId?, interfaces}`` where
+        ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
+        sources under their own address, every other node under the pipe
+        address (see ``interfaces.pipe_interfaces``). The caller's ``@dev``
+        control answers before any publication (the spec it submitted;
+        ``version`` is None), as it does for ``submit()``; nothing has to be
+        running on any rung.
+        """
+        from ai.account.pipe_deploy import Pin
+
+        from .. import services_catalog
+        from ..address import build_address
+        from ..interfaces import pipe_interfaces
+        from ..types import TaskError
+
+        # Step 1: who asks, for what
+        address = args.get('address')
+        if not isinstance(address, str) or not address:
+            raise ValueError('address is required')
+        account_info = self._account_info
+        if account_info is None:
+            raise PermissionError('Not authenticated')
+        team = args.get('team') or None
+
+        # Step 2: THE decision every name call makes (TaskServer.resolve_candidates,
+        # plan 3.2): what answers this address for this caller, in the ladder's
+        # order — @dev, @me, the teams in team order, @public — without starting
+        # anything. The first candidate is the answer: the caller's registered
+        # control (the spec it submitted; @dev has no publication, and a dormant
+        # control's spec stays readable) or a publication's pin (the registry
+        # artifact). Nothing has to be running on any rung.
+        parsed, _rungs, candidates = await self._server.resolve_candidates(
+            address, account_info, 'task.data', team=str(team) if team else None
+        )
+        pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
+        if not candidates:
+            raise TaskError(
+                TaskError.NOT_REGISTERED,
+                f'No rung of {pipe_address!r} serves you',
+                address=pipe_address,
+                rungsTried=['dev', 'me', 'team', 'public'],
+            )
+        first = candidates[0]
+        if not isinstance(first, Pin):
+            return self.build_response(request, body=await self._interfaces_of_control(first))
+        pin = first
+        deployment = pin.deployment
+        if pin.rung == 'team':
+            # A team publication is read with the same permission a data
+            # request on it needs; @me is the caller's own, @public is anyone's
+            self.verify_team_permission(deployment.team_id, 'task.data')
+
+        # Step 3: the pinned artifact, projected through the catalog
+        pipeline = await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version)
+        interfaces = await pipe_interfaces(pipeline, parsed.developer_id, parsed.pipe_id, services_catalog.get_service)
+        body: Dict[str, Any] = {
+            'address': pipe_address,
+            'rung': pin.rung,
+            'version': pin.version,
+            'interfaces': interfaces,
+        }
+        if pin.rung == 'team':
+            body['teamId'] = deployment.team_id
+        return self.build_response(request, body=body)
+
+    async def _interfaces_of_control(self, control: Any) -> Dict[str, Any]:
+        """
+        The interfaces body for a live control: the spec IT submitted, unresolved.
+
+        Args:
+            control: The resolved control.
+
+        Returns:
+            ``{address, rung, version: None, teamId?, interfaces}`` — a live run
+            has no registry version to report.
+        """
+        from .. import services_catalog
+        from ..address import build_address, parse_address
+        from ..interfaces import pipe_interfaces
+
+        parsed = parse_address(control.address)
+        interfaces = await pipe_interfaces(
+            control.pipeline, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
+        )
+        body: Dict[str, Any] = {
+            'address': build_address(parsed.developer_id, parsed.pipe_id),
+            'rung': control.rung,
+            'version': None,
+            'interfaces': interfaces,
+        }
+        if control.rung == 'team':
+            body['teamId'] = control.owner_id
+        return body

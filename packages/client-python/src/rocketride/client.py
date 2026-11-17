@@ -322,7 +322,16 @@ class RocketRideClient(
 
         return response.get('body') or {}
 
-    async def tool(self, *, token: str, tool: str, node_id: str = '', input: dict = None, timeout: float = None) -> Any:
+    async def tool(
+        self,
+        *,
+        tool: str,
+        address: str = None,
+        token: str = None,
+        node_id: str = '',
+        input: dict = None,
+        timeout: float = None,
+    ) -> Any:
         """
         Invoke a @tool_function on a pipeline node.
 
@@ -331,10 +340,19 @@ class RocketRideClient(
         call through the control plane, and returns the result directly -- no
         Question, Answer, or SSE overhead.
 
+        A standalone tool call is a binding of its own: it resolves the
+        address the way :meth:`submit` does and STARTS the publication's
+        engine when it is dormant, so a front end may call a node of a pipe
+        nobody has used recently. A node the entry source did not load fails
+        at the engine.
+
         Args:
-            token: Pipeline token for authentication and resource access.
             tool: Name of the @tool_function to invoke (e.g. ``'search'``,
                 ``'list'``, ``'execute'``).
+            address: The pipe's address (``developerId.pipelineId[.source]``),
+                or the address a :meth:`use`/:meth:`submit` result returned.
+            token: Deprecated spelling of ``address`` (the token slot carries
+                the address); one of the two is required.
             node_id: Target node ID.  When empty the call broadcasts to all
                 tool-lane nodes; the first node that owns the tool handles it.
             input: Arguments forwarded to the tool function.
@@ -344,12 +362,16 @@ class RocketRideClient(
             The tool's return value (typically a dict).
 
         Raises:
+            ValueError: Neither ``address`` nor ``token`` was given.
             RuntimeError: If the server signals failure or no node handles the
                 requested tool.
         """
+        target = address or token
+        if not target:
+            raise ValueError('tool() needs the pipe address (address=)')
         result = await self.call(
             'rrext_process',
-            token=token,
+            token=target,
             timeout=timeout,
             subcommand='tool',
             tool=tool,
@@ -357,6 +379,38 @@ class RocketRideClient(
             input=input or {},
         )
         return result.get('result')
+
+    async def interfaces(self, address: str, *, team: str = None) -> dict:
+        """
+        What the publication that answers ``address`` offers a front end.
+
+        One pure read -- no engine is started, no hold is taken, nothing is
+        billed. The address resolves the way :meth:`submit` resolves a name
+        (your ``@me`` publication, your teams in team order, the publisher's
+        ``@public`` one) and the pinned version's spec is projected
+        server-side, so the spec never leaves the server. Sources sit under
+        their own address (``acme.docBrain.chat``), every other node under the
+        pipe address (``acme.docBrain``, the default source). A front end
+        filters with plain equality on the catalog classType word: ``chat``,
+        ``dropper``, ``database``.
+
+        Args:
+            address: ``developerId.pipelineId[.source]``; a source segment is
+                accepted and ignored.
+            team: Resolve the ``@team`` rung through this one of your teams.
+
+        Returns:
+            ``{'address', 'rung', 'version', 'teamId'?, 'interfaces'}`` where
+            ``interfaces`` is ``{address: {classType: [{'nodeId', 'name'}]}}``.
+
+        Raises:
+            RuntimeError: No published rung serves you (``TASK_NOT_REGISTERED``),
+                or the address is outside a scoped key's endpoints.
+        """
+        args = {'subcommand': 'interfaces', 'address': address}
+        if team:
+            args['team'] = team
+        return await self.call('rrext_deploy_pipe', **args)
 
     # =========================================================================
     # NAMESPACED API ACCESSORS

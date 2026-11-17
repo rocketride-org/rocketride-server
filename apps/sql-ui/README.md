@@ -493,10 +493,13 @@ statements ran either way; only the app's picture of the schema is behind.
   ClickHouse declares no foreign keys at all.
 - **The schema is a snapshot** from pipeline start, unless the node can
   re-read it.
-- **A pipeline-bound connection needs its pipeline running.** Discovery sees
-  running tasks only; when the pipeline stops, the connection stops with it.
-  A direct connection has no such dependency — its temporary pipeline is the
-  app's to start and stop.
+- **A pipeline-bound connection does not need its pipeline running.** It is
+  bound to an address and a node; the server resolves the publication (or
+  your own Play'd run) that answers the address and starts a dormant engine
+  on the first statement. The connection dialog lists the database nodes of
+  the pipelines in your current task list and finds any other pipe by its
+  address. A direct connection owns its temporary pipeline, which the app
+  starts and stops.
 - **Direct connections store their configuration as typed** in your per-user
   server file. Use `${ROCKETRIDE_*}` references for secrets.
 - **The limit moves in front of a locking clause.** MySQL requires the
