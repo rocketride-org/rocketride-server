@@ -39,8 +39,14 @@
 // substituted on the way to the engine only. `shell.event.*` is the only
 // connection state an app sees, as allowlisted payloads.
 //
-// INERT in PR2a-1: nothing outside `src/isolation/` imports this module
-// (T30 guards it) until PR2b wires it in `Shell.tsx`.
+// N1 (PR2a-2): every response, engine event and error text is scrubbed for
+// the realm it goes to (scrub.ts): aliases for project and task ids, the
+// grant's user alias, no team or run-kind fields, and a backstop. Engine
+// events reach a gated realm only for runs it owns, only while attached.
+// Inbound strings holding a credential or a real id are refused (N1-f).
+//
+// INERT in PR2a-1/PR2a-2: nothing outside `src/isolation/` imports this
+// module (T30 guards it) until PR2b wires it in `Shell.tsx`.
 // =============================================================================
 
 import type { DAPMessage } from 'rocketride';
@@ -51,6 +57,7 @@ import { createGatedBusRouter } from '../ops/busBridge';
 import type { IBusEndpoint } from '../ops/busBridge';
 import { createOpBus } from '../ops/busOps';
 import type { IOpBus } from '../ops/busOps';
+import { createBoundedSet, createKnownProjects, isHighEntropy } from './aliases';
 import { appKeyOf, isCanonicalAppId } from './appKey';
 import { KNOWN_CAPS } from './capabilities';
 import { CapabilityDeniedError } from './capabilityDenied';
@@ -58,14 +65,22 @@ import type { DenyCode } from './capabilityDenied';
 import { deniedEnvelope, deniedMessage, deny, sanitizeEnvelope } from './denial';
 import { admitValue, asDenial, DAP_TIMEOUT_MAX_MS, directMonitorKey, gateClientRequest, gateOp } from './gate';
 import type { IGateContext, IGatedRequest } from './gate';
-import { base64url, createLedger } from './ledger';
+import { base64url, createLedger, mintProjectAlias } from './ledger';
 import type { ILedger, IRunEntry } from './ledger';
 import { createRateLimiter, QUOTAS, SIZES } from './rate';
+import { REDACTED, scrubErrorText, scrubEvent, scrubOutbound, scrubResponse } from './scrub';
+import type { IScrubContext } from './scrub';
 import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
-import { isWireBinary, measure } from './walk';
+import { measure } from './walk';
 
-/** The outbound backstop's credential pattern (Appendix L). */
-const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
+/** N1-f: an engine-format credential (`generate_token`, `keyed_task_token`) bounded by non-word characters. */
+const ENGINE_CREDENTIAL_RE = /\b(?:tk|pk)_[0-9a-f]{32}\b/;
+/** The shortest exact value matched inbound (shorter values would match ordinary text). */
+const INBOUND_MIN = 8;
+/** The engine's status update, whose `id` is a real task id (`task_engine.py:1841`). */
+const STATUS_EVENT = 'apaevt_status_update';
+/** The guest op engine events are delivered on (`clientOps.ts` CLIENT_EVENT_OP; a literal, as in busBridge.ts). */
+const CLIENT_EVENT_OP = 'client.event';
 /** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers TASK_NOT_REGISTERED the run stops counting. */
 const LOST_RUN_RETRY_MS = [30_000, 120_000];
 /** The engine's code for a project/source with no live run (`TaskError.NOT_REGISTERED`, `modules/task/types.py`). */
@@ -82,6 +97,8 @@ interface IRealmState {
 	info: RealmInfo;
 	ledger: ILedger;
 	gate: IGateContext;
+	/** What the scrubber reads for this realm (N1). */
+	scrub: IScrubContext;
 	inflight: number;
 	/** Pref keys this realm's app has written (shared by its realms, kept across reattach). */
 	prefKeys: Set<string>;
@@ -93,25 +110,6 @@ interface IRealmState {
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/** Calls `cb` for every string (values and keys), skipping exact binary members only. Throws what `cb` throws. */
-function scanStrings(value: unknown, cb: (s: string) => void): void {
-	const seen = new Set<object>();
-	const stack: unknown[] = [value];
-	while (stack.length > 0) {
-		const v = stack.pop();
-		if (typeof v === 'string') cb(v);
-		else if (typeof v === 'object' && v !== null && !seen.has(v) && !isWireBinary(v) && !ArrayBuffer.isView(v)) {
-			seen.add(v);
-			if (Array.isArray(v)) stack.push(...v);
-			else
-				for (const [k, x] of Object.entries(v)) {
-					cb(k);
-					stack.push(x);
-				}
-		}
-	}
-}
 
 /** A hostname without trailing dots (`example.com.` and `example.com` are one host). */
 const dotless = (host: string): string => host.toLowerCase().replace(/\.+$/, '');
@@ -160,6 +158,61 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	/** Pref keys written per app, for the 256-key cap (outlives any one realm). */
 	const prefKeysByApp = new Map<string, Set<string>>();
+
+	// ── N1 state (plan sections 2 and 4.4), root-wide, cleared at logout ────
+	/** Foreign project ids the root saw (events, responses): bounded, never a realm's own. */
+	const known = createKnownProjects();
+	/** Every token and real task id the root saw (bounded): exact-match backstop and N1-f. */
+	const seen = createBoundedSet();
+	/** The shell API keys (fetched at attach and on shell:login). */
+	const apiKeys = new Set<string>();
+	/** Engine events no attached realm owns (test counter). */
+	let eventsDropped = 0;
+
+	const remember = (...values: unknown[]): void => {
+		for (const v of values) if (typeof v === 'string' && v.length >= INBOUND_MIN) seen.add(v);
+	};
+	/** The client's own key, read live (the SDK accessor, `client.ts:3420`). */
+	const clientApiKey = (): string | undefined => {
+		try {
+			const key = (cm.getClient() as { getApiKey?: () => unknown } | null | undefined)?.getApiKey?.();
+			return typeof key === 'string' ? key : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	const addApiKey = (key: unknown): void => {
+		if (typeof key === 'string' && key.length >= INBOUND_MIN) apiKeys.add(key);
+	};
+	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
+	const refreshApiKeys = (): void => {
+		addApiKey(clientApiKey());
+		void Promise.resolve()
+			.then(() => cm.ops().request('host.apiKey', {}))
+			.then(
+				(answer) => addApiKey(isPlainObject(answer) ? answer.apiKey : undefined),
+				() => undefined
+			);
+	};
+	/** Whether any attached realm's ledger holds this project id as its own run's. */
+	const ownedByAnyRealm = (projectId: string): boolean => [...realms.values()].some((st) => st.ledger.runs().some((r) => r.projectId === projectId));
+	/** Exact values no realm may receive in clear (scrub.ts `needles`): seen values, every realm's live ledger values, the session token, the API keys. */
+	const rootNeedles = (): string[] => {
+		const out = [...seen.values(), cm.loadToken(), ...apiKeys];
+		const live = clientApiKey();
+		if (live !== undefined) out.push(live);
+		for (const st of realms.values())
+			for (const r of st.ledger.runs()) {
+				out.push(r.token, r.publicToken, r.taskId);
+				if (isHighEntropy(r.projectId)) out.push(r.projectId);
+			}
+		return out.filter((s) => typeof s === 'string' && s.length >= INBOUND_MIN);
+	};
+	/** N1-f: what an inbound string may not hold (built once per inbound value). */
+	const inboundChecker = (): ((s: string) => boolean) => {
+		const needles = [...rootNeedles(), ...known.highEntropy()];
+		return (s) => ENGINE_CREDENTIAL_RE.test(s) || needles.some((n) => s.includes(n));
+	};
 
 	/** Root-internal timers (see `IAppRootOptions.schedule`). */
 	const schedule =
@@ -325,6 +378,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'execute': {
 				if (!body || typeof body.token !== 'string') return response;
 				const pipeline = req.args.pipeline as Record<string, unknown>;
+				remember(body.token, body.publicToken, body.id);
 				const run = st.ledger.addRun({
 					token: body.token,
 					publicToken: typeof body.publicToken === 'string' ? body.publicToken : '',
@@ -338,6 +392,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const run = req.run!;
 				run.completedAt = undefined;
 				if (!body) return response;
+				remember(body.token, body.publicToken, body.id);
 				if (typeof body.token === 'string') run.token = body.token;
 				if (typeof body.publicToken === 'string') run.publicToken = body.publicToken;
 				if (typeof body.id === 'string') run.taskId = body.id;
@@ -346,7 +401,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'rrext_get_token': {
 				if (!body) return response;
 				const { token, publicToken: _public, ...rest } = body;
-				void _public;
+				remember(token, _public);
 				const run = typeof token === 'string' ? st.ledger.runByToken(token) : undefined;
 				return withBody(run ? { ...rest, token: run.handle } : rest);
 			}
@@ -379,21 +434,16 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		}
 	};
 
-	// ── Outbound backstop (the scrubber is PR2a-2) ──────────────────────────
+	// ── Outbound choke point (N1-e): scrub, then the backstop ────────────────
 
 	const outboundFor =
 		(st: IRealmState) =>
 		(message: unknown): unknown => {
 			if (opts.__throwIn === 'outbound') throw new Error('test hook: outbound');
-			const needles = [cm.loadToken(), ...st.ledger.secrets()].filter((s) => typeof s === 'string' && s.length >= 8);
-			// The pattern is not applied to the app's own file content (plan section 4.4); exact matches still are.
+			// The patterns are not applied to the app's own file content (plan section 4.4); exact matches still are.
 			const m = message as { __rrbus?: string; result?: { ok?: boolean; value?: { command?: string } } };
 			const storeReply = m?.__rrbus === 'response' && m.result?.ok === true && m.result.value?.command === 'rrext_store';
-			scanStrings(message, (s) => {
-				for (const needle of needles) if (s.includes(needle)) throw deny('credential', 'outbound');
-				if (!storeReply && BACKSTOP_RE.test(s)) throw deny('credential', 'outbound');
-			});
-			return message;
+			return scrubOutbound(st.scrub, message, { patterns: !storeReply });
 		};
 
 	// ── Per-realm handlers ──────────────────────────────────────────────────
@@ -503,13 +553,28 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 						endOrphan(req, response);
 						throw err;
 					}
+					// N1-a: scrubbed for this realm; a backstop hit outside notes and error text is a denial.
+					try {
+						recorded = scrubResponse(st.scrub, req, recorded);
+					} catch (err) {
+						throw err instanceof CapabilityDeniedError ? err : deny('credential', 'client.request', { command: req.command });
+					}
 					const encoded = encodeMessageData(recorded);
 					const size = measure(encoded);
 					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
 					return { ok: true, value: encoded } satisfies IWireEnvelope;
 				} catch (err) {
 					if (err instanceof CapabilityDeniedError) return deniedEnvelope(err);
-					return sanitizeEnvelope({ ok: false, error: serializeError(err) });
+					// N1-c: a thrown engine error loses its stack and has its text scrubbed.
+					const envelope = sanitizeEnvelope({ ok: false, error: serializeError(err) });
+					if (!envelope.ok) {
+						try {
+							envelope.error.message = scrubErrorText(st.scrub, envelope.error.message, req.run);
+						} catch {
+							envelope.error.message = REDACTED;
+						}
+					}
+					return envelope;
 				} finally {
 					req.release();
 				}
@@ -631,7 +696,38 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
 	cm.on('shell:logout', () => {
 		epoch++;
-		for (const st of realms.values()) st.ledger.clear();
+		for (const st of realms.values()) {
+			st.ledger.clear();
+			st.scrub.aliases.clear();
+		}
+		known.clear();
+		seen.clear();
+		apiKeys.clear();
+	});
+	cm.on('shell:login', () => refreshApiKeys());
+
+	// ── client.event (N1-b): owned runs only, scrubbed, only while attached ─
+	cm.on('shell:event', (payload: unknown) => {
+		const event = isPlainObject(payload) && isPlainObject(payload.event) ? payload.event : undefined;
+		const body = event && isPlainObject(event.body) ? event.body : undefined;
+		if (event && event.event === STATUS_EVENT) remember(event.id);
+		const projectId = body && typeof body.project_id === 'string' && body.project_id !== '' ? body.project_id : undefined;
+		const owners = projectId === undefined ? [] : [...realms.values()].filter((st) => !st.detached && st.ledger.runs().some((r) => r.projectId === projectId));
+		if (owners.length === 0) {
+			eventsDropped++;
+			if (projectId !== undefined) known.add(projectId);
+			return;
+		}
+		for (const st of owners) {
+			let scrubbed: DAPMessage;
+			try {
+				scrubbed = scrubEvent(st.scrub, event as unknown as DAPMessage);
+			} catch {
+				logDrop(st, CLIENT_EVENT_OP, 'credential');
+				continue;
+			}
+			router.deliver(st.info.realmId, CLIENT_EVENT_OP, { message: scrubbed });
+		}
 	});
 
 	return {
@@ -655,7 +751,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const st: IRealmState = {
 				info,
 				ledger,
-				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
+				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), inbound: inboundChecker, random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
+				scrub: { ledger, grant, known, aliases: new Map(), mintAlias: () => mintProjectAlias(opts.random), ownedByAnyRealm, needles: rootNeedles },
 				inflight: 0,
 				prefKeys: prefKeysByApp.get(entry.id) ?? prefKeysByApp.set(entry.id, new Set()).get(entry.id)!,
 				loggedDrops: new Set(),
@@ -672,6 +769,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				},
 			});
 			realms.set(realmId, st);
+			refreshApiKeys();
 			return realmId;
 		},
 
@@ -722,5 +820,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				closing--;
 			}
 		},
+
+		__stats: () => ({ eventsDropped, knownProjects: known.size() }),
 	};
 }
