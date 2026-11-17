@@ -279,6 +279,47 @@ def test_reads_run_concurrently(make_global, monkeypatch, model_server: bool, so
     assert results == [['text']] * 4
 
 
+def test_table_engine_weights_join_the_device_budget_base(monkeypatch) -> None:
+    """The lazy load goes through ``loading_model``: the engine's weights join the base, not a call's progress."""
+    import ai.common.models as models
+    from ai.common.models import device_budget as budget_mod
+
+    class Device:
+        """A fake GPU: free, unused cache and allocated MB."""
+
+        free, allocated = 4000.0, 0.0
+
+        def __call__(self) -> tuple:
+            """Return the memory as the guard reads it."""
+            return self.free, 0.0, self.allocated
+
+    device = Device()
+
+    class FakeDocTR:
+        """Takes 3000 MB on the device when created."""
+
+        def __init__(self) -> None:
+            """Load the weights."""
+            device.free -= 3000.0
+            device.allocated += 3000.0
+
+    guard = budget_mod.DeviceBudget('cuda:0', device, lambda: False, lambda: None, lambda: None)
+    monkeypatch.setattr(budget_mod, 'is_model_server_enabled', lambda: False)
+    monkeypatch.setattr(budget_mod, '_budgets', {'cuda:0': guard})
+    monkeypatch.setattr(budget_mod, '_allocated_mb', lambda torch=None: {})
+    monkeypatch.setattr(
+        budget_mod,
+        '_resident_mb',
+        lambda model, torch=None: {'cuda:0': 3000.0} if isinstance(model, FakeDocTR) else {},
+    )
+    monkeypatch.setattr(models, 'DocTR', FakeDocTR, raising=False)
+
+    with guard.reserve(1000.0):
+        engine = _iglobal_mod.ModelServerOCR(engine='doctr').ocr
+        assert isinstance(engine, FakeDocTR)
+        assert guard._idle_allocated == 3000.0  # without the fix 0: the weights count as this call's progress
+
+
 def test_table_engine_is_loaded_once(monkeypatch) -> None:
     """The first pages of several worker threads arrive together: one engine is loaded, not one each."""
     adapter = _iglobal_mod.ModelServerOCR(engine='doctr')

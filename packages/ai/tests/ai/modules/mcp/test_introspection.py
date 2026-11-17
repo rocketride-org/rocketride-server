@@ -363,7 +363,6 @@ async def test_validate_pipeline_passes_the_component_form_through_wrapped_once(
         {'pipeline': {'pipeline': {'version': 1, 'component': component}}, 'source': None}
     ]
     assert result['ok'] is True
-    assert fake_engine.get_services_calls == 0  # no components array, so the provider check is skipped
 
 
 @pytest.mark.asyncio
@@ -640,55 +639,19 @@ async def test_resolve_config_rejects_a_non_object_config(fake_engine):
 
 
 @pytest.mark.asyncio
-async def test_validate_pipeline_reports_a_provider_the_engine_does_not_have(fake_engine):
-    """The engine validates a pipeline structurally and never checks its providers.
-
-    A typed provider name passes validation and fails later at run time, which is
-    the gap this tool exists to close.
-    """
-    registry = ToolRegistry()
-    introspection.register(registry)
-    fake_engine._services = {'services': {'parse': {}, 'llm_openai': {}}}
-    pipeline = {
-        'components': [
-            {'id': 'a', 'provider': 'parse', 'config': {}},
-            {'id': 'b', 'provider': 'no_such_provider', 'config': {}},
-        ]
+async def test_validate_pipeline_reports_an_unknown_provider_once(fake_engine):
+    """The engine reports a provider it has no service for, and the tool adds no error of its own."""
+    error = {
+        'id': 'b',
+        'message': 'Component b names provider no_such_provider, which is not a service on this engine; '
+        'use a provider from the service catalog',
     }
-
-    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
-
-    assert result['ok'] is False
-    assert [e['component'] for e in result['errors']] == ['b']
-    assert 'no_such_provider' in result['errors'][0]['message']
-
-
-@pytest.mark.asyncio
-async def test_validate_pipeline_accepts_providers_in_the_catalog(fake_engine):
-    """Every provider present means the added check contributes no errors."""
-    registry = ToolRegistry()
-    introspection.register(registry)
-    fake_engine._services = {'services': {'parse': {}, 'llm_openai': {}}}
-    pipeline = {'components': [{'id': 'a', 'provider': 'parse', 'config': {}}]}
-
-    result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
-
-    assert result['ok'] is True
-    assert result['errors'] == []
-
-
-@pytest.mark.asyncio
-async def test_validate_pipeline_keeps_engine_errors_alongside_provider_errors(fake_engine):
-    """The engine's own findings must survive, not be replaced by the added check."""
-    registry = ToolRegistry()
-    introspection.register(registry)
     fake_engine._services = {'services': {'parse': {}}}
-    fake_engine._validate_result = {'errors': [{'ccode': 40, 'message': 'structural'}], 'warnings': ['w']}
+    fake_engine._validate_result = {'errors': [error], 'warnings': []}
+    registry = ToolRegistry()
+    introspection.register(registry)
     pipeline = {'components': [{'id': 'b', 'provider': 'no_such_provider', 'config': {}}]}
 
     result = await registry.handler('validate_pipeline')(fake_engine, None, {'pipeline': pipeline})
 
-    messages = [e.get('message') for e in result['errors']]
-    assert 'structural' in messages
-    assert any('no_such_provider' in m for m in messages)
-    assert result['warnings'] == ['w']
+    assert result == {'ok': False, 'errors': [error], 'warnings': []}
