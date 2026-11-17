@@ -115,6 +115,7 @@ class ChatMixin(DAPClient):
 
         Raises:
             RuntimeError: If the question is empty or if the chat operation fails
+            ValueError: If a turn-mode question breaks a turn rule (see Question.checkTurn)
 
         Example:
             # Simple question
@@ -159,6 +160,9 @@ class ChatMixin(DAPClient):
             # Validate that we have a question to ask
             if not question:
                 raise RuntimeError('Question cannot be empty')
+
+            # A broken turn rule fails here, before a pipe opens, not when the engine reads it
+            question.checkTurn()
 
             # Create unique identifier for this chat operation
             objinfo = {'name': f'Question {self._next_chat_id}'}

@@ -70,15 +70,15 @@ def _web_server(monkeypatch, tmp_path, built):
     (tmp_path / 'index.html').write_text(_SHELL_HTML)
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
     monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
-    monkeypatch.delenv('MCP_DEV_NO_AUTH', raising=False)
 
     server = WebServer()
     # WebServer.__init__ loads `dist/server/.env`, so a developer's local
     # engine settings (ROCKETRIDE_URI=http://localhost:5565, a resource
-    # identifier) would otherwise decide what these tests resolve. Clear them
-    # AFTER construction: these tests are about routing and auth, and the
-    # engine URI rules have their own suite (test_engine_uri.py).
-    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER'):
+    # identifier, the dev auth bypass) would otherwise decide what these tests
+    # resolve. Clear them AFTER construction: these tests are about routing
+    # and auth, and the engine URI rules have their own suite
+    # (test_engine_uri.py).
+    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH'):
         monkeypatch.delenv(name, raising=False)
 
     async def _accept_any(authorization):

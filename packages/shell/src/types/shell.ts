@@ -302,8 +302,25 @@ export interface ShellConnectionEventMap {
 	 * it is kept in the connection manager's buffer, as are facts raised before
 	 * any app subscribed or whose last listener left before their dispatch, and
 	 * handed over by `drainTelemetry()`.
+	 *
+	 * @deprecated The shell owns the telemetry transport now (the reporter is
+	 * handed to the app via TelemetryProvider/useReport); this event is typed
+	 * for frozen-floor compatibility and is no longer emitted. Removal is a
+	 * separate, signed-off contract decision.
 	 */
 	'shell:telemetry': TelemetryFact;
+
+	/**
+	 * The device's analytics-consent state changed: a banner or Settings
+	 * decision in this tab ('local') or another tab's decision relayed through
+	 * storage ('external'). Platform state — apps that gate their own
+	 * experiment captures on consent (home-ui's roulette) follow this instead
+	 * of owning a consent store.
+	 */
+	'shell:consentChange': {
+		state: 'undecided' | 'accepted' | 'rejected';
+		origin: 'local' | 'external';
+	};
 
 	/**
 	 * Request the shell open a built-in overlay (e.g. from a guest app's

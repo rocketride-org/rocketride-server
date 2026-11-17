@@ -597,7 +597,9 @@ class GuardrailsEngine:
 
         Args:
             text: The text to evaluate.
-            mode: Either 'input' (pre-LLM) or 'output' (post-LLM).
+            mode: 'input' (pre-LLM), 'output' (post-LLM), or 'tool_call' (the
+                  arguments of a model's tool calls: content safety and PII only,
+                  since grounding and format do not apply to arguments).
             context: Optional context dict with keys like 'source_documents',
                      'allowed_topics', 'blocked_topics', 'expected_format'.
 
@@ -646,6 +648,13 @@ class GuardrailsEngine:
             expected_fmt = context.get('expected_format', self.expected_format)
             if expected_fmt:
                 results.append(self.check_format_compliance(text, expected_fmt))
+
+        elif mode == 'tool_call':
+            if self.enable_content_safety:
+                results.append(self.check_content_safety(text))
+
+            if self.enable_pii_detection:
+                results.append(self.check_pii_leak(text))
 
         # Aggregate results
         violations = [r for r in results if not r['passed']]

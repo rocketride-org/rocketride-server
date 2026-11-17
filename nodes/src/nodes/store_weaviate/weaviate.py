@@ -119,11 +119,12 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches milvus configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'dot', 'l2-squared', 'hamming', 'manhattan']:
+        supported = tuple(self.similarityDict)
+        if similarity in supported:
             self.similarity = self.similarityDict[similarity]
         else:
             raise Exception(
-                'The metric you provided in the config.json does not match required weaviate configurations'
+                f'Weaviate: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
             )
 
         if profile == 'cloud':

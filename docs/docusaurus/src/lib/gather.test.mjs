@@ -9,6 +9,12 @@ const require = createRequire(import.meta.url);
 const { pageDescription, stampLastUpdate, gather, assertNoUnexpectedPlaceholders, EXPECTED_PLACEHOLDERS } = require('../../scripts/lib/gather.js');
 
 describe('pageDescription', () => {
+	it('uses the same paragraph finder as the meta description', () => {
+		assert.equal(pageDescription('# T\n\n![Logo](/logo.png)\n\nProse here.\n'), 'Prose here.');
+		assert.equal(pageDescription('# T\n\n````md\n```\ncode\n```\n````\n\nProse here.\n'), 'Prose here.');
+		assert.equal(pageDescription('# T\n\nUse `<!--` to open a comment.\n'), 'Use <!-- to open a comment.');
+	});
+
 	it('prefers a front-matter description when the page declares one', () => {
 		const md = '---\ntitle: Hi\ndescription: Declared up front.\n---\n\n# Hi\n\nProse instead.\n';
 		assert.equal(pageDescription(md), 'Declared up front.');
@@ -35,9 +41,9 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription('---\ntitle: T\ndescription: "Quoted."\n---\n\n# T\n\nProse.\n'), 'Quoted.');
 	});
 
-	it('falls back to the first prose sentence, skipping the heading', () => {
+	it('falls back to the first prose paragraph (as the meta description does), skipping the heading', () => {
 		const md = '---\ntitle: Hi\n---\n\n# Hi\n\nA pipeline is a graph. More after the stop.\n';
-		assert.equal(pageDescription(md), 'A pipeline is a graph.');
+		assert.equal(pageDescription(md), 'A pipeline is a graph. More after the stop.');
 	});
 
 	it('skips MDX imports and JSX to reach the prose', () => {
@@ -48,6 +54,54 @@ describe('pageDescription', () => {
 	it('strips inline links and emphasis from the extracted sentence', () => {
 		const md = '# T\n\nSee the [engine](/concepts/engine) and **run** it.\n';
 		assert.equal(pageDescription(md), 'See the engine and run it.');
+	});
+
+	it('ignores an HTML comment, even over several lines, before the first paragraph', () => {
+		const md = '---\ntitle: T\n---\n\n<!-- note to editors\nstill the note -->\n\n# T\n\nThe real first paragraph.\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('keeps a fenced code block that contains an HTML comment opener from swallowing the prose', () => {
+		const md = '# T\n\n```html\n<!-- example\n```\n\nThe real first paragraph.\n\n<!-- later note -->\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('keeps inline code that contains an HTML comment opener from swallowing the prose', () => {
+		const md = '# T\n\nWrite `<!--` to open a comment.\n\nMore text.\n\n<!-- later note -->\n';
+		assert.equal(pageDescription(md), 'Write <!-- to open a comment.');
+	});
+
+	it('does not let a fence marker inside a comment open a code block', () => {
+		const md = '# T\n\n<!--\n```\n-->\n\nThe real first paragraph.\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('does not treat an escaped backtick as the start of inline code', () => {
+		const md = '# T\n\nWhat is \\`? <!-- note --> Use the `client`.\n';
+		assert.equal(pageDescription(md).includes('note'), false);
+	});
+
+	it('removes a real multi-line comment before the first paragraph and keeps a later fenced opener', () => {
+		const md = '# T\n\n<!-- first line\nsecond line -->\n\nThe real first paragraph.\n\n```html\n<!-- example\n```\n';
+		assert.equal(pageDescription(md), 'The real first paragraph.');
+	});
+
+	it('closes a fence on a CRLF line ending so a later comment is still removed', () => {
+		const md = '# T\r\n\r\n```js\r\ncode();\r\n```\r\n\r\nAfter <!-- hidden --> the block.\r\n';
+		const out = pageDescription(md);
+		assert.equal(out.includes('hidden'), false);
+		assert.equal(out, 'After the block.');
+	});
+
+	it('does not let a backtick in a heading pair with one in a later paragraph', () => {
+		const md = '# Heading `\n\nThe <!-- hidden note --> real paragraph.\n\nUse `client`.\n';
+		const out = pageDescription(md);
+		assert.equal(out.includes('hidden note'), false);
+		assert.ok(out.includes('The ') && out.includes(' real paragraph.'));
+	});
+
+	it('keeps a code span that crosses a line break inside one paragraph', () => {
+		assert.equal(pageDescription('# T\n\na `x <!--\ny` b\n'), 'a x <!-- y b');
 	});
 
 	it('returns an empty string when the page has no leading prose', () => {

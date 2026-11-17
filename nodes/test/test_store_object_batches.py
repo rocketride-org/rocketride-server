@@ -161,7 +161,7 @@ def _milvus(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
         json.loads(re.search(r'in (\[.*\])$', filter).group(1))
     )
     store.client.upsert.side_effect = lambda collection_name, data: log.stored.extend(
-        (row['meta'].objectId, row['meta'].chunkId) for row in data
+        (row['meta']['objectId'], row['meta']['chunkId']) for row in data
     )
     return store, log
 

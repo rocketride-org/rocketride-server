@@ -15,7 +15,7 @@ from typing import Any, Dict
 from ..apps import TRACE_VIEWER_URI
 from ..engine import LogNotFound
 from ..errors import _bad, _timeout
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 
 DEFAULT_TIMEOUT_SECONDS = 30
 LOG_READ_MAX_EVENTS = 200
@@ -230,6 +230,7 @@ def register(registry: ToolRegistry) -> None:
         'List recorded runs (chapters) for a pipeline from the persistent run log — begin/end '
         'times, beginSeq, outcome. Works for past and live runs.',
         {'type': 'object', 'properties': _KEY_SCHEMA, 'required': ['projectId', 'source']},
+        hints=ToolHints.reads('Reads persisted run-log metadata.'),
     )(_log_chapters)
     registry.register(
         'log_read',
@@ -253,6 +254,7 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['projectId', 'source'],
         },
+        hints=ToolHints.reads('Reads a bounded page of persisted run-log events.'),
     )(_log_read)
     registry.register(
         'log_traces',
@@ -278,6 +280,7 @@ def register(registry: ToolRegistry) -> None:
             'required': ['projectId', 'source'],
         },
         ui_resource_uri=TRACE_VIEWER_URI,
+        hints=ToolHints.reads('Reads trace summaries from the persisted run log.'),
     )(_log_traces)
     registry.register(
         'log_trace',
@@ -292,4 +295,5 @@ def register(registry: ToolRegistry) -> None:
             'required': ['projectId', 'source', 'beginSeq'],
         },
         ui_resource_uri=TRACE_VIEWER_URI,
+        hints=ToolHints.reads("Reads one trace's events from the persisted run log."),
     )(_log_trace)

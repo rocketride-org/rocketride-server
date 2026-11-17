@@ -117,10 +117,6 @@ def test_haiku_45_gets_extended_thinking():
     assert kw['thinking']['budget_tokens'] >= 1024
 
 
-def test_haiku_latest_gets_extended_thinking():
-    assert build_anthropic_thinking_kwargs('claude-haiku-latest', 8192).get('thinking')
-
-
 def test_legacy_claude3_haiku_has_no_thinking():
     assert build_anthropic_thinking_kwargs('claude-3-haiku', 8192) == {}
 

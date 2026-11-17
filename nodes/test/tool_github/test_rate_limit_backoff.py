@@ -71,6 +71,7 @@ def node(monkeypatch):
             default_repo='owner/repo',
             read_only=True,
             get_token=Mock(return_value=TOKEN),
+            secrets=lambda: (TOKEN,),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
             graphql_allow_mutations=False,
@@ -380,6 +381,41 @@ def test_graphql_execution_error_with_path_on_the_last_point_is_not_retried(node
     assert result['data'] == {'data': None, 'errors': body['errors']}
 
 
+@pytest.mark.parametrize(
+    'error',
+    [
+        {'message': 'Something went wrong while executing your query. Please try again.'},
+        {'type': 'RATE_LIMITED', 'message': 'API rate limit exceeded.'},
+    ],
+)
+@pytest.mark.parametrize('retry_after', [False, True])
+def test_mutation_http_200_errors_never_resend_a_possibly_applied_write(node, error, retry_after):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    body = {'data': None, 'errors': [error]}
+    headers = dict(graphql_limited().headers)
+    if retry_after:
+        headers['Retry-After'] = '1'
+    node.request.side_effect = [response(body, 200, headers), response({'data': {'addStar': {'id': 'twice'}}})]
+    result = node.inst.graphql({'query': 'mutation { addStar(input: {starrableId: "repo"}) { clientMutationId } }'})
+    assert node.request.call_count == 1
+    assert node.slept == []
+    assert result['status'] == 200
+    assert result['data'] == body
+
+
+@pytest.mark.parametrize('status', [403, 429])
+def test_mutation_http_rate_limit_refusal_still_backs_off(node, status):
+    node.inst.IGlobal.read_only = False
+    node.inst.IGlobal.graphql_allow_mutations = True
+    body = {'data': {'addStar': {'clientMutationId': 'once'}}}
+    node.request.side_effect = [secondary_limit(status, '1'), response(body)]
+    result = node.inst.graphql({'query': 'mutation { addStar(input: {starrableId: "repo"}) { clientMutationId } }'})
+    assert node.request.call_count == 2
+    assert node.slept == [1.0]
+    assert result['data']['data'] == body['data']
+
+
 def test_graphql_errors_of_other_types_are_not_retried(node):
     body = {'data': None, 'errors': [{'type': 'NOT_FOUND', 'message': 'RATE_LIMITED is not this error'}]}
     node.request.return_value = response(body, 200, dict(OK_HEADERS))
@@ -422,7 +458,8 @@ def test_a_retry_after_a_long_wait_sends_a_freshly_minted_token(node, path):
     echoed = 'tok-before-wait and tok-after-wait'
     payload = {'data': {'echo': echoed}} if path == 'graphql' else {'echo': echoed}
     node.request.side_effect = [secondary_limit(retry_after='600'), response(payload)]
-    result = getattr(node.inst, tool)(args)
+    # Through the tool map: the tool wrapper redacts every token the call used.
+    result = node.inst._collect_tool_methods()[tool](args)
     assert node.slept == [600.0]
     sent = [call.kwargs['headers']['Authorization'] for call in node.request.call_args_list]
     assert sent == ['Bearer tok-before-wait', 'Bearer tok-after-wait']
@@ -431,17 +468,20 @@ def test_a_retry_after_a_long_wait_sends_a_freshly_minted_token(node, path):
     assert 'tok-after-wait' not in json.dumps(result)
 
 
-def test_the_node_layer_redacts_every_token_it_handed_out(node):
+def test_the_tool_wrapper_redacts_every_token_handed_out(node):
     node.inst.IGlobal.get_token = Mock(side_effect=['tok-one', 'tok-two'])
-    result = node.inst._with_credentials(lambda credential, secrets: {'sent': [credential(), credential()]})
-    assert result == {'sent': ['[REDACTED]', '[REDACTED]']}
+    run = node.inst._redacting(
+        lambda args, ctx: node.inst._with_credentials(
+            lambda credential, secrets: {'sent': [credential(), credential()]}, ctx=ctx
+        )
+    )
+    assert run({}) == {'sent': ['[REDACTED]', '[REDACTED]']}
 
 
-def test_a_retry_signs_the_app_jwt_again(node, monkeypatch):
+def test_a_retry_signs_the_app_jwt_again(node):
     node.policy(budget_seconds=900)
-    node.inst.IGlobal.auth_type = 'app'
-    node.inst.IGlobal.app_id = '123'
-    monkeypatch.setattr(node.client, 'sign_app_jwt', Mock(side_effect=['jwt-one', 'jwt-two']))
+    node.inst.IGlobal.auth_type_for = lambda repo=None, owner=None: 'app'
+    node.inst.IGlobal.app_jwt = Mock(side_effect=['jwt-one', 'jwt-two'])
     node.request.side_effect = [secondary_limit(retry_after='600'), response({'slug': 'my-app', 'note': 'jwt-two'})]
     result = node.inst.user_get({})
     sent = [call.kwargs['headers']['Authorization'] for call in node.request.call_args_list]

@@ -194,6 +194,14 @@ export interface CheckoutModalBaseProps {
 	/** Short description shown below the app name. */
 	appDescription?: string;
 
+	/**
+	 * Id of the app being subscribed to. Optional. It picks the label of the
+	 * button shown after a grant or hackathon code is redeemed: the pipeline
+	 * builder (`rocketride.pipeBuilder`) keeps "Start building", every other
+	 * app gets "Continue to <appName>".
+	 */
+	appId?: string;
+
 	/** Stripe publishable key (pk_test_* or pk_live_*). */
 	stripePublishableKey: string;
 

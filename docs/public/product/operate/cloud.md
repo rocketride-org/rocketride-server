@@ -1,5 +1,6 @@
 ---
 title: Cloud
+description: "RocketRide Cloud is a managed engine: the same runtime you can self-host, operated for you. Point a client at the Cloud endpoint and start building."
 ---
 
 # Cloud
@@ -40,6 +41,8 @@ Weighing Cloud against running the engine yourself? The comparison lives on
 
 - [Quickstart](/quickstart): run your first pipeline.
 - [Choose How to Run RocketRide](/operate): Cloud vs. self-hosting.
+- [Cloud Databases](/operate/cloud-databases): limits, retention, backups and
+  export for the databases the RocketRide database nodes use.
 - [Self-hosting](/operate/self-hosting): run the engine yourself.
 - [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python) ·
   [CLI](/connect/cli): clients that connect to Cloud.

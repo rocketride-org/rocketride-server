@@ -37,7 +37,7 @@
 // decoupled from connection, same as VSCode.
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties } from '../util/signupAttribution';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, signupState } from '../util/signupAttribution';
 import type { PkceCredential, SignupProperties } from 'rocketride';
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier, storeRedirectUri, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
@@ -138,7 +138,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			}
 		}
 
-		stashSignupProperties(register ? signup : null);
+		const context = stashSignupProperties(register ? signup : null);
 
 		// Generate PKCE challenge (stores verifier in sessionStorage automatically)
 		const { challenge } = await generatePkce();
@@ -157,6 +157,11 @@ export class CloudAuthProvider implements IAuthProvider {
 		// stash it with the verifier's lifetime (both exchange sites read it).
 		storeRedirectUri(redirectUri);
 
+		// The OAuth state carries one thing. A dev relay owns it when relaying; otherwise, including an
+		// unframed dev shell without the relay, it is the cookieless signup context, when there is one.
+		let state = signupState(context);
+		if (useRelay) state = `rrdev:${window.location.origin}`;
+
 		// Build the authorization URL
 		const url = buildAuthUrl(
 			this.zitadelUrl,
@@ -164,7 +169,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			redirectUri,
 			challenge,
 			register,
-			useRelay ? `rrdev:${window.location.origin}` : undefined,
+			state,
 		);
 
 		// assign() (not replace()) so the landing page stays in history — the
