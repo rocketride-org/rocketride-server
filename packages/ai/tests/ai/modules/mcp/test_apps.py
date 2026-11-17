@@ -108,6 +108,10 @@ async def test_server_reports_nonempty_version(fake_engine):
     assert info is not None and info.version
 
 
+def _csp(*connect):
+    return {'ui': {'csp': {'connectDomains': list(connect), 'resourceDomains': []}}}
+
+
 def test_ui_resource_csp_stamped_when_origin_known(apps_dir, monkeypatch):
     spec = apps.AppSpec(
         uri='ui://rocketride/x.html',
@@ -117,13 +121,95 @@ def test_ui_resource_csp_stamped_when_origin_known(apps_dir, monkeypatch):
     )
     monkeypatch.setattr(apps, 'APPS', [spec])
     listed = apps.list_ui_resources(apps_dir, engine_origin='http://localhost:5565')
-    assert listed[0].meta == {'ui': {'csp': {'connectDomains': ['http://localhost:5565']}}}
+    assert listed[0].meta == _csp('http://localhost:5565')
 
 
-def test_ui_resource_no_csp_without_origin_or_flag(apps_dir):
+def test_every_widget_declares_an_empty_csp_without_origin_or_flag(apps_dir):
     listed = apps.list_ui_resources(apps_dir)
     assert listed  # an empty list would vacuously pass the CSP check below
-    assert all(r.meta is None for r in listed)
+    assert all(r.meta == _csp() for r in listed)
+
+
+@pytest.fixture
+def all_apps_dir(tmp_path):
+    for spec in apps.APPS:
+        (tmp_path / spec.filename).write_text(
+            f'<!doctype html><html><body>{spec.title}</body></html>', encoding='utf-8'
+        )
+    return tmp_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('ui_domain', [None, 'https://widgets.example.test'])
+async def test_read_returns_the_same_ui_meta_as_list_for_every_widget(fake_engine, all_apps_dir, ui_domain):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    server = handlers_mod.build_mcp_server(
+        lambda: fake_engine,
+        apps_dir=all_apps_dir,
+        engine_origin='https://engine.example.test',
+        ui_domain=ui_domain,
+    )
+    async with Client(server) as client:
+        listed = {str(r.uri): r for r in (await client.list_resources()).resources}
+        for spec in apps.APPS:
+            read = await client.read_resource(spec.uri)
+            content = read.contents[0]
+            expected = _csp('https://engine.example.test') if spec.needs_engine_origin else _csp()
+            if ui_domain:
+                expected['ui']['domain'] = ui_domain
+            assert content.meta == expected, spec.uri
+            assert listed[spec.uri].meta == content.meta, spec.uri
+            # Hosts read the wire name, _meta, on the content item itself.
+            assert content.model_dump(by_alias=True, exclude_none=True)['_meta'] == expected
+
+
+@pytest.mark.asyncio
+async def test_read_sends_no_domain_when_none_is_configured(fake_engine, all_apps_dir):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, apps_dir=all_apps_dir)
+    async with Client(server) as client:
+        for spec in apps.APPS:
+            read = await client.read_resource(spec.uri)
+            assert 'domain' not in read.contents[0].meta['ui'], spec.uri
+
+
+@pytest.mark.asyncio
+async def test_read_without_engine_origin_gives_the_dropper_an_empty_connect_list(fake_engine, all_apps_dir):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, apps_dir=all_apps_dir, engine_origin=None)
+    async with Client(server) as client:
+        read = await client.read_resource(apps.DROPPER_URI)
+    assert read.contents[0].meta == _csp()
+
+
+@pytest.mark.parametrize(
+    ('engine_origin', 'expected'),
+    [
+        ('https://Engine.Example.TEST:443/', 'https://engine.example.test'),
+        ('https://user:secret@engine.example.test/base/path?q=1#x', 'https://engine.example.test'),
+        ('http://127.0.0.1:5565', 'http://127.0.0.1:5565'),
+        ('http://[::1]:5565/', 'http://[::1]:5565'),
+    ],
+)
+def test_dropper_connect_domain_is_a_bare_origin(engine_origin, expected):
+    dropper = apps.spec_for_uri(apps.DROPPER_URI)
+    assert apps.ui_meta(dropper, engine_origin, None) == _csp(expected)
+
+
+@pytest.mark.parametrize('engine_origin', [None, '', 'ws://engine.example.test', 'not a url', 'https://host:notaport'])
+def test_dropper_gets_an_empty_connect_list_without_a_usable_origin(engine_origin):
+    dropper = apps.spec_for_uri(apps.DROPPER_URI)
+    assert apps.ui_meta(dropper, engine_origin, None) == _csp()
+
+
+def test_ui_meta_never_gives_other_widgets_a_network_origin():
+    for spec in apps.APPS:
+        if spec.needs_engine_origin:
+            continue
+        assert apps.ui_meta(spec, 'https://engine.example.test', None) == _csp(), spec.uri
 
 
 @pytest.mark.asyncio
@@ -168,7 +254,7 @@ async def test_list_resources_stamps_csp_from_engine_origin_without_building_cli
     async with Client(server) as client:
         listed = await client.list_resources()
     dropper = next(r for r in listed.resources if str(r.uri) == apps.DROPPER_URI)
-    assert dropper.meta == {'ui': {'csp': {'connectDomains': ['http://localhost:5565']}}}
+    assert dropper.meta == _csp('http://localhost:5565')
 
 
 def test_trace_viewer_spec_registered():
