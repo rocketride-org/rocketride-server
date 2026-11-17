@@ -295,8 +295,9 @@ interface PublicPage {
 Rules, enforced when a version is published to the public store rung (the
 publish fails with a message naming the field):
 
-- Only platform apps (ids in the `rocketride` developer namespace) may declare
-  `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
+- Only platform apps (ids in the `rocketride` developer namespace; on OSS
+  that is every app, since every OSS app id is `rocketride.<name>`) may
+  declare `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
   `rocketride.home`) may declare pages. `site` goes with the `/` page: a
   platform app that declares `site` without declaring `/` is refused, and a
   third-party app's `site` is ignored, since it can never take effect.
