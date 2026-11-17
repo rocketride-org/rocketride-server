@@ -66,8 +66,10 @@ import { isWireBinary, measure } from './walk';
 
 /** The outbound backstop's credential pattern (Appendix L). */
 const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
-/** Later lookups of a lost run (ms): after the engine's own queueing, before teardown. */
-const LOST_RUN_RETRY_MS = [30_000, 150_000];
+/** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers "not found" the run stops counting. */
+const LOST_RUN_RETRY_MS = [30_000, 120_000];
+/** Failures raised before the request reaches the socket (`client()` here, `DAPClient.request` in the SDK): nothing was sent, so nothing can be lost. */
+const NOT_SENT_ERRORS: ReadonlySet<string> = new Set(['Not connected to server', 'Server is not connected']);
 /** Root-internal frame refresh retries (ms). */
 const REFRESH_RETRY_MS = [2000, 4000, 8000];
 /** `/apps/frame` answers that end the session instead of being retried. */
@@ -207,16 +209,18 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	 * Looks a lost run up by (minted project, source) and ends it. Resolves
 	 * true once it is found and terminated (it then leaves the lost set).
 	 */
-	const endLostRun = (ledger: ILedger, project: string, source: string): Promise<boolean> =>
+	const endLostRun = (ledger: ILedger, project: string, source: string): Promise<'found' | 'absent' | 'error'> =>
 		sendEngine('rrext_get_token', { projectId: project, source })
-			.then(async (r) => {
-				const token = isPlainObject(r) && r.success !== false && isPlainObject(r.body) ? r.body.token : undefined;
-				if (typeof token !== 'string') return false;
+			.then(async (r): Promise<'found' | 'absent' | 'error'> => {
+				// 'absent' only for a connected engine that answered without a token.
+				if (!isPlainObject(r) || r.success === false) return 'error';
+				const token = isPlainObject(r.body) ? r.body.token : undefined;
+				if (typeof token !== 'string') return 'absent';
 				await sendEngine('terminate', { token });
 				ledger.lostRuns.delete(project);
-				return true;
+				return 'found';
 			})
-			.catch(() => false);
+			.catch(() => 'error' as const);
 	const recoverLostRun = (st: IRealmState, req: IGatedRequest): void => {
 		if (req.command !== 'execute' || !req.mintedProject) return;
 		const pipeline = req.args.pipeline as Record<string, unknown>;
@@ -228,8 +232,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		st.ledger.lostRuns.set(project, source);
 		const ledger = st.ledger;
 		const attempt = (retriesLeft: number[]): void => {
-			track(endLostRun(ledger, project, source)).then((found) => {
-				if (found || retriesLeft.length === 0 || !ledger.lostRuns.has(project)) return;
+			// Cleared by detach, teardown or logout (ledger.clear), or already found: no more lookups.
+			if (!ledger.lostRuns.has(project)) return;
+			track(endLostRun(ledger, project, source)).then((result) => {
+				if (result === 'found' || !ledger.lostRuns.has(project)) return;
+				if (retriesLeft.length === 0) {
+					// The last lookup, answered by a connected engine: it never started. Stop counting it.
+					if (result === 'absent') ledger.lostRuns.delete(project);
+					return;
+				}
 				const [delay, ...rest] = retriesLeft;
 				schedule(() => attempt(rest), delay);
 			});
@@ -460,10 +471,18 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const startedIn = epoch;
 				try {
 					let response: DAPMessage;
+					let reachedClient = false;
 					try {
-						response = (await track(Promise.resolve().then(() => client().request(req.message, req.timeout)))) as DAPMessage;
+						response = (await track(
+							Promise.resolve().then(() => {
+								const c = client();
+								reachedClient = true;
+								return c.request(req.message, req.timeout);
+							})
+						)) as DAPMessage;
 					} catch (err) {
-						recoverLostRun(st, req);
+						// Lost only if it may have been sent (DA R3-1): not while disconnected.
+						if (reachedClient && !(err instanceof Error && NOT_SENT_ERRORS.has(err.message))) recoverLostRun(st, req);
 						throw err;
 					}
 					// Teardown, logout or detach happened meanwhile: end what the answer started.
