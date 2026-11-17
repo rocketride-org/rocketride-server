@@ -18,7 +18,10 @@ from ai.modules.mcp.tools import integrations, introspection
 from .conftest import FakeEngineClient
 
 TAG = 'hosted-models:openai'
-NOTE = 'Runs on RocketRide-hosted models, billed to your compute tokens. Leave apikey empty.'
+NOTE = (
+    "Runs on RocketRide-hosted models with no key of your own, using this workspace's compute credits. "
+    'Leave apikey empty, or set it to use your own OpenAI key.'
+)
 PLATFORM_NAMES = ('ROCKETRIDE_MODEL_GATEWAY', 'RR_MODEL_GATEWAY', 'rrmg_')
 
 RAW = {

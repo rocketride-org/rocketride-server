@@ -134,5 +134,5 @@ def test_a_hosted_task_with_no_key_and_no_pass_says_so_before_building_a_client(
 def test_a_self_hosted_node_with_no_key_anywhere_says_how_to_add_one(monkeypatch, self_hosted):
     monkeypatch.delenv('OPENAI_API_KEY', raising=False)
 
-    with pytest.raises(ValueError, match=r'^llm_openai: no API key is set\. Enter your OpenAI key'):
+    with pytest.raises(ValueError, match=r'^llm_openai: no API key is set\. Add your OpenAI key'):
         _chat(monkeypatch, 'llm_openai', apikey='')

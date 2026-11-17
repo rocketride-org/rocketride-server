@@ -53,13 +53,15 @@ _SERVER_HOSTED_FLAG = '--saas'
 
 _NO_KEY_HOSTED = (
     "{node}: no API key is set, and RocketRide-hosted models aren't available for this run. "
-    'Enter your OpenAI key in the node settings, or save it as the ROCKETRIDE_OPENAI_KEY variable '
+    'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
     'and set apikey to ${{ROCKETRIDE_OPENAI_KEY}}.'
 )
 _NO_KEY_SELF_HOSTED = (
-    '{node}: no API key is set. Enter your OpenAI key in the node settings, or save it as the '
-    'ROCKETRIDE_OPENAI_KEY variable and set apikey to ${{ROCKETRIDE_OPENAI_KEY}}.'
+    '{node}: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
+    'as ROCKETRIDE_OPENAI_KEY and set apikey to ${{ROCKETRIDE_OPENAI_KEY}}.'
 )
+# A compatible node with an endpoint of its own never runs on hosted models.
+_NO_KEY_OWN_ENDPOINT = '{node}: no API key is set. Add the API key for your endpoint in the node settings.'
 
 _UNAVAILABLE = (
     'RocketRide-hosted models are unavailable right now. Try again shortly, '
@@ -70,16 +72,16 @@ _UNAVAILABLE = (
 # writes the same sentences in error.message.
 REFUSAL_SENTENCES = {
     'insufficient_credits': (
-        "This workspace doesn't have enough compute tokens left to run this request on "
-        'RocketRide-hosted models. Add your own OpenAI key in the node settings, or check your '
-        'plan and usage in RocketRide.'
+        "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
+        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'under Account > Billing in RocketRide.'
     ),
     'rate_limited': 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.',
     'model_not_available': (
         "The model {model} isn't offered as a RocketRide-hosted model. Choose another model, "
         'or add your own OpenAI key in the node settings.'
     ),
-    'invalid_gateway_pass': 'RocketRide-hosted models stopped accepting this run. Start the pipeline again.',
+    'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': _UNAVAILABLE,
     'upstream_unavailable': _UNAVAILABLE,
     'request_too_large': (
@@ -87,11 +89,14 @@ REFUSAL_SENTENCES = {
         'or add your own OpenAI key in the node settings.'
     ),
     'unsupported_parameter': (
-        "RocketRide-hosted models don't support {field}. Add your own OpenAI key in the node settings to use it."
+        "RocketRide-hosted models don't support {field}. "
+        'Add your own OpenAI key in the node settings to run this request.'
     ),
 }
+# Any other refusal. Its code stays out of the sentence (a code can name internals); it is in the log.
 _OTHER_REFUSAL = (
-    'RocketRide-hosted models returned an error ({code}). Try again, or add your own OpenAI key in the node settings.'
+    "RocketRide-hosted models couldn't run this request. Try again later, or add your own OpenAI key in the "
+    'node settings.'
 )
 
 # The backend's own sentences, read back for the value it filled in.
@@ -196,7 +201,8 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
     - On a hosted task, a node with no key uses the run's pass. For
       ``llm_openai_api`` only when the node has no base URL of its own: the pass
       goes nowhere but the hosted backend. With no pass, or with a base URL, it
-      fails with a message, so a hosted task never builds a client with no key.
+      fails with a message (one that names the node's own endpoint when it has
+      one), so a hosted task never builds a client with no key.
     - On a self-hosted engine, ``llm_openai`` with no key and no
       ``OPENAI_API_KEY`` fails with a message. Every other case is unchanged.
 
@@ -208,7 +214,9 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
 
     if _is_hosted():
         gateway = read_pass()
-        if gateway is not None and (logical_type != _COMPATIBLE_PROVIDER or _is_empty(base_url)):
+        if logical_type == _COMPATIBLE_PROVIDER and not _is_empty(base_url):
+            raise MissingModelKeyError(_NO_KEY_OWN_ENDPOINT.format(node=logical_type))
+        if gateway is not None:
             return OpenAICredentials(gateway.token, gateway.base_url, True)
         raise MissingModelKeyError(_NO_KEY_HOSTED.format(node=logical_type))
 
@@ -259,8 +267,7 @@ def friendly_gateway_error(error: BaseException, model: str = '') -> Optional[st
     message = body.get('message') if isinstance(body.get('message'), str) else ''
     sentence = REFUSAL_SENTENCES.get(code)
     if sentence is None:
-        shown = re.sub(r'[^A-Za-z0-9_.-]', '', code)[:64] or 'unknown'
-        return _OTHER_REFUSAL.format(code=shown)
+        return _OTHER_REFUSAL
     if code == 'model_not_available':
         found = _MODEL_IN_MESSAGE.match(message)
         name = _clean(model) or (_clean(found.group(1)) if found else '')
