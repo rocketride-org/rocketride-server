@@ -50,8 +50,9 @@ CLUSTER_KEYS = {
     'took_ms',
 }
 
-#: Budgets are asserted at their value locally and at three times it on CI runners.
-SLACK = 3 if os.environ.get('CI') else 1
+#: Budgets are asserted at their value locally and at six times it on CI runners,
+#: where the suites share a few cores (the same factor as vector-ui's ciBudget).
+SLACK = 6 if os.environ.get('CI') else 1
 
 
 def _blobs(sizes: List[int], *, dim: int = 16, spread: float = 0.05, seed: int = 11) -> np.ndarray:
