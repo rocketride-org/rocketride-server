@@ -66,8 +66,10 @@ import { isWireBinary, measure } from './walk';
 
 /** The outbound backstop's credential pattern (Appendix L). */
 const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
-/** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers "not found" the run stops counting. */
+/** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers TASK_NOT_REGISTERED the run stops counting. */
 const LOST_RUN_RETRY_MS = [30_000, 120_000];
+/** The engine's code for a project/source with no live run (`TaskError.NOT_REGISTERED`, `modules/task/types.py`). */
+const TASK_NOT_REGISTERED = 'TASK_NOT_REGISTERED';
 /** Failures raised before the request reaches the socket (`client()` here, `DAPClient.request` in the SDK): nothing was sent, so nothing can be lost. */
 const NOT_SENT_ERRORS: ReadonlySet<string> = new Set(['Not connected to server', 'Server is not connected']);
 /** Root-internal frame refresh retries (ms). */
@@ -212,10 +214,14 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	const endLostRun = (ledger: ILedger, project: string, source: string): Promise<'found' | 'absent' | 'error'> =>
 		sendEngine('rrext_get_token', { projectId: project, source })
 			.then(async (r): Promise<'found' | 'absent' | 'error'> => {
-				// 'absent' only for a connected engine that answered without a token.
-				if (!isPlainObject(r) || r.success === false) return 'error';
+				if (!isPlainObject(r)) return 'error';
+				// 'absent' only for the engine's own "no such run" answer: on_rrext_get_token
+				// re-raises TaskError(TASK_NOT_REGISTERED), which DAPBase.build_exception
+				// sends as success:false with `code`. Any other failure (permission,
+				// ambiguity, transport) is 'error' and keeps the run counted.
+				if (r.success === false) return (r as { code?: unknown }).code === TASK_NOT_REGISTERED ? 'absent' : 'error';
 				const token = isPlainObject(r.body) ? r.body.token : undefined;
-				if (typeof token !== 'string') return 'absent';
+				if (typeof token !== 'string') return 'error';
 				await sendEngine('terminate', { token });
 				ledger.lostRuns.delete(project);
 				return 'found';
