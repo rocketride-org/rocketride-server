@@ -2420,11 +2420,51 @@ test('a blank API key connects keyless when the server does not require one', as
 	assert.deepEqual(loginCalls, [[KEYLESS_CREDENTIAL]]);
 	assert.notEqual(KEYLESS_CREDENTIAL, '');
 
-	const { manager } = createTestManager();
+	// An OSS server without ROCKETRIDE_APIKEY echoes the credential back as the
+	// session token, so the shell persists the keyless placeholder.
+	const keylessResult: ConnectResult = { ...authenticatedResult, userToken: KEYLESS_CREDENTIAL };
+	const firstLogins: unknown[][] = [];
+	const { manager, savedTokens } = createTestManager();
 	manager.serverUri = 'https://shell.example.test';
-	manager.client = testClient({ login: async () => authenticatedResult });
-	assert.deepEqual(await manager.connect(''), authenticatedResult);
+	manager.client = testClient({
+		login: async (...args: unknown[]) => {
+			firstLogins.push(args);
+			return keylessResult;
+		},
+		getAccountInfo: () => keylessResult,
+	});
+	assert.deepEqual(await manager.connect(''), keylessResult);
 	assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+	assert.deepEqual(firstLogins, [[KEYLESS_CREDENTIAL]]);
+	assert.deepEqual(savedTokens, [KEYLESS_CREDENTIAL], 'the keyless session token is saved');
+
+	// A reload bootstraps from that saved token and reconnects keyless.
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const reloadLogins: unknown[][] = [];
+	const reload = createTestManager();
+	reload.manager.serverUri = 'https://shell.example.test';
+	reload.manager.client = testClient({
+		login: async (...args: unknown[]) => {
+			reloadLogins.push(args);
+			return keylessResult;
+		},
+		getAccountInfo: () => keylessResult,
+	});
+	reload.manager._attachPromise = Promise.resolve();
+	reload.manager.loadToken = () => savedTokens[0] ?? '';
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { search: '' } },
+	});
+	try {
+		const completed = await reload.manager.bootstrap();
+		assert.equal(completed?.result, keylessResult);
+		assert.deepEqual(reloadLogins, [[KEYLESS_CREDENTIAL]], 'the saved keyless token is replayed on reload');
+		assert.equal(reload.manager.connectionStatus.state, ConnectionState.CONNECTED);
+	} finally {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
 });
 
 test('a blank API key rejected by a key-protected server says a key is required', async () => {
