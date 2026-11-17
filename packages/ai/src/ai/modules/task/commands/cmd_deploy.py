@@ -343,8 +343,9 @@ class DeployCommands(_DeployBase):
 
         org_id = self._org_id()
         # Server-owned keys (platform, approvedCapabilities, build) are never
-        # the caller's: a pipe shares its rail with an app of the same id (#1022).
-        metadata = caller_metadata(args.get('metadata')) if isinstance(args.get('metadata'), dict) else None
+        # the caller's: a pipe shares its rail with an app of the same id, and
+        # says explicitly that it is not the seeder's (#1022).
+        metadata = {**caller_metadata(args.get('metadata')), 'platform': False}
         entry = await account.deployments_publish(
             org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata
         )

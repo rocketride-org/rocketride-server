@@ -370,3 +370,41 @@ async def test_a_forced_reseed_with_a_repoint_hook_leaves_the_state_to_the_hook(
     assert registry.bindings == []
     assert registry.state_flips == []
     assert registry.state == 'disabled'
+
+
+# =============================================================================
+# self-heal picks the seeder's rows by metadata, never by comment (#1022 G4 round 2 SHOULD-3)
+# =============================================================================
+
+
+async def _heal(static_apps, monkeypatch, row):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+    copies = []
+
+    async def copied(app_id, artifact_path):
+        copies.append(artifact_path)
+        return 1
+
+    monkeypatch.setattr(seed_apps, 'copy_bundle_to_store', copied)
+    row['artifactPath'] = f'.deployments/{APP_ID}/v1-abcdef12.json'
+    registry = _Registry([row])
+    healed = await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR)
+    return healed, copies, registry
+
+
+@pytest.mark.asyncio
+async def test_self_heal_ignores_a_user_deploy_that_copies_the_seed_comment(static_apps, monkeypatch):
+    """A deploy's comment is the caller's: a failed user deploy commented 'Platform seed' is never healed or bound."""
+    row = _seed_row(status='failed')
+    row['metadata'] = {'platform': False, 'build': {'status': 'failed'}}
+    healed, copies, registry = await _heal(static_apps, monkeypatch, row)
+    assert healed is False and copies == [] and registry.bindings == []
+
+
+@pytest.mark.asyncio
+async def test_self_heal_picks_a_platform_row_whatever_its_comment(static_apps, monkeypatch):
+    """The seeder's row is the one with metadata.platform True (build.seeded only for rows from before the flag)."""
+    row = _seed_row(status='failed', comment='renamed by an operator')
+    row['metadata'] = {'platform': True, 'build': {'status': 'failed', 'seeded': True}}
+    healed, copies, registry = await _heal(static_apps, monkeypatch, row)
+    assert healed is True and len(copies) == 1 and registry.bindings == [1]

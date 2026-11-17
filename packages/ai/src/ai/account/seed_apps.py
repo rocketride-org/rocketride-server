@@ -373,6 +373,23 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
     return registered
 
 
+def is_seed_row(entry: Dict[str, Any]) -> bool:
+    """
+    Whether a rail row was written by the seeder (the platform's own version, #1022).
+
+    ``metadata.platform`` decides where the key exists: the seeder writes True,
+    every deploy door writes False, and no caller can set it. Rows seeded
+    before the flag existed carry only the seeder's build stamp, so a row
+    WITHOUT the key falls back to ``metadata.build.seeded is True``. Never
+    the row's comment, which a deploy's caller chooses.
+    """
+    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+    if 'platform' in metadata:
+        return metadata['platform'] is True
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    return build.get('seeded') is True
+
+
 def _build_ok(entry: Dict[str, Any]) -> bool:
     """Whether a registry row's build completed (``metadata.build.status`` ok)."""
     metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
@@ -532,7 +549,8 @@ async def seed_manifest_app(
             if target is None:
                 for row in ready:
                     # Newest SEED row only — user deploys are the worker's job.
-                    if str(row.get('comment') or '') != SEED_COMMENT:
+                    # Chosen by metadata, never by the caller-chosen comment.
+                    if not is_seed_row(row):
                         continue
                     try:
                         if await copy_bundle_to_store(app_id, str(row.get('artifactPath') or '')) > 0:

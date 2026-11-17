@@ -177,7 +177,14 @@ class TestPublish:
         conn = _make_conn(_account_info())
         metadata = {'platform': True, 'approvedCapabilities': ['fs.app'], 'build': {'seeded': True}, 'note': 'kept'}
         await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': metadata})
-        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'note': 'kept'}
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'note': 'kept', 'platform': False}
+
+    @pytest.mark.asyncio
+    async def test_publish_writes_platform_false_without_caller_metadata(self, account_stub):
+        """#1022 G4 round 2 SHOULD-3: a pipe version always says it is not the seeder's."""
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'platform': False}
 
     @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):

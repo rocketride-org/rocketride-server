@@ -436,6 +436,9 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         **caller_meta,
         'manifest': manifest,
         'build': {'status': 'queued', 'queuedAt': time.time(), 'attempt': 0},
+        # A deploy is never the seeder's (#1022): said explicitly, so the
+        # first-party rule and the seeder's self-heal never guess.
+        'platform': False,
     }
     entry = await account.deployments_publish(
         org_id,

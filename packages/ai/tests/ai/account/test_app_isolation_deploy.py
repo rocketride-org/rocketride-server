@@ -271,7 +271,7 @@ async def test_deployments_publish_strips_server_owned_keys_from_pipes():
     metadata = {'platform': True, 'approvedCapabilities': ['fs.app'], 'build': {'seeded': True}, 'note': 1}
     await AccountBase.deployments_publish(fake, 'local', 'p1', {'kind': 'pipe', 'name': 'P'}, {}, metadata=metadata)
     await AccountBase.deployments_publish(fake, 'local', 'p1', {'name': 'P'}, {}, metadata=dict(metadata))
-    assert calls[0] == {'note': 1} and calls[1] == {'note': 1}
+    assert calls[0] == {'note': 1, 'platform': False} and calls[1] == {'note': 1, 'platform': False}
     # app artifacts come only through handle_app_add (which strips the caller's keys) and the seeder
     await AccountBase.deployments_publish(fake, 'local', 'a1', {'kind': 'app'}, {}, metadata=dict(metadata))
     assert calls[2] == metadata
@@ -320,7 +320,7 @@ async def test_handle_app_add_strips_platform(deploy_registry, content_store):
     )
     assert result['success'] is True
     stored = deploy_registry.publish_calls[0]['metadata']
-    assert 'platform' not in stored
+    assert stored['platform'] is False  # written explicitly by the server (G4 round 2 SHOULD-3)
     assert stored['projectId'] == 'wc-1' and stored['note'] == 'keep me'  # the rest of the caller's metadata survives
     assert 'platform' not in stored['manifest']
 
@@ -332,7 +332,7 @@ async def test_platform_is_stripped_whatever_its_value(value, deploy_registry, c
     from ai.account.app_deploy import handle_app_add
 
     await handle_app_add(_FakeConn(), _add_request(data=_app_zip(), metadata={'platform': value}))
-    assert 'platform' not in deploy_registry.publish_calls[0]['metadata']
+    assert deploy_registry.publish_calls[0]['metadata']['platform'] is False
 
 
 # ---------------------------------------------------------------------------

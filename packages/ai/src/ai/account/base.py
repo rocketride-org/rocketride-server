@@ -695,15 +695,15 @@ class AccountBase(ABC):
         pre-approved platform artifacts directly as 'ready'.
 
         A non-app artifact's ``metadata`` loses the server-owned keys
-        (``platform``, ``approvedCapabilities``, ``build``): only the app
-        deploy and the seeder write them (#1022).
+        (``platform``, ``approvedCapabilities``, ``build``) and says
+        ``platform: False``: only the app deploy and the seeder write them (#1022).
 
         Returns the new registry entry (version, sha256, publishedBy, ...).
         """
         if isinstance(metadata, dict) and str(pipeline.get('kind') or 'pipe') != 'app':
             from .deployment_backend import caller_metadata
 
-            metadata = caller_metadata(metadata)
+            metadata = {**caller_metadata(metadata), 'platform': False}
         return await self._deployment_backend().publish(
             org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
         )
@@ -926,15 +926,10 @@ class AccountBase(ABC):
         except Exception:
             return False
 
-        def seeded(entry) -> bool:
-            metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
-            if 'platform' in metadata:
-                return metadata['platform'] is True
-            build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
-            return build.get('seeded') is True
+        from .seed_apps import is_seed_row
 
         apps = [e for e in entries or [] if isinstance(e, dict) and str(e.get('kind') or 'pipe') == 'app']
-        return bool(apps) and all(seeded(entry) for entry in apps)
+        return bool(apps) and all(is_seed_row(entry) for entry in apps)
 
     async def set_approved_capabilities(self, org_id: str, app_id: str, version: int, caps: list, actor: dict) -> dict:
         """Record the capabilities an admin granted one app version (``metadata.approvedCapabilities``).
