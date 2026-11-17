@@ -694,14 +694,22 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				for (const st of realms.values()) work.push(...teardownRealm(st, tally));
 				// Then the root's own background work: engine calls started before the
 				// teardown, and the ending of what their late answers started (DA N3).
+				let stopped = false;
 				const drain = async (): Promise<boolean> => {
 					await Promise.allSettled(work);
-					while (background.size > 0) await Promise.allSettled([...background]);
+					while (background.size > 0 && !stopped) await Promise.allSettled([...background]);
 					return false;
 				};
 				let timer: ReturnType<typeof setTimeout> | undefined;
 				const timedOut = await Promise.race([drain(), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
 				if (timer !== undefined) clearTimeout(timer);
+				if (timedOut) {
+					// What is still pending past the timeout is hung (security R3-L3): stop
+					// tracking it, so no later teardown waits on it again. Its late answer
+					// is still ended by the epoch check.
+					stopped = true;
+					background.clear();
+				}
 				if (tally.failed > 0 || timedOut) opts.log('warn', `[isolation] teardown: ${tally.failed} terminate request(s) failed${timedOut ? '; timed out' : ''}`);
 				for (const st of realms.values()) st.ledger.clear();
 			} finally {
