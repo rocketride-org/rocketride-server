@@ -369,6 +369,9 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	let mintedProject: string | undefined;
 	if (run) checked.token = run.token;
 	if (command === 'execute') {
+		// The source must be known: a lost answer is recovered by (minted project, source).
+		const source = checked.source ?? (checked.pipeline as Record<string, unknown>).source;
+		if (typeof source !== 'string' || source === '' || utf8Length(source) > SIZES.name) fail('schema');
 		reserve('runs', QUOTAS.runs);
 		mintedProject = `rrapp.${g.info.appKey}.${uuid4(g.random)}`;
 		checked.pipeline = { ...(checked.pipeline as Record<string, unknown>), project_id: mintedProject };
