@@ -607,9 +607,7 @@ def test_a_hosted_reasoning_turn_goes_to_the_pass_url_with_the_pass(monkeypatch)
     }
     mod, _ = _driver(monkeypatch, 'llm_openai', 'openai_client.py', config)
     monkeypatch.setattr(
-        mod,
-        '_ResponsesChatOpenAI',
-        functools.partial(mod._ResponsesChatOpenAI, http_client=httpx.Client(transport=httpx.MockTransport(handler))),
+        mod, 'hosted_http_clients', lambda: {'http_client': httpx.Client(transport=httpx.MockTransport(handler))}
     )
     chat = mod.Chat('llm_openai', {}, {})
 

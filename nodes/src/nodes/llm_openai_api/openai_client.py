@@ -10,7 +10,12 @@ from typing import Any, Dict, Iterator
 from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.model_gateway import HostedModelError, friendly_gateway_error, resolve_openai_credentials
+from ai.common.model_gateway import (
+    HostedModelError,
+    friendly_gateway_error,
+    hosted_http_clients,
+    resolve_openai_credentials,
+)
 from langchain_openai import ChatOpenAI as _LangChainChatOpenAI
 from openai import APIError, APIStatusError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -189,6 +194,8 @@ class Chat(ChatBase):
         }
         if base_url:
             kwargs['base_url'] = base_url
+        if self._hosted_models:
+            kwargs.update(hosted_http_clients())
 
         # Get the llm
         self._llm = ChatOpenAI(**kwargs)

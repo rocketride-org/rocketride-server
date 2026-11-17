@@ -28,7 +28,12 @@ OpenAI binding for the ChatLLM.
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.model_gateway import HostedModelError, friendly_gateway_error, resolve_openai_credentials
+from ai.common.model_gateway import (
+    HostedModelError,
+    friendly_gateway_error,
+    hosted_http_clients,
+    resolve_openai_credentials,
+)
 from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -79,14 +84,16 @@ class Chat(ChatBase):
         self._client_kwargs = {'api_key': apikey}
         if credentials.base_url:
             self._client_kwargs['base_url'] = credentials.base_url
+        self._http_clients = hosted_http_clients() if credentials.hosted else {}
 
         # Reasoning models stream via the Responses API + max_completion_tokens.
         if self._is_reasoning:
             # Raw client for the Responses API path (reasoning models).
-            self._raw_client = OpenAI(**self._client_kwargs)
+            self._raw_client = OpenAI(**self._client_kwargs, http_client=self._http_clients.get('http_client'))
             self._llm = ChatOpenAI(
                 model=self._model,
                 **self._client_kwargs,
+                **self._http_clients,
                 model_kwargs={'max_completion_tokens': self._modelOutputTokens},
             )
         else:
@@ -94,6 +101,7 @@ class Chat(ChatBase):
             self._llm = ChatOpenAI(
                 model=self._model,
                 **self._client_kwargs,
+                **self._http_clients,
                 temperature=config['temperature'] if 'temperature' in config else 0,
                 max_tokens=self._modelOutputTokens,
             )
@@ -110,6 +118,7 @@ class Chat(ChatBase):
             self._responses_llm = _ResponsesChatOpenAI(
                 model=self._model,
                 **self._client_kwargs,
+                **self._http_clients,
                 use_responses_api=True,
                 max_tokens=self._modelOutputTokens,
                 reasoning={'summary': 'auto'},
