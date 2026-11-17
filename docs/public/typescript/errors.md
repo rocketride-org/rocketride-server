@@ -99,6 +99,8 @@ A rejected `call()` keeps the server's message as `message` and its code as
 code):
 
 ```typescript
+import { DAPException } from 'rocketride';
+
 try {
 	const rows = await client.tool({ token, tool: 'read_query', nodeId, input });
 } catch (err) {

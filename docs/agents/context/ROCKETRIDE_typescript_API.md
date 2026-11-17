@@ -491,6 +491,8 @@ const rows = await client.tool({
 When the server rejects the call (including when no node handles the tool), `tool()` throws a `DAPException` whose `code` is the server's machine-readable code when it sent one: `TASK_STOPPED` means the task stopped (or is restarting) before the call reached the node, and no code means the tool failed or no node handled it. Classify on `err.code`, never on the message text (see section 18):
 
 ```typescript
+import { DAPException } from 'rocketride';
+
 try {
 	const rows = await client.tool({ token, tool: 'search', input: { q: 'invoices 2026' } });
 } catch (err) {
