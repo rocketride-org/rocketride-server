@@ -745,6 +745,23 @@ async def test_the_wait_is_bounded(logs, account, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_stale_last_event_does_not_time_out_a_fresh_wait(logs, account, monkeypatch):
+    """Mid-restart, ``_last_event_time`` is the old run's: the timeout counts from the start of the wait."""
+    monkeypatch.setattr(engine, 'CONST_MAX_READY_TIME', 5)
+    ts = _server(logs)
+    control = _starting_run(ts)
+    control.task._is_restarting = True
+    control.task._last_event_time = engine.time.time() - 600  # an idle run's last event
+
+    reuse = asyncio.ensure_future(_reuse(ts, control, _conn(SESSION)))
+    await asyncio.sleep(0.4)  # longer than a poll
+    assert not reuse.done()
+    control.task._db_seen = ([('team', 'team-2')], False)
+
+    assert (await asyncio.wait_for(reuse, 2))['reused'] is True
+
+
+@pytest.mark.asyncio
 async def test_a_run_that_cannot_hold_a_database_is_not_waited_for(logs, account):
     ts = _server(logs)
     plain = _register_control(ts, owner_conn=_conn(SESSION), pipeline=NO_DB_PIPELINE)

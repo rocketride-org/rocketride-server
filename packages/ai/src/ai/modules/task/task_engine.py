@@ -1048,11 +1048,16 @@ class Task(DAPBase):
 
         Raises:
             TaskError: the run completed or was stopped first.
-            TimeoutError: no subprocess event for ``CONST_MAX_READY_TIME`` seconds.
+            TimeoutError: no subprocess event for ``CONST_MAX_READY_TIME`` seconds,
+                counted from the later of the last event and the start of this wait.
         """
         event = self.__dict__.get('_db_seen_event')
         if event is None:
             event = self.__dict__['_db_seen_event'] = asyncio.Event()
+        # The clock starts no earlier than this wait: during a restart
+        # ``_last_event_time`` still holds the old run's last event, which can
+        # be long past on an idle run.
+        wait_started = time.time()
         while True:
             seen = self._db_seen
             if seen is not None:
@@ -1063,7 +1068,7 @@ class Task(DAPBase):
                     raise TaskError(TaskError.COMPLETED, 'Task has already completed')
                 if state == TASK_STATE.CANCELLED.value:
                     raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
-            if time.time() - self._last_event_time >= CONST_MAX_READY_TIME:
+            if time.time() - max(self._last_event_time, wait_started) >= CONST_MAX_READY_TIME:
                 raise TimeoutError(
                     f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. '
                     'The task never reported its databases'
