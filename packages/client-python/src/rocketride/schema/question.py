@@ -205,11 +205,13 @@ class Answer(BaseModel):
 
     @model_serializer(mode='wrap')
     def _omit_unset_turn_fields(self, handler):
-        """Leave the turn fields out of a text answer's dump, so it stays as it was."""
+        """Leave unset turn fields and empty metadata out of the dump, so a plain answer stays as it was."""
         data = handler(self)
         for key in ('message', 'stopReason', 'error'):
             if data.get(key) is None:
                 data.pop(key, None)
+        if not data.get('metadata'):
+            data.pop('metadata', None)
         return data
 
     def toolCalls(self) -> List[ToolCallBlock]:
