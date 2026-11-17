@@ -38,13 +38,13 @@ TOKEN = 'rrmg_' + 'a' * 43
 
 NO_KEY_HOSTED = (
     "llm_openai: no API key is set, and RocketRide-hosted models aren't available for this run. "
-    'Add your OpenAI key in the node settings. To keep the key out of the pipeline, save it in '
-    "Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
+    'Add your OpenAI key in the node settings. To keep the key out of the pipeline, save it in RocketRide '
+    "under Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 NO_KEY_SELF_HOSTED = (
     'llm_openai: no API key is set. Add your OpenAI key in the node settings. To keep the key out of the '
-    'pipeline, save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} '
-    "as the node's API key."
+    'pipeline, save it in RocketRide under Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter '
+    "${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 
 SENTENCES = {
