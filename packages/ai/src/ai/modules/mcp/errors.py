@@ -13,7 +13,26 @@ result dict.
 
 from typing import Any, Optional
 
+from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_NO_DEV_TEAM
+
 HARD_EXC_NAMES = ('ConnectionError', 'AuthenticationException', 'TimeoutError')
+
+# The account reasons the engine refuses a run for, keyed by their exact text:
+# the SDK turns a refused command into a bare RuntimeError, so the message is
+# all that reaches this layer. Each gets a type and a hint for the agent. A
+# waitlisted account has nothing else to check, so its hint does not send the
+# agent to account_status.
+_ACCOUNT_REFUSALS = {
+    CONST_ACCOUNT_WAITLISTED: (
+        'AccountWaitlisted',
+        'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+    ),
+    CONST_NO_DEV_TEAM: (
+        'NoDevelopmentTeam',
+        'Call account_status, then tell the user its summary and next steps instead of this message. '
+        'They already include it.',
+    ),
+}
 
 
 class HardError(Exception):
@@ -79,6 +98,8 @@ def normalize_error(exc: Exception, *, hint: Optional[str] = None) -> dict:
     the MCP dispatch layer surfaces them as a tool error. Everything else
     returns ``{ok: False, error_type, message, hint}`` so the agent can
     self-correct (e.g. missing required argument -> retry with it filled in).
+    A run refused for an account reason (waitlisted, no development team)
+    gets its own ``error_type`` and a hint saying what to do next.
     """
     error_type = type(exc).__name__
     # isinstance covers builtin subclasses (ConnectionResetError,
@@ -87,9 +108,14 @@ def normalize_error(exc: Exception, *, hint: Optional[str] = None) -> dict:
     # names (e.g. AuthenticationException).
     if isinstance(exc, (ConnectionError, TimeoutError)) or error_type in HARD_EXC_NAMES:
         raise HardError(str(exc), error_type=error_type)
+    message = _extract_dap_failure(exc) or str(exc)
+    account_refusal = _ACCOUNT_REFUSALS.get(message.strip())
+    if account_refusal:
+        refusal_type, refusal_hint = account_refusal
+        return {'ok': False, 'error_type': refusal_type, 'message': message, 'hint': refusal_hint}
     return {
         'ok': False,
         'error_type': error_type,
-        'message': _extract_dap_failure(exc) or str(exc),
+        'message': message,
         'hint': hint,
     }

@@ -105,6 +105,7 @@ class EngineClient(Protocol):
     async def get_environment_keys(self) -> List[str]: ...
     async def get_capabilities(self) -> List[str]: ...
     async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]: ...
+    async def get_account_status(self) -> Dict[str, Any]: ...
     async def close(self) -> None: ...
 
 
@@ -444,6 +445,10 @@ class WsEngineClient:
         info = self._client.get_account_info() or {}
         capabilities = info.get('capabilities') if isinstance(info, dict) else None
         return [c for c in capabilities if isinstance(c, str)] if isinstance(capabilities, (list, tuple)) else []
+
+    async def get_account_status(self) -> Dict[str, Any]:
+        """Return the engine's ``rrext_account_status`` body for this client's own account."""
+        return await self._guarded(lambda: self._client.call('rrext_account_status'))
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:

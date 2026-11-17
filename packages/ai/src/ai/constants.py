@@ -166,6 +166,20 @@ CONST_SPEND_ALLOW_SECONDS = 5.0  # seconds a task trusts an "allowed" answer bef
 # seconds a data operation waits for the source to bind `state.target`
 CONST_DATA_OPEN_TARGET_WAIT = CONST_MAX_READY_TIME
 
+# The two account reasons a development run (launch or execute) is refused
+# for. The MCP tool layer matches these exact texts to give the refusal a type
+# and a hint, so they are defined once, here. They repeat, word for word, what
+# the MCP account_status tool says for the same state.
+CONST_ACCOUNT_WAITLISTED = (
+    "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
+    "You'll get an email when the account is activated. You don't need to do anything else."
+)
+CONST_NO_DEV_TEAM = (
+    'No development team is selected, and every pipeline you run needs one. '
+    'In RocketRide, open Account > Profile and choose your development team. '
+    'If no team is listed, ask a workspace admin to add you to one.'
+)
+
 # =============================================================================
 # Task Channel (requests from a task to the engine over /task/data)
 # =============================================================================
