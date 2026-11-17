@@ -75,6 +75,16 @@ def shell_root(tmp_path, monkeypatch):
     (tmp_path / 'themes').mkdir()
     (tmp_path / 'themes' / 'dark.json').write_text('{}')
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    # Pin the default policy: an RR_SHELL_FRAME_ANCESTORS_EXTRA in the test
+    # process's environment must not change what these tests expect.
+    monkeypatch.setattr(
+        shell_mod,
+        '_SHELL_DOCUMENT_HEADERS',
+        {
+            **shell_mod._SHELL_DOCUMENT_HEADERS,
+            'Content-Security-Policy': f'frame-ancestors {shell_mod._frame_ancestor_sources("")}',
+        },
+    )
     return tmp_path
 
 

@@ -79,6 +79,16 @@ def seeded(tmp_path, monkeypatch):
     monkeypatch.setattr(shell_mod, '_shell_root', str(shell))
     monkeypatch.setattr(shell_mod, '_apps_root', str(apps))
     monkeypatch.setattr(shell_mod, '_is_saas', lambda: False)
+    # The golden pins the DEFAULT policy, whatever RR_SHELL_FRAME_ANCESTORS_EXTRA
+    # the test process inherits.
+    monkeypatch.setattr(
+        shell_mod,
+        '_SHELL_DOCUMENT_HEADERS',
+        {
+            **shell_mod._SHELL_DOCUMENT_HEADERS,
+            'Content-Security-Policy': f'frame-ancestors {shell_mod._frame_ancestor_sources("")}',
+        },
+    )
 
     async def fake_apps_for_token(token: str) -> list:
         return APPS
