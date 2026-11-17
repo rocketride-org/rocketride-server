@@ -33,20 +33,31 @@
 
 const CONTROL_OR_BACKSLASH = /[\u0000-\u001f\u007f\\]/;
 
-/** Whether one path segment is safe (the last may be empty: a trailing slash). */
+/** Percent-decodings tried before a segment that still decodes further is refused. */
+const MAX_DECODES = 4;
+
+/**
+ * Whether one path segment is safe (the last may be empty: a trailing slash).
+ * The segment is percent-decoded to a fixed point, and every stage must be
+ * free of `.`/`..`, separators and control characters, so `%252e%252e`
+ * cannot become `..` in a store that decodes twice.
+ */
 function segmentOk(seg: string, last: boolean): boolean {
 	if (seg === '') return last;
-	if (seg === '.' || seg === '..') return false;
-	if (seg.includes('%')) {
+	let current = seg;
+	for (let i = 0; ; i++) {
+		if (current === '.' || current === '..' || current.includes('/') || CONTROL_OR_BACKSLASH.test(current)) return false;
+		if (!current.includes('%')) return true;
+		if (i === MAX_DECODES) return false;
 		let decoded: string;
 		try {
-			decoded = decodeURIComponent(seg);
+			decoded = decodeURIComponent(current);
 		} catch {
 			return false;
 		}
-		if (decoded === '.' || decoded === '..' || decoded.includes('/') || CONTROL_OR_BACKSLASH.test(decoded)) return false;
+		if (decoded === current) return true;
+		current = decoded;
 	}
-	return true;
 }
 
 /**
