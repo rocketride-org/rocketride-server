@@ -37,3 +37,15 @@ export function markdownUrl(pathname) {
 export function isExternal(href) {
 	return /^https?:\/\//.test(href);
 }
+
+/**
+ * Add a trailing slash to an absolute URL that has none. The site builds with
+ * `trailingSlash: true`, so a URL without the slash redirects.
+ *
+ * @param {unknown} url - A URL string; any other value is returned unchanged.
+ * @returns {unknown} The URL ending in `/`, or the input as it was.
+ */
+export function withTrailingSlash(url) {
+	if (typeof url !== 'string' || url.endsWith('/')) return url;
+	return `${url}/`;
+}

@@ -1,5 +1,6 @@
 ---
 title: Error Handling
+description: Patterns for keeping RocketRide pipelines useful when things fail, with links to Troubleshooting for what can fail and WebSocket Events for the format.
 ---
 
 # Error Handling

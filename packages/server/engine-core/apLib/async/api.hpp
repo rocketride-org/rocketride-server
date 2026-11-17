@@ -43,16 +43,17 @@ inline bool sleepCheck(time::Duration wait, bool global) noexcept {
     _forever() {
         if (totalWaited >= wait) return false;
 
+        // Sleep from the first step, never yield-spin: callers poll in a
+        // loop (an idle queue calls this with .5s forever), so a spin
+        // phase would repeat on every call and keep a core busy.
         if (totalWaited > 5s)
             sleep(100ms);
         else if (totalWaited > 1s)
             sleep(50ms);
         else if (totalWaited > .5s)
             sleep(5ms);
-        else if (totalWaited > .1s)
-            sleep(1ms);
         else
-            yield();
+            sleep(1ms);
 
         if (cancelled(global)) return true;
 
@@ -70,16 +71,15 @@ inline Error sleepCheck(Location location, time::Duration wait,
     _forever() {
         if (totalWaited >= wait) return {};
 
+        // Same ladder as above, with no yield spin.
         if (totalWaited > 5s)
             sleep(100ms);
         else if (totalWaited > 1s)
             sleep(50ms);
         else if (totalWaited > .5s)
             sleep(5ms);
-        else if (totalWaited > .1s)
-            sleep(1ms);
         else
-            yield();
+            sleep(1ms);
 
         if (auto ccode = cancelled(location, global)) return ccode;
 

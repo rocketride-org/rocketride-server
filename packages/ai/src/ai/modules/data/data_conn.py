@@ -39,6 +39,7 @@ from rocketlib import (
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
+    isCancelled,
     monitorCompleted,
     monitorFailed,
     monitorOther,
@@ -74,6 +75,37 @@ LANE_BINDER_METHODS = {'tag': 'tags', 'raw': 'tags'}
 # listens on them, so they always come back from getListeners() and must be kept
 # out of any "lanes you could send to" list.
 LANE_LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
+
+# Structured formats that are still plain text. When no component reads the
+# format's own lane, a body in one of these goes to the text lane if some
+# component reads text, instead of falling through to raw where an agent behind
+# a text lane never sees it. `+json` and `+xml` suffix types count too.
+TEXT_LANE_FALLBACK_TYPES = frozenset(
+    {'application/json', 'application/xml', 'application/x-ndjson', 'application/yaml', 'application/x-yaml'}
+)
+
+
+def _is_text_format(mime_base: str) -> bool:
+    """
+    Tell whether a MIME type without parameters is a structured text format.
+
+    Args:
+        mime_base: Lower-case MIME type with any ``;`` parameters removed.
+
+    Returns:
+        bool: True for the types in ``TEXT_LANE_FALLBACK_TYPES`` and any
+        ``application/*+json`` or ``application/*+xml`` type.
+    """
+    if mime_base in TEXT_LANE_FALLBACK_TYPES:
+        return True
+    return mime_base.startswith('application/') and mime_base.endswith(('+json', '+xml'))
+
+
+# The text lane holds a body until the pipe closes so it arrives as one text.
+# Past this many bytes it stops holding: the text so far is written and the rest
+# goes through chunk by chunk, as every text body did before, so a large upload
+# costs no more memory than it used to.
+TEXT_LANE_HOLD_BYTES = 8 * 1024 * 1024
 
 
 def _trim_tool_data(value: Any) -> Any:
@@ -118,8 +150,9 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
-    # Text lane: holds the bytes of a character that a write cut in half
-    text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
+    text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
+    text_parts: Any = None  # Text-lane body decoded so far, written as one text when the pipe closes
+    text_bytes: int = 0  # Text-lane bytes received so far, checked against TEXT_LANE_HOLD_BYTES
 
 
 class DataConn(DAPConn):
@@ -273,33 +306,70 @@ class DataConn(DAPConn):
             if not future.done():
                 future.set_exception(error)
 
+    async def _wait_for_target(self) -> 'IServiceEndpoint':
+        """Wait for the source node to bind ``state.target``, then return it.
+
+        A client may open a pipe as soon as ``use()`` returns, while the source
+        node is still starting and has not bound its target. This connection
+        lives in the task's own process and cannot see the engine's task state,
+        so it watches what it can see: it stops at once when the connection is
+        closing or the task is being cancelled, and otherwise gives up after
+        ``CONST_DATA_OPEN_TARGET_WAIT`` seconds (the task's ready time). Every
+        waiter polls on its own, so none holds a lock or a pipe slot.
+
+        Returns:
+            IServiceEndpoint: The bound source target.
+
+        Raises:
+            RuntimeError: The connection closed or the task was cancelled while
+                waiting, or no source bound a target within the wait.
+        """
+        deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+        while True:
+            target = self._target
+            if target is not None:
+                return target
+            if self._shutdown_event.is_set() or isCancelled():
+                raise RuntimeError(
+                    'The task stopped before its source node was ready, so the data operation was dropped.'
+                )
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.05)
+        raise RuntimeError(
+            f'The pipeline source did not become ready within {CONST_DATA_OPEN_TARGET_WAIT:g} seconds, '
+            'so the data operation was dropped. Check that the pipeline has a source node that accepts data '
+            '(for example webhook, chat or dropper) and that it started without errors.'
+        )
+
     async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
         """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
 
         Folds two concerns:
 
-        1. The race-window wait that used to live at the top of `_open` —
-           EaaS may send `data/open` BEFORE the source node's `_run()` has
-           bound `state.target`. Poll the lazy `_target` property for up
-           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
-        2. The semaphore size — read `target.taskConfig['threadCount']`
-           once target is actually available. Doing this in `__init__`
-           would always see `None` and silently default to 4, ignoring
-           any user-configured `threadCount`.
+        1. The wait for the source node to bind `state.target`, which can
+           trail a client's first open (see :pyfunc:`_wait_for_target`).
+        2. The semaphore size: read `target.taskConfig['threadCount']`
+           once the target is bound, because it is not available when the
+           connection is created.
 
         Idempotent. The lock guards against concurrent first-`_open`
         calls on the same connection racing to init the semaphore.
+
+        Returns:
+            asyncio.Semaphore: The semaphore limiting concurrent pipes.
+
+        Raises:
+            RuntimeError: No source bound a target; see :pyfunc:`_wait_for_target`.
         """
         if self._pipe_sem is not None:
             return self._pipe_sem
+        # Outside the lock, so concurrent opens wait side by side
+        target = await self._wait_for_target()
         async with self._pipe_sem_init_lock:
             if self._pipe_sem is not None:  # double-check after acquiring lock
                 return self._pipe_sem
-            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
-            while self._target is None and time.monotonic() < deadline:
-                await asyncio.sleep(0.05)
-            target = self._target
-            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._thread_count = target.taskConfig.get('threadCount', 4)
             self._pipe_sem = asyncio.Semaphore(self._thread_count)
             self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
             return self._pipe_sem
@@ -374,20 +444,34 @@ class DataConn(DAPConn):
         # Get the listeners on this pipe
         listeners = pipe_instance.getListeners()
 
+        # The MIME type without parameters such as charset
+        mime_base = mime_type.split(';', 1)[0].strip().lower()
+
         # If this is rocketlib tag data, we can send it out directly on the tag lane
         if mime_type == 'application/rocketlib-tag':
             return 'tag'
 
         # If this is question and we have a question listener
-        elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
+        elif mime_base.startswith('application/rocketride-question') and 'questions' in listeners:
             return 'questions'
 
         # If this is json content and we have a json listener
-        elif mime_type.split(';', 1)[0].strip() == 'application/json' and 'json' in listeners:
+        elif mime_base == 'application/json' and 'json' in listeners:
             return 'json'
 
         # If this is text content and we have a text listener
-        elif mime_type.startswith('text/') and 'text' in listeners:
+        elif mime_base.startswith('text/') and 'text' in listeners:
+            return 'text'
+
+        # If this is structured text (JSON, XML, ...) that would otherwise reach
+        # nobody: no reader on its own lane and none on raw (tags, e.g. parse),
+        # but a text listener. A question keeps its own path.
+        elif (
+            _is_text_format(mime_base)
+            and not mime_base.startswith('application/rocketride-question')
+            and 'text' in listeners
+            and 'tags' not in listeners
+        ):
             return 'text'
 
         # If this is image content and we have an image listener
@@ -500,9 +584,75 @@ class DataConn(DAPConn):
             pipe.writeTagEndStream()
             pipe.writeTagEndObject()
 
+        elif lane == 'text':
+            # _close has normally written the text already; this covers any
+            # other path that ends a text pipe. Idempotent.
+            self._flush_text(pipe_conn)
+
         else:
             # Other lanes don't need framing
             pass
+
+    def _write_text(self, conn_pipe: DataConnPipe, data: bytes) -> None:
+        """
+        Decode one text-lane chunk and keep it until the body is complete.
+
+        The text lane gets the body as ONE text (see _flush_text): a node such as
+        `question` turns every writeText into its own question, so a body that
+        arrives in two chunks would otherwise become two half-questions. The
+        decoder keeps a UTF-8 character split between chunks intact, and invalid
+        bytes still fail this write.
+
+        A body larger than TEXT_LANE_HOLD_BYTES is not held whole: the chunk that
+        crosses the limit writes everything held so far, and each later chunk is
+        written as it arrives.
+
+        Args:
+            conn_pipe: The pipe being written. Holds the decoder and the text so far.
+            data: The raw bytes of this chunk.
+        """
+        if conn_pipe.text_decoder is None:
+            conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
+            conn_pipe.text_parts = []
+            conn_pipe.text_bytes = 0
+        text = conn_pipe.text_decoder.decode(data)
+        conn_pipe.text_bytes += len(data)
+        if conn_pipe.text_bytes > TEXT_LANE_HOLD_BYTES:
+            conn_pipe.text_parts.append(text)
+            text = ''.join(conn_pipe.text_parts)
+            conn_pipe.text_parts.clear()
+            if text:
+                conn_pipe.pipe.writeText(text)
+        elif text:
+            conn_pipe.text_parts.append(text)
+
+    def _flush_text(self, conn_pipe: DataConnPipe) -> None:
+        """
+        Write the whole text-lane body as one text. Idempotent.
+
+        A pipe whose write already failed has reported its error, so it writes
+        nothing and raises nothing here.
+
+        Raises:
+            UnicodeDecodeError: The body ends inside a UTF-8 character.
+        """
+        decoder = conn_pipe.text_decoder
+        if decoder is None:
+            return
+        parts = conn_pipe.text_parts or []
+        conn_pipe.text_decoder = None
+        conn_pipe.text_parts = None
+        if conn_pipe.has_failed:
+            return
+        try:
+            parts.append(decoder.decode(b'', final=True))
+        except UnicodeDecodeError as e:
+            raise UnicodeDecodeError(
+                e.encoding, e.object, e.start, e.end, 'the text body ends inside a character'
+            ) from e
+        text = ''.join(parts)
+        if text:
+            conn_pipe.pipe.writeText(text)
 
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
@@ -682,9 +832,8 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
-        # Lazy-init the semaphore using the now-bound target's threadCount
-        # config. Also folds the race-window wait for `state.target` — see
-        # `_ensure_pipe_sem` docstring.
+        # Waits for the source to bind `state.target`, then sizes the semaphore
+        # from its threadCount config; see `_ensure_pipe_sem`.
         pipe_sem = await self._ensure_pipe_sem()
 
         # Acquire semaphore in async context (non-blocking for event loop)
@@ -813,10 +962,7 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    # Writes are cut at any byte (an HTTP body arrives in stream chunks)
-                    string_data = conn_pipe.text_decoder.decode(data)
-                    if string_data:
-                        pipe.writeText(string_data)
+                    self._write_text(conn_pipe, data)
 
                 elif lane == 'json':
                     try:
@@ -923,19 +1069,19 @@ class DataConn(DAPConn):
             # Reset activity timer since close is considered activity
             self._reset_pipe_activity(conn_pipe)
 
+            # Write the text lane's body as one text now, outside close_sync's
+            # catch-all, so a body that ends inside a UTF-8 character reaches
+            # the client as an error, as it did when each write decoded its own
+            # chunk.
+            if conn_pipe.lane == 'text':
+                await asyncio.to_thread(self._flush_text, conn_pipe)
+
             def close_sync():
                 """End and close the pipe, then collect the pipeline's results (runs in a worker thread).
 
                 Returns:
                     The object's response with its objectId, and its error when the object failed.
-
-                Raises:
-                    UnicodeDecodeError: The text-lane data ended inside a character.
                 """
-                # Text that ends inside a character is truncated; a failed pipe already reported its error
-                if conn_pipe.lane == 'text' and not conn_pipe.has_failed:
-                    conn_pipe.text_decoder.decode(b'', final=True)
-
                 # End the pipe and close it.  If either step throws (e.g. a
                 # node's writeText/writeAudio raised during closing flush),
                 # we still need to extract whatever results and error info

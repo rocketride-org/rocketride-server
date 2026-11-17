@@ -40,6 +40,7 @@ _TOOL_ARG_HELPERS = (
     'optional_int',
     'optional_bool',
     'int_arg',
+    'require_str_list',
 )
 
 STUB_MODULE_NAMES = ('rocketlib', 'ai', 'ai.common', 'ai.common.config', 'ai.common.utils')

@@ -245,3 +245,26 @@ describe('DAPClient transport epochs', () => {
 		expect(deliveredWithTrace?.arguments?.data).toBe(binary);
 	});
 });
+
+describe('DAPClient request timeout', () => {
+	/** The client's private pending-request table, read for assertions only. */
+	const pendingOf = (client: DAPClient): Map<number, unknown> => (client as unknown as { _pendingRequests: Map<number, unknown> })._pendingRequests;
+
+	test('a request past its timeout is rejected and removed from pending', async () => {
+		const transport = new ControlledTransport();
+		const client = new ObservableDAPClient(transport);
+
+		// A per-call timeout shorter than the client's 1 s default; the transport never answers.
+		const request = requestOutcome(client.request({ type: 'request', seq: 0, command: 'rrext_deploy_app', arguments: { subcommand: 'developer_status' } }, 20));
+		expect(pendingOf(client).size).toBe(1);
+
+		const outcome = await request;
+		expect(outcome.status).toBe('rejected');
+		expect(String((outcome as { error: unknown }).error)).toMatch(/timed out after 20ms/);
+		expect(pendingOf(client).size).toBe(0);
+
+		// A reply that arrives after the timeout is ignored, not delivered or re-registered.
+		await transport.receive(responseFor(transport.sent[0], { developerId: 'acme' }));
+		expect(pendingOf(client).size).toBe(0);
+	});
+});
