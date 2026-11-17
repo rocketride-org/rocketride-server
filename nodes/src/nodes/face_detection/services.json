@@ -114,5 +114,18 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "short",
+		"profiles": {
+			"short": {
+				"title": "BlazeFace Short-Range",
+				"profile": "short",
+				"threshold": 0.5,
+				"emit_landmarks": true
+			}
+		},
+		"dropped": []
 	}
 }

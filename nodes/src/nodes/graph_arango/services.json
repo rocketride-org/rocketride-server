@@ -174,5 +174,15 @@
 		"arangodb.max_attempts",
 		"arangodb.max_execute_rows",
 		"arangodb.allow_execute"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "_system"
+			}
+		},
+		"dropped": []
+	}
 }

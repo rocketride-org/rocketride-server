@@ -77,5 +77,23 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "agent_description", "instructions", "require_tool_call", "goal", "backstory", "planning"]
+	"properties": ["type", "agent_description", "instructions", "require_tool_call", "goal", "backstory", "planning"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"agent_description": "",
+				"instructions": [],
+				"advanced_mode": false,
+				"goal": "",
+				"backstory": "",
+				"planning": false,
+				"require_tool_call": false
+			}
+		},
+		"dropped": [
+			"advanced_mode"
+		]
+	}
 }

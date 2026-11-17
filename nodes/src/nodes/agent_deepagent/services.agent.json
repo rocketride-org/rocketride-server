@@ -64,5 +64,21 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "agent_description", "system_prompt", "instructions", "require_tool_call"]
+	"properties": ["type", "agent_description", "system_prompt", "instructions", "require_tool_call"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"advanced_mode": false,
+				"instructions": [],
+				"agent_description": "",
+				"system_prompt": "",
+				"require_tool_call": false
+			}
+		},
+		"dropped": [
+			"advanced_mode"
+		]
+	}
 }

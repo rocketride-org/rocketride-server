@@ -139,5 +139,22 @@
 		"currency_convert_explicit.amount_field",
 		"currency_convert_explicit.currency_field",
 		"currency_convert_explicit.decimals"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Explicit conversion at a stated rate",
+				"source_currency": "EUR",
+				"target_currency": "USD",
+				"rate": 1.0,
+				"rate_date": "",
+				"amount_field": "amount",
+				"currency_field": "currency",
+				"decimals": 2
+			}
+		},
+		"dropped": []
+	}
 }

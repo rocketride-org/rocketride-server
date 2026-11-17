@@ -120,5 +120,30 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": [
+			"use_system_prompt_append"
+		],
+		"renamed": {
+			"use_advanced_config": {
+				"to": "configMode",
+				"values": {
+					"true": "advanced",
+					"false": "simple"
+				}
+			},
+			"parse_mode": {
+				"to": "parse_mode",
+				"values": {
+					"cost_effective (LLM)": "cost_effective"
+				}
+			}
+		}
+	}
 }

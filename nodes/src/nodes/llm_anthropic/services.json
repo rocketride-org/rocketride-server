@@ -298,5 +298,265 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "claude-sonnet-4-6",
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 200000,
+				"apikey": ""
+			},
+			"claude-sonnet-4-6": {
+				"title": "Claude Sonnet 4.6",
+				"model": "claude-sonnet-4-6",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-opus-4-6": {
+				"title": "Claude Opus 4.6",
+				"model": "claude-opus-4-6",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-haiku-4-5": {
+				"title": "Claude Haiku 4.5",
+				"model": "claude-haiku-4-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 64000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-sonnet-4-5": {
+				"title": "Claude Sonnet 4.5",
+				"model": "claude-sonnet-4-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 64000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-opus-4-5": {
+				"title": "Claude Opus 4.5",
+				"model": "claude-opus-4-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 64000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-opus-4-7": {
+				"title": "Anthropic: Claude Opus 4.7",
+				"model": "claude-opus-4-7",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"claude-3-haiku": {
+				"title": "Anthropic: Claude 3 Haiku",
+				"model": "claude-3-haiku",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"claude-fable-5": {
+				"title": "Anthropic: Claude Fable 5",
+				"model": "claude-fable-5",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-fable-latest": {
+				"title": "Anthropic: Claude Fable Latest",
+				"model": "claude-fable-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-4": {
+				"title": "Anthropic: Claude Opus 4",
+				"model": "claude-opus-4",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 32000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-4-1": {
+				"title": "Anthropic: Claude Opus 4.1",
+				"model": "claude-opus-4-1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 32000,
+				"deprecated": true,
+				"migration": "Please use 'claude-opus-5' instead",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-4-7-fast": {
+				"title": "Anthropic: Claude Opus 4.7 (Fast)",
+				"model": "claude-opus-4-7-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-4-8": {
+				"title": "Anthropic: Claude Opus 4.8",
+				"model": "claude-opus-4-8",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-4-8-fast": {
+				"title": "Anthropic: Claude Opus 4.8 (Fast)",
+				"model": "claude-opus-4-8-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-latest": {
+				"title": "Anthropic: Claude Opus Latest",
+				"model": "claude-opus-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-sonnet-4": {
+				"title": "Anthropic: Claude Sonnet 4",
+				"model": "claude-sonnet-4",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 64000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-sonnet-5": {
+				"title": "Anthropic: Claude Sonnet 5",
+				"model": "claude-sonnet-5",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-sonnet-latest": {
+				"title": "Anthropic Claude Sonnet Latest",
+				"model": "claude-sonnet-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-5": {
+				"title": "Claude Opus 5",
+				"model": "claude-opus-5",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-opus-5-fast": {
+				"title": "Claude Opus 5 (Fast)",
+				"model": "claude-opus-5-fast",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-fable-5-1": {
+				"title": "Anthropic: Claude Fable 5.1",
+				"model": "claude-fable-5-1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"deprecatedBy",
+			"migration",
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

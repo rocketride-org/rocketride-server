@@ -87,5 +87,23 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"event_type": "media_inspect",
+				"chunk_kb": 1024,
+				"silence_db": -40,
+				"silence_ms": 700,
+				"peak_ms": 100,
+				"scene_threshold": 0.35,
+				"title": "Default",
+				"request": "{}",
+				"max_input_mb": 16384
+			}
+		},
+		"dropped": []
 	}
 }

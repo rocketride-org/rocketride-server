@@ -141,5 +141,13 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["facts.fields", "facts.validate", "facts.include_provenance"]
+	"properties": ["facts.fields", "facts.validate", "facts.include_provenance"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

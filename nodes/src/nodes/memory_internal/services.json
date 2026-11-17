@@ -16,5 +16,13 @@
 	//		Defines the properties shown in the pipeline builder side panel, in order.
 	//		The node has no settings: the store is per run and keyed by the agent.
 	//
-	"properties": []
+	"properties": [],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

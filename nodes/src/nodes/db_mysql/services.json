@@ -149,5 +149,15 @@
 		"mysql.table",
 		"mysql.max_attempts",
 		"mysql.allow_execute"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "database"
+			}
+		},
+		"dropped": []
+	}
 }

@@ -51,5 +51,20 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "description", "system_prompt", "instructions"]
+	"properties": ["type", "description", "system_prompt", "instructions"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"advanced_mode": false,
+				"description": "",
+				"instructions": [],
+				"system_prompt": ""
+			}
+		},
+		"dropped": [
+			"advanced_mode"
+		]
+	}
 }

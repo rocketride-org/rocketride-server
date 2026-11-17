@@ -241,5 +241,122 @@
 		"anonymizeChar",
 		"anonymize.entityTypes",
 		"anonymize.redactionStyle"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "glinerSmall",
+		"profiles": {
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerMultiPII": {
+				"title": "GLiNER Multi PII - Multilingual PII model",
+				"model": "urchade/gliner_multi_pii-v1",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerPIILarge": {
+				"title": "GLiNER PII Large - High-accuracy English PII",
+				"model": "knowledgator/gliner-pii-large-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerMergedLarge": {
+				"title": "GLiNER Merged Large - Combined model from multiple datasets",
+				"model": "xomad/gliner-model-merge-large-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerSmall": {
+				"title": "GLiNER Small - Lightweight general-purpose model",
+				"model": "urchade/gliner_small-v2.1",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerMedium": {
+				"title": "GLiNER Medium - Balanced performance",
+				"model": "urchade/gliner_medium-v2.1",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerLarge": {
+				"title": "GLiNER Large - Best accuracy, more resources",
+				"model": "urchade/gliner_large-v2.1",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerMulti": {
+				"title": "GLiNER Multi - Multilingual support",
+				"model": "urchade/gliner_multi",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"gretelSmall": {
+				"title": "Gretel GLiNER Bi-Small - Business-oriented NER",
+				"model": "gretelai/gretel-gliner-bi-small-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"gretelLarge": {
+				"title": "Gretel GLiNER Bi-Large - For large-scale anonymization",
+				"model": "gretelai/gretel-gliner-bi-large-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerKo": {
+				"title": "GLiNER Korean - Korean language support",
+				"model": "taeminlee/gliner_ko",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerIt": {
+				"title": "GLiNER Italian - For Italian entity extraction",
+				"model": "DeepMount00/GLiNER_PII_ITA",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerAr": {
+				"title": "GLiNER Arabic - Arabic language support",
+				"model": "NAMAA-Space/gliner_arabic-v2.1",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerCommunitySmall": {
+				"title": "GLiNER Small v2.5 - Community edition",
+				"model": "gliner-community/gliner_small-v2.5",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerCommunityMedium": {
+				"title": "GLiNER Medium v2.5 - Community edition",
+				"model": "gliner-community/gliner_medium-v2.5",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerCommunityLarge": {
+				"title": "GLiNER Large v2.5 - Community edition",
+				"model": "gliner-community/gliner_large-v2.5",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerBiomedSmall": {
+				"title": "GLiNER Biomed Small - Compact biomedical model",
+				"model": "Ihor/gliner-biomed-small-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			},
+			"glinerBiomedLarge": {
+				"title": "GLiNER Biomed Large - High accuracy biomedical model",
+				"model": "Ihor/gliner-biomed-large-v1.0",
+				"anonymizeChar": "█",
+				"anonymizeAll": false
+			}
+		},
+		"dropped": [
+			"anonymizeAll"
+		]
+	}
 }

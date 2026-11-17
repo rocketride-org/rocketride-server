@@ -150,5 +150,15 @@
 		"postgresdb.table",
 		"postgresdb.max_attempts",
 		"postgresdb.allow_execute"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "postgres"
+			}
+		},
+		"dropped": []
+	}
 }

@@ -201,5 +201,36 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "coda",
+		"profiles": {
+			"coda": {
+				"title": "Coda    - Flagship, best quality",
+				"model": "coda",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"arcana": {
+				"title": "Arcana  - Expressive, multilingual",
+				"model": "arcana",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"mistv3": {
+				"title": "Mist v3 - Lowest latency",
+				"model": "mistv3",
+				"voice": "astra",
+				"apikey": ""
+			},
+			"mistv2": {
+				"title": "Mist v2 - Pronunciation control",
+				"model": "mistv2",
+				"voice": "astra",
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

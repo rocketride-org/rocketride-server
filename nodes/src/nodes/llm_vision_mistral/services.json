@@ -184,5 +184,48 @@
 		"llm_vision_mistral.apikey",
 		"llm_vision_mistral.systemPrompt",
 		"llm_vision_mistral.prompt"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "mistral-large-3",
+		"profiles": {
+			"mistral-large-3": {
+				"title": "Mistral Large 3 - Premier Vision (256k tokens)",
+				"model": "mistral-large-2512",
+				"modelTotalTokens": 256000,
+				"apikey": ""
+			},
+			"mistral-medium-3.1": {
+				"title": "Mistral Medium 3.1 - Balanced Vision (128k tokens)",
+				"model": "mistral-medium-2508",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"mistral-small-3.2": {
+				"title": "Mistral Small 3.2 - Fast & Cheap Vision (128k tokens)",
+				"model": "mistral-small-2506",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"ministral-14b-3": {
+				"title": "Ministral 3 14B - High Performance Vision (256k tokens)",
+				"model": "ministral-14b-2512",
+				"modelTotalTokens": 256000,
+				"apikey": ""
+			},
+			"ministral-8b-3": {
+				"title": "Ministral 3 8B - Balanced Vision (256k tokens)",
+				"model": "ministral-8b-2512",
+				"modelTotalTokens": 256000,
+				"apikey": ""
+			},
+			"ministral-3b-3": {
+				"title": "Ministral 3 3B - Efficient Vision (256k tokens)",
+				"model": "ministral-3b-2512",
+				"modelTotalTokens": 256000,
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

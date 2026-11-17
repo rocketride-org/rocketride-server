@@ -522,5 +522,951 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "openai-5-2",
+		"profiles": {
+			"custom": {
+				"model": "",
+				"modelTotalTokens": 16384,
+				"apikey": ""
+			},
+			"openai-5-4": {
+				"title": "GPT-5.4",
+				"model": "gpt-5.4",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-4-pro": {
+				"title": "GPT-5.4 Pro",
+				"model": "gpt-5.4-pro",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-4-mini": {
+				"title": "GPT-5.4-mini",
+				"model": "gpt-5.4-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-4-nano": {
+				"title": "GPT-5.4-nano",
+				"model": "gpt-5.4-nano",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-4o": {
+				"title": "GPT-4o",
+				"model": "gpt-4o",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"openai-4o-mini": {
+				"title": "GPT-4o-mini",
+				"model": "gpt-4o-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"openai-5": {
+				"title": "GPT-5",
+				"model": "gpt-5",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-1": {
+				"title": "GPT-5.1",
+				"model": "gpt-5.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-2": {
+				"title": "GPT-5.2",
+				"model": "gpt-5.2",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-mini": {
+				"title": "GPT-5-mini",
+				"model": "gpt-5-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"openai-5-nano": {
+				"title": "GPT-5-nano",
+				"model": "gpt-5-nano",
+				"modelSource": "provider",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"gpt-3-5-turbo": {
+				"title": "OpenAI: GPT-3.5 Turbo",
+				"model": "gpt-3.5-turbo",
+				"modelSource": "provider",
+				"modelTotalTokens": 16385,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"gpt-3-5-turbo-16k": {
+				"title": "OpenAI: GPT-3.5 Turbo 16k",
+				"model": "gpt-3.5-turbo-16k",
+				"modelSource": "provider",
+				"modelTotalTokens": 16385,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"gpt-4": {
+				"title": "OpenAI: GPT-4",
+				"model": "gpt-4",
+				"modelSource": "provider",
+				"modelTotalTokens": 8191,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"gpt-4-1": {
+				"title": "OpenAI: GPT-4.1",
+				"model": "gpt-4.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"apikey": ""
+			},
+			"gpt-4-1-mini": {
+				"title": "OpenAI: GPT-4.1 Mini",
+				"model": "gpt-4.1-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"apikey": ""
+			},
+			"gpt-4-1-nano": {
+				"title": "OpenAI: GPT-4.1 Nano",
+				"model": "gpt-4.1-nano",
+				"modelSource": "provider",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"apikey": ""
+			},
+			"gpt-4-turbo": {
+				"title": "OpenAI: GPT-4 Turbo",
+				"model": "gpt-4-turbo",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"gpt-5-1-chat-latest": {
+				"title": "GPT-5.1 Chat Latest",
+				"model": "gpt-5.1-chat-latest",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"gpt-5-2-chat-latest": {
+				"title": "GPT-5.2 Chat Latest",
+				"model": "gpt-5.2-chat-latest",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"gpt-5-3-chat-latest": {
+				"title": "GPT-5.3 Chat Latest",
+				"model": "gpt-5.3-chat-latest",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"gpt-5-chat-latest": {
+				"title": "GPT-5 Chat Latest",
+				"model": "gpt-5-chat-latest",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"apikey": ""
+			},
+			"o1": {
+				"title": "OpenAI: o1",
+				"model": "o1",
+				"modelSource": "provider",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"o3": {
+				"title": "OpenAI: o3",
+				"model": "o3",
+				"modelSource": "provider",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"o3-mini": {
+				"title": "OpenAI: o3 Mini",
+				"model": "o3-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"o4-mini": {
+				"title": "OpenAI: o4 Mini",
+				"model": "o4-mini",
+				"modelSource": "provider",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"gpt-5-5": {
+				"title": "OpenAI: GPT-5.5",
+				"model": "gpt-5.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"gpt-4-turbo-preview": {
+				"title": "OpenAI: GPT-4 Turbo Preview",
+				"model": "gpt-4-turbo-preview",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"gpt-5-1-chat": {
+				"title": "OpenAI: GPT-5.1 Chat",
+				"model": "gpt-5.1-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"gpt-5-3-chat": {
+				"title": "OpenAI: GPT-5.3 Chat",
+				"model": "gpt-5.3-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-08-10). Please select a current model.",
+				"apikey": ""
+			},
+			"gpt-5-6-luna": {
+				"title": "OpenAI: GPT-5.6 Luna",
+				"model": "gpt-5.6-luna",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna-pro": {
+				"title": "OpenAI: GPT-5.6 Luna Pro",
+				"model": "gpt-5.6-luna-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol": {
+				"title": "OpenAI: GPT-5.6 Sol",
+				"model": "gpt-5.6-sol",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol-pro": {
+				"title": "OpenAI: GPT-5.6 Sol Pro",
+				"model": "gpt-5.6-sol-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra": {
+				"title": "OpenAI: GPT-5.6 Terra",
+				"model": "gpt-5.6-terra",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra-pro": {
+				"title": "OpenAI: GPT-5.6 Terra Pro",
+				"model": "gpt-5.6-terra-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-chat": {
+				"title": "OpenAI: GPT-5 Chat",
+				"model": "gpt-5-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"apikey": ""
+			},
+			"gpt-chat-latest": {
+				"title": "OpenAI: GPT Chat Latest",
+				"model": "gpt-chat-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"apikey": ""
+			},
+			"gpt-latest": {
+				"title": "OpenAI GPT Latest",
+				"model": "gpt-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-mini-latest": {
+				"title": "OpenAI GPT Mini Latest",
+				"model": "gpt-mini-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-120b": {
+				"title": "OpenAI: gpt-oss-120b",
+				"model": "gpt-oss-120b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 117964,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-120b-free": {
+				"title": "OpenAI: gpt-oss-120b (free)",
+				"model": "gpt-oss-120b:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 131072,
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-20b": {
+				"title": "OpenAI: gpt-oss-20b",
+				"model": "gpt-oss-20b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 117964,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-20b-free": {
+				"title": "OpenAI: gpt-oss-20b (free)",
+				"model": "gpt-oss-20b:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"deprecatedBy": "openrouter",
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-safeguard-20b": {
+				"title": "OpenAI: gpt-oss-safeguard-20b",
+				"model": "gpt-oss-safeguard-20b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-mini-high": {
+				"title": "OpenAI: o3 Mini High",
+				"model": "o3-mini-high",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-pro": {
+				"title": "OpenAI: o3 Pro",
+				"model": "o3-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o4-mini-high": {
+				"title": "OpenAI: o4 Mini High",
+				"model": "o4-mini-high",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-3-5-turbo-batch": {
+				"title": "OpenAI: GPT-3.5 Turbo (batch)",
+				"model": "gpt-3.5-turbo:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 16385,
+				"modelOutputTokens": 4096,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-3.5-turbo' instead.",
+				"apikey": ""
+			},
+			"gpt-4-1-batch": {
+				"title": "OpenAI: GPT-4.1 (batch)",
+				"model": "gpt-4.1:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4.1' instead.",
+				"apikey": ""
+			},
+			"gpt-4-1-mini-batch": {
+				"title": "OpenAI: GPT-4.1 Mini (batch)",
+				"model": "gpt-4.1-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4.1-mini' instead.",
+				"apikey": ""
+			},
+			"gpt-4-1-nano-batch": {
+				"title": "OpenAI: GPT-4.1 Nano (batch)",
+				"model": "gpt-4.1-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1047576,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4.1-nano' instead.",
+				"apikey": ""
+			},
+			"gpt-4-turbo-batch": {
+				"title": "OpenAI: GPT-4 Turbo (batch)",
+				"model": "gpt-4-turbo:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4-turbo' instead.",
+				"apikey": ""
+			},
+			"gpt-4o-batch": {
+				"title": "OpenAI: GPT-4o (batch)",
+				"model": "gpt-4o:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4o' instead.",
+				"apikey": ""
+			},
+			"gpt-4o-mini-batch": {
+				"title": "OpenAI: GPT-4o-mini (batch)",
+				"model": "gpt-4o-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-4o-mini' instead.",
+				"apikey": ""
+			},
+			"gpt-5-1-batch": {
+				"title": "OpenAI: GPT-5.1 (batch)",
+				"model": "gpt-5.1:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.1' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2-batch": {
+				"title": "OpenAI: GPT-5.2 (batch)",
+				"model": "gpt-5.2:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.2' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-2-chat": {
+				"title": "OpenAI: GPT-5.2 Chat",
+				"model": "gpt-5.2-chat",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 32000,
+				"apikey": ""
+			},
+			"gpt-5-2-pro-batch": {
+				"title": "OpenAI: GPT-5.2 Pro (batch)",
+				"model": "gpt-5.2-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.2-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-batch": {
+				"title": "OpenAI: GPT-5.4 (batch)",
+				"model": "gpt-5.4:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.4' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-mini-batch": {
+				"title": "OpenAI: GPT-5.4 Mini (batch)",
+				"model": "gpt-5.4-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.4-mini' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-nano-batch": {
+				"title": "OpenAI: GPT-5.4 Nano (batch)",
+				"model": "gpt-5.4-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.4-nano' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-4-pro-batch": {
+				"title": "OpenAI: GPT-5.4 Pro (batch)",
+				"model": "gpt-5.4-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.4-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-5-batch": {
+				"title": "OpenAI: GPT-5.5 (batch)",
+				"model": "gpt-5.5:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.5' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-5-pro-batch": {
+				"title": "OpenAI: GPT-5.5 Pro (batch)",
+				"model": "gpt-5.5-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.5-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna-batch": {
+				"title": "OpenAI: GPT-5.6 Luna (batch)",
+				"model": "gpt-5.6-luna:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-luna' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-luna-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Luna Pro (batch)",
+				"model": "gpt-5.6-luna-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-luna-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol-batch": {
+				"title": "OpenAI: GPT-5.6 Sol (batch)",
+				"model": "gpt-5.6-sol:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-sol' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-sol-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Sol Pro (batch)",
+				"model": "gpt-5.6-sol-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-sol-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra-batch": {
+				"title": "OpenAI: GPT-5.6 Terra (batch)",
+				"model": "gpt-5.6-terra:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-terra' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-6-terra-pro-batch": {
+				"title": "OpenAI: GPT-5.6 Terra Pro (batch)",
+				"model": "gpt-5.6-terra-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5.6-terra-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-batch": {
+				"title": "OpenAI: GPT-5 (batch)",
+				"model": "gpt-5:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-mini-batch": {
+				"title": "OpenAI: GPT-5 Mini (batch)",
+				"model": "gpt-5-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5-mini' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-nano-batch": {
+				"title": "OpenAI: GPT-5 Nano (batch)",
+				"model": "gpt-5-nano:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5-nano' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-5-pro-batch": {
+				"title": "OpenAI: GPT-5 Pro (batch)",
+				"model": "gpt-5-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 400000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-5-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra": {
+				"title": "OpenAI: GPT-6 Astra",
+				"model": "gpt-6-astra",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-batch": {
+				"title": "OpenAI: GPT-6 Astra (batch)",
+				"model": "gpt-6-astra:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-6-astra' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-pro": {
+				"title": "OpenAI: GPT-6 Astra Pro",
+				"model": "gpt-6-astra-pro",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-6-astra-pro-batch": {
+				"title": "OpenAI: GPT-6 Astra Pro (batch)",
+				"model": "gpt-6-astra-pro:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-6-astra-pro' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-120b-batch": {
+				"title": "OpenAI: gpt-oss-120b (batch)",
+				"model": "gpt-oss-120b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 117964,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-oss-120b' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"gpt-oss-20b-batch": {
+				"title": "OpenAI: gpt-oss-20b (batch)",
+				"model": "gpt-oss-20b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 117964,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'gpt-oss-20b' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-batch": {
+				"title": "OpenAI: o3 (batch)",
+				"model": "o3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'o3' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o3-mini-batch": {
+				"title": "OpenAI: o3 Mini (batch)",
+				"model": "o3-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'o3-mini' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"o4-mini-batch": {
+				"title": "OpenAI: o4 Mini (batch)",
+				"model": "o4-mini:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 100000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the OpenAI API serves no model with this ID. Please use 'o4-mini' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"deprecatedBy",
+			"migration",
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
+	}
 }

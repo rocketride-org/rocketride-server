@@ -172,5 +172,54 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "bertLarge",
+		"profiles": {
+			"custom": {
+				"title": "Custom model",
+				"model": "",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"bertLarge": {
+				"title": "BERT Large (English) - High accuracy for English text",
+				"model": "dbmdz/bert-large-cased-finetuned-conll03-english",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"bertBase": {
+				"title": "BERT Base (English) - Balanced performance",
+				"model": "dslim/bert-base-NER",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"distilbert": {
+				"title": "DistilBERT (English) - Fast and lightweight",
+				"model": "Davlan/distilbert-base-multilingual-cased-ner-hrl",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"xlmRoberta": {
+				"title": "XLM-RoBERTa (Multilingual) - Supports 100+ languages",
+				"model": "Davlan/xlm-roberta-base-ner-hrl",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"deberta": {
+				"title": "DeBERTa v3 (English) - State-of-the-art accuracy",
+				"model": "dslim/distilbert-NER",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.9
+			},
+			"biomedical": {
+				"title": "BioBERT (Biomedical) - Medical/scientific entities",
+				"model": "dmis-lab/biobert-base-cased-v1.1",
+				"aggregation_strategy": "simple",
+				"min_confidence": 0.85
+			}
+		},
+		"dropped": []
+	}
 }

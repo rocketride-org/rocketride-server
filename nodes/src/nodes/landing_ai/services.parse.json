@@ -55,5 +55,16 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["landing_ai_parse.api_key", "landing_ai_parse.model", "landing_ai_parse.region"]
+	"properties": ["landing_ai_parse.api_key", "landing_ai_parse.model", "landing_ai_parse.region"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model": "dpt-2-latest",
+				"region": "production"
+			}
+		},
+		"dropped": []
+	}
 }

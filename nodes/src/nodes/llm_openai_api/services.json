@@ -135,5 +135,18 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "custom",
+		"profiles": {
+			"custom": {
+				"model": "",
+				"base_url": "",
+				"modelTotalTokens": 32768,
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

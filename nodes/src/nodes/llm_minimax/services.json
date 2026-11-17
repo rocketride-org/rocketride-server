@@ -272,5 +272,205 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "minimax-m2",
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2": {
+				"title": "MiniMax M2",
+				"model": "MiniMax-M2",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-m2-1": {
+				"title": "MiniMax M2.1",
+				"model": "MiniMax-M2.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-m2-1-highspeed": {
+				"title": "MiniMax M2.1 Highspeed",
+				"model": "MiniMax-M2.1-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-5": {
+				"title": "MiniMax M2.5",
+				"model": "MiniMax-M2.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-m2-5-highspeed": {
+				"title": "MiniMax M2.5 Highspeed",
+				"model": "MiniMax-M2.5-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-7": {
+				"title": "MiniMax M2.7",
+				"model": "MiniMax-M2.7",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-m2-7-highspeed": {
+				"title": "MiniMax M2.7 Highspeed",
+				"model": "MiniMax-M2.7-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 65536,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-local": {
+				"title": "MiniMax M2 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-5-local": {
+				"title": "MiniMax M2.5 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.5",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-7-local": {
+				"title": "MiniMax M2.7 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.7",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800,
+				"modelOutputTokens": 8192,
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m3": {
+				"title": "MiniMax M3",
+				"model": "MiniMax-M3",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-01": {
+				"title": "MiniMax: MiniMax-01",
+				"model": "minimax-01",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000192,
+				"modelOutputTokens": 900172,
+				"apikey": ""
+			},
+			"minimax-m1": {
+				"title": "MiniMax: MiniMax M1",
+				"model": "minimax-m1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 40000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m2-her": {
+				"title": "MiniMax: MiniMax M2-her",
+				"model": "minimax-m2-her",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 65536,
+				"modelOutputTokens": 2048,
+				"apikey": ""
+			},
+			"minimax-m2-7-free": {
+				"title": "MiniMax: MiniMax M2.7 (free)",
+				"model": "minimax-m2.7:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 196608,
+				"modelOutputTokens": 176947,
+				"deprecated": true,
+				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M2.7' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m3-batch": {
+				"title": "MiniMax: MiniMax M3 (batch)",
+				"model": "minimax-m3:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 524288,
+				"modelOutputTokens": 471859,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m3-free": {
+				"title": "MiniMax: MiniMax M3 (free)",
+				"model": "minimax-m3:free",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 943718,
+				"deprecated": true,
+				"migration": "OpenRouter free routing alias — the MiniMax API serves no model with this ID. Please use 'MiniMax-M3' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"migration",
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

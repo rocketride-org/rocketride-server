@@ -197,5 +197,72 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "sonar",
+		"profiles": {
+			"sonar-pro": {
+				"title": "Sonar Pro",
+				"model": "sonar-pro",
+				"modelSource": "manual",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8000,
+				"apikey": ""
+			},
+			"sonar": {
+				"title": "Sonar",
+				"model": "sonar",
+				"modelSource": "manual",
+				"modelTotalTokens": 127072,
+				"modelOutputTokens": 114364,
+				"apikey": ""
+			},
+			"sonar-reasoning-pro": {
+				"title": "Sonar Reasoning Pro",
+				"model": "sonar-reasoning-pro",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 115200,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"sonar-reasoning": {
+				"title": "Sonar Reasoning",
+				"model": "sonar-reasoning",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"apikey": ""
+			},
+			"sonar-deep-research": {
+				"title": "Sonar Deep Research",
+				"model": "sonar-deep-research",
+				"modelSource": "manual",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 115200,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"sonar-pro-search": {
+				"title": "Perplexity: Sonar Pro Search",
+				"model": "sonar-pro-search",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8000,
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"modelSource"
+		]
 	}
 }

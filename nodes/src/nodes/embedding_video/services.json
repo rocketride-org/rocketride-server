@@ -180,5 +180,27 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "openai-patch16",
+		"profiles": {
+			"custom": {
+				"title": "Custom model"
+			},
+			"openai-patch16": {
+				"title": "OpenAI CLIP - 16x16 - good performance, lower memory",
+				"model": "openai/clip-vit-base-patch16"
+			},
+			"openai-patch32": {
+				"title": "OpenAI CLIP - 32x32 - lower performance, better recognition",
+				"model": "openai/clip-vit-base-patch32"
+			},
+			"google16x224": {
+				"title": "Google ViT - 16x16 - fast, accurate, general-purpose",
+				"model": "google/vit-base-patch16-224"
+			}
+		},
+		"dropped": []
 	}
 }

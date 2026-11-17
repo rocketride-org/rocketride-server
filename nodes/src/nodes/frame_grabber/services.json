@@ -222,5 +222,22 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "interval",
+		"profiles": {
+			"interval": {
+				"title": "Extract video frames at intervals"
+			},
+			"transition": {
+				"title": "Extract video frames at scene transitions ",
+				"percent": 0.4
+			},
+			"key": {
+				"title": "Extract video frames at keyframes"
+			}
+		},
+		"dropped": []
 	}
 }

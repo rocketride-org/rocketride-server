@@ -121,5 +121,25 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "sentence",
+		"profiles": {
+			"sentence": {
+				"title": "Sentence Boundary - Splits at sentence endings for coherent chunks",
+				"strategy": "sentence",
+				"chunk_size": 1000,
+				"chunk_overlap": 200
+			},
+			"token": {
+				"title": "Token-based - Splits by token count, ideal for LLM context windows",
+				"strategy": "token",
+				"chunk_size": 512,
+				"chunk_overlap": 50,
+				"encoding_name": "cl100k_base"
+			}
+		},
+		"dropped": []
 	}
 }

@@ -178,5 +178,42 @@
 		"llm_vision_openai.apikey",
 		"llm_vision_openai.systemPrompt",
 		"llm_vision_openai.prompt"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "openai-4-1",
+		"profiles": {
+			"openai-4-1": {
+				"title": "GPT-4.1",
+				"model": "gpt-4.1",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-mini": {
+				"title": "GPT-4.1-mini",
+				"model": "gpt-4.1-mini",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4-1-nano": {
+				"title": "GPT-4.1-nano",
+				"model": "gpt-4.1-nano",
+				"modelTotalTokens": 1047576,
+				"apikey": ""
+			},
+			"openai-4o": {
+				"title": "GPT-4o",
+				"model": "gpt-4o",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			},
+			"openai-4o-mini": {
+				"title": "GPT-4o-mini",
+				"model": "gpt-4o-mini",
+				"modelTotalTokens": 128000,
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

@@ -294,5 +294,42 @@
 		"context_optimizer.query_budget_pct",
 		"context_optimizer.document_budget_pct",
 		"context_optimizer.history_budget_pct"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "auto",
+		"profiles": {
+			"auto": {
+				"title": "Auto - Use default model limits",
+				"model_name": "gpt-5",
+				"max_context_tokens": 0,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 15,
+				"document_budget_pct": 50,
+				"history_budget_pct": 25
+			},
+			"manual": {
+				"title": "Manual - Specify token limits",
+				"model_name": "custom",
+				"max_context_tokens": 128000,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 15,
+				"document_budget_pct": 50,
+				"history_budget_pct": 25
+			},
+			"ci_tiny": {
+				"title": "CI tiny - force budget optimization",
+				"model_name": "custom",
+				"max_context_tokens": 112,
+				"system_prompt_budget_pct": 10,
+				"query_budget_pct": 20,
+				"document_budget_pct": 35,
+				"history_budget_pct": 35
+			}
+		},
+		"dropped": [],
+		"profileMap": {
+			"ci_tiny": "manual"
+		}
+	}
 }

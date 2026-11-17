@@ -159,5 +159,18 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "kokoro",
+		"profiles": {
+			"kokoro": {
+				"engine": "kokoro",
+				"kokoro_voice": "af_heart"
+			}
+		},
+		"dropped": [
+			"engine"
+		]
 	}
 }

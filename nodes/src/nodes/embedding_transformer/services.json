@@ -201,5 +201,29 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "miniLM",
+		"profiles": {
+			"custom": {
+				"title": "Custom model"
+			},
+			"miniLM": {
+				"title": "miniLM  - General use embeddings, good performance",
+				"model": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
+			},
+			"miniAll": {
+				"title": "miniAll - Another good one",
+				"model": "sentence-transformers/all-MiniLM-L6-v2"
+			},
+			"mpnet": {
+				"title": "mpnet   - Yet another good one",
+				"model": "sentence-transformers/multi-qa-mpnet-base-cos-v1"
+			}
+		},
+		"dropped": [
+			"preprocessor"
+		]
+	}
 }

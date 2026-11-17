@@ -165,5 +165,15 @@
 		"graph_neo4j.database",
 		"graph_neo4j.max_attempts",
 		"graph_neo4j.allow_execute"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "neo4j"
+			}
+		},
+		"dropped": []
+	}
 }

@@ -149,5 +149,12 @@
 			"description": "Example path: container/path/to/your/blobs/*",
 			"item": "Pipe.exclude.path"
 		}
-	]
+	],
+	"legacy": {
+		"profiles": {},
+		"dropped": [
+			"exclude.path",
+			"include.path"
+		]
+	}
 }

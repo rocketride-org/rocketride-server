@@ -54,5 +54,13 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
 	}
 }

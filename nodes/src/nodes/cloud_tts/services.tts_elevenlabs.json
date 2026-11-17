@@ -143,5 +143,36 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "eleven_multilingual_v2",
+		"profiles": {
+			"eleven_multilingual_v2": {
+				"title": "Multilingual v2 - High quality, 29 languages",
+				"model": "eleven_multilingual_v2",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_turbo_v2_5": {
+				"title": "Turbo v2.5      - Low latency, 32 languages",
+				"model": "eleven_turbo_v2_5",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_flash_v2_5": {
+				"title": "Flash v2.5      - Lowest latency",
+				"model": "eleven_flash_v2_5",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_v3": {
+				"title": "Eleven v3       - Most expressive",
+				"model": "eleven_v3",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

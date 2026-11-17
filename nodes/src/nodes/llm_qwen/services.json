@@ -509,5 +509,566 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "qwen-flash",
+		"profiles": {
+			"qwen3-7-max": {
+				"title": "Qwen3.7 Max",
+				"model": "qwen3.7-max",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"region": "us",
+				"base_url": "",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen3-7-plus": {
+				"title": "Qwen3.7 Plus",
+				"model": "qwen3.7-plus",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"region": "us",
+				"base_url": "",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen3-6-flash": {
+				"title": "Qwen3.6 Flash",
+				"model": "qwen3.6-flash",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"region": "us",
+				"base_url": "",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen-max": {
+				"title": "Qwen Max (latest)",
+				"model": "qwen-max",
+				"modelSource": "manual",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 8192,
+				"region": "us",
+				"base_url": "",
+				"apikey": ""
+			},
+			"qwen-plus": {
+				"title": "Qwen Plus (latest)",
+				"model": "qwen-plus",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 32768,
+				"region": "us",
+				"base_url": "",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen-flash": {
+				"title": "Qwen Flash (latest)",
+				"model": "qwen-flash",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 4096,
+				"region": "us",
+				"base_url": "",
+				"apikey": ""
+			},
+			"qwen-turbo": {
+				"title": "Qwen Turbo (latest)",
+				"model": "qwen-turbo",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"region": "us",
+				"base_url": "",
+				"apikey": ""
+			},
+			"qwen-plus-2025-07-28": {
+				"title": "Qwen Plus 0728",
+				"model": "qwen-plus-2025-07-28",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 32768,
+				"region": "us",
+				"base_url": "",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen-2-5-72b-instruct": {
+				"title": "Qwen2.5 72B Instruct",
+				"model": "qwen-2.5-72b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 16384,
+				"deprecated": true,
+				"migration": "Not a valid DashScope model ID (this is an OpenRouter alias; DashScope uses qwen2.5-72b-instruct). Select Qwen Plus or a qwen3.x profile.",
+				"apikey": ""
+			},
+			"qwen-2-5-7b-instruct": {
+				"title": "Qwen2.5 7B Instruct",
+				"model": "qwen-2.5-7b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 29491,
+				"deprecated": true,
+				"migration": "Not a valid DashScope model ID (this is an OpenRouter alias; DashScope uses qwen2.5-7b-instruct). Select Qwen Flash or a qwen3.x profile.",
+				"apikey": ""
+			},
+			"qwen-2-5-coder-32b-instruct": {
+				"title": "Qwen2.5 Coder 32B Instruct",
+				"model": "qwen-2.5-coder-32b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 29491,
+				"deprecated": true,
+				"migration": "Not a valid DashScope model ID (this is an OpenRouter alias; DashScope uses qwen2.5-coder-32b-instruct). Select a qwen3.x profile.",
+				"apikey": ""
+			},
+			"qwen-plus-2025-07-28-thinking": {
+				"title": "Qwen Plus 0728 (thinking)",
+				"model": "qwen-plus-2025-07-28:thinking",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 32768,
+				"deprecated": true,
+				"migration": "The ':thinking' suffix is OpenRouter variant syntax and is rejected by DashScope, which controls reasoning with the enable_thinking parameter. Select Qwen Plus 0728 or a qwen3.x profile.",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"qwen3-14b": {
+				"title": "Qwen: Qwen3 14B",
+				"model": "qwen3-14b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 16384,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-235b-a22b": {
+				"title": "Qwen: Qwen3 235B A22B",
+				"model": "qwen3-235b-a22b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-235b-a22b-2507": {
+				"title": "Qwen: Qwen3 235B A22B Instruct 2507",
+				"model": "qwen3-235b-a22b-2507",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 16384,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-235b-a22b-thinking-2507": {
+				"title": "Qwen: Qwen3 235B A22B Thinking 2507",
+				"model": "qwen3-235b-a22b-thinking-2507",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 117964,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-30b-a3b": {
+				"title": "Qwen: Qwen3 30B A3B",
+				"model": "qwen3-30b-a3b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 16384,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-30b-a3b-instruct-2507": {
+				"title": "Qwen: Qwen3 30B A3B Instruct 2507",
+				"model": "qwen3-30b-a3b-instruct-2507",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 32000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-30b-a3b-thinking-2507": {
+				"title": "Qwen: Qwen3 30B A3B Thinking 2507",
+				"model": "qwen3-30b-a3b-thinking-2507",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 81920,
+				"modelOutputTokens": 32768,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-32b": {
+				"title": "Qwen: Qwen3 32B",
+				"model": "qwen3-32b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 16384,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-122b-a10b": {
+				"title": "Qwen: Qwen3.5-122B-A10B",
+				"model": "qwen3.5-122b-a10b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 81920,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-27b": {
+				"title": "Qwen: Qwen3.5-27B",
+				"model": "qwen3.5-27b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-35b-a3b": {
+				"title": "Qwen: Qwen3.5-35B-A3B",
+				"model": "qwen3.5-35b-a3b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 16384,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-397b-a17b": {
+				"title": "Qwen: Qwen3.5 397B A17B",
+				"model": "qwen3.5-397b-a17b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-9b": {
+				"title": "Qwen: Qwen3.5-9B",
+				"model": "qwen3.5-9b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-9b-batch": {
+				"title": "Qwen: Qwen3.5-9B (batch)",
+				"model": "qwen3.5-9b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.5-9b' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-flash-02-23": {
+				"title": "Qwen: Qwen3.5-Flash",
+				"model": "qwen3.5-flash-02-23",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-plus-02-15": {
+				"title": "Qwen: Qwen3.5 Plus 2026-02-15",
+				"model": "qwen3.5-plus-02-15",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-5-plus-20260420": {
+				"title": "Qwen: Qwen3.5 Plus 2026-04-20",
+				"model": "qwen3.5-plus-20260420",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-6-27b": {
+				"title": "Qwen: Qwen3.6 27B",
+				"model": "qwen3.6-27b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-6-35b-a3b": {
+				"title": "Qwen: Qwen3.6 35B A3B",
+				"model": "qwen3.6-35b-a3b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-6-max-preview": {
+				"title": "Qwen: Qwen3.6 Max Preview",
+				"model": "qwen3.6-max-preview",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-6-plus": {
+				"title": "Qwen: Qwen3.6 Plus",
+				"model": "qwen3.6-plus",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-7-flash": {
+				"title": "Qwen: Qwen3.7 Flash",
+				"model": "qwen3.7-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-2-4t-a95b": {
+				"title": "Qwen: Qwen3.8 2.4T A95B",
+				"model": "qwen3.8-2.4t-a95b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576,
+				"modelOutputTokens": 262144,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-2-4t-a95b-batch": {
+				"title": "Qwen: Qwen3.8 2.4T A95B (batch)",
+				"model": "qwen3.8-2.4t-a95b:batch",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1010000,
+				"modelOutputTokens": 909000,
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DashScope API serves no model with this ID. Please use 'qwen3.8-2.4t-a95b' instead.",
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-27b": {
+				"title": "Qwen: Qwen3.8 27B",
+				"model": "qwen3.8-27b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-flash": {
+				"title": "Qwen: Qwen3.8 Flash",
+				"model": "qwen3.8-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8-max-0902": {
+				"title": "Qwen: Qwen3.8 Max (0902)",
+				"model": "qwen3.8-max-0902",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 131072,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-8b": {
+				"title": "Qwen: Qwen3 8B",
+				"model": "qwen3-8b",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-coder": {
+				"title": "Qwen: Qwen3 Coder 480B A35B",
+				"model": "qwen3-coder",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-coder-30b-a3b-instruct": {
+				"title": "Qwen: Qwen3 Coder 30B A3B Instruct",
+				"model": "qwen3-coder-30b-a3b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-coder-flash": {
+				"title": "Qwen: Qwen3 Coder Flash",
+				"model": "qwen3-coder-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-coder-next": {
+				"title": "Qwen: Qwen3 Coder Next",
+				"model": "qwen3-coder-next",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-coder-plus": {
+				"title": "Qwen: Qwen3 Coder Plus",
+				"model": "qwen3-coder-plus",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-max": {
+				"title": "Qwen: Qwen3 Max",
+				"model": "qwen3-max",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-max-thinking": {
+				"title": "Qwen: Qwen3 Max Thinking",
+				"model": "qwen3-max-thinking",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 65536,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-next-80b-a3b-instruct": {
+				"title": "Qwen: Qwen3 Next 80B A3B Instruct",
+				"model": "qwen3-next-80b-a3b-instruct",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"qwen3-next-80b-a3b-thinking": {
+				"title": "Qwen: Qwen3 Next 80B A3B Thinking",
+				"model": "qwen3-next-80b-a3b-thinking",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 235929,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"capabilities",
+			"deprecated",
+			"migration",
+			"modelSource"
+		]
 	}
 }

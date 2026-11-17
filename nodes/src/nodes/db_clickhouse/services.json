@@ -154,5 +154,15 @@
 		"clickhouse.table",
 		"clickhouse.max_attempts",
 		"clickhouse.allow_execute"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "default"
+			}
+		},
+		"dropped": []
+	}
 }

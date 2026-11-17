@@ -64,5 +64,17 @@
 		"landing_ai_extract.schema_file",
 		"landing_ai_extract.strict",
 		"landing_ai_extract.region"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"strict": false,
+				"region": "production",
+				"schema_file": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}}}"
+			}
+		},
+		"dropped": []
+	}
 }

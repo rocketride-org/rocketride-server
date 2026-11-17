@@ -267,5 +267,191 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "meta_llama3_3-70b",
+		"profiles": {
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"ai21_jamba-1_5-large": {
+				"title": "Jamba 1.5 Large",
+				"model": "ai21.jamba-1-5-large-v1:0",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"ai21_jamba-1_5-mini": {
+				"title": "Jamba 1.5 Mini",
+				"model": "ai21.jamba-1-5-mini-v1:0",
+				"modelTotalTokens": 256000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"amazon_titan-text-express": {
+				"title": "Titan Text Express",
+				"model": "amazon.titan-text-express-v1",
+				"modelTotalTokens": 8192,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"amazon_nova-2-lite": {
+				"title": "Nova 2 Lite",
+				"model": "amazon.nova-2-lite-v1:0",
+				"modelTotalTokens": 1000000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-3_7-sonnet": {
+				"title": "Claude Sonnet 3.7",
+				"model": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-sonnet-4-5": {
+				"title": "Claude Sonnet 4.5",
+				"model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-3_5-haiku": {
+				"title": "Claude Haiku 3.5",
+				"model": "anthropic.claude-3-5-haiku-20241022-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-haiku-4-5": {
+				"title": "Claude Haiku 4.5",
+				"model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-opus-4": {
+				"title": "Claude Opus 4",
+				"model": "anthropic.claude-opus-4-20250514-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"anthropic_claude-opus-4-5": {
+				"title": "Claude Opus 4.5",
+				"model": "anthropic.claude-opus-4-5-20251101-v1:0",
+				"modelTotalTokens": 200000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"cohere_command-r-plus": {
+				"title": "Command R+",
+				"model": "cohere.command-r-plus-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"cohere_command-r": {
+				"title": "Command R",
+				"model": "cohere.command-r-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_1-8b": {
+				"title": "Llama 3.1 8B Instruct",
+				"model": "meta.llama3-1-8b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_1-70b": {
+				"title": "Llama 3.1 70B Instruct",
+				"model": "meta.llama3-1-70b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_3-70b": {
+				"title": "Llama 3.3 70B Instruct",
+				"model": "meta.llama3-3-70b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-1b": {
+				"title": "Llama 3.2 1B Instruct",
+				"model": "meta.llama3-2-1b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-3b": {
+				"title": "Llama 3.2 3B Instruct",
+				"model": "meta.llama3-2-3b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-11b": {
+				"title": "Llama 3.2 11B Vision Instruct",
+				"model": "meta.llama3-2-11b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama3_2-90b": {
+				"title": "Llama 3.2 90B Vision Instruct",
+				"model": "meta.llama3-2-90b-instruct-v1:0",
+				"modelTotalTokens": 128000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama4-scout-17b": {
+				"title": "Llama 4 Scout 17B Instruct",
+				"model": "meta.llama4-scout-17b-instruct-v1:0",
+				"modelTotalTokens": 3500000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			},
+			"meta_llama4-maverick-17b": {
+				"title": "Llama 4 Maverick 17B Instruct",
+				"model": "meta.llama4-maverick-17b-instruct-v1:0",
+				"modelTotalTokens": 1000000,
+				"accessKey": "",
+				"secretKey": "",
+				"region": "us-east-1"
+			}
+		},
+		"dropped": [],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

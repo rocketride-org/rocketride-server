@@ -183,5 +183,53 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "ernie-4-5-turbo-128k",
+		"profiles": {
+			"ernie-4-5-turbo-128k": {
+				"title": "ERNIE 4.5 Turbo 128K",
+				"model": "ernie-4.5-turbo-128k",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://qianfan.baidubce.com/v2",
+				"apikey": ""
+			},
+			"ernie-4-5-turbo-32k": {
+				"title": "ERNIE 4.5 Turbo 32K",
+				"model": "ernie-4.5-turbo-32k",
+				"modelSource": "provider",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://qianfan.baidubce.com/v2",
+				"apikey": ""
+			},
+			"ernie-5-0-thinking-preview": {
+				"title": "ERNIE 5.0 Thinking Preview",
+				"model": "ernie-5.0-thinking-preview",
+				"modelSource": "provider",
+				"modelTotalTokens": 128000,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://qianfan.baidubce.com/v2",
+				"apikey": ""
+			},
+			"custom": {
+				"title": "Custom",
+				"model": "",
+				"modelSource": "manual",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://qianfan.baidubce.com/v2",
+				"apikey": ""
+			}
+		},
+		"dropped": [
+			"modelSource"
+		],
+		"renamed": {
+			"custom.model": "customModel"
+		}
 	}
 }

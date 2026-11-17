@@ -204,5 +204,15 @@
 				}
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
 	}
 }

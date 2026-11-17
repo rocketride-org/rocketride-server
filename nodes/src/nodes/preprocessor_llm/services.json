@@ -98,5 +98,15 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["preprocessor_llm.numberOfTokens"]
+	"properties": ["preprocessor_llm.numberOfTokens"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"numberOfTokens": 384
+			}
+		},
+		"dropped": []
+	}
 }

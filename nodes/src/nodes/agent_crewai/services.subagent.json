@@ -71,5 +71,25 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order
 	//
-	"properties": ["type", "instructions", "role", "goal", "backstory", "task_description", "expected_output"]
+	"properties": ["type", "instructions", "role", "goal", "backstory", "task_description", "expected_output"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"instructions": [],
+				"advanced_mode": false,
+				"role": "Specialist",
+				"task_description": "",
+				"goal": "",
+				"backstory": "",
+				"expected_output": ""
+			}
+		},
+		"dropped": [
+			"advanced_mode",
+			"agent_config_header",
+			"task_config_header"
+		]
+	}
 }

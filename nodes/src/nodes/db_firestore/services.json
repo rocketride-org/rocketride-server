@@ -42,5 +42,15 @@
 		"gcp.projectId",
 		"firestore.database",
 		"firestore.collection"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"database": "(default)"
+			}
+		},
+		"dropped": []
+	}
 }

@@ -198,5 +198,32 @@
 				}
 			]
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "mask2former-instance",
+		"profiles": {
+			"mask2former-instance": {
+				"title": "Mask2Former — Object Instances (COCO, 80 classes, default)",
+				"mode": "instance",
+				"engine": "mask2former-instance",
+				"model": "facebook/mask2former-swin-tiny-coco-instance",
+				"revision": "22c4a2f15dc88149b8b8d9f4d42c54431fbd66f6",
+				"threshold": 0.3,
+				"maxEdge": 1024
+			},
+			"mask2former-semantic": {
+				"title": "Mask2Former — Scene Regions (ADE20K, 150 classes)",
+				"mode": "semantic",
+				"engine": "mask2former-semantic",
+				"model": "facebook/mask2former-swin-tiny-ade-semantic",
+				"revision": "c8cf1b5e823aee214d937d0d001c1850ba44ef6a",
+				"threshold": 0.0,
+				"maxEdge": 1024
+			}
+		},
+		"dropped": [
+			"engine"
+		]
+	}
 }
