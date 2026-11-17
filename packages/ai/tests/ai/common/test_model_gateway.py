@@ -49,10 +49,13 @@ NO_KEY_SELF_HOSTED = (
 SENTENCES = {
     'insufficient_credits': (
         "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
-        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'Add your own OpenAI key in the node settings. A workspace admin can also manage compute credits '
         'under Account > Billing in RocketRide.'
     ),
-    'rate_limited': 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.',
+    'rate_limited': (
+        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
+        'requests at once, or add your own OpenAI key in the node settings.'
+    ),
     'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': (
         'RocketRide-hosted models are unavailable right now. Try again shortly, or add your own OpenAI key '
@@ -63,7 +66,7 @@ SENTENCES = {
         'in the node settings.'
     ),
     'request_too_large': (
-        'This request is too large for RocketRide-hosted models. Send less text, or add your own OpenAI key '
+        'This request is too large for RocketRide-hosted models. Shorten the input, or add your own OpenAI key '
         'in the node settings.'
     ),
 }
@@ -313,8 +316,8 @@ def test_each_refusal_code_reads_as_its_sentence(code, sentence, wrapped):
 
 def test_a_model_not_offered_names_the_model():
     sentence = (
-        "The model gpt-9 isn't offered as a RocketRide-hosted model. Choose another model, "
-        'or add your own OpenAI key in the node settings.'
+        "The model gpt-9 isn't offered as a RocketRide-hosted model. Choose another model in the node "
+        'settings, or add your own OpenAI key there.'
     )
     assert friendly_gateway_error(_refusal(400, 'model_not_available'), 'gpt-9') == sentence
     from_backend = _refusal(
@@ -322,8 +325,8 @@ def test_a_model_not_offered_names_the_model():
     )
     assert friendly_gateway_error(from_backend) == sentence
     assert friendly_gateway_error(_refusal(400, 'model_not_available')) == (
-        "The model you chose isn't offered as a RocketRide-hosted model. Choose another model, "
-        'or add your own OpenAI key in the node settings.'
+        "The model you chose isn't offered as a RocketRide-hosted model. Choose another model in the node "
+        'settings, or add your own OpenAI key there.'
     )
 
 
@@ -342,11 +345,17 @@ def test_an_unsupported_field_is_named():
 def test_any_other_code_reads_as_the_general_sentence():
     """The code stays out of the sentence: a code can name internals (the log has it)."""
     expected = (
-        "RocketRide-hosted models couldn't run this request. Try again later, or add your own OpenAI key in the "
+        "RocketRide-hosted models couldn't run this request. Try again shortly, or add your own OpenAI key in the "
         'node settings.'
     )
-    for code in ('something_new', 'gateway_local_only', 'invalid_request', None):
+    for code in ('something_new', 'gateway_local_only', 'spend_limit_reached', None):
         assert friendly_gateway_error(_refusal(418, code)) == expected
+
+
+def test_a_request_the_hosted_models_cannot_accept():
+    assert friendly_gateway_error(_refusal(400, 'invalid_request')) == (
+        "RocketRide-hosted models couldn't accept this request. Check the node settings, then run the pipeline again."
+    )
 
 
 def test_no_sentence_contains_a_star():

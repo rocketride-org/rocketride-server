@@ -43,22 +43,25 @@ STOP = ['\nObservation:']
 SENTENCES = {
     'insufficient_credits': (
         "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
-        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'Add your own OpenAI key in the node settings. A workspace admin can also manage compute credits '
         'under Account > Billing in RocketRide.'
     ),
     'model_not_available': (
-        "The model {model} isn't offered as a RocketRide-hosted model. Choose another model, "
-        'or add your own OpenAI key in the node settings.'
+        "The model {model} isn't offered as a RocketRide-hosted model. Choose another model in the node "
+        'settings, or add your own OpenAI key there.'
     ),
     'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'request_too_large': (
-        'This request is too large for RocketRide-hosted models. Send less text, or add your own OpenAI key '
+        'This request is too large for RocketRide-hosted models. Shorten the input, or add your own OpenAI key '
         'in the node settings.'
     ),
     'unsupported_parameter': (
         "RocketRide-hosted models don't support stop. Add your own OpenAI key in the node settings to run this request."
     ),
-    'rate_limited': 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.',
+    'rate_limited': (
+        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
+        'requests at once, or add your own OpenAI key in the node settings.'
+    ),
     'gateway_unavailable': (
         'RocketRide-hosted models are unavailable right now. Try again shortly, or add your own OpenAI key '
         'in the node settings.'
