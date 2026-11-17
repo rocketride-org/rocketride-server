@@ -7,7 +7,7 @@
  * Graph Explorer's live database suites (registry notes: nodes/scripts/tasks.js;
  * servers: nodes/test/db-services/graph.sh).
  *
- * Suites that need a server: `test_rocketride_graph_full.py` and
+ * Suites that need a server: `test_rocketride_graph_live.py` and
  * `test_graph_age_full.py` (Apache AGE), `test_graph_neo4j_full.py` (Neo4j) and
  * `test_graph_falkordb_full.py` (FalkorDB). Two more need the real driver
  * packages: `test_graph_drivers_full.py` (real driver objects, no server) and
@@ -18,10 +18,11 @@
  * (build it first) with a stand-in for the cloud database broker, starts each
  * shipped Graph Explorer template (`apps/graph-ui/templates`) against the test
  * servers, and calls its graph tools through the Python SDK.
- * `test_rocketride_graph_full.py` exists on develop, where `nodes:test` leaves it out
- * (its mocked pass globs `*_full.py` away) and only `nodes:test-full` collects it.
- * Listing it below is this domain's deliberate CI change: it joins the unmocked live
- * pass, required on the Linux CI leg, and runs a second time through the AGE pooler.
+ * `test_rocketride_graph_live.py` exists on develop, where `nodes:test` runs it in the
+ * mocked pass (skipping without `RR_TEST_AGE_DSN`) and CI runs it once more on AGE
+ * 1.6.0. Listing it below is this domain's deliberate CI change: it moves to the
+ * unmocked live pass, required on the Linux CI leg, and runs a second time through
+ * the AGE pooler.
  *
  * AGE pooler pass: with `RR_TEST_AGE_POOLER_DSN` set, the two AGE suites run a
  * second time through that transaction-mode pooler (`RR_TEST_AGE_DSN` is pointed
@@ -57,7 +58,7 @@ module.exports = {
 	name: 'graph',
 	suites: [
 		// develop's AGE suite for the RocketRide graph node (see the header: a CI behavior change).
-		'test_rocketride_graph_full.py',
+		'test_rocketride_graph_live.py',
 		'test_graph_age_full.py',
 		'test_graph_drivers_full.py',
 		'test_graph_neo4j_full.py',
@@ -65,7 +66,7 @@ module.exports = {
 		'test_graph_wire_fixtures_full.py',
 		'test_graph_toolpath_full.py',
 	],
-	poolerSuites: ['test_rocketride_graph_full.py', 'test_graph_age_full.py'],
+	poolerSuites: ['test_rocketride_graph_live.py', 'test_graph_age_full.py'],
 	poolerEnv: 'RR_TEST_AGE_POOLER_DSN',
 	poolerMode: 'second-pass',
 	// The suites reach AGE through the pooler; the admin work (DDL, graph setup) stays on the database itself.

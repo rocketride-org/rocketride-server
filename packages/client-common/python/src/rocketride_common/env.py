@@ -45,6 +45,9 @@ ENV_DEPLOY_APIKEY = 'ROCKETRIDE_DEPLOY_APIKEY'
 # The standard hard-stop message for a missing deploy pair
 NO_DEPLOY_TARGET_MESSAGE = 'No deployment target configured. Set ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY (or pass --uri/--apikey) - the development connection is never a deploy fallback.'
 
+# The standard hard-stop message for a deploy target URI with no deploy API key
+NO_DEPLOY_APIKEY_MESSAGE = 'No deployment API key configured. Set ROCKETRIDE_DEPLOY_APIKEY (or pass --apikey) - the development key is never a deploy fallback.'
+
 
 def parse_env_line(line: str) -> Optional[Tuple[str, str]]:
     """

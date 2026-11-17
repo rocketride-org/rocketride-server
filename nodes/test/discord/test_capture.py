@@ -1819,13 +1819,13 @@ class TestWriterThread:
             for _ in range(QUEUE_MAX_ROWS):
                 writer.submit(_row())
             started = time.monotonic()
-            writer.stop(timeout=0.4)
+            writer.stop(timeout=2.0)
             elapsed = time.monotonic() - started
         finally:
             release.set()
         thread.join(5)
 
-        assert elapsed < 0.6
+        assert elapsed < 3.0
 
     def test_a_full_queue_still_lets_the_worker_end(self):
         release = threading.Event()

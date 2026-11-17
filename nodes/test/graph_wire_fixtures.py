@@ -247,62 +247,66 @@ def live_falkordb() -> Dict[str, Any]:
 
 
 def live_age() -> Dict[str, Any]:
-    """Apache AGE live captures (the database of test_rocketride_graph_full.py)."""
+    """Apache AGE live captures (the database of test_rocketride_graph_live.py)."""
     from pytest import MonkeyPatch
 
     from . import test_graph_age_full as ag
-    from . import test_rocketride_graph_full as rr
+    from . import test_rocketride_graph_live as rr
 
     out: Dict[str, Any] = {}
     mp = MonkeyPatch()
-    try:
-        env = rr.make_rr_env(mp)
-        with rr.seeded_age_graph():
-            for i in range(36):
-                ag._cypher_admin(f'CREATE (:L{i} {{k: {i}}})')
-            ag._cypher_admin("MATCH (a:Person {name: 'alice'}) SET a.big = 9007199254740993, a.precise = 1.5::numeric")
-            glb = rr._begin(env)
-            inst = env.iinstance_cls()
-            inst.IGlobal = glb
-            try:
-                out['age_read_query_graph.json'] = inst.read_query(
-                    {'cypher': "MATCH (a:Person {name: 'alice'})-[r:KNOWS]->(b) RETURN a, r, b, a.name, a.name"}
+    # make_rr_env loads the graph modules against its stubs; drop them afterwards.
+    with rr.own_modules_isolated():
+        try:
+            env = rr.make_rr_env(mp)
+            with rr.seeded_age_graph():
+                for i in range(36):
+                    ag._cypher_admin(f'CREATE (:L{i} {{k: {i}}})')
+                ag._cypher_admin(
+                    "MATCH (a:Person {name: 'alice'}) SET a.big = 9007199254740993, a.precise = 1.5::numeric"
                 )
-                out['age_read_query_path.json'] = inst.read_query(
-                    {'cypher': "MATCH p = (b:Person {name: 'bob'})<-[:KNOWS]-(a) RETURN p"}
-                )
-                out['age_read_query_big_id.json'] = inst.read_query(
-                    {'cypher': 'MATCH (n:L35) RETURN n, id(n) AS raw_id'}
-                )
-                out['age_dialect.json'] = inst.dialect({})
-                out['age_get_schema.json'] = inst.get_schema({})
-                with MonkeyPatch.context() as budget:
-                    budget.setattr(sys.modules['ai.common.graph.graph_global_base'], 'SCHEMA_REFRESH_BUDGET_MS', 0)
-                    out['age_refresh_schema_stale.json'] = inst.refresh_schema({})
-                errors = {
-                    'refused_write': _error_text(lambda: inst.read_query({'cypher': 'CREATE (:Evil)'})),
-                    'refused_call': _error_text(lambda: inst.read_query({'cypher': 'CALL db.labels()'})),
-                    'hint_date': _error_text(lambda: inst.read_query({'cypher': "RETURN date('2024-01-01')"})),
-                    'hint_exists_subquery': _error_text(
-                        lambda: inst.read_query({'cypher': 'MATCH (n) WHERE EXISTS { MATCH (n)-->() } RETURN n'})
-                    ),
-                    'invalid_cypher': _error_text(lambda: inst.read_query({'cypher': 'MATCHX (n) RETURN n'})),
-                }
-            finally:
-                glb.endGlobal()
-            glb = rr._begin(env, {'query_timeout_ms': 200})
-            inst = env.iinstance_cls()
-            inst.IGlobal = glb
-            try:
-                ag._cypher_admin('UNWIND range(1, 2000) AS i CREATE (:Bulk {i: i})')
-                errors['timeout'] = _error_text(
-                    lambda: inst.read_query({'cypher': 'MATCH (a:Bulk), (b:Bulk), (c:Bulk) RETURN count(*)'})
-                )
-            finally:
-                glb.endGlobal()
-            out['age_errors.json'] = errors
-    finally:
-        mp.undo()
+                glb = rr._begin(env)
+                inst = env.iinstance_cls()
+                inst.IGlobal = glb
+                try:
+                    out['age_read_query_graph.json'] = inst.read_query(
+                        {'cypher': "MATCH (a:Person {name: 'alice'})-[r:KNOWS]->(b) RETURN a, r, b, a.name, a.name"}
+                    )
+                    out['age_read_query_path.json'] = inst.read_query(
+                        {'cypher': "MATCH p = (b:Person {name: 'bob'})<-[:KNOWS]-(a) RETURN p"}
+                    )
+                    out['age_read_query_big_id.json'] = inst.read_query(
+                        {'cypher': 'MATCH (n:L35) RETURN n, id(n) AS raw_id'}
+                    )
+                    out['age_dialect.json'] = inst.dialect({})
+                    out['age_get_schema.json'] = inst.get_schema({})
+                    with MonkeyPatch.context() as budget:
+                        budget.setattr(sys.modules['ai.common.graph.graph_global_base'], 'SCHEMA_REFRESH_BUDGET_MS', 0)
+                        out['age_refresh_schema_stale.json'] = inst.refresh_schema({})
+                    errors = {
+                        'refused_write': _error_text(lambda: inst.read_query({'cypher': 'CREATE (:Evil)'})),
+                        'refused_call': _error_text(lambda: inst.read_query({'cypher': 'CALL db.labels()'})),
+                        'hint_date': _error_text(lambda: inst.read_query({'cypher': "RETURN date('2024-01-01')"})),
+                        'hint_exists_subquery': _error_text(
+                            lambda: inst.read_query({'cypher': 'MATCH (n) WHERE EXISTS { MATCH (n)-->() } RETURN n'})
+                        ),
+                        'invalid_cypher': _error_text(lambda: inst.read_query({'cypher': 'MATCHX (n) RETURN n'})),
+                    }
+                finally:
+                    glb.endGlobal()
+                glb = rr._begin(env, {'query_timeout_ms': 200})
+                inst = env.iinstance_cls()
+                inst.IGlobal = glb
+                try:
+                    ag._cypher_admin('UNWIND range(1, 2000) AS i CREATE (:Bulk {i: i})')
+                    errors['timeout'] = _error_text(
+                        lambda: inst.read_query({'cypher': 'MATCH (a:Bulk), (b:Bulk), (c:Bulk) RETURN count(*)'})
+                    )
+                finally:
+                    glb.endGlobal()
+                out['age_errors.json'] = errors
+        finally:
+            mp.undo()
     return out
 
 

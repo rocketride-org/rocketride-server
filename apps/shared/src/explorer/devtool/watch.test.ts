@@ -42,8 +42,6 @@ import type { IDiscoveryBus } from './watch';
 import { account, createFakeClientRealm, createFakeMirroredRealm, settle } from './testing';
 import type { IFakeClientRealm } from './testing';
 
-const APP = 'sql-ui';
-
 /** A rocket-ui-style rig: client realm, controller mount, a store over a fake engine. */
 interface IRig {
 	realm: IFakeClientRealm;

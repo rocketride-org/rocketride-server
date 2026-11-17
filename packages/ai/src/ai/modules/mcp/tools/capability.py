@@ -16,7 +16,7 @@ enable/disable/remove act on one team's deployment, addressed by
 from typing import Any, Dict, Optional
 
 from ..errors import _bad
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call as _engine_call
 from ._common import load_pipeline
 
@@ -441,18 +441,21 @@ def register(registry: ToolRegistry) -> None:
         'store_read',
         'Read a text file from the RocketRide store by its store-relative path.',
         _STORE_READ_SCHEMA,
+        hints=ToolHints.reads("Reads one file from the caller's own account store."),
     )(_store_read)
 
     registry.register(
         'store_list',
         "List entries under a store-relative directory path (default '' = root).",
         _STORE_LIST_SCHEMA,
+        hints=ToolHints.reads("Lists entries in the caller's own account store."),
     )(_store_list)
 
     registry.register(
         'store_stat',
         'Get metadata for a store file or directory: exists, type (file|dir), size, modified.',
         _STORE_STAT_SCHEMA,
+        hints=ToolHints.reads("Reads file or directory metadata from the caller's own account store."),
     )(_store_stat)
 
     registry.register(
@@ -460,18 +463,30 @@ def register(registry: ToolRegistry) -> None:
         'Get a time-limited signed download URL for a store file -- the out-of-band '
         'counterpart to store_read for large files that cannot ride an in-band result.',
         _STORE_GET_URL_SCHEMA,
+        hints=ToolHints.reads(
+            "Signs a time-limited download URL for a file in the caller's store; nothing is stored or "
+            'changed, though the URL is a bearer capability.'
+        ),
     )(_store_get_url)
 
     registry.register(
         'save_template',
         'Save an inline pipeline as a reusable template under a template_id.',
         _SAVE_TEMPLATE_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason="Writes .templates/<id>.json in the caller's store and overwrites an existing template with the "
+            'same id.',
+        ),
     )(_save_template)
 
     registry.register(
         'load_template',
         'Load a previously saved pipeline template by its template_id.',
         _LOAD_TEMPLATE_SCHEMA,
+        hints=ToolHints.reads("Reads a saved template from the caller's own store."),
     )(_load_template)
 
     registry.register(
@@ -481,6 +496,13 @@ def register(registry: ToolRegistry) -> None:
         'run anything: pass deploy_to, or call deploy_to_team next, to put the version live on a team; '
         'then deploy_set_schedule to run it on a cron.',
         _DEPLOY_ADD_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason="Registers a new immutable version (additive), but the optional deploy_to replaces the team's "
+            'live pointer and re-arms its unpaused schedules; private org registry.',
+        ),
     )(_deploy_add)
 
     registry.register(
@@ -489,12 +511,14 @@ def register(registry: ToolRegistry) -> None:
         'org admin), one row per (projectId, teamId) with its version, state and per-source schedules. '
         'Paged: count is the rows returned, total every match.',
         _DEPLOY_LIST_SCHEMA,
+        hints=ToolHints.reads('Reads the deployment records the caller may see.'),
     )(_deploy_list)
 
     registry.register(
         'deploy_status',
         "Get one team's deployment of a project: version, state, per-source schedules, and who deployed it when.",
         _DEPLOYMENT_KEY_SCHEMA,
+        hints=ToolHints.reads('Reads one team deployment record.'),
     )(_deploy_status)
 
     registry.register(
@@ -502,6 +526,7 @@ def register(registry: ToolRegistry) -> None:
         "List a project's registered versions, newest first (version, pipelineName, comment, "
         'publishedAt) -- the versions deploy_to_team can point a team at.',
         _DEPLOY_VERSIONS_SCHEMA,
+        hints=ToolHints.reads("Reads a project's registered versions."),
     )(_deploy_versions)
 
     registry.register(
@@ -510,6 +535,13 @@ def register(registry: ToolRegistry) -> None:
         '(the same version to another team) and rollback (an older version) are all this call; a '
         'removed deployment is revived.',
         _DEPLOY_TO_TEAM_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason="Replaces the team's live version pointer (promotion or rollback), revives a removed deployment "
+            'and re-arms its unpaused schedules; private registry.',
+        ),
     )(_deploy_to_team)
 
     registry.register(
@@ -518,12 +550,26 @@ def register(registry: ToolRegistry) -> None:
         'first). source_id must be a source component of the deployed version; schedules fire only '
         'while the deployment is enabled.',
         _DEPLOY_SET_SCHEDULE_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason="Replaces or clears one source's cron schedule, cancelling scheduled runs or arming new metered "
+            'ones; private registry.',
+        ),
     )(_deploy_set_schedule)
 
     registry.register(
         'deploy_enable',
         "Enable a team's disabled deployment so its schedules fire again.",
         _DEPLOYMENT_KEY_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason="Re-arms the deployment's unpaused schedules, which start metered runs that cannot be undone; "
+            'private registry.',
+        ),
     )(_deploy_enable)
 
     registry.register(
@@ -531,11 +577,25 @@ def register(registry: ToolRegistry) -> None:
         "Disable a team's deployment -- the kill switch: schedules stop firing and manual runs are "
         'refused until deploy_enable.',
         _DEPLOYMENT_KEY_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason='Cancels every future scheduled run of the deployment (the kill switch); private registry.',
+        ),
     )(_deploy_disable)
 
     registry.register(
         'deploy_remove',
-        "Soft-remove a team's deployment: it leaves listings and stops running, but its versions and "
-        'audit history are kept; deploy_to_team revives it.',
+        "Soft-remove a team's deployment: it leaves listings and its schedules stop firing (tasks already "
+        'running are not terminated; use terminate for that), but its versions and audit history are kept; '
+        'deploy_to_team revives it.',
         _DEPLOYMENT_KEY_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=False,
+            reason='Soft-removes the deployment and cancels its scheduled runs; versions and history are kept; '
+            'private registry.',
+        ),
     )(_deploy_remove)

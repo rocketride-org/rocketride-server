@@ -52,9 +52,12 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
+import { clearTelemetryOnSignOut, initTelemetryHost, markTelemetrySignedIn, setHostTelemetryEnabled, setTelemetryIdentity } from '../../telemetry/host';
+import { subscribeConsent } from '../../telemetry/consentState';
+import { isInVSCode } from '../../themes/vscode';
 import { SignedOutScreen } from './SignedOutScreen';
 import { getHomeAppId } from '../../constants';
-import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
@@ -186,6 +189,50 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const cm = ConnectionManager.getInstance();
 	const { RR_ZITADEL_URL, RR_ZITADEL_CLIENT_ID } = config.apiConfig;
 
+	// ── Telemetry host ────────────────────────────────────────────────────
+	// Boot the one telemetry transport from the probe-served config. Keyless
+	// (OSS, or no RR_POSTHOG_PUBLISHABLE_KEY on the server) this is a no-op
+	// and the posthog chunk is never fetched. In a VS Code webview the consent
+	// source is the editor's own telemetry setting ('host'); in the cloud it
+	// is the device's stored record ('stored') — never both.
+	useEffect(() => {
+		initTelemetryHost({
+			key: config.apiConfig.RR_POSTHOG_KEY ?? '',
+			host: config.apiConfig.RR_POSTHOG_HOST ?? '',
+			consentSource: isInVSCode() ? 'host' : 'stored',
+		});
+		// The sign-in/out lifecycle: capture modes and identity follow, and a
+		// sign-out drops the queue's hold (one session's captures never forward
+		// under the next account).
+		const offLogin = cm.on('shell:login', () => {
+			markTelemetrySignedIn();
+		});
+		const offLogout = cm.on('shell:logout', () => {
+			clearTelemetryOnSignOut();
+			setTelemetryIdentity(false, null);
+		});
+		// Consent is platform state: decisions (either surface, either tab)
+		// fan out on the bus so apps can follow without owning a store.
+		const offConsent = subscribeConsent((state, origin) => {
+			cm.emit('shell:consentChange', { state, origin });
+		});
+		// In a VS Code webview the editor's telemetry setting is the one
+		// consent switch; the extension host mirrors it on a retained topic.
+		let offHostSetting: (() => void) | undefined;
+		if (isInVSCode()) {
+			offHostSetting = cm.subscribe('shell:telemetryEnabled', (snapshot) => {
+				const s = snapshot as { enabled?: boolean } | null;
+				setHostTelemetryEnabled(s?.enabled === true);
+			});
+		}
+		return () => {
+			offLogin();
+			offLogout();
+			offConsent();
+			offHostSetting?.();
+		};
+	}, [cm, config.apiConfig.RR_POSTHOG_KEY, config.apiConfig.RR_POSTHOG_HOST]);
+
 	// ── Session-locked app ────────────────────────────────────────────────
 	// The tab session owns the URL parsing and per-tab persistence; authored
 	// preview pages (blob-served by the App Builder) instead carry their
@@ -234,6 +281,18 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
+
+	// The resolved identity drives telemetry's signed-in state and the opaque
+	// id the consented instance identifies by (never an email or name).
+	// identity === null means "signed out" only once the bootstrap has
+	// resolved: while it runs (loading) or after it failed (error) the state
+	// is unknown, and unknown must stay off the known-signed-out path (rich
+	// capture, signed-out capture config, the stored-identity reset).
+	const authResolved = renderPhase !== 'loading' && renderPhase !== 'error';
+	useEffect(() => {
+		if (!authResolved) return;
+		setTelemetryIdentity(identity !== null, identity?.userId ?? null);
+	}, [identity, authResolved]);
 	const [activeAppId, setActiveAppId] = useState<string | null>(null);
 	const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
 	// Embedded (iframe) sign-in prompt — the popup-based OAuth entry point
@@ -535,26 +594,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		}
 	}, [identity, apps]);
 
-	// The waitlist screen renders no app, so nothing would forward the telemetry
-	// facts the connection manager holds (auth:complete for a waitlisted sign-up,
-	// the one most likely to end with the tab closed). The home remote's
-	// `telemetry` entry initialises its analytics and forwards them; an older
-	// home build without the entry resolves null and nothing happens. Once per
-	// page load: the entry drains the held facts once and subscribes for the rest.
-	const telemetryEntryRanRef = useRef(false);
-	useEffect(() => {
-		if (renderPhase !== 'waitlisted' || telemetryEntryRanRef.current) {
-			return;
-		}
-		telemetryEntryRanRef.current = true;
-		void loadAppModule<{ default?: () => void }>(defaultAppId, 'telemetry')
-			.then((entry) => {
-				entry?.default?.();
-			})
-			.catch(() => {
-				// the entry's own failure stays inside it
-			});
-	}, [renderPhase, defaultAppId]);
+	// (The waitlist screen needs no telemetry side-load any more: the shell owns
+	// the transport and connection.ts reports auth:complete on the shell's own
+	// reporter — it lands even when no app ever mounts.)
 
 	// Refresh identity on account update
 	useEffect(() => {

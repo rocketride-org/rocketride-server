@@ -32,8 +32,9 @@ REPO = Path(__file__).resolve().parents[3]
 CAPTURES = REPO / 'apps' / 'graph-ui' / 'tests' / 'fixtures' / 'v1' / 'live'
 ENGINES = ('neo4j', 'falkordb', 'age')
 
-# The node suites' defaults (nodes/test/test_graph_neo4j_full.py, test_graph_falkordb_full.py,
-# test_rocketride_graph_full.py): the local containers from README.md.
+# The node suites' defaults (nodes/test/test_graph_neo4j_full.py, test_graph_falkordb_full.py;
+# test_rocketride_graph_live.py has no default and needs RR_TEST_AGE_DSN): the local
+# containers from README.md.
 NEO4J_URI = os.environ.get('RR_TEST_NEO4J_URI', 'bolt://127.0.0.1:57687')
 NEO4J_USER = os.environ.get('RR_TEST_NEO4J_USER', 'neo4j')
 NEO4J_PASSWORD = os.environ.get('RR_TEST_NEO4J_PASSWORD', 'gxlocal-test-pass')

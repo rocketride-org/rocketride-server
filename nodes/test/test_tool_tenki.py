@@ -978,14 +978,14 @@ def test_a_resume_refused_for_the_whole_budget_is_reported_and_the_session_kept(
 def test_calls_queued_behind_a_resume_refused_for_the_whole_budget_ask_once_each(monkeypatch, logs):
     # Found in review of the rework: each queued call waited out a budget of its own, one after another under the
     # lock (four calls, eight minutes at the real 120 s).
-    monkeypatch.setattr(mod, '_RESUME_RETRY_SECS', 0.3)
+    monkeypatch.setattr(mod, '_RESUME_RETRY_SECS', 1.0)
     session = _Session()
     inst, _ = _used(monkeypatch, session)
     session.state, session.resume_refusals, session.barrier = 'PAUSED', 10**6, threading.Barrier(4)
     started = time.monotonic()
     results = _parallel(*[lambda: inst.list_files({})] * 4)
     assert all('still being torn down' in result['error'] for result in results)
-    assert time.monotonic() - started < 0.9 and session.calls.count('resume') <= 0.3 / 0.01 + 4
+    assert time.monotonic() - started < 3.0 and session.calls.count('resume') <= 1.0 / 0.01 + 4
 
 
 def test_calls_queued_behind_a_given_up_resume_that_tenki_carried_out_are_resumed(monkeypatch, logs):

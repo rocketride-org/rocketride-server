@@ -155,6 +155,8 @@ from .account import (
     CreateKeyParams,
     CreateKeyResult,
     InviteMemberParams,
+    InvitedMember,
+    TeamAssignment,
     TeamMemberParams,
 )
 
@@ -306,6 +308,8 @@ __all__ = [
     'CreateKeyParams',
     'CreateKeyResult',
     'InviteMemberParams',
+    'InvitedMember',
+    'TeamAssignment',
     'TeamMemberParams',
     # Deploy types
     'AppVerifyCheck',

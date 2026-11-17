@@ -12,6 +12,10 @@ pytest<9.2
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+# The sys.modules guard (_sys_modules_guard.py) uses @pytest.hookimpl(wrapper=True),
+# which pluggy supports from 1.2; pytest<9.2 alone would also allow an older pluggy.
+# Same floor in packages/server/build-requirements.txt.
+pluggy>=1.2
 
 # Packages the tests import directly. At runtime they come from the node that
 # declares them, which installs them only when a pipeline first loads it, so
@@ -23,7 +27,7 @@ img2table                   # ocr: test_model_server_ocr.py
 # nodes' requirements.txt, to the versions the live suites and the graph-ui wire
 # fixtures were validated with. Those pins reach these installs through the
 # engine constraints, so no version is repeated here.
-psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
+psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_live.py, test_rocketride_graph_live.py
 pgvector                    # the live pgvector suites' import guards (every suite in nodes/scripts/db-lanes/ that talks to pgvector); unpinned here: nodes/src/nodes/constraints.lock pins 0.4.2, the version both the nodes and these suites use
 antlr4-python3-runtime      # rocketride_graph (AGE translator, generated with ANTLR 4.13.2): live database suites
 neo4j                       # graph_neo4j: live database suites (test_graph_drivers_full.py uses its Bolt hydration)
@@ -36,4 +40,7 @@ google-api-python-client    # tool_google_workspace: test_google_client.py, gmai
 google-auth                 # tool_google_workspace
 langchain-aws               # llm_bedrock: test_token_count.py, test_prompt_cache.py
 langchain-anthropic         # llm_anthropic: test_prompt_cache.py
+langchain-core              # agent_langchain, agent_deepagent: test_tool_builder.py; test_real_langchain.py
 astrapy                     # store_astra: test_active_paths.py
+pymilvus                    # store_milvus: test_store_milvus_live.py
+langchain-text-splitters    # summarization: test_summarization.py

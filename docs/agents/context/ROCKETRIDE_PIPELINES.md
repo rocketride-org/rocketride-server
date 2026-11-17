@@ -18,7 +18,7 @@ pipeline components this document does not mention. Always confirm a provider na
 and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
-On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
+On RocketRide Cloud there are no custom nodes (it runs only the catalog's),
 and a pipeline bundled in a store app may use catalog nodes only: see 'Catalog nodes only'
 in `ROCKETRIDE_APPS.md`.
 
@@ -478,7 +478,7 @@ message points straight at the wiring to fix:
 | --- | --- |
 | Sub-pipeline shared with the main flow or a second start | `Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_a) that the main flow owns; a control node's sub-pipeline must not be shared with the main pipeline or another start` |
 | One sub-pipeline node reached by two control nodes | `is reachable from two control roots ( ... and ... ) - a node has exactly one lifecycle owner` |
-| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, lane validation rejects earlier: `input lane ... not found in service definition` — `tool_pipe` accepts no data input at all) |
+| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, `validate()` reports it first as `which tool_pipe does not take; it takes no lanes`, since `tool_pipe` accepts no data input at all) |
 
 **Valid:** invoking the *same* tool from two agents — one sub-pipeline, one owner. Only
 *sharing nodes between* sub-pipelines (or with the main flow) is rejected.
@@ -586,7 +586,8 @@ chat →  → agent_b →  → response_answers   (ONE node, one `input` entry p
 ```text
                 → [preprocessor_langchain → embedding_transformer → qdrant (content)]
 webhook → parse →
-                → [summarization [controlled: llm] → embedding_transformer → qdrant (summaries)]
+                → [summarization → embedding_transformer → qdrant (summaries)]
+    [controlled by summarization: llm]
 ```
 
 Two-tier retrieval indexing. `summarization` requires an `llm` control connection.
@@ -1009,7 +1010,8 @@ response/store node for the machine-readable result. For video, put `frame_grabb
 ### Pattern 27: Structured extraction with validation
 
 ```text
-webhook → parse → extract_data [controlled: llm] → schema_validate → response_answers
+webhook → parse → extract_data → schema_validate → response_answers
+    [controlled by extract_data: llm]
 ```
 
 `extract_data` (requires an `llm` control connection) pulls a configured column set out of
@@ -1163,7 +1165,7 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 ### Driving pipelines from code (pointers)
 
 - Start once with `client.use(filepath='...')` and reuse the returned token; pass
-  `use_existing=True` in long-running services to avoid `Pipeline already running`. A task
+  `use_existing=True` in long-running services to avoid `Pipeline is already running`. A task
   is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
   time give each `use()` its own unguessable `tk_` token.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
@@ -1215,10 +1217,19 @@ Validation errors (pipeline rejected before running):
 | `input references unknown component id:` / `control references unknown component id:` | `from` must name an existing component |
 | `'pipeline.source' references unknown component id:` | Point `source` at a real component id |
 | `Pipeline has multiple source components, please specify one explicitly` | Two+ `mode: "Source"` components — add top-level `source` (or pass `source` to `client.use()`) |
-| `input lane <lane> not found in service definition` | Data input wired into invoke-only `tool_pipe` — remove it; `tool_pipe` is invoked, never fed |
 | `...must not be shared with the main pipeline or another start` | Sub-pipeline node also reachable from a start — make the sub-pipeline self-contained (ownership rule 3) |
 | `...is reachable from two control roots...a node has exactly one lifecycle owner` | Node shared between two invoke nodes' sub-pipelines — one sub-pipeline per invoke node (rule 2) |
 | `...drives a sub-pipeline and is also data-fed...` | Remove the data input from the invoke node (rule 1) |
+
+Wiring errors. `validate()` checks the pipeline against the services it names. A run does
+not, so a pipeline with these errors can still start and then fail or lose data:
+
+| Error contains | Cause / fix |
+| --- | --- |
+| `which is not a service on this engine` | Unknown or misspelled provider; use one from the service catalog |
+| `which is not a class of <provider>` | A `control` entry on the wrong node; put it on the node being called, with `from` naming the node that calls it |
+| `which <provider> does not produce` | The upstream node never writes that lane; wire it from a node that does |
+| `which <provider> does not take` | The node never reads that lane, such as a data input into invoke-only `tool_pipe`; remove the input or use a lane the node takes |
 
 Runtime errors:
 
@@ -1226,7 +1237,7 @@ Runtime errors:
 | --- | --- |
 | `Connection closed` / `Connection timeout` | **Blocked async event loop** — async I/O only; see the SDK docs |
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
-| `Pipeline already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
+| `Pipeline is already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
 | `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
 

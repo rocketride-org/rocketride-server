@@ -42,7 +42,7 @@ if not _REQUIRED:
 from . import graph_wire_fixtures as gen  # noqa: E402
 from . import test_graph_falkordb_full as fk  # noqa: E402
 from . import test_graph_neo4j_full as n4  # noqa: E402
-from . import test_rocketride_graph_full as rr  # noqa: E402
+from . import test_rocketride_graph_live as rr  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'apps' / 'graph-ui' / 'tests' / 'fixtures' / 'v1'
 

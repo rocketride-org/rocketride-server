@@ -320,6 +320,9 @@ async def run_bridge(
                 await client.connect()
             except Exception as exc:
                 _log(f'unable to connect to RocketRide server: {exc}')
+                hint = getattr(exc, 'hint', None)
+                if hint:
+                    _log(f'hint: {hint}')
                 return 2
 
         try:

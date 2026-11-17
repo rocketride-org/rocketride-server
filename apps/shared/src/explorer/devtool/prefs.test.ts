@@ -493,6 +493,47 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 		assert.equal(r.requests.some((q) => q.op === 'fsWriteJson'), false);
 	});
 
+	it('the read before a write answers while nobody is vouched for: the change is held, then written once the same owner is back', async () => {
+		for (const backBeforeCheck of [false, true]) {
+			let current: string | null = OWNER;
+			let reads = 0;
+			let release: (value: unknown) => void = () => undefined;
+			const writes: unknown[] = [];
+			const { fs } = fakeFs({
+				'fsStat': () => ({ exists: true }),
+				// The load's read answers at once; the read before the write is held.
+				'fsReadJson': () => (++reads === 1 ? file({}) : reads === 2 ? new Promise((resolve) => { release = resolve; }) : file({})),
+				'fsMkdir': () => undefined,
+				'fsWriteJson': (params) => { writes.push(params.value); },
+			});
+			const { clock, opts } = options(fs, { ownerNow: () => current });
+			const prefs = createFsPrefs(opts);
+			assert.equal(await prefs.load(), 'ready');
+			prefs.setPref('k', 'v');
+			await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+			await settle();
+			assert.equal(reads, 2, 'the write is waiting on its fresh read');
+			current = null;
+			release(file({}));
+			if (backBeforeCheck) {
+				// The same owner is back before the write looks again.
+				await settle();
+				current = OWNER;
+			}
+			await clock.advance(60_000);
+			await settle();
+			if (!backBeforeCheck) {
+				assert.equal(writes.length, 0, 'nothing sent while unknown');
+				current = OWNER;
+				await clock.advance(60_000);
+				await settle();
+			}
+			assert.equal(writes.length, 1, 'written without another setPref, flush or close');
+			assert.deepEqual((writes[0] as { owners: Record<string, { prefs: unknown }> }).owners[OWNER].prefs, { k: 'v' });
+			prefs.dispose();
+		}
+	});
+
 	it('mkdir in flight, then dispose(): nothing is sent', async () => {
 		const r = heldMkdir(() => OWNER);
 		await r.prefs.load();
