@@ -501,7 +501,9 @@ describe('discoverToolEndpoints — readable names (one listTasks per discovery,
 			const started = Date.now();
 			const hung = await discoverNamed([unnamed()], () => new Promise(() => undefined), { taskNamesTimeoutMs: 20 });
 			assert.equal(hung.found[0]!.endpoint.pipelineName, 'Tools', 'a listTasks that never answers');
-			assert.ok(Date.now() - started < 2_000, 'it waits only its own timeout');
+			// Ignoring the 20 ms override would wait out TASK_NAMES_TIMEOUT_MS (10 s);
+			// half of that is the bound, so a slow CI runner cannot flip it.
+			assert.ok(Date.now() - started < TASK_NAMES_TIMEOUT_MS / 2, 'it waits only its own timeout');
 			assert.ok(TASK_NAMES_TIMEOUT_MS > 0 && TASK_NAMES_TIMEOUT_MS <= 10_000, 'a third of the store\'s 30 s discovery bound, at most');
 			const world = fakeWorld([unnamed()]);
 			Object.defineProperty(world.client, 'listTasks', { get() { throw new Error('getter'); } });
