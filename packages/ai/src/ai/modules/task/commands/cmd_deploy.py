@@ -51,6 +51,7 @@
 # a team needs task.control on THAT team (cmd_pipe.py).
 # =============================================================================
 
+import json
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from rocketlib import debug
@@ -58,6 +59,7 @@ from rocketlib import debug
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of
 from ai.account.models import resolve_team_permissions
+from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, write_pipe_content
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -326,7 +328,24 @@ class DeployCommands(_DeployBase):
         if not self._teams_with('task.control'):
             raise PermissionError("Permission 'task.control' denied")
 
+        # The BUNDLE (plan 9, B7): the binary ``data`` frame is the zip of the
+        # pipeline folder — the pipe, its .rrpipe manifest, readme, icon and
+        # assets. The pipe inside it IS the artifact; a ``pipeline`` dict sent
+        # beside it must be the same pipe. Without a bundle the dict is the
+        # artifact alone (the SDK and CI door): nothing to list in the store
+        # until a bundle is deployed.
+        bundle = None
+        data = args.get('data')
+        if data is not None:
+            if not isinstance(data, (bytes, bytearray)):
+                raise ValueError('data must be the pipeline bundle zip (binary frame), not text')
+            bundle = read_pipe_bundle(bytes(data))
         pipeline = args.get('pipeline')
+        if bundle is not None:
+            if pipeline is None:
+                pipeline = bundle.pipeline
+            elif json.dumps(pipeline, sort_keys=True) != json.dumps(bundle.pipeline, sort_keys=True):
+                raise ValueError("pipeline differs from the bundle's .pipe - deploy the bundle as it is on disk")
         # Shape first, then content: a missing/empty pipeline must report
         # itself, not a misleading "name is required".
         if not isinstance(pipeline, dict) or not pipeline:
@@ -358,7 +377,11 @@ class DeployCommands(_DeployBase):
         _assert_owns_namespace(self, full_name)
 
         org_id = self._org_id()
-        metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
+        caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
+        # The listing manifest the publish row snapshots (plan 9): what the
+        # author wrote in the .rrpipe plus the pipe's own facts; never a
+        # publisher or author (derived, plan S7)
+        metadata = {**caller_meta, 'manifest': pipe_manifest(pipeline, bundle)}
         # Born state (plan S8): on a review-ladder server a pipe deploys
         # 'private' like an app (team and personal rungs serve it; @public
         # needs 'ready' after review); without the ladder the developer IS
@@ -373,6 +396,22 @@ class DeployCommands(_DeployBase):
             metadata=metadata,
             state=None if account.review_ladder else 'ready',
         )
+        if bundle is not None and bundle.content_entries:
+            # The content beside the artifact (readme, icon, assets, the
+            # manifest file). The registry row was allocated first because
+            # the version names the content paths; a failed write flips the
+            # row 'failed' (the rail refuses to serve that state) and
+            # surfaces the cause, as the app door does.
+            try:
+                await write_pipe_content(org_id, self._account_info.userId, entry, bundle)
+            except Exception as exc:
+                try:
+                    await account.set_artifact_state(org_id, project_id, entry['version'], 'failed', self._actor())
+                except Exception as flip_exc:
+                    debug(f'[DEPLOY] could not flip {project_id} v{entry["version"]} to failed: {flip_exc}')
+                raise ValueError(
+                    f'deploy failed while storing the bundle content (version {entry["version"]} marked failed): {exc}'
+                ) from exc
         await self._withdraw_stale_submissions(org_id, project_id, int(entry['version']))
         await account.audit(
             self._account_info.userId,

@@ -137,9 +137,19 @@ async def run_deploy(args) -> int:
             if client is None:
                 return 1
             if args.kind == 'pipe':
-                with open(args.file, 'r', encoding='utf-8') as f:
-                    pipeline = json.load(f)
-                result = await client.deploy.add(pipeline, kind='pipe', comment=args.comment, deploy_to=args.deploy_to)
+                # A pipeline publishes as a BUNDLE (plan 9, B7): the folder
+                # pipelines/<id>/ with its one .pipe, the .rrpipe manifest,
+                # readme, icon and assets. A .pipe is accepted when it is its
+                # folder's only pipe; a bare pipe beside others is refused.
+                try:
+                    result = await client.deploy.add_pipe(args.file, comment=args.comment, deploy_to=args.deploy_to)
+                except ValueError as exc:
+                    if 'not a pipeline bundle' in str(exc):
+                        return out.fail(
+                            str(exc),
+                            'a pipeline deploys from its own folder: pipelines/<id>/<id>.pipe beside <id>.rrpipe, readme.md, an icon and assets/',
+                        )
+                    raise
             else:
                 with open(args.file, 'rb') as f:
                     data = f.read()

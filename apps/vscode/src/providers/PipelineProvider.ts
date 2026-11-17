@@ -29,6 +29,7 @@ import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
+import { packPipeBundle, pipeBundleFolderOf } from 'rocketride/app-pack';
 import { getLogger } from '../shared/util/output';
 // Deep import on purpose — see SidebarProvider: the barrel drags view types
 // into the extension-host compile; parse.ts is pure.
@@ -336,15 +337,22 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 					const saved = await document.save();
 					if (!saved) throw new Error('Save failed; publish cancelled');
 				}
-				const parsed = JSON.parse(document.getText()) as PipelineConfig;
-				// The registry renders pipelineName on every deploy surface;
-				// .pipe JSON rarely carries one (names live in FILENAMES), so the
-				// snapshot takes the file's basename when the JSON has none.
-				const pipeline = {
-					...parsed,
-					name: parsed.name || document.uri.path.split('/').pop()?.replace(/\.pipe(?:\.json)?$/, '') || document.uri.path,
-				};
-				await deployClient.deploy.add({ pipeline, ...(p.comment ? { comment: p.comment } : {}), ...(p.deployTo ? { deployTo: p.deployTo } : {}) });
+				// A pipeline publishes as a BUNDLE (plan §9, B7): the folder
+				// holding this one .pipe, its .rrpipe manifest, readme, icon and
+				// assets. The SDK's packer reads the folder (the extension host
+				// is Node); a pipe that is not alone in its folder is refused
+				// with the way out.
+				const folder = pipeBundleFolderOf(document.uri.fsPath);
+				if (!folder) {
+					throw new Error('This pipeline is not in a bundle folder. Move it to pipelines/<id>/<id>.pipe (beside its readme, icon and assets) to deploy it.');
+				}
+				const packed = packPipeBundle(folder);
+				await deployClient.deploy.add({
+					pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
+					data: packed.data,
+					...(p.comment ? { comment: p.comment } : {}),
+					...(p.deployTo ? { deployTo: p.deployTo } : {}),
+				});
 			},
 			'host.pipeline.contentSet': async (p) => {
 				const editorState = stateFor(p.doc);

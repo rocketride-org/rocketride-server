@@ -238,6 +238,52 @@ class DeployApi:
             comment=comment,
         )
 
+    async def add_pipe(
+        self,
+        bundle_dir: str,
+        *,
+        comment: str | None = None,
+        deploy_to: str | None = None,
+    ) -> PublishResult:
+        """
+        Pack a pipeline BUNDLE folder and deploy it as the next immutable
+        registry version — the call behind the DEPLOY card and the CLI's
+        ``deploy add <folder>`` (plan 9, B7).
+
+        The bundle is ``pipelines/<pipeId>/``: exactly one ``.pipe`` (what
+        runs), beside the store manifest ``<stem>.rrpipe``, ``readme.md``,
+        an icon and ``assets/`` (the readme's images). The pipe rides as the
+        artifact, the rest as the content zip the server stores beside it. A
+        folder that is not a bundle (no pipe, several pipes) is refused
+        before any call; :meth:`add` with ``kind='pipe'`` stays the raw door
+        for a pipeline dict with no bundle.
+
+        Args:
+            bundle_dir: The bundle folder, or its ``.pipe`` when it is the
+                folder's only pipe.
+            comment: Optional "what changed" note kept in the registry.
+            deploy_to: Team id to deploy the new version to immediately
+                (one-step add+deploy).
+
+        Returns:
+            The artifact entry, plus the deployment when ``deploy_to`` was given.
+        """
+        from ._pipe_bundle import pack_pipe_bundle, pipe_bundle_folder_of
+
+        folder = pipe_bundle_folder_of(bundle_dir)
+        if folder is None:
+            raise ValueError(
+                f'{bundle_dir} is not a pipeline bundle - wrap the pipe in its own folder (pipelines/<id>/<id>.pipe)'
+            )
+        packed = pack_pipe_bundle(folder)
+        return await self.add(
+            packed.pipeline,
+            kind='pipe',
+            data=packed.data,
+            comment=comment,
+            deploy_to=deploy_to,
+        )
+
     async def create_app(
         self,
         slug: str,

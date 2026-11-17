@@ -37,7 +37,7 @@
 import * as fs from 'fs';
 import { Command } from 'commander';
 import { RocketRideClient } from '../../client/client';
-import { pipelineNameFromPath, resolveDeployTeams, resolveTeamArg, teamNameOf } from '../../client/deploy-helpers';
+import { resolveDeployTeams, resolveTeamArg, teamNameOf } from '../../client/deploy-helpers';
 import type { DeployTeamRef } from '../../client/deploy-helpers';
 import { Deployment, DeployHistoryEntry } from '../../client/types';
 import { Output } from '../output';
@@ -185,8 +185,8 @@ Examples:
 
 	// ── deploy add ───────────────────────────────────────────────────────
 	const addCmd = deployCmd
-		.command('add <file>')
-		.description('Deploy an artifact file as the next registry version (deploying activates nothing)')
+		.command('add <path>')
+		.description('Deploy a pipeline bundle folder (pipelines/<id>/) or a node package as the next registry version (deploying activates nothing)')
 		.option('--kind <kind>', 'Artifact kind: pipe or node', 'pipe')
 		.option('--comment <text>', 'What-changed note kept in the registry')
 		.option('--deploy-to <team>', 'Also point this team (@me, a name, or an id) at the new version in the same call')
@@ -196,19 +196,26 @@ Examples:
 					return out.fail(`Unknown artifact kind '${options.kind}'`, "use 'pipe' or 'node' (apps deploy via 'rocketride app deploy')");
 				}
 				if (!fs.existsSync(file)) {
-					return out.fail(`Artifact file not found: ${file}`);
+					return out.fail(`Artifact path not found: ${file}`);
 				}
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
 				const deployTo = options.deployTo !== undefined ? teamArgOf(client, options.deployTo) : undefined;
 				let result;
 				if (options.kind === 'pipe') {
-					// .pipe names live in FILENAMES; every deploy surface renders
-					// pipelineName, so an unnamed pipeline takes the file's name
-					// (exactly as the VS Code Deploy action does).
-					const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
-					const pipeline = { ...parsed, name: parsed.name || pipelineNameFromPath(file) };
-					result = await client.deploy.add({ kind: 'pipe', pipeline, comment: options.comment, deployTo });
+					// A pipeline publishes as a BUNDLE (plan §9, B7): the folder
+					// pipelines/<id>/ with its one .pipe, the .rrpipe manifest,
+					// readme, icon and assets. A .pipe is accepted when it is its
+					// folder's only pipe; a bare pipe beside others is refused.
+					try {
+						result = await client.deploy.addPipe(file, { comment: options.comment, deployTo });
+					} catch (err) {
+						const message = err instanceof Error ? err.message : String(err);
+						if (message.includes('not a pipeline bundle')) {
+							return out.fail(message, 'a pipeline deploys from its own folder: pipelines/<id>/<id>.pipe beside <id>.rrpipe, readme.md, an icon and assets/');
+						}
+						throw err;
+					}
 				} else {
 					result = await client.deploy.add({ kind: 'node', data: fs.readFileSync(file), comment: options.comment, deployTo });
 				}

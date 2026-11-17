@@ -196,6 +196,42 @@ export class DeployApi {
 	}
 
 	/**
+	 * Packs a pipeline BUNDLE folder and deploys it as the next immutable
+	 * registry version — the call behind the DEPLOY card and the CLI's
+	 * `deploy add <folder>` (Node.js only; plan §9, B7).
+	 *
+	 * The bundle is `pipelines/<pipeId>/`: exactly one `.pipe` (what runs),
+	 * beside the store manifest `<stem>.rrpipe`, `readme.md`, an icon and
+	 * `assets/` (the readme's images). The pipe rides as the artifact, the
+	 * rest as the content zip the server stores beside it. A folder that is
+	 * not a bundle (no pipe, several pipes) is refused before any call;
+	 * `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a
+	 * pipeline dict with no bundle.
+	 *
+	 * @param bundleDir - The bundle folder, or its `.pipe` when it is the
+	 *   folder's only pipe.
+	 * @param options.comment - "What changed" note kept in the registry.
+	 * @param options.deployTo - Team id to deploy the new version to
+	 *   immediately (one-step add+deploy).
+	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
+	 */
+	async addPipe(bundleDir: string, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
+		const pack = await this.loadAppPack();
+		const folder = pack.pipeBundleFolderOf(bundleDir);
+		if (!folder) {
+			throw new Error(`${bundleDir} is not a pipeline bundle - wrap the pipe in its own folder (pipelines/<id>/<id>.pipe)`);
+		}
+		const packed = pack.packPipeBundle(folder);
+		return this.add({
+			kind: 'pipe',
+			pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
+			data: packed.data,
+			...(options.comment !== undefined && { comment: options.comment }),
+			...(options.deployTo !== undefined && { deployTo: options.deployTo }),
+		});
+	}
+
+	/**
 	 * Scaffolds a new app in the workspace — the programmatic twin of the
 	 * App Builder's New App wizard, rendering the identical templates
 	 * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace

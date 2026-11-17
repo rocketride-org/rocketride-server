@@ -100,7 +100,15 @@ future). Learn it once:
   changes nothing a user sees. For apps the server also *builds* the deployed
   source; a failed build leaves the version unservable, with a build log to
   read. The registry version is not your semver — your package's display
-  version rides along as metadata.
+  version rides along as metadata. A **pipeline deploys as a bundle folder**,
+  `pipelines/<id>/`: its one `.pipe` (what runs) beside `<id>.rrpipe` (the
+  store manifest: name, tagline, description, category, tags, icon, links,
+  mode, plans), `readme.md`, an icon and `assets/` (the readme's images).
+  A bare `.pipe` still runs in development and may be sent as a dict through
+  the SDK, but the DEPLOY card and `rocketride deploy add` publish the folder,
+  and the store lists only what a bundle carries. A short id is one thing per
+  developer id across apps, pipes and nodes: the first deploy fixes the
+  kind, and version numbers are never reused.
 - **Publish** — bind one deployed version to one **audience rung**. The same
   verb covers first release, update, promotion, and rollback: publishing is
   *repointing*, never rebuilding.

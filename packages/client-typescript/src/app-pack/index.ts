@@ -64,6 +64,7 @@ import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
 import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
 import { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
+import { MAX_PIPE_MANIFEST_BYTES, MAX_PIPE_README_BYTES, PIPE_ASSETS_DIR, PIPE_ICON_NAMES, PIPE_README_NAME, packPipeBundle, pipeBundleFolderOf, pipeOfBundle, readPipeManifest } from './pipe-bundle.js';
 import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 
 export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
@@ -72,6 +73,8 @@ export { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMA
 export type { AppRef, ScannedApp } from './scan.js';
 export { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 export type { PlatformVendorResult, VendorLog, VendorPlatformOptions } from './vendor.js';
+export { MAX_PIPE_MANIFEST_BYTES, MAX_PIPE_README_BYTES, PIPE_ASSETS_DIR, PIPE_ICON_NAMES, PIPE_README_NAME, packPipeBundle, pipeBundleFolderOf, pipeOfBundle, readPipeManifest } from './pipe-bundle.js';
+export type { PackedPipeBundle, PipeManifest } from './pipe-bundle.js';
 
 /** Receives one human-readable line per pack/verify step. */
 export type PackProgress = (line: string) => void;
@@ -1016,4 +1019,13 @@ registerAppPack({
 	extractInstallCause,
 	isTransientLockError,
 	vendorPlatformPackages,
+	MAX_PIPE_MANIFEST_BYTES,
+	MAX_PIPE_README_BYTES,
+	PIPE_ASSETS_DIR,
+	PIPE_ICON_NAMES,
+	PIPE_README_NAME,
+	packPipeBundle,
+	pipeBundleFolderOf,
+	pipeOfBundle,
+	readPipeManifest,
 });
