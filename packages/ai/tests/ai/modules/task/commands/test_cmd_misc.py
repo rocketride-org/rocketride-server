@@ -1792,3 +1792,128 @@ async def test_on_rrext_validate_checks_the_single_component_form(monkeypatch):
     errors = result['body']['errors']
     assert len(errors) == 1 and errors[0]['id'] == 'q1'
     assert '"score"' in errors[0]['message']
+
+
+# ---------------------------------------------------------------------------
+# Conversion from the old node-config format (plan 5.6.8)
+# ---------------------------------------------------------------------------
+
+
+def _conversion(pipeline, *, touched, warnings=(), errors=()):
+    """A stand-in ConvertResult the handler reads like the real one."""
+    return SimpleNamespace(pipeline=pipeline, touched=touched, warnings=list(warnings), errors=list(errors))
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_validates_and_returns_the_converted_pipeline(monkeypatch):
+    """An old-shape pipeline is converted first; the reply carries the converted text and the warnings."""
+    _schemas(monkeypatch)
+    old = {'components': [{'id': 'c1', 'provider': 'store_qdrant', 'config': {'profile': 'local'}}]}
+    new = {'components': [{'id': 'c1', 'provider': 'store_qdrant', 'name': 'Qdrant', 'config': {'mode': 'local'}}]}
+    seen = {}
+    monkeypatch.setattr(
+        cmd_misc,
+        'convert_pipeline',
+        lambda p: _conversion(new, touched=True, warnings=[{'id': 'c1', 'message': 'profile -> mode'}]),
+    )
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: seen.setdefault('payload', payload) and {})
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': old, 'source': 'c1'}})
+
+    # The engine validated the CONVERTED components, and the caller gets them back
+    assert seen['payload']['pipeline']['components'] == new['components']
+    body = result['body']
+    assert body['converted'] == new
+    assert body['conversion'] == [{'id': 'c1', 'message': 'profile -> mode'}]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_reports_an_unconvertible_component_as_an_error(monkeypatch):
+    """What the converter refuses is one of validate's errors; nothing is guessed."""
+    _schemas(monkeypatch)
+    old = {'components': [{'id': 'c1', 'provider': 'store_qdrant', 'config': {'profile': 'nope'}}]}
+    monkeypatch.setattr(
+        cmd_misc,
+        'convert_pipeline',
+        lambda p: _conversion(
+            p, touched=False, errors=[{'id': 'c1', 'message': "profile 'nope' is not one of the old profiles"}]
+        ),
+    )
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {})
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': old, 'source': 'c1'}})
+
+    messages = [e['message'] for e in result['body']['errors']]
+    assert any('not one of the old profiles' in m for m in messages)
+    assert result['body']['converted'] == old
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_adds_nothing_for_a_current_format_pipeline(monkeypatch):
+    """A pipeline the converter leaves alone gets no `converted`/`conversion` keys."""
+    _schemas(monkeypatch)
+    monkeypatch.setattr(cmd_misc, 'convert_pipeline', lambda p: _conversion(p, touched=False))
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: {'ok': True})
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': {'components': []}}})
+    assert 'converted' not in result['body'] and 'conversion' not in result['body']
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_validate_validates_the_partial_conversion_when_one_component_fails(monkeypatch):
+    """Component A converts and B cannot: the engine validates A as converted, and the reply carries that text."""
+    _schemas(monkeypatch)
+    old = {
+        'components': [
+            {'id': 'a', 'provider': 'store_qdrant', 'config': {'profile': 'local'}},
+            {'id': 'b', 'provider': 'store_qdrant', 'config': {'profile': 'nope'}},
+        ]
+    }
+    partial = {
+        'components': [
+            {'id': 'a', 'provider': 'store_qdrant', 'name': 'Qdrant', 'config': {'mode': 'local'}},
+            {'id': 'b', 'provider': 'store_qdrant', 'config': {'profile': 'nope'}},
+        ]
+    }
+    seen = {}
+    monkeypatch.setattr(
+        cmd_misc,
+        'convert_pipeline',
+        lambda p: _conversion(
+            partial, touched=True, errors=[{'id': 'b', 'message': "profile 'nope' is not one of the old profiles"}]
+        ),
+    )
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: seen.setdefault('payload', payload) and {})
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': old, 'source': 'a'}})
+
+    # A is validated as converted, B as the user wrote it
+    assert seen['payload']['pipeline']['components'] == partial['components']
+    body = result['body']
+    # With an error the converted text is the converter's own result, not the engine echo
+    assert body['converted'] == partial
+    assert any('not one of the old profiles' in e['message'] for e in body['errors'])
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_convert_returns_the_conversion_body():
+    """`rrext_convert` answers {pipeline, warnings, errors, touched}, unwrapping the file envelope."""
+    conn = _make_conn()
+    pipeline = {'name': 'p', 'components': [{'id': 'c.1', 'provider': 'nope', 'name': 'x', 'config': {}}]}
+    result = await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': {'pipeline': pipeline}}})
+
+    body = result['body']
+    assert set(body) == {'pipeline', 'warnings', 'errors', 'touched'}
+    assert body['errors'][0]['id'] == 'c.1' and 'B5' in body['errors'][0]['message']
+    assert body['touched'] is False and body['pipeline'] == pipeline
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_convert_refuses_a_payload_without_components():
+    conn = _make_conn()
+    with pytest.raises(ValueError):
+        await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': {'version': 1, 'component': {}}}})

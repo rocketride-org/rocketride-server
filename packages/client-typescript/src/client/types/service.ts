@@ -234,8 +234,30 @@ export interface ValidationResult {
 	errors: ValidationError[];
 	/** Validation warnings — pipeline may still execute. */
 	warnings: ValidationError[];
+	/** The pipeline rewritten to the current config format, present when it was in the old one. */
+	converted?: Record<string, unknown>;
+	/** What the conversion changed or dropped, present when it ran. */
+	conversion?: ValidationError[];
 	/** Additional fields from the engine response. */
 	[key: string]: unknown;
+}
+
+/**
+ * Result of `convert()`: a pipeline rewritten from the old node-config format.
+ *
+ * `pipeline` is the text to use (the input when `touched` is false); `errors`
+ * names every component the converter would not guess at, which keeps its
+ * original config.
+ */
+export interface ConvertResult {
+	/** The converted pipeline (the input when nothing changed). */
+	pipeline: Record<string, unknown>;
+	/** What was changed, dropped or filled in, per component. */
+	warnings: ValidationError[];
+	/** Components that could not be converted. */
+	errors: ValidationError[];
+	/** Whether anything changed. */
+	touched: boolean;
 }
 
 // ============================================================================

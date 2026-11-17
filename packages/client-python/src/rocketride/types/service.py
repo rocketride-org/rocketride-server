@@ -39,6 +39,8 @@ Usage:
 from enum import Flag
 from typing import Any, Dict, List, Optional, TypedDict
 
+from .pipeline import PipelineConfig
+
 
 # ============================================================================
 # Service Definition Types
@@ -144,6 +146,23 @@ class VALIDATION_RESULT(TypedDict, total=False):
 
     errors: List[VALIDATION_ERROR]  # Validation errors — pipeline will not execute with these
     warnings: List[VALIDATION_ERROR]  # Validation warnings — pipeline may still execute
+    converted: PipelineConfig  # The pipeline rewritten to the current config format, when it was in the old one
+    conversion: List[VALIDATION_ERROR]  # What the conversion changed or dropped, when it ran
+
+
+class CONVERT_RESULT(TypedDict):
+    """
+    Result of ``convert()``: a pipeline rewritten from the old node-config format.
+
+    ``pipeline`` is the text to use (unchanged when ``touched`` is False);
+    ``errors`` names every component the converter would not guess at, which
+    keeps its original config.
+    """
+
+    pipeline: PipelineConfig  # The converted pipeline (the input when nothing changed)
+    warnings: List[VALIDATION_ERROR]  # What was changed, dropped or filled in, per component
+    errors: List[VALIDATION_ERROR]  # Components that could not be converted
+    touched: bool  # Whether anything changed
 
 
 # ============================================================================

@@ -28,7 +28,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, ConvertResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -1472,6 +1472,44 @@ export class RocketRideClient extends DAPClient {
 			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
 			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
+		}
+	}
+
+	/**
+	 * Rewrite a pipeline from the old node-config format to the current one.
+	 *
+	 * A `.pipe` saved against the old `profile`-based node configuration is
+	 * converted by the server from each node's migration data. The server also
+	 * converts on its own at validate, start and publish, so this call is for
+	 * writing the converted text back to a file. Nothing is stored server-side.
+	 *
+	 * @param options.pipeline - Pipeline configuration, flat or in the `.pipe` file envelope
+	 * @returns The pipeline to use (the input when `touched` is false), what
+	 *          changed per component, and the components that could not be
+	 *          converted (they keep their original config)
+	 * @throws Error if the server refuses the request
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await client.convert({ pipeline });
+	 * if (result.touched && result.errors.length === 0) {
+	 *   await save(result.pipeline);
+	 * }
+	 * ```
+	 *
+	 * `warnings` and `errors` are ALWAYS arrays.
+	 */
+	async convert(options: { pipeline: PipelineConfig | Record<string, unknown> }): Promise<ConvertResult> {
+		try {
+			const result = await this.call<ConvertResult>('rrext_convert', { pipeline: options.pipeline });
+			return {
+				pipeline: result?.pipeline ?? (options.pipeline as Record<string, unknown>),
+				warnings: result?.warnings ?? [],
+				errors: result?.errors ?? [],
+				touched: Boolean(result?.touched),
+			};
+		} catch (err) {
+			throw new Error(`Pipeline conversion failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 

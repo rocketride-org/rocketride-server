@@ -218,6 +218,7 @@ from .service import (
     SERVICES_RESPONSE,
     VALIDATION_ERROR,
     VALIDATION_RESULT,
+    CONVERT_RESULT,
     PROTOCOL_CAPS,
 )
 
@@ -294,6 +295,7 @@ __all__ = [
     'SERVICES_RESPONSE',
     'VALIDATION_ERROR',
     'VALIDATION_RESULT',
+    'CONVERT_RESULT',
     'PROTOCOL_CAPS',
     # Account types
     'AccountProfile',

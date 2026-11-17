@@ -371,9 +371,17 @@ class FileDeploymentBackend:
         if str(pipeline.get('kind') or 'pipe') == 'pipe':
             from ai.common.parameters import validate_parameters
             from ai.modules.task.address import validate_component_ids, validate_segment
+            from ai.modules.task.task_convert import convert_pipeline
 
             validate_segment(project_id, 'project_id')
             validate_component_ids(pipeline)
+            # Old-format node config is converted before it is frozen into an
+            # artifact (plan 5.6.8), so no old-shape artifact is created again
+            conversion = convert_pipeline(pipeline)
+            if conversion.errors:
+                raise ValueError('conversion: ' + '; '.join(e['message'] for e in conversion.errors))
+            if conversion.touched:
+                pipeline = conversion.pipeline
             # The parameters map is frozen into the artifact: it must be valid
             # against the nodes it names (plan 5.4 item 4)
             parameter_errors = validate_parameters(pipeline)
