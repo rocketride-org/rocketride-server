@@ -252,7 +252,13 @@ PUBLIC_ROUTES = [route for route, _, _ in PUBLIC_ROUTE_MANIFEST]
 # very URLs the client tells them to drop), and /store is the legacy alias the
 # client canonicalizes to /marketplace, so listing it publishes a duplicate of
 # its own canonical.
-UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store'})
+#
+# HIDDEN FOR NOW: /marketplace and /build-publish-earn are `unlisted` in
+# routes.ts as well (the Marketplace pair is pulled from nav, footers and the
+# index until it relaunches). They keep serving the SPA on a hard reload — only
+# the sitemap/llms.txt listing goes. To re-launch, remove them (and /store stays
+# unlisted regardless, as the alias) alongside dropping `unlisted` in routes.ts.
+UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store', '/marketplace', '/build-publish-earn'})
 
 # The advertised subset — what /sitemap.xml and /llms.txt enumerate.
 LISTED_ROUTE_MANIFEST = [entry for entry in PUBLIC_ROUTE_MANIFEST if entry[0] not in UNLISTED_ROUTES]

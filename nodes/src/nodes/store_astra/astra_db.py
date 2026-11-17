@@ -91,11 +91,12 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches astra configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'euclidean', 'dot_product']:
+        supported = ('cosine', 'euclidean', 'dot_product')
+        if similarity in supported:
             self.similarity = similarity
         else:
             raise Exception(
-                'The similarity metric you provided in the config.json does not match required astra configurations'
+                f'Astra DB: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
             )
 
         # Strip API key also
@@ -383,6 +384,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         if not chunks:
             return
@@ -395,17 +401,18 @@ class Store(DocumentStoreBase):
         # Clear the documents list
         documents: List[Dict] = []
 
-        # Clear the object id list for deletion
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
         def flush():
+            """Delete the replaced objects (first call only), then insert the queued documents that have a vector."""
             nonlocal documents
             nonlocal objectIds
 
             # First, delete existing documents if we have objectIds to delete
             if len(objectIds):
                 # Delete all documents with these object IDs
-                for objectId in objectIds.keys():
+                for objectId in objectIds:
                     collection.delete_many({'meta.objectId': objectId})
 
             def is_valid_vector(vector):
@@ -419,15 +426,8 @@ class Store(DocumentStoreBase):
                 collection.insert_many(valid_docs)
 
             # Clear them
-            objectIds = {}
+            objectIds = []
             documents = []
-
-        # For each document, check if we need to delete existing chunks
-        for chunk in chunks:
-            # If we are writing chunk 0, then delete the object
-            if not chunk.metadata.chunkId:
-                # Save this object id to be deleted
-                objectIds[chunk.metadata.objectId] = True
 
         # For each document, prepare the data for insertion
         for chunk in chunks:

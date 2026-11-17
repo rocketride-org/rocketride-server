@@ -54,7 +54,7 @@ from ..apps import PIPELINES_TABLE_URI
 from ..errors import _bad
 from ..errors import _timeout
 from ..errors import normalize_error
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_INTERVAL_SECONDS = 1
@@ -196,11 +196,15 @@ def register(registry: ToolRegistry) -> None:
         'timeout elapses, returning a status snapshot. Long-lived tasks (e.g. webhooks) may never '
         'reach a terminal state -- the snapshot returned at timeout has terminal=false.',
         _MONITOR_SCHEMA,
+        hints=ToolHints.reads(
+            "Polls task status; only the server's in-memory token bookkeeping changes when the task completes."
+        ),
     )(_monitor)
     registry.register(
         'list_running_pipelines',
-        'List running pipelines on the connected server with their task tokens, names, and state. '
+        'List running pipelines on the connected server with their task tokens, names, and status. '
         'Use the tokens with monitor, send_data, or terminate.',
         {'type': 'object', 'properties': {}},
         ui_resource_uri=PIPELINES_TABLE_URI,
+        hints=ToolHints.reads('Lists the running tasks the caller is permitted to see on this engine.'),
     )(_list_running_pipelines)

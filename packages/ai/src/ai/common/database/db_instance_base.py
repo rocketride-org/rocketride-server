@@ -176,6 +176,10 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
+# What get_data reports when _executeSQLQuery raises DatabaseLaneError
+_QUERY_EXECUTION_FAILED = 'Query execution failed'
+
+
 class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
 
@@ -191,6 +195,14 @@ class DatabaseLaneError(RuntimeError):
     full exception is in the engine log, written by ``error()`` before this is
     raised.
     """
+
+
+class _QuestionFailed(RuntimeError):
+    """A question failed with a message this module wrote for the caller, safe to put on the lanes."""
+
+
+# What the caller gets for a failure whose text the node did not write; the cause goes to the log only
+_QUESTION_FAILED = 'Failed to answer the question'
 
 
 class DatabaseInstanceBase(IInstanceBase, ABC):
@@ -339,7 +351,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         except DatabaseLaneError:
             # The tool contract is an explicit `valid: False` result, not an
             # exception. The lane handlers rely on the raise instead.
-            return {'valid': False, 'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
+            return {'valid': False, 'error': _QUERY_EXECUTION_FAILED, 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
         return {'valid': True, 'rows': rows, 'sql': sql_query, 'row_limit': limit}
@@ -441,9 +453,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         elif is_valid and sql_query:
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
         elif result.get('error'):
-            # EXPLAIN rejected the query on every attempt -- surface the real
-            # database error instead of the rejected SQL, so callers can tell
-            # this apart from a genuinely off-topic question.
+            # EXPLAIN rejected the query on every attempt (or the LLM reported an
+            # error) -- surface the error instead of the rejected SQL, so callers
+            # can tell this apart from a genuinely off-topic question.
             return {'error': result['error'], 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
@@ -833,7 +845,16 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
         times.  Returns the last LLM response if EXPLAIN eventually accepts it;
         if every attempt is rejected, the result is forced to ``isValid: False``
-        with the last EXPLAIN error carried in ``error``.
+        with the last EXPLAIN error carried in ``error``. An ``error`` the LLM
+        puts in its own reply becomes ``_QUESTION_FAILED`` (its text goes to the
+        log), so ``error`` in the result is always text the node wrote.
+
+        Args:
+            question_text: The natural-language question.
+            limit: The row limit the generated query must apply.
+
+        Returns:
+            The LLM's reply as a dict with ``isValid`` and ``query``, plus ``error`` when the question failed.
         """
         previous_sql: str | None = None
         last_error: str | None = None
@@ -841,6 +862,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
+            # The prompt asks for no error key: whatever the LLM wrote there is its text, not ours
+            if result.get('error'):
+                warning(f'The LLM reported an error for the question: {result["error"]}')
+                result['error'] = _QUESTION_FAILED
 
             is_valid = parse_bool(result.get('isValid', False))
             sql_query = result.get('query', '')
@@ -988,21 +1013,36 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         return result.answer
 
     def _executeSQLQuery(self, query: str) -> list[dict]:
-        """Execute a SQL SELECT query and return rows as a list of dicts.
+        """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts.
 
-        There is no failure return value: every failure raises
+        There is no failure return value: a database failure raises
         ``DatabaseLaneError``. This used to return ``None``, and the lane handler
         then emitted the string ``"None"`` as the answer, which reads downstream
         as a successful, empty result.
+
+        Args:
+            query: The generated SQL.
+
+        Returns:
+            One dict per row.
+
+        Raises:
+            DatabaseLaneError: The database refused or failed the query (the cause is in the engine log).
+            Exception: Any error that is not a database failure, such as the RuntimeError of a dialect without a
+                read-only mode.
         """
         try:
-            with self.IGlobal.engine.connect() as conn:
+            with self.IGlobal.read_only_connection() as conn:
                 result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
         except Exception as e:
+            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException,
+            # including when readonly=1 refuses a write
+            if not _isDbFailure(e):
+                raise
             error(f'Error executing SQL query: {e}')
             raise DatabaseLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
@@ -1090,12 +1130,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         lanes = self.instance.getListeners()
 
-        # What to tell the lanes, decided inside the `try` and written outside it.
-        # A write to a downstream node can fail (a DB node downstream raising on its
-        # own outage reaches this caller as a plain `Exception`); if the writes sat
-        # in the `try`, the catch-all below would log that failure and return, and
-        # the step would complete with the rows never written.
-        error_message: str | None = None
+        # The result is decided inside the `try` and written outside it. A write to a
+        # downstream node can fail (a DB node downstream raising on its own outage
+        # reaches this caller as a plain `Exception`); if the writes sat in the `try`,
+        # the catch-all below would log that failure and return, and the step would
+        # complete with the rows never written.
         result: Any = None
         executed = False
 
@@ -1105,41 +1144,46 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             sql_query = query_json.get('query')
             is_valid_query = parse_bool(query_json.get('isValid', False))
 
+            # The EXPLAIN repair loop gave up (`query` still holds the rejected SQL,
+            # not an answer) or the LLM reported an error. Report it, never print it as prose.
             if query_json.get('error'):
-                # The EXPLAIN repair loop gave up: `query` still holds the rejected
-                # SQL, not an answer. Emit the error instead of printing it as prose.
-                error_message = query_json['error']
-            elif is_valid_query and sql_query and not is_sql_safe(sql_query):
-                # The LLM claimed valid SQL but it fails the safety gate: same rule
-                # -- surface the rejection, never emit the unsafe SQL as prose/data.
-                error_message = 'Generated query contains unsafe SQL'
-            else:
-                executed = is_valid_query and bool(sql_query)
-                # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
-                result = self._executeSQLQuery(sql_query) if executed else sql_query
+                raise _QuestionFailed(query_json['error'])
+            # The LLM claimed valid SQL but it fails the safety gate: same rule
+            # -- surface the rejection, never emit the unsafe SQL as prose/data.
+            if is_valid_query and sql_query and not is_sql_safe(sql_query):
+                raise _QuestionFailed('Generated query contains unsafe SQL')
+            # Neither SQL to run nor a prose answer: report it instead of emitting the text 'None'
+            if not sql_query:
+                raise _QuestionFailed('The LLM returned neither a query nor an answer')
+
+            executed = is_valid_query and bool(sql_query)
+            # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
+            # A database failure raises DatabaseLaneError (logged by `_executeSQLQuery`)
+            result = self._executeSQLQuery(sql_query) if executed else sql_query
 
         except (DatabaseLaneError, DatabaseUnavailableError):
             # `_executeSQLQuery` / `_validateQuery` have logged the cause. Fail the step: emitting
-            # anything here, an error object included, lets the pipeline carry on
-            # as if the question had been answered.
+            # anything here, an error object included, lets the pipeline carry on as if the question
+            # had been answered. This must stay ahead of the catch-all below, which would otherwise
+            # turn the outage into an error on the lanes and return normally.
             raise
-        except MissingLlmError as e:
-            # The caller needs this cause, not only the log: on the text/answers
-            # lanes when one is wired, otherwise through the engine's error path
-            # (a table-only pipeline has no lane that carries an error message).
-            error(f'Error handling question: {e}')
-            if 'text' not in lanes and 'answers' not in lanes:
-                raise
-            error_message = str(e)
         except Exception as e:
-            # The node's own non-database work failed (the LLM returned nothing usable,
-            # a prompt error): log it. A database failure never lands here.
+            # The caller needs to know the question failed, not only the log: on the
+            # text/answers lanes when one is wired, otherwise through the engine's
+            # error path (a table-only pipeline has no lane that carries an error),
+            # which hands the exception's text to the client too. Only messages
+            # written here reach the caller either way; any other exception text can
+            # carry the LLM's reply or a provider's internals, so it stays in the log.
             error(f'Error handling question: {e}')
+            written_here = isinstance(e, (_QuestionFailed, MissingLlmError))
+            if 'text' not in lanes and 'answers' not in lanes:
+                if written_here:
+                    raise
+                raise _QuestionFailed(_QUESTION_FAILED) from None
+            self._emitError(str(e) if written_here else _QUESTION_FAILED, lanes)
             return
 
-        if error_message is not None:
-            self._emitError(error_message, lanes)
-            return
+        # Outside the try: a lane write runs the downstream nodes, so their failure fails the question with their own error
         self._emit(result, lanes, executed=executed)
 
     def _emitError(self, message: str, lanes) -> None:

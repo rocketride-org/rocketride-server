@@ -23,7 +23,10 @@
 
 """Pure deploy/publish helpers (TS deploy-helpers twin)."""
 
+import asyncio
 import math
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -148,3 +151,49 @@ def test_pipeline_name_from_path_strips_pipe_extensions():
     assert pipeline_name_from_path('pipelines/ingest.pipe') == 'ingest'
     assert pipeline_name_from_path('C:\work\chat.pipe.json') == 'chat'
     assert pipeline_name_from_path('plain.json') == 'plain.json'
+
+
+class _FakeOut:
+    def __init__(self):
+        self.failures = []
+
+    def fail(self, message, hint=''):
+        self.failures.append(message)
+        return 1
+
+
+@pytest.mark.parametrize('apikey', ['', '   ', None])
+def test_connect_deploy_stops_early_on_a_blank_key(apikey):
+    from rocketride.cli.commands import deploy
+    from rocketride.cli.utils.env import NO_DEPLOY_APIKEY_MESSAGE
+
+    out = _FakeOut()
+    args = SimpleNamespace(uri='https://deploy.test', apikey=apikey)
+    with mock.patch.object(deploy, 'connect_client', new=mock.AsyncMock()) as connect:
+        assert asyncio.run(deploy._connect_deploy(args, out)) is None
+    connect.assert_not_called()
+    assert out.failures == [NO_DEPLOY_APIKEY_MESSAGE]
+    assert 'ROCKETRIDE_DEPLOY_APIKEY' in out.failures[0] and '--apikey' in out.failures[0]
+
+
+def test_connect_deploy_passes_a_set_key_through():
+    from rocketride.cli.commands import deploy
+
+    out = _FakeOut()
+    args = SimpleNamespace(uri='https://deploy.test', apikey='k')
+    with mock.patch.object(deploy, 'connect_client', new=mock.AsyncMock(return_value='client')) as connect:
+        assert asyncio.run(deploy._connect_deploy(args, out)) == 'client'
+    connect.assert_awaited_once_with('https://deploy.test', 'k')
+    assert out.failures == []
+
+
+@pytest.mark.parametrize('apikey', ['', '  '])
+def test_app_deploy_stops_early_on_a_blank_key(apikey, capsys):
+    from rocketride.cli.commands import app
+    from rocketride.cli.utils.env import NO_DEPLOY_APIKEY_MESSAGE
+
+    args = SimpleNamespace(app_subcommand='deploy', uri='https://deploy.test', apikey=apikey, json=None)
+    with mock.patch.object(app, 'connect_client', new=mock.AsyncMock()) as connect:
+        assert asyncio.run(app.run_app(args)) == 1
+    connect.assert_not_called()
+    assert NO_DEPLOY_APIKEY_MESSAGE in capsys.readouterr().err

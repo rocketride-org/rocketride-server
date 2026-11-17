@@ -390,6 +390,16 @@ class ServerInfoResult(TypedDict, total=False):
             on this server, so clients initialise Stripe Elements with the key
             matching the server's Stripe account (test vs live) instead of a
             build-time value. Absent on servers without billing (OSS).
+        posthogPublishableKey (str): PostHog project token (``phc_*``)
+            configured on this server, so the shell initialises product
+            telemetry with the key matching this environment instead of a
+            build-time value. Absent on servers without telemetry (OSS) —
+            telemetry is then structurally off.
+        posthogHost (str): The analytics ingestion address telemetry requests
+            go to. Present exactly when ``posthogPublishableKey`` is: the
+            server serves neither unless the operator configured both, so a
+            self-hosted engine never sends its users' events to a host it did
+            not choose.
         endpoints (ServerEndpoints): The server's public addresses, RESOLVED
             to absolute URLs by :meth:`RocketRideClient.get_server_info` —
             the server's ``'origin'`` sentinel ("the address you probed me
@@ -403,6 +413,8 @@ class ServerInfoResult(TypedDict, total=False):
     platform: str
     apps: list[AppManifestEntry]
     stripePublishableKey: str
+    posthogPublishableKey: str
+    posthogHost: str
     endpoints: 'ServerEndpoints'
 
 

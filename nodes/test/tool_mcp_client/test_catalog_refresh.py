@@ -302,6 +302,43 @@ class TestRefreshOutcomes:
         assert g.call_tool(server_name='srv', tool_name='a', arguments={})['content'][0]['text'] == 'called a'
         assert any('refresh (test) failed' in w and 'server went away' in w for w in warnings)
 
+    def test_failed_later_page_keeps_previous_catalog(self, clock, warnings, monkeypatch):
+        """A transport failure on page two propagates with its own message; the old catalog stays."""
+        client = McpStdioClient(command='unused', args=[])  # never started; _request is scripted
+        calls = []
+
+        def _request(method, params):
+            calls.append(dict(params))
+            if 'cursor' in params:
+                raise RuntimeError('synthetic transport failure')
+            return {'tools': [{'name': 'a'}, {'name': 'b'}], 'nextCursor': 'c1'}
+
+        monkeypatch.setattr(client, '_request', _request)
+        g = _iglobal(client, _tool('a'))
+        clock[0] += REFRESH_MIN_INTERVAL_S
+
+        assert g.refresh_tools(reason='test') is False
+        assert set(g._tools_by_original) == {'a'}  # page one's 'b' did not leak into the cache
+        assert calls == [{}, {'cursor': 'c1'}]
+        assert any('refresh (test) failed' in w and 'synthetic transport failure' in w for w in warnings)
+
+    def test_helper_validation_error_on_a_later_page_names_the_page(self, clock, warnings, monkeypatch):
+        """A malformed page two is refused by the helper; the warning names the page and the old catalog stays."""
+        client = McpStdioClient(command='unused', args=[])
+
+        def _request(method, params):
+            if 'cursor' in params:
+                return 'not an object'
+            return {'tools': [{'name': 'a'}, {'name': 'b'}], 'nextCursor': 'c1'}
+
+        monkeypatch.setattr(client, '_request', _request)
+        g = _iglobal(client, _tool('a'))
+        clock[0] += REFRESH_MIN_INTERVAL_S
+
+        assert g.refresh_tools(reason='test') is False
+        assert set(g._tools_by_original) == {'a'}
+        assert any('refresh (test) failed' in w and 'page 2' in w for w in warnings)
+
     def test_changed_catalog_warns_with_added_and_removed_names(self, warnings):
         client = _ScriptedClient([_tool('a'), _tool('c')])
         g = _iglobal(client, _tool('a'), _tool('b'))
@@ -356,7 +393,32 @@ def stub_client(live_tools_file):
         c.stop()
 
 
+@pytest.fixture
+def paged_stub_client(tmp_path, monkeypatch):
+    tools = [{'name': f'tool_{i}', 'description': f'tool {i}', 'inputSchema': {'type': 'object'}} for i in range(3)]
+    path = tmp_path / 'tools.json'
+    path.write_text(json.dumps(tools))
+    monkeypatch.setenv('STUB_MCP_TOOLS_FILE', str(path))
+    monkeypatch.setenv('STUB_MCP_PAGE_SIZE', '1')
+    c = McpStdioClient(command=sys.executable, args=[STUB_SERVER], timeout_s=10.0)
+    c.start()
+    try:
+        yield c
+    finally:
+        c.stop()
+
+
 class TestAgainstStubServer:
+    def test_tool_on_a_later_page_is_discovered_and_callable_through_iglobal(self, paged_stub_client, clock):
+        g = IGlobal.__new__(IGlobal)
+        g.serverName = 'stub'
+        g._client = paged_stub_client
+        g._cache_tools(paged_stub_client.list_tools())
+
+        assert {t['name'] for t in g.list_namespaced_tools()} == {'stub.tool_0', 'stub.tool_1', 'stub.tool_2'}
+        result = g.call_tool(server_name='stub', tool_name='tool_2', arguments={'k': 'v'})
+        assert result['received_arguments'] == {'k': 'v'}
+
     def test_tool_added_after_start_becomes_callable_and_ghost_is_refused(self, stub_client, live_tools_file, clock):
         g = IGlobal.__new__(IGlobal)
         g.serverName = 'stub'
