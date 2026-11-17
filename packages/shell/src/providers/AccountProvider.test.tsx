@@ -177,6 +177,12 @@ test('billing details and dashboard remain workspace-scoped during an A to B to 
 		await act(async () => heldBBalance.resolve(bBalance));
 		assert.deepEqual(readView().subscriptions, [aRow]);
 		assert.equal(readView().creditBalance, aBalance);
+
+		// A failed refresh in the same workspace keeps the rows on screen and reports the error.
+		getDetails.mock.mockImplementation(() => Promise.reject(new Error('details unavailable')));
+		await switchTo('a');
+		assert.deepEqual(readView().subscriptions, [aRow]);
+		assert.equal(readView().billingError, 'details unavailable');
 	} finally {
 		await act(async () => {
 			heldADetails.resolve([aRow]);

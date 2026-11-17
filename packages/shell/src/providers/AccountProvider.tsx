@@ -262,15 +262,23 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		const sequence = ++billingLoadSequence.current;
 		const subscriptionSequence = ++subscriptionLoadSequence.current;
 		const isCurrentLoad = () => sequence === billingLoadSequence.current && isCurrentBillingScope();
-		const publishSubscriptions = (rows: BillingDetail[], error: string | null) => {
+		// A failed refresh keeps the rows already shown for this scope and only
+		// adds the error; a first load with no rows yet publishes an empty list.
+		const publishSubscriptions = (rows: BillingDetail[] | null, error: string | null) => {
 			if (subscriptionSequence === subscriptionLoadSequence.current && isCurrentLoad()) {
-				setSubscriptionSnapshot({ client, orgId, userId, rows, error });
+				setSubscriptionSnapshot((current) => ({
+					client,
+					orgId,
+					userId,
+					rows: rows ?? (current?.client === client && current.orgId === orgId && current.userId === userId ? current.rows : []),
+					error,
+				}));
 			}
 		};
 		const [, , balance, transactions, usageByUser, usageByTeam] = await Promise.all([
 			client.billing.getDetails(orgId).then(
 				(rows) => publishSubscriptions(rows, null),
-				(error: unknown) => publishSubscriptions([], errMsg(error) || 'Failed to load subscriptions'),
+				(error: unknown) => publishSubscriptions(null, errMsg(error) || 'Failed to load subscriptions'),
 			),
 			client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []).then((plans) => {
 				if (isCurrentLoad()) setAllPlans(plans);
