@@ -15,6 +15,10 @@ they must stay what the Python side really emits. Two sets:
 - **Live captures** (``v1/live/*.json``): the real node tools (``read_query``,
   ``dialect``, ``get_schema``, ``refresh_schema``, error text) against the live
   test databases the ``*_full.py`` suites use (same ``RR_TEST_*`` variables).
+  ``--live`` needs ``RR_TEST_AGE_DSN`` set (the AGE suites have no default
+  DSN, so without it the AGE captures stop with an error instead of reaching
+  some local database), plus the Neo4j and FalkorDB variables when those
+  servers are not on the ports in scripts/acceptance/graph-explorer/README.md.
 
 ``test_graph_wire_fixtures_full.py`` regenerates both sets in the live-database
 lane and compares them with the committed files, so a change to the envelope,
@@ -253,6 +257,8 @@ def live_age() -> Dict[str, Any]:
     from . import test_graph_age_full as ag
     from . import test_rocketride_graph_live as rr
 
+    if not rr.TEST_DSN:
+        raise RuntimeError('live AGE captures need RR_TEST_AGE_DSN (the AGE test database); it is not set')
     out: Dict[str, Any] = {}
     mp = MonkeyPatch()
     # make_rr_env loads the graph modules against its stubs; drop them afterwards.
