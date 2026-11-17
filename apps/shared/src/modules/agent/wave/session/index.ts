@@ -37,7 +37,8 @@
  */
 
 import { ModelFailure, type ChatModel, type KeyTrouble, type ModelRequest, type ModelResponse } from '../../model';
-import { CostLimitError, type Meter, type RequestSize } from '../../usage';
+import { tokenProps, type AgentEvents, type TurnReport } from '../../turn';
+import { CostLimitError, type Meter, type RequestSize, type Tokens } from '../../usage';
 import type { HistoryTurn, PromptPrefix, ResultEntry, ToolCall } from '../plan';
 import { nativeConversation } from './native';
 import { textConversation } from './text';
@@ -104,7 +105,7 @@ export type Adapter = 'native' | 'text';
 
 /** One turn's conversation with its model. */
 export interface ModelSession {
-	/** The adapter the session talks through now, for the run's log line. */
+	/** The adapter the session talks through now, for the turn's usage. */
 	readonly adapter: Adapter;
 	/**
 	 * Tells the model what came of its last reply, then asks for the next one.
@@ -141,6 +142,8 @@ export interface SessionOptions {
 	onKeyTrouble?: (trouble: KeyTrouble) => void;
 	/** How long one send waits for an answer (default MODEL_CALL_LIMIT_MS). */
 	limitMs?: number;
+	/** Hears each request the session sends, as `agent_model:request`, bound to the turn (default: nothing). */
+	report?: TurnReport;
 }
 
 /**
@@ -215,6 +218,12 @@ export interface Conversation {
 /** Thrown inside a send when the run is stopped while the model is asked. */
 class RunStopped extends Error {}
 
+/** A send with no answer inside the limit: a ModelFailure like any other to the send policy, a timeout to its event. */
+class NoAnswerInTime extends ModelFailure {}
+
+/** A request's event. */
+type RequestEvent = AgentEvents['agent_model:request'];
+
 class Session implements ModelSession {
 	private conversation: Conversation;
 	/** Until the first answer is taken, the round the turn opened with, so a refusal of tools can start the turn again as text. */
@@ -231,17 +240,17 @@ class Session implements ModelSession {
 
 	async next(round: Round): Promise<ModelReply> {
 		this.put(round);
-		const reply = await this.reply();
+		const reply = await this.reply('next');
 		if (reply.kind !== 'unusable') return reply;
 		this.conversation.retry(reply.problems);
-		return this.reply();
+		return this.reply('resend');
 	}
 
 	async conclude(round: Round): Promise<Conclusion> {
 		this.put(round);
 		this.concluded = true;
 		this.conversation.conclude();
-		const reply = await this.reply();
+		const reply = await this.reply('conclude');
 		switch (reply.kind) {
 			case 'answer':
 				return { kind: 'answer', answer: reply.answer };
@@ -263,11 +272,14 @@ class Session implements ModelSession {
 		this.conversation.answer(round);
 	}
 
-	/** One reply: send, fall back to text on a refusal of tools, and continue a reply cut at the output limit. */
-	private async reply(): Promise<ModelReply> {
+	/**
+	 * One reply: send, fall back to text on a refusal of tools, and continue a reply cut at the output
+	 * limit. A continuation sends as 'continue'; a fall back to text resends the same ask as `purpose`.
+	 */
+	private async reply(purpose: RequestEvent['purpose']): Promise<ModelReply> {
 		const parts: string[] = [];
 		for (let continued = 0; ; ) {
-			const sent = await this.send(this.conversation.request());
+			const sent = await this.send(this.conversation.request(), continued > 0 ? 'continue' : purpose);
 			switch (sent.kind) {
 				case 'stopped':
 				case 'cost_limit':
@@ -325,46 +337,70 @@ class Session implements ModelSession {
 	 * ModelFailure gets one fresh try, none after Stop, and a send with no answer inside the limit is
 	 * one. A CostLimitError comes from reserve, before anything is sent.
 	 */
-	private async send(out: Outgoing): Promise<ModelResponse | Interrupted> {
+	private async send(out: Outgoing, purpose: RequestEvent['purpose']): Promise<ModelResponse | Interrupted> {
 		const { signal } = this.o;
-		const started = performance.now();
 		try {
 			try {
-				return await this.attempt(out, false);
+				return await this.attempt(out, false, purpose);
 			} catch (first) {
 				if (!(first instanceof ModelFailure) || !first.retryable || signal.aborted) throw first;
-				return await this.attempt(out, true);
+				return await this.attempt(out, true, purpose);
 			}
 		} catch (error) {
 			if (error instanceof RunStopped || signal.aborted) return { kind: 'stopped' };
 			if (error instanceof CostLimitError) return { kind: 'cost_limit', error };
 			if (error instanceof ModelFailure && error.key) this.o.onKeyTrouble?.(error.key);
 			return { kind: 'failed', error: error instanceof Error ? error : new Error(String(error)) };
-		} finally {
-			// step: the eval runs count this line
-			console.log(`[agent] model call ${Math.round(performance.now() - started)} ms`);
 		}
 	}
 
 	/**
-	 * One send, reserved just before it goes. Real counts settle it, from an answer or from a failure
-	 * the provider billed; a failure the provider cannot have billed releases it; an answer with no
-	 * counts, a timeout, a thrown chat and a stop keep it.
+	 * One send, reserved just before it goes, timed and reported. Real counts settle it, from an
+	 * answer or from a failure the provider billed; a failure the provider cannot have billed
+	 * releases it; an answer with no counts, a timeout, a thrown chat and a stop keep it. One event
+	 * per reservation, so a CostLimitError from reserve, with nothing sent, reports nothing.
 	 */
-	private async attempt(out: Outgoing, fresh: boolean): Promise<ModelResponse> {
+	private async attempt(out: Outgoing, fresh: boolean, purpose: RequestEvent['purpose']): Promise<ModelResponse> {
 		const held = this.o.meter?.reserve(out.size);
+		const started = performance.now();
+		const sent = { adapter: this.conversation.adapter, purpose, fresh };
 		try {
 			const response = await answerOrStop(this.o.model.send(out.request, fresh ? { fresh } : undefined), this.o.limitMs ?? MODEL_CALL_LIMIT_MS, this.o.signal);
-			if (response.kind === 'unsupported') held?.release();
-			else if (response.tokens) held?.settle(response.tokens);
+			if (response.kind === 'unsupported') {
+				held?.release();
+				this.reported(sent, started, { outcome: 'unsupported', billed: false });
+				return response;
+			}
+			let usd: number | undefined;
+			if (response.tokens) usd = held?.settle(response.tokens);
 			else held?.keep();
+			this.reported(sent, started, { outcome: 'answered', billed: true, stop: response.kind === 'turn' ? response.stop : 'none' }, response.tokens, usd);
 			return response;
 		} catch (error) {
-			if (error instanceof ModelFailure && error.tokens) held?.settle(error.tokens);
-			else if (error instanceof ModelFailure && !error.billed) held?.release();
+			const failure = error instanceof ModelFailure ? error : undefined;
+			let usd: number | undefined;
+			if (failure?.tokens) usd = held?.settle(failure.tokens);
+			else if (failure && !failure.billed) held?.release();
 			else held?.keep();
+			const outcome = error instanceof RunStopped || this.o.signal.aborted ? 'stopped' : error instanceof NoAnswerInTime ? 'timeout' : 'failed';
+			const billed = !failure || failure.billed || failure.tokens !== undefined;
+			this.reported(sent, started, { outcome, billed, ...(outcome === 'stopped' ? {} : { retryable: failure?.retryable ?? false }), key: failure?.key?.state ?? 'none' }, failure?.tokens, usd);
 			throw error;
 		}
+	}
+
+	/** Reports one attempt. Every value is a number, a flag or a closed kind: nothing here can carry the request, the reply or a failure's message. */
+	private reported(sent: Pick<RequestEvent, 'adapter' | 'purpose' | 'fresh'>, started: number, end: Pick<RequestEvent, 'outcome' | 'billed'> & Partial<Pick<RequestEvent, 'stop' | 'retryable' | 'key'>>, tokens?: Tokens, usd?: number): void {
+		this.o.report?.('agent_model:request', {
+			...sent,
+			stop: 'none',
+			key: 'none',
+			...end,
+			ms: Math.round(performance.now() - started),
+			counted: tokens !== undefined,
+			...(tokens ? tokenProps(tokens) : {}),
+			...(usd !== undefined ? { usd } : {}),
+		});
 	}
 }
 
@@ -383,7 +419,7 @@ function answerOrStop(sending: Promise<ModelResponse>, ms: number, signal: Abort
 			signal.removeEventListener('abort', stop);
 			// step: the eval runs count this line
 			console.log(`[agent] model call had no answer in ${Math.round(ms / 1000)} s`);
-			reject(new ModelFailure(`The model did not answer in ${Math.round(ms / 1000)} s.`, { retryable: true, billed: true }));
+			reject(new NoAnswerInTime(`The model did not answer in ${Math.round(ms / 1000)} s.`, { retryable: true, billed: true }));
 		}, ms);
 		if (signal.aborted) stop();
 		else signal.addEventListener('abort', stop, { once: true });

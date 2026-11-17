@@ -34,6 +34,7 @@
 import type { AgentWatchPlace, AppErrorRow, ConsoleRow, WatchStatus } from '../../tools/appdev/types';
 import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
 import type { ModelChoice } from './model';
+import type { AgentReport } from './turn';
 
 // =============================================================================
 // THE SEAM
@@ -302,6 +303,13 @@ export interface AgentHost {
 	 * @returns Whether an editor opened.
 	 */
 	openFile?(path: string): Promise<boolean>;
+	/**
+	 * Where the agent's events go: the shell's reporter for the app, read once at the app's root, which
+	 * renders inside the shell's TelemetryProvider (rocket-ui's RocketApp). A component under the sidebar
+	 * gets the shell's do-nothing reporter, so no agent code calls useReport() itself. Hosts without
+	 * telemetry (tests) leave it out, and nothing is reported. Each turn binds it with turnReport.
+	 */
+	readonly report?: AgentReport;
 }
 
 // =============================================================================

@@ -33,6 +33,7 @@ import type { RocketRideClient } from 'shell';
 import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
 import { DEFAULT_LIMITS, GRANTS, grantsFrom, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings } from 'shared/modules/agent/host';
 import { messageOf } from 'shared/modules/agent/toolkits/common';
+import type { AgentReport } from 'shared/modules/agent/turn';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
@@ -190,9 +191,12 @@ export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>
  *
  * @param client - The connected client; it supplies the publisher and packs deploys.
  * @param ws - The workspace the host is bound to: its view and its scope.
+ * @param report - The reporter RocketApp got from useReport(). RocketApp renders inside the shell's
+ *   TelemetryProvider, so this is the real one; the agent's sidebar renders outside it and would get
+ *   the do-nothing one. The shell keeps one reporter per app for the page's life.
  * @returns The host to install with setAgentHost().
  */
-export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): AgentHost {
+export function createRocketAgentHost(client: RocketRideClient, ws: Workspace, report: AgentReport): AgentHost {
 	// step: after a team switch, a run must not reach the new team's dev sessions, even where app ids match
 	const current = (): boolean => {
 		try {
@@ -256,5 +260,6 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 		},
 		// step: a file link on a turn's card opens the file the way the Explorer does, in this host's team only
 		openFile: async (path) => current() && openWorkspaceFile(path),
+		report,
 	};
 }

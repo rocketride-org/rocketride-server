@@ -22,7 +22,8 @@
 
 // =============================================================================
 // AGENT TESTS — a conversation stays in its team, keys stay out of saves, the
-// step and cost limits pause a turn, and Undo never loses or overwrites work
+// step and cost limits pause a turn, Undo never loses or overwrites work, and a
+// turn reports what it did with no user content
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -519,4 +520,32 @@ test("a conversation keeps its model: a turn asks it, it is saved with it, and a
 	// step: a stored conversation saves its own pick at once
 	stored.setModel(opus);
 	await until(() => (written.get(sessionPath(SAVED_SESSION)) as AgentSessionFile).model?.model === opus.model);
+});
+
+// =============================================================================
+// WHAT A TURN REPORTS
+// =============================================================================
+
+test('a turn reports its end, each model request and each tool call, priced from real counts, with no user content', async () => {
+	const events: Array<[string, Record<string, unknown>]> = [];
+	const engine = scripted([planReply(['read_file', { path: 'secret-plan.txt' }]), doneReply('Read it.')]);
+	const answer = engine.chat as (o: { question: Question }) => Promise<object>;
+	// step: each text answer carries the response node's `tokens` key
+	store({ ...engine, chat: async (o: { question: Question }) => (isTurn(o.question) ? answer(o) : { ...(await answer(o)), tokens: { input: 1000, output: 100, cache_read: 0, cache_creation: 0 } }) });
+	setAgentHost({ ...hostOver(workspace({ 'secret-plan.txt': 'launch codes' }).vfs), report: (event, props) => void events.push([event, props]) });
+	const session = AgentSession.newSession();
+	const { turn: ended } = await session.execute('Read secret-plan.txt for me.', undefined, turn());
+	assert.deepEqual(
+		events.map(([event, props]) => `${event}:${String(props.outcome)}`),
+		['agent_model:request:unsupported', 'agent_model:request:answered', 'agent_tool:call:ok', 'agent_model:request:answered', 'agent_turn:end:done']
+	);
+	const end = events[events.length - 1][1];
+	const requests = events.filter(([event]) => event === 'agent_model:request').reduce((sum, [, props]) => sum + (typeof props.usd === 'number' ? props.usd : 0), 0);
+	assert.ok(requests > 0, 'the text answers were priced from their counts');
+	assert.deepEqual({ card: ended.usage.cost?.usd, end: end.usd, uncounted: end.uncounted }, { card: requests, end: requests, uncounted: 0 }, 'the card, the turn end and the requests read one meter');
+	assert.ok(
+		events.every(([, props]) => props.turn_id === ended.turnId && props.conversation_id === session.sessionId && props.model === 'claude-sonnet-5-5'),
+		'every event carries the turn, the conversation and the model'
+	);
+	assert.doesNotMatch(JSON.stringify(events), /secret-plan|launch codes|Read it|for me/, 'no path, content, reply or request reaches an event');
 });

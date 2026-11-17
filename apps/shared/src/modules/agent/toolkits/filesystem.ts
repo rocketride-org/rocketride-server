@@ -185,11 +185,6 @@ export class FileTracker {
 		return this.files.get(path);
 	}
 
-	/** The paths whose content the run read or wrote, in the order first seen; a file the run only deleted is left out. */
-	seen(): string[] {
-		return [...this.files.values()].filter((file) => file.readHash !== undefined).map((file) => file.path);
-	}
-
 	/** The run read a file at `version`. */
 	read(path: string, version: number, hash: string, stored = hash): void {
 		const file = this.entry(path);
@@ -920,15 +915,6 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	// ── Toolkit surface ──────────────────────────────────────────────────
-
-	/**
-	 * The paths whose content this toolkit saw this run, read or written.
-	 *
-	 * @returns Canonical paths, in the order first seen.
-	 */
-	pathsSeen(): string[] {
-		return this.tracker.seen();
-	}
 
 	tools(): AgentTool[] {
 		return [
