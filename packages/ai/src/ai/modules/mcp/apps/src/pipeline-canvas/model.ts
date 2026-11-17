@@ -309,7 +309,7 @@ export function errorFor(summary: ViewPipelineSummary): Extract<CanvasModel, { k
 		case 'PipelineTooLarge':
 			return { kind: 'error', message: `${file} is too large to show here${typeof summary.size === 'number' ? ` (${formatBytes(summary.size)})` : ''}. The limit is 2 MB.`, hint: 'Open it in the builder instead.' };
 		case 'InvalidPipeline':
-			return { kind: 'error', message: `${file} isn't a pipeline the canvas can read.`, hint: 'Ask to see your saved pipelines.' };
+			return { kind: 'error', message: `${file} isn't a pipeline file, or it is damaged.`, hint: 'Open it in the builder to check it.' };
 		default:
 			return { kind: 'error', message: withoutTeamIds(summary.message || 'The pipeline could not be opened.') };
 	}
@@ -328,7 +328,12 @@ export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown)
 	const projectNodes = parentsFirst(getNodesFromProject(pipeline) as INode[]).filter((node) => !isEmptyNote(node));
 	const edges = getEdgesFromNodes(projectNodes).map(readOnly);
 	const hadPositions = anyPosition(pipeline.components as unknown[]);
-	const nodes = placeNodes(projectNodes, edges, hadPositions).map(sizeForReactFlow).map(readOnly);
+	// A provider this engine's catalog lacks is drawn with a dashed outline (canvas.css).
+	const missing = new Set(payload ? projectNodes.filter((node) => node.type === INodeType.Default && !payload.services?.[node.data.provider]).map((node) => node.data.provider) : []);
+	const nodes = placeNodes(projectNodes, edges, hadPositions)
+		.map(sizeForReactFlow)
+		.map(readOnly)
+		.map((node) => (missing.has(node.data.provider) ? ({ ...node, className: 'rr-node-missing' } as INode) : node));
 	if (!nodes.length) return { kind: 'empty', summary };
 
 	return {
@@ -340,9 +345,7 @@ export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown)
 		icons: payload?.icons ?? {},
 		laidOut: !hadPositions,
 		summaryOnly: !payload,
-		missingProviders: payload
-			? [...new Set(nodes.filter((node) => node.type === INodeType.Default && !payload.services?.[node.data.provider]).map((node) => node.data.provider))].sort()
-			: [],
+		missingProviders: [...missing].sort(),
 	};
 }
 
@@ -354,4 +357,44 @@ export function displayPath(path?: string, workspace?: string): string {
 	}
 	const team = /^@\/Team\/=[^/]+\/\.projects\//.exec(path);
 	return team ? path.slice(team[0].length) : path;
+}
+
+/**
+ * The pipeline's main flow in one line, for a phone where the drawing is
+ * small: the longest chain of data connections, by title, and how many other
+ * nodes there are. For example "Chat → RocketRide Wave → Return Answers, and
+ * 8 more nodes". Empty when there is no data connection.
+ */
+export function mainFlow(summary: ViewPipelineSummary): string {
+	const nodes = summary.nodes ?? [];
+	const title = new Map(nodes.map((node) => [node.id, node.title || node.provider]));
+	const next = new Map<string, string[]>();
+	for (const c of summary.connections ?? []) {
+		if (!c.lane || !title.has(c.from) || !title.has(c.to)) continue;
+		if (!next.has(c.from)) next.set(c.from, []);
+		next.get(c.from)!.push(c.to);
+	}
+	if (!next.size) return '';
+	const memo = new Map<string, string[]>();
+	const longest = (id: string, seen: Set<string>): string[] => {
+		if (memo.has(id)) return memo.get(id)!;
+		let best: string[] = [];
+		for (const to of next.get(id) ?? []) {
+			if (seen.has(to)) continue;
+			seen.add(to);
+			const path = longest(to, seen);
+			seen.delete(to);
+			if (path.length > best.length) best = path;
+		}
+		const result = [id, ...best];
+		memo.set(id, result);
+		return result;
+	};
+	let path: string[] = [];
+	for (const node of nodes) {
+		const candidate = longest(node.id, new Set([node.id]));
+		if (candidate.length > path.length) path = candidate;
+	}
+	const rest = (summary.node_count ?? nodes.length) - path.length;
+	return path.map((id) => title.get(id)).join(' → ') + (rest > 0 ? `, and ${rest} more ${rest === 1 ? 'node' : 'nodes'}` : '');
 }

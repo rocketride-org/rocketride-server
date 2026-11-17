@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, formatBytes, type ToolResultLike, type ViewPipelineSummary } from './model';
+import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, formatBytes, mainFlow, type ToolResultLike, type ViewPipelineSummary } from './model';
 
 const SERVICES = {
 	webhook: { title: 'Webhook', classType: ['source'], lanes: { _source: ['questions'] }, invoke: {}, capabilities: 0, icon: 'webhook.svg' },
@@ -179,7 +179,7 @@ describe('buildCanvasModel', () => {
 			[{ error_type: 'NotFound', message: 'No pipeline file at ...', hint: 'Call store_list with path ...' }, { message: 'There is no pipeline at sub/x.pipe.', hint: 'Ask to see your saved pipelines.' }],
 			[{ error_type: 'AccessDenied', path: '@/Team/=team_B/.projects/y.pipe' }, { message: "You don't have access to y.pipe.", hint: 'Ask to see the pipelines you can open.' }],
 			[{ error_type: 'PipelineTooLarge', size: 2_200_033 }, { message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.', hint: 'Open it in the builder instead.' }],
-			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline the canvas can read.", hint: 'Ask to see your saved pipelines.' }],
+			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline file, or it is damaged.", hint: 'Open it in the builder to check it.' }],
 			[{ error_type: 'InvalidPath', path: '' }, { message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' }],
 			[{ error_type: 'Timeout', message: 'view_pipeline timed out waiting for the engine at @/Team/=team_A/.projects' }, { message: 'view_pipeline timed out waiting for the engine at .projects' }],
 		];
@@ -200,6 +200,8 @@ describe('buildCanvasModel', () => {
 		if (model.kind !== 'graph') throw new Error(model.kind);
 
 		expect(model.missingProviders).toEqual(['memory_internal']);
+		expect((model.nodes.find((n) => n.id === 'mem_1') as unknown as { className?: string }).className).toBe('rr-node-missing');
+		expect((model.nodes.find((n) => n.id === 'agent_1') as unknown as { className?: string }).className).toBeUndefined();
 		// The agent declares only an llm channel; the file also invokes its memory.
 		expect(model.services.agent).toMatchObject({ title: 'Agent', invoke: { llm: {}, memory: {} } });
 		expect(model.edges.map((e) => e.sourceHandle)).toContain('invoke-source.memory');
@@ -242,5 +244,44 @@ describe('displayPath', () => {
 		expect(displayPath('@/Team/=team_B/.projects/shared.pipe', '@/Team/=team_A/.projects')).toBe('shared.pipe');
 		expect(displayPath('odd/path.pipe', '.projects')).toBe('odd/path.pipe');
 		expect(displayPath(undefined, '.projects')).toBe('');
+	});
+});
+
+describe('mainFlow', () => {
+	it('names the longest chain of data connections and counts the rest', () => {
+		const summary = summaryFor(COMPONENTS, {
+			node_count: 5,
+			nodes: [
+				{ id: 'chat', provider: 'chat', title: 'Chat' },
+				{ id: 'agent', provider: 'agent', title: 'Agent' },
+				{ id: 'out', provider: 'response', title: 'Answers' },
+				{ id: 'llm', provider: 'llm', title: 'LLM' },
+				{ id: 'side', provider: 'response', title: 'Log' },
+			],
+			connections: [
+				{ from: 'chat', to: 'agent', lane: 'questions' },
+				{ from: 'agent', to: 'out', lane: 'answers' },
+				{ from: 'chat', to: 'side', lane: 'questions' },
+				{ from: 'agent', to: 'llm', control: 'llm' },
+			],
+		});
+
+		expect(mainFlow(summary)).toBe('Chat → Agent → Answers, and 2 more nodes');
+	});
+
+	it('is empty without data connections, and survives a cycle', () => {
+		expect(mainFlow(summaryFor([], { nodes: [{ id: 'a', provider: 'p' }], connections: [] }))).toBe('');
+		const cyclic = summaryFor([], {
+			node_count: 2,
+			nodes: [
+				{ id: 'a', provider: 'p', title: 'A' },
+				{ id: 'b', provider: 'p', title: 'B' },
+			],
+			connections: [
+				{ from: 'a', to: 'b', lane: 'x' },
+				{ from: 'b', to: 'a', lane: 'x' },
+			],
+		});
+		expect(mainFlow(cyclic)).toBe('A → B');
 	});
 });

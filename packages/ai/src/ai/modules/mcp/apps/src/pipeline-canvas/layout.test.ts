@@ -257,6 +257,41 @@ describe('layoutPipeline in a frame', () => {
 		expect([...rows.values()]).toEqual([4, 4]);
 	});
 
+	it('cuts a band where the fewest edges cross', () => {
+		// a b c d e f: a fans out to b, c and d, so a cut after a or b would cut
+		// several edges; the cut after d crosses only d -> e.
+		const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+		const edges = [
+			{ source: 'a', target: 'b' },
+			{ source: 'b', target: 'c' },
+			{ source: 'a', target: 'c' },
+			{ source: 'c', target: 'd' },
+			{ source: 'b', target: 'd' },
+			{ source: 'd', target: 'e' },
+			{ source: 'e', target: 'f' },
+		];
+		const positions = layoutPipeline(ids, edges, fixed, { width: 420, height: 2000 });
+		const firstBand = ids.filter((id) => positions[id].y === positions.a.y);
+
+		expect(firstBand).toEqual(['a', 'b', 'c', 'd']);
+	});
+
+	it('puts an invoked node that sends data below the others in its column', () => {
+		const positions = layoutPipeline(
+			['chat', 'agent', 'tool', 'answers', 'branch'],
+			[
+				{ source: 'chat', target: 'agent' },
+				{ source: 'agent', target: 'tool', control: true },
+				{ source: 'agent', target: 'answers' },
+				{ source: 'tool', target: 'branch' },
+			],
+			fixed
+		);
+
+		expect(positions.tool.x).toBe(positions.answers.x);
+		expect(positions.tool.y).toBeGreaterThan(positions.answers.y);
+	});
+
 	it('puts bands one under the other with the band gap', () => {
 		const ids = chain(6);
 		const positions = layoutPipeline(ids, links(ids), fixed, { width: 300, height: 2000 });
