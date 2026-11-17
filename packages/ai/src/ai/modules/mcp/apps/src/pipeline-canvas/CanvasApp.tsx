@@ -8,9 +8,15 @@
  * The editor contexts those components read are swapped for read-only
  * stand-ins at build time (resolve.ts). Nothing here can drag, connect,
  * select, delete or run anything: the user can only pan and zoom.
+ *
+ * Inline in a chat the canvas never traps the chat's scrolling: the mouse
+ * wheel and a one-finger swipe scroll the chat, and the canvas moves with a
+ * drag (mouse), two fingers (touch) or the buttons. Full screen, when the
+ * host offers it, is the place to explore: there the wheel pans and every
+ * gesture goes to the canvas.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Background, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow, type NodeChange } from '@xyflow/react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactElement } from 'react';
+import { Background, MiniMap, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow, useStore, type NodeChange } from '@xyflow/react';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import '@xyflow/react/dist/style.css';
 
@@ -19,8 +25,8 @@ import NodeComponent from '@app-shared/tools/pipelines/panels/design/canvas/comp
 import NodeGroup from '@app-shared/tools/pipelines/panels/design/canvas/components/node/node-group/NodeGroup';
 import NodeAnnotation from '@app-shared/tools/pipelines/panels/design/canvas/components/node/node-annotation/NodeAnnotation';
 import FlowEdge from '@app-shared/tools/pipelines/panels/design/canvas/components/edge/FlowEdge';
-import { registerServiceIcons } from '@app-shared/tools/pipelines/panels/design/canvas/util/Icon';
-import { INodeType, type IProject, type INodeData } from '@app-shared/tools/pipelines/panels/design/canvas/types';
+import { Icon, registerServiceIcons } from '@app-shared/tools/pipelines/panels/design/canvas/util/Icon';
+import { INodeType, type IProject, type INodeData, type IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 
 import { ReadOnlyFlowGraphProvider, type FlowNode } from './stand-ins/FlowGraphContext';
 import { ReadOnlyFlowProjectProvider } from './stand-ins/FlowProjectContext';
@@ -28,16 +34,24 @@ import { ReadOnlyFlowPreferencesProvider } from './stand-ins/FlowPreferencesCont
 import { ESTIMATED_NODE_SIZE, displayPath, placeNodes, type CanvasModel } from './model';
 
 /**
- * Canvas height bounds, in px. The height follows the graph's shape inside
+ * Canvas height bounds, in px. The height follows the drawing's shape inside
  * these bounds, always as a pixel value: host auto-resize measures the
  * document, and a % or vh height would collapse the widget.
  */
-export const CANVAS_MAX_HEIGHT = 420;
-export const CANVAS_MIN_HEIGHT = 260;
+export const CANVAS_MAX_HEIGHT = 560;
+export const CANVAS_MIN_HEIGHT = 200;
 
-const FIT_PADDING = 0.08;
+/** Below this zoom the builder's node titles are too small to read, so larger labels are drawn over them. */
+export const OVERVIEW_ZOOM = 0.9;
+/** A node narrower than this on screen gets no label: the label could not hold a word. */
+const LABEL_MIN_WIDTH = 40;
+/** Height of the builder's top cap and header row at zoom 1, in px. */
+const NODE_HEADER_HEIGHT = 46;
+
+const FIT_PADDING = 0.04;
 const FIT_VIEW_OPTIONS = { padding: FIT_PADDING, maxZoom: 1.25 };
 const PRO_OPTIONS = { hideAttribution: true };
+const PAN_STEP = 80;
 
 /**
  * The builder's node header shows an edit gear when it is told the node's
@@ -65,14 +79,20 @@ const NODE_TYPES = {
 const EDGE_TYPES = { default: FlowEdge };
 
 type GraphModel = Extract<CanvasModel, { kind: 'graph' }>;
+type DisplayMode = 'inline' | 'fullscreen' | 'pip';
+
+interface Bounds {
+	width: number;
+	height: number;
+}
 
 /** Applies only the size React Flow measures; nothing else can change. */
 function onlyDimensions(changes: NodeChange<FlowNode>[]): NodeChange<FlowNode>[] {
 	return changes.filter((change) => change.type === 'dimensions');
 }
 
-/** Width over height of the drawing, from node positions and sizes. */
-function graphAspect(nodes: GraphModel['nodes']): number {
+/** The drawing's size from node positions and estimated sizes, before the browser measures. */
+function estimatedBounds(nodes: GraphModel['nodes']): Bounds {
 	let minX = Infinity;
 	let minY = Infinity;
 	let maxX = -Infinity;
@@ -80,179 +100,51 @@ function graphAspect(nodes: GraphModel['nodes']): number {
 	for (const node of nodes) {
 		if (node.parentId) continue;
 		const box = node as unknown as { width?: number; height?: number };
-		const width = box.width ?? ESTIMATED_NODE_SIZE.width;
-		const height = box.height ?? ESTIMATED_NODE_SIZE.height;
 		minX = Math.min(minX, node.position.x);
 		minY = Math.min(minY, node.position.y);
-		maxX = Math.max(maxX, node.position.x + width);
-		maxY = Math.max(maxY, node.position.y + height);
+		maxX = Math.max(maxX, node.position.x + (box.width ?? ESTIMATED_NODE_SIZE.width));
+		maxY = Math.max(maxY, node.position.y + (box.height ?? ESTIMATED_NODE_SIZE.height));
 	}
-	if (!Number.isFinite(minX)) return 1;
-	return Math.max(maxX - minX, 1) / Math.max(maxY - minY, 1);
+	if (!Number.isFinite(minX)) return { width: 1, height: 1 };
+	return { width: Math.max(maxX - minX, 1), height: Math.max(maxY - minY, 1) };
 }
 
-/** The canvas height that shows the whole graph at its fitted zoom without empty bands. */
-function canvasHeight(width: number, aspect: number): number {
-	const wanted = (width * (1 - 2 * FIT_PADDING)) / aspect + width * 2 * FIT_PADDING;
-	return Math.round(Math.min(CANVAS_MAX_HEIGHT, Math.max(CANVAS_MIN_HEIGHT, wanted)));
+/** The inline canvas height that shows the whole drawing at its fitted zoom without empty bands. */
+function inlineHeight(width: number, bounds: Bounds, max: number): number {
+	const inner = width * (1 - 2 * FIT_PADDING);
+	const wanted = (inner * bounds.height) / bounds.width + width * 2 * FIT_PADDING;
+	return Math.round(Math.min(max, Math.max(CANVAS_MIN_HEIGHT, wanted)));
 }
 
-interface FullScreen {
-	/** True when the host offers full screen; the button shows only then. */
-	available: boolean;
-	active: boolean;
-	toggle: () => void;
-}
-
-const EXPAND_ICON = 'M3 3h7v2H5v5H3V3zm11 0h7v7h-2V5h-5V3zM3 14h2v5h5v2H3v-7zm16 0h2v7h-7v-2h5v-5z';
-const COLLAPSE_ICON = 'M8 3h2v7H3V8h5V3zm6 0h2v5h5v2h-7V3zM3 14h7v7H8v-5H3v-2zm11 0h7v2h-5v5h-2v-7z';
-
-const ZOOM_IN_ICON = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z';
-const ZOOM_OUT_ICON = 'M5 11h14v2H5v-2z';
-const FIT_ICON = 'M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4zM9 9h6v6H9V9z';
-
-function ToolButton({ label, icon, onClick }: { label: string; icon: string; onClick: () => void }): ReactElement {
-	return (
-		<button type="button" className="rr-canvas-tool" onClick={onClick} title={label} aria-label={label}>
-			<svg viewBox="0 0 24 24" aria-hidden="true">
-				<path d={icon} />
-			</svg>
-		</button>
-	);
-}
-
-/** Under the drawing, so it never covers a node: what the canvas allows, and the view buttons. */
-function Toolbar({ fullScreen }: { fullScreen: FullScreen }): ReactElement {
-	const { zoomIn, zoomOut, fitView } = useReactFlow();
-	return (
-		<div className="rr-canvas-bar">
-			<span className="rr-canvas-howto">Drag to move, pinch to zoom.</span>
-			<div className="rr-canvas-tools" role="toolbar" aria-label="View">
-				<ToolButton label="Zoom out" icon={ZOOM_OUT_ICON} onClick={() => zoomOut({ duration: 150 })} />
-				<ToolButton label="Zoom in" icon={ZOOM_IN_ICON} onClick={() => zoomIn({ duration: 150 })} />
-				<ToolButton label="Fit to view" icon={FIT_ICON} onClick={() => fitView({ ...FIT_VIEW_OPTIONS, duration: 200 })} />
-				{fullScreen.available && <ToolButton label={fullScreen.active ? 'Exit full screen' : 'Full screen'} icon={fullScreen.active ? COLLAPSE_ICON : EXPAND_ICON} onClick={fullScreen.toggle} />}
-			</div>
-		</div>
-	);
-}
-
-function Flow({ model, fullScreen }: { model: GraphModel; fullScreen: FullScreen }): ReactElement {
-	const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(model.nodes as unknown as FlowNode[]);
-	const initialized = useNodesInitialized();
-	const { fitView, getInternalNode } = useReactFlow();
-	const relaidOut = useRef(false);
-	const fitted = useRef(false);
-
-	// A pipeline saved without positions was placed with estimated sizes.
-	// Once the browser has measured every node, place it again with the real
-	// sizes, so tall nodes never overlap.
+/** True on a touch screen (a coarse primary pointer), kept current. */
+function useCoarsePointer(): boolean {
+	const query = '(pointer: coarse)';
+	const [coarse, setCoarse] = useState(() => window.matchMedia(query).matches);
 	useEffect(() => {
-		if (!initialized || !model.laidOut || relaidOut.current) return;
-		relaidOut.current = true;
-		const sizeOf = (id: string) => {
-			const measured = getInternalNode(id)?.measured;
-			return { width: measured?.width ?? ESTIMATED_NODE_SIZE.width, height: measured?.height ?? ESTIMATED_NODE_SIZE.height };
-		};
-		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf) as unknown as FlowNode[]);
-	}, [initialized, model, getInternalNode, setNodes]);
-
-	// Fit the whole graph once, after the final placement. Later changes
-	// never move the view the user has panned or zoomed.
-	useEffect(() => {
-		if (!initialized || fitted.current || (model.laidOut && !relaidOut.current)) return;
-		fitted.current = true;
-		requestAnimationFrame(() => fitView(FIT_VIEW_OPTIONS));
-	}, [initialized, nodes, model.laidOut, fitView]);
-
-	// Entering or leaving full screen changes the canvas size: fit again.
-	const firstMode = useRef(true);
-	useEffect(() => {
-		if (firstMode.current) {
-			firstMode.current = false;
-			return;
-		}
-		const timer = window.setTimeout(() => fitView(FIT_VIEW_OPTIONS), 150);
-		return () => window.clearTimeout(timer);
-	}, [fullScreen.active, fitView]);
-
-	const project = useMemo(() => ({ components: [] }) as unknown as IProject, []);
-
-	return (
-		<ReadOnlyFlowPreferencesProvider>
-			<ReadOnlyFlowProjectProvider project={project} servicesJson={model.services}>
-				<ReadOnlyFlowGraphProvider nodes={nodes} edges={model.edges}>
-					<ReactFlow
-						nodes={nodes}
-						edges={model.edges}
-						nodeTypes={NODE_TYPES}
-						edgeTypes={EDGE_TYPES}
-						onNodesChange={(changes) => onNodesChange(onlyDimensions(changes))}
-						nodesDraggable={false}
-						nodesConnectable={false}
-						nodesFocusable={false}
-						edgesFocusable={false}
-						elementsSelectable={false}
-						deleteKeyCode={null}
-						selectionKeyCode={null}
-						multiSelectionKeyCode={null}
-						// Wheel and two-finger scroll keep scrolling the chat; pinch,
-						// the zoom buttons and double-click zoom the canvas.
-						zoomOnScroll={false}
-						panOnScroll={false}
-						preventScrolling={false}
-						zoomOnPinch
-						panOnDrag
-						minZoom={0.1}
-						maxZoom={2}
-						fitView
-						fitViewOptions={FIT_VIEW_OPTIONS}
-						proOptions={PRO_OPTIONS}
-					>
-						<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
-					</ReactFlow>
-				</ReadOnlyFlowGraphProvider>
-			</ReadOnlyFlowProjectProvider>
-		</ReadOnlyFlowPreferencesProvider>
-	);
+		const mq = window.matchMedia(query);
+		const update = () => setCoarse(mq.matches);
+		mq.addEventListener('change', update);
+		return () => mq.removeEventListener('change', update);
+	}, []);
+	return coarse;
 }
 
-function Header({ summary, count, shown }: { summary: GraphModel['summary']; count: number; shown: number }): ReactElement {
-	const file = displayPath(summary.path, summary.workspace);
-	return (
-		<div className="rr-canvas-head">
-			<div className="rr-canvas-title">
-				<span className="rr-canvas-name">{summary.name || file || 'Pipeline'}</span>
-				<span className="rr-canvas-pill">Read only</span>
-			</div>
-			<div className="rr-canvas-meta">
-				<span className="rr-canvas-count">
-					{count} {count === 1 ? 'node' : 'nodes'}
-				</span>
-				{file && (
-					<span className="rr-canvas-path" title={summary.path}>
-						{file}
-					</span>
-				)}
-			</div>
-			{summary.truncated && (
-				<div className="rr-canvas-note" role="status">
-					Showing the first {shown} of {count} nodes.
-				</div>
-			)}
-		</div>
-	);
+interface HostView {
+	mode: DisplayMode;
+	canFullScreen: boolean;
+	/** Bottom inset the host asks content to keep clear of (a composer, a home bar). */
+	safeBottom: number;
+	request: (mode: DisplayMode) => void;
 }
 
-type DisplayMode = 'inline' | 'fullscreen' | 'pip';
-
-/** The host's display mode and whether it offers full screen, kept current. */
-function useDisplayMode(app?: App): { mode: DisplayMode; canFullScreen: boolean; request: (mode: DisplayMode) => void } {
+/** The host's display mode, whether it offers full screen, and its safe area, kept current. */
+function useHostView(app?: App): HostView {
 	const read = useCallback(() => {
 		const context = app?.getHostContext();
 		return {
 			mode: (context?.displayMode as DisplayMode | undefined) ?? 'inline',
 			canFullScreen: !!context?.availableDisplayModes?.includes('fullscreen'),
+			safeBottom: Number(context?.safeAreaInsets?.bottom ?? 0) || 0,
 		};
 	}, [app]);
 	const [state, setState] = useState(read);
@@ -270,17 +162,320 @@ function useDisplayMode(app?: App): { mode: DisplayMode; canFullScreen: boolean;
 		},
 		[app]
 	);
-	return { ...state, request };
+	return useMemo(() => ({ ...state, request }), [state, request]);
 }
 
-/** One tool result, drawn. Remounted for every result (see main.tsx). */
-export function CanvasApp({ model, app }: { model: CanvasModel; app?: App }): ReactElement {
-	useMemo(() => {
-		if (model.kind === 'graph') registerServiceIcons({ services: model.services as never, icons: model.icons });
-	}, [model]);
+// 24 px icons, drawn with currentColor.
+const ZOOM_IN_ICON = 'M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5z';
+const ZOOM_OUT_ICON = 'M5 11h14v2H5v-2z';
+const FIT_ICON = 'M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4zM9 9h6v6H9V9z';
+const EXPAND_ICON = 'M3 3h7v2H5v5H3V3zm11 0h7v7h-2V5h-5V3zM3 14h2v5h5v2H3v-7zm16 0h2v7h-7v-2h5v-5z';
+const COLLAPSE_ICON = 'M8 3h2v7H3V8h5V3zm6 0h2v5h5v2h-7V3zM3 14h7v7H8v-5H3v-2zm11 0h7v2h-5v5h-2v-7z';
 
+function Svg({ path }: { path: string }): ReactElement {
+	return (
+		<svg viewBox="0 0 24 24" aria-hidden="true">
+			<path d={path} />
+		</svg>
+	);
+}
+
+function ToolButton({ label, icon, onClick }: { label: string; icon: string; onClick: () => void }): ReactElement {
+	return (
+		<button type="button" className="rr-canvas-tool" title={label} aria-label={label} onClick={onClick}>
+			<Svg path={icon} />
+		</button>
+	);
+}
+
+function Toolbar({ host, moved }: { host: HostView; moved: MutableRefObject<boolean> }): ReactElement {
+	const { zoomIn, zoomOut, fitView } = useReactFlow();
+	const active = host.mode === 'fullscreen';
+	return (
+		<div className="rr-canvas-tools" role="toolbar" aria-label="View">
+			<ToolButton
+				label="Zoom out"
+				icon={ZOOM_OUT_ICON}
+				onClick={() => {
+					moved.current = true;
+					zoomOut({ duration: 150 });
+				}}
+			/>
+			<ToolButton
+				label="Zoom in"
+				icon={ZOOM_IN_ICON}
+				onClick={() => {
+					moved.current = true;
+					zoomIn({ duration: 150 });
+				}}
+			/>
+			<ToolButton
+				label="Fit to view"
+				icon={FIT_ICON}
+				onClick={() => {
+					moved.current = false;
+					fitView({ ...FIT_VIEW_OPTIONS, duration: 200 });
+				}}
+			/>
+			{host.canFullScreen && (
+				<button type="button" className="rr-canvas-tool rr-canvas-expand" onClick={() => host.request(active ? 'inline' : 'fullscreen')} aria-label={active ? 'Close full screen' : 'Expand to full screen'}>
+					<Svg path={active ? COLLAPSE_ICON : EXPAND_ICON} />
+					<span>{active ? 'Close' : 'Expand'}</span>
+				</button>
+			)}
+		</div>
+	);
+}
+
+/**
+ * Larger titles over the builder's node headers when the drawing is zoomed
+ * out too far to read them, in the spirit of React Flow's contextual zoom.
+ * Each label covers the header of its node exactly (same place and width, the
+ * header's colours), so the node keeps its shape and its lanes; only the
+ * title grows. Labels ignore the pointer.
+ */
+function OverviewLabels({ services }: { services: IServiceCatalog }): ReactElement | null {
+	const [tx, ty, zoom] = useStore((s) => s.transform);
+	const nodeLookup = useStore((s) => s.nodeLookup);
+	if (zoom >= OVERVIEW_ZOOM) return null;
+	const labels: ReactElement[] = [];
+	for (const node of nodeLookup.values()) {
+		if (node.type !== INodeType.Default || !node.measured?.width) continue;
+		const width = node.measured.width * zoom;
+		if (width < LABEL_MIN_WIDTH) continue;
+		const data = node.data as INodeData;
+		const service = services[data.provider] as { title?: string; icon?: string } | undefined;
+		const title = data.name || service?.title || data.provider;
+		const { x, y } = node.internals.positionAbsolute;
+		labels.push(
+			<div key={node.id} className="rr-overview-label" style={{ left: x * zoom + tx, top: y * zoom + ty, width, height: Math.max(22, NODE_HEADER_HEIGHT * zoom) }}>
+				{service?.icon && width >= 90 && <Icon name={service.icon} width="14" height="14" className="rr-overview-icon" />}
+				<span>{title}</span>
+			</div>
+		);
+	}
+	return (
+		<div className="rr-overview" aria-hidden="true">
+			{labels}
+		</div>
+	);
+}
+
+function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostView; moved: MutableRefObject<boolean>; onBounds: (bounds: Bounds) => void }): ReactElement {
+	const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(model.nodes as unknown as FlowNode[]);
+	const initialized = useNodesInitialized();
+	const { fitView, getInternalNode, getNodesBounds, setViewport, getNodes } = useReactFlow();
+	const frameWidth = useStore((s) => s.width);
+	const frameHeight = useStore((s) => s.height);
+	const active = host.mode === 'fullscreen';
+	const placed = useRef(!model.laidOut);
+	const [ready, setReady] = useState(false);
+
+	// A pipeline saved without positions was placed with estimated sizes.
+	// Once the browser has measured every node, place it again with the real
+	// sizes and the real frame, so nothing overlaps and a long flow wraps to
+	// suit the frame.
+	useEffect(() => {
+		if (!initialized || placed.current || !frameWidth) return;
+		placed.current = true;
+		const sizeOf = (id: string) => {
+			const measured = getInternalNode(id)?.measured;
+			return { width: measured?.width ?? ESTIMATED_NODE_SIZE.width, height: measured?.height ?? ESTIMATED_NODE_SIZE.height };
+		};
+		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf, { width: frameWidth, height: CANVAS_MAX_HEIGHT }) as unknown as FlowNode[]);
+	}, [initialized, model.edges, getInternalNode, setNodes, frameWidth]);
+
+	// Once the final placement is measured, report the drawing's real size,
+	// which sets the frame's height.
+	useEffect(() => {
+		if (!initialized || !placed.current) return;
+		const frame = requestAnimationFrame(() => {
+			const box = getNodesBounds(getNodes());
+			if (box.width > 0 && box.height > 0) onBounds({ width: box.width, height: box.height });
+			setReady(true);
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [initialized, nodes, getNodesBounds, getNodes, onBounds]);
+
+	// Fit the whole drawing whenever the frame changes size, unless the user
+	// has moved the view. Full screen opens on the sources at a readable zoom
+	// when the whole drawing would be too small to read there.
+	useEffect(() => {
+		if (!ready || !frameWidth || !frameHeight) return;
+		const frame = requestAnimationFrame(() => {
+			if (active) {
+				const all = getNodesBounds(getNodes());
+				const fitZoom = Math.min(frameWidth / all.width, frameHeight / all.height);
+				if (fitZoom < 0.8) {
+					const targets = new Set(model.edges.map((edge) => edge.target));
+					const sources = getNodes().filter((node) => !node.parentId && !targets.has(node.id));
+					const box = getNodesBounds(sources.length ? sources : getNodes());
+					const zoom = Math.min(1, (frameHeight - 48) / Math.max(box.height, 1));
+					setViewport({ x: 24 - box.x * zoom, y: frameHeight / 2 - (box.y + box.height / 2) * zoom, zoom });
+					return;
+				}
+			} else if (moved.current) {
+				return;
+			}
+			fitView(FIT_VIEW_OPTIONS);
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [ready, frameWidth, frameHeight, active, fitView, getNodes, getNodesBounds, setViewport, model.edges, moved]);
+
+	const project = useMemo(() => ({ components: [] }) as unknown as IProject, []);
+
+	return (
+		<ReadOnlyFlowPreferencesProvider>
+			<ReadOnlyFlowProjectProvider project={project} servicesJson={model.services}>
+				<ReadOnlyFlowGraphProvider nodes={nodes} edges={model.edges}>
+					<ReactFlow
+						nodes={nodes}
+						edges={model.edges}
+						nodeTypes={NODE_TYPES}
+						edgeTypes={EDGE_TYPES}
+						onNodesChange={(changes) => onNodesChange(onlyDimensions(changes))}
+						onMoveStart={(event) => {
+							if (event) moved.current = true;
+						}}
+						nodesDraggable={false}
+						nodesConnectable={false}
+						nodesFocusable={false}
+						edgesFocusable={false}
+						elementsSelectable={false}
+						deleteKeyCode={null}
+						selectionKeyCode={null}
+						multiSelectionKeyCode={null}
+						// Inline: the wheel scrolls the chat (pinch or Ctrl + wheel zooms).
+						// Full screen: the wheel pans and the canvas keeps every event.
+						zoomOnScroll={false}
+						panOnScroll={active}
+						preventScrolling={active}
+						zoomOnPinch
+						panOnDrag
+						zoomOnDoubleClick
+						minZoom={0.02}
+						maxZoom={2}
+						proOptions={PRO_OPTIONS}
+					>
+						<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
+						<OverviewLabels services={model.services} />
+						{active && <MiniMap pannable zoomable position="bottom-right" nodeClassName="rr-minimap-node" ariaLabel="Overview of the whole pipeline" style={{ marginBottom: 16 + host.safeBottom }} />}
+					</ReactFlow>
+				</ReadOnlyFlowGraphProvider>
+			</ReadOnlyFlowProjectProvider>
+		</ReadOnlyFlowPreferencesProvider>
+	);
+}
+
+/** Keyboard on the focused frame: arrows pan, + and - zoom, 0 fits, Escape leaves full screen. */
+function useFrameKeys(host: HostView, moved: MutableRefObject<boolean>): (event: KeyboardEvent<HTMLDivElement>) => void {
+	const { getViewport, setViewport, zoomIn, zoomOut, fitView } = useReactFlow();
+	return (event) => {
+		const step: Record<string, [number, number]> = { ArrowLeft: [PAN_STEP, 0], ArrowRight: [-PAN_STEP, 0], ArrowUp: [0, PAN_STEP], ArrowDown: [0, -PAN_STEP] };
+		if (step[event.key]) {
+			const { x, y, zoom } = getViewport();
+			moved.current = true;
+			setViewport({ x: x + step[event.key][0], y: y + step[event.key][1], zoom }, { duration: 100 });
+		} else if (event.key === '+' || event.key === '=') {
+			moved.current = true;
+			zoomIn({ duration: 150 });
+		} else if (event.key === '-') {
+			moved.current = true;
+			zoomOut({ duration: 150 });
+		} else if (event.key === '0') {
+			moved.current = false;
+			fitView({ ...FIT_VIEW_OPTIONS, duration: 200 });
+		} else if (event.key === 'Escape' && host.mode === 'fullscreen') {
+			host.request('inline');
+		} else {
+			return;
+		}
+		event.preventDefault();
+	};
+}
+
+function Header({ summary, count, shown, missing, tools }: { summary: GraphModel['summary']; count: number; shown: number; missing: string[]; tools?: ReactElement }): ReactElement {
+	const file = displayPath(summary.path, summary.workspace);
+	const stem = file.replace(/^.*\//, '').replace(/\.pipe(\.json)?$/, '');
+	const name = summary.name || stem || 'Pipeline';
+	// A pipeline without its own name is titled by its file name; the file is then shown only when it adds a folder.
+	const showFile = !!file && (summary.name ? summary.name !== stem : file !== `${stem}.pipe` && file !== `${stem}.pipe.json`);
+	return (
+		<div className="rr-canvas-head">
+			<div className="rr-canvas-heading">
+				<div className="rr-canvas-title">
+					<span className="rr-canvas-name" title={name}>
+						{name}
+					</span>
+					<span className="rr-canvas-pill">Read only</span>
+				</div>
+				<div className="rr-canvas-meta">
+					<span className="rr-canvas-count">
+						{count} {count === 1 ? 'node' : 'nodes'}
+					</span>
+					{showFile && (
+						<span className="rr-canvas-path" title={file}>
+							{file}
+						</span>
+					)}
+				</div>
+				{summary.description && <div className="rr-canvas-description">{summary.description}</div>}
+			</div>
+			{tools}
+			{(summary.truncated || missing.length > 0) && (
+				<div className="rr-canvas-notes" role="status">
+					{summary.truncated && (
+						<div>
+							Showing the first {shown} of {count} nodes. Open the pipeline in the builder to see all of it.
+						</div>
+					)}
+					{missing.length > 0 && (
+						<div>
+							{missing.length === 1 ? `${missing[0]} isn't installed on this engine, so it is drawn with a plain icon.` : `${missing.join(', ')} aren't installed on this engine, so they are drawn with a plain icon.`}
+						</div>
+					)}
+				</div>
+			)}
+		</div>
+	);
+}
+
+/** The drawing as text, for screen readers: every node, then every connection. */
+function TextAlternative({ summary }: { summary: GraphModel['summary'] }): ReactElement {
+	const titles = new Map((summary.nodes ?? []).map((node) => [node.id, node.title || node.provider]));
+	return (
+		<div className="rr-sr-only" id="rr-canvas-text">
+			<p>Nodes:</p>
+			<ul>
+				{(summary.nodes ?? []).map((node) => (
+					<li key={node.id}>
+						{node.title || node.provider} ({node.provider})
+					</li>
+				))}
+			</ul>
+			<p>Connections:</p>
+			<ul>
+				{(summary.connections ?? []).map((c, i) => (
+					<li key={i}>
+						{titles.get(c.from) ?? c.from} to {titles.get(c.to) ?? c.to}, {c.lane ? `${c.lane} lane` : `invokes as ${c.control}`}
+					</li>
+				))}
+			</ul>
+		</div>
+	);
+}
+
+function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactElement {
+	const coarse = useCoarsePointer();
+	const active = host.mode === 'fullscreen';
+	const moved = useRef(false);
 	const boxRef = useRef<HTMLDivElement>(null);
+	const headRef = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(0);
+	const [bounds, setBounds] = useState<Bounds>(() => estimatedBounds(model.nodes));
+	const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+	const onKeyDown = useFrameKeys(host, moved);
+
 	useLayoutEffect(() => {
 		const box = boxRef.current;
 		if (!box) return;
@@ -288,59 +483,116 @@ export function CanvasApp({ model, app }: { model: CanvasModel; app?: App }): Re
 		const observer = new ResizeObserver(() => setWidth(box.clientWidth));
 		observer.observe(box);
 		return () => observer.disconnect();
-	}, [model.kind]);
+	}, []);
 
-	const aspect = useMemo(() => (model.kind === 'graph' ? graphAspect(model.nodes) : 1), [model]);
-
-	const display = useDisplayMode(app);
-	const active = display.mode === 'fullscreen';
-	const fullScreen: FullScreen = useMemo(
-		() => ({ available: display.canFullScreen, active, toggle: () => display.request(active ? 'inline' : 'fullscreen') }),
-		[display, active]
-	);
-	// In full screen the host sizes the frame, so the canvas fills the window below the header.
-	const headRef = useRef<HTMLDivElement>(null);
-	const [viewport, setViewport] = useState(() => window.innerHeight);
 	useEffect(() => {
 		if (!active) return;
-		const onResize = () => setViewport(window.innerHeight);
+		const onResize = () => setViewportHeight(window.innerHeight);
+		const onEscape = (event: globalThis.KeyboardEvent) => {
+			if (event.key === 'Escape') host.request('inline');
+		};
 		onResize();
 		window.addEventListener('resize', onResize);
-		return () => window.removeEventListener('resize', onResize);
-	}, [active]);
+		window.addEventListener('keydown', onEscape);
+		return () => {
+			window.removeEventListener('resize', onResize);
+			window.removeEventListener('keydown', onEscape);
+		};
+	}, [active, host]);
 
-	if (model.kind === 'error') {
-		return (
-			<div className="rr-card rr-canvas-error" role="alert">
-				<div className="rr-canvas-error-message">{model.message}</div>
-				{model.hint && <div className="rr-canvas-hint">{model.hint}</div>}
+	// Inline on a touch screen, one finger scrolls the chat: a one-finger touch
+	// never reaches the canvas (two fingers still pan and zoom it). Map embeds
+	// call this cooperative gesture handling.
+	useEffect(() => {
+		const box = boxRef.current;
+		if (!box || active || !coarse) return;
+		const oneFinger = (event: TouchEvent) => {
+			if (event.touches.length === 1) event.stopPropagation();
+		};
+		box.addEventListener('touchstart', oneFinger, { capture: true, passive: true });
+		return () => box.removeEventListener('touchstart', oneFinger, { capture: true });
+	}, [active, coarse]);
+
+	const onBounds = useCallback((next: Bounds) => setBounds((current) => (Math.abs(current.width - next.width) < 1 && Math.abs(current.height - next.height) < 1 ? current : next)), []);
+
+	const headBottom = headRef.current?.getBoundingClientRect().bottom ?? 90;
+	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 40 - host.safeBottom) : width ? inlineHeight(width, bounds, CANVAS_MAX_HEIGHT) : CANVAS_MIN_HEIGHT;
+
+	const hint = active
+		? coarse
+			? 'Drag to move, pinch to zoom.'
+			: 'Drag or scroll to move. Pinch or Ctrl + scroll to zoom. Esc closes.'
+		: coarse
+			? host.canFullScreen
+				? 'Use two fingers to move or zoom, or tap Expand.'
+				: 'Use two fingers to move or zoom.'
+			: 'Drag to move. Ctrl + scroll or double-click to zoom.';
+
+	return (
+		<div className={`rr-canvas${active ? ' rr-canvas-full' : ''}${coarse ? ' rr-canvas-coarse' : ''}`}>
+			<div ref={headRef}>
+				<Header
+					summary={model.summary}
+					count={model.summary.node_count ?? model.nodes.length}
+					shown={model.summary.nodes?.length ?? model.nodes.length}
+					missing={model.missingProviders}
+					tools={<Toolbar host={host} moved={moved} />}
+				/>
 			</div>
-		);
-	}
+			<div
+				ref={boxRef}
+				className="rr-canvas-frame"
+				style={{ height }}
+				tabIndex={0}
+				role="region"
+				aria-label={`Read-only diagram of ${model.summary.name || 'the pipeline'}. Arrow keys move it, plus and minus zoom.`}
+				aria-describedby="rr-canvas-text"
+				onKeyDown={onKeyDown}
+			>
+				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} />}
+			</div>
+			<div className="rr-canvas-howto">{hint}</div>
+			<TextAlternative summary={model.summary} />
+		</div>
+	);
+}
+
+function ErrorCard({ message, hint }: { message: string; hint?: string }): ReactElement {
+	return (
+		<div className="rr-card rr-canvas-error" role="alert">
+			<svg viewBox="0 0 24 24" aria-hidden="true" className="rr-canvas-error-icon">
+				<path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm-1 5v7h2V7h-2zm0 9v2h2v-2h-2z" />
+			</svg>
+			<div>
+				<div className="rr-canvas-error-title">Couldn't open this pipeline</div>
+				<div className="rr-canvas-error-message">{message}</div>
+				{hint && <div className="rr-canvas-hint">{hint}</div>}
+			</div>
+		</div>
+	);
+}
+
+/** One tool result, drawn. Remounted for every result (see main.tsx). */
+export function CanvasApp({ model, app }: { model: CanvasModel; app?: App }): ReactElement {
+	useMemo(() => {
+		if (model.kind === 'graph') registerServiceIcons({ services: model.services as never, icons: model.icons });
+	}, [model]);
+	const host = useHostView(app);
+
+	if (model.kind === 'error') return <ErrorCard message={model.message} hint={model.hint} />;
 	if (model.kind === 'empty') {
 		return (
 			<div className="rr-canvas">
-				<Header summary={model.summary} count={0} shown={0} />
+				<Header summary={model.summary} count={0} shown={0} missing={[]} />
 				<div className="rr-card rr-canvas-empty" role="status">
 					This pipeline has no nodes yet.
 				</div>
 			</div>
 		);
 	}
-	const inlineHeight = width ? canvasHeight(width, aspect) : CANVAS_MAX_HEIGHT;
-	// Leave room for the toolbar (40 px) and the page margin under the drawing.
-	const fullHeight = Math.max(CANVAS_MIN_HEIGHT, viewport - (headRef.current?.getBoundingClientRect().bottom ?? 120) - 64);
 	return (
-		<div className={active ? 'rr-canvas rr-canvas-full' : 'rr-canvas'}>
-			<div ref={headRef}>
-				<Header summary={model.summary} count={model.summary.node_count ?? model.nodes.length} shown={model.summary.nodes?.length ?? model.nodes.length} />
-			</div>
-			<ReactFlowProvider>
-				<div ref={boxRef} className="rr-canvas-frame" style={{ height: active ? fullHeight : inlineHeight }} aria-label={`Read-only diagram of ${model.summary.name || 'the pipeline'}`} role="region">
-					{width > 0 && <Flow model={model} fullScreen={fullScreen} />}
-				</div>
-				<Toolbar fullScreen={fullScreen} />
-			</ReactFlowProvider>
-		</div>
+		<ReactFlowProvider>
+			<Graph model={model} host={host} />
+		</ReactFlowProvider>
 	);
 }

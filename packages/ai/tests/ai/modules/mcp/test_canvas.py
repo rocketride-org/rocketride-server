@@ -271,8 +271,9 @@ async def test_a_file_over_the_limit_is_refused_before_it_is_read():
     result = await _call(engine, {'path': '.projects/big.pipe'})
 
     assert result['error_type'] == 'PipelineTooLarge'
-    assert result['message'] == 'This pipeline file is too large to show (2097153 bytes, the limit is 2,097,152).'
+    assert result['message'] == 'This pipeline file is too large to show (2,097,153 bytes, the limit is 2,097,152).'
     assert result['hint'] is None
+    assert result['size'] == 2_097_153
     assert engine.read_paths == []
 
 

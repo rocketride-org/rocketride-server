@@ -19,7 +19,7 @@ import { INodeType } from '@app-shared/tools/pipelines/panels/design/canvas/type
 import type { INode, IProject, IProjectComponent, IService, IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 import { IServiceCapabilities } from 'shell';
 
-import { layoutPipeline, type LayoutSize } from './layout';
+import { layoutPipeline, type LayoutFrame, type LayoutSize } from './layout';
 
 /** The `_meta` key the tool puts the drawing payload under. */
 export const CANVAS_META_KEY = 'rocketride/canvas';
@@ -32,6 +32,9 @@ export const ESTIMATED_NODE_SIZE: LayoutSize = { width: 180, height: 90 };
 
 /** Size of a saved group with no recorded size. */
 export const DEFAULT_GROUP_SIZE: LayoutSize = { width: 320, height: 200 };
+
+/** The frame a layout aims at before the widget knows its real size. */
+export const DEFAULT_FRAME: LayoutFrame = { width: 740, height: 420 };
 
 export interface SummaryNode {
 	id: string;
@@ -60,6 +63,8 @@ export interface ViewPipelineSummary {
 	error_type?: string;
 	message?: string;
 	hint?: string | null;
+	/** File size in bytes, on a PipelineTooLarge error. */
+	size?: number;
 }
 
 /** The widget-only payload under `_meta['rocketride/canvas']`. */
@@ -91,6 +96,8 @@ export type CanvasModel =
 			laidOut: boolean;
 			/** True when the drawing came from the summary because `_meta` was missing. */
 			summaryOnly: boolean;
+			/** Providers in the file that this engine's catalog does not have. */
+			missingProviders: string[];
 	  };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -138,57 +145,58 @@ export function pipelineFromSummary(summary: ViewPipelineSummary): IProject {
 }
 
 /**
- * Catalog entries for providers the catalog does not know (a node removed
- * from this engine, or a summary-only drawing). The entry is made from the
- * node's own connections, so its lanes and invoke diamonds exist and its
- * edges have handles to attach to. Its icon is the builder's fallback icon
- * and its title is the provider name.
+ * Catalog entries the drawing needs so that every connection in the file has
+ * handles to attach to. A provider the catalog does not know (a node removed
+ * from this engine, or a summary-only drawing) gets an entry made from its
+ * node's own connections, with the builder's fallback icon and the provider
+ * name as its title. A known provider keeps its entry, plus any lane or
+ * invoke channel the file uses and the catalog does not declare, so a
+ * connection the builder would silently leave out is still drawn.
  */
 export function fillMissingServices(nodes: INode[], services: IServiceCatalog): IServiceCatalog {
 	const catalog: IServiceCatalog = { ...services };
-	const missing = nodes.filter((node) => node.type === INodeType.Default && !catalog[node.data.provider]);
-	if (!missing.length) return catalog;
-
-	const outputsOf = new Map<string, Set<string>>();
-	const invokesOf = new Map<string, Set<string>>();
+	const used = new Map<string, { inputs: Set<string>; outputs: Set<string>; invokes: Set<string>; invoked: boolean }>();
+	const usage = (provider: string) => {
+		if (!used.has(provider)) used.set(provider, { inputs: new Set(), outputs: new Set(), invokes: new Set(), invoked: false });
+		return used.get(provider)!;
+	};
+	const providerOf = new Map(nodes.map((node) => [node.id, node.data.provider]));
 	for (const node of nodes) {
+		if (node.type !== INodeType.Default) continue;
+		const own = usage(node.data.provider);
 		for (const input of node.data.input ?? []) {
-			if (!outputsOf.has(input.from)) outputsOf.set(input.from, new Set());
-			outputsOf.get(input.from)!.add(input.lane);
+			own.inputs.add(input.lane);
+			const from = providerOf.get(input.from);
+			if (from) usage(from).outputs.add(input.lane);
 		}
 		for (const control of node.data.control ?? []) {
-			if (!invokesOf.has(control.from)) invokesOf.set(control.from, new Set());
-			invokesOf.get(control.from)!.add(control.classType);
+			own.invoked = true;
+			const from = providerOf.get(control.from);
+			if (from) usage(from).invokes.add(control.classType);
 		}
 	}
 
-	const byProvider = new Map<string, INode[]>();
-	for (const node of missing) {
-		if (!byProvider.has(node.data.provider)) byProvider.set(node.data.provider, []);
-		byProvider.get(node.data.provider)!.push(node);
-	}
-	for (const [provider, group] of byProvider) {
-		const inputs = new Set<string>();
-		const outputs = new Set<string>();
-		const invokes = new Set<string>();
-		let invocable = false;
-		for (const node of group) {
-			for (const input of node.data.input ?? []) inputs.add(input.lane);
-			for (const lane of outputsOf.get(node.id) ?? []) outputs.add(lane);
-			for (const classType of invokesOf.get(node.id) ?? []) invokes.add(classType);
-			if (node.data.control?.length) invocable = true;
-		}
-		const outputList = [...outputs].sort();
-		const lanes: Record<string, string[]> = {};
-		for (const lane of [...inputs].sort()) lanes[lane] = outputList;
-		// A hidden input (leading '_') carries the outputs of a node with none.
-		if (!inputs.size && outputList.length) lanes._out = outputList;
+	for (const [provider, use] of used) {
+		const known = catalog[provider] as (IService & Record<string, unknown>) | undefined;
+		const lanes: Record<string, unknown[]> = { ...((known?.lanes as Record<string, unknown[]>) ?? {}) };
+		const declaredOutputs = new Set(Object.values(lanes).flatMap((entries) => (entries ?? []).map((entry) => (typeof entry === 'string' ? entry : (entry as { type: string }).type))));
+		const missingInputs = [...use.inputs].filter((lane) => !(lane in lanes)).sort();
+		const missingOutputs = [...use.outputs].filter((lane) => !declaredOutputs.has(lane)).sort();
+		const invoke: Record<string, unknown> = { ...((known?.invoke as Record<string, unknown>) ?? {}) };
+		const missingInvokes = [...use.invokes].filter((classType) => !(classType in invoke)).sort();
+		const capabilities = Number(known?.capabilities ?? 0);
+		const needsInvokeTarget = use.invoked && (capabilities & IServiceCapabilities.Invoke) !== IServiceCapabilities.Invoke;
+		if (known && !missingInputs.length && !missingOutputs.length && !missingInvokes.length && !needsInvokeTarget) continue;
+
+		for (const lane of missingInputs) lanes[lane] = [];
+		// A hidden input (leading '_') carries outputs no declared input lists.
+		if (missingOutputs.length) lanes._extra = [...((lanes._extra as unknown[]) ?? []), ...missingOutputs];
+		for (const classType of missingInvokes) invoke[classType] = {};
 		catalog[provider] = {
-			title: provider,
-			icon: UNKNOWN_ICON,
+			...(known ?? { title: provider, icon: UNKNOWN_ICON }),
 			lanes,
-			invoke: Object.fromEntries([...invokes].sort().map((classType) => [classType, {}])),
-			capabilities: invocable ? IServiceCapabilities.Invoke : 0,
+			invoke,
+			capabilities: needsInvokeTarget ? capabilities | IServiceCapabilities.Invoke : capabilities,
 		} as unknown as IService;
 	}
 	return catalog;
@@ -216,12 +224,19 @@ export function parentsFirst(nodes: INode[]): INode[] {
  * Without positions there is no saved grouping either, so a child is drawn
  * at the top level instead of inside a group at 0,0.
  */
-export function placeNodes(nodes: INode[], edges: Edge[], hadPositions: boolean, sizeOf: (id: string) => LayoutSize = () => ESTIMATED_NODE_SIZE): INode[] {
+export function placeNodes(
+	nodes: INode[],
+	edges: Edge[],
+	hadPositions: boolean,
+	sizeOf: (id: string) => LayoutSize = () => ESTIMATED_NODE_SIZE,
+	frame: LayoutFrame = DEFAULT_FRAME
+): INode[] {
 	if (hadPositions) return nodes;
 	const positions = layoutPipeline(
 		nodes.map((node) => node.id),
 		edges.map((edge) => ({ source: edge.source, target: edge.target, control: !!edge.sourceHandle?.startsWith('invoke-source') })),
-		sizeOf
+		sizeOf,
+		frame
 	);
 	return nodes.map((node) => ({ ...node, parentId: undefined, position: positions[node.id] ?? { x: 0, y: 0 } }));
 }
@@ -270,13 +285,41 @@ export function withoutTeamIds(text: string): string {
 	return text.replace(/@\/Team\/=[A-Za-z0-9][A-Za-z0-9_.-]*\/\.projects/g, '.projects');
 }
 
+/** A byte count as the person reads it: 2.1 MB, 640 KB. */
+export function formatBytes(bytes: number): string {
+	if (bytes >= 1_000_000) return `${(bytes / 1_048_576).toFixed(1).replace(/\.0$/, '')} MB`;
+	if (bytes >= 1_000) return `${Math.round(bytes / 1024)} KB`;
+	return `${bytes} bytes`;
+}
+
+/**
+ * The person's view of a tool error. The tool's own message and hint are
+ * written for the model (they name tools such as store_list); the widget
+ * says what happened and what the person can ask for instead.
+ */
+export function errorFor(summary: ViewPipelineSummary): Extract<CanvasModel, { kind: 'error' }> {
+	const file = displayPath(summary.path, summary.workspace) || 'that path';
+	switch (summary.error_type) {
+		case 'InvalidPath':
+			return { kind: 'error', message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' };
+		case 'NotFound':
+			return { kind: 'error', message: `There is no pipeline at ${file}.`, hint: 'Ask to see your saved pipelines.' };
+		case 'AccessDenied':
+			return { kind: 'error', message: `You don't have access to ${file}.`, hint: 'Ask to see the pipelines you can open.' };
+		case 'PipelineTooLarge':
+			return { kind: 'error', message: `${file} is too large to show here${typeof summary.size === 'number' ? ` (${formatBytes(summary.size)})` : ''}. The limit is 2 MB.` };
+		case 'InvalidPipeline':
+			return { kind: 'error', message: `${file} isn't a pipeline the canvas can read.` };
+		default:
+			return { kind: 'error', message: withoutTeamIds(summary.message || 'The pipeline could not be opened.') };
+	}
+}
+
 /** Builds the canvas model for one tool result. */
 export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown): CanvasModel {
 	const summary = readSummary(result);
 	if (!summary) return { kind: 'error', message: 'The tool result could not be read.' };
-	if (!summary.ok) {
-		return { kind: 'error', message: withoutTeamIds(summary.message || 'The pipeline could not be opened.'), hint: summary.hint ? withoutTeamIds(summary.hint) : undefined };
-	}
+	if (!summary.ok) return errorFor(summary);
 
 	const payload = readPayload(result, fallbackMeta);
 	const pipeline = payload?.pipeline ?? pipelineFromSummary(summary);
@@ -297,6 +340,9 @@ export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown)
 		icons: payload?.icons ?? {},
 		laidOut: !hadPositions,
 		summaryOnly: !payload,
+		missingProviders: payload
+			? [...new Set(nodes.filter((node) => node.type === INodeType.Default && !payload.services?.[node.data.provider]).map((node) => node.data.provider))].sort()
+			: [],
 	};
 }
 

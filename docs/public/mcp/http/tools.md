@@ -349,7 +349,8 @@ never edited or run.
 - **Errors:** every error also carries `path` and `workspace`.
   `InvalidPath` (not a pipeline file under `.projects/`, or a path with `..`,
   a backslash or a leading slash), `NotFound`, `AccessDenied`,
-  `PipelineTooLarge`, `InvalidPipeline` (not JSON, or no `components` list).
+  `PipelineTooLarge` (with the file's `size` in bytes), `InvalidPipeline` (not
+  JSON, or no `components` list).
 
 ## Manage deployments
 

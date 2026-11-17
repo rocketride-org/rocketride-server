@@ -8,10 +8,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, type ToolResultLike, type ViewPipelineSummary } from './model';
+import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, formatBytes, type ToolResultLike, type ViewPipelineSummary } from './model';
 
 const SERVICES = {
-	webhook: { title: 'Webhook', classType: ['source'], lanes: { _source: ['tags'] }, invoke: {}, capabilities: 0, icon: 'webhook.svg' },
+	webhook: { title: 'Webhook', classType: ['source'], lanes: { _source: ['questions'] }, invoke: {}, capabilities: 0, icon: 'webhook.svg' },
 	agent: { title: 'Agent', classType: ['agent'], lanes: { questions: ['answers'] }, invoke: { llm: {} }, capabilities: 0, icon: 'agent.svg' },
 	llm_openai: { title: 'OpenAI', classType: ['llm'], lanes: {}, invoke: {}, capabilities: 1024, icon: 'openai.svg' },
 };
@@ -127,7 +127,7 @@ describe('buildCanvasModel', () => {
 		expect(model.edges.map((e) => e.id).sort()).toEqual(['agent_1::llm_1::llm', 'webhook_1::agent_1::questions']);
 		// No catalog: every provider gets a made-up entry with handles for its edges.
 		expect(model.services.agent).toMatchObject({ title: 'agent', icon: UNKNOWN_ICON, lanes: { questions: [] }, invoke: { llm: {} } });
-		expect(model.services.webhook).toMatchObject({ lanes: { _out: ['questions'] } });
+		expect(model.services.webhook).toMatchObject({ lanes: { _extra: ['questions'] } });
 		expect(model.services.llm_openai).toMatchObject({ capabilities: 1024 });
 	});
 
@@ -173,25 +173,36 @@ describe('buildCanvasModel', () => {
 		expect(buildCanvasModel(result(empty)).kind).toBe('empty');
 	});
 
-	it('shows the message and the hint of a tool error', () => {
-		const error = { ok: false, error_type: 'NotFound', message: 'No pipeline file at .projects/x.pipe.', hint: 'Call store_list with path .projects to see the saved pipelines.' };
-
-		expect(buildCanvasModel(result(error))).toEqual({ kind: 'error', message: error.message, hint: error.hint });
+	it('tells the person what went wrong, not the model', () => {
+		const base = { ok: false, path: '@/Team/=team_A/.projects/sub/x.pipe', workspace: '@/Team/=team_A/.projects' };
+		const cases: Array<[Record<string, unknown>, { message: string; hint?: string }]> = [
+			[{ error_type: 'NotFound', message: 'No pipeline file at ...', hint: 'Call store_list with path ...' }, { message: 'There is no pipeline at sub/x.pipe.', hint: 'Ask to see your saved pipelines.' }],
+			[{ error_type: 'AccessDenied', path: '@/Team/=team_B/.projects/y.pipe' }, { message: "You don't have access to y.pipe.", hint: 'Ask to see the pipelines you can open.' }],
+			[{ error_type: 'PipelineTooLarge', size: 2_200_033 }, { message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.' }],
+			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline the canvas can read." }],
+			[{ error_type: 'InvalidPath', path: '' }, { message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' }],
+			[{ error_type: 'Timeout', message: 'view_pipeline timed out waiting for the engine at @/Team/=team_A/.projects' }, { message: 'view_pipeline timed out waiting for the engine at .projects' }],
+		];
+		for (const [fields, expected] of cases) {
+			const model = buildCanvasModel(result({ ...base, ...fields } as never));
+			expect(model).toEqual({ kind: 'error', ...expected });
+			// Nothing addressed to the model, and no team id, reaches the person.
+			expect(JSON.stringify(model)).not.toMatch(/store_list|team_A|team_B/);
+		}
 	});
 
-	it('shows team paths without the team id', () => {
-		const error = {
-			ok: false,
-			error_type: 'AccessDenied',
-			message: "You don't have access to the pipeline at @/Team/=team_B/.projects/x.pipe.",
-			hint: 'Call store_list with path @/Team/=team_A/.projects to see the pipelines you can open.',
-		};
+	it('marks providers this engine does not have, and draws a connection the catalog does not declare', () => {
+		const components = [
+			...COMPONENTS,
+			{ id: 'mem_1', provider: 'memory_internal', config: {}, control: [{ classType: 'memory', from: 'agent_1' }], ui: { position: { x: 600, y: 200 } } },
+		];
+		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
+		if (model.kind !== 'graph') throw new Error(model.kind);
 
-		expect(buildCanvasModel(result(error))).toEqual({
-			kind: 'error',
-			message: "You don't have access to the pipeline at .projects/x.pipe.",
-			hint: 'Call store_list with path .projects to see the pipelines you can open.',
-		});
+		expect(model.missingProviders).toEqual(['memory_internal']);
+		// The agent declares only an llm channel; the file also invokes its memory.
+		expect(model.services.agent).toMatchObject({ title: 'Agent', invoke: { llm: {}, memory: {} } });
+		expect(model.edges.map((e) => e.sourceHandle)).toContain('invoke-source.memory');
 	});
 
 	it('reads the summary from the text block when structuredContent is missing', () => {
@@ -211,6 +222,15 @@ describe('buildCanvasModel', () => {
 		if (model.kind !== 'graph') throw new Error(model.kind);
 
 		expect(model.summaryOnly).toBe(true);
+	});
+});
+
+describe('formatBytes', () => {
+	it('reads as a person would', () => {
+		expect(formatBytes(2_200_033)).toBe('2.1 MB');
+		expect(formatBytes(2_097_152)).toBe('2 MB');
+		expect(formatBytes(640_000)).toBe('625 KB');
+		expect(formatBytes(12)).toBe('12 bytes');
 	});
 });
 

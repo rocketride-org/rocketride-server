@@ -410,13 +410,15 @@ async def _view_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
         )
 
     def too_large(size: int) -> dict:
-        return _error(
+        result = _error(
             'PipelineTooLarge',
-            f'This pipeline file is too large to show ({size} bytes, the limit is 2,097,152).',
+            f'This pipeline file is too large to show ({size:,} bytes, the limit is 2,097,152).',
             None,
             path=path,
             workspace=workspace,
         )
+        result['size'] = size
+        return result
 
     # Stat first, so a huge file is refused before it is read.
     try:

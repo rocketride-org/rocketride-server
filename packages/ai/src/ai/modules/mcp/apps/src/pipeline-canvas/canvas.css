@@ -3,16 +3,24 @@
  * Copyright (c) 2026 Aparavi Software AG
  * See LICENSE file for details.
  *
- * Canvas widget chrome: the header above the drawing and the zoom controls.
- * The nodes and edges are styled by the builder's own CSS.
+ * Canvas widget chrome: the header, the view buttons, the frame, the larger
+ * titles drawn at overview zoom, and the read-only adjustments to React Flow.
+ * The nodes and edges themselves are styled by the builder's own CSS.
  */
 body {
 	color: var(--rr-text-primary);
 	background: transparent;
 }
 
+/* --- Header: title, meta and the view buttons on one block ------------- */
 .rr-canvas-head {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	column-gap: 12px;
 	margin: 0 0 8px;
+}
+.rr-canvas-heading {
 	min-width: 0;
 }
 .rr-canvas-title {
@@ -56,62 +64,36 @@ body {
 	font-family: ui-monospace, monospace;
 	font-size: 11px;
 }
-.rr-canvas-note {
-	margin-top: 6px;
-	font-size: 12px;
-	color: var(--rr-text-secondary);
-}
-
-.rr-canvas-empty {
-	color: var(--rr-text-secondary);
-}
-
-.rr-canvas-error {
-	border-left: 3px solid var(--rr-flame);
-}
-.rr-canvas-hint {
-	margin-top: 4px;
-	color: var(--rr-text-secondary);
-}
-
-/* The drawing area. Its height is set in px by CanvasApp.tsx. */
-.rr-canvas-frame {
-	position: relative;
-	border-radius: 10px;
-	overflow: hidden;
-	border: 1px solid var(--rr-line);
-	background: var(--rr-bg-default);
-}
-
-/* The builder's node CSS assumes the app's global border-box sizing (MUI's
-   baseline); without it a node header is wider than its node. */
-.rr-canvas-frame,
-.rr-canvas-frame *,
-.rr-canvas-frame *::before,
-.rr-canvas-frame *::after {
-	box-sizing: border-box;
-}
-
-/* Under the drawing: the hint and the view buttons (32 px targets). */
-.rr-canvas-bar {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 8px;
-	margin-top: 6px;
-	min-width: 0;
-}
-.rr-canvas-howto {
-	min-width: 0;
+.rr-canvas-description {
+	margin-top: 2px;
 	font-size: 12px;
 	color: var(--rr-text-secondary);
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* A phone-width chat: the buttons get their own row under the title. */
+@media (max-width: 560px) {
+	.rr-canvas-head {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.rr-canvas-tools {
+		justify-self: start;
+		margin-top: 8px;
+	}
+}
+.rr-canvas-notes {
+	grid-column: 1 / -1;
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+
+/* --- View buttons (32 px; 44 px on a touch screen) ---------------------- */
 .rr-canvas-tools {
 	display: flex;
 	flex: none;
+	align-self: start;
 	border: 1px solid var(--rr-line-strong);
 	border-radius: 8px;
 	overflow: hidden;
@@ -120,13 +102,16 @@ body {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 32px;
+	gap: 6px;
+	min-width: 32px;
 	height: 32px;
 	padding: 0;
 	border: none;
 	border-right: 1px solid var(--rr-line);
 	background: transparent;
 	color: var(--rr-text-primary);
+	font: inherit;
+	font-size: 12px;
 	cursor: pointer;
 }
 .rr-canvas-tool:last-child {
@@ -144,13 +129,139 @@ body {
 	height: 16px;
 	fill: currentColor;
 }
-
-/* Full screen: the page is the canvas. */
-.rr-canvas-full {
-	margin: 0;
+.rr-canvas-expand {
+	padding: 0 10px 0 8px;
+	font-weight: 600;
+}
+.rr-canvas-coarse .rr-canvas-tool {
+	min-width: 44px;
+	height: 44px;
 }
 
-/* Read only: no handle invites a connection. */
-.rr-canvas .react-flow__handle {
+/* --- The drawing area (height set in px by CanvasApp.tsx) --------------- */
+.rr-canvas-frame {
+	position: relative;
+	border-radius: 10px;
+	overflow: hidden;
+	border: 1px solid var(--rr-line);
+	background: var(--rr-bg-default);
+}
+.rr-canvas-frame:focus-visible {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: 2px;
+}
+.rr-canvas-howto {
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+
+/* The builder's node CSS assumes the app's global border-box sizing (MUI's
+   baseline); without it a node header is wider than its node. */
+.rr-canvas-frame,
+.rr-canvas-frame *,
+.rr-canvas-frame *::before,
+.rr-canvas-frame *::after {
+	box-sizing: border-box;
+}
+
+/* Read only: a handle is not a place to start a connection. No crosshair,
+   and a drag that starts on one pans the canvas. */
+.rr-canvas .react-flow .react-flow__handle,
+.rr-canvas .react-flow .react-flow__handle.connectionindicator {
 	cursor: inherit;
+	pointer-events: none;
+}
+
+/* Inline, a one-finger swipe scrolls the chat (CanvasApp.tsx stops it before
+   the canvas sees it); the browser must be allowed to scroll. */
+.rr-canvas:not(.rr-canvas-full) .react-flow__pane,
+.rr-canvas:not(.rr-canvas-full) .react-flow__renderer {
+	touch-action: pan-y;
+}
+
+/* --- Larger titles at overview zoom (see OverviewLabels) ---------------- */
+.rr-overview {
+	position: absolute;
+	inset: 0;
+	z-index: 6;
+	pointer-events: none;
+	overflow: hidden;
+}
+.rr-overview-label {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 0 clamp(3px, 8%, 8px);
+	border-radius: 4px 4px 0 0;
+	background: var(--rr-bg-titleBar-inactive);
+	color: var(--rr-text-primary);
+	font:
+		500 12px/1.2 system-ui,
+		sans-serif;
+	white-space: nowrap;
+	overflow: hidden;
+}
+.rr-overview-label span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.rr-overview-icon {
+	flex: none;
+}
+
+/* --- Full screen -------------------------------------------------------- */
+.rr-canvas-full .react-flow__minimap {
+	border: 1px solid var(--rr-line-strong);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-full .react-flow__minimap-mask {
+	fill: color-mix(in srgb, var(--rr-bg-default) 70%, transparent);
+}
+.rr-canvas-full .rr-minimap-node {
+	fill: var(--rr-bg-titleBar-active);
+	stroke: none;
+}
+
+/* --- States ------------------------------------------------------------- */
+.rr-canvas-empty {
+	color: var(--rr-text-secondary);
+}
+.rr-canvas-error {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+}
+.rr-canvas-error-icon {
+	flex: none;
+	width: 18px;
+	height: 18px;
+	margin-top: 1px;
+	fill: var(--rr-flame);
+}
+.rr-canvas-error-title {
+	font-weight: 650;
+}
+.rr-canvas-error-message {
+	margin-top: 2px;
+}
+.rr-canvas-hint {
+	margin-top: 4px;
+	color: var(--rr-text-secondary);
+}
+
+/* Visually hidden, read by screen readers. */
+.rr-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
 }

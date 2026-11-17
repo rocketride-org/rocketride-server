@@ -3,11 +3,11 @@
 	<head>
 		<meta charset="utf-8" />
 		<title>Pipeline canvas</title>
-		<!-- Minimal pre-JS styling only; the widget design system
-		     (../shared/theme.css) and canvas.css are imported by main.tsx and
-		     inlined at build. The canvas has a fixed pixel height (see
-		     CanvasApp.tsx), never a % or vh one: host auto-resize measures
-		     this document, and a relative height would collapse it. -->
+		<!-- Pre-JS styling only: a skeleton the size of the smallest canvas, so
+		     the chat does not jump when the drawing arrives. The widget design
+		     system and canvas.css are imported by main.tsx and inlined at build.
+		     Heights are pixels, never % or vh: host auto-resize measures this
+		     document, and a relative height would collapse it. -->
 		<style>
 			:root {
 				color-scheme: light dark;
@@ -18,14 +18,31 @@
 					sans-serif;
 				margin: 12px;
 			}
-			.rr-waiting {
-				opacity: 0.6;
-				padding: 8px 0;
+			.rr-skeleton-title {
+				width: 180px;
+				height: 18px;
+				margin: 2px 0 26px;
+				border-radius: 4px;
+				background: color-mix(in srgb, currentcolor 8%, transparent);
+			}
+			.rr-skeleton {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				height: 260px;
+				border-radius: 10px;
+				border: 1px solid color-mix(in srgb, currentcolor 14%, transparent);
+				background-image: radial-gradient(color-mix(in srgb, currentcolor 18%, transparent) 1px, transparent 1px);
+				background-size: 20px 20px;
+				opacity: 0.7;
 			}
 		</style>
 	</head>
 	<body>
-		<div id="root"><div class="rr-waiting" role="status">Loading pipeline...</div></div>
+		<div id="root">
+			<div class="rr-skeleton-title"></div>
+			<div class="rr-skeleton" role="status">Loading pipeline...</div>
+		</div>
 		<script type="module" src="./main.tsx"></script>
 	</body>
 </html>
