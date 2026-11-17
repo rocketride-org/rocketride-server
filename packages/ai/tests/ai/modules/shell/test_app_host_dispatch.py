@@ -1,0 +1,453 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+
+"""Host dispatch of the app-origin middleware (#1022 PR1, design section 5 and 12).
+
+``AppHostMiddleware`` is a pure ASGI middleware, outermost, for ``http`` and
+``websocket`` scopes:
+
+* on an APP HOST (label of exactly 25 chars in ``[a-z2-7]`` under the template,
+  host lowercased, trailing dot stripped, port compared with the template) only
+  ``/_rr/*``, ``/_t/<token>/v<N>/*`` and ``/_p/<appId>/v<N>/*`` are served;
+  everything else is 404 and a WebSocket is closed before accept (HTTP 403);
+* on any OTHER host, paths starting ``/_t/``, ``/_p/`` or ``/_rr/`` are 404 and
+  everything else passes through untouched.
+
+Tests T9 to T19 of ``.rr-sec/PR1_PLAN.md`` (host matrix H1 to H10). H4 and H5
+are GUARDS: they hold on the base too (no route answers ``/_t`` there), so they
+build the app without the middleware when its module does not exist yet.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from . import isolation_support as sup
+from .isolation_support import app_host_of, csp_directives, label_for, meta_content
+
+LABEL = label_for('acme.thirdparty')
+HOST = app_host_of(LABEL)
+FAKE_TOKEN = 'v1.k1.eyJhIjoieCJ9.c2lnbmF0dXJl'  # token-shaped; only used where no real one can exist yet
+
+
+def _config_or_none(env):
+    """The parsed config, or None while the fix does not exist (guards only)."""
+    ao = sup.module_or_none('ai.modules.shell.app_origin')
+    if ao is None:
+        return None
+    return sup.need(ao, 'load_isolation_config')(__import__('os').environ)
+
+
+def _client(env, *, require=True, hits=None):
+    cfg = env.config() if require else _config_or_none(env)
+    app = sup.outer_app(sup.shell_inner_app(hits), cfg, require=require)
+    return TestClient(app, base_url=sup.SHELL_ORIGIN)
+
+
+def _guard_token(env):
+    """A real token when the fix exists, a token-shaped string on the base."""
+    ao = sup.module_or_none('ai.modules.shell.app_origin')
+    cfg = _config_or_none(env)
+    if ao is None or cfg is None:
+        return FAKE_TOKEN
+    return ao.mint_frame_token('acme.thirdparty', 1, 'u1', 'org-1', config=cfg)
+
+
+# ---------------------------------------------------------------------------
+# T9 H1: a valid label is an app host
+# ---------------------------------------------------------------------------
+
+
+def test_h1_valid_label_serves_frame_html_with_shell_origins(isolation_env):
+    """T9: ``/_rr/frame.html`` on an app host serves the guest frame with the shell origins as a meta tag."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    resp = client.get('/_rr/frame.html', headers={'host': HOST})
+    assert resp.status_code == 200
+    assert resp.headers['content-type'].startswith('text/html')
+    assert resp.headers['cache-control'] == 'no-cache'
+    origins = meta_content(resp.text, 'rr-shell-origins')
+    assert origins is not None, resp.text
+    assert sup.SHELL_ORIGIN in origins.replace(',', ' ').split()
+    assert '/_rr/guest-test.js' in resp.text  # the stub's script tag survives the injection
+    assert hits == []  # the inner app never saw the request
+
+
+def test_h1_guest_bundle_is_immutable_and_only_the_marker_file_is_served(isolation_env):
+    """T9: ``/_rr/guest-<hash>.js`` is the file named by runtime.json, cached forever; no other guest file."""
+    client = _client(isolation_env)
+    resp = client.get('/_rr/guest-test.js', headers={'host': HOST})
+    assert resp.status_code == 200
+    assert 'immutable' in resp.headers['cache-control']
+    assert resp.text == '/* guest runtime test stub */'
+    assert client.get('/_rr/guest-other.js', headers={'host': HOST}).status_code == 404
+    assert client.get('/_rr/runtime.json', headers={'host': HOST}).status_code == 404
+    assert client.get('/_rr/../shell/index.html', headers={'host': HOST}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# T10 H2: label shape
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'label',
+    [
+        LABEL[:-1],  # 24 characters
+        LABEL + 'a',  # 26 characters
+        '0' + LABEL[1:],  # '0' is not base32
+        LABEL[:-1] + '1',
+        LABEL[:-1] + '8',
+        LABEL[:-1] + '-',
+        LABEL[:-1] + '_',
+        'a' + 'b' * 23 + '.x',  # a label cannot contain a dot
+    ],
+)
+def test_h2_wrong_shape_is_not_an_app_host(label, isolation_env):
+    """T10: only a 25-character ``[a-z2-7]`` label is an app host: the shell's own routes keep answering."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    host = app_host_of(label)
+    assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 404
+    assert client.get('/auth', headers={'host': host}).status_code == 200  # an ordinary host
+    assert ('http', '/auth') in hits
+
+
+def test_h2_unknown_but_well_formed_label_still_gets_frame_html(isolation_env):
+    """T10: ``frame.html`` is not tied to an app: any well-formed label gets it (tokens carry the app)."""
+    client = _client(isolation_env)
+    resp = client.get('/_rr/frame.html', headers={'host': app_host_of('a' + 'q' * 24)})
+    assert resp.status_code == 200
+
+
+def test_h2_other_domain_is_not_an_app_host(isolation_env):
+    """T10: the suffix must match the template."""
+    client = _client(isolation_env)
+    for host in (f'{LABEL}.other.example', f'{LABEL}.apps.example.evil.example', f'{LABEL}.evil-apps.example'):
+        assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 404, host
+
+
+# ---------------------------------------------------------------------------
+# T11 H3: case, trailing dot, port
+# ---------------------------------------------------------------------------
+
+
+def test_h3_case_and_trailing_dot_are_normalised(isolation_env):
+    """T11: the Host header is lowercased and a trailing dot stripped before the label check."""
+    client = _client(isolation_env)
+    for host in (HOST.upper(), HOST + '.', HOST.upper() + '.'):
+        assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 200, host
+
+
+@pytest.mark.parametrize('suffix', [':8443', ':80', ':1'])
+def test_h3_wrong_port_is_not_an_app_host(suffix, isolation_env):
+    """T11: the port must match the template (https default: none)."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    host = HOST + suffix
+    assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 404
+    assert client.get('/auth', headers={'host': host}).status_code == 200
+    assert ('http', '/auth') in hits
+
+
+def test_h3_localhost_template_compares_the_port(isolation_env):
+    """T11: ``http://{label}.apps.localhost:8765``: the port is part of the host match."""
+    isolation_env.set(RR_APP_ORIGIN_TEMPLATE=sup.LOCAL_TEMPLATE)
+    client = _client(isolation_env)
+    good = app_host_of(LABEL, sup.LOCAL_TEMPLATE)
+    assert good.endswith(':8765')
+    assert client.get('/_rr/frame.html', headers={'host': good}).status_code == 200
+    assert client.get('/_rr/frame.html', headers={'host': good.replace(':8765', ':9999')}).status_code == 404
+    assert client.get('/_rr/frame.html', headers={'host': good.replace(':8765', '')}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# T12 H4 (guard) and T13 H5 (guard): app-host paths on every other host are 404
+# ---------------------------------------------------------------------------
+
+
+def _app_host_paths(token):
+    return [
+        f'/_t/{token}/v1/remoteEntry.js',
+        '/_t/',
+        '/_t',
+        '/_p/acme.thirdparty/v1/remoteEntry.js',
+        '/_rr/frame.html',
+        '/_rr/clear',
+        '/_rr/guest-test.js',
+    ]
+
+
+def test_h4_app_host_paths_are_404_on_the_shell_host(isolation_env):
+    """T12 (guard): ``/_t``, ``/_p``, ``/_rr`` answer 404 on the shell's own host; no bundle bytes ever."""
+    client = _client(isolation_env, require=False)
+    for path in _app_host_paths(_guard_token(isolation_env)):
+        resp = client.get(path)
+        assert resp.status_code == 404, path
+        assert 'bundle' not in resp.text and 'guest runtime' not in resp.text
+
+
+def test_h4_app_host_paths_are_404_on_any_unrelated_host(isolation_env):
+    """T12 (guard): the same on an arbitrary host name."""
+    client = _client(isolation_env, require=False)
+    for host in ('localhost', '127.0.0.1:8080', 'evil.example', f'{LABEL}.evil.example'):
+        for path in _app_host_paths(_guard_token(isolation_env)):
+            assert client.get(path, headers={'host': host}).status_code == 404, (host, path)
+
+
+@pytest.mark.parametrize('forged', ['x-forwarded-host', 'x-rr-app-host', 'forwarded', 'x-original-host'])
+def test_h5_forged_host_headers_do_not_make_an_app_host(forged, isolation_env):
+    """T13 (guard): with ``RR_APP_HOST_SOURCE=host`` only the Host header counts."""
+    client = _client(isolation_env, require=False)
+    value = f'host={HOST}' if forged == 'forwarded' else HOST
+    for path in _app_host_paths(_guard_token(isolation_env)):
+        assert client.get(path, headers={forged: value}).status_code == 404, (forged, path)
+
+
+@pytest.mark.parametrize('secret_header', [None, '', 'short', 'w' * 32, 'w' * 33])
+def test_h5_edge_header_without_the_right_secret_is_not_an_app_host(secret_header, isolation_env):
+    """T13 (guard): ``edge-header``: an empty, short, missing or wrong secret means a non-app host."""
+    isolation_env.set(RR_APP_HOST_SOURCE='edge-header', RR_EDGE_SECRET='s' * 32)
+    client = _client(isolation_env, require=False)
+    headers = {'x-rr-app-host': HOST}
+    if secret_header is not None:
+        headers['x-rr-edge-secret'] = secret_header
+    for path in _app_host_paths(_guard_token(isolation_env)):
+        assert client.get(path, headers=headers).status_code == 404, (secret_header, path)
+    # ... and the Host header alone does not make one either, in this mode
+    assert client.get('/_rr/frame.html', headers={'host': HOST}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# T14 H7: WebSocket on an app host
+# ---------------------------------------------------------------------------
+
+
+def test_h7_websocket_on_an_app_host_is_rejected_before_accept(isolation_env):
+    """T14: the scope gets ``websocket.close`` without accept (the client sees HTTP 403); the app never runs."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/ws', headers={'host': HOST}):
+            pass
+    assert hits == []
+
+
+def test_h7_websocket_on_the_shell_host_still_works(isolation_env):
+    """T14 control: the same socket on a non-app host passes through untouched."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    with client.websocket_connect('/ws') as ws:
+        assert ws.receive_text() == 'hello from inner'
+    assert ('websocket', '/ws') in hits
+
+
+# ---------------------------------------------------------------------------
+# T15 H8: the shell's routes do not exist on an app host
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'method,path',
+    [
+        ('GET', '/'),
+        ('GET', '/pricing'),
+        ('GET', '/shell'),
+        ('GET', '/shell/index.html'),
+        ('GET', '/shell/static/main.js'),
+        ('POST', '/apps/session'),
+        ('GET', '/apps/acme.thirdparty/v1/remoteEntry.js'),
+        ('POST', '/apps/frame'),
+        ('GET', '/auth'),
+        ('GET', '/robots.txt'),
+        ('GET', '/openapi.json'),
+        ('GET', '/_t'),
+        ('GET', '/_rr'),
+    ],
+)
+def test_h8_shell_routes_are_404_on_an_app_host(method, path, isolation_env):
+    """T15: only the three app-host route families exist there; the inner app is never reached."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    resp = client.request(method, path, headers={'host': HOST})
+    assert resp.status_code == 404, (method, path)
+    assert hits == []
+
+
+# ---------------------------------------------------------------------------
+# T16 H9: clear
+# ---------------------------------------------------------------------------
+
+
+def test_h9_clear_sends_clear_site_data(isolation_env):
+    """T16: ``/_rr/clear`` empties the app origin's storage (the shell loads it on logout)."""
+    resp = _client(isolation_env).get('/_rr/clear', headers={'host': HOST})
+    assert resp.status_code == 200
+    assert resp.headers['clear-site-data'] == '"storage"'
+    assert resp.headers['cache-control'] == 'no-store'
+
+
+# ---------------------------------------------------------------------------
+# T17 H10: no cookies on an app host
+# ---------------------------------------------------------------------------
+
+
+def test_h10_no_set_cookie_on_any_app_host_response(served_app):
+    """T17: not on frame.html, the guest, clear, bundles, 404s, nor when the request carries cookies."""
+    token = served_app.token()
+    paths = [
+        '/_rr/frame.html',
+        '/_rr/guest-test.js',
+        '/_rr/clear',
+        f'/_t/{token}/v1/remoteEntry.js',
+        '/_p/acme.thirdparty/v1/remoteEntry.js',
+        f'/_t/{token}/v9/remoteEntry.js',
+        '/auth',
+        '/apps/session',
+        '/nothing/here',
+    ]
+    for path in paths:
+        for cookie in ('', 'rr_apps_token=stolen; inner_session=1'):
+            headers = {'cookie': cookie} if cookie else {}
+            resp = served_app.get(path, headers=headers)
+            assert 'set-cookie' not in resp.headers, (path, cookie)
+
+
+# ---------------------------------------------------------------------------
+# T18 edge-header positive case
+# ---------------------------------------------------------------------------
+
+
+def test_edge_header_with_the_secret_makes_an_app_host(isolation_env):
+    """T18: with the right ``X-RR-Edge-Secret`` the host comes from ``X-RR-App-Host`` (constant-time compare)."""
+    isolation_env.set(RR_APP_HOST_SOURCE='edge-header', RR_EDGE_SECRET='s' * 32)
+    client = _client(isolation_env)
+    resp = client.get('/_rr/frame.html', headers={'x-rr-app-host': HOST, 'x-rr-edge-secret': 's' * 32})
+    assert resp.status_code == 200
+    # the real Host header (the edge's own name) is irrelevant in this mode
+    resp = client.get(
+        '/_rr/frame.html', headers={'host': 'origin.internal', 'x-rr-app-host': HOST, 'x-rr-edge-secret': 's' * 32}
+    )
+    assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# T19 header snapshot
+# ---------------------------------------------------------------------------
+
+_NET = re.compile(r'^https://')
+
+
+def _core(sources):
+    """A CSP source list without the per-app ``network`` origins."""
+    return [s for s in sources if not _NET.match(s)]
+
+
+def _assert_common_headers(resp, where):
+    h = resp.headers
+    max_age = re.search(r'max-age=(\d+)', h.get('strict-transport-security', ''))
+    assert max_age and int(max_age.group(1)) >= 31536000, where
+    assert h.get('cross-origin-resource-policy') == 'same-origin', where
+    assert h.get('referrer-policy') == 'no-referrer', where
+    assert h.get('x-content-type-options') == 'nosniff', where
+    assert h.get('origin-agent-cluster') == '?1', where
+    assert 'service-worker' in h.get('vary', '').lower(), where
+    assert 'content-security-policy' in h, where
+
+
+def test_app_host_headers_snapshot(served_app):
+    """T19: every app-host response carries the full header set; the CSP is Appendix C's."""
+    token = served_app.token()
+    responses = {
+        'frame': served_app.get('/_rr/frame.html'),
+        'guest': served_app.get('/_rr/guest-test.js'),
+        'clear': served_app.get('/_rr/clear'),
+        'token': served_app.get(f'/_t/{token}/v1/remoteEntry.js'),
+        'public': served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js'),
+        'missing': served_app.get('/nothing/here'),
+    }
+    for name, resp in responses.items():
+        _assert_common_headers(resp, name)
+
+    frame = csp_directives(responses['frame'].headers['content-security-policy'])
+    assert frame['default-src'] == ["'none'"]
+    assert frame['script-src'] == ["'self'", "'wasm-unsafe-eval'"]
+    assert frame['style-src'] == ["'self'", "'unsafe-inline'"]
+    assert _core(frame['img-src']) == ["'self'", 'data:', 'blob:']
+    assert _core(frame['font-src']) == ["'self'", 'data:']
+    assert _core(frame['connect-src']) == ["'self'"]
+    assert frame['worker-src'] == ["'self'", 'blob:']
+    assert frame['frame-src'] == ["'none'"]
+    assert frame['form-action'] == ["'none'"]
+    assert frame['base-uri'] == ["'none'"]
+    assert frame['object-src'] == ["'none'"]
+    assert frame['frame-ancestors'] == [sup.SHELL_ORIGIN]
+
+    # The same policy minus frame-ancestors on everything else that serves code.
+    for name in ('guest', 'token', 'public'):
+        csp = csp_directives(responses[name].headers['content-security-policy'])
+        assert 'frame-ancestors' not in csp, name
+        assert {k: _core(v) for k, v in csp.items()} == {
+            k: _core(v) for k, v in frame.items() if k != 'frame-ancestors'
+        }, name
+
+
+def test_csp_never_widens_beyond_self_and_network_origins(served_app):
+    """T19: no wildcard, no scheme-only source, no eval, no inline script, whatever the app asked for."""
+    csp = served_app.get(f'/_t/{served_app.token()}/v1/remoteEntry.js').headers['content-security-policy']
+    assert '*' not in csp
+    assert "'unsafe-eval'" not in csp
+    assert 'unsafe-inline' not in csp_directives(csp)['script-src']
+    for sources in csp_directives(csp).values():
+        assert 'https:' not in sources and 'http:' not in sources
+
+
+@pytest.mark.parametrize('path_kind', ['token', 'public'])
+def test_app_host_refuses_service_worker_registration(path_kind, served_app):
+    """T19 (E9): a request that declares ``Service-Worker: script`` is refused on the app host."""
+    path = (
+        f'/_t/{served_app.token()}/v1/remoteEntry.js'
+        if path_kind == 'token'
+        else '/_p/acme.thirdparty/v1/remoteEntry.js'
+    )
+    ok = served_app.get(path)
+    assert ok.status_code == 200
+    resp = served_app.get(path, headers={'service-worker': 'script'})
+    assert resp.status_code == 404
+
+
+def test_server_installs_the_middleware_only_when_not_off(monkeypatch, isolation_env):
+    """T19 (section 5): ``WebServer`` adds AppHostMiddleware outermost when the mode is not off, nothing under off."""
+    from ai.web.server import WebServer
+
+    host_mod = sup.load_module('ai.web.app_host')
+    middleware_cls = sup.need(host_mod, 'AppHostMiddleware')
+
+    server = WebServer()
+    assert server.app.user_middleware[0].cls is middleware_cls  # first in the list is the outermost
+
+    isolation_env.set(RR_APP_ISOLATION=None)
+    off = WebServer()
+    assert all(m.cls is not middleware_cls for m in off.app.user_middleware)
