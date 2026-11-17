@@ -238,5 +238,5 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 **/node_modules/
 **/dist/
 
-# Eval runner output (apps/shared/src/modules/agent/eval)
+# Local eval and verify run output
 .verify/
