@@ -110,11 +110,11 @@ chunks it touches, and pays one count query per batch.
   behaviour (switches, trash tools, listing, `get` not-found, `upsert` chunk
   numbering, `stats`, the base contract), plus the engine's real
   `IInstanceBase` collector where available.
-- `nodes/test/test_vector_store_writes_full.py` and
-  `nodes/test/test_vector_store_listing_full.py`: both Postgres drivers on a
+- `nodes/test/test_vector_store_writes_live.py` and
+  `nodes/test/test_vector_store_listing_live.py`: both Postgres drivers on a
   real pgvector database (`RR_TEST_PG_DSN`, `RR_REQUIRE_DB_TESTS=1` to fail
   instead of skip), driver methods and tools alike.
-- `nodes/test/test_rocketride_vector_tools_full.py`: the managed node's
+- `nodes/test/test_rocketride_vector_tools_live.py`: the managed node's
   switches and shipped profile on the real store.
 
 Run them with the built engine (`dist/engine -m pytest <path> -q -p

@@ -100,6 +100,15 @@ class DAPException(Exception):
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
 
+    def __reduce__(self):
+        """
+        Rebuild from the DAP result dictionary when unpickled.
+
+        The default rebuilds from ``args`` (the message string), which
+        ``__init__`` cannot take; every subclass shares this constructor.
+        """
+        return (self.__class__, (self.dap_result,), self.__dict__)
+
     @property
     def code(self) -> Optional[str]:
         """

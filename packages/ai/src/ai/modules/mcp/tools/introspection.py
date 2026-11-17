@@ -2,9 +2,9 @@
 """Authoring / introspection tools: `list_components`, `describe_component`,
 `validate_pipeline`, `describe_pipeline`.
 
-These are read-only / static-analysis tools -- no task tokens, no execution.
-`validate_pipeline` is engine-authoritative (zero client-side validation rules,
-so zero drift from the engine's own rules). `describe_pipeline` has no backing
+Four of these are read-only; `validate_pipeline`'s single-component form runs
+a provider probe (see its hints). None of them issues a task token or starts a
+run. `describe_pipeline` has no backing
 SDK method; it is synthesized client-side via a static parse of the pipeline
 plus a best-effort `get_service` lookup per component provider.
 """
@@ -14,7 +14,7 @@ from typing import Any, Dict
 
 from .. import credentials as credentials_mod
 from ..errors import _bad
-from ..tooling import ToolRegistry
+from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call
 from ._common import load_pipeline
 
@@ -100,41 +100,6 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     return result
 
 
-async def _unknown_provider_errors(client, pipeline: Dict[str, Any]):
-    """Report components naming a provider the engine has no service for.
-
-    The engine validates a whole pipeline structurally. Its provider lookup lives
-    in the single-component path (`validate_pipeline.cpp`), which the pipeline path
-    never reaches, so a typed provider name validates clean and fails at run time.
-    The names come from the engine's own catalog, so this adds no client-side rule.
-
-    Args:
-        client: The engine client.
-        pipeline: The pipeline body, already unwrapped from its envelope.
-
-    Returns:
-        A ``(errors, engine_error)`` pair; ``engine_error`` is set only when the
-        catalog could not be read.
-    """
-    components = [c for c in (pipeline.get('components') or []) if isinstance(c, dict)]
-    if not components:
-        return [], None
-
-    services, err = await engine_call(client.get_services(), 'validate_pipeline')
-    if err:
-        return [], err
-
-    catalog = (services or {}).get('services') or {}
-    if not catalog:
-        return [], None
-
-    return [
-        {'component': c.get('id'), 'message': f'unknown provider {c.get("provider")!r}'}
-        for c in components
-        if c.get('provider') and c['provider'] not in catalog
-    ], None
-
-
 async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     # The engine requires the {'pipeline': {...}} envelope and treats a missing
@@ -148,13 +113,8 @@ async def _validate_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
     result = validated or {}
-    errors = list(result.get('errors') or [])
+    errors = result.get('errors') or []
     warnings = result.get('warnings') or []
-
-    unknown, err = await _unknown_provider_errors(client, payload['pipeline'])
-    if err:
-        return err
-    errors.extend(unknown)
     return {'ok': not errors, 'errors': errors, 'warnings': warnings}
 
 
@@ -229,6 +189,15 @@ async def _describe_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     }
 
 
+_VALIDATE_PIPELINE_DESCRIPTION = (
+    "Validate a pipeline with the engine's validator, which also checks each component's provider, control "
+    "entries and lanes against this engine's services. ok is false when errors is non-empty. "
+    'A whole pipeline is checked statically; '
+    "the single-component form {version, component} instead runs that provider's configuration probe, which "
+    'may contact the configured provider or database.'
+)
+
+
 def register(registry: ToolRegistry) -> None:
     """Register the authoring/introspection tools against ``registry``."""
     registry.register(
@@ -236,6 +205,11 @@ def register(registry: ToolRegistry) -> None:
         'List RocketRide components ready to use now (zero-config plus integrations you have configured). '
         'Call describe_component for a config schema, list_integrations for integrations needing setup.',
         {'type': 'object', 'properties': {}},
+        hints=ToolHints.reads(
+            "Reads the engine catalog and the caller's variable names; writes nothing; bounded to this engine "
+            'and account.'
+        ),
+        always_load=True,
     )(_list_components)
 
     registry.register(
@@ -248,6 +222,8 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['name'],
         },
+        hints=ToolHints.reads('Reads one service definition and its credential readiness; writes nothing.'),
+        always_load=True,
     )(_describe_component)
 
     registry.register(
@@ -262,16 +238,31 @@ def register(registry: ToolRegistry) -> None:
             },
             'required': ['provider'],
         },
+        hints=ToolHints.reads('Computes the merged config the engine would load for a component; nothing is saved.'),
     )(_resolve_config)
 
     registry.register(
         'validate_pipeline',
-        "Validate a pipeline against the engine's own rules (zero client-side rules -- zero drift).",
+        _VALIDATE_PIPELINE_DESCRIPTION,
         _PIPELINE_SCHEMA,
+        hints=ToolHints(
+            read_only=False,
+            destructive=True,
+            open_world=True,
+            reason='Whole-pipeline validation is a static engine check, but the accepted single-component form '
+            "{version, component} runs that provider's own configuration probe inside the engine: LLM nodes "
+            'send a small completion request to the configured endpoint, a charge that cannot be undone, '
+            'and store nodes connect to the configured database with the supplied credentials. Destinations '
+            'are caller-configured, so the tool is open-world. No run is started and nothing is saved.',
+        ),
+        always_load=True,
     )(_validate_pipeline)
 
     registry.register(
         'describe_pipeline',
         'Statically describe a pipeline source and components (id, provider, title, classType, inputs).',
         _PIPELINE_SCHEMA,
+        hints=ToolHints.reads(
+            'Parses caller-supplied pipeline JSON with best-effort catalog lookups; nothing is saved or run.'
+        ),
     )(_describe_pipeline)

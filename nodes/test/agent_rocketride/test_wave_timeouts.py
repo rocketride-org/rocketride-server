@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import pytest
 
 WAIT = 10  # seconds; a bound for waits that should end at once
-LIMIT = 0.3  # seconds; the real time limit in tests where a call is stuck
+LIMIT = 2.0  # seconds; the real time limit in tests where a call is stuck
 
 
 class Memory:

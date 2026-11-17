@@ -39,7 +39,7 @@ import { RocketRideClient } from '../client/client';
 import { DAPMessage, PipelineConfig, RocketRideClientConfig } from '../client/types';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 import { Output, JsonOption } from './output';
-import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_TARGET_MESSAGE } from './env';
+import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_APIKEY_MESSAGE, NO_DEPLOY_TARGET_MESSAGE } from './env';
 
 /** Options every connected command accepts. */
 export interface ConnectionOptions {
@@ -123,6 +123,10 @@ export async function connectDeploy(options: ConnectionOptions, out: Output): Pr
 		out.fail(NO_DEPLOY_TARGET_MESSAGE);
 		return null;
 	}
+	if (!options.apikey?.trim()) {
+		out.fail(NO_DEPLOY_APIKEY_MESSAGE);
+		return null;
+	}
 	return connectClient(options);
 }
 
@@ -164,6 +168,7 @@ export function takeInterrupt(): boolean {
 /**
  * Derive the user-facing hint for a thrown error.
  *
+ * An error that carries its own single-line `hint` (the SDK attaches one) wins.
  * Auth rejections name the fix (`rocketride login`); connection failures
  * point at the server address; everything else gets no hint.
  *
@@ -172,6 +177,10 @@ export function takeInterrupt(): boolean {
  * @returns A hint sentence, possibly empty.
  */
 export function hintFor(err: unknown, uri?: string): string {
+	const ownHint = (err as { hint?: unknown } | null | undefined)?.hint;
+	if (typeof ownHint === 'string' && ownHint.trim() && !ownHint.trim().includes('\n')) {
+		return ownHint.trim();
+	}
 	const message = err instanceof Error ? err.message : String(err);
 	if (/invalid api key|not authenticated|unauthorized|authentication failed|account is waitlisted/i.test(message)) {
 		return `credentials for ${uri || 'the server'} were rejected — run 'rocketride login' to re-authenticate`;

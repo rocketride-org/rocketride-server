@@ -149,11 +149,17 @@ empty `getTasks()` list is not proof that something failed to provision.
 
 Tokens live only in a `Map` inside the store
 ([`connect/store.ts`](../../../apps/shared/src/explorer/connect/store.ts)).
-Endpoints, probe results, the state snapshot, keys, sessions and errors never
-contain one, so nothing the library returns can leak one into preferences,
-storage, a URL, a log, a copied JSON or a document payload. Call tools only
-through `store.session(client, endpoint)`; the session reads the token at call
-time and never keeps it.
+The endpoints, probe results, state snapshot, keys, sessions and errors the
+store exposes never contain one, so nothing read from the store can leak one
+into preferences, storage, a URL, a log, a copied JSON or a document payload.
+Call tools only through `store.session(client, endpoint)`; the session reads the
+token at call time and never keeps it.
+
+Two lower-level discovery functions exported from the library DO return tokens:
+`discoverToolEndpoints()` returns a `token` beside each endpoint it finds, and
+`readTaskRow()` returns the token of the task row it parses. Discovery is how
+the store fills its `Map`. A caller that uses them directly holds live task tokens: never log,
+persist, copy or send those results anywhere.
 
 Discovery lists running tasks only, so a task that is restarting disappears
 from it just like a stopped one. An endpoint that disappears is shown
@@ -921,7 +927,7 @@ the host's one channel per mount over a harness peer
   `inaccessible` is an identity-permission hint plus a failed probe, and a retry
   needs re-discovery.
 - SQL Explorer's `execute` has no client timeout (SQL nodes set no statement
-  deadline; the app offers Stop waiting). Schema reflection waits up to 5
-  minutes and the engine check 15 seconds.
+  deadline; the app offers Stop waiting). Reading the schema waits up to 60
+  seconds, re-reading it 135, and the engine check 15.
 - Nothing cancels a running tool call. Stop waiting stops the client, not the
   node.

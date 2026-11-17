@@ -42,6 +42,7 @@ import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } fro
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from '../../../../types';
 import { pinStatusOf, versionBadgeOf } from '../../../../servingStatus';
 import type { ServingTone } from '../../../../servingStatus';
+import { useDeveloperRegistration } from '../../../useDeveloperRegistration';
 
 // =============================================================================
 // TYPES
@@ -528,9 +529,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	const [actionError, setActionError] = useState('');
 	// Developer registration: '' = org not a developer yet; null = unknown/loading.
 	const [developerId, setDeveloperId] = useState<string | null>(null);
-	const [regSlug, setRegSlug] = useState('');
-	const [regBusy, setRegBusy] = useState(false);
-	const [regError, setRegError] = useState('');
+	// The register form (shared with the New App wizard): claim the org's
+	// developer id slug (org.admin, self-service).
+	const registration = useDeveloperRegistration(host.registerDeveloper, undefined, setDeveloperId);
 	// The server build ticker: registryVersion -> the current display word
 	// ('uploaded' → 'preparing' → 'installing' → …); '' from the server
 	// clears the entry (success — nothing left to say).
@@ -616,22 +617,6 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 			.then(setDeveloperId)
 			.catch(() => setDeveloperId(null));
 	}, [host]);
-
-	/** Claim the org's developer id slug (org.admin, self-service). */
-	const onRegister = useCallback(async (): Promise<void> => {
-		if (!host.registerDeveloper || !regSlug.trim()) return;
-		setRegBusy(true);
-		setRegError('');
-		try {
-			const assigned = await host.registerDeveloper(regSlug.trim());
-			setDeveloperId(assigned);
-			setRegSlug('');
-		} catch (e) {
-			setRegError(e instanceof Error ? e.message : String(e));
-		} finally {
-			setRegBusy(false);
-		}
-	}, [host, regSlug]);
 
 	/** Deploy: open the stock message dialog (window.prompt is unavailable in
 	 * the webview). The snapshot itself happens in confirmDeploy. */
@@ -813,12 +798,12 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 								<strong>Register as a developer to deploy apps.</strong> Every app id is <code>&lt;developerId&gt;.&lt;name&gt;</code>. Claim your organization&rsquo;s developer id (letters and underscores only) to publish under your own namespace.
 							</div>
 							<div style={styles.devBannerRow}>
-								<input style={styles.devInput} placeholder="developer id (e.g. acme_labs)" value={regSlug} onChange={(e) => setRegSlug(e.target.value)} />
-								<button style={styles.pickBtn} disabled={regBusy || !regSlug.trim()} onClick={() => void onRegister()}>
-									{regBusy ? 'Registering…' : 'Register'}
+								<input style={styles.devInput} placeholder="developer id (e.g. acme_labs)" value={registration.slug} onChange={(e) => registration.setSlug(e.target.value)} />
+								<button style={styles.pickBtn} disabled={registration.busy || !registration.slug.trim()} onClick={() => void registration.submit()}>
+									{registration.busy ? 'Registering…' : 'Register'}
 								</button>
 							</div>
-							{regError ? <div style={styles.devError}>{regError}</div> : null}
+							{registration.error ? <div style={styles.devError}>{registration.error}</div> : null}
 						</div>
 					)}
 					{/* Published versions rail */}

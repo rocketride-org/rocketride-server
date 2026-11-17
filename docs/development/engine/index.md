@@ -90,7 +90,6 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 | `--tika`                | External Tika service support                    |
 | `--serviceCategory CAT` | Service category filter                          |
 | `--serviceName NAME`    | Service name filter                              |
-| `--node_path PATH`      | Load local node prototypes from PATH             |
 
 `--testArgs`, `--nodeId`, and `--url.keystorenet` are options of the engine-lib
 test binaries, not of the engine executable.

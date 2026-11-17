@@ -4,6 +4,7 @@
 import pytest
 
 from ai.web import oauth_resource as oauth
+from ai.web.openai_apps_challenge import CHALLENGE_PATH
 
 
 @pytest.mark.asyncio
@@ -77,3 +78,22 @@ async def test_websocket_to_mcp_is_closed_not_served(monkeypatch, fake_engine):
     await handler({'type': 'websocket', 'path': '/mcp', 'headers': [], 'state': {}}, receive, send)
 
     assert sent == [{'type': 'websocket.close', 'code': 1008}]
+
+
+@pytest.mark.asyncio
+async def test_openai_challenge_route_is_mounted_and_public(monkeypatch, fake_engine):
+    """Unknown paths default to private, so the route must be public even while it answers 404."""
+    pytest.importorskip('rocketlib')
+    from ai.web.server import WebServer
+    import ai.modules.mcp as mcp_module
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', lambda cfg, on_event=None: fake_engine)
+
+    server = WebServer()
+    server.use('mcp', {})
+
+    paths = {getattr(r, 'path', None) for r in server.app.routes}
+    public = list(server._public_paths or [])
+    assert CHALLENGE_PATH in paths
+    assert CHALLENGE_PATH in public
+    assert '/mcp' not in public

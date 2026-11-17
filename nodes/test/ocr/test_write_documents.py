@@ -28,7 +28,6 @@ import base64
 import contextlib
 import importlib.util
 import sys
-import threading
 import types
 from pathlib import Path
 from typing import Iterator
@@ -115,8 +114,12 @@ class _StubReader:
 
 class _StubIGlobal:
     def __init__(self, reader: _StubReader) -> None:
+        """Hold the reader.
+
+        Args:
+            reader: The stub reader.
+        """
         self.reader = reader
-        self.readerLock = threading.Lock()
         # no `table_ocr` attribute, so extract_tables_from_image returns early
 
 

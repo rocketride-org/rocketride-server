@@ -89,11 +89,16 @@ export function createLiveRegion(announcer: IAnnouncer): React.FC {
 		const announcement = useSyncExternalStore(announcer.subscribe, announcer.get, announcer.get);
 		const [spoken, setSpoken] = useState('');
 		const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+		// The announcement already current at mount was made before this region
+		// existed (an earlier region spoke it, or none was mounted). A region that
+		// mounts later, such as when the realm's claim passes to another document,
+		// must not speak it again.
+		const mountRevisionRef = useRef(announcement.revision);
 
 		useEffect(() => {
 			// Empty first, in this commit; the text returns in a later task.
 			setSpoken('');
-			if (announcement.text === '') return undefined;
+			if (announcement.text === '' || announcement.revision === mountRevisionRef.current) return undefined;
 			timerRef.current = setTimeout(() => {
 				timerRef.current = null;
 				setSpoken(announcement.text);
