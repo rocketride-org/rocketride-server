@@ -23,7 +23,7 @@ with a context forged inside the tool input.
   an agent upsert succeeds while the same upsert through client.tool() is
   refused with WRITES_DISABLED (gate G2)
 
-Needs the probe nodes: start the engine with --node_path=<repo>/nodes/test/vx_context_probe.
+Needs the probe nodes: copy <repo>/nodes/test/vx_context_probe/vx_probe_* into the engine's nodes/ folder.
 """
 
 from __future__ import annotations

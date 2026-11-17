@@ -13,7 +13,7 @@ whole answer to keep 2 KB), are recorded in out/phase0/g0_8_payload.json.
 The TypeScript run needs node and the CommonJS build of
 packages/client-typescript (``./builder client-typescript:build``).
 
-Needs the probe nodes: start the engine with --node_path=<repo>/nodes/test/vx_context_probe.
+Needs the probe nodes: copy <repo>/nodes/test/vx_context_probe/vx_probe_* into the engine's nodes/ folder.
 """
 
 from __future__ import annotations

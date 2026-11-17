@@ -12,7 +12,7 @@
   is ``'account'``, a task token (``tk_``) is ``'task'``, a public task key
   (``pk_``) is ``'public'``. The key itself never appears in the context.
 
-Needs the probe nodes: start the engine with --node_path=<repo>/nodes/test/vx_context_probe.
+Needs the probe nodes: copy <repo>/nodes/test/vx_context_probe/vx_probe_* into the engine's nodes/ folder.
 """
 
 from __future__ import annotations
