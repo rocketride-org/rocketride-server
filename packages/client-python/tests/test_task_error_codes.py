@@ -30,11 +30,12 @@ failure without matching the English message.
 
 import inspect
 import os
+import pickle
 
 import pytest
 
 from rocketride.core.dap_base import DAPBase
-from rocketride.core.exceptions import DAPException, PipeException
+from rocketride.core.exceptions import AuthenticationException, CommandException, DAPException, PipeException
 
 
 class _Base(DAPBase):
@@ -153,3 +154,17 @@ def test_command_failure_keeps_the_fallback_message():
     client = _client_answering({'type': 'response', 'success': False})
     with pytest.raises(RuntimeError, match='^rrext_get_tasks failed$'):
         asyncio.run(client.call('rrext_get_tasks'))
+
+
+@pytest.mark.parametrize('cls', [DAPException, CommandException, PipeException, AuthenticationException])
+def test_exception_survives_pickling(cls):
+    """A process pool or a pickled result rebuilds the exception with its response."""
+    e = cls({'message': 'Task is stopped', 'code': 'TASK_STOPPED', 'hint': 'start it'})
+
+    copy = pickle.loads(pickle.dumps(e))
+
+    assert type(copy) is cls
+    assert str(copy) == 'Task is stopped'
+    assert copy.code == 'TASK_STOPPED'
+    assert copy.hint == 'start it'
+    assert copy.dap_result == e.dap_result
