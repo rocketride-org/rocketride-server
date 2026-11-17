@@ -177,7 +177,6 @@ def test_shared_host_alone_installs_no_guard(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--shared-host'])
     monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
     monkeypatch.setattr(gpu_guard, '_installed', False)
-    monkeypatch.setattr(gpu_guard, '_reason', None)
     monkeypatch.setattr(gpu_guard, 'get_model_server_address', lambda: None)
 
     gpu_guard.install_gpu_guard()
@@ -185,46 +184,44 @@ def test_shared_host_alone_installs_no_guard(monkeypatch):
     assert not gpu_guard.is_installed()
 
 
-def _install_hosted_guard(monkeypatch, gpu_guard):
-    """A hosted engine's task with no model server, as on staging."""
+def test_hosted_engine_without_a_model_server_keeps_torch(monkeypatch, depends_calls):
+    """--modelserver is the switch, not --hosted: a locally hosted SaaS server with no
+    model server loads and installs torch like any local engine.
+    """
+    from ai.common.models import gpu_guard
+
     monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--hosted'])
     monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
     monkeypatch.setattr(gpu_guard, '_installed', False)
-    monkeypatch.setattr(gpu_guard, '_reason', None)
     gpu_guard.install_gpu_guard()
-    assert gpu_guard.is_installed()
+    assert not gpu_guard.is_installed()
 
-
-def test_hosted_engine_refuses_torch_without_a_model_server(monkeypatch, depends_calls):
-    """A hosted engine never installs torch, model server or not (#2681)."""
-    from ai.common.models import gpu_guard
-
-    _install_hosted_guard(monkeypatch, gpu_guard)
-
-    with pytest.raises(ImportError, match='not available on RocketRide Cloud'):
+    try:
         __import__(WRAPPER)
-    # sys.modules is consulted before sys.meta_path: drop a torch an earlier test loaded
-    for name in [m for m in sys.modules if m == 'torch' or m.startswith('torch.')]:
-        monkeypatch.delitem(sys.modules, name)
-    with pytest.raises(ImportError, match='not available on RocketRide Cloud'):
-        __import__('torch')
+    except ImportError as exc:
+        assert 'blocked in model server mode' not in str(exc)
 
-    assert _wrapper_installs(depends_calls) == [], 'the CUDA wheel was fetched before the refusal'
+    assert _wrapper_installs(depends_calls), 'the install was not reached'
 
 
-def test_hosted_engine_model_loader_installs_nothing(monkeypatch, depends_calls):
-    """A local model loader on a hosted engine stops before its own requirements.
+def test_model_loader_installs_nothing_with_a_model_server(monkeypatch, depends_calls):
+    """A local model loader stops before its own requirements when a model server is configured.
 
     sentence-transformers pulls torch in as a dependency, so refusing at the
-    import alone would still leave torch on disk.
+    import alone would still leave torch on disk. A hosted engine's task carries
+    --hosted too; it changes nothing here.
     """
     from ai.common.models import gpu_guard
     from ai.common.models.transformers.sentence_transformers import SentenceTransformerLoader
 
-    _install_hosted_guard(monkeypatch, gpu_guard)
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--hosted', '--modelserver=localhost:5590'])
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    monkeypatch.setattr(gpu_guard, '_installed', False)
+    gpu_guard.install_gpu_guard()
+    assert gpu_guard.is_installed()
     monkeypatch.setattr(SentenceTransformerLoader, '_dependencies_loaded', False)
 
-    with pytest.raises(ImportError, match='not available on RocketRide Cloud'):
+    with pytest.raises(ImportError, match='blocked in model server mode'):
         SentenceTransformerLoader._ensure_dependencies()
 
     # ai.common.ssl may install its own requirement first; that one is fine.

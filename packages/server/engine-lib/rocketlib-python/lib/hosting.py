@@ -26,7 +26,8 @@
 How a hosted engine started this task: the two flags on its command line.
 
 ``--hosted``: the task belongs to a hosted engine. Its rules hold wherever the
-task runs: a credit check before every pipe, no torch install or import.
+task runs: a credit check before every pipe. Torch is not one of them: it is
+refused only when a model server is configured (``--modelserver``).
 
 ``--shared-host``: the task runs on the engine's own host (spawn), so the
 guards for a shared machine apply: the sandbox keeps to its default modules,
