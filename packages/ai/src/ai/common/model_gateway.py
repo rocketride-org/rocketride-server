@@ -53,12 +53,13 @@ _SERVER_HOSTED_FLAG = '--saas'
 
 _NO_KEY_HOSTED = (
     "{node}: no API key is set, and RocketRide-hosted models aren't available for this run. "
-    'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
-    "and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
+    'Add your OpenAI key in the node settings. To keep the key out of the pipeline, save it in '
+    "Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
 )
 _NO_KEY_SELF_HOSTED = (
-    '{node}: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
-    "as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
+    '{node}: no API key is set. Add your OpenAI key in the node settings. To keep the key out of the '
+    'pipeline, save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} '
+    "as the node's API key."
 )
 # A compatible node with an endpoint of its own never runs on hosted models.
 _NO_KEY_OWN_ENDPOINT = '{node}: no API key is set. Add the API key for your endpoint in the node settings.'
@@ -77,8 +78,8 @@ REFUSAL_SENTENCES = {
         'under Account > Billing in RocketRide.'
     ),
     'rate_limited': (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
-        'requests at once, or add your own OpenAI key in the node settings.'
+        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
+        'or add your own OpenAI key in the node settings.'
     ),
     'model_not_available': (
         "The model {model} isn't offered as a RocketRide-hosted model. Choose another model in the node "
@@ -109,7 +110,7 @@ _OTHER_REFUSAL = (
 _MODEL_IN_MESSAGE = re.compile(r"^The model (.+?) isn't offered as a RocketRide-hosted model\.")
 _FIELD_IN_MESSAGE = re.compile(r"^RocketRide-hosted models don't support (.+?)\. Add your own OpenAI key")
 # Used when neither the request nor the refusal names the field or the model.
-_SOME_FIELD = 'part of this request'
+_SOME_FIELD = 'a feature this request uses'
 _SOME_MODEL = 'you chose'
 
 

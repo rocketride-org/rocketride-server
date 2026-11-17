@@ -45,7 +45,8 @@ HOSTED_MODELS_CAPABILITY = 'hosted-models:openai'
 HOSTED_INTEGRATIONS = frozenset({'llm_openai'})
 HOSTED_NOTE = (
     "Runs on RocketRide-hosted models without a key of your own, using this workspace's compute credits. "
-    'Leave apikey empty, or set it to your own OpenAI key.'
+    'Leave apikey empty, or save your OpenAI key in Settings > Variables as ROCKETRIDE_OPENAI_KEY and set '
+    'apikey to ${ROCKETRIDE_OPENAI_KEY}.'
 )
 
 SETUP_HOW = (

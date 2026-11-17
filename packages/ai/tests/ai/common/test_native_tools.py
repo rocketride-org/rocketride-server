@@ -682,8 +682,8 @@ def test_a_hosted_refusal_reaches_the_caller_as_its_sentence():
     from ai.common.model_gateway import HostedModelError
 
     sentence = (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
-        'requests at once, or add your own OpenAI key in the node settings.'
+        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
+        'or add your own OpenAI key in the node settings.'
     )
 
     class _Refused:
