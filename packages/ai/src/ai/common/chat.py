@@ -301,6 +301,8 @@ class ChatBase:
         terminal = self.terminal_error(error)
         if terminal is None:
             return
+        # The user reads the terminal error; the log keeps what the provider sent (its code included)
+        debug(f'Model call ended for model={self._model} ({type(error).__name__}): {error}')
         if terminal is error:
             raise error
         raise terminal from error
