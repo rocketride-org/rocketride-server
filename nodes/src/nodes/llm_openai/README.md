@@ -159,7 +159,9 @@ Pipeline validation makes a small live call to verify the API key and model name
 
 When the hosted models refuse a request, for example because the workspace doesn't have
 enough compute credits left, the run fails with a sentence that says what happened and what
-to do. The request is not sent again, and no other request is tried in its place.
+to do. The engine doesn't retry the request and doesn't try another request in its place.
+When the hosted models are busy or unavailable, the OpenAI client may still retry the request
+on its own, as it does for those answers from OpenAI.
 
 ### Testing
 
