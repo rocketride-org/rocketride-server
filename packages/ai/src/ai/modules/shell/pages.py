@@ -622,7 +622,8 @@ async def _from_store(call: Callable[[str], Awaitable[_T]], path: str) -> _T:
     except StorageError:
         raise
     except Exception as exc:
-        # shortcut: develop drivers raise raw provider errors; remove when the storage PR lands
+        # shortcut: develop drivers raise raw provider errors; drop this wrapper when the storage PR,
+        # rocketride-org/rocketride-server#3269, lands
         raise StorageError(f'the store failed reading {path}: {type(exc).__name__}: {exc}') from exc
 
 
