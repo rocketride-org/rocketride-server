@@ -404,13 +404,6 @@ def test_edge_header_with_the_secret_makes_an_app_host(isolation_env):
 # T19 header snapshot
 # ---------------------------------------------------------------------------
 
-_NET = re.compile(r'^https://')
-
-
-def _core(sources):
-    """A CSP source list without the per-app ``network`` origins."""
-    return [s for s in sources if not _NET.match(s)]
-
 
 def _assert_common_headers(resp, where):
     h = resp.headers
@@ -425,7 +418,13 @@ def _assert_common_headers(resp, where):
 
 
 def test_app_host_headers_snapshot(served_app):
-    """T19: every app-host response carries the full header set; the CSP is Appendix C's."""
+    """T19: every app-host response carries the full header set; the CSP is Appendix C's, exactly.
+
+    The per-version ``network`` origins are not in any app-host CSP in PR1:
+    ``frame.html`` is per label, not per app, and how they reach the frame's
+    policy is a PR2 acceptance criterion (G4 S2). So nothing is stripped
+    before comparing: no source beyond Appendix C's may appear.
+    """
     token = served_app.token()
     responses = {
         'frame': served_app.get('/_rr/frame.html'),
@@ -442,9 +441,9 @@ def test_app_host_headers_snapshot(served_app):
     assert frame['default-src'] == ["'none'"]
     assert frame['script-src'] == ["'self'", "'wasm-unsafe-eval'"]
     assert frame['style-src'] == ["'self'", "'unsafe-inline'"]
-    assert _core(frame['img-src']) == ["'self'", 'data:', 'blob:']
-    assert _core(frame['font-src']) == ["'self'", 'data:']
-    assert _core(frame['connect-src']) == ["'self'"]
+    assert frame['img-src'] == ["'self'", 'data:', 'blob:']
+    assert frame['font-src'] == ["'self'", 'data:']
+    assert frame['connect-src'] == ["'self'"]
     assert frame['worker-src'] == ["'self'", 'blob:']
     assert frame['frame-src'] == ["'none'"]
     assert frame['form-action'] == ["'none'"]
@@ -456,9 +455,7 @@ def test_app_host_headers_snapshot(served_app):
     for name in ('guest', 'token', 'public'):
         csp = csp_directives(responses[name].headers['content-security-policy'])
         assert 'frame-ancestors' not in csp, name
-        assert {k: _core(v) for k, v in csp.items()} == {
-            k: _core(v) for k, v in frame.items() if k != 'frame-ancestors'
-        }, name
+        assert csp == {k: v for k, v in frame.items() if k != 'frame-ancestors'}, name
 
 
 def test_csp_never_widens_beyond_self_and_network_origins(served_app):
