@@ -39,7 +39,7 @@ App-host dispatch (#1022, design section 5).
 App-host routes:
     GET /_rr/frame.html               — the guest frame, shell origins injected as a meta tag
     GET /_rr/<guest>                  — the guest bundle named by runtime.json (immutable)
-    GET /_rr/clear                    — Clear-Site-Data: "storage" (a same-site navigation only, on logout)
+    GET /_rr/clear                    — Clear-Site-Data: "storage" (a same-origin navigation only, on logout)
     GET /_t/<token>/v<N>/<file>       — one version's dist behind a frame token (private, no-store)
     GET /_p/<appId>/v<N>/<file>       — a public ready version's dist (anonymous; registry
                                         walks are budgeted per client)
@@ -217,11 +217,12 @@ class AppHostMiddleware:
     def _serve_rr(self, name: str, headers: Headers) -> Response:
         """``/_rr/frame.html``, ``/_rr/<guest>`` and ``/_rr/clear``."""
         if name == 'clear':
-            # Only a same-site navigation wipes the origin's storage (the guest
-            # navigates its own frame here on logout); another site loading it
-            # as a frame or subresource gets the plain 404. No fetch metadata
-            # at all fails closed.
-            same_site = headers.get('sec-fetch-site') in ('same-origin', 'same-site', 'none')
+            # Only a same-ORIGIN navigation wipes the origin's storage (each
+            # guest navigates its own frame here on logout). Every app host is
+            # same-site with every other one, so 'same-site' would let one app
+            # wipe another's storage; any other site, a subresource load, or no
+            # fetch metadata at all (older browsers never clear) gets the 404.
+            same_site = headers.get('sec-fetch-site') in ('same-origin', 'none')
             navigation = headers.get('sec-fetch-dest') in ('document', 'iframe')
             foreign = 'origin' in headers and headers['origin'] not in self._own_origins(headers)
             if not (same_site and navigation) or foreign:

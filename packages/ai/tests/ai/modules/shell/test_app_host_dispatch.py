@@ -355,12 +355,11 @@ SAME_ORIGIN_FRAME = {'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'iframe'
     'fetch',
     [
         SAME_ORIGIN_FRAME,
-        {'sec-fetch-site': 'same-site', 'sec-fetch-dest': 'document'},
         {'sec-fetch-site': 'none', 'sec-fetch-dest': 'document'},  # typed into the address bar
     ],
 )
 def test_h9_clear_sends_clear_site_data(fetch, isolation_env):
-    """T16: ``/_rr/clear`` empties the app origin's storage on a same-site navigation (the guest navigates to it on logout)."""
+    """T16: ``/_rr/clear`` empties the app origin's storage on a same-ORIGIN navigation (the guest navigates its own frame there on logout)."""
     resp = _client(isolation_env).get('/_rr/clear', headers={'host': HOST, **fetch})
     assert resp.status_code == 200
     assert resp.headers['clear-site-data'] == '"storage"'
@@ -371,6 +370,8 @@ def test_h9_clear_sends_clear_site_data(fetch, isolation_env):
     'fetch',
     [
         {},  # no fetch metadata: fail closed
+        {'sec-fetch-site': 'same-site', 'sec-fetch-dest': 'iframe'},  # another app (same site): G4 round 2 R2-L2
+        {'sec-fetch-site': 'same-site', 'sec-fetch-dest': 'document'},
         {'sec-fetch-site': 'cross-site', 'sec-fetch-dest': 'iframe'},  # another site frames it
         {'sec-fetch-site': 'cross-site', 'sec-fetch-dest': 'document'},
         {'sec-fetch-site': 'same-origin', 'sec-fetch-dest': 'image'},  # a subresource, not a navigation
