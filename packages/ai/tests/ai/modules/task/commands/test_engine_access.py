@@ -66,7 +66,8 @@ async def test_a_dormant_control_with_team_access_restarts_its_engine():
     assert await engine_for(conn, control, 'task.control') == 'engine'
 
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.control')
-    conn._server.ensure_engine.assert_awaited_once_with(control)
+    # The request's connection presents no account here, so no credential goes along
+    conn._server.ensure_engine.assert_awaited_once_with(control, credential=None)
 
 
 @pytest.mark.asyncio

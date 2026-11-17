@@ -170,7 +170,7 @@ def engines(monkeypatch):
     """Engines that 'start' (and confirm running) and 'stop' without a subprocess; returns the stop log."""
     stopped: List[tuple] = []
 
-    async def start(self):
+    async def start(self, *, credential=None):
         # The subprocess reports its service up at once
         self.state = EngineState.STARTING
         self._confirm_running()
@@ -728,8 +728,8 @@ async def test_a_control_removed_during_its_restart_takes_no_hold(catalog, engin
     assert control.dormant
     original = ts._authorize_control_db
 
-    async def authorize_then_remove(target):
-        approved = await original(target)
+    async def authorize_then_remove(target, *, credential=None):
+        approved = await original(target, credential=credential)
         ts._task_control.pop(target.key, None)
         return approved
 
@@ -871,7 +871,7 @@ async def test_concurrent_starters_of_one_key_start_one_engine(catalog, monkeypa
     """Concurrent starters serialize on the key's start lock; the losers attach to the winner."""
     created = []
 
-    async def slow_start(self):
+    async def slow_start(self, *, credential=None):
         created.append(self)
         await asyncio.sleep(0.01)
 
@@ -1286,7 +1286,7 @@ async def test_concurrent_requests_after_a_stop_start_one_engine(catalog, engine
 
     created = []
 
-    async def slow_start(self):
+    async def slow_start(self, *, credential=None):
         created.append(self)
         await asyncio.sleep(0.01)
 
@@ -1343,7 +1343,7 @@ async def test_a_failed_restart_leaves_the_control_dormant(catalog, engines, clo
     stopped = control.task
     await _idle_out(ts, clock)
 
-    async def failing_start(self):
+    async def failing_start(self, *, credential=None):
         raise RuntimeError('no ports')
 
     monkeypatch.setattr(TaskEngine, 'start_task', failing_start)
@@ -1447,7 +1447,7 @@ async def test_a_crash_before_running_is_not_retried(catalog, engines, monkeypat
     """An engine that never confirmed running is not restarted: the control sees the failure, as before."""
     ts = _server()
 
-    async def start_without_running(self):
+    async def start_without_running(self, *, credential=None):
         return None
 
     monkeypatch.setattr(TaskEngine, 'start_task', start_without_running)
@@ -1524,7 +1524,7 @@ async def test_task_lists_show_dormant_and_starting_controls(catalog, engines, c
     # engine confirms running
     release = asyncio.Event()
 
-    async def slow_start(self):
+    async def slow_start(self, *, credential=None):
         await release.wait()
 
     monkeypatch.setattr(TaskEngine, 'start_task', slow_start)
@@ -1556,7 +1556,7 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
     # Another holder's restart holds the gate; this control waits behind it
     release = asyncio.Event()
 
-    async def slow_start(self):
+    async def slow_start(self, *, credential=None):
         await release.wait()
         self._confirm_running()
 
@@ -1928,7 +1928,7 @@ async def test_concurrent_identical_launches_share_one_control(catalog, monkeypa
     """Two identical launches that pass the lookup together are one control: the gate rechecks before registering."""
     release = asyncio.Event()
 
-    async def held_start(self):
+    async def held_start(self, *, credential=None):
         await release.wait()
         self.state = EngineState.STARTING
         self._confirm_running()

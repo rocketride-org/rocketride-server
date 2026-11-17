@@ -146,6 +146,7 @@ from .node_id import node_id
 from .task_engine import (
     TaskEngine,
     authorize_db_targets,
+    presenting_credential,
     component_facts,
     db_access,
     db_identity,
@@ -3440,8 +3441,12 @@ class TaskServer(DAPBase):
 
         # The RocketRide cloud databases are authorized for EVERY control as
         # its own run, before it holds an engine (SDD 4.4): an engine's own
-        # start authorizes the databases of the control that starts it only
-        control.db_approved = await self._authorize_control_db(control)
+        # start authorizes the databases of the control that starts it only.
+        # The connection's credential goes down as a call argument, so the
+        # account can limit what a restricted key may reach: it is not kept
+        # on the control or the engine, and not logged
+        credential = self._presenting_credential(conn)
+        control.db_approved = await self._authorize_control_db(control, credential=credential)
 
         # A bare key is a SHARED engine (plan 7.2): nobody's, started with no
         # user environment; every value rides each control's open
@@ -3495,7 +3500,17 @@ class TaskServer(DAPBase):
                     f'Task "{existing_control.id}" is already running: reusing it (useExisting) and ignoring the '
                     'submitted pipeline, which differs from the running one. Restart the task to apply it.'
                 )
-            await self.ensure_engine(existing_control)
+            # Reusing hands this caller the live control, whose engine holds
+            # the databases it was authorized for under whatever credential
+            # started it. The caller's own credential must reach them too, or
+            # a restricted key would ride a wider run of the same owner. The
+            # account has just answered for the pipeline this caller
+            # submitted (above): that covers a control of the same spec. A
+            # control of another spec (useExisting) is asked about on its
+            # own; a dormant one is asked by its restart below
+            if not _same_spec(existing_control) and not existing_control.dormant:
+                await self._authorize_reuse(existing_control, credential)
+            await self.ensure_engine(existing_control, credential=credential)
             if wait_for_running:
                 await existing_control.task.wait_for_running()
             return _return_results(existing_control, reused=True)
@@ -3553,10 +3568,16 @@ class TaskServer(DAPBase):
                     env_source=None if shared else self._owner_chain(control, overrides),
                 ),
                 _register,
+                credential=credential,
             )
 
-            # The gate answered with a twin: the caller's control already runs
+            # The gate answered with a twin: the caller's control already runs.
+            # A twin taken with useExisting may run another spec than the one
+            # this caller submitted (and was authorized for above), so the
+            # caller's credential is checked against the twin's own databases
             if reused is not None:
+                if not _same_spec(reused):
+                    await self._authorize_reuse(reused, credential)
                 if wait_for_running:
                     await reused.task.wait_for_running()
                 return _return_results(reused, reused=True)
@@ -3667,7 +3688,36 @@ class TaskServer(DAPBase):
         return key, threads, content
 
     @staticmethod
-    async def _authorize_control_db(control: TaskControl) -> Dict[str, str]:
+    def _presenting_credential(conn: Optional[TaskConn]) -> Optional[str]:
+        """The ``AccountInfo.auth`` of the connection a request came in on (``presenting_credential``)."""
+        return presenting_credential(conn)
+
+    async def _authorize_reuse(self, control: TaskControl, credential: Optional[str]) -> None:
+        """
+        Authorize a connection that is handed a control which already exists.
+
+        A reuse creates nothing, but the caller gets the live control, and
+        its engine holds the databases the control was approved for. So the
+        caller's own credential must reach every one of them, as the
+        control's run: the same question ``_authorize_control_db`` asks when
+        a control is created, on the control's own spec. Nothing is kept, and
+        the control's ``db_approved`` is not rewritten: what its engine was
+        handed does not change.
+
+        Args:
+            control: The existing control the caller is about to get.
+            credential: The caller's (``_presenting_credential``).
+
+        Raises:
+            PermissionError: A database the control uses is denied to this credential.
+        """
+        try:
+            await self._authorize_control_db(control, credential=credential)
+        except PermissionError as e:
+            raise PermissionError(f'Cannot reuse the running task "{control.id}": {e}') from e
+
+    @staticmethod
+    async def _authorize_control_db(control: TaskControl, *, credential: Optional[str] = None) -> Dict[str, str]:
         """
         Authorize the RocketRide cloud databases ``control``'s DB nodes use, as the control's own run (SDD 4.4).
 
@@ -3679,6 +3729,9 @@ class TaskServer(DAPBase):
 
         Args:
             control: The control (its pipeline, env and identity are set).
+            credential: The presenting connection's ``AccountInfo.auth``
+                (``_presenting_credential``), passed to the account layer so
+                it can apply that credential's limits. Never stored.
 
         Returns:
             ``dsn_key`` -> the owner the account approved, per database; empty
@@ -3704,7 +3757,7 @@ class TaskServer(DAPBase):
             public_endpoint=public_endpoint,
             task_id=control.id,
         )
-        approved = await authorize_db_targets(identity, targets)
+        approved = await authorize_db_targets(identity, targets, credential=credential)
         return {dsn_key(scope, target): owner for scope, target, owner in approved}
 
     @staticmethod
@@ -3811,6 +3864,8 @@ class TaskServer(DAPBase):
         key: str,
         build: Callable[[], TaskEngine],
         hold: Callable[[TaskEngine], None],
+        *,
+        credential: Optional[str] = None,
     ) -> TaskEngine:
         """
         The start gate: attach to the live engine of ``key``, or start one.
@@ -3825,6 +3880,8 @@ class TaskServer(DAPBase):
             key: The engine key.
             build: Builds the engine when none is live.
             hold: Takes the caller's hold on the engine (under the lock).
+            credential: The presenting connection's, for the databases of an
+                engine this call starts (``TaskEngine.start_task``). Not kept.
 
         Returns:
             The engine the hold is on.
@@ -3848,13 +3905,13 @@ class TaskServer(DAPBase):
                 self._engines.register(key, engine)
                 self._schedule_engine(engine)
                 try:
-                    await engine.start_task()
+                    await engine.start_task(credential=credential)
                 except Exception:
                     self._drop_engine(engine)
                     raise
             return engine
 
-    async def ensure_engine(self, control: TaskControl) -> Optional[TaskEngine]:
+    async def ensure_engine(self, control: TaskControl, *, credential: Optional[str] = None) -> Optional[TaskEngine]:
         """
         The engine a request through ``control`` runs on, started again if dormant.
 
@@ -3873,6 +3930,10 @@ class TaskServer(DAPBase):
 
         Args:
             control: The resolved control.
+            credential: The ``AccountInfo.auth`` of the connection the request
+                came in on (``_presenting_credential``), for the database
+                authorization a restart repeats. None when the server starts
+                the engine again by itself. Never stored.
 
         Returns:
             The engine to send the request to.
@@ -3884,8 +3945,9 @@ class TaskServer(DAPBase):
 
         # The account answers again before a dormant control takes a hold:
         # membership revoked since the control started refuses the rejoin and
-        # leaves it on its stopped engine
-        control.db_approved = await self._authorize_control_db(control)
+        # leaves it on its stopped engine. It is asked as the request that
+        # wakes the engine: the databases go to a new process for that caller
+        control.db_approved = await self._authorize_control_db(control, credential=credential)
 
         def _hold(engine: TaskEngine) -> None:
             # A control removed while this request waited (the account
@@ -3927,6 +3989,7 @@ class TaskServer(DAPBase):
                     env_source=None if stopped.shared else stopped._env_source,
                 ),
                 _hold,
+                credential=credential,
             )
 
         except Exception:
