@@ -20,6 +20,8 @@ test('a "never expires" request capped by the server shows the granted date, mar
 test('a longer request capped by the server is marked as bounded; a granted request is not', () => {
 	assert.deepEqual(revealedKeyExpiry('2030-01-01T00:00:00.000Z', '2027-02-03T10:00:00'), { expiresAt: '2027-02-03T10:00:00', bounded: true });
 	assert.deepEqual(revealedKeyExpiry('2027-01-01T10:00:00.000Z', '2027-01-01T10:00:00.250000'), { expiresAt: '2027-01-01T10:00:00.250000', bounded: false });
+	assert.deepEqual(revealedKeyExpiry('2027-01-01T10:00:30.000Z', '2027-01-01T10:00:00'), { expiresAt: '2027-01-01T10:00:00', bounded: true });
+	assert.deepEqual(revealedKeyExpiry('2027-01-01T10:00:00.400Z', '2027-01-01T10:00:00'), { expiresAt: '2027-01-01T10:00:00', bounded: false });
 });
 
 test('a key the server says does not expire shows no expiry', () => {

@@ -41,7 +41,9 @@ function wireMillis(iso: string): number {
 export function revealedKeyExpiry(requested: string | undefined, granted: string | null | undefined): RevealedKeyExpiry {
 	if (granted === undefined) return { expiresAt: requested ?? null, bounded: false };
 	if (granted === null) return { expiresAt: null, bounded: false };
-	// A minute of slack: the server computes "now + N days" a moment after the form did.
-	const bounded = requested === undefined || wireMillis(granted) < wireMillis(requested) - 60_000;
+	// The server stores the requested timestamp as sent, so an uncapped key comes
+	// back equal to it. A second of slack only absorbs storage rounding; a session
+	// cap even 30 seconds earlier (a sign-in just before a 90-day request) is marked.
+	const bounded = requested === undefined || wireMillis(granted) < wireMillis(requested) - 1_000;
 	return { expiresAt: granted, bounded };
 }
