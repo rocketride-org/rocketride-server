@@ -298,7 +298,7 @@ export interface ShellApiConfig {
 	ROCKETRIDE_URI?: string;
 	/**
 	 * Hard-coded API key for dev; bypasses OAuth2 when present. Host input only:
-	 * the shell never passes it to app code through useShellApiConfig() (#1022).
+	 * useShellApiConfig() omits it (#1022).
 	 */
 	RR_APIKEY?: string;
 	/** Stripe publishable key. */

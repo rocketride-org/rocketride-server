@@ -124,12 +124,16 @@ origin.
 and `shell:login` iframe messages are `''`. `useShellApiConfig()` and
 `shell:init` omit `RR_APIKEY` (the `RR_APIKEY` field stays in the frozen
 `ShellApiConfig` type). This is not isolation: app code still runs on the
-shell origin, and these exported paths still return credentials until
-third-party apps move off-origin: `useShellApiKey()` and the `host.apiKey`
+shell origin, and exported paths still return credentials until third-party
+apps move off-origin. Among them: `useShellApiKey()` and the `host.apiKey`
 op (the client's connect key), `getClient().getAccountInfo()` and
 `ConnectionManager.getAccountInfo()` (the full `ConnectResult`),
-`ConnectionManager.loadToken()` and the token in web storage, and the
-`shell:login` shell event (`useShellEvent`).
+`ConnectionManager.loadToken()` and the token in web storage, the
+`shell:login` shell event (`useShellEvent`; not the `shell:login` iframe
+message), and the `shell:accountUpdate` event in a brokered realm, which
+re-emits the mirrored `ConnectResult` (the server's own `apaext_account`
+push already blanks the token). The list is not exhaustive: `getClient()`
+and `ConnectionManager` are exported whole.
 
 **Webview documents.** rocket-ui frames a `webview:<url>` document with
 `allow-scripts allow-same-origin` only when the URL passes
@@ -141,8 +145,9 @@ pages and run with the shell's authority. `/apps/` and any `%2e`, `%2f` or
 `http:` on `localhost`, `127.0.0.1` or `[::1]`. Credentials in the URL,
 non-http schemes, relative and protocol-relative URLs and unparsable strings
 are refused and show the invalid-URI message. A shell without an http(s)
-origin (a VS Code webview, `file://`) has no own server, so only the
-external rule applies.
+origin (a VS Code webview, `file://`) cannot tell which server is the
+engine: it frames only `/chat/` and `/dropper/` on any loopback host,
+refuses `/apps/` on every host, and frames other `https:` URLs.
 
 ## `appdev:call` — the app-control message
 

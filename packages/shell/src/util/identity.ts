@@ -29,11 +29,13 @@
  * and `useShellApiConfig()` and `shell:init` omit the API key (#1022).
  *
  * This is preparation, not isolation. App code runs on the shell origin, so
- * these exported paths still return credentials until PR2 moves third-party
- * apps off-origin: `useShellApiKey()` / the `host.apiKey` op,
+ * exported paths still return credentials until PR2 moves third-party apps
+ * off-origin. Among them: `useShellApiKey()` / the `host.apiKey` op,
  * `getClient().getAccountInfo()` and `ConnectionManager.getAccountInfo()`,
- * `ConnectionManager.loadToken()` and web storage, and the `shell:login`
- * shell event.
+ * `ConnectionManager.loadToken()` and web storage, the `shell:login` shell
+ * event, and `shell:accountUpdate` in a brokered realm (the mirrored
+ * `ConnectResult`). Not exhaustive: `getClient()` and `ConnectionManager`
+ * are exported whole.
  */
 
 /**

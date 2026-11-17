@@ -573,8 +573,7 @@ export interface ShellApiConfig {
 	ROCKETRIDE_URI?: string;
 	/**
 	 * Hard-coded API key for service accounts / dev; bypasses OAuth2 when present.
-	 * Host input only: `useShellApiConfig()` and `shell:init` never pass it to app
-	 * code (#1022). Kept because the type is frozen in the shell-api contract.
+	 * Host input only: `useShellApiConfig()` and `shell:init` omit it (#1022). Kept because the type is frozen in the shell-api contract.
 	 */
 	RR_APIKEY?: string;
 	/** Stripe publishable key — required for Stripe Elements checkout. */
