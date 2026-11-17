@@ -40,10 +40,13 @@ _GENERIC_TOKENS = frozenset(
 )
 
 # The capability tag an engine's account reports when the integrations below run
-# with no key of the caller's own (contract: checked by membership, never equality).
+# with no key of the caller's own. Readers check membership, never equality.
 HOSTED_MODELS_CAPABILITY = 'hosted-models:openai'
 HOSTED_INTEGRATIONS = frozenset({'llm_openai'})
-HOSTED_NOTE = 'Runs on RocketRide-hosted models, billed to your compute tokens. Leave apikey empty.'
+HOSTED_NOTE = (
+    "Runs on RocketRide-hosted models with no key of your own, using this workspace's compute credits. "
+    'Leave apikey empty, or set it to use your own OpenAI key.'
+)
 
 SETUP_HOW = (
     'Set these variables in RocketRide: VS Code extension -> RocketRide: '

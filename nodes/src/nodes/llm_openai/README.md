@@ -158,7 +158,7 @@ reasoning models ignore it, because OpenAI's Responses API controls sampling sep
 Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. With an empty `apikey` it makes no call. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
 
 When the hosted models refuse a request, for example because the workspace doesn't have
-enough compute tokens left, the run fails with a sentence that says what happened and what
+enough compute credits left, the run fails with a sentence that says what happened and what
 to do. The request is not sent again, and no other request is tried in its place.
 
 ### Testing

@@ -77,7 +77,7 @@ must be supplied directly in the node configuration.
 On a hosted engine that offers RocketRide-hosted models, a `custom` node with neither an API
 key nor a base URL runs on those models, the same way `llm_openai` does with an empty key. A
 node with its own base URL never uses them; on a hosted engine, such a node with no key stops
-before it sends a request.
+before it sends a request and asks for the API key of its endpoint.
 
 ## Notes
 

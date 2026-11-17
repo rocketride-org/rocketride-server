@@ -38,21 +38,22 @@ TOKEN = 'rrmg_' + 'a' * 43
 
 NO_KEY_HOSTED = (
     "llm_openai: no API key is set, and RocketRide-hosted models aren't available for this run. "
-    'Enter your OpenAI key in the node settings, or save it as the ROCKETRIDE_OPENAI_KEY variable '
+    'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
     'and set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
 )
 NO_KEY_SELF_HOSTED = (
-    'llm_openai: no API key is set. Enter your OpenAI key in the node settings, or save it as the '
-    'ROCKETRIDE_OPENAI_KEY variable and set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
+    'llm_openai: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
+    'as ROCKETRIDE_OPENAI_KEY and set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
 )
 
 SENTENCES = {
     'insufficient_credits': (
-        "This workspace doesn't have enough compute tokens left to run this request on RocketRide-hosted "
-        'models. Add your own OpenAI key in the node settings, or check your plan and usage in RocketRide.'
+        "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
+        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'under Account > Billing in RocketRide.'
     ),
     'rate_limited': 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.',
-    'invalid_gateway_pass': 'RocketRide-hosted models stopped accepting this run. Start the pipeline again.',
+    'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': (
         'RocketRide-hosted models are unavailable right now. Try again shortly, or add your own OpenAI key '
         'in the node settings.'
@@ -194,12 +195,19 @@ def test_a_hosted_task_with_no_key_uses_the_pass(hosted, monkeypatch, apikey):
     assert resolve_openai_credentials('llm_openai_api', apikey, '') == (TOKEN, BASE_URL, True)
 
 
-def test_the_pass_never_goes_to_a_base_url_of_the_node(hosted, monkeypatch):
-    """A compatible node with its own endpoint and no key gets the message, not the pass."""
-    monkeypatch.setenv(GATEWAY_ENV, json.dumps(_pass()))
+@pytest.mark.parametrize('with_pass', [True, False])
+def test_the_pass_never_goes_to_a_base_url_of_the_node(hosted, monkeypatch, with_pass):
+    """A compatible node with its own endpoint and no key gets a message about that endpoint, not the pass."""
+    if with_pass:
+        monkeypatch.setenv(GATEWAY_ENV, json.dumps(_pass()))
+    else:
+        monkeypatch.delenv(GATEWAY_ENV, raising=False)
     with pytest.raises(MissingModelKeyError) as caught:
         resolve_openai_credentials('llm_openai_api', '', 'https://api.example.test/v1')
-    assert str(caught.value) == NO_KEY_HOSTED.replace('llm_openai:', 'llm_openai_api:')
+    assert (
+        str(caught.value)
+        == 'llm_openai_api: no API key is set. Add the API key for your endpoint in the node settings.'
+    )
 
 
 def test_a_hosted_task_with_no_key_and_no_pass_fails_with_the_message(hosted, no_env_key, monkeypatch):
@@ -321,9 +329,7 @@ def test_a_model_not_offered_names_the_model():
 
 def test_an_unsupported_field_is_named():
     def sentence(field):
-        return (
-            f"RocketRide-hosted models don't support {field}. Add your own OpenAI key in the node settings to use it."
-        )
+        return f"RocketRide-hosted models don't support {field}. Add your own OpenAI key in the node settings to run this request."
 
     assert friendly_gateway_error(_refusal(400, 'unsupported_parameter', param='previous_response_id')) == sentence(
         'previous_response_id'
@@ -334,12 +340,13 @@ def test_an_unsupported_field_is_named():
 
 
 def test_any_other_code_reads_as_the_general_sentence():
+    """The code stays out of the sentence: a code can name internals (the log has it)."""
     expected = (
-        'RocketRide-hosted models returned an error (something_new). '
-        'Try again, or add your own OpenAI key in the node settings.'
+        "RocketRide-hosted models couldn't run this request. Try again later, or add your own OpenAI key in the "
+        'node settings.'
     )
-    assert friendly_gateway_error(_refusal(418, 'something_new')) == expected
-    assert '(unknown)' in friendly_gateway_error(_refusal(500, None))
+    for code in ('something_new', 'gateway_local_only', 'invalid_request', None):
+        assert friendly_gateway_error(_refusal(418, code)) == expected
 
 
 def test_no_sentence_contains_a_star():

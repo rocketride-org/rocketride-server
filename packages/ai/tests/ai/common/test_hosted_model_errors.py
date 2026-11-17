@@ -42,20 +42,21 @@ STOP = ['\nObservation:']
 
 SENTENCES = {
     'insufficient_credits': (
-        "This workspace doesn't have enough compute tokens left to run this request on RocketRide-hosted "
-        'models. Add your own OpenAI key in the node settings, or check your plan and usage in RocketRide.'
+        "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
+        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'under Account > Billing in RocketRide.'
     ),
     'model_not_available': (
         "The model {model} isn't offered as a RocketRide-hosted model. Choose another model, "
         'or add your own OpenAI key in the node settings.'
     ),
-    'invalid_gateway_pass': 'RocketRide-hosted models stopped accepting this run. Start the pipeline again.',
+    'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'request_too_large': (
         'This request is too large for RocketRide-hosted models. Send less text, or add your own OpenAI key '
         'in the node settings.'
     ),
     'unsupported_parameter': (
-        "RocketRide-hosted models don't support stop. Add your own OpenAI key in the node settings to use it."
+        "RocketRide-hosted models don't support stop. Add your own OpenAI key in the node settings to run this request."
     ),
     'rate_limited': 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.',
     'gateway_unavailable': (
