@@ -19,12 +19,16 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 
-"""Per-app frame tokens (#1022 PR1, design sections 7 and Appendix C).
+"""Per-app frame tokens (#1022 PR1, design sections 7 and Appendix C, as changed by G4 M3).
 
-Layout: ``v1.<kid>.<b64url(json claims)>.<b64url(HMAC-SHA256(key, "v1.<kid>.<claims>"))>``
-with claims ``{a: appId, v: version, u: userId, o: orgId, iat, exp}`` and
-``exp = iat + 900``. App code can read its own token, so it only ever grants
-GETs of ONE version's dist for at most 15 minutes, on that app's own host.
+Layout: ``v1.<kid>.<b64url(nonce)>.<b64url(AES-256-GCM ciphertext and tag)>``.
+The plaintext is the claims ``{a: appId, v: version, u: userId, o: orgId,
+iat, exp}`` with ``exp = iat + 900``; the additional data is ``v1.<kid>``; the
+AES key is HKDF-SHA256 (no salt, info ``rocketride/app-frame-token/aes-256-gcm/v1``)
+of the configured key. App code reads its own token from the URL, so the claims
+are CONFIDENTIAL (it never learns the user or org id) and authenticated (it
+cannot change them). A token only ever grants GETs of ONE version's dist for at
+most 15 minutes, on that app's own host.
 
 Pinned API (``ai.modules.shell.app_origin``):
 
@@ -37,11 +41,13 @@ Tests T20 to T25 of ``.rr-sec/PR1_PLAN.md``.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
+import os
 
 import pytest
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from . import isolation_support as sup
 from .isolation_support import b64u, key_entry, label_for, new_key, unb64u, valid_env
@@ -70,11 +76,26 @@ def _error():
     return sup.need(_ao(), 'FrameTokenError')
 
 
-def _forge(claims: dict, key: bytes, kid: str = 'k1') -> str:
-    """A token with the right layout, built independently of the product code."""
-    body = b64u(json.dumps(claims, separators=(',', ':')).encode())
-    sig = hmac.new(key, f'v1.{kid}.{body}'.encode(), hashlib.sha256).digest()
-    return f'v1.{kid}.{body}.{b64u(sig)}'
+_INFO = b'rocketride/app-frame-token/aes-256-gcm/v1'
+
+
+def _aead_key(key: bytes) -> bytes:
+    """The documented derivation, independent of the product code."""
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_INFO).derive(key)
+
+
+def _forge(claims, key: bytes, kid: str = 'k1', nonce: bytes = None) -> str:
+    """A token with the documented layout, built independently of the product code."""
+    nonce = nonce or os.urandom(12)
+    plain = claims if isinstance(claims, bytes) else json.dumps(claims, separators=(',', ':')).encode()
+    sealed = AESGCM(_aead_key(key)).encrypt(nonce, plain, f'v1.{kid}'.encode())
+    return f'v1.{kid}.{b64u(nonce)}.{b64u(sealed)}'
+
+
+def _open(token: str, key: bytes) -> dict:
+    """Decrypt a token independently of the product code."""
+    head, kid, nonce, sealed = token.split('.')
+    return json.loads(AESGCM(_aead_key(key)).decrypt(unb64u(nonce), unb64u(sealed), f'{head}.{kid}'.encode()))
 
 
 # ---------------------------------------------------------------------------
@@ -83,70 +104,102 @@ def _forge(claims: dict, key: bytes, kid: str = 'k1') -> str:
 
 
 def test_frame_token_layout(clock):
-    """T20: the documented layout, signed with HMAC-SHA256 over ``v1.<kid>.<claims>``, 15 minutes."""
+    """T20: the documented AEAD layout; the claims decrypt with the derived key and say what was minted."""
     key = new_key()
     cfg = _cfg(key_entry('k1', key))
     token = _mint(cfg)
-    version, kid, body, sig = token.split('.')
-    assert (version, kid) == ('v1', 'k1')
-    claims = json.loads(unb64u(body))
+    head, kid, nonce, sealed = token.split('.')
+    assert (head, kid) == ('v1', 'k1')
+    assert len(unb64u(nonce)) == 12
+    claims = _open(token, key)
     assert set(claims) == {'a', 'v', 'u', 'o', 'iat', 'exp'}
     assert (claims['a'], claims['v'], claims['u'], claims['o']) == (APP, 1, 'u1', 'org-1')
     assert claims['exp'] - claims['iat'] == 900
     assert abs(claims['iat'] - int(clock.now)) <= 1
-    assert sig == b64u(hmac.new(key, f'v1.k1.{body}'.encode(), hashlib.sha256).digest())
     assert _verify(token, label_for(APP), cfg) == claims
     assert '=' not in token and '+' not in token and '/' not in token  # url-safe, no padding
+    assert _mint(cfg) != token  # a fresh nonce per token
+
+
+def test_frame_token_claims_are_confidential(clock):
+    """T20 (G4 M3): app code reads its own token; it must not learn the user or org id (nor the app id)."""
+    cfg = _cfg(key_entry('k1', new_key()))
+    token = _mint(cfg, user='user-7f3a9c', org='org-5b1e2d')
+    visible = token.encode() + b''.join(unb64u(part) for part in token.split('.')[2:])
+    for secret in (b'user-7f3a9c', b'org-5b1e2d', APP.encode(), b'"u"', b'"o"'):
+        assert secret not in visible, secret
+
+
+@pytest.mark.parametrize(
+    'claims',
+    [
+        {'a': APP, 'v': 1, 'u': 'u1', 'o': 'org-1', 'iat': 0, 'exp': 900, 'x': 1},  # extra claim
+        {'a': APP, 'v': '1', 'u': 'u1', 'o': 'org-1', 'iat': 0, 'exp': 900},  # version not an int
+        {'a': APP, 'v': True, 'u': 'u1', 'o': 'org-1', 'iat': 0, 'exp': 900},
+        {'a': APP, 'v': 1, 'u': 5, 'o': 'org-1', 'iat': 0, 'exp': 900},
+        {'a': APP, 'v': 1, 'u': 'u1', 'o': 'org-1', 'iat': 0, 'exp': 100000},  # longer than 15 minutes
+        b'not json',
+        b'[1, 2]',
+    ],
+    ids=repr,
+)
+def test_frame_token_strict_claims(claims, clock):
+    """T20: even under the right key, only the exact claim set and types verify."""
+    key = new_key()
+    cfg = _cfg(key_entry('k1', key))
+    if isinstance(claims, dict) and claims['exp'] == 900:
+        now = int(clock.now)
+        claims = {**claims, 'iat': now, 'exp': now + 900}
+    elif isinstance(claims, dict):
+        now = int(clock.now)
+        claims = {**claims, 'iat': now, 'exp': now + 100000}
+    with pytest.raises(_error()):
+        _verify(_forge(claims, key), label_for(APP), cfg)
 
 
 @pytest.mark.parametrize(
     'mutation',
     [
-        'version',
-        'user',
-        'org',
-        'app',
-        'signature',
-        'drop_signature',
+        'ciphertext',
+        'tag',
+        'nonce',
+        'short_nonce',
+        'truncated',
+        'kid_swap',
+        'drop_part',
         'extra_part',
         'empty',
         'garbage',
         'prefix',
+        'not_b64',
         'other_key',
     ],
 )
 def test_frame_token_tamper(mutation, clock):
-    """T20: any change to the claims or the signature, or a signature under another key, is refused."""
-    key = new_key()
-    cfg = _cfg(key_entry('k1', key))
+    """T20: any change to the token, or a token sealed under another key, is refused with the one error."""
+    key, other = new_key(), new_key()
+    cfg = _cfg(key_entry('k1', key), key_entry('k2', other))
     token = _mint(cfg)
-    head, kid, body, sig = token.split('.')
-    claims = json.loads(unb64u(body))
-    label = label_for(APP)
+    head, kid, nonce, sealed = token.split('.')
+    flip = lambda text, i: text[:i] + ('A' if text[i] != 'A' else 'B') + text[i + 1 :]  # noqa: E731
 
-    if mutation in ('version', 'user', 'org', 'app'):
-        field = {'version': 'v', 'user': 'u', 'org': 'o', 'app': 'a'}[mutation]
-        claims[field] = {'v': 2, 'u': 'u2', 'o': 'org-2', 'a': 'acme.other'}[field]
-        forged = f'{head}.{kid}.{b64u(json.dumps(claims, separators=(",", ":")).encode())}.{sig}'  # old signature kept
-        if mutation == 'app':
-            label = label_for('acme.other')
-    elif mutation == 'signature':
-        flipped = 'A' if sig[0] != 'A' else 'B'  # the FIRST char carries 6 full bits
-        forged = f'{head}.{kid}.{body}.{flipped}{sig[1:]}'
-    elif mutation == 'drop_signature':
-        forged = f'{head}.{kid}.{body}'
-    elif mutation == 'extra_part':
-        forged = f'{token}.extra'
-    elif mutation == 'empty':
-        forged = ''
-    elif mutation == 'garbage':
-        forged = 'not-a-token'
-    elif mutation == 'prefix':
-        forged = f'v2.{kid}.{body}.{sig}'
-    else:  # other_key: an attacker signs well-formed claims with a key of their own
-        forged = _forge(claims, new_key())
+    forged = {
+        'ciphertext': f'{head}.{kid}.{nonce}.{flip(sealed, 0)}',
+        'tag': f'{head}.{kid}.{nonce}.{flip(sealed, len(sealed) - 2)}',
+        'nonce': f'{head}.{kid}.{flip(nonce, 0)}.{sealed}',
+        'short_nonce': f'{head}.{kid}.{nonce[:-2]}.{sealed}',
+        'truncated': f'{head}.{kid}.{nonce}.{sealed[:20]}',
+        'kid_swap': f'{head}.k2.{nonce}.{sealed}',  # the kid is authenticated data
+        'drop_part': f'{head}.{kid}.{nonce}',
+        'extra_part': f'{token}.extra',
+        'empty': '',
+        'garbage': 'not-a-token',
+        'prefix': f'v2.{kid}.{nonce}.{sealed}',
+        'not_b64': f'{head}.{kid}.{nonce}.{sealed[:-1]}!',
+        'other_key': _forge(_open(token, key), new_key()),  # an attacker seals the same claims with its own key
+    }[mutation]
     with pytest.raises(_error()):
-        _verify(forged, label, cfg)
+        _verify(forged, label_for(APP), cfg)
 
 
 # ---------------------------------------------------------------------------

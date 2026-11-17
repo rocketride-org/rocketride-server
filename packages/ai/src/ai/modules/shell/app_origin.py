@@ -408,14 +408,20 @@ def validate_isolation_config(account: Any = None) -> None:
 # =============================================================================
 # FRAME TOKENS — one app version, one user, 15 minutes (design section 7)
 # =============================================================================
-# Layout (Appendix C): v1.<kid>.<b64url(json claims)>.<b64url(HMAC-SHA256(key,
-# "v1.<kid>.<claims>"))>, claims {a: appId, v: version, u: userId, o: orgId,
-# iat, exp}. App code can read its own token, so a token only ever grants GETs
-# of ONE version's dist, on that app's own host, until it expires; the
-# entitlement is re-checked on every request on top of it.
+# Layout: v1.<kid>.<b64url(nonce)>.<b64url(AES-256-GCM(claims))>, additional
+# data "v1.<kid>", claims {a: appId, v: version, u: userId, o: orgId, iat,
+# exp}. The AES key is HKDF-SHA256 of the configured key (info below), so the
+# configured key is never used directly. App code reads its own token from the
+# URL: the claims are sealed so it cannot learn the user or org id (G4 M3) nor
+# change anything. A token only ever grants GETs of ONE version's dist, on
+# that app's own host, until it expires; the entitlement is re-checked on
+# every request on top of it.
 
 FRAME_TOKEN_TTL = 900
 _CLAIM_KEYS = frozenset({'a', 'v', 'u', 'o', 'iat', 'exp'})
+_TOKEN_KEY_INFO = b'rocketride/app-frame-token/aes-256-gcm/v1'
+_NONCE_BYTES = 12
+_TAG_BYTES = 16
 
 
 class FrameTokenError(ValueError):
@@ -429,7 +435,7 @@ def _b64u(data: bytes) -> str:
 
 def _unb64u(text: str) -> bytes:
     """Strict inverse of ``_b64u``; raises FrameTokenError on anything else."""
-    if not _B64URL.fullmatch(text):
+    if not _B64URL.fullmatch(text) or len(text) % 4 == 1:
         raise FrameTokenError('malformed token')
     try:
         return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
@@ -437,44 +443,53 @@ def _unb64u(text: str) -> bytes:
         raise FrameTokenError('malformed token') from None
 
 
-def _signature(key: bytes, signed: str) -> str:
-    """The token signature over ``v1.<kid>.<claims>``."""
-    return _b64u(hmac.new(key, signed.encode('ascii'), hashlib.sha256).digest())
+def _aead(key: bytes):
+    """The AES-256-GCM cipher of one configured key (HKDF-SHA256, a label of its own)."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return AESGCM(HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_TOKEN_KEY_INFO).derive(key))
+
+
+def _mint(app_id: str, version: int, user_id: str, org_id: str, config: IsolationConfig) -> Tuple[str, dict]:
+    """``(token, claims)`` sealed under the first configured key."""
+    if not config.token_keys:
+        raise RuntimeError('no frame token key is configured (RR_APP_FRAME_TOKEN_KEYS)')
+    kid, key = config.token_keys[0]
+    iat = int(time.time())
+    claims = {'a': app_id, 'v': version, 'u': user_id, 'o': org_id, 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
+    nonce = os.urandom(_NONCE_BYTES)
+    sealed = _aead(key).encrypt(nonce, json.dumps(claims, separators=(',', ':')).encode('utf-8'), f'v1.{kid}'.encode())
+    return f'v1.{kid}.{_b64u(nonce)}.{_b64u(sealed)}', claims
 
 
 def mint_frame_token(
     app_id: str, version: int, user_id: str, org_id: str, *, config: Optional[IsolationConfig] = None
 ) -> str:
     """
-    Sign a frame token for one app version and one user, valid for 15 minutes.
+    Seal a frame token for one app version and one user, valid for 15 minutes.
 
     Args:
         app_id: The app the token opens.
         version: The registry version it opens.
         user_id: The user the entitlement is re-checked for.
         org_id: The org the entitlement is re-checked in.
-        config: The configuration (default: the environment's); the FIRST key signs.
+        config: The configuration (default: the environment's); the FIRST key seals.
 
     Returns:
         The token, URL-safe (it is a path segment of ``/_t/<token>/v<N>/``).
     """
-    config = config or current_config()
-    if not config.token_keys:
-        raise RuntimeError('no frame token key is configured (RR_APP_FRAME_TOKEN_KEYS)')
-    kid, key = config.token_keys[0]
-    iat = int(time.time())
-    claims = {'a': app_id, 'v': version, 'u': user_id, 'o': org_id, 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
-    signed = f'v1.{kid}.{_b64u(json.dumps(claims, separators=(",", ":")).encode("utf-8"))}'
-    return f'{signed}.{_signature(key, signed)}'
+    return _mint(app_id, version, user_id, org_id, config or current_config())[0]
 
 
 def verify_frame_token(token: str, host_label: str, *, config: Optional[IsolationConfig] = None) -> dict:
     """
     Verify a frame token for the app host it arrived on.
 
-    Checks the layout, the key id (any configured key verifies), the
-    signature, the claim types, the expiry and that ``host_label`` is
-    ``label_of(claims.a)``.
+    Checks the layout, the key id (any configured key opens), the AEAD seal
+    (which authenticates the key id too), the exact claim set and types, the
+    expiry and that ``host_label`` is ``label_of(claims.a)``.
 
     Args:
         token: The token from the ``/_t/<token>/`` path.
@@ -491,16 +506,19 @@ def verify_frame_token(token: str, host_label: str, *, config: Optional[Isolatio
     parts = token.split('.') if isinstance(token, str) else []
     if len(parts) != 4 or parts[0] != 'v1':
         raise FrameTokenError('malformed token')
-    _, kid, body, sig = parts
+    _, kid, nonce_text, sealed_text = parts
     key = dict(config.token_keys).get(kid)
-    if key is None or not _B64URL.fullmatch(sig):
+    if key is None:
         raise FrameTokenError('unknown key')
-    if not hmac.compare_digest(sig, _signature(key, f'v1.{kid}.{body}')):
-        raise FrameTokenError('bad signature')
+    nonce, sealed = _unb64u(nonce_text), _unb64u(sealed_text)
+    if len(nonce) != _NONCE_BYTES or len(sealed) <= _TAG_BYTES:
+        raise FrameTokenError('malformed token')
+    from cryptography.exceptions import InvalidTag
+
     try:
-        claims = json.loads(_unb64u(body))
-    except ValueError:
-        raise FrameTokenError('malformed claims') from None
+        claims = json.loads(_aead(key).decrypt(nonce, sealed, f'v1.{kid}'.encode()))
+    except (InvalidTag, ValueError):
+        raise FrameTokenError('bad seal') from None
     if not isinstance(claims, dict) or set(claims) != _CLAIM_KEYS:
         raise FrameTokenError('malformed claims')
     ints = [claims['v'], claims['iat'], claims['exp']]
@@ -931,9 +949,9 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
     if info is None and state != 'ready':
         return None
     if info is not None:
-        frame_token = mint_frame_token(app_id, version, user_id, org_id, config=config)
+        frame_token, claims = _mint(app_id, version, user_id, org_id, config)
         entry_prefix = f'/_t/{frame_token}/v{version}/'
-        expires_at = json.loads(_unb64u(frame_token.split('.')[2]))['exp'] * 1000
+        expires_at = claims['exp'] * 1000
     else:
         entry_prefix = f'/_p/{app_id}/v{version}/'
         expires_at = (int(time.time()) + FRAME_TOKEN_TTL) * 1000
