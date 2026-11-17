@@ -724,6 +724,11 @@ def invalidate_app_serving(app_id: str) -> None:
     for cache in (_version_dir_cache, _app_auth_cache):
         for key in [k for k, entry in cache.items() if entry.get('appId') == app_id]:
             cache.pop(key, None)
+    # The app-origin caches (entitlement behind frame tokens, isolation
+    # verdicts) follow the same deploy events (#1022).
+    from .app_origin import drop_app
+
+    drop_app(app_id)
 
 
 async def _serve_versioned(request: Request, app_id: str, version: int, rest: list) -> Response:

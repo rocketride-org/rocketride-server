@@ -41,9 +41,11 @@ added anywhere.
 import base64
 import binascii
 import hashlib
+import hmac
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional, Tuple
@@ -361,3 +363,213 @@ def validate_isolation_config(account: Any = None) -> None:
             raise _refuse(
                 f'isolation needs the SaaS account to implement {", ".join(inherited)}: {_REMEDY} until it does'
             )
+
+
+# =============================================================================
+# FRAME TOKENS — one app version, one user, 15 minutes (design section 7)
+# =============================================================================
+# Layout (Appendix C): v1.<kid>.<b64url(json claims)>.<b64url(HMAC-SHA256(key,
+# "v1.<kid>.<claims>"))>, claims {a: appId, v: version, u: userId, o: orgId,
+# iat, exp}. App code can read its own token, so a token only ever grants GETs
+# of ONE version's dist, on that app's own host, until it expires; the
+# entitlement is re-checked on every request on top of it.
+
+FRAME_TOKEN_TTL = 900
+_CLAIM_KEYS = frozenset({'a', 'v', 'u', 'o', 'iat', 'exp'})
+
+
+class FrameTokenError(ValueError):
+    """A frame token that does not verify. Every cause raises the same error."""
+
+
+def _b64u(data: bytes) -> str:
+    """URL-safe base64 without padding."""
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def _unb64u(text: str) -> bytes:
+    """Strict inverse of ``_b64u``; raises FrameTokenError on anything else."""
+    if not _B64URL.fullmatch(text):
+        raise FrameTokenError('malformed token')
+    try:
+        return base64.urlsafe_b64decode(text + '=' * (-len(text) % 4))
+    except (binascii.Error, ValueError):
+        raise FrameTokenError('malformed token') from None
+
+
+def _signature(key: bytes, signed: str) -> str:
+    """The token signature over ``v1.<kid>.<claims>``."""
+    return _b64u(hmac.new(key, signed.encode('ascii'), hashlib.sha256).digest())
+
+
+def mint_frame_token(
+    app_id: str, version: int, user_id: str, org_id: str, *, config: Optional[IsolationConfig] = None
+) -> str:
+    """
+    Sign a frame token for one app version and one user, valid for 15 minutes.
+
+    Args:
+        app_id: The app the token opens.
+        version: The registry version it opens.
+        user_id: The user the entitlement is re-checked for.
+        org_id: The org the entitlement is re-checked in.
+        config: The configuration (default: the environment's); the FIRST key signs.
+
+    Returns:
+        The token, URL-safe (it is a path segment of ``/_t/<token>/v<N>/``).
+    """
+    config = config or current_config()
+    if not config.token_keys:
+        raise RuntimeError('no frame token key is configured (RR_APP_FRAME_TOKEN_KEYS)')
+    kid, key = config.token_keys[0]
+    iat = int(time.time())
+    claims = {'a': app_id, 'v': version, 'u': user_id, 'o': org_id, 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
+    signed = f'v1.{kid}.{_b64u(json.dumps(claims, separators=(",", ":")).encode("utf-8"))}'
+    return f'{signed}.{_signature(key, signed)}'
+
+
+def verify_frame_token(token: str, host_label: str, *, config: Optional[IsolationConfig] = None) -> dict:
+    """
+    Verify a frame token for the app host it arrived on.
+
+    Checks the layout, the key id (any configured key verifies), the
+    signature, the claim types, the expiry and that ``host_label`` is
+    ``label_of(claims.a)``.
+
+    Args:
+        token: The token from the ``/_t/<token>/`` path.
+        host_label: The label of the app host the request arrived on.
+        config: The configuration (default: the environment's).
+
+    Returns:
+        The claims.
+
+    Raises:
+        FrameTokenError: The token does not open anything on this host.
+    """
+    config = config or current_config()
+    parts = token.split('.') if isinstance(token, str) else []
+    if len(parts) != 4 or parts[0] != 'v1':
+        raise FrameTokenError('malformed token')
+    _, kid, body, sig = parts
+    key = dict(config.token_keys).get(kid)
+    if key is None or not _B64URL.fullmatch(sig):
+        raise FrameTokenError('unknown key')
+    if not hmac.compare_digest(sig, _signature(key, f'v1.{kid}.{body}')):
+        raise FrameTokenError('bad signature')
+    try:
+        claims = json.loads(_unb64u(body))
+    except ValueError:
+        raise FrameTokenError('malformed claims') from None
+    if not isinstance(claims, dict) or set(claims) != _CLAIM_KEYS:
+        raise FrameTokenError('malformed claims')
+    ints = [claims['v'], claims['iat'], claims['exp']]
+    if not all(type(value) is int for value in ints) or not all(isinstance(claims[k], str) for k in 'auo'):
+        raise FrameTokenError('malformed claims')
+    if claims['v'] < 1 or not 0 < claims['exp'] - claims['iat'] <= FRAME_TOKEN_TTL:
+        raise FrameTokenError('malformed claims')
+    if time.time() >= claims['exp']:
+        raise FrameTokenError('expired')
+    if not hmac.compare_digest(label_of(claims['a']).encode('utf-8'), str(host_label).encode('utf-8')):
+        raise FrameTokenError('wrong host')
+    return claims
+
+
+# =============================================================================
+# ENTITLEMENT — re-checked behind every token (design section 7)
+# =============================================================================
+# Verdicts are cached with a HARD 60 s expiry (never slid by use), so a valid
+# token of a user who lost access stops serving within a minute however hot it
+# is; ``invalidate_app_serving`` drops an app's entries at once. Every cache of
+# this module is a module-level dict whose entries carry ``appId`` and
+# ``expiry``.
+
+ENTITLEMENT_TTL = 60.0
+_CACHE_MAX = 4096
+_entitlement_cache: dict = {}
+
+
+def _cached(cache: dict, key: Any) -> Optional[dict]:
+    """A live cache entry, or None."""
+    hit = cache.get(key)
+    return hit if hit is not None and hit['expiry'] > time.time() else None
+
+
+def _remember(cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, **values: Any) -> dict:
+    """Store an entry with a hard expiry; the cache is bounded (expired first, then soonest to expire)."""
+    now = time.time()
+    entry = {**values, 'expiry': now + ttl, 'appId': app_id}
+    cache[key] = entry
+    if len(cache) > _CACHE_MAX:
+        for k in [k for k, v in cache.items() if v['expiry'] <= now]:
+            cache.pop(k, None)
+        if len(cache) > _CACHE_MAX:
+            for k in sorted(cache, key=lambda k: cache[k]['expiry'])[: len(cache) - _CACHE_MAX]:
+                cache.pop(k, None)
+    return entry
+
+
+def drop_app(app_id: str) -> None:
+    """Drop every cached isolation verdict of one app (called by ``invalidate_app_serving``)."""
+    for name, cache in list(globals().items()):
+        if name.endswith('_cache') and isinstance(cache, dict):
+            for key in [k for k, entry in cache.items() if isinstance(entry, dict) and entry.get('appId') == app_id]:
+                cache.pop(key, None)
+
+
+def _is_saas() -> bool:
+    """True when the loaded account edition gates app serving (SaaS)."""
+    from .shell import _is_saas as is_saas
+
+    return is_saas()
+
+
+async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
+    """
+    Registry version -> dist dir that a frame token of ``(user_id, org_id)`` may serve.
+
+    SaaS: the versions ``entitled_version_dirs`` grants the account
+    ``account_info_for(user_id, org_id)`` builds; no account means nothing.
+    OSS: every built version (open serving, as ``apps_static``).
+    """
+    from ai.account import account
+    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
+
+    saas = _is_saas()
+    key = ('token', app_id, user_id, org_id) if saas else ('open', app_id)
+    hit = _cached(_entitlement_cache, key)
+    if hit is not None:
+        return hit['dirs']
+    if saas:
+        try:
+            info = await account.account_info_for(user_id, org_id)
+        except Exception:
+            info = None
+        dirs = await entitled_version_dirs(info, app_id) if info is not None else {}
+    else:
+        dirs = await open_version_dirs(app_id)
+    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+
+
+async def public_version_dirs(app_id: str) -> dict:
+    """Registry version -> dist dir an anonymous caller may load (SaaS: public ``ready``; OSS: open)."""
+    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
+
+    key = ('public', app_id)
+    hit = _cached(_entitlement_cache, key)
+    if hit is not None:
+        return hit['dirs']
+    dirs = await entitled_version_dirs(None, app_id) if _is_saas() else await open_version_dirs(app_id)
+    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+
+
+async def entitlement_ok(user_id: str, org_id: str, app_id: str, version: int) -> bool:
+    """
+    Whether a frame token of ``(user_id, org_id)`` may still serve ``app_id`` v``version``.
+
+    On OSS the check is skipped (open serving, as ``apps_static``): no
+    account lookup, always True.
+    """
+    if not _is_saas():
+        return True
+    return version in await token_version_dirs(user_id, org_id, app_id)
