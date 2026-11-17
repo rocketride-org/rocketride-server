@@ -462,6 +462,8 @@ _snapshot_reads: Dict[str, 'asyncio.Task[bytes]'] = {}
 # while S3 retries a black-holed request), and that executor serves every
 # asyncio.to_thread in the engine; a read waiting for a slot holds none.
 # Requests keep their own deadline (_SNAPSHOT_READ_SECONDS) while it waits.
+# The semaphore binds to the first loop that waits on it: fine with the
+# engine's single loop, but a contended wait on another loop raises RuntimeError.
 _SNAPSHOT_READ_SLOTS = 4
 _snapshot_read_slots = asyncio.Semaphore(_SNAPSHOT_READ_SLOTS)
 
