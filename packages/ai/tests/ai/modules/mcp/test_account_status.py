@@ -303,8 +303,12 @@ async def test_credits_waitlisted():
 
 # -- model_key -----------------------------------------------------------------
 
-_HOSTED = "OpenAI models can run on RocketRide without a key of your own. They use this workspace's compute credits."
-_OTHERS = 'Other AI providers need your own key, saved in RocketRide under Settings > Variables.'
+_HOSTED = (
+    "Some OpenAI models can run on RocketRide without a key of your own. They use this workspace's compute credits."
+)
+_OTHERS = (
+    'Other OpenAI models and other AI providers need your own key, saved in RocketRide under Settings > Variables.'
+)
 
 
 async def test_model_key_hosted_models_capability():
@@ -326,7 +330,7 @@ async def test_model_key_hosted_models_capability_also_names_saved_keys():
 
     assert _check(result, 'model_key')['detail'] == (
         f'{_HOSTED} RocketRide has a saved AI model key for Mistral AI. '
-        'Any other AI provider needs your own key, saved in RocketRide under Settings > Variables.'
+        'Other OpenAI models and any other AI provider need your own key, saved in RocketRide under Settings > Variables.'
     )
 
 
