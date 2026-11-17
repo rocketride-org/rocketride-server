@@ -66,6 +66,27 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 
 from ai.web import Request
 
+# Script and stylesheet types pinned for every platform. mimetypes.guess_type
+# reads the OS registry on Windows, where '.js' maps to application/javascript
+# or even text/plain depending on what is installed; text/plain under
+# nosniff breaks module scripts. These are the types Python itself uses on
+# POSIX (RFC 9239 for JavaScript), so Linux and macOS responses do not change.
+_PINNED_MEDIA_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+}
+
+
+def _media_type(name: str | os.PathLike) -> Optional[str]:
+    """Return the media type for a served file name, the same on every OS.
+
+    None means "no opinion": FileResponse then falls back to its own guess.
+    """
+    suffix = os.path.splitext(os.fspath(name))[1].lower()
+    return _PINNED_MEDIA_TYPES.get(suffix) or mimetypes.guess_type(os.fspath(name))[0]
+
+
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
 
@@ -451,7 +472,7 @@ async def shell_static(request: Request):
         headers = dict(_SHELL_DOCUMENT_HEADERS) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
         if is_static:
             headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-        return FileResponse(file_path, headers=headers or None)
+        return FileResponse(file_path, headers=headers or None, media_type=_media_type(file_path))
 
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.
@@ -752,7 +773,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
+    media_type = _media_type(rest[-1]) or 'application/octet-stream'
     return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
 
 
@@ -884,7 +905,7 @@ async def apps_static(request: Request):
 
     # Serve the file if it exists
     if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
+        return FileResponse(file_path, media_type=_media_type(file_path))
 
     raise HTTPException(status_code=404, detail='Not found')
 

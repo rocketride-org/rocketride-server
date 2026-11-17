@@ -165,3 +165,37 @@ def test_off_mode_responses_match_the_golden_fixture(seeded, monkeypatch):
         GOLDEN.write_text(json.dumps(actual, indent=2, sort_keys=True) + '\n')
     expected = json.loads(GOLDEN.read_text())
     assert actual == expected
+
+
+def test_off_mode_golden_holds_when_the_os_maps_js_differently(seeded, monkeypatch):
+    """Windows reads '.js' from the registry (application/javascript, or text/plain).
+
+    The golden must not depend on that: the shell pins script and stylesheet
+    types itself. Simulate the registry by making every mimetypes lookup
+    answer the Windows way, both in our module and in Starlette's FileResponse.
+    """
+    import mimetypes
+
+    import starlette.responses
+
+    real_guess = mimetypes.guess_type
+
+    def registry_guess(url, strict=True):
+        if str(url).lower().endswith(('.js', '.mjs')):
+            return ('application/javascript', None)
+        if str(url).lower().endswith('.css'):
+            return ('text/plain', None)
+        return real_guess(url, strict)
+
+    monkeypatch.setattr(mimetypes, 'guess_type', registry_guess)
+    monkeypatch.setattr(starlette.responses, 'guess_type', registry_guess)
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+    assert _record(seeded) == json.loads(GOLDEN.read_text())
+
+
+def test_media_type_pins_scripts_and_stylesheets():
+    assert shell_mod._media_type('main.abc123.js') == 'text/javascript'
+    assert shell_mod._media_type('remoteEntry.MJS') == 'text/javascript'
+    assert shell_mod._media_type('theme.css') == 'text/css'
+    assert shell_mod._media_type('icon.svg') == 'image/svg+xml'
+    assert shell_mod._media_type('blob.unknownext') is None
