@@ -36,13 +36,10 @@ after ``@dev`` (which is a live-control lookup, not a publication):
   there is no tie rule and no ambiguity error;
 - ``@public``: the store rung, the publisher's ``~public`` publication.
 
-Every row comes through ONE row source, ``publish_rows``. Today it is the
-union of the two publish tables the backends serve: pipe publishes
-(``published_pipes``, read per audience slot with ``deployments_get``) and
-the audience publishes (``published_apps``, read with ``publish_get``),
-each row's kind taken from the artifact registry entry it points at. C.17
-merges the tables into ``published_artifacts`` and swaps this one function;
-nothing else in the resolver changes.
+Every row comes through ONE row source, ``publish_rows``: one read of the
+one publish table (``published_artifacts``, C.17) for the project, filtered
+to the slots asked for. A pipe's team and personal pointers and its public
+row are rows of that table alike; each row's kind is the registry entry's.
 
 Each pin carries the ``DeploymentRef`` the control will be stamped with (the
 publisher's disable/remove releases it), the artifact version to start, the
@@ -249,16 +246,26 @@ def _audience_of(slot: str) -> Dict[str, str]:
     return {'type': 'team', 'id': slot}
 
 
+def _slot_of(row: Dict[str, Any]) -> str:
+    """The audience slot a publish row serves: ``user~{uid}``, the team id, or the public key."""
+    audience = row.get('audience') or {}
+    kind = audience.get('type')
+    if kind == 'user':
+        return f'user~{audience.get("id") or ""}'
+    if kind == 'team':
+        return str(audience.get('id') or '')
+    return PUBLIC_AUDIENCE_KEY
+
+
 async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequence[str]) -> List[PublishRow]:
     """
-    THE row source: every live publish row of ``project_id`` for ``slots``, from every publish table.
+    THE row source: every live publish row of ``project_id`` for ``slots``.
 
-    Today the union of ``published_pipes`` (``deployments_get``, per team or
-    ``user~`` slot) and ``published_apps`` (``publish_get``, per audience);
-    a row's kind is the kind of the registry entry it points at. C.17 swaps
-    this function for one read of ``published_artifacts``. Unreadable rows
-    are skipped: a missing table or a backend that refuses a kind reads as
-    no row, as ``resolve_app_pins`` treats an unreadable publish list.
+    ONE read of the one publish table (``publish_of_app`` for kind 'pipe'),
+    then the slots asked for, in order. A row's kind and review state are
+    the registry entry's (``artifactState`` rides the row). A failing store
+    raises: a name is never reported 'not found' because the database was
+    down (audit 2026-11-12).
 
     Args:
         account: The account singleton.
@@ -267,45 +274,31 @@ async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequen
         slots: The audience slots to read, in order.
 
     Returns:
-        The rows found, in ``slots`` order (a slot may yield one row per table).
+        The rows found, in ``slots`` order.
     """
-    # Step 1: the registry entries: each row's kind and review state. A
-    # failing store raises: a name is never reported 'not found' because the
-    # database was down (audit 2026-11-12)
-    versions = {int(v.get('version')): v for v in await account.deployments_versions(org_id, project_id)}
+    # Step 1: every live publish row of the project, read once
+    by_slot: Dict[str, Dict[str, Any]] = {}
+    for pub in await account.publish_of_app(org_id, 'pipe', project_id):
+        by_slot[_slot_of(pub)] = pub
 
-    def _row(slot: str, version: Any, state: Any, artifact_state: Any, billing: Any) -> Optional[PublishRow]:
-        """One table row in the row source's shape, or None when it points nowhere."""
-        if not isinstance(version, int) or version not in versions:
-            return None
-        entry = versions[version]
-        return PublishRow(
-            kind=str(entry.get('kind') or 'pipe'),
-            org_id=org_id,
-            project_id=project_id,
-            slot=slot,
-            version=version,
-            state=str(state or ''),
-            artifact_state=str(artifact_state or entry.get('state') or DEFAULT_REVIEW_STATE),
-            billing_team_id=str(billing or ''),
-        )
-
+    # Step 2: the slots asked for, in the caller's order
     rows: List[PublishRow] = []
     for slot in slots:
-        # Step 2: published_pipes: a team or personal slot (never public)
-        if slot != PUBLIC_AUDIENCE_KEY:
-            dep = await account.deployments_get(org_id, slot, project_id)
-            if dep:
-                row = _row(slot, dep.get('version'), dep.get('state'), '', dep.get('billingTeamId'))
-                if row is not None:
-                    rows.append(row)
-
-        # Step 3: published_apps: the audience row of the slot
-        pub = await account.publish_get(org_id, 'app', project_id, _audience_of(slot))
-        if pub:
-            row = _row(slot, pub.get('version'), pub.get('state'), pub.get('artifactState'), pub.get('billingTeamId'))
-            if row is not None:
-                rows.append(row)
+        pub = by_slot.get(slot)
+        if not pub or not isinstance(pub.get('version'), int):
+            continue
+        rows.append(
+            PublishRow(
+                kind=str(pub.get('kind') or 'pipe'),
+                org_id=org_id,
+                project_id=project_id,
+                slot=slot,
+                version=int(pub['version']),
+                state=str(pub.get('state') or ''),
+                artifact_state=str(pub.get('artifactState') or DEFAULT_REVIEW_STATE),
+                billing_team_id=str(pub.get('billingTeamId') or ''),
+            )
+        )
     return rows
 
 

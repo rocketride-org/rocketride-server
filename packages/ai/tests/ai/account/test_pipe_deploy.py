@@ -1,66 +1,69 @@
-# MIT License
-#
-# Copyright (c) 2026 Aparavi Software AG
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 """Unit tests for ai.account.pipe_deploy: the publish row source.
 
-A failing store raises; a name is never reported absent because the
-database was down (audit 2026-11-12).
+ONE read of the one publish table per project (plan 10.1, C.17); the slots
+come back in the caller's order. A failing store raises; a name is never
+reported absent because the database was down (audit 2026-11-12).
 """
 
 from unittest.mock import AsyncMock
 
 import pytest
 
-from ai.account.pipe_deploy import publish_rows
+from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY, publish_rows
+
+
+def _row(audience, version=1, state='enabled', artifact_state='ready', billing=''):
+    """One publish row as publish_of_app answers it."""
+    return {
+        'kind': 'pipe',
+        'audience': audience,
+        'version': version,
+        'state': state,
+        'artifactState': artifact_state,
+        'billingTeamId': billing,
+    }
 
 
 @pytest.mark.asyncio
-async def test_a_failing_registry_read_raises_instead_of_reading_as_no_rows():
-    """deployments_versions failing is the caller's error, not an empty row set."""
+async def test_a_failing_publish_read_raises_instead_of_reading_as_no_rows():
+    """publish_of_app failing is the caller's error, not an empty row set."""
     account = AsyncMock()
-    account.deployments_versions = AsyncMock(side_effect=RuntimeError('db down'))
+    account.publish_of_app = AsyncMock(side_effect=RuntimeError('db down'))
 
     with pytest.raises(RuntimeError, match='db down'):
         await publish_rows(account, 'org-1', 'docBrain', ['team-1'])
 
 
 @pytest.mark.asyncio
-async def test_a_failing_slot_read_raises_too():
-    """deployments_get / publish_get failures propagate the same way."""
+async def test_one_read_answers_every_slot_in_the_callers_order():
+    """The project's rows are read ONCE; the slots asked for come back in order."""
     account = AsyncMock()
-    account.deployments_versions = AsyncMock(return_value=[{'version': 1, 'kind': 'pipe', 'state': 'ready'}])
-    account.deployments_get = AsyncMock(side_effect=RuntimeError('slot read failed'))
+    account.publish_of_app = AsyncMock(
+        return_value=[
+            _row({'type': 'public', 'id': ''}, version=3, artifact_state='ready'),
+            _row({'type': 'team', 'id': 'team-1'}, version=2, billing='team-1'),
+            _row({'type': 'user', 'id': 'u-1'}, version=1, artifact_state='private', billing='team-home'),
+            _row({'type': 'team', 'id': 'team-9'}, version=2),
+        ]
+    )
 
-    with pytest.raises(RuntimeError, match='slot read failed'):
-        await publish_rows(account, 'org-1', 'docBrain', ['team-1'])
+    rows = await publish_rows(account, 'org-1', 'docBrain', ['user~u-1', 'team-1', PUBLIC_AUDIENCE_KEY])
+
+    account.publish_of_app.assert_awaited_once_with('org-1', 'pipe', 'docBrain')
+    assert [(r.slot, r.version, r.artifact_state, r.billing_team_id) for r in rows] == [
+        ('user~u-1', 1, 'private', 'team-home'),
+        ('team-1', 2, 'ready', 'team-1'),
+        (PUBLIC_AUDIENCE_KEY, 3, 'ready', ''),
+    ]
+    assert all(r.kind == 'pipe' and r.org_id == 'org-1' and r.project_id == 'docBrain' for r in rows)
 
 
 @pytest.mark.asyncio
-async def test_a_failing_audience_read_raises_too():
-    """publish_get failing propagates the same way: no slot read masks it."""
+async def test_a_slot_without_a_row_yields_nothing():
+    """A team that holds no publication of the name is skipped, not an error."""
     account = AsyncMock()
-    account.deployments_versions = AsyncMock(return_value=[{'version': 1, 'kind': 'pipe', 'state': 'ready'}])
-    account.deployments_get = AsyncMock(return_value=None)
-    account.publish_get = AsyncMock(side_effect=RuntimeError('audience read failed'))
+    account.publish_of_app = AsyncMock(return_value=[_row({'type': 'team', 'id': 'team-1'})])
 
-    with pytest.raises(RuntimeError, match='audience read failed'):
-        await publish_rows(account, 'org-1', 'docBrain', ['team-1'])
+    rows = await publish_rows(account, 'org-1', 'docBrain', ['team-2', PUBLIC_AUDIENCE_KEY])
+
+    assert rows == []

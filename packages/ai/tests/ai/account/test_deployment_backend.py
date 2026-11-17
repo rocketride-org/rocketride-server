@@ -97,7 +97,7 @@ class TestPublish:
     async def test_publish_stamps_kind_state_and_metadata(self, backend):
         """The rail contract: kind rides the artifact dict, state is stamped by kind."""
         pipe = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
-        assert (pipe['kind'], pipe['state']) == ('pipe', 'ready')
+        assert (pipe['kind'], pipe['state']) == ('pipe', 'private')
         # Display name always lives in metadata.manifest (pipelineName is legacy)
         assert pipe['metadata']['manifest']['name'] == 'Invoice Ingest'
 
@@ -627,3 +627,159 @@ class TestIterEnabled:
         # scheduler feed — iter_enabled swallows the StorageError and yields
         # nothing instead of raising.
         assert [d async for d in backend.iter_enabled()] == []
+
+
+# ============================================================================
+# The name row and the one publish map (plan 2.3, 10.1 — C.17)
+# ============================================================================
+
+
+class TestNameRow:
+    @pytest.mark.asyncio
+    async def test_a_name_keeps_its_kind(self, backend):
+        """One namespace across kinds (B37): the first deploy fixes the kind, the other kinds are refused."""
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        app_under_the_pipes_name = {'kind': 'app', 'appId': 'proj-1', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        with pytest.raises(ValueError, match='already a pipe in this organization'):
+            await backend.publish('org-1', 'proj-1', app_under_the_pipes_name, ACTOR)
+        # Nothing was written for the refused kind
+        assert [v['version'] for v in await backend.versions('org-1', 'proj-1')] == [1]
+
+    @pytest.mark.asyncio
+    async def test_versions_come_from_the_name_row(self, backend, store):
+        """The meta IS the name row: its nextVersion hands out the numbers and is never decremented."""
+        import json
+
+        for _ in range(3):
+            await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        assert [v['version'] for v in await backend.versions('org-1', 'proj-1')] == [3, 2, 1]
+        meta = json.loads(await store.read_file(backend._meta_path('org-1', 'proj-1')))
+        assert (meta['kind'], meta['nextVersion']) == ('pipe', 4)
+
+    @pytest.mark.asyncio
+    async def test_pointer_rows_are_publish_rows(self, backend):
+        """A team or personal pointer is a row of the one publish map, read back by kind (plan 10.1)."""
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR, 'team-1')
+        await backend.deploy('org-1', 'user~user-1', 'proj-1', 1, ACTOR, 'team-home')
+
+        rows = {r['audience']['type']: r for r in await backend.publish_of_app('org-1', 'pipe', 'proj-1')}
+        assert set(rows) == {'team', 'user'}
+        assert (rows['team']['audience']['id'], rows['team']['billingTeamId']) == ('team-1', 'team-1')
+        assert (rows['user']['audience']['id'], rows['user']['billingTeamId']) == ('user-1', 'team-home')
+        assert all(
+            (r['kind'], r['version'], r['state'], r['artifactState']) == ('pipe', 1, 'enabled', 'private')
+            for r in rows.values()
+        )
+        assert all(r['projectId'] == 'proj-1' for r in rows.values())
+        # The one map answers by kind: the pipe's rows are no app's rows
+        assert await backend.publish_get('org-1', 'app', 'proj-1', AUD_TEAM) is None
+        assert (await backend.publish_get('org-1', 'pipe', 'proj-1', AUD_TEAM))['version'] == 1
+
+    @pytest.mark.asyncio
+    async def test_publish_set_keeps_a_pointers_schedules_and_billing(self, backend):
+        """Repointing a pipe row through publish_set keeps what the pointer verbs stamped."""
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR, 'team-1')
+        await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '@hourly', ACTOR)
+
+        row = await backend.publish_set('org-1', 'pipe', 'proj-1', AUD_TEAM, 2, {'name': 'Invoice Ingest'}, ACTOR)
+        assert (row['version'], row['billingTeamId']) == (2, 'team-1')
+        dep = await backend.get('org-1', 'team-1', 'proj-1')
+        assert dep['version'] == 2 and dep['schedules']['webhook_1']['cron'] == '@hourly'
+        # And a version of the wrong kind is refused
+        with pytest.raises(ValueError, match='not a app'):
+            await backend.publish_set('org-1', 'app', 'proj-1', AUD_TEAM, 2, {}, ACTOR)
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_meta_folds_its_deployments_into_the_publish_map(self, backend, store):
+        """A pre-C.17 file's team pointers read as publish rows, and the next write drops the old dict."""
+        import json
+
+        entry = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        path = backend._meta_path('org-1', 'proj-1')
+        meta = json.loads(await store.read_file(path))
+        meta.pop('publishes', None)
+        meta['deployments'] = {
+            'team-a': {
+                'teamId': 'team-a',
+                'version': entry['version'],
+                'state': 'enabled',
+                'billingTeamId': 'team-a',
+                'schedules': {'webhook_1': {'cron': '@daily', 'paused': False}},
+                'createdAt': 1.0,
+                'createdBy': ACTOR,
+                'updatedAt': 2.0,
+                'updatedBy': ACTOR,
+                'deployedAt': 2.0,
+            }
+        }
+        await store.write_file(path, json.dumps(meta))
+
+        dep = await backend.get('org-1', 'team-a', 'proj-1')
+        assert (dep['teamId'], dep['version'], dep['billingTeamId'], dep['deployedAt']) == ('team-a', 1, 'team-a', 2.0)
+        assert dep['schedules']['webhook_1']['cron'] == '@daily'
+        rows = await backend.publish_of_app('org-1', 'pipe', 'proj-1')
+        assert [(r['audience']['type'], r['audience']['id']) for r in rows] == [('team', 'team-a')]
+        feed = [d async for d in backend.iter_enabled()]
+        assert [(d['teamId'], d['projectId']) for d in feed] == [('team-a', 'proj-1')]
+
+        await backend.set_state('org-1', 'team-a', 'proj-1', 'disabled', ACTOR)
+        rewritten = json.loads(await store.read_file(path))
+        assert 'deployments' not in rewritten and rewritten['publishes']['team~team-a']['state'] == 'disabled'
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_meta_without_a_kind_still_keeps_its_kind(self, backend, store):
+        """A pre-C.17 meta carries no top-level kind: its versions say what the name is, and another kind is refused."""
+        import json
+
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        path = backend._meta_path('org-1', 'proj-1')
+        meta = json.loads(await store.read_file(path))
+        del meta['kind']
+        del meta['nextVersion']
+        await store.write_file(path, json.dumps(meta))
+
+        app_under_the_pipes_name = {'kind': 'app', 'appId': 'proj-1', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        with pytest.raises(ValueError, match='already a pipe in this organization'):
+            await backend.publish('org-1', 'proj-1', app_under_the_pipes_name, ACTOR)
+        assert [v['version'] for v in await backend.versions('org-1', 'proj-1')] == [1]
+        # The same kind keeps publishing, numbered past the highest version
+        again = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        assert again['version'] == 2
+        assert json.loads(await store.read_file(path))['kind'] == 'pipe'
+
+    @pytest.mark.asyncio
+    async def test_a_legacy_publish_row_without_a_kind_reads_as_its_versions_kind(self, backend, store):
+        """A pre-C.17 app publish row carries no kind: it is read, and returned, as the app it points at."""
+        import json
+
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 1, {'name': 'Brandy'}, ACTOR)
+        path = backend._meta_path('org-1', 'acme.brandy')
+        meta = json.loads(await store.read_file(path))
+        del meta['publishes']['~public']['kind']
+        await store.write_file(path, json.dumps(meta))
+
+        row = await backend.publish_get('org-1', 'app', 'acme.brandy', AUD_PUBLIC)
+        assert row is not None and row['kind'] == 'app'
+        assert [r['kind'] for r in await backend.publish_of_app('org-1', 'app', 'acme.brandy')] == ['app']
+        assert [r['kind'] for r in await backend.publish_list('org-1', 'app', [AUD_PUBLIC])] == ['app']
+        assert await backend.publish_get('org-1', 'pipe', 'acme.brandy', AUD_PUBLIC) is None
+
+    @pytest.mark.asyncio
+    async def test_a_storage_failure_propagates_instead_of_reading_as_no_project(self, store):
+        """Only a MISSING meta is 'no project'; a store that is down raises through the readers."""
+
+        class _DownStore(type(store)):
+            """The throwaway store with its reads broken."""
+
+            async def read_file(self, filename):
+                raise StorageError('storage unavailable')
+
+        backend = FileDeploymentBackend(_DownStore(f'filesystem://{store._root_path}'))
+        with pytest.raises(StorageError, match='storage unavailable'):
+            await backend.publish_of_app('org-1', 'pipe', 'proj-1')
+        with pytest.raises(StorageError, match='storage unavailable'):
+            await backend.get('org-1', 'team-1', 'proj-1')

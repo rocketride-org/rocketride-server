@@ -41,8 +41,10 @@ Storage layout, one directory per project under the org's system-owned
 ``.deployments`` tree (raw file access is internal/sys.admin only — the
 store's system-tree rule — while this backend is the domain API):
     <project_id>/v000001-<sha8>.json   immutable artifact (never overwritten)
-    <project_id>/meta.json             registry index + per-team deployments +
-                                       history + schedules (CAS-guarded)
+    <project_id>/meta.json             the NAME row (kind, nextVersion) +
+                                       registry index + ONE publish map
+                                       (team, personal and public rows alike,
+                                       schedules inline) + history (CAS-guarded)
 
 Uses IStore directly (the trusted, in-server layer): paths are constructed
 here from validated ids, never from caller-supplied path strings.
@@ -57,7 +59,7 @@ from rocketlib import error
 
 from ai.common.list_rows import paginate_rows
 
-from .store import IStore, StorageError, VersionMismatchError
+from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
 # Mirrors the store's own retry posture for read-modify-write records.
@@ -67,6 +69,12 @@ _CAS_ATTEMPTS = 5
 # whole-deployment kill switch (nothing runs); 'removed' is the soft-delete
 # terminal state: invisible in listings, history retained forever.
 _STATES = ('enabled', 'disabled', 'errored', 'removed')
+
+#: The kinds a name can be (plan 2.3): fixed at the first deploy.
+_KINDS = ('pipe', 'app', 'node')
+
+#: The storage key of the public publish (file format; never on the wire).
+_PUBLIC_KEY = '~public'
 
 
 def _safe_id(value: str, what: str) -> str:
@@ -225,6 +233,32 @@ def artifact_sha256(data: str) -> str:
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
 
+def kind_mismatch_message(project_id: str, existing_kind: str, wanted_kind: str) -> str:
+    """The refusal when a name already belongs to another kind in the org (plan 2.3, B37).
+
+    One namespace per developer id across apps, pipes and nodes: the first
+    deploy of a name fixes its kind, and the other kinds are refused under
+    that name forever after. Both backends raise this exact text.
+
+    Args:
+        project_id: The short id being deployed.
+        existing_kind: The kind the name already is.
+        wanted_kind: The kind the caller tried to deploy.
+
+    Returns:
+        The message for the ValueError.
+    """
+    return (
+        f"'{project_id}' is already {_an(existing_kind)} in this organization; "
+        f'{_an(wanted_kind)} may not share a short id with it under one developer id — choose another name'
+    )
+
+
+def _an(kind: str) -> str:
+    """'an app', 'a pipe', 'a node' — the kind with its article."""
+    return f'an {kind}' if kind[:1] in 'aeiou' else f'a {kind}'
+
+
 def artifact_content_dir(artifact_path: str) -> str:
     """The store home of one registry version's CONTENT, from its artifact path.
 
@@ -297,7 +331,7 @@ class FileDeploymentBackend:
         entry's ``kind`` comes from the artifact dict (app artifacts carry
         kind:'app'; plain pipeline JSON defaults to 'pipe'), ``state`` is
         stamped by kind (app -> 'private' — internal-eligible, the developer
-        submits it for review; pipe -> 'ready') unless the caller overrides
+        submits it for review; a pipe the same since C.17, plan S8) unless the caller overrides
         it, and ``metadata`` carries the manifest/build blob (a minimal
         manifest.name is synthesized so display names never depend on the
         legacy pipelineName key).
@@ -344,20 +378,34 @@ class FileDeploymentBackend:
         # reproducible from the semantic pipeline, not dict ordering.
         data = json.dumps(pipeline, sort_keys=True, indent=1)
         sha = artifact_sha256(data)
-        # Kind rides the artifact dict itself; state is stamped by kind (apps
-        # deploy 'private' — internal-eligible, submitted for review
-        # separately; pipes are servable immediately).
+        # Kind rides the artifact dict itself; every kind is born 'private'
+        # (internal-eligible, submitted for review separately, plan S8)
+        # unless the caller overrides it.
         kind = str(pipeline.get('kind') or 'pipe')
+        if kind not in _KINDS:
+            raise ValueError(f'Unknown artifact kind: {kind!r}')
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
-            """Allocate the next version and append the registry entry."""
-            version = 1 + max((v['version'] for v in meta['versions']), default=0)
+            """Fix the name's kind, allocate the next version and append the registry entry."""
+            # The NAME row (plan 2.3): the meta IS the project row. Its kind
+            # is fixed at the first deploy (B37) and its nextVersion hands
+            # out numbers that are never reused (a legacy meta without one
+            # starts past its highest version).
+            # A pre-C.17 meta carries no kind: its versions say what the name is
+            existing_kind = str(meta.get('kind') or '')
+            if not existing_kind and meta['versions']:
+                existing_kind = str(meta['versions'][-1].get('kind') or 'pipe')
+            if existing_kind and existing_kind != kind:
+                raise ValueError(kind_mismatch_message(project_id, existing_kind, kind))
+            meta['kind'] = kind
+            version = int(meta.get('nextVersion') or (1 + max((v['version'] for v in meta['versions']), default=0)))
+            meta['nextVersion'] = version + 1
             entry = {
                 'version': version,
                 'sha256': sha,
                 'bytes': len(data.encode('utf-8')),
                 'kind': kind,
-                'state': state or ('private' if kind == 'app' else 'ready'),
+                'state': state or 'private',
                 'metadata': artifact_metadata(pipeline, metadata),
                 'pipelineName': str(pipeline.get('name') or ''),
                 'publishedBy': who,
@@ -425,25 +473,29 @@ class FileDeploymentBackend:
             raise ValueError('version must be a positive integer')
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
-            """Validate the target version and move the team pointer."""
-            if not any(v['version'] == version for v in meta['versions']):
+            """Validate the target version and move the slot's pointer."""
+            entry = self._artifact_entry_of(meta, version)
+            if not entry:
                 raise ValueError(f'version {version} is not published for {project_id}')
             now = time.time()
-            dep = meta['deployments'].get(team_id)
+            publishes = self._publishes_of(meta)
+            key = self._slot_key(team_id)
+            dep = publishes.get(key)
             if dep is None:
                 dep = {
-                    'teamId': team_id,
+                    'kind': str(entry.get('kind') or 'pipe'),
                     'version': version,
                     'state': 'enabled',
                     'billingTeamId': billing_team_id,
+                    'schedules': {},
+                    'snapshot': {'name': str(entry.get('pipelineName') or '')},
                     'createdAt': now,
                     'createdBy': who,
-                    'schedules': {},
                 }
-                meta['deployments'][team_id] = dep
+                publishes[key] = dep
                 action = 'deploy'
             else:
-                action = 'rollback' if version < dep['version'] else 'deploy'
+                action = 'rollback' if version < int(dep.get('version') or 0) else 'deploy'
                 dep['version'] = version
                 # A pointer move revives a removed/errored deployment — and
                 # RE-STAMPS the billing team: each pointer move re-decides.
@@ -451,11 +503,11 @@ class FileDeploymentBackend:
                 dep['state'] = 'enabled'
             dep['updatedAt'] = now
             dep['updatedBy'] = who
-            # The pointer-move stamp: "deployed on". Only deploy() writes it —
+            # The pointer-move stamp: "published on". Only deploy() writes it —
             # disable/enable and schedule edits bump updatedAt, never this.
-            dep['deployedAt'] = now
+            dep['publishedAt'] = now
             meta['history'].append({'at': now, 'action': action, 'teamId': team_id, 'version': version, 'actor': who})
-            return self._joined(meta, project_id, dep)
+            return self._joined(meta, project_id, team_id, dep)
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -488,7 +540,7 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Flip the state and record the action."""
-            dep = meta['deployments'].get(team_id)
+            dep = self._pointer_of(meta, team_id)
             if dep is None or dep.get('state') == 'removed':
                 raise StorageError(f'No deployment of {project_id} for team {team_id}')
             now = time.time()
@@ -498,7 +550,7 @@ class FileDeploymentBackend:
             meta['history'].append(
                 {'at': now, 'action': action, 'teamId': team_id, 'version': dep['version'], 'actor': who}
             )
-            return self._joined(meta, project_id, dep)
+            return self._joined(meta, project_id, team_id, dep)
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -531,10 +583,11 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Upsert or remove the schedule row on the team deployment."""
-            dep = meta['deployments'].get(team_id)
+            dep = self._pointer_of(meta, team_id)
             if dep is None or dep.get('state') == 'removed':
                 raise StorageError(f'No deployment of {project_id} for team {team_id}')
             now = time.time()
+            dep.setdefault('schedules', {})
             existing = dep['schedules'].get(source_id) or {}
             if cron is None:
                 # Clearing the SCHEDULE keeps the row when it still carries
@@ -559,7 +612,7 @@ class FileDeploymentBackend:
                 }
             dep['updatedAt'] = now
             dep['updatedBy'] = who
-            return self._joined(meta, project_id, dep)
+            return self._joined(meta, project_id, team_id, dep)
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -587,16 +640,17 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Upsert the config fields on the (possibly new) row."""
-            dep = meta['deployments'].get(team_id)
+            dep = self._pointer_of(meta, team_id)
             if dep is None or dep.get('state') == 'removed':
                 raise StorageError(f'No deployment of {project_id} for team {team_id}')
+            dep.setdefault('schedules', {})
             existing = dep['schedules'].get(source_id) or {'cron': '', 'paused': False, 'ttl': None, 'lastRunAt': None}
             existing['traceLevel'] = trace_level
             existing['debugOut'] = bool(debug_out)
             dep['schedules'][source_id] = existing
             dep['updatedAt'] = time.time()
             dep['updatedBy'] = who
-            return self._joined(meta, project_id, dep)
+            return self._joined(meta, project_id, team_id, dep)
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -623,16 +677,16 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Flip the paused flag on the existing schedule row."""
-            dep = meta['deployments'].get(team_id)
+            dep = self._pointer_of(meta, team_id)
             if dep is None or dep.get('state') == 'removed':
                 raise StorageError(f'No deployment of {project_id} for team {team_id}')
-            sched = dep['schedules'].get(source_id)
+            sched = (dep.get('schedules') or {}).get(source_id)
             if sched is None:
                 raise StorageError(f'No schedule for source {source_id} on {project_id} for team {team_id}')
             sched['paused'] = bool(paused)
             dep['updatedAt'] = time.time()
             dep['updatedBy'] = who
-            return self._joined(meta, project_id, dep)
+            return self._joined(meta, project_id, team_id, dep)
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -645,8 +699,8 @@ class FileDeploymentBackend:
 
             async def mutate(meta: Dict[str, Any]) -> None:
                 """Set the fired timestamp when the schedule still exists."""
-                dep = meta['deployments'].get(team_id)
-                if dep and source_id in dep.get('schedules', {}):
+                dep = self._pointer_of(meta, team_id)
+                if dep and source_id in (dep.get('schedules') or {}):
                     dep['schedules'][source_id]['lastRunAt'] = time.time()
 
             await self._mutate_meta(org_id, project_id, mutate)
@@ -673,11 +727,16 @@ class FileDeploymentBackend:
             meta = await self._read_meta(org_id, project_id)
             if meta is None:
                 continue
-            deps = [meta['deployments'].get(team_id)] if team_id is not None else list(meta['deployments'].values())
-            for dep in deps:
-                if not dep or dep.get('state') == 'removed':
+            # Pipe pointer rows only: a team or personal slot, never the
+            # public row and never an app's publish.
+            for key, dep in self._publishes_of(meta).items():
+                if key == _PUBLIC_KEY or dep.get('state') == 'removed':
                     continue
-                out.append(self._joined(meta, project_id, dep))
+                if team_id is not None and key != self._slot_key(team_id):
+                    continue
+                if self._row_kind(meta, dep) != 'pipe':
+                    continue
+                out.append(self._joined(meta, project_id, self._slot_of_key(key), dep))
         return out
 
     async def get(self, org_id: str, team_id: str, project_id: str) -> Optional[Dict[str, Any]]:
@@ -688,10 +747,10 @@ class FileDeploymentBackend:
         meta = await self._read_meta(org_id, project_id)
         if meta is None:
             return None
-        dep = meta['deployments'].get(team_id)
+        dep = self._pointer_of(meta, team_id)
         if not dep or dep.get('state') == 'removed':
             return None
-        return self._joined(meta, project_id, dep)
+        return self._joined(meta, project_id, team_id, dep)
 
     async def versions(self, org_id: str, project_id: str) -> List[Dict[str, Any]]:
         """The registry entries for a project, newest first (version strip)."""
@@ -708,8 +767,9 @@ class FileDeploymentBackend:
     #
     # meta['publishes'] = {audience_key: row}; audience_key is the file-format
     # encoding 'user~<id>' | 'team~<id>' | '~public' (never on the wire — the
-    # contract carries {'type','id'} audience dicts). Only kind='app' exists
-    # today; published_pipes joins in its own phase.
+    # contract carries {'type','id'} audience dicts). ONE map for every kind
+    # (plan 10.1): a pipe's team and personal pointers (schedules and the
+    # billing team inline) and an app's audience rows are rows of it alike.
 
     @staticmethod
     def _audience_key(audience: Dict[str, str]) -> str:
@@ -743,7 +803,7 @@ class FileDeploymentBackend:
         meta['versions'] so the scope walk can gate serving and mint entry
         URLs without a second registry read.
         """
-        if key == '~public':
+        if key == _PUBLIC_KEY:
             audience = {'type': 'public', 'id': ''}
         elif key.startswith('user~'):
             audience = {'type': 'user', 'id': key[len('user~') :]}
@@ -751,11 +811,18 @@ class FileDeploymentBackend:
             audience = {'type': 'team', 'id': key[len('team~') :]}
         return {
             'orgId': org_id,
+            # The id under both spellings: 'appId' is the shipped key every
+            # app reader uses; 'projectId' is the kind-neutral one.
             'appId': project_id,
+            'projectId': project_id,
             'audience': audience,
             'artifactState': artifact_state,
             'artifactPath': artifact_path,
             'artifactBuild': artifact_build,
+            'kind': 'pipe',
+            'billingTeamId': '',
+            'schedules': {},
+            'snapshot': {},
             **row,
         }
 
@@ -789,9 +856,33 @@ class FileDeploymentBackend:
         return str(ver.get('state') or DEFAULT_REVIEW_STATE)
 
     def _publishes_of(self, meta: Dict[str, Any]) -> Dict[str, Any]:
-        """The meta's publishes dict (container-tolerant on old files)."""
+        """The meta's publish map, created on the meta when absent (so writers may add rows)."""
         publishes = meta.get('publishes')
-        return publishes if isinstance(publishes, dict) else {}
+        if not isinstance(publishes, dict):
+            publishes = {}
+            meta['publishes'] = publishes
+        return publishes
+
+    def _row_kind(self, meta: Dict[str, Any], row: Dict[str, Any]) -> str:
+        """A publish row's kind: its own stamp, else the kind of the version it points at."""
+        kind = row.get('kind')
+        if kind:
+            return str(kind)
+        return str(self._artifact_entry_of(meta, int(row.get('version') or 0)).get('kind') or 'pipe')
+
+    @staticmethod
+    def _slot_key(team_id: str) -> str:
+        """The publish-map key of a pointer slot: 'user~{uid}' stays, a team id becomes 'team~{id}'."""
+        return team_id if team_id.startswith('user~') else f'team~{team_id}'
+
+    @staticmethod
+    def _slot_of_key(key: str) -> str:
+        """The pointer slot of a publish-map key (the inverse of _slot_key; the public key is itself)."""
+        return key[len('team~') :] if key.startswith('team~') else key
+
+    def _pointer_of(self, meta: Dict[str, Any], team_id: str) -> Optional[Dict[str, Any]]:
+        """The pointer row of a team or personal slot, or None."""
+        return self._publishes_of(meta).get(self._slot_key(team_id))
 
     async def publish_set(
         self,
@@ -815,7 +906,7 @@ class FileDeploymentBackend:
         """
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
+        if kind not in _KINDS:
             raise ValueError(f'publish_set: unsupported kind {kind!r}')
         if state not in ('enabled', 'disabled'):
             raise ValueError(f'publish_set: unsupported state {state!r}')
@@ -823,16 +914,24 @@ class FileDeploymentBackend:
         key = self._audience_key(audience)
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
-            """Verify the version exists, then upsert the audience row."""
-            if not any(int(v.get('version', 0)) == version for v in meta['versions']):
+            """Verify the version exists and is of the kind, then upsert the audience row."""
+            entry = self._artifact_entry_of(meta, version)
+            if not entry:
                 raise StorageError(f'{app_id} v{version}: not in the registry')
-            publishes = meta.setdefault('publishes', {})
+            if str(entry.get('kind') or 'pipe') != kind:
+                raise ValueError(f'{app_id} v{version} is a {entry.get("kind") or "pipe"}, not a {kind}')
+            publishes = self._publishes_of(meta)
             existing = publishes.get(key) or {}
             now = time.time()
+            # A pipe pointer repointed here keeps what the pointer verbs
+            # stamped: its schedules and its billing team.
             row = {
+                'kind': kind,
                 'version': version,
                 'state': state,
                 'snapshot': dict(snapshot or {}),
+                'billingTeamId': existing.get('billingTeamId', ''),
+                'schedules': existing.get('schedules', {}),
                 'createdAt': existing.get('createdAt', now),
                 'createdBy': existing.get('createdBy', who),
                 'updatedAt': now,
@@ -877,14 +976,14 @@ class FileDeploymentBackend:
         """One audience's publish row of one app, or None (removed = None)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
+        if kind not in _KINDS:
             raise ValueError(f'publish_get: unsupported kind {kind!r}')
         meta = await self._read_meta(org_id, app_id)
         if meta is None:
             return None
         key = self._audience_key(audience)
         row = self._publishes_of(meta).get(key)
-        if not row or row.get('state') == 'removed':
+        if not row or row.get('state') == 'removed' or self._row_kind(meta, row) != kind:
             return None
         ver = self._artifact_entry_of(meta, row.get('version', 0))
         return self._publish_row(
@@ -901,14 +1000,14 @@ class FileDeploymentBackend:
         """Every live publish row of one app (the where/reverse index feed)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
+        if kind not in _KINDS:
             raise ValueError(f'publish_of_app: unsupported kind {kind!r}')
         meta = await self._read_meta(org_id, app_id)
         if meta is None:
             return []
         out: List[Dict[str, Any]] = []
         for key, row in self._publishes_of(meta).items():
-            if row.get('state') == 'removed':
+            if row.get('state') == 'removed' or self._row_kind(meta, row) != kind:
                 continue
             ver = self._artifact_entry_of(meta, row.get('version', 0))
             out.append(
@@ -932,7 +1031,7 @@ class FileDeploymentBackend:
         one indexed query instead.
         """
         _safe_id(org_id, 'org_id')
-        if kind != 'app':
+        if kind not in _KINDS:
             raise ValueError(f'publish_list: unsupported kind {kind!r}')
         keys = {self._audience_key(a) for a in audiences}
         out: List[Dict[str, Any]] = []
@@ -941,7 +1040,7 @@ class FileDeploymentBackend:
             if meta is None:
                 continue
             for key, row in self._publishes_of(meta).items():
-                if key in keys and row.get('state') != 'removed':
+                if key in keys and row.get('state') != 'removed' and self._row_kind(meta, row) == kind:
                     ver = self._artifact_entry_of(meta, row.get('version', 0))
                     out.append(
                         self._publish_row(
@@ -962,7 +1061,7 @@ class FileDeploymentBackend:
         """Flip one binding's lifecycle state (disable/remove/re-enable)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
+        if kind not in _KINDS:
             raise ValueError(f'publish_set_state: unsupported kind {kind!r}')
         if state not in ('enabled', 'disabled', 'removed'):
             raise ValueError(f'Unknown binding state: {state!r}')
@@ -973,7 +1072,7 @@ class FileDeploymentBackend:
             """Update the binding's state in place."""
             publishes = self._publishes_of(meta)
             row = publishes.get(key)
-            if not row:
+            if not row or self._row_kind(meta, row) != kind:
                 raise StorageError(f'{app_id}: no publish for that audience')
             now = time.time()
             row['state'] = state
@@ -1228,12 +1327,12 @@ class FileDeploymentBackend:
                 meta = await self._read_meta(org_id, project_id)
                 if meta is None:
                     continue
-                for team_id, dep in meta['deployments'].items():
-                    if dep.get('state') != 'enabled':
+                for key, dep in self._publishes_of(meta).items():
+                    if key == _PUBLIC_KEY or dep.get('state') != 'enabled' or self._row_kind(meta, dep) != 'pipe':
                         continue
                     yield {
                         'orgId': org_id,
-                        'teamId': team_id,
+                        'teamId': self._slot_of_key(key),
                         'projectId': project_id,
                         'version': dep['version'],
                         'state': dep['state'],
@@ -1264,19 +1363,60 @@ class FileDeploymentBackend:
 
     async def _read_meta(self, org_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         """Load and shape-check a project's meta.json; None when absent."""
+        # Only a MISSING file is 'no project'; any other storage failure
+        # propagates, so a name is never reported unpublished because the
+        # store was down (the resolver's row source reads through here)
         try:
             data = await self._store.read_file(self._meta_path(org_id, project_id))
-        except StorageError:
+        except StorageNotFoundError:
             return None
         try:
-            meta = json.loads(data)
-            meta.setdefault('versions', [])
-            meta.setdefault('deployments', {})
-            meta.setdefault('history', [])
-            return meta
+            return self._normalize_meta(json.loads(data), org_id, project_id)
         except Exception as e:
             error(f'deployments: corrupt meta for {org_id}/{project_id}: {e}')
             return None
+
+    def _normalize_meta(self, meta: Dict[str, Any], org_id: str, project_id: str) -> Dict[str, Any]:
+        """Shape a meta for this backend, folding a pre-C.17 file's team pointers into the publish map.
+
+        Before C.17 the file kept team pointers in ``deployments`` (keyed by
+        slot) beside the app publishes in ``publishes``; now there is ONE
+        map (plan 10.1). A legacy ``deployments`` entry becomes the publish
+        row under its slot key, carrying what the pointer carried (version,
+        state, billing team, schedules); the fold is written back on the
+        next mutate. ``kind`` and ``nextVersion`` (the name row) are stamped
+        on the first publish after the upgrade.
+        """
+        meta.setdefault('projectId', project_id)
+        meta.setdefault('orgId', org_id)
+        meta.setdefault('versions', [])
+        meta.setdefault('history', [])
+        publishes = self._publishes_of(meta)
+        # A pre-C.17 publish row carries no kind: stamp the kind of the version
+        # it points at, so every reader and every row returned agree
+        for row in publishes.values():
+            if isinstance(row, dict) and not row.get('kind'):
+                row['kind'] = str(self._artifact_entry_of(meta, int(row.get('version') or 0)).get('kind') or 'pipe')
+        legacy = meta.pop('deployments', None)
+        if isinstance(legacy, dict):
+            for team_id, dep in legacy.items():
+                key = self._slot_key(str(team_id))
+                if key in publishes or not isinstance(dep, dict):
+                    continue
+                publishes[key] = {
+                    'kind': str(self._artifact_entry_of(meta, int(dep.get('version') or 0)).get('kind') or 'pipe'),
+                    'version': dep.get('version'),
+                    'state': dep.get('state', 'enabled'),
+                    'billingTeamId': dep.get('billingTeamId', ''),
+                    'schedules': dep.get('schedules', {}),
+                    'snapshot': {},
+                    'createdAt': dep.get('createdAt'),
+                    'createdBy': dep.get('createdBy'),
+                    'updatedAt': dep.get('updatedAt'),
+                    'updatedBy': dep.get('updatedBy'),
+                    'publishedAt': dep.get('deployedAt', dep.get('updatedAt')),
+                }
+        return meta
 
     async def _mutate_meta(self, org_id: str, project_id: str, mutate) -> Any:
         """CAS read-modify-write of meta.json with bounded retries.
@@ -1295,11 +1435,9 @@ class FileDeploymentBackend:
             except StorageError:
                 meta, cas_version = None, None
             if meta is None:
-                meta = {'projectId': project_id, 'orgId': org_id, 'versions': [], 'deployments': {}, 'history': []}
+                meta = {'projectId': project_id, 'orgId': org_id, 'versions': [], 'publishes': {}, 'history': []}
             else:
-                meta.setdefault('versions', [])
-                meta.setdefault('deployments', {})
-                meta.setdefault('history', [])
+                meta = self._normalize_meta(meta, org_id, project_id)
 
             result = await mutate(meta)
 
@@ -1319,12 +1457,14 @@ class FileDeploymentBackend:
                 continue
         raise StorageError(f'deployments: meta update contention for {org_id}/{project_id}: {last}')
 
-    def _joined(self, meta: Dict[str, Any], project_id: str, dep: Dict[str, Any]) -> Dict[str, Any]:
-        """A client-facing deployment record: pointer + its registry entry."""
+    def _joined(self, meta: Dict[str, Any], project_id: str, team_id: str, dep: Dict[str, Any]) -> Dict[str, Any]:
+        """A client-facing deployment record: a slot's publish row + its registry entry."""
         entry = next((v for v in meta['versions'] if v['version'] == dep['version']), {})
         return {
             'projectId': project_id,
-            'teamId': dep['teamId'],
+            # teamId carries the OWNER-KEY slot on the wire ('user~{uid}' for
+            # a personal publish, the plain team id otherwise).
+            'teamId': team_id,
             'version': dep['version'],
             'state': dep['state'],
             # The absolute billing/secrets stamp — runs read this, never
@@ -1335,9 +1475,10 @@ class FileDeploymentBackend:
             'createdBy': dep.get('createdBy'),
             'updatedAt': dep.get('updatedAt'),
             'updatedBy': dep.get('updatedBy'),
-            # Stamped by deploy() on every pointer move; records from before
-            # the field existed fall back to updatedAt.
-            'deployedAt': dep.get('deployedAt', dep.get('updatedAt')),
+            # Stamped by deploy() on every pointer move (the wire keeps the
+            # shipped 'deployedAt' spelling); records from before the field
+            # existed fall back to updatedAt.
+            'deployedAt': dep.get('publishedAt', dep.get('updatedAt')),
             'pipelineName': entry.get('pipelineName', ''),
             'sha256': entry.get('sha256', ''),
             'publishedAt': entry.get('publishedAt'),

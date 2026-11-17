@@ -53,6 +53,8 @@
 
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from rocketlib import debug
+
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of
 from ai.account.models import resolve_team_permissions
@@ -60,7 +62,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
 from ..address import validate_component_ids, validate_segment
-from ..deploy_events import broadcast_deploy_changed, release_deployment_holds
+from ..deploy_events import broadcast_deploy_changed, broadcast_review_state, release_deployment_holds
 
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
@@ -357,9 +359,21 @@ class DeployCommands(_DeployBase):
 
         org_id = self._org_id()
         metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
+        # Born state (plan S8): on a review-ladder server a pipe deploys
+        # 'private' like an app (team and personal rungs serve it; @public
+        # needs 'ready' after review); without the ladder the developer IS
+        # the admin, so it is born 'ready' — the same rule the app door
+        # applies (app_deploy.handle_app_add).
         entry = await account.deployments_publish(
-            org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata
+            org_id,
+            project_id,
+            pipeline,
+            self._actor(),
+            comment=str(args.get('comment') or ''),
+            metadata=metadata,
+            state=None if account.review_ladder else 'ready',
         )
+        await self._withdraw_stale_submissions(org_id, project_id, int(entry['version']))
         await account.audit(
             self._account_info.userId,
             'deploy',
@@ -395,6 +409,33 @@ class DeployCommands(_DeployBase):
             body['deployment'] = dep
             await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
         return self.build_response(request, body=body)
+
+    async def _withdraw_stale_submissions(self, org_id: str, project_id: str, new_version: int) -> None:
+        """Withdraw every OLDER version of the name still in review (submit -> private).
+
+        Deploying supersedes pending reviews (plan S8, the app door's rule):
+        a new version makes older submissions stale by definition, and
+        leaving them queued spends review effort on code that is already
+        replaced, or approves a version the publisher moved past. Best-effort
+        per row: the deploy itself already succeeded.
+        """
+        try:
+            rail = await account.deployments_versions(org_id, project_id)
+        except Exception:
+            rail = []
+        for row in rail:
+            row_version = int(row.get('version', 0))
+            if row_version >= new_version or str(row.get('state') or '') != 'submit':
+                continue
+            try:
+                await account.set_artifact_state(org_id, project_id, row_version, 'private', self._actor())
+                debug(
+                    f'[DEPLOY] withdrew the stale review of {project_id} v{row_version} (superseded by v{new_version})'
+                )
+                # The stale version left the queue: reviewer badges drop it live
+                await broadcast_review_state(self._server, org_id, project_id, row_version, 'private')
+            except Exception as exc:
+                debug(f'[DEPLOY] could not withdraw {project_id} v{row_version}: {exc}')
 
     # =========================================================================
     # READS
