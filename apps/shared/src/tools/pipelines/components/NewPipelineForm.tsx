@@ -38,20 +38,15 @@ import React, { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, Card, InputField, commonStyles } from 'shell';
 import { SHORT_ID_PATTERN } from '../sidebar/bundles';
+import type { NewPipelineIdentity } from '../types';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** What the host knows about where and under whose namespace a pipeline is born. */
-export interface NewPipelineIdentity {
-	/** The org's developer id ('' when none is claimed yet; the banner above says so). */
-	developerId: string;
-	/** Whether a create target exists (a workspace folder / a connected store). */
-	workspaceOpen: boolean;
-	/** Names already taken under the pipelines directory (folders and pipe stems), for live collision checks. */
-	existingNames: string[];
-}
+// The identity lives in the tool's types module (a plain .ts the op map can
+// import); re-exported here for the form's consumers.
+export type { NewPipelineIdentity } from '../types';
 
 /** Props for {@link NewPipelineForm}. */
 export interface INewPipelineFormProps {
@@ -210,7 +205,9 @@ export const NewPipelineForm: React.FC<INewPipelineFormProps> = ({ identity, cre
 					<div style={styles.divider} />
 					<div style={styles.footer}>
 						<div style={error ? styles.footerError : styles.footerNote}>{error ?? note}</div>
-						<Button variant="secondary" onClick={onCancel}>
+						{/* Cancel closes the untitled document; while a create is in
+						    flight the host is about to swap it, so Cancel waits. */}
+						<Button variant="secondary" disabled={creating} onClick={onCancel}>
 							Cancel
 						</Button>
 						<Button variant="primary" disabled={!canCreate} onClick={() => onCreate(name, displayName.trim())}>

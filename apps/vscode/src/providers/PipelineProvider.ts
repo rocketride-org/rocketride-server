@@ -463,7 +463,18 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// only the identity is set here.
 				const base = p.project && typeof p.project === 'object' ? (p.project as Record<string, unknown>) : {};
 				const content = JSON.stringify({ ...base, project_id: p.name, name: p.displayName, components: Array.isArray(base.components) ? base.components : [] }, null, 2);
-				await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
+				try {
+					await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
+				} catch (error) {
+					// A failed write must leave the name retryable: the folder THIS
+					// attempt made goes if it is still empty (never anyone else's content).
+					try {
+						if ((await vscode.workspace.fs.readDirectory(bundleDir)).length === 0) await vscode.workspace.fs.delete(bundleDir);
+					} catch {
+						// nothing to clean, or not ours to clean
+					}
+					throw error;
+				}
 				// Retire the untitled form document and open the file in its place.
 				const editorState = this.findLiveEditorState(p.doc);
 				if (editorState) {

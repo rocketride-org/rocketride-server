@@ -329,6 +329,12 @@ const SidebarProvider: React.FC = () => {
 						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
 						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 						const bundle = bundlePathsFor(dir, stem);
+						// The Explorer checked the typed path; the bundle's pipe is another
+						// path, and an existing pipeline there is never truncated.
+						const existing = await projectVfs.list(bundle.folder).catch(() => []);
+						if (existing.some((e) => e.type !== 'dir' && e.name === `${stem}.pipe`)) {
+							throw new Error(`"${bundle.file}" already exists; choose another name.`);
+						}
 						await projectVfs.mkdir(bundle.folder);
 						await projectVfs.write(bundle.file, { project_id: crypto.randomUUID(), components: [] });
 						break;

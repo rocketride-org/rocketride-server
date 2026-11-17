@@ -20,7 +20,7 @@
 
 import type { ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
 import type { IMintedEndpointKey } from '../tools/pipelines/components/pipeline-actions/endpointKey';
-import type { NewPipelineIdentity } from '../tools/pipelines/components/NewPipelineForm';
+import type { NewPipelineIdentity } from '../tools/pipelines/types';
 
 /**
  * What `host.pipeline.load` answers: the document's full boot state. The

@@ -462,7 +462,15 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			// The untitled document's content rides along (its components stay);
 			// only the identity is set here.
 			const base = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
-			await projectVfs.write(bundle.file, { ...base, project_id: name, name: displayName, components: Array.isArray(base.components) ? base.components : [] });
+			try {
+				await projectVfs.write(bundle.file, { ...base, project_id: name, name: displayName, components: Array.isArray(base.components) ? base.components : [] });
+			} catch (err) {
+				// A failed write must leave the name retryable: the folder THIS
+				// attempt made goes if it is still empty (never anyone else's content).
+				const left = await projectVfs.list(bundle.folder).catch(() => null);
+				if (left && left.length === 0) await projectVfs.delete(bundle.folder).catch(() => undefined);
+				throw err;
+			}
 			const docs = getDocs();
 			docs?.discardDocument(uri);
 			await docs?.openDocument(bundle.file);

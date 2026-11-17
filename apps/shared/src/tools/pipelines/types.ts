@@ -73,3 +73,17 @@ export interface IViewProps {
 	initialState?: Record<string, unknown>;
 	onStateChange?: (state: Record<string, unknown>) => void;
 }
+
+/**
+ * What the host knows about where and under whose namespace a new pipeline
+ * is born: the New Pipeline form's identity (plan 2.1, 9). A plain type so the
+ * op map (compiled into the VS Code extension host, no JSX) can name it.
+ */
+export interface NewPipelineIdentity {
+	/** The org's developer id ('' when none is claimed yet; the banner above says so). */
+	developerId: string;
+	/** Whether a create target exists (a workspace folder / a connected store). */
+	workspaceOpen: boolean;
+	/** Names already taken under the pipelines directory (folders and pipe stems), for live collision checks. */
+	existingNames: string[];
+}
