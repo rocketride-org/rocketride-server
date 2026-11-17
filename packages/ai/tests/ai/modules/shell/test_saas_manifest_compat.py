@@ -141,7 +141,7 @@ async def test_store_errors_other_than_not_found_skip_the_app_or_fail_the_gate(m
     async def broken(path):
         raise StorageError('store down')
 
-    monkeypatch.setattr(pp, 'read_artifact_file', broken)
+    monkeypatch.setattr(pp, 'read_artifact_text', broken)
     assert await load_published(acct) == []  # aggregate: skipped, never a partial manifest
     with pytest.raises(RuntimeError, match='rocketride.home: store down'):
         await load_published(acct, strict=True)  # the gate: fail closed, naming the app

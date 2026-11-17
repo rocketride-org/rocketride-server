@@ -141,6 +141,11 @@ async def read_file(path: str) -> bytes:
     return FILES[path]
 
 
+async def read_text(path: str) -> str:
+    """``public_pages.read_artifact_text`` over FILES (StorageNotFoundError when absent)."""
+    return (await read_file(path)).decode('utf-8')
+
+
 async def file_info(path: str) -> Dict[str, Any]:
     """``public_pages.artifact_file_info`` over FILES (StorageNotFoundError when absent)."""
     from ai.account.store import StorageNotFoundError
