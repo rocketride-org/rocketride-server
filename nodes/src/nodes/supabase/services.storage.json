@@ -1,0 +1,90 @@
+{
+	//
+	// Supabase Storage: buckets and files as agent tools.
+	// Connects with the Project URL + secret key (core/services.common.supabase.json).
+	//
+	"title": "Supabase Storage",
+	"protocol": "tool_supabase_storage://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.supabase.storage",
+	"prefix": "supabase_storage",
+	"icon": "supabase.svg",
+	"documentation": "https://docs.rocketride.org/nodes/supabase/storage",
+	"description": [
+		"Exposes Supabase Storage as agent tools: list buckets and files, read a file (inline when small, otherwise a signed URL), ",
+		"make signed download links, upload files, create buckets and delete files. ",
+		"Connects with the project URL and a secret key. The access level (read, write or admin) decides which tools may run."
+	],
+	"tile": ["Supabase Storage (${parameters.supabase.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Supabase Storage",
+				"authType": "key",
+				"url": "",
+				"secretKey": "",
+				"access": "read",
+				"inlineLimitKb": 256,
+				"uploadLimitMb": 10,
+				"listLimit": 100,
+				"signedUrlSeconds": 3600
+			}
+		}
+	},
+	"fields": {
+		"supabase.access": {
+			"description": "What the agent may do. read: list_buckets, list_files, download_file, create_signed_url. write: also upload_file. admin: also create_bucket and delete_file."
+		},
+		"supabase_storage.inlineLimitKb": {
+			"type": "integer",
+			"title": "Inline download limit (KB)",
+			"default": 256,
+			"minimum": 1,
+			"maximum": 4096,
+			"description": "download_file returns a file's content inline only up to this size. A larger file is returned as a signed URL instead, because its content would cost the agent too many tokens."
+		},
+		"supabase_storage.uploadLimitMb": {
+			"type": "integer",
+			"title": "Upload limit (MB)",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 50,
+			"description": "upload_file refuses content larger than this before sending it."
+		},
+		"supabase_storage.listLimit": {
+			"type": "integer",
+			"title": "List limit",
+			"default": 100,
+			"minimum": 1,
+			"maximum": 1000,
+			"description": "The most entries one list_files or list_buckets call returns. The agent pages through larger folders with offset."
+		},
+		"supabase_storage.signedUrlSeconds": {
+			"type": "integer",
+			"title": "Signed URL lifetime (seconds)",
+			"default": 3600,
+			"minimum": 60,
+			"maximum": 604800,
+			"description": "How long the signed URL that download_file returns for a large file stays valid, and the default for create_signed_url. Anyone holding the URL can download the file until then."
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Supabase Storage",
+			"properties": [
+				"supabase.authType",
+				"supabase.access",
+				"supabase_storage.inlineLimitKb",
+				"supabase_storage.uploadLimitMb",
+				"supabase_storage.listLimit",
+				"supabase_storage.signedUrlSeconds"
+			]
+		}
+	]
+}

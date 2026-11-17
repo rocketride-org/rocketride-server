@@ -1,0 +1,16 @@
+# Shared requirements for every Supabase service. Installed by
+# SupabaseGlobalBase.beginGlobal through depends(); never in CONFIG mode.
+#
+# supabase-py: Auth admin, Storage, PostgREST (Queues RPC). Held to the 2.34
+# line the node was built and tested against (2.34.1).
+# supabase 2.34 needs pyjwt>=2.15.1. The shared nodes/src/nodes/constraints.lock
+# pins pyjwt==2.13.0 today; the lock-node-deps workflow regenerates the lock
+# after merge and moves pyjwt up to 2.15.1 for every node (call this out in
+# the PR; a universal compile of all node requirements resolves cleanly).
+supabase>=2.34.1,<2.35
+# HTTP helper (SupabaseApi) for REST calls supabase-py does not wrap
+# (Realtime broadcast, Edge Functions). Already a supabase-py dependency;
+# listed because we import it directly.
+httpx
+# Postgres services (Cron; Vector reuses store_postgres, which installs its own).
+psycopg2-binary

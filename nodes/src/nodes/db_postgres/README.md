@@ -10,7 +10,7 @@ Uses SQLAlchemy with the psycopg2 driver (`psycopg2-binary`). The connection str
 
 Safety defaults: generated SQL must be shaped like a `SELECT` (see Notes), is validated with `EXPLAIN` against the live database, and runs in a read-only transaction with a 60-second statement timeout; raw SQL execution is disabled by default via `allow_execute`.
 
-The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
+For a Supabase project, use the Database service of the `supabase` node (protocol `db_supabase://`, formerly a preset in this folder). It reuses this implementation unchanged, so pipelines saved with the old preset keep working.
 
 ## Example pipelines
 
@@ -162,15 +162,6 @@ Rows arriving on the `answers` lane are inserted into the configured `table`:
 - A primary key PostgreSQL is not known to generate (a composite key, a text key with no default) that a row omits is left out of the statement too, and PostgreSQL decides. The node does not refuse the row: "generates it itself" is read from reflected metadata, which does not describe triggers, so a `uuid`/`CHAR(36)` key filled by a `BEFORE INSERT` trigger is indistinguishable from a key nobody supplies — omitting the column is what lets the trigger run. Where nothing fills it in, PostgreSQL rejects the row with `null value in column "..." violates not-null constraint` and the whole batch is rolled back. (SQLAlchemy emits a Python `SAWarning` — once per column per process under the default filter — for a statement that leaves a primary key unbound; it is expected here.)
 - Lists and dicts are serialised as JSON strings; booleans are stored as `0`/`1`.
 - Each batch is inserted in a single transaction: on failure every row of it is rolled back and the error is raised as `Insert into "<table>" failed:` followed by PostgreSQL's own primary message, with the statement echo stripped exactly as for `execute`. On the `answers` lane the error is logged, not returned, so check the server log when rows do not appear.
-
-### Supabase preset
-
-`services.supabase.json` registers the same node as Supabase (`db_supabase://`); its tools carry the same bare names. The connection is encrypted over TLS. Operational notes:
-
-- **Use the Supavisor pooler** from the Supabase dashboard (Connect button): `aws-0-<region>.pooler.supabase.com:6543` (transaction) or `:5432` (session). It works over IPv4.
-- The **direct connection** (`db.<project-ref>.supabase.co:5432`) is IPv6-only and will fail to resolve on networks without IPv6.
-- For the pooler, the user must include your project ref: `postgres.<project-ref>`. Without the suffix the pooler returns `no tenant identifier`. For the direct connection it is just `postgres`.
-- The database password comes from your Supabase project (Project Settings -> Database); the database name defaults to `postgres`.
 
 ---
 
