@@ -261,12 +261,21 @@ function readOnly<T extends object>(item: T): T {
 	return { ...item, draggable: false, selectable: false, deletable: false, connectable: false, focusable: false };
 }
 
+/**
+ * The person reads paths the way the builder shows them, without the team id
+ * inside a team path (`@/Team/=<id>/.projects/x.pipe` reads `.projects/x.pipe`).
+ * The model keeps the full path in the tool result.
+ */
+export function withoutTeamIds(text: string): string {
+	return text.replace(/@\/Team\/=[A-Za-z0-9][A-Za-z0-9_.-]*\/\.projects/g, '.projects');
+}
+
 /** Builds the canvas model for one tool result. */
 export function buildCanvasModel(result: ToolResultLike, fallbackMeta?: unknown): CanvasModel {
 	const summary = readSummary(result);
 	if (!summary) return { kind: 'error', message: 'The tool result could not be read.' };
 	if (!summary.ok) {
-		return { kind: 'error', message: summary.message || 'The pipeline could not be opened.', hint: summary.hint || undefined };
+		return { kind: 'error', message: withoutTeamIds(summary.message || 'The pipeline could not be opened.'), hint: summary.hint ? withoutTeamIds(summary.hint) : undefined };
 	}
 
 	const payload = readPayload(result, fallbackMeta);
