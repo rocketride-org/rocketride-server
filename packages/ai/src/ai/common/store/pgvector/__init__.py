@@ -29,7 +29,14 @@ Import it after the node has installed its requirements (``psycopg2``):
 ``from ai.common.store.pgvector import PgVectorStore``.
 """
 
-from .driver import DEFAULT_STATEMENT_TIMEOUT_MS, MIN_SIMILARITY_SCORE, PgVectorStore
+from .driver import DEFAULT_STATEMENT_TIMEOUT_MS, MIN_SIMILARITY_SCORE, PgVectorStore, resolve_metric
 from .sql import HNSW_MAX_DIMS, VALID_TABLE
 
-__all__ = ['DEFAULT_STATEMENT_TIMEOUT_MS', 'HNSW_MAX_DIMS', 'MIN_SIMILARITY_SCORE', 'PgVectorStore', 'VALID_TABLE']
+__all__ = [
+    'DEFAULT_STATEMENT_TIMEOUT_MS',
+    'HNSW_MAX_DIMS',
+    'MIN_SIMILARITY_SCORE',
+    'PgVectorStore',
+    'VALID_TABLE',
+    'resolve_metric',
+]

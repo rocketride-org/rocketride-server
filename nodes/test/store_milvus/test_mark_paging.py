@@ -84,7 +84,7 @@ def test_a_count_that_never_reaches_zero_does_not_keep_the_read_going(store, mon
     """A count(*) that answers rows the windowed reads never return ends at the driver's own bound."""
     total = sum(len(ids) for ids in CHUNKS.values())
     counted = store._countWhere
-    monkeypatch.setattr(store, '_countWhere', lambda conditions: counted(conditions) + 5)
+    monkeypatch.setattr(store, '_countWhere', lambda conditions, consistency=None: counted(conditions, consistency) + 5)
     query = store.client.query
     calls = []
 

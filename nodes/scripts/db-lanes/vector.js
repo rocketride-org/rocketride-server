@@ -11,12 +11,11 @@
  * (Qdrant) and `test_store_chroma_full.py` (Chroma) drive the shared drivers behind
  * the vector stores on new and legacy-shaped collections; they stub the engine
  * surface themselves. The suites that exist on develop and this domain changed
- * (`test_rocketride_db_full.py`, `test_rocketride_vector_tools_full.py`,
- * `test_vector_store_writes_full.py`, `test_vector_store_listing_full.py` and
- * `test_pgvector_search.py`) are listed below: a deliberate CI change of this PR. On
- * develop `nodes:test` leaves the four `*_full.py` suites out (its mocked pass globs them
- * away; only `nodes:test-full` collects them) and runs `test_pgvector_search.py` in its
- * mocked pass; here all five run in the unmocked live pass, required on the Linux CI leg.
+ * (`test_rocketride_db_live.py`, `test_rocketride_vector_tools_live.py`,
+ * `test_vector_store_writes_live.py`, `test_vector_store_listing_live.py` and
+ * `test_pgvector_search_live.py`) are listed below: a deliberate CI change of this PR. On
+ * develop `nodes:test` runs these five in its mocked pass, each skipping without
+ * `RR_TEST_PG_DSN`; here they run in the unmocked live pass, required on the Linux CI leg.
  * `test_vector_toolpath_full.py` does not stub: it starts the
  * engine in `dist/server` (build it first) with a stand-in for the cloud database
  * broker, starts each shipped Vector Explorer template (`apps/vector-ui/templates`)
@@ -30,7 +29,7 @@
  * servers are not seeded with.
  *
  * pgvector pooler cases: the pgvector suites (`test_store_postgres_full.py` and the
- * `rocketride_vector` cases of `test_rocketride_db_full.py`) also run through a
+ * `rocketride_vector` cases of `test_rocketride_db_live.py`) also run through a
  * transaction-mode pooler, the way the cloud reaches tenant databases. With
  * `RR_TEST_PGVECTOR_POOLER_DSN` set (CI points it at a PgBouncer in front of its
  * pgvector container) each case runs once directly and once through the pooler, in
@@ -51,11 +50,11 @@ module.exports = {
 	name: 'vector',
 	suites: [
 		// develop's pgvector suites (see the header: a CI behavior change).
-		'test_rocketride_db_full.py',
-		'test_rocketride_vector_tools_full.py',
-		'test_vector_store_listing_full.py',
-		'test_vector_store_writes_full.py',
-		'test_pgvector_search.py',
+		'test_rocketride_db_live.py',
+		'test_rocketride_vector_tools_live.py',
+		'test_vector_store_listing_live.py',
+		'test_vector_store_writes_live.py',
+		'test_pgvector_search_live.py',
 		'test_store_postgres_full.py',
 		'test_store_qdrant_full.py',
 		'test_store_chroma_full.py',
@@ -64,7 +63,7 @@ module.exports = {
 	],
 	// These suites parametrise their cases over the database and the pooler named by
 	// RR_TEST_PGVECTOR_POOLER_DSN, so the live pass runs the pooled cases itself.
-	poolerSuites: ['test_rocketride_db_full.py', 'test_store_postgres_full.py'],
+	poolerSuites: ['test_rocketride_db_live.py', 'test_store_postgres_full.py'],
 	poolerEnv: 'RR_TEST_PGVECTOR_POOLER_DSN',
 	poolerMode: 'in-suite',
 	poolerUnsetNote: 'RR_TEST_PGVECTOR_POOLER_DSN is not set: the pgvector suites leave out their pooled cases',

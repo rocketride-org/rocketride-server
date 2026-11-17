@@ -26,6 +26,13 @@ import { EventEmitter } from 'node:events';
 import { TransportWebSocket } from '../src/client/core/TransportWebSocket';
 import type { DAPMessage } from '../src/client/types';
 
+/**
+ * Connect timeout for tests that settle every attempt through the fake socket.
+ * Long enough that a stalled event loop on a loaded runner never fires it
+ * first; the timeout path has its own test with a short value.
+ */
+const CONNECT_TIMEOUT_MS = 10_000;
+
 type BrowserHandler<T> = ((event: T) => unknown) | null;
 
 class FakeNodeWebSocket extends EventEmitter {
@@ -357,7 +364,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('pending'));
 		transport.bind({ onDisconnected: disconnected });
 
-		const connectOutcome = outcome(transport.connect(250));
+		const connectOutcome = outcome(transport.connect(CONNECT_TIMEOUT_MS));
 		await harness.waitForAttempts('pending');
 		await transport.disconnect();
 
@@ -369,8 +376,8 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 	test('same-URI concurrent connects share one socket attempt and outcome', async () => {
 		const transport = new TransportWebSocket(harness.uri('same'));
 
-		const first = transport.connect(250);
-		const second = transport.connect(250);
+		const first = transport.connect(CONNECT_TIMEOUT_MS);
+		const second = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('same');
 		await new Promise<void>((resolve) => setTimeout(resolve, 20));
 
@@ -385,10 +392,10 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('a'));
 		transport.bind({ onDisconnected: disconnected });
 
-		const first = outcome(transport.connect(250));
+		const first = outcome(transport.connect(CONNECT_TIMEOUT_MS));
 		await harness.waitForAttempts('a');
 		transport.setUri(harness.uri('b'));
-		const second = transport.connect(250);
+		const second = transport.connect(CONNECT_TIMEOUT_MS);
 
 		await expect(settleSoon(first)).resolves.toMatchObject({ status: 'rejected' });
 		await harness.waitForAttempts('b');
@@ -405,13 +412,13 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('a'));
 		transport.bind({ onDisconnected: disconnected, onReceive: received });
 
-		const first = outcome(transport.connect(250));
+		const first = outcome(transport.connect(CONNECT_TIMEOUT_MS));
 		await harness.waitForAttempts('a');
 		const oldSocket = harness.currentSocket(transport);
 		const oldHandlers = harness.captureHandlers(oldSocket);
 
 		transport.setUri(harness.uri('b'));
-		const second = transport.connect(250);
+		const second = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('b');
 		await harness.open('b', harness.currentSocket(transport));
 		await second;
@@ -436,7 +443,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('established-a'));
 		transport.bind({ onDisconnected: disconnected, onReceive: received });
 
-		const first = transport.connect(250);
+		const first = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('established-a');
 		const oldSocket = harness.currentSocket(transport);
 		await harness.open('established-a', oldSocket);
@@ -453,7 +460,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		oldHandlers.error(new Error('stale established A error'));
 		oldHandlers.close(1006, 'stale established A close');
 
-		const second = transport.connect(250);
+		const second = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('established-b');
 		await harness.open('established-b', harness.currentSocket(transport));
 		await second;
@@ -467,7 +474,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('error-close'));
 		transport.bind({ onDisconnected: disconnected });
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('error-close');
 		const socket = harness.currentSocket(transport);
 		await harness.open('error-close', socket);
@@ -486,7 +493,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('cleanup'));
 		transport.bind({ onDisconnected: disconnected });
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('cleanup');
 		const socket = harness.currentSocket(transport);
 		await harness.open('cleanup', socket);
@@ -515,7 +522,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const traces: string[] = [];
 		transport.bind({});
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('send-trace');
 		const socket = harness.currentSocket(transport);
 		await harness.open('send-trace', socket);
@@ -558,7 +565,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 
 	test('a synchronous socket close clears its fallback timer before disconnect resolves', async () => {
 		const transport = new TransportWebSocket(harness.uri('synchronous-close'));
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('synchronous-close');
 		const socket = harness.currentSocket(transport);
 		await harness.open('synchronous-close', socket);
@@ -609,7 +616,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 			const transport = new TransportWebSocket(harness.uri(`pre-open-${failure}`));
 			transport.bind({ onDisconnected: disconnected });
 
-			const connected = outcome(transport.connect(250));
+			const connected = outcome(transport.connect(CONNECT_TIMEOUT_MS));
 			await harness.waitForAttempts(`pre-open-${failure}`);
 			const socket = harness.currentSocket(transport);
 			if (failure === 'error') harness.error(socket, new Error('pre-open failure'));
@@ -656,7 +663,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 			},
 		});
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('rejecting-disconnected');
 		const socket = harness.currentSocket(transport);
 		await harness.open('rejecting-disconnected', socket);
@@ -702,7 +709,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 			},
 		});
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('reentrant-disconnect');
 		const socket = harness.currentSocket(transport);
 		await harness.open('reentrant-disconnect', socket);
@@ -744,7 +751,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 			},
 		});
 
-		const connected = transport.connect(250);
+		const connected = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('delayed-reentrant-disconnect');
 		const socket = harness.currentSocket(transport);
 		await harness.open('delayed-reentrant-disconnect', socket);
@@ -775,7 +782,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		const transport = new TransportWebSocket(harness.uri('draining-a'));
 		transport.bind({ onReceive: received });
 
-		const first = transport.connect(250);
+		const first = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('draining-a');
 		const oldSocket = harness.currentSocket(transport);
 		await harness.open('draining-a', oldSocket);
@@ -787,7 +794,7 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		expect(received).toHaveBeenCalledTimes(1);
 
 		transport.setUri(harness.uri('draining-b'));
-		const second = transport.connect(250);
+		const second = transport.connect(CONNECT_TIMEOUT_MS);
 		await harness.waitForAttempts('draining-b');
 		const newSocket = harness.currentSocket(transport);
 		await harness.open('draining-b', newSocket);

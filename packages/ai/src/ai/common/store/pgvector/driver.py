@@ -110,6 +110,20 @@ _INVALID_TABLE = (
 )
 
 
+def resolve_metric(similarity: Any, store_name: str = 'PostgreSQL (pgvector)') -> str:
+    """Return the pgvector metric of a configured ``similarity``, or refuse it.
+
+    The refusal names the store, the rejected value and the accepted values, so a node
+    can call this before it resolves its connection (``rocketride_vector`` does).
+    """
+    metric = METRICS.get(str(similarity or 'cosine').strip().lower())
+    if metric is None:
+        raise Exception(
+            f'{store_name}: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(METRICS)}.'
+        )
+    return metric
+
+
 class PgVectorStore(DocumentStoreBase):
     """A ``DocumentStoreBase`` over one pgvector table, with every explorer hook answered natively."""
 
@@ -121,7 +135,7 @@ class PgVectorStore(DocumentStoreBase):
 
     #: Support level reported by the explorer's dialect, for both pgvector providers (postgres and
     #: rocketride_vector): the unmocked live suites (nodes/test/test_store_postgres_full.py,
-    #: test_rocketride_db_full.py and test_vector_toolpath_full.py) run on a new and a legacy
+    #: test_rocketride_db_live.py and test_vector_toolpath_full.py) run on a new and a legacy
     #: table, directly and through a transaction-mode pooler.
     VX_SUPPORT = 'supported'
 
@@ -159,6 +173,7 @@ class PgVectorStore(DocumentStoreBase):
         pool_size: int = 4,
         idle_timeout_s: Optional[float] = 60.0,
         caveats: Sequence[str] = (),
+        store_name: str = 'PostgreSQL (pgvector)',
     ) -> None:
         """Open the store over ``table``.
 
@@ -173,11 +188,7 @@ class PgVectorStore(DocumentStoreBase):
         if not name or not VALID_TABLE.fullmatch(name):
             raise ValueError(_INVALID_TABLE.format(name=name))
 
-        metric = METRICS.get(str(similarity or 'cosine').strip().lower())
-        if metric is None:
-            raise Exception(
-                'The metric you provided in the config.json does not match required postgres configurations'
-            )
+        metric = resolve_metric(similarity, store_name)
 
         #: The configured table name (the transform key uses it); ``table`` is the name PostgreSQL uses.
         self.collection = name

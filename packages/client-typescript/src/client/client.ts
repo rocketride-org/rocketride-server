@@ -38,6 +38,13 @@ import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
+// Exact text the server sends when it receives an empty credential.
+const NO_AUTH_MESSAGE = 'No authorization provided';
+const NO_AUTH_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. ' +
+	'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. ' +
+	'RocketRide Cloud needs a key: run `rocketride login`.';
+
 // Global counter for generating unique client IDs
 let clientId = 0;
 
@@ -301,6 +308,24 @@ export class DataPipe {
 
 		return (response.body as any)?.result as T;
 	}
+}
+
+/**
+ * The error a method that re-words a failed call throws: a DAPException (of
+ * the same class) keeps its server response and `code` under the new
+ * message, so a caller can still classify it (e.g. `TASK_STOPPED`); anything
+ * else becomes a plain Error with the message.
+ *
+ * @param err - What the call threw.
+ * @param message - The message to throw with.
+ * @returns The error to throw.
+ */
+function rewrapFailure(err: unknown, message: string): Error {
+	if (err instanceof DAPException) {
+		const Same = err.constructor as new (dapResult: Record<string, unknown>) => DAPException;
+		return new Same({ ...err.dapResult, message });
+	}
+	return new Error(message);
 }
 
 /**
@@ -850,6 +875,9 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
+					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
+				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
 			}
 
@@ -1280,7 +1308,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_ping', undefined, { token });
 		} catch (err) {
-			throw new Error(`Ping failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Ping failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -1331,8 +1359,13 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Validate a pipeline configuration.
 	 *
-	 * Sends the pipeline to the server for structural validation, checking
-	 * required fields and component references.
+	 * Sends the pipeline to the server, which checks required fields and
+	 * component references, then checks the pipeline against the services
+	 * it names: each provider is a service on the engine, each control
+	 * entry sits on the node being called, and each input's lane is one
+	 * its upstream node produces and its node takes. A node with no lanes,
+	 * such as a tool, is not checked for the lanes it takes, and a `"*"`
+	 * in a node's lanes matches any lane.
 	 *
 	 * Source resolution follows the same logic as {@link use}:
 	 * 1. Explicit `source` option (if provided)
@@ -1372,7 +1405,7 @@ export class RocketRideClient extends DAPClient {
 			// never need null guards on a passing validation.
 			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
-			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -1545,7 +1578,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -1588,7 +1621,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -1611,7 +1644,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -1893,6 +1926,9 @@ export class RocketRideClient extends DAPClient {
 				throw new Error('Question cannot be empty');
 			}
 
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
+
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;
@@ -2098,7 +2134,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_monitor', args, { token });
 		} catch (err) {
-			throw new Error(`Event subscription failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Event subscription failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -2929,11 +2965,14 @@ export class RocketRideClient extends DAPClient {
 	 * every app id it owns. Readable on both editions (OSS answers the
 	 * fixed namespace its sessions carry; there is no Stripe Connect there).
 	 *
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table, so a late reply is ignored.
 	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
 	 *   `developerId` is null until an org admin registers one
 	 */
-	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	async developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' }, options)) as any;
 	}
 
 	/**
@@ -2942,10 +2981,14 @@ export class RocketRideClient extends DAPClient {
 	 * publish beyond the workspace.
 	 *
 	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table (the claim may still land
+	 *   on the server, so callers should re-check developerStatus()).
 	 * @returns The server's registration record
 	 */
-	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	async registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId }, options)) as any;
 	}
 
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —

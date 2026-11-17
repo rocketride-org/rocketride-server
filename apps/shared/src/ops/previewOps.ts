@@ -77,6 +77,9 @@ export interface PreviewHostOpMap extends ShellOpMap {
 	'host.preview.loadListing': ShellOpSpec<{ app: string }, ListingDraft | null>;
 	/** Persists the listing draft into the app's package.json. */
 	'host.preview.saveListing': ShellOpSpec<{ app: string; draft: ListingDraft }, void>;
+	/** Moves a `local.*` app to `<developerId>.<name>` in its files, then
+	 *  reopens the App Builder on the new id. Answers the new id. */
+	'host.preview.adoptDeveloperId': ShellOpSpec<{ app: string; developerId: string }, { appId: string }>;
 	/** Runs the listing pre-flight checks against the on-disk build. */
 	'host.preview.preflight': ShellOpSpec<{ app: string }, PreflightCheck[]>;
 	/** OS picker for a manifest asset; answers the app-folder-relative './'

@@ -19,6 +19,7 @@ import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
+import { grantSuccessLabel } from './successLabel';
 import type { CheckoutModalProps, CheckoutPlan, PromoValidation } from './types';
 
 // =============================================================================
@@ -449,6 +450,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appName,
 	appDescription,
+	appId,
 	stripePublishableKey,
 	preselectedPlan,
 	preselectedPromo,
@@ -671,7 +673,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 								)}
 								Code <b>{grantResult.code}</b>
 							</p>
-							<button style={S.submitBtn(false)} onClick={onSuccess}>Start building</button>
+							<button style={S.submitBtn(false)} onClick={onSuccess}>{grantSuccessLabel(appName, appId)}</button>
 						</div>
 
 					) : clientSecret && selectedPlan ? (

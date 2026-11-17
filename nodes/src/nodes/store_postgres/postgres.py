@@ -90,4 +90,5 @@ class Store(PgVectorStore):
             threshold=config.get('score', 0.5),
             hnsw_m=config.get('hnsw_m', 16),
             hnsw_ef_construction=config.get('hnsw_ef_construction', 64),
+            store_name='PostgreSQL (pgvector)',
         )

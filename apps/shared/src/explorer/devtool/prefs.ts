@@ -524,7 +524,15 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 			// reverted. A failed read writes nothing: the change stays in memory and the
 			// failure is reported (and retried, as any failed write).
 			const fresh = await readOnce();
-			if (fresh === 'stale' || !mayWrite()) return;
+			if (fresh === 'stale') {
+				// The owner changed while the file was read: what it read is discarded,
+				// and the change follows the owner rule (held and looked at again while
+				// nobody is vouched for, dropped for another identity, rescheduled when
+				// the same owner is already back).
+				if (mayWrite()) schedule();
+				return;
+			}
+			if (!mayWrite()) return;
 			others = fresh.others;
 			extra = fresh.extra;
 			// Composed only now, from the bag of an owner who is signed in now.

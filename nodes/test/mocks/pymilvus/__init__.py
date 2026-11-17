@@ -202,6 +202,10 @@ class IndexParams:
         )
 
 
+# The ints describe_collection reports for each consistency level
+_CONSISTENCY_LEVELS = {'Strong': 0, 'Session': 1, 'Bounded': 2, 'Eventually': 3}
+
+
 # =============================================================================
 # Payload Serialization Helper
 # =============================================================================
@@ -617,22 +621,26 @@ class MilvusClient:
         MilvusClient._collections[collection_name] = {
             'schema': schema,
             'index_params': index_params,
+            'consistency_level': _CONSISTENCY_LEVELS[kwargs.get('consistency_level', 'Bounded')],
         }
         MilvusClient._data[collection_name] = []
 
     def describe_collection(self, collection_name: str, **kwargs) -> Dict[str, Any]:
         """
-        Describe a collection: its fields (with the vector dimension) as the real client reports them.
+        Describe a collection as the real client reports it.
 
         Args:
             collection_name: Name of the collection
+            **kwargs: Additional parameters (ignored)
 
         Returns:
-            Dict with ``collection_name`` and ``fields`` (``name``, ``type``, ``params``)
+            Dict with ``collection_name``, ``consistency_level`` (an int as the real client reports
+            it: 2, Bounded, unless the collection was created with another level) and ``fields``
+            (``name``, ``type``, ``params``, with the vector dimension)
         """
         info = MilvusClient._collections.get(collection_name)
         if info is None:
-            raise Exception(f'collection not found[collection={collection_name}]')
+            raise Exception(f"can't find collection[database=default][collection={collection_name}]")
         schema = info.get('schema')
         fields = []
         for f in getattr(schema, 'fields', []) or []:
@@ -644,7 +652,7 @@ class MilvusClient:
                     'is_primary': f.is_primary,
                 }
             )
-        return {'collection_name': collection_name, 'fields': fields}
+        return {'collection_name': collection_name, 'consistency_level': info['consistency_level'], 'fields': fields}
 
     def describe_index(self, collection_name: str, index_name: str, **kwargs) -> Dict[str, Any]:
         """

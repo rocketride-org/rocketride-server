@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
-
 # Add the apLib.test executable
 rocketride_add_executable(aptest LIST_ONLY "*.ipp" *.cpp *.hpp *.h)
 

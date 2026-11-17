@@ -55,10 +55,14 @@ import { CompactNavProvider, useCompactNav } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
+import { ConsentBannerHost } from '../../telemetry/ConsentBannerHost';
+import { TelemetryProvider } from '../../telemetry/TelemetryContext';
+import { getReporter } from '../../telemetry/host';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { SignedOutScreen } from './SignedOutScreen';
 import { AuthPhase } from '../../types/connection';
 import { isFramedShell, tabSession, updateTabSession } from '../../util/devGate';
+import { explainUnbuiltApp, type UnbuiltAppText } from '../../util/unbuiltApp';
 
 /**
  * Whether the tab's auth phase demands the signed-out SURFACE instead of an
@@ -645,6 +649,28 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			: `[shell] cannot resolve app "${activeAppId}": this server has no app with that id`);
 	}, [activeAppUnresolvable, activeAppId, devLockedApp]);
 
+	// The manifest omits an app until one of its versions builds, so ask the
+	// version rail why. Only the developer org gets rows back; everyone else
+	// keeps the plain "App not found".
+	const [unbuilt, setUnbuilt] = useState<{ appId: string; text: UnbuiltAppText | null } | null>(null);
+	// isConnected re-runs the lookup when a client arrives after the screen shows.
+	const askRail = activeAppUnresolvable && !devLockedApp && activeAppId !== defaultAppId && !!identity && isConnected;
+	useEffect(() => {
+		const client = askRail ? ConnectionManager.getInstance().getClient() : undefined;
+		if (!client) return;
+		let current = true;
+		client
+			.listDeployments(activeAppId)
+			.then((rail) => {
+				if (current) setUnbuilt({ appId: activeAppId, text: explainUnbuiltApp(activeAppId, rail) });
+			})
+			.catch((err) => console.warn(`[shell] cannot read the version rail of "${activeAppId}"`, err));
+		return () => {
+			current = false;
+		};
+	}, [askRail, activeAppId]);
+	const unbuiltText = unbuilt?.appId === activeAppId ? unbuilt.text : null;
+
 	// --- Loading guard -------------------------------------------------------
 	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
 	// boot LoadingScreen — returning null here put a blank frame between two
@@ -692,15 +718,24 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		const remembered = activeAppId === tabSession().appId ? tabSession() : undefined;
 		if (!signedOutSurfaceHeld()) return <LoadingScreen iconUrl={activeManifest?.icon ?? remembered?.appIcon} />;
 		return (
-			<SignedOutScreen
-				appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
-				iconUrl={activeManifest?.icon ?? remembered?.appIcon}
-				// Framed shells sign in through a separate window (the popup
-				// flow) — say so; the loginRequest handler kicks it directly
-				// off this button's gesture, no second prompt.
-				note={isFramedShell() ? 'Sign in opens in a separate window; this preview continues automatically afterwards.' : undefined}
-				onSignIn={() => ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId })}
-			/>
+			<>
+				{/* This screen returns before the shell chrome below mounts, yet
+				    the shell's cookieless telemetry already captures on it — so
+				    the visitor is asked here too, and a "Privacy settings"
+				    request (openConsentBanner) reopens the banner for a
+				    withdrawal. The host itself renders nothing when telemetry
+				    is off or the embedding host owns the switch. */}
+				<ConsentBannerHost signedOut />
+				<SignedOutScreen
+					appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
+					iconUrl={activeManifest?.icon ?? remembered?.appIcon}
+					// Framed shells sign in through a separate window (the popup
+					// flow) — say so; the loginRequest handler kicks it directly
+					// off this button's gesture, no second prompt.
+					note={isFramedShell() ? 'Sign in opens in a separate window; this preview continues automatically afterwards.' : undefined}
+					onSignIn={() => ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId })}
+				/>
+			</>
 		);
 	}
 
@@ -747,6 +782,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<CompactNavProvider value={compactNav}>
 		<div style={styles.shell}>
 			<ConnectionErrorBanner />
+			{/* The consent banner, shell-owned: renders nothing when telemetry is
+			    off (no probe key), in VS Code (the editor's telemetry setting is
+			    the one switch), or until the page settles. The footer's "Privacy
+			    settings" link reopens it on any surface, signed in too. */}
+			<ConsentBannerHost signedOut={identity === null} />
 			{/* The way to the navigation once it is a drawer. Renders nothing for
 			    an app that has no sidebar to open. */}
 			{isCompact && <CompactChromeBar open={drawerOpen} onOpen={() => setDrawerOpen(true)} />}
@@ -771,12 +811,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						{hasAppUi && activeApp ? (
 							// The framing control mounts the descriptor's `app`
 							// component raw; the app declares its layout inside.
+							// The reporter is bound to the DESCRIPTOR's id — a late
+							// event from a backgrounded app stamps its true emitter.
 							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<AppFrame
-									app={activeApp}
-									isConnected={isConnected}
-									identity={identity}
-								/>
+								<TelemetryProvider reporter={getReporter(activeAppId)}>
+									<AppFrame
+										app={activeApp}
+										isConnected={isConnected}
+										identity={identity}
+									/>
+								</TelemetryProvider>
 							</AppErrorBoundary>
 					) : devPending ? (
 							// DEV PREVIEW, registration not yet injected: the dev
@@ -820,14 +864,14 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 							// returns false silently for unknown ids).
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>
-									{activeAppId === defaultAppId ? 'Home app unavailable' : 'App not found'}
+									{activeAppId === defaultAppId ? 'Home app unavailable' : (unbuiltText?.title ?? 'App not found')}
 								</div>
 								<div style={styles.appLoadErrorMessage} role="alert">
 									{activeAppId === defaultAppId
 										? `This server has no home app (“${activeAppId}”) installed. It may not have been built and registered on this deployment.`
 										: devLockedApp
 											? `No dev build of “${activeAppId}” arrived from App Builder, and this server has no published app with that id. Check that the id matches appManifest.id in the app's package.json, and look for build errors in App Builder's Console pane.`
-											: `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`}
+											: (unbuiltText?.message ?? `This server has no app with the id “${activeAppId}”. It may have been renamed, removed, or belong to a different RocketRide deployment.`)}
 								</div>
 								<div style={styles.appLoadErrorActions}>
 									{activeAppId === defaultAppId ? (
