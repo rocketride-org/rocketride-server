@@ -38,6 +38,7 @@ import { useShellConnection } from '../connection/ConnectionContext';
 import { useShellApiConfig } from '../connection/ShellApiConfigContext';
 import { ConnectionManager } from '../connection/connection';
 import type { ShellToIframeMsg } from '../util/iframeBridgeProtocol';
+import { withoutCredentials } from '../util/identity';
 
 // =============================================================================
 // HELPERS
@@ -150,8 +151,9 @@ export function useIframeBridge(iframeRef: RefObject<HTMLIFrameElement>): void {
 			type: 'shell:init',
 			// Snapshot current --rr-* design tokens from the DOM at this moment
 			theme: readCssTokens(),
-			// Use the ref to get the latest auth user without depending on the closure
-			user: authUserRef.current,
+			// Use the ref to get the latest auth user without depending on the closure;
+			// the session token never leaves the shell (#1022)
+			user: withoutCredentials(authUserRef.current),
 			// Use the ref to get the latest connection state without stale closure risk
 			isConnected: isConnectedRef.current,
 			// Cast the full ShellApiConfig to the wire-safe Record shape
@@ -211,9 +213,9 @@ export function useIframeBridge(iframeRef: RefObject<HTMLIFrameElement>): void {
 			ConnectionManager.getInstance().on('shell:disconnected', () => {
 				if (readyRef.current) post({ type: 'shell:connectionChange', isConnected: false });
 			}),
-			// Forward new auth user after a successful login
+			// Forward new auth user after a successful login, without its session token
 			ConnectionManager.getInstance().on('shell:login', ({ user }) => {
-				if (readyRef.current) post({ type: 'shell:login', user });
+				if (readyRef.current) post({ type: 'shell:login', user: withoutCredentials(user) });
 			}),
 			// Notify the iframe when the user logs out (shell-initiated)
 			ConnectionManager.getInstance().on('shell:logout', () => {

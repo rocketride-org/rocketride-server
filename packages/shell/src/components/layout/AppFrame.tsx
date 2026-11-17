@@ -33,9 +33,10 @@
 // contract and AppLayout stay unchanged.
 // =============================================================================
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { ConnectResult } from 'rocketride';
 import type { AppDescriptor } from '../workspace/types';
+import { withoutCredentials } from '../../util/identity';
 
 // =============================================================================
 // TYPES
@@ -58,10 +59,14 @@ export interface AppFrameProps {
 /**
  * Mounts the app's `app` component raw in the client area.
  *
+ * The app gets the identity without its session token (`userToken`), which
+ * never leaves the shell (#1022).
+ *
  * @param props - See {@link AppFrameProps}.
  */
 export const AppFrame: React.FC<AppFrameProps> = ({ app, isConnected, identity }) => {
+	const safeIdentity = useMemo(() => withoutCredentials(identity), [identity]);
 	const App = app.app;
 	if (!App) return null;
-	return <App isConnected={isConnected} identity={identity} />;
+	return <App isConnected={isConnected} identity={safeIdentity} />;
 };
