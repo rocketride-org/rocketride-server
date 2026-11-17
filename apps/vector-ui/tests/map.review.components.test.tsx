@@ -27,6 +27,7 @@ import { outlierKey, outlierRows, outliersScope } from '../src/map/outliers';
 import { EMPTY_EXAMPLES, recommendRows, resolvedLine } from '../src/map/recommend';
 import { fixture } from './support/fixtures';
 import { loadSample, modelOf } from './support/map.samples';
+import { renderBudget } from './support/timing';
 
 const noop = (): void => undefined;
 const on: Availability = { enabled: true, reason: null };
@@ -367,7 +368,7 @@ test('one group across 1,000 documents: the first 20 are listed with the count o
 	assert.match(out, /and 980 more documents, none of them queued\. Show group selects the whole group on the map\./);
 	assert.match(out, /Shared passages only/, 'each mail holds text of its own');
 	assert.match(out, />Show group</);
-	assert.ok(panel.ms <= 50, `the panel rendered in ${panel.ms.toFixed(1)} ms`);
+	assert.ok(panel.ms <= renderBudget(50), `the panel rendered in ${panel.ms.toFixed(1)} ms`);
 	// A re-render with what the panel keeps (a keep click, Mark reviewed): no verdict or queue is worked out again.
 	const view = dedupeView(sample, 0.97);
 	const info = docInfo(sample, rows);
@@ -376,7 +377,7 @@ test('one group across 1,000 documents: the first 20 are listed with the count o
 	const verdicts = new Map(view.groups.map((g) => [g.key, copyVerdict(g, info)] as const));
 	const again = bestOf(() => renderToStaticMarkup(DuplicatesBody({ sample: model, writes: on, view, info, state, reviewed: new Set(), queue, done: null, bulk: true, verdicts, onThreshold: noop, onPolicy: noop, onKeep: noop, onShow: noop, onReview: noop, onRemove: noop })));
 	assert.equal(again.out, out, 'the same markup');
-	assert.ok(again.ms <= 15, `a re-render took ${again.ms.toFixed(1)} ms`);
+	assert.ok(again.ms <= renderBudget(15), `a re-render took ${again.ms.toFixed(1)} ms`);
 });
 
 test("a group's kept document is listed even when it is not among the first 20, and the rest count what they queue", () => {
