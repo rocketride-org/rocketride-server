@@ -34,14 +34,16 @@
  * The marker is narrow on purpose: it is set and read only in a top-level
  * window (a framed shell never redirects to the IdP), honoured only on the
  * IdP return leg (`code`, `error` or `state` in the URL), removed whenever it
- * is read, and ignored when older than ten minutes.
+ * is read, and ignored when older than thirty minutes (long enough for a
+ * slow sign-up with email verification or MFA). Refreshing the callback URL
+ * after the marker was read drops the role: sign in again.
  */
 
 /** sessionStorage key marking this tab as the auth popup; the value is the epoch-ms time it was set. */
 export const AUTH_POPUP_KEY = 'rr:auth:popup';
 
 /** How long a remembered popup role stays valid. */
-const AUTH_POPUP_TTL_MS = 10 * 60 * 1000;
+const AUTH_POPUP_TTL_MS = 30 * 60 * 1000;
 
 /** URL parameters the IdP puts on the return leg. */
 const RETURN_LEG_PARAMS = ['code', 'error', 'state'];
@@ -103,7 +105,7 @@ function resolveEnv(env: AuthPopupEnv): Required<AuthPopupEnv> {
  * Whether this window is the auth popup.
  *
  * A remembered role is read (and removed) only in a top-level window on the
- * IdP return leg, and honoured only when it is at most ten minutes old.
+ * IdP return leg, and honoured only when it is at most thirty minutes old.
  *
  * @param windowName - `window.name` (cleared by a browsing context group switch).
  * @param params - The page's query parameters (`?rrauth=1` on a fresh popup).

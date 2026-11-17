@@ -63,7 +63,7 @@ const brokenStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
 
 const RETURN = new URLSearchParams('code=abc&state=xyz');
 const T0 = 1_700_000_000_000;
-const TEN_MIN = 10 * 60 * 1000;
+const THIRTY_MIN = 30 * 60 * 1000;
 
 /** Environment of a top-level popup tab at time `now`. */
 function top(storage: ReturnType<typeof memoryStorage> | typeof brokenStorage | null, now = T0) {
@@ -89,13 +89,21 @@ test('the role survives the IdP return leg (code, error or state) and the marker
 	}
 });
 
+test('a slow sign-in (email verification, MFA) keeps the role for up to 30 minutes', () => {
+	const storage = memoryStorage();
+	rememberAuthPopup(top(storage));
+	assert.equal(isAuthPopupWindow('', RETURN, top(storage, T0 + 25 * 60 * 1000)), true, '25 minutes');
+	rememberAuthPopup(top(storage));
+	assert.equal(isAuthPopupWindow('', RETURN, top(storage, T0 + THIRTY_MIN)), true, 'exactly 30 minutes');
+});
+
 test('the marker is ignored, and removed, outside the IdP return leg', () => {
 	const storage = memoryStorage();
 	rememberAuthPopup(top(storage));
 	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), top(storage)), false);
 	assert.equal(isAuthPopupWindow('', new URLSearchParams('appid=x'), top(storage)), false);
 	assert.equal(storage.data.has(AUTH_POPUP_KEY), true, 'not read without a return-leg parameter');
-	assert.equal(isAuthPopupWindow('', RETURN, top(storage, T0 + TEN_MIN + 1)), false, 'older than 10 minutes');
+	assert.equal(isAuthPopupWindow('', RETURN, top(storage, T0 + THIRTY_MIN + 1)), false, 'older than 30 minutes');
 	assert.equal(storage.data.has(AUTH_POPUP_KEY), false, 'a stale marker is removed when read');
 });
 
