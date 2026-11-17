@@ -522,3 +522,72 @@ def test_override_never_allows_a_shell_inside_the_app_domain(isolation_env):
         RR_APP_DOMAIN_SAME_SITE_OK='1',
     )
     _refuses('RR_APP_ORIGIN_TEMPLATE')
+
+
+# ---------------------------------------------------------------------------
+# T8d the client address of the unauthenticated rate limits (G4 round 2 SHOULD-4 / R2-L1)
+# ---------------------------------------------------------------------------
+
+
+def _headers(*pairs):
+    from starlette.datastructures import Headers
+
+    return Headers(raw=[(k.lower().encode('latin-1'), v.encode('latin-1')) for k, v in pairs])
+
+
+def _client_ip(cfg, peer, *pairs):
+    return need(_ao(), 'client_ip')(_headers(*pairs), peer, cfg)
+
+
+@pytest.mark.parametrize(
+    'value,expected',
+    [
+        ('198.51.100.10:46532', '198.51.100.10'),  # CloudFront-Viewer-Address, IPv4
+        ('2001:db8:3333:4444:5555:6666:7777:8888:46532', '2001:db8:3333:4444:5555:6666:7777:8888'),  # IPv6
+        ('[2001:db8::1]:443', '2001:db8::1'),
+        ('2001:db8::1', '2001:db8::1'),
+        ('203.0.113.7', '203.0.113.7'),
+        ('1.1.1.1, 2.2.2.2', '2.2.2.2'),  # the last hop
+        ('evil', 'peer-fallback'),
+        ('999.1.1.1', 'peer-fallback'),
+        ('1.1.1.1:99999', 'peer-fallback'),
+        ('x' * 200, 'peer-fallback'),
+        ('', 'peer-fallback'),
+    ],
+)
+def test_client_ip_parses_the_trusted_header(value, expected, isolation_env):
+    """T8d: ip, ip:port, [v6]:port and CloudFront's v6:port; anything invalid falls back to the peer."""
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='CloudFront-Viewer-Address')
+    peer = '10.9.9.9'
+    got = _client_ip(isolation_env.config(), peer, ('cloudfront-viewer-address', value))
+    assert got == (peer if expected == 'peer-fallback' else expected)
+
+
+def test_client_ip_reads_the_last_value_across_header_lines(isolation_env):
+    """T8d: a client can prepend lines or entries; the edge's own entry is the last one of all lines."""
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='X-Forwarded-For')
+    cfg = isolation_env.config()
+    pairs = (('x-forwarded-for', '6.6.6.6, 7.7.7.7'), ('x-forwarded-for', '3.3.3.3'))
+    assert _client_ip(cfg, '10.0.0.1', *pairs) == '3.3.3.3'
+
+
+def test_client_ip_ignores_the_header_when_not_configured(isolation_env):
+    """T8d: without RR_TRUSTED_CLIENT_IP_HEADER a client cannot choose its bucket."""
+    assert _client_ip(isolation_env.config(), '10.0.0.1', ('x-forwarded-for', '3.3.3.3')) == '10.0.0.1'
+
+
+def test_client_ip_honours_the_header_only_from_trusted_proxies(isolation_env):
+    """T8d: with RR_TRUSTED_PROXY_CIDRS the header counts only when the peer is one of those proxies."""
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='X-Forwarded-For', RR_TRUSTED_PROXY_CIDRS='10.0.0.0/8, fd00::/8')
+    cfg = isolation_env.config()
+    assert _client_ip(cfg, '10.1.2.3', ('x-forwarded-for', '3.3.3.3')) == '3.3.3.3'
+    assert _client_ip(cfg, 'fd00::5', ('x-forwarded-for', '3.3.3.3')) == '3.3.3.3'
+    assert _client_ip(cfg, '192.168.1.1', ('x-forwarded-for', '3.3.3.3')) == '192.168.1.1'
+    assert _client_ip(cfg, 'testclient', ('x-forwarded-for', '3.3.3.3')) == 'testclient'
+
+
+@pytest.mark.parametrize('cidrs', ['10.0.0.0/33', 'not-a-net', '10.0.0.0/8;', ' , '])
+def test_invalid_trusted_proxy_cidrs_refuse_start(cidrs, isolation_env):
+    """T8d: RR_TRUSTED_PROXY_CIDRS is a list of networks."""
+    isolation_env.set(RR_TRUSTED_PROXY_CIDRS=cidrs)
+    _refuses('RR_TRUSTED_PROXY_CIDRS')

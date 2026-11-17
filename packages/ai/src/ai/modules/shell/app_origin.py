@@ -100,6 +100,8 @@ class IsolationConfig:
         app_port: The template's port, or None (https).
         client_ip_header: ``RR_TRUSTED_CLIENT_IP_HEADER`` lowercased, or ''
             (rate limits then key on the peer address).
+        trusted_proxies: ``RR_TRUSTED_PROXY_CIDRS`` as networks; when set, the
+            client-IP header counts only from a peer inside one of them.
         same_site_asserted: Shell hosts sharing the app suffix's last two
             labels that ``RR_APP_DOMAIN_SAME_SITE_OK=1`` let through.
     """
@@ -114,6 +116,7 @@ class IsolationConfig:
     app_suffix: str = ''
     app_port: Optional[int] = None
     client_ip_header: str = ''
+    trusted_proxies: Tuple[Any, ...] = ()
     same_site_asserted: Tuple[str, ...] = ()
 
     def origin_of(self, app_id: str) -> str:
@@ -256,6 +259,16 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
     if client_ip_header is not None and not _HEADER_NAME.fullmatch(client_ip_header):
         raise _refuse(f'RR_TRUSTED_CLIENT_IP_HEADER must be one header name (got {client_ip_header!r})')
     client_ip_header = (client_ip_header or '').lower()
+    trusted_proxies = []
+    cidrs = env.get('RR_TRUSTED_PROXY_CIDRS')
+    if cidrs is not None:
+        items = [item for item in re.split(r'[\s,]+', cidrs.strip()) if item]
+        try:
+            trusted_proxies = [ipaddress.ip_network(item, strict=False) for item in items]
+        except ValueError:
+            trusted_proxies = []
+        if not trusted_proxies:
+            raise _refuse(f'RR_TRUSTED_PROXY_CIDRS must be a list of IP networks (got {cidrs!r})')
 
     return IsolationConfig(
         mode=mode,
@@ -268,6 +281,7 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         app_suffix=suffix,
         app_port=port,
         client_ip_header=client_ip_header,
+        trusted_proxies=tuple(trusted_proxies),
         same_site_asserted=tuple(asserted),
     )
 
@@ -972,20 +986,64 @@ def client_rate_ok(client: str) -> bool:
     return _rate_ok(_client_rate_cache, client, CLIENT_RATE_LIMIT)
 
 
-def client_ip(headers: Mapping[str, str], peer: str, config: IsolationConfig) -> str:
-    """
-    The client address rate limits key on.
+_CLIENT_IP_MAX = 64
 
-    The peer address, unless ``RR_TRUSTED_CLIENT_IP_HEADER`` names the header a
-    trusted edge sets: then its last comma-separated entry (the address the
-    edge itself saw). A client cannot pick its bucket otherwise.
+
+def _address_of(value: str) -> Optional[str]:
+    """The IP address of one header entry (``ip``, ``ip:port``, ``[v6]:port``, ``v6:port``), or None."""
+    value = value.strip()
+    if not value or len(value) > _CLIENT_IP_MAX:
+        return None
+    candidates = [value]
+    if value.startswith('['):
+        host, sep, port = value[1:].partition(']')
+        candidates = [host] if not port or (port[:1] == ':' and port[1:].isdecimal() and port[1:].isascii()) else []
+    elif ':' in value:
+        host, _, port = value.rpartition(':')
+        if port.isascii() and port.isdecimal() and int(port) <= 65535:
+            candidates.append(host)  # v4:port, or CloudFront's unbracketed v6:port
+    for candidate in candidates:
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        # a bare v6 address also parses after dropping its last group: prefer the whole value
+        return str(address)
+    return None
+
+
+def client_ip(headers: Any, peer: str, config: IsolationConfig) -> str:
     """
-    if config.client_ip_header:
-        value = headers.get(config.client_ip_header, '')
-        entries = [item.strip() for item in value.split(',') if item.strip()]
-        if entries:
-            return entries[-1]
-    return peer
+    The client address the unauthenticated rate limits key on.
+
+    The peer address, unless ``RR_TRUSTED_CLIENT_IP_HEADER`` names the header
+    a trusted edge sets. Then the LAST entry across all lines of that header
+    (the one the edge itself appended), with any port stripped and validated
+    as an IP address; an invalid or oversized value falls back to the peer.
+    With ``RR_TRUSTED_PROXY_CIDRS`` set, the header counts only when the peer
+    is inside one of those networks; unset, any peer is trusted (the edge must
+    then be the only way in).
+
+    Behind CloudFront and an ALB: set ``RR_TRUSTED_CLIENT_IP_HEADER`` to
+    ``CloudFront-Viewer-Address`` (add it to the origin request policy; the
+    edge overwrites any client value) and ``RR_TRUSTED_PROXY_CIDRS`` to the
+    ALB's subnets. ``X-Forwarded-For`` also works there, since the ALB
+    appends the address it saw last.
+    """
+    if not config.client_ip_header:
+        return peer
+    if config.trusted_proxies:
+        try:
+            peer_address = ipaddress.ip_address(peer)
+        except ValueError:
+            return peer
+        if not any(peer_address in network for network in config.trusted_proxies):
+            return peer
+    getlist = getattr(headers, 'getlist', None)
+    lines = getlist(config.client_ip_header) if getlist else [headers.get(config.client_ip_header, '')]
+    entries = [item for line in lines for item in str(line).split(',') if item.strip()]
+    address = _address_of(entries[-1]) if entries else None
+    return address or peer
 
 
 async def _version_facts(app_id: str, version: int, dist_dir: str) -> Optional[Tuple[str, str, dict]]:
