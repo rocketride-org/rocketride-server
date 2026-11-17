@@ -28,7 +28,8 @@
 //   (1) kind and walk budget → (2) size → (3) rate → (4) op allowlist (the
 //   realm's handler bus) → (5) `client.request` params `{message, timeout?}`
 //   and DAP top-level keys → (6) row → (7) capability → (8) argument types
-//   → (9) ownership → (10) rewrite.
+//   → (9) ownership, then N1-f (credentials and real ids in any string)
+//   → (10) rewrite.
 //
 // Quotas are checked with the rewrite (they need the row). Any exception
 // that is not a denial is reported as `schema`: nothing is forwarded unless
@@ -71,6 +72,12 @@ export interface IGateContext {
 	rate: IRateLimiter;
 	/** The session token (`''` when signed out). */
 	sessionToken(): string;
+	/**
+	 * N1-f: a checker, built once per inbound value, that says whether a
+	 * string holds a credential or a real id the root has seen (refused with
+	 * `credential` at any depth). Absent: only the session token is refused.
+	 */
+	inbound?(): (s: string) => boolean;
 	random(n: number): Uint8Array;
 	/** Test hook: the gate throws (it must then fail closed). */
 	throwIn?: string;
@@ -123,6 +130,31 @@ function walkParams(g: IGateContext, op: string, raw: unknown): Record<string, u
 	});
 	if (!isPlainObject(copy)) throw deny('schema', op);
 	return copy;
+}
+
+/**
+ * N1-f, after ownership (so typed handle and alias fields keep their own
+ * codes): any string or key, at any depth, holding a credential or a real id
+ * the root has seen is refused. `__rrbin` payloads are app data (plan
+ * section 4.4, scope) and are not scanned.
+ */
+function refuseInbound(g: IGateContext, value: unknown, fail: (code: DenyCode) => never): void {
+	const refused = g.inbound?.();
+	if (!refused) return;
+	const stack: unknown[] = [value];
+	while (stack.length > 0) {
+		const v = stack.pop();
+		if (typeof v === 'string') {
+			if (refused(v)) fail('credential');
+		} else if (typeof v === 'object' && v !== null && !isWireBinary(v) && !ArrayBuffer.isView(v)) {
+			if (Array.isArray(v)) stack.push(...v);
+			else
+				for (const [k, x] of Object.entries(v)) {
+					if (refused(k)) fail('credential');
+					stack.push(x);
+				}
+		}
+	}
 }
 
 /** One argument's type check (step 8). Ownership is step 9. */
@@ -244,10 +276,12 @@ export function admitValue(g: IGateContext, lane: string, value: unknown): unkno
 		if (!g.rate.allow('request')) throw deny('rate', lane);
 		if (value === undefined) return undefined;
 		const session = g.sessionToken();
+		const refused = g.inbound?.();
 		const copy = walk(value, {
 			onString(s) {
 				if (s.length > SIZES.stringCeiling) throw deny('too_large', lane);
 				if (session !== '' && s.includes(session)) throw deny('credential', lane);
+				if (refused?.(s)) throw deny('credential', lane);
 			},
 		});
 		const size = measure(copy);
@@ -276,12 +310,15 @@ export function gateOp(g: IGateContext, op: string, raw: unknown): { params: Rec
 	const row = matchRow(op, undefined, undefined);
 	if (!row) throw deny('unknown_op', op);
 	const checked = checkArgs(g, row, params, { op });
+	let run: IRunEntry | undefined;
 	if (row.args.key === 'monitor-key:run-handle') {
-		const run = g.ledger.run((checked.key as { token: string }).token);
+		run = g.ledger.run((checked.key as { token: string }).token);
 		if (!run) throw deny('ownership', op);
-		return { params: checked, run };
 	}
-	return { params: checked };
+	refuseInbound(g, checked, (code) => {
+		throw deny(code, op);
+	});
+	return run ? { params: checked, run } : { params: checked };
 }
 
 /**
@@ -357,6 +394,8 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 		fs = g.ledger.fs(checked.handle);
 		if (!fs) fail('ownership');
 	}
+	// (9, end) N1-f: free strings at any depth
+	refuseInbound(g, checked, fail);
 
 	// (10) rewrite — real values only on the engine side; quotas before anything is started
 	// Quotas count slots reserved by requests still waiting on the engine, so
