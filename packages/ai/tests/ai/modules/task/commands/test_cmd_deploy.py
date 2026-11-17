@@ -485,9 +485,54 @@ class TestPublish:
         account_stub.deployments_publish.assert_not_awaited()
 
 
-# ============================================================================
-# deploy
-# ============================================================================
+class TestPipeDoorKeepsToPipes:
+    """develop #2989 (rocketride-ai/rocketride-saas#1011): the pipe door mints pipes, never app ids or app-owned metadata.
+
+    Develop keeps pipe ids OUT of the developer namespace. Here a pipe's
+    registry name is ``developerId.pipeId`` by design (plan S7): it is derived
+    from the actor's own developer id, the file carries the short id only, and
+    a name has one kind per organization (B37). So the id a caller sends can
+    never name an app, its own or another organization's.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('project_id', ['acme.brandy', 'acme.deep.name', 'other.app'])
+    async def test_a_project_id_shaped_like_an_app_id_is_refused_by_the_address_grammar(self, account_stub, project_id):
+        """A dotted id cannot be sent: the short id is one segment, so no caller can spell an app id."""
+        from ai.modules.task.types import TaskError
+
+        conn = _make_conn(_account_info())
+        with pytest.raises(TaskError, match='project_id') as refused:
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': project_id}})
+        assert refused.value.code == TaskError.INVALID_ARGUMENT
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_registry_name_is_the_actors_namespace_plus_the_short_id(self, account_stub):
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        assert account_stub.deployments_publish.await_args.args[1] == conn._registry_id(PIPE['project_id'])
+        assert account_stub.deployments_publish.await_args.args[1].endswith('.' + PIPE['project_id'])
+
+    @pytest.mark.asyncio
+    async def test_caller_cannot_forge_the_build_lifecycle(self, account_stub):
+        conn = _make_conn(_account_info())
+        sent = {'build': {'status': 'ok'}, 'ci': 'run-7', 'projectId': 'p'}
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': sent})
+
+        stored = account_stub.deployments_publish.await_args.kwargs['metadata']
+        assert 'build' not in stored
+        assert (stored['ci'], stored['projectId']) == ('run-7', 'p')
+        # The listing manifest is the server's own (plan 9), beside what the caller sent
+        assert 'manifest' in stored
+        # The caller's own dict is not mutated.
+        assert 'build' in sent
+
+    @pytest.mark.asyncio
+    async def test_absent_metadata_carries_the_manifest_and_no_build(self, account_stub):
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        assert set(account_stub.deployments_publish.await_args.kwargs['metadata']) == {'manifest'}
 
 
 class TestDeploy:

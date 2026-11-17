@@ -130,7 +130,7 @@ class _FakeRegistry:
         self.versions.append(
             {
                 'version': version,
-                # Both real rails stamp the version's kind on its entry
+                # Both real rails stamp the version's kind on its entry (app|pipe|node)
                 'kind': kind,
                 'sha256': f'sha-{version}',
                 'state': state,
@@ -1746,6 +1746,80 @@ async def test_entitled_pipe_dirs_follow_the_pipe_gate(registry, monkeypatch):
     assert await entitled_version_dirs(None, 'acme.brandy', 'pipe') == {}
     registry.versions[0]['state'] = 'ready'
     assert await entitled_version_dirs(None, 'acme.brandy', 'pipe') == {1: _V1_STORE}
+
+
+# =============================================================================
+# ROWS OF ANOTHER KIND ARE NOT EVIDENCE (rocketride-ai/rocketride-saas#1011)
+# =============================================================================
+# On develop the pipe door accepted any project id, so another org could hold
+# PIPE rows under a real app's id, with a forged metadata.build.status='ok'.
+# Here no door can write such a row (a pipe's name is derived from its own
+# developer id, plan S7, and the pipe door drops a sent build), but the serving
+# readers still take only the rows of the kind they are asked for: a pipe row
+# under an app's name, however it got there, serves nothing as an app.
+
+_EVIL_PIPE_DIST = 'orgs/org-evil/files/.deployments/acme.brandy/v000007-fakesha7/dist'
+
+
+def _install_forged_pipe_rows(registry, monkeypatch, org_id='org-evil'):
+    """org1 keeps the real app rail; ``org_id`` gets one forged-built pipe row."""
+    forged = {
+        'version': 7,
+        'sha256': 'sha-forged',
+        'kind': 'pipe',
+        'state': 'ready',
+        'metadata': {'manifest': {'name': 'x'}, 'build': {'status': 'ok'}},
+        'publishedAt': 9000,
+        'publishedBy': {'userId': 'u-evil', 'display': 'M', 'email': 'm@evil.example'},
+        'comment': '',
+        'artifactPath': f'orgs/{org_id}/files/.deployments/acme.brandy/v000007-fakesha7.json',
+    }
+
+    async def deployments_versions(caller_org, project_id):
+        if caller_org == org_id:
+            return [forged]
+        return list(registry.versions) if caller_org in ('org1', 'local') else []
+
+    monkeypatch.setattr(account_singleton, 'deployments_versions', deployments_versions, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_forged_pipe_rows_do_not_entitle_serving(registry, monkeypatch):
+    """The attacker org's pipe row (build forged 'ok') is not an app rail: it
+    entitles nothing; the real app's public binding still serves.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='dev1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _install_forged_pipe_rows(registry, monkeypatch)
+    attacker = _info(user_id='u-evil', org_id='org-evil', teams=[])
+
+    assert await entitled_version_dirs(attacker, 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_forged_pipe_rows_alone_entitle_nothing(registry, monkeypatch):
+    """No public binding and no app rail of the caller's own: empty."""
+    registry.add_version(1, '1.0.0', publisher_id='dev1', state='private')
+    _install_forged_pipe_rows(registry, monkeypatch)
+
+    assert await entitled_version_dirs(_info(user_id='u-evil', org_id='org-evil', teams=[]), 'acme.brandy') == {}
+
+
+@pytest.mark.asyncio
+async def test_the_real_developer_is_still_entitled_to_its_own_rail(registry):
+    """The legitimate developer flow is unchanged: the org's own app rail serves."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {1: _V1_DIST}
+
+
+@pytest.mark.asyncio
+async def test_open_dirs_asked_for_an_app_ignore_pipe_rows(registry):
+    """OSS open serving reads the kind it is asked for: a built-looking pipe row never serves as an app."""
+    registry.add_version(1, '1.0.0', kind='pipe')
+
+    assert await open_version_dirs('acme.brandy') == {}
+    assert list(await open_version_dirs('acme.brandy', 'pipe')) == [1]
 
 
 @pytest.mark.asyncio
