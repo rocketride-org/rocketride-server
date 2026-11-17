@@ -7,9 +7,10 @@ hide_table_of_contents: true
 hide_title: true
 pagination_next: null
 pagination_prev: null
+description: RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON, executed by a multithreaded C++ core on your laptop, servers, or Cloud.
 ---
 
-import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen } from 'react-icons/lu';
+import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen, LuBot } from 'react-icons/lu';
 import { SiPython, SiTypescript, SiDiscord, SiGithub } from 'react-icons/si';
 import { VscVscode } from 'react-icons/vsc';
 
@@ -31,12 +32,15 @@ RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JS
 
 New to RocketRide? Start here: run a working pipeline and pick up the core concepts along the way.
 
-<CardGrid>
+<CardGrid columns={3}>
   <Card href="/quickstart/ide-walkthrough" title="Build in your IDE" icon={<LuZap />}>
     Install the VS Code extension, deploy a local runtime, and assemble a pipeline visually in minutes.
   </Card>
   <Card href="/quickstart/sdk-integration" title="Integrate with an SDK" icon={<LuCode />}>
     Drop pipelines into your TypeScript or Python application with a few lines of code.
+  </Card>
+  <Card href="/quickstart/coding-agents" title="Use from a coding agent" icon={<LuBot />}>
+    Copy-paste commands for any coding agent: run the engine, check it, connect over MCP.
   </Card>
 </CardGrid>
 

@@ -265,7 +265,7 @@ With `persist: true`, a dropped connection reconnects automatically and replays 
 
 ##### `RocketRideClient.getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>`
 
-Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
+Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, posthogPublishableKey?, posthogHost?, endpoints }`. The PostHog pair is the environment's product-telemetry config (absent = telemetry off); the `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
 
 ```typescript
 const info = await RocketRideClient.getServerInfo('localhost:5565');
@@ -391,9 +391,9 @@ Return the **unresolved** pipeline configuration for a running task — `${ROCKE
 
 ### `validate(options): Promise<ValidationResult>`
 
-Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.
+Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). It checks what `use()` checks, then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Returns `{ errors, warnings, ... }`; treat any `errors` as a reason not to run. `warnings` are non-fatal.
 
-`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs. It checks the component's provider but skips the control and lane checks, which need the whole pipeline.
 
 ```typescript
 const result = await client.validate({ pipeline });
