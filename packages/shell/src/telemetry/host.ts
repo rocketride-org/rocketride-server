@@ -24,7 +24,33 @@ import { classifyTraffic, isTestHost } from './traffic';
 import { privacySignalOn } from 'rocketride/analytics';
 import { newJourneyKey } from './bridge';
 import { SdkQueue } from './sdkQueue';
+// mode.ts imports posthog-js for types only, so this keeps the SDK chunk lazy.
+import { clearPostHogStorage, quietly } from './mode';
 import type * as Transport from './transport';
+
+/**
+ * Remove PostHog's own storage on this site: its localStorage and
+ * sessionStorage keys and its ph_ cookies, on this host and its parent
+ * domain. Each storage accessor can throw (blocked site data), so each is
+ * read guarded and an unreadable one is skipped; never throws.
+ */
+function clearSiteStorage(): void {
+	quietly(() => {
+		const read = <T>(get: () => T): T | null => {
+			try {
+				return get() ?? null;
+			} catch {
+				return null;
+			}
+		};
+		clearPostHogStorage(
+			read(() => (typeof document === 'undefined' ? null : document)),
+			read(() => window.localStorage),
+			read(() => window.sessionStorage),
+			read(() => window.location.hostname) ?? '',
+		);
+	});
+}
 
 /** The lazily loaded transport chunk; null until its import resolves (or forever, keyless). */
 let transport: typeof Transport | null = null;
@@ -110,6 +136,12 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	}
 	if (privacySignalOn()) {
 		queue.clearHold();
+		// A privacy signal also removes whatever PostHog stored on an earlier
+		// visit (as home-ui's init did before the port). An embedded preview
+		// shares the host tab's storage and leaves it to the host.
+		if (!isEmbeddedDevShell()) {
+			clearSiteStorage();
+		}
 		enabled = false;
 		return;
 	}
@@ -256,12 +288,30 @@ function startSdk(unloading = false): void {
 	queue.start(unloading);
 }
 
+/** The `app` stamp's shape (events.contract.json stampedProperties.app.pattern). */
+const APP_STAMP_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
+/**
+ * The `app` value an app's events are stamped with: the descriptor's
+ * `telemetryId` when it declares a well-formed one, else the descriptor id.
+ * A malformed alias (empty, wrong characters, not a string) falls back to the
+ * id rather than stamping a value the contract rejects.
+ *
+ * @param appId - The descriptor id.
+ * @param telemetryId - The descriptor's optional `telemetryId`.
+ * @returns The value to bind the app's reporter to.
+ */
+export function telemetryAppStamp(appId: string, telemetryId?: unknown): string {
+	return typeof telemetryId === 'string' && APP_STAMP_PATTERN.test(telemetryId) ? telemetryId : appId;
+}
+
 /**
  * The bound reporter for one app: minted on first ask, stable from then on.
  * Keyless or disabled, the sink simply never delivers — the reporter shape is
  * the same, so apps need no branches.
  *
- * @param appId - The emitting app's id (the descriptor's).
+ * @param appId - The emitting app's stamp: the descriptor's telemetryId, else
+ *   its id (see telemetryAppStamp); 'shell' for the shell's own events.
  * @returns The app's `report(event, props?, options?)`.
  */
 export function getReporter(appId: string): Reporter {
@@ -394,9 +444,11 @@ export function trackConsentShown(): void {
 
 /**
  * A report bound to one consented session: it sends through the app's own
- * reporter (sanitised, app-stamped, consent-routed) and returns whether the
- * event went out. It refuses, returning false, once the moment the capture was
- * taken in has passed: consent withdrawn, the SDK gone, or the session rotated.
+ * reporter (sanitised, app-stamped, consent-routed) and returns whether it was
+ * handed to the transport. It refuses, returning false, once the moment the
+ * capture was taken in has passed: consent withdrawn, the SDK gone, or the
+ * session rotated. True does not mean delivered: the event can still be queued,
+ * or dropped at send time by the consent gate (attributionGate).
  */
 export type ConsentedReporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => boolean;
 

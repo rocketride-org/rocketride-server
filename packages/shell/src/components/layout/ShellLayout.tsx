@@ -57,7 +57,7 @@ import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConsentBannerHost } from '../../telemetry/ConsentBannerHost';
 import { TelemetryProvider } from '../../telemetry/TelemetryContext';
-import { getReporter } from '../../telemetry/host';
+import { getReporter, telemetryAppStamp } from '../../telemetry/host';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { SignedOutScreen } from './SignedOutScreen';
 import { AuthPhase } from '../../types/connection';
@@ -811,10 +811,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						{hasAppUi && activeApp ? (
 							// The framing control mounts the descriptor's `app`
 							// component raw; the app declares its layout inside.
-							// The reporter is bound to the DESCRIPTOR's id — a late
-							// event from a backgrounded app stamps its true emitter.
+							// The reporter is bound to the DESCRIPTOR (its telemetryId,
+							// else its id) — a late event from a backgrounded app
+							// stamps its true emitter.
 							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<TelemetryProvider reporter={getReporter(activeAppId)}>
+								<TelemetryProvider reporter={getReporter(telemetryAppStamp(activeAppId, activeApp.telemetryId))}>
 									<AppFrame
 										app={activeApp}
 										isConnected={isConnected}

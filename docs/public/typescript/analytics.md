@@ -26,8 +26,11 @@ at `rocketride.analytics` in the Python SDK.
 
 Apps running on the platform shell do not call `createReporter` themselves —
 the shell mints their reporter and hands it over (`useReport()` /
-`getReporter(appId)` from the shell API). Creating reporters directly is for
-hosts and for standalone code with its own transport.
+`getReporter(appId)` from the shell API). The shell stamps the app descriptor's
+`id`, or its optional `telemetryId` when the app declares one (for apps whose
+dashboards predate the descriptor id) — chosen once on the descriptor, never
+per event. Creating reporters directly is for hosts and for standalone code
+with its own transport.
 
 ## **Import**
 

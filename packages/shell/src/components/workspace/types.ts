@@ -325,6 +325,15 @@ export interface AppDescriptor {
 	id: string;
 	/** Display name shown in the app switcher. */
 	name: string;
+	/**
+	 * The app value stamped on this app's events; defaults to `id`. For apps
+	 * whose dashboards predate the descriptor id. Chosen once here: the shell
+	 * binds the app's reporter to it, so it is fixed for the reporter's
+	 * lifetime and per-event props still cannot overwrite it. Must match the
+	 * events contract's `app` pattern (`^[A-Za-z0-9._-]{1,128}$`); any other
+	 * value falls back to `id`.
+	 */
+	telemetryId?: string;
 	/** Optional icon shown in the app switcher list. */
 	icon?: React.ReactNode;
 	/** Branding tokens (logo, welcome text) for the app. */

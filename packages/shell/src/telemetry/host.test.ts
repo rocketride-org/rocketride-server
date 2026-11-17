@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Identity, type IdentityMode } from './identity.ts';
-import { clearTelemetryOnSignOut, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity } from './host.ts';
+import { clearTelemetryOnSignOut, getReporter, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity, shellReporter, telemetryAppStamp } from './host.ts';
 import { HOLD_STORAGE_KEY } from './sdkQueue.ts';
 import { resetDevGateForTests } from '../util/devGate.ts';
 
@@ -173,6 +173,38 @@ test('after the bind, identity reports go straight to the transport', async () =
 	});
 });
 
+test('the app stamp is the descriptor telemetryId when set, else the descriptor id', () => {
+	assert.equal(telemetryAppStamp('rocketride.home', 'home-ui'), 'home-ui');
+	assert.equal(telemetryAppStamp('rocketride.home'), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', undefined), 'rocketride.home');
+	// A malformed alias never reaches the stamp: it falls back to the id.
+	for (const bad of ['', 'has space', 'x'.repeat(129), 42, null]) {
+		assert.equal(telemetryAppStamp('rocketride.home', bad), 'rocketride.home', `bad alias ${String(bad)}`);
+	}
+});
+
+test('a reporter bound to a telemetryId stamps it, and per-event props cannot overwrite it; auth facts still stamp shell', async () => {
+	const { win, runTimers } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		const t = fakeTransport('anonymous');
+		const captured: Array<[string, Record<string, unknown>]> = [];
+		const sdk = { capture: (event: string, props: Record<string, unknown>) => { captured.push([event, props]); }, register: () => {} };
+		(t.module as unknown as { active: () => typeof sdk }).active = () => sdk;
+		loadTransportForTests(t.module);
+		runTimers();
+		getReporter(telemetryAppStamp('rocketride.home', 'home-ui'))('chat:send', { app: 'spoofed', n: 1 });
+		getReporter(telemetryAppStamp('rocketride.models'))('models:open', { app: 'spoofed' });
+		shellReporter()('auth:complete', { app: 'home-ui', source: 'shell' });
+		assert.deepEqual(captured.map(([event, props]) => [event, props.app]), [
+			['chat:send', 'home-ui'],
+			['models:open', 'rocketride.models'],
+			['auth:complete', 'shell'],
+		]);
+		assert.equal(captured[0][1].n, 1, 'the caller props still ride along');
+	});
+});
+
 test('a page-active change after the SDK start is pushed to the live instances', async () => {
 	const { win, runTimers } = page();
 	await withGlobals({ window: win, document: docHidden }, () => {
@@ -217,6 +249,84 @@ test('every disabled branch drops the hold an earlier page load of the tab left'
 			assert.equal(tab.data.has(HOLD_STORAGE_KEY), false, `${label}: hold dropped`);
 		});
 	}
+});
+
+/** A full Storage double (key/length too, as clearPostHogStorage enumerates) over a Map. */
+function store(keys: string[]) {
+	const data = new Map<string, string>(keys.map((k) => [k, '1']));
+	return {
+		data,
+		storage: {
+			get length() { return data.size; },
+			key: (i: number) => [...data.keys()][i] ?? null,
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => { data.set(k, v); },
+			removeItem: (k: string) => { data.delete(k); },
+		},
+	};
+}
+
+/** A document double whose cookie setter applies expiries, as a browser's would. */
+function cookieDoc(initial: string[]) {
+	const jar = new Map<string, string>(initial.map((c) => c.split('=') as [string, string]));
+	return {
+		jar,
+		doc: {
+			visibilityState: 'hidden',
+			get cookie() { return [...jar].map(([k, v]) => `${k}=${v}`).join('; '); },
+			set cookie(value: string) {
+				const [pair] = value.split(';');
+				const [name, v] = pair.split('=');
+				if (/expires=Thu, 01 Jan 1970|max-age=0/i.test(value)) jar.delete(name.trim());
+				else jar.set(name.trim(), v);
+			},
+		},
+	};
+}
+
+const PH_LOCAL = ['ph_phc_x_posthog', '__ph_opt_in_out_phc_x', '_postHogToolbarParams'];
+const PH_SESSION = ['ph_phc_x_window_id', 'ph_phc_x_primary_window_exists'];
+
+/** Boot the host with prior-visit PostHog storage under `nav`, and return what is left. */
+async function bootWithStoredPostHog(nav: Record<string, unknown>, consentSource: 'stored' | 'host' = 'stored') {
+	const local = store([...PH_LOCAL, 'rr_consent_v1']);
+	const tab = store([...PH_SESSION, 'rr:auth:start_ts']);
+	const { jar, doc } = cookieDoc(['ph_phc_x_posthog=abc', 'other=1']);
+	const { win } = page({ localStorage: local.storage, sessionStorage: tab.storage });
+	await withGlobals({ window: win, document: doc, sessionStorage: tab.storage, localStorage: local.storage, navigator: nav }, () => {
+		resetTelemetryHostForTests();
+		initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource });
+	});
+	return { local: [...local.data.keys()], session: [...tab.data.keys()], cookies: [...jar.keys()] };
+}
+
+for (const [label, nav] of [['DNT', { doNotTrack: '1' }], ['GPC', { globalPrivacyControl: true }]] as const) {
+	test(`a ${label} signal removes PostHog's stored keys and ph_ cookies from an earlier visit, and nothing else`, async () => {
+		const left = await bootWithStoredPostHog(nav);
+		assert.deepEqual(left.local, ['rr_consent_v1']);
+		assert.deepEqual(left.session, ['rr:auth:start_ts']);
+		assert.deepEqual(left.cookies, ['other']);
+	});
+}
+
+test('without a privacy signal a disabled boot leaves PostHog storage alone', async () => {
+	// the host-consent branch: disabled at boot like the signal branch, but no signal
+	const left = await bootWithStoredPostHog({}, 'host');
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test('a privacy-signal boot never throws when every storage accessor throws', async () => {
+	const { win } = page();
+	const boom = () => { throw new Error('SecurityError'); };
+	Object.defineProperty(win, 'localStorage', { get: boom });
+	Object.defineProperty(win, 'sessionStorage', { get: boom });
+	const doc = { visibilityState: 'hidden', get cookie(): string { return boom(); } };
+	await withGlobals({ window: win, document: doc, navigator: { globalPrivacyControl: true } }, () => {
+		resetTelemetryHostForTests();
+		assert.doesNotThrow(() => initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource: 'stored' }));
+	});
 });
 
 test("an embedded preview's disabled boot never touches the host tab's hold", async () => {
