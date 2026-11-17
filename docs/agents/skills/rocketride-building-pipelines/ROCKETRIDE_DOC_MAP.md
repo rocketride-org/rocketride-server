@@ -26,7 +26,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 
 # RocketRide Documentation
 
-> Build, run, and ship data + AI pipelines with the RocketRide toolchain.
+> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
 
 ## Home
 

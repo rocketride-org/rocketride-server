@@ -29,7 +29,7 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
 | **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
 | **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
-| **MCP**        | `rocketride-mcp` (deprecated) | [MCP server](/connect/mcp/stdio) |
+| **MCP**        | built into the engine (`/mcp`) | [MCP server](/connect/mcp/http) |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 

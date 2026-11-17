@@ -14,7 +14,23 @@ const { sections, sectionFor } = require('./spine');
 const { cleanTwin, INDEX_LINE_PREFIX } = require('./twin');
 
 const SITE_TITLE = 'RocketRide Documentation';
-const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide toolchain.';
+// Opening paragraph and "when to use" list at the top of llms.txt, for agents
+// deciding whether RocketRide fits the task.
+const SITE_ABOUT =
+	'MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native ' +
+	'download, or use RocketRide Cloud. Use it from MCP, the CLI, or the Python or TypeScript SDK.';
+const SITE_WHEN = [
+	'## When to use RocketRide',
+	'',
+	'- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, ' +
+		'PII anonymization) and take them to production.',
+	'- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, your IDE, the CLI, ' +
+		'or the Python and TypeScript SDKs.',
+	'- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.',
+];
+const SITE_DESC =
+	'RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. ' +
+	'Build, test and publish durable agents that scale in production.';
 // Absolute base for llms.txt links. The llms.txt format specifies URLs, and an
 // agent that fetched the file on its own has no base to resolve against.
 // Mirrors `url` in docusaurus.config.ts.
@@ -193,7 +209,7 @@ function ordered(manifest) {
 }
 
 function llmsIndex(manifest) {
-	const lines = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, ''];
+	const lines = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, '', SITE_ABOUT, '', ...SITE_WHEN, ''];
 	const order = sections().map((s) => s.label);
 	const bySection = new Map();
 	const entryLine = (e) => `- [${e.title}](${SITE_URL}${e.mdSibling})${e.description ? `: ${e.description}` : ''}`;

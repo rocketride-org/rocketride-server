@@ -1,7 +1,7 @@
 ---
 title: Use RocketRide from a coding agent
 sidebar_label: Use from a coding agent
-description: Start page for coding agents. Run the engine locally in Docker, check it is up, use it from the CLI, SDK or MCP, and find the machine-readable docs.
+description: Start page for coding agents. Run the engine locally in Docker, check it is up, use it over MCP or from the CLI or SDK, and find the machine-readable docs.
 ---
 
 # Use RocketRide from a coding agent
@@ -10,7 +10,7 @@ This page is the shortest path for a coding agent (or the person driving one) to
 
 ## What RocketRide is
 
-RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage dynamically using the MCP server, from the terminal with the CLI, from code with the Python or TypeScript SDK, or directly from an IDE with the VS Code extension.
 
 Open source, MIT licensed. Nodes cover LLM providers, vector stores, OCR, NER, PII anonymization and more.
 

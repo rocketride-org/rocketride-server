@@ -15,9 +15,8 @@ pipelines, and deploys pipelines and apps — the same operations the
 installing the Python package puts `rocketride` on your path, and the Node
 package runs with `npx rocketride`.
 
-> Driving the engine from an AI assistant instead of a terminal? The
-> [MCP server](/connect/mcp/stdio) exposes the same pipeline operations as tools for
-> Claude, Cursor, and other MCP clients.
+> Driving the engine over MCP instead of a terminal? The
+> [MCP server](/connect/mcp/http) exposes the same pipeline operations as tools.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command, but
 > not the same set of commands. [`diff`](#diff) and `otel`, the
@@ -719,6 +718,6 @@ Sub-commands:
 - [Run from the CLI](/quickstart/cli): the five-step tutorial.
 - [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   same operations, in code.
-- [MCP server](/connect/mcp/stdio): the same operations, as AI-assistant tools.
+- [MCP server](/connect/mcp/http): the same operations, as MCP tools.
 - [WebSocket protocol](/connect/websocket): what the CLI sends to the engine.
 - [Cloud](/operate/cloud) · [Self-hosting](/operate/self-hosting): where the engine runs.
