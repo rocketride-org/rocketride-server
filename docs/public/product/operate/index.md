@@ -1,6 +1,7 @@
 ---
 title: Choose How to Run RocketRide
 sidebar_label: Choose How to Run
+description: "One engine, two ways to run it: point your clients at managed RocketRide Cloud, or run the engine yourself. The same .pipe file runs on either."
 ---
 
 # Choose How to Run RocketRide

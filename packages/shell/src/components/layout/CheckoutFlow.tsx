@@ -112,6 +112,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 		<CheckoutModal
 			appName={checkoutApp.name}
 			appDescription={checkoutApp.description}
+			appId={checkoutApp.id}
 			stripePublishableKey={stripeKey}
 			preselectedPlan={presetPlan ?? undefined}
 			preselectedPromo={presetPromo ?? undefined}

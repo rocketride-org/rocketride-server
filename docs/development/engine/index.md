@@ -90,7 +90,6 @@ Path resolution supports `~` for the user home directory on both Unix and Window
 | `--tika`                | External Tika service support                    |
 | `--serviceCategory CAT` | Service category filter                          |
 | `--serviceName NAME`    | Service name filter                              |
-| `--node_path PATH`      | Load local node prototypes from PATH             |
 
 `--testArgs`, `--nodeId`, and `--url.keystorenet` are options of the engine-lib
 test binaries, not of the engine executable.
@@ -329,7 +328,8 @@ The external parsers shell out via the Unix `env` shim; if `env` or a required t
 
 Started with `--dumps`, the engine writes a minidump when it crashes. On Linux
 and macOS Crashpad writes a `.dmp`, which the crashing engine moves into the
-crash-dump location before it exits; a later run sweeps any it could not move.
+crash-dump location before it exits; one it could not move stays in the crash
+database.
 On Windows the engine writes an `.mdmp` there itself. Without `--dumps` it
 writes none. Turning one back into a stack trace (LLDB,
 GDB via `minidump-2-core`, or `minidump-stackwalk` against the shipped `.sym`

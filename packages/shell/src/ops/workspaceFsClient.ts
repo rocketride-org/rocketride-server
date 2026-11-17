@@ -74,6 +74,9 @@ function buildWorkspaceFs(bus: IWorkspaceFsBus): WorkspaceFs {
 	// Realm-unique watch keys: a ROUTING key, not a correlation id. The
 	// random prefix keeps a rebooted page's keys from colliding with its
 	// predecessor's (whose host-side watchers are dropped on page boot).
+	// Keys are `<prefix>-<seq>`. WatchRegistry.pageOf (apps/vscode/src/providers/
+	// toolhost/watchRegistry.ts) splits on the LAST '-' to find the page, so the
+	// random part must stay dash-free (base-36 digits are).
 	const prefix = `fs-${Math.random().toString(36).slice(2, 10)}`;
 	let seq = 0;
 	const watchers = new Map<string, (path: string) => void>();

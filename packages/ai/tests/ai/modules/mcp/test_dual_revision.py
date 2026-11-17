@@ -213,3 +213,64 @@ async def test_modern_client_can_list_tools_through_the_real_mount(monkeypatch, 
         # in the module that goes through JSON serialization to see them.
         assert result['ttlMs'] == TOOLS_TTL_MS
         assert result['cacheScope'] == CACHE_SCOPE
+
+
+def _assert_listing_carries_explicit_annotations(tools):
+    """Every tool states all three booleans on the wire; `_meta` appears only where a tool asks for it."""
+    for tool in tools:
+        annotations = tool['annotations']
+        assert set(annotations) == {'readOnlyHint', 'destructiveHint', 'openWorldHint'}, tool['name']
+        assert all(isinstance(value, bool) for value in annotations.values()), tool['name']
+    by_name = {tool['name']: tool for tool in tools}
+    assert by_name['list_components']['_meta']['anthropic/alwaysLoad'] is True
+    assert '_meta' not in by_name['store_read']
+    assert by_name['validate_pipeline']['annotations'] == {
+        'readOnlyHint': False,
+        'destructiveHint': True,
+        'openWorldHint': True,
+    }
+
+
+async def test_legacy_initialize_carries_instructions(monkeypatch, fake_engine):
+    from ai.modules.mcp.handlers import SERVER_INSTRUCTIONS
+
+    async with _mcp_test_app(monkeypatch, fake_engine) as mcp_test_app:
+        resp = await mcp_test_app.post('/mcp', json=LEGACY_INIT, headers=LEGACY_HEADERS)
+
+    assert resp.status_code == 200
+    assert _first_jsonrpc_payload(resp)['result']['instructions'] == SERVER_INSTRUCTIONS
+
+
+async def test_modern_discover_carries_instructions(monkeypatch, fake_engine):
+    from ai.modules.mcp.handlers import SERVER_INSTRUCTIONS
+
+    discover = {**MODERN_TOOLS_LIST, 'method': 'server/discover'}
+    headers = {**MODERN_HEADERS, 'Mcp-Method': 'server/discover'}
+    async with _mcp_test_app(monkeypatch, fake_engine) as mcp_test_app:
+        resp = await mcp_test_app.post('/mcp', json=discover, headers=headers)
+
+    assert resp.status_code == 200
+    result = _first_jsonrpc_payload(resp)['result']
+    assert result['instructions'] == SERVER_INSTRUCTIONS
+    assert '2026-07-28' in result['supportedVersions']
+
+
+async def test_legacy_listing_carries_explicit_annotations_and_always_load(monkeypatch, fake_engine):
+    list_tools = {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list', 'params': {}}
+    async with _mcp_test_app(monkeypatch, fake_engine) as mcp_test_app:
+        await mcp_test_app.post('/mcp', json=LEGACY_INIT, headers=LEGACY_HEADERS)
+        await mcp_test_app.post(
+            '/mcp', json={'jsonrpc': '2.0', 'method': 'notifications/initialized'}, headers=LEGACY_HEADERS
+        )
+        resp = await mcp_test_app.post('/mcp', json=list_tools, headers=LEGACY_HEADERS)
+
+    assert resp.status_code == 200
+    _assert_listing_carries_explicit_annotations(_first_jsonrpc_payload(resp)['result']['tools'])
+
+
+async def test_modern_listing_carries_explicit_annotations(monkeypatch, fake_engine):
+    async with _mcp_test_app(monkeypatch, fake_engine) as mcp_test_app:
+        resp = await mcp_test_app.post('/mcp', json=MODERN_TOOLS_LIST, headers=MODERN_HEADERS)
+
+    assert resp.status_code == 200
+    _assert_listing_carries_explicit_annotations(_first_jsonrpc_payload(resp)['result']['tools'])

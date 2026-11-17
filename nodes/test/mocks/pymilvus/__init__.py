@@ -202,6 +202,10 @@ class IndexParams:
         )
 
 
+# The ints describe_collection reports for each consistency level
+_CONSISTENCY_LEVELS = {'Strong': 0, 'Session': 1, 'Bounded': 2, 'Eventually': 3}
+
+
 # =============================================================================
 # Payload Serialization Helper
 # =============================================================================
@@ -549,8 +553,28 @@ class MilvusClient:
         MilvusClient._collections[collection_name] = {
             'schema': schema,
             'index_params': index_params,
+            'consistency_level': _CONSISTENCY_LEVELS[kwargs.get('consistency_level', 'Bounded')],
         }
         MilvusClient._data[collection_name] = []
+
+    def describe_collection(self, collection_name: str, **kwargs) -> Dict[str, Any]:
+        """
+        Describe a collection.
+
+        Args:
+            collection_name: Name of the collection
+            **kwargs: Additional parameters (ignored)
+
+        Returns:
+            The collection's name and consistency level, an int as the real client reports it
+            (2, Bounded, unless the collection was created with another level)
+        """
+        if collection_name not in MilvusClient._collections:
+            raise Exception(f"can't find collection[database=default][collection={collection_name}]")
+        return {
+            'collection_name': collection_name,
+            'consistency_level': MilvusClient._collections[collection_name]['consistency_level'],
+        }
 
     # -------------------------------------------------------------------------
     # Data Operations: Query (Filter-Based Retrieval)
