@@ -337,6 +337,26 @@ _SHELL_DOCUMENT_HEADERS = {
 _DOCUMENT_SUFFIXES = frozenset({'.html', '.htm', '.xhtml'})
 
 
+def _document_headers() -> dict:
+    """
+    The headers of one shell document response.
+
+    ``_SHELL_DOCUMENT_HEADERS``, plus, while app isolation is not ``off``, a
+    Report-Only ``frame-src 'self' <every app origin>`` (#1022, Appendix C):
+    it reports frames from anywhere else and is enforced only 30 days after
+    staging reaches ``enforce``. Read per request, like the mode.
+    """
+    from .app_origin import current_config
+
+    config = current_config()
+    if config.mode == 'off':
+        return _SHELL_DOCUMENT_HEADERS
+    return {
+        **_SHELL_DOCUMENT_HEADERS,
+        'Content-Security-Policy-Report-Only': f"frame-src 'self' {config.frame_src_wildcard()}",
+    }
+
+
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
     """
     Resolve a requested path within a base directory, guarding against
@@ -416,7 +436,7 @@ async def shell_static(request: Request):
         prerender_root = (Path(_shell_root) / '_prerender').resolve()
         capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
         if capture.is_relative_to(prerender_root) and capture.is_file():
-            return FileResponse(capture, headers=_SHELL_DOCUMENT_HEADERS)
+            return FileResponse(capture, headers=_document_headers())
 
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
@@ -449,7 +469,7 @@ async def shell_static(request: Request):
     # HTML anywhere under the shell root (static/ included) is a document and
     # gets the framing policy; themes, icons and other assets do not.
     if file_path.exists() and file_path.is_file():
-        headers = dict(_SHELL_DOCUMENT_HEADERS) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
+        headers = dict(_document_headers()) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
         if is_static:
             headers['Cache-Control'] = 'public, max-age=31536000, immutable'
         return FileResponse(file_path, headers=headers or None)
@@ -458,7 +478,7 @@ async def shell_static(request: Request):
     # client-side routing (React Router, etc.) can handle it.
     index_path = Path(_shell_root) / 'index.html'
     if index_path.exists() and index_path.is_file():
-        return FileResponse(index_path, headers=_SHELL_DOCUMENT_HEADERS)
+        return FileResponse(index_path, headers=_document_headers())
 
     # Shell hasn't been built yet
     raise HTTPException(
