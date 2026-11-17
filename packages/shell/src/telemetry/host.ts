@@ -106,11 +106,13 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	// page load of the tab would otherwise sit in sessionStorage with nothing
 	// to drain them. (An embedded preview's queue has no storage, so this
 	// never touches the host tab's hold.)
-	if (!config.key || typeof window === 'undefined') {
+	if (typeof window === 'undefined') {
 		queue.clearHold();
 		enabled = false;
 		return;
 	}
+	// The signal check runs before the keyless one: a visit after the server
+	// dropped its key must still remove what PostHog stored while it had one.
 	if (privacySignalOn()) {
 		queue.clearHold();
 		// A privacy signal also removes whatever PostHog stored on an earlier
@@ -119,6 +121,11 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 		if (!isEmbeddedDevShell()) {
 			clearSiteStorage();
 		}
+		enabled = false;
+		return;
+	}
+	if (!config.key) {
+		queue.clearHold();
 		enabled = false;
 		return;
 	}

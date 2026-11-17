@@ -17,7 +17,7 @@ import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CaptureResult } from 'posthog-js';
 import { ATTRIBUTED_TAG, CONSENT_KEY, CONSENT_VERSION } from './consent.ts';
-import { HOLD_STORAGE_KEY, SdkQueue, newEventUuid, type HoldStorage } from './sdkQueue.ts';
+import { HOLD_STORAGE_KEY, LEGACY_HOLD_STORAGE_KEYS, SdkQueue, newEventUuid, type HoldStorage } from './sdkQueue.ts';
 
 /** A Web Storage double. */
 function memoryStorage(): HoldStorage & { data: Map<string, string> } {
@@ -148,6 +148,22 @@ test('an earlier load held the exposure (OAuth round trip), consent withdrawn si
 	p.queue.start();
 	assert.deepEqual(p.sent.map((s) => [s.instance, s.event]), [['cookieless', '$pageview']]);
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null);
+});
+
+test('a hold in an earlier format (written before ATTRIBUTED_TAG existed) is discarded unread, never sent cookieless', () => {
+	const storage = memoryStorage();
+	const { [ATTRIBUTED_TAG]: _tag, ...untagged } = EXPOSURE;
+	for (const key of LEGACY_HOLD_STORAGE_KEYS) {
+		storage.setItem(key, JSON.stringify([
+			{ event: 'cta:click', props: { cta_id: 'get_started', intent: 'register', ...untagged }, ts: Date.now() - 1000, id: newEventUuid() },
+		]));
+	}
+	setConsent('rejected');
+	const p = pageLoad(storage);
+	p.state.consented = false;
+	p.queue.start();
+	assert.deepEqual(p.sent, [], 'the untagged attributed entry is not replayed');
+	for (const key of LEGACY_HOLD_STORAGE_KEYS) assert.equal(storage.getItem(key), null, `${key} removed`);
 });
 
 test('a privacy signal (DNT/GPC) on at send time drops a queued attributed event even with consent accepted', () => {

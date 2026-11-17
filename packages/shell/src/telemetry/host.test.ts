@@ -339,14 +339,23 @@ const PH_LOCAL = ['ph_phc_x_posthog', '__ph_opt_in_out_phc_x', '_postHogToolbarP
 const PH_SESSION = ['ph_phc_x_window_id', 'ph_phc_x_primary_window_exists'];
 
 /** Boot the host with prior-visit PostHog storage under `nav`, and return what is left. */
-async function bootWithStoredPostHog(nav: Record<string, unknown>, consentSource: 'stored' | 'host' = 'stored') {
+async function bootWithStoredPostHog(
+	nav: Record<string, unknown>,
+	consentSource: 'stored' | 'host' = 'stored',
+	{ key = 'phc_x', embedded = false }: { key?: string; embedded?: boolean } = {},
+) {
 	const local = store([...PH_LOCAL, 'rr_consent_v1']);
 	const tab = store([...PH_SESSION, 'rr:auth:start_ts']);
 	const { jar, doc } = cookieDoc(['ph_phc_x_posthog=abc', 'other=1']);
 	const { win } = page({ localStorage: local.storage, sessionStorage: tab.storage });
+	if (embedded) {
+		// an App Builder preview: dev hooks on and framed by the host tab
+		win.location = { search: '?rrdev=1', pathname: '/', hostname: 'cloud.example.test' };
+		win.top = {};
+	}
 	await withGlobals({ window: win, document: doc, sessionStorage: tab.storage, localStorage: local.storage, navigator: nav }, () => {
 		resetTelemetryHostForTests();
-		initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource });
+		initTelemetryHost({ key, host: key ? 'https://e.example.test' : '', consentSource });
 	});
 	return { local: [...local.data.keys()], session: [...tab.data.keys()], cookies: [...jar.keys()] };
 }
@@ -363,6 +372,27 @@ for (const [label, nav] of [['DNT', { doNotTrack: '1' }], ['GPC', { globalPrivac
 test('without a privacy signal a disabled boot leaves PostHog storage alone', async () => {
 	// the host-consent branch: disabled at boot like the signal branch, but no signal
 	const left = await bootWithStoredPostHog({}, 'host');
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test('a keyless boot with a privacy signal still removes PostHog storage from a keyed earlier visit', async () => {
+	const left = await bootWithStoredPostHog({ doNotTrack: '1' }, 'stored', { key: '' });
+	assert.deepEqual(left.local, ['rr_consent_v1']);
+	assert.deepEqual(left.session, ['rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['other']);
+});
+
+test('a keyless boot without a privacy signal leaves PostHog storage alone', async () => {
+	const left = await bootWithStoredPostHog({}, 'stored', { key: '' });
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test("an embedded preview's keyless boot with a privacy signal leaves the host tab's PostHog storage alone", async () => {
+	const left = await bootWithStoredPostHog({ globalPrivacyControl: true }, 'stored', { key: '', embedded: true });
 	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
 	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
 	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);

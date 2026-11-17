@@ -551,9 +551,13 @@ function surfaceNames(bundleText) {
  * declaration at a time. Keying by name makes the comparison order-independent:
  * moving a declaration around in api.ts (or dts-bundle-generator emitting it in
  * a different order) changes no entry. Each statement is re-printed by the
- * TypeScript printer with comments removed and its whitespace collapsed, so
- * JSDoc edits and formatting are not changes either. Merged declarations (an
- * interface declared twice) share a key; their texts are sorted and joined.
+ * TypeScript printer with comments removed. The printer emits from the syntax
+ * tree with its own layout, so JSDoc edits and formatting are not changes
+ * either, while the text inside string and template literals (such as a
+ * quoted property name) is kept exactly. Declarations that share a key
+ * (function overloads, an interface declared twice) are joined in source
+ * order, not sorted: overload order decides which signature TypeScript picks,
+ * so swapping two overloads is a real change.
  *
  * @param {string} bundleText - A generated/frozen bundle body.
  * @returns {Map<string, string>} declaration key -> normalized text.
@@ -567,7 +571,7 @@ function declarationTexts(bundleText) {
 		groups.get(key).push(text);
 	};
 	for (const st of sf.statements) {
-		const text = printer.printNode(ts.EmitHint.Unspecified, st, sf).replace(/\s+/g, ' ').trim();
+		const text = printer.printNode(ts.EmitHint.Unspecified, st, sf).trim();
 		if (st.name && ts.isIdentifier(st.name)) {
 			add(`${ts.SyntaxKind[st.kind]}:${st.name.text}`, text);
 		} else if (ts.isVariableStatement(st)) {
@@ -576,7 +580,7 @@ function declarationTexts(bundleText) {
 		} else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause)) {
 			// `export { A as B, ... }` blocks: one entry per exported name.
 			for (const el of st.exportClause.elements) {
-				add(`Export:${el.name.text}`, el.getText(sf).replace(/\s+/g, ' ').trim());
+				add(`Export:${el.name.text}`, printer.printNode(ts.EmitHint.Unspecified, el, sf).trim());
 			}
 		} else {
 			// Anything else (`export {}`, side-effect statements) is keyed by
@@ -585,7 +589,7 @@ function declarationTexts(bundleText) {
 		}
 	}
 	const out = new Map();
-	for (const [key, texts] of groups) out.set(key, texts.sort().join('\n'));
+	for (const [key, texts] of groups) out.set(key, texts.join('\n'));
 	return out;
 }
 
