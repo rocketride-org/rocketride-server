@@ -308,6 +308,26 @@ def developer_id_required(action: str) -> str:
     )
 
 
+def _namespace_id_of(conn: Any, artifact_id: str) -> str:
+    """The full name of a registry key for the namespace check.
+
+    An app's registry key IS its full name (``<developerId>.<name>``); a
+    pipe's registry key is its SHORT id, and its full name is derived from
+    the caller's developer id (plan 2.1), the address grammar. A key without
+    a dot is a pipe's.
+
+    Args:
+        conn: The connection (the caller's developer id).
+        artifact_id: The registry key.
+
+    Returns:
+        The full name to check against the caller's namespace.
+    """
+    if '.' in artifact_id:
+        return artifact_id
+    return f'{_developer_id_of(conn) or ""}.{artifact_id}'
+
+
 def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     """GUARANTEE the app id lives in the caller org's developer namespace.
 
@@ -882,7 +902,8 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not developer:
             return conn.build_error(request, f'Only the developer organization can submit {app_id} for review')
         try:
-            _assert_owns_namespace(conn, app_id)
+            # A pipe's registry key is its short id; the namespace holds full names
+            _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         artifact = await _artifact_of(account, home, app_id, {'version': version})
@@ -943,7 +964,8 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not developer:
             return conn.build_error(request, f'Only the developer organization can withdraw {app_id} from review')
         try:
-            _assert_owns_namespace(conn, app_id)
+            # A pipe's registry key is its short id; the namespace holds full names
+            _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         artifact = await _artifact_of(account, home, app_id, {'version': version})
@@ -987,7 +1009,8 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                 request, f'Only the developer organization can reply on the review thread of {app_id}'
             )
         try:
-            _assert_owns_namespace(conn, app_id)
+            # A pipe's registry key is its short id; the namespace holds full names
+            _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         await account.deployments_history_append(
