@@ -79,7 +79,7 @@ interface IRealmState {
 	ledger: ILedger;
 	gate: IGateContext;
 	inflight: number;
-	/** Pref keys this realm has written. */
+	/** Pref keys this realm's app has written (shared by its realms, kept across reattach). */
 	prefKeys: Set<string>;
 	/** Ops whose drop was already logged (once per realm per op). */
 	loggedDrops: Set<string>;
@@ -145,6 +145,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		if (!c || !cm.isConnected()) throw new Error('Not connected to server');
 		return c;
 	};
+
+	/** Pref keys written per app, for the 256-key cap (outlives any one realm). */
+	const prefKeysByApp = new Map<string, Set<string>>();
 
 	/** Teardowns in progress: every realm request is refused meanwhile. */
 	let closing = 0;
@@ -562,7 +565,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				ledger,
 				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
 				inflight: 0,
-				prefKeys: new Set(),
+				prefKeys: prefKeysByApp.get(entry.id) ?? prefKeysByApp.set(entry.id, new Set()).get(entry.id)!,
 				loggedDrops: new Set(),
 				detached: false,
 				detachRouter: () => {},

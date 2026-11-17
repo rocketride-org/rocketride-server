@@ -192,7 +192,8 @@ function checkType(op: string, name: string, base: string, value: unknown, g: IG
 			return canonical;
 		}
 		case 'app-partition':
-			if (str(SIZES.name) !== `app:${g.info.appId}`) fail('namespace');
+			// `app:` + the app id, which may be 128 characters (`is_canonical_app_id`).
+			if (str(SIZES.name + 'app:'.length) !== `app:${g.info.appId}`) fail('namespace');
 			return value;
 		case 'https-url':
 			return str(SIZES.string);
