@@ -45,8 +45,8 @@ object in the reply (see :func:`parse_judge_verdict` for the rationale).
 
 Key Features:
     - Prompt builder with clearly delimited, injection-hardened sections
-    - Robust verdict parsing: direct JSON, fenced ```json blocks, then the
-      first balanced ``{...}`` object
+    - Robust verdict parsing: direct JSON of the whole reply, then the
+      leftmost fenced ```json block or balanced ``{...}`` object
     - Scores clamped to the [0.0, 1.0] range
     - Pipeline-backed judge factory decoupled from the SDK client
 
@@ -212,8 +212,14 @@ def _find_verdict_object(text: str) -> dict:
     that parses as a JSON object wins:
 
     1. The entire reply, stripped (the compliant case)
-    2. The contents of each fenced code block (``` or ```json), in order
-    3. Each balanced ``{...}`` substring, leftmost first
+    2. Every fenced code block (``` or ```json) and every balanced ``{...}``
+       substring, ordered together by where each starts in the reply
+
+    Fenced blocks are NOT tried ahead of unfenced objects: that would let a
+    fenced object placed after the real verdict outrank it. Ordering all of
+    them by position keeps "first object in the reply" true whether or not
+    either object sits in a fence. On a tie (a fence whose body starts with
+    the object) the fenced block is tried first; both hold the same object.
 
     Taking the FIRST object (rather than the last) is a deliberate
     anti-injection choice: the judge is instructed to begin its reply with
@@ -234,9 +240,20 @@ def _find_verdict_object(text: str) -> dict:
     """
     stripped = text.strip()
 
+    # Position-ordered candidates: fenced block bodies and balanced objects,
+    # each keyed by its start offset in the raw reply. sorted() is stable, so
+    # a fence body and the object starting at the same offset keep fence-first.
+    ordered: list[tuple[int, str]] = [(match.start(1), match.group(1).strip()) for match in _FENCE_RE.finditer(text)]
+    at = 0
+    for obj in _iter_balanced_objects(text):
+        # Balanced objects are yielded leftmost first and never overlap, so a
+        # forward search from the end of the previous one finds each in place.
+        at = text.index(obj, at)
+        ordered.append((at, obj))
+        at += len(obj)
+
     candidates = [stripped]
-    candidates.extend(match.strip() for match in _FENCE_RE.findall(text))
-    candidates.extend(_iter_balanced_objects(text))
+    candidates.extend(candidate for _, candidate in sorted(ordered, key=lambda pair: pair[0]))
 
     for candidate in candidates:
         if not candidate:
@@ -257,8 +274,8 @@ def parse_judge_verdict(text: str) -> JudgeVerdict:
 
     Extraction order (first hit wins — see :func:`_find_verdict_object` for
     why FIRST is the injection-safe choice): direct JSON parse of the whole
-    reply, then fenced ```json blocks, then the first balanced ``{...}``
-    object. The first JSON object found is authoritative: if it is not a
+    reply, then the leftmost fenced ```json block or balanced ``{...}``
+    object, fenced or not. The first JSON object found is authoritative: if it is not a
     valid verdict the parse fails rather than scanning onwards, so an
     attacker cannot displace a malformed real verdict with a well-formed
     injected one later in the reply.
