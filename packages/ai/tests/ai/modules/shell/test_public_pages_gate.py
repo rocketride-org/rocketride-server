@@ -29,6 +29,8 @@ actionable message; storage failures fail closed.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 import ai.modules.shell.public_pages as pp
@@ -113,6 +115,40 @@ async def test_missing_snapshot_rejected_present_snapshot_allowed():
     assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
 
 
+async def test_a_page_at_a_feed_path_the_root_owner_declares_is_refused():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['site']['feeds'] = [{'path': '/blog/feed.xml', 'title': 'Blog', 'prefix': '/blog/'}]
+    acct = hostile_account(home)
+    manifest = {'publicPages': [{'path': '/blog/feed.xml', 'title': 'F'}, {'path': '/fine', 'title': 'Fine'}]}
+    errors = await gate_errors('rocketride.other', manifest, DIST, acct)
+    assert len(errors) == 1
+    assert "publicPages path '/blog/feed.xml' is a feed of the published app rocketride.home" in errors[0]
+
+
+async def test_a_relative_image_must_exist_in_the_build_output():
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'H', 'image': 'og/home.png'}],
+        'site': {'title': 'R', 'image': 'og/site.png'},
+    }
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert len(errors) == 2
+    assert "publicPages path '/': image 'og/home.png' is not in the built version" in errors[0]
+    assert "site.image 'og/site.png' is not in the built version" in errors[1]
+    FILES[f'{DIST}/og/home.png'] = b'png'
+    FILES[f'{DIST}/og/site.png'] = b'png'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_https_and_root_path_images_are_not_checked_against_the_build():
+    manifest = {
+        'publicPages': [
+            {'path': '/a', 'title': 'A', 'image': 'https://cdn.example.com/a.png'},
+            {'path': '/b', 'title': 'B', 'image': '/static/b.png'},
+        ]
+    }
+    assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+
+
 async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
     manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
     FILES[f'{DIST}/pages/fresh.html'] = b'x' * MAX_SNAPSHOT_BYTES
@@ -122,6 +158,46 @@ async def test_a_snapshot_over_the_size_cap_is_refused_by_its_stat():
     size = MAX_SNAPSHOT_BYTES + 1
     assert len(errors) == 1
     assert f"snapshot 'pages/fresh.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit" in errors[0]
+
+
+async def test_a_not_found_snapshot_missing_from_the_build_is_rejected():
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    assert errors == [
+        "site.notFound 'pages/404.html' is not in the built version; emit it into the build output or drop the field"
+    ]
+    FILES[f'{DIST}/pages/404.html'] = b'<html></html>'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+
+
+async def test_a_not_found_snapshot_over_the_size_cap_is_refused_by_its_stat():
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    FILES[f'{DIST}/pages/404.html'] = b'x' * MAX_SNAPSHOT_BYTES
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
+    FILES[f'{DIST}/pages/404.html'] = b'x' * (MAX_SNAPSHOT_BYTES + 1)
+    errors = await gate_errors('rocketride.home', manifest, DIST, hostile_account())
+    size = MAX_SNAPSHOT_BYTES + 1
+    assert errors == [
+        f"site.notFound 'pages/404.html' is {size} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit; move images, "
+        'styles and scripts into the build output and reference them through {{assets}}'
+    ]
+
+
+async def test_a_not_found_stat_failure_other_than_not_found_fails_closed(monkeypatch):
+    from .hostile_fixtures import file_info
+
+    async def flaky(path):
+        if path.endswith('/pages/404.html'):
+            raise OSError('store down')
+        return await file_info(path)
+
+    monkeypatch.setattr(pp, 'artifact_file_info', flaky)
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    with pytest.raises(OSError):
+        await gate_errors('rocketride.home', manifest, DIST, hostile_account())
 
 
 async def test_every_problem_is_reported_at_once():
@@ -167,6 +243,11 @@ async def test_the_gate_never_reads_a_snapshot_body(monkeypatch):
     FILES[f'{DIST}/pages/fresh.html'] = b'<html></html>'
     manifest = {'publicPages': [{'path': '/fresh', 'title': 'F', 'snapshot': 'pages/fresh.html'}]}
     assert await gate_errors('rocketride.other', manifest, DIST, hostile_account()) == []
+    # Nor the site.notFound snapshot.
+    FILES[f'{DIST}/pages/404.html'] = b'<html></html>'
+    manifest = copy.deepcopy(HOME_MANIFEST)
+    manifest['site']['notFound'] = 'pages/404.html'
+    assert await gate_errors('rocketride.home', manifest, DIST, hostile_account()) == []
 
 
 class _RawStore:
@@ -291,4 +372,18 @@ async def test_a_redirect_source_whose_slash_twin_is_another_apps_page_is_reject
     assert errors == [
         "site.redirects from '/store/': its slash twin '/store' is a page of the published app rocketride.home; "
         'a URL is a page or a redirect, not both: drop the entry'
+    ]
+
+
+async def test_feed_paths_claimed_by_another_published_app_are_rejected():
+    home = copy.deepcopy(HOME_MANIFEST)
+    home['publicPages'].append({'path': '/news.xml', 'title': 'News'})
+    feed = {'prefix': '/', 'title': 'All'}
+    manifest = {
+        'publicPages': [{'path': '/', 'title': 'R'}],
+        'site': {'feeds': [{'path': '/news.xml', **feed}, {'path': '/feed.xml', **feed}]},
+    }
+    errors = await gate_errors('rocketride.other', manifest, DIST, hostile_account(home=home))
+    assert [e for e in errors if 'feeds' in e] == [
+        "site.feeds path '/news.xml' is a page of the published app rocketride.home; choose another path"
     ]
