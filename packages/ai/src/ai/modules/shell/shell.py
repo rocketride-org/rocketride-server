@@ -271,45 +271,66 @@ DOCS_URL = 'https://docs.rocketride.org/'
 # caches hold them for an hour (same max-age convention as task/fetch.py).
 _CACHE_CONTROL = 'public, max-age=3600'
 
-# Frame-ancestor sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA: a bare
-# scheme ("vscode-webview:") or an http(s) host with an optional port. Anything
-# else (keywords, paths, separators, quotes) could widen or break the policy.
+# Frame ancestors every shell document allows: its own origin, and the VS Code
+# App Builder preview, whose webview iframe (vscode-webview://<id>) sits inside
+# the desktop workbench (vscode-file://vscode-app). frame-ancestors checks
+# every ancestor up to the top, so both schemes are needed for the desktop
+# preview. Web-hosted VS Code (vscode.dev, code-server, github.dev) uses https
+# origins instead; those hosts are added through RR_SHELL_FRAME_ANCESTORS_EXTRA.
+_FRAME_ANCESTORS_DEFAULT = ("'self'", 'vscode-webview:', 'vscode-file:')
+
+# Sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA (lowercased first): a
+# non-web scheme ("vscode-webview:"), or an http(s) host with an optional port
+# whose name is not a bare or top-level wildcard. Anything else (keywords,
+# paths, separators, quotes, '*', web schemes) would widen or break the policy.
 _FRAME_ANCESTOR_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*:$')
-_FRAME_ANCESTOR_HOST = re.compile(r'^https?://[a-z0-9*.-]+(:\d{1,5})?$')
+_FRAME_ANCESTOR_HOST = re.compile(r'^https?://(\*\.[a-z0-9-]+(\.[a-z0-9-]+)+|[a-z0-9-]+(\.[a-z0-9-]+)*)(:\d{1,5})?$')
+_FRAME_ANCESTOR_WEB_SCHEMES = frozenset(
+    {'http:', 'https:', 'ws:', 'wss:', 'data:', 'blob:', 'filesystem:', 'javascript:'}
+)
 
 
 def _frame_ancestor_sources(value: str) -> str:
     """
-    Validate the extra frame-ancestor sources for shell documents.
+    Build the frame-ancestors source list for shell documents.
 
     Args:
-        value: Whitespace-separated CSP sources (scheme or http(s) host sources).
+        value: Whitespace-separated extra CSP sources, appended to
+            ``'self' vscode-webview: vscode-file:``.
 
     Returns:
-        The sources joined by single spaces (empty when there are none).
+        The full source list, lowercased, in order, without duplicates.
 
     Raises:
-        ValueError: If any token is not a scheme source or an http(s) host
-            source; the message names the offending token.
+        ValueError: If any extra token is not a non-web scheme source or an
+            http(s) host source; the message names the offending token.
     """
-    tokens = value.split()
-    for token in tokens:
-        if not (_FRAME_ANCESTOR_SCHEME.match(token) or _FRAME_ANCESTOR_HOST.match(token)):
-            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {token}')
-    return ' '.join(tokens)
+    sources = list(_FRAME_ANCESTORS_DEFAULT)
+    for raw in value.split():
+        token = raw.lower()
+        is_scheme = bool(_FRAME_ANCESTOR_SCHEME.match(token)) and token not in _FRAME_ANCESTOR_WEB_SCHEMES
+        if not (is_scheme or _FRAME_ANCESTOR_HOST.match(token)):
+            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {raw}')
+        if token not in sources:
+            sources.append(token)
+    return ' '.join(sources)
 
 
-# Headers for shell DOCUMENTS (index.html, prerender captures, other .html
-# under the shell root), never hashed assets. frame-ancestors stops a
-# cross-origin page from framing the shell (the VS Code webview is the one
-# legitimate parent by default); COOP cuts the window.opener handle of a page
-# that window.open()s the shell (#1022). Built once at import, so an invalid
-# RR_SHELL_FRAME_ANCESTORS_EXTRA stops engine startup.
-_frame_ancestors_extra = _frame_ancestor_sources(os.environ.get('RR_SHELL_FRAME_ANCESTORS_EXTRA', 'vscode-webview:'))
+# Headers for shell DOCUMENTS (index.html, prerender captures, any other HTML
+# under the shell root, static/ included), never scripts, styles or other
+# assets. frame-ancestors stops a cross-origin page from framing the shell;
+# COOP cuts the window.opener handle of a page that window.open()s the shell
+# (#1022). Built once at import, so an invalid RR_SHELL_FRAME_ANCESTORS_EXTRA
+# stops engine startup.
+_frame_ancestors = _frame_ancestor_sources(os.environ.get('RR_SHELL_FRAME_ANCESTORS_EXTRA', ''))
 _SHELL_DOCUMENT_HEADERS = {
-    'Content-Security-Policy': f"frame-ancestors 'self' {_frame_ancestors_extra}".rstrip(),
+    'Content-Security-Policy': f'frame-ancestors {_frame_ancestors}',
     'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
 }
+
+# Suffixes served as documents. SVG is left out: the shell only loads its SVGs
+# (favicon, icons) as images, where neither header applies.
+_DOCUMENT_SUFFIXES = frozenset({'.html', '.htm', '.xhtml'})
 
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
@@ -421,14 +442,13 @@ async def shell_static(request: Request):
 
     # Serve the file if it exists. Everything under static/ is content-hashed
     # (a new build changes the name), so the browser may keep it for good.
-    # Any other .html under the shell root is a document and gets the framing
-    # policy; themes, icons and other assets do not.
+    # HTML anywhere under the shell root (static/ included) is a document and
+    # gets the framing policy; themes, icons and other assets do not.
     if file_path.exists() and file_path.is_file():
+        headers = dict(_SHELL_DOCUMENT_HEADERS) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
         if is_static:
-            return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
-        if file_path.suffix.lower() == '.html':
-            return FileResponse(file_path, headers=_SHELL_DOCUMENT_HEADERS)
-        return FileResponse(file_path)
+            headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return FileResponse(file_path, headers=headers or None)
 
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.

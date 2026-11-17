@@ -4,10 +4,9 @@
     "headers": {
       "accept-ranges": "bytes",
       "content-length": "35",
-      "content-security-policy": "frame-ancestors 'self' vscode-webview:",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
       "content-type": "text/html; charset=utf-8",
       "cross-origin-opener-policy": "same-origin-allow-popups",
-      "etag": "\"560a090df76e654a2d90b63ac6ecf017\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /",
@@ -18,10 +17,9 @@
     "headers": {
       "accept-ranges": "bytes",
       "content-length": "37",
-      "content-security-policy": "frame-ancestors 'self' vscode-webview:",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
       "content-type": "text/html; charset=utf-8",
       "cross-origin-opener-policy": "same-origin-allow-popups",
-      "etag": "\"f488fe5dc2c8fdebc574afcfe8871beb\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /pricing",
@@ -32,10 +30,9 @@
     "headers": {
       "accept-ranges": "bytes",
       "content-length": "35",
-      "content-security-policy": "frame-ancestors 'self' vscode-webview:",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
       "content-type": "text/html; charset=utf-8",
       "cross-origin-opener-policy": "same-origin-allow-popups",
-      "etag": "\"560a090df76e654a2d90b63ac6ecf017\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /shell/index.html",
@@ -48,7 +45,6 @@
       "cache-control": "public, max-age=31536000, immutable",
       "content-length": "20",
       "content-type": "text/javascript; charset=utf-8",
-      "etag": "\"774e28ab81fe9645100baa188188d827\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /shell/static/main.abc123.js",
@@ -59,10 +55,9 @@
     "headers": {
       "accept-ranges": "bytes",
       "content-length": "35",
-      "content-security-policy": "frame-ancestors 'self' vscode-webview:",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
       "content-type": "text/html; charset=utf-8",
       "cross-origin-opener-policy": "same-origin-allow-popups",
-      "etag": "\"560a090df76e654a2d90b63ac6ecf017\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /shell/some/client/route",
@@ -123,7 +118,6 @@
       "accept-ranges": "bytes",
       "content-length": "41",
       "content-type": "image/svg+xml",
-      "etag": "\"1a279a85e0d6a59dab34feb3ca9c27f5\"",
       "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
     },
     "request": "GET /apps/acme.thirdparty/icon.svg",

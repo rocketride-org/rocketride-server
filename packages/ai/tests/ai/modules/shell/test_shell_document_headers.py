@@ -25,15 +25,15 @@
 A shell document (the SPA ``index.html``, a prerendered marketing capture,
 or any ``.html`` under the shell root) must carry:
 
-  - ``Content-Security-Policy: frame-ancestors 'self' vscode-webview:`` so no
-    cross-origin page can frame the shell (the VS Code webview is the one
-    legitimate parent);
+  - ``Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:``
+    so no cross-origin page can frame the shell (the VS Code webview, inside the
+    desktop workbench, is the one legitimate parent);
   - ``Cross-Origin-Opener-Policy: same-origin-allow-popups`` so a page that
     ``window.open``s the shell loses its ``window.opener`` handle.
 
-The extra frame ancestors come from ``RR_SHELL_FRAME_ANCESTORS_EXTRA`` and are
+Extra frame ancestors from ``RR_SHELL_FRAME_ANCESTORS_EXTRA`` are appended and
 validated at import. Hashed static assets are not documents and get neither
-header.
+header; HTML under ``static/`` is a document and gets both.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from fastapi.testclient import TestClient
 
 import ai.modules.shell.shell as shell_mod
 
-CSP = "frame-ancestors 'self' vscode-webview:"
+CSP = "frame-ancestors 'self' vscode-webview: vscode-file:"
 COOP = 'same-origin-allow-popups'
 ENV = 'RR_SHELL_FRAME_ANCESTORS_EXTRA'
 
@@ -68,7 +68,12 @@ def shell_root(tmp_path, monkeypatch):
     (tmp_path / '_prerender' / 'pricing' / 'index.html').write_text('<!doctype html><title>pricing</title>')
     (tmp_path / 'static').mkdir()
     (tmp_path / 'static' / 'main.abc123.js').write_text('console.log(1)')
+    (tmp_path / 'static' / 'view.abc123.html').write_text('<!doctype html><title>view</title>')
     (tmp_path / 'about.html').write_text('<!doctype html><title>about</title>')
+    (tmp_path / 'legacy.htm').write_text('<!doctype html><title>legacy</title>')
+    (tmp_path / 'page.xhtml').write_text('<html xmlns="http://www.w3.org/1999/xhtml"><title>x</title></html>')
+    (tmp_path / 'themes').mkdir()
+    (tmp_path / 'themes' / 'dark.json').write_text('{}')
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
     return tmp_path
 
@@ -113,6 +118,28 @@ def test_shell_html_file_sends_document_headers(shell_root):
     _assert_document_headers(resp)
 
 
+def test_htm_and_xhtml_files_are_documents(shell_root):
+    """T3b: .htm and .xhtml are documents too."""
+    client = _client()
+    _assert_document_headers(client.get('/shell/legacy.htm'))
+    _assert_document_headers(client.get('/shell/page.xhtml'))
+
+
+def test_html_under_static_is_a_document_and_stays_immutable(shell_root):
+    """T3c: an HTML entry page under static/ gets the framing policy AND the immutable cache."""
+    resp = _client().get('/shell/static/view.abc123.html')
+    _assert_document_headers(resp)
+    assert resp.headers['cache-control'] == 'public, max-age=31536000, immutable'
+
+
+def test_non_document_shell_file_has_no_document_csp(shell_root):
+    """T4b (control): theme JSON and other non-HTML files are not documents."""
+    resp = _client().get('/shell/themes/dark.json')
+    assert resp.status_code == 200
+    assert 'content-security-policy' not in resp.headers
+    assert 'cross-origin-opener-policy' not in resp.headers
+
+
 def test_hashed_static_asset_has_no_document_csp(shell_root):
     """T4 (control): content-hashed bundles are not documents; no framing policy on them."""
     resp = _client().get('/shell/static/main.abc123.js')
@@ -122,18 +149,49 @@ def test_hashed_static_asset_has_no_document_csp(shell_root):
     assert resp.headers['cache-control'] == 'public, max-age=31536000, immutable'
 
 
-def test_frame_ancestors_extra_env_is_appended(shell_root, reload_shell, monkeypatch):
-    """T5: RR_SHELL_FRAME_ANCESTORS_EXTRA replaces the vscode-webview default, 'self' always stays."""
-    mod = reload_shell('https://a.example vscode-webview:')
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        ('https://a.example', f'{CSP} https://a.example'),
+        ('https://a.example  http://localhost:3000', f'{CSP} https://a.example http://localhost:3000'),
+        ('HTTPS://*.Code-Server.Example:8443', f'{CSP} https://*.code-server.example:8443'),
+        ('vscode-webview: vscode-file:', CSP),
+        ('', CSP),
+    ],
+)
+def test_frame_ancestors_extra_env_is_appended(shell_root, reload_shell, monkeypatch, value, expected):
+    """T5: RR_SHELL_FRAME_ANCESTORS_EXTRA is appended (lowercased, deduplicated) to 'self' and the VS Code defaults."""
+    mod = reload_shell(value)
     monkeypatch.setattr(mod, '_shell_root', str(shell_root))
     resp = _client().get('/shell/some/route')
     assert resp.status_code == 200
-    assert resp.headers.get('content-security-policy') == "frame-ancestors 'self' https://a.example vscode-webview:"
+    assert resp.headers.get('content-security-policy') == expected
     assert resp.headers.get('cross-origin-opener-policy') == COOP
 
 
 @pytest.mark.parametrize(
-    'bad', ["'unsafe-inline'", 'a;b', 'https://x/path', 'https://a.example, vscode-webview:', '*.example']
+    'bad',
+    [
+        "'unsafe-inline'",
+        "'self'",
+        'a;b',
+        'https://x/path',
+        'https://a.example, vscode-webview:',
+        '*.example',
+        '*',
+        'https://*',
+        'http://*:80',
+        'https://*.com',
+        'https://a..b',
+        'https:',
+        'HTTP:',
+        'data:',
+        'blob:',
+        'ws:',
+        'wss:',
+        'filesystem:',
+        'javascript:',
+    ],
 )
 def test_invalid_frame_ancestors_extra_refuses_import(reload_shell, bad):
     """T6: a malformed value stops startup and names the offending token."""

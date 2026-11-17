@@ -24,7 +24,7 @@
 
 PR1 and PR2 of the #1022 fix add isolation machinery behind ``RR_APP_ISOLATION``.
 While it is ``off`` they must leave every response byte for byte as PR0 ships
-it: same status, same headers (``Date`` aside), same body. This test drives the
+it: same status, same headers (``Date`` and ``ETag`` aside), same body. This test drives the
 real ``shell_static``, ``apps_session`` and ``apps_static`` handlers over a
 seeded tree and compares each response with ``golden/off_golden.json``.
 
@@ -139,7 +139,9 @@ def _record(client: TestClient) -> list:
             {
                 'request': f'{method} {path}',
                 'status': resp.status_code,
-                'headers': {k: v for k, v in sorted(resp.headers.items()) if k != 'date'},
+                # date changes per run; etag hashes mtime and size, which
+                # depend on the checkout, not on the served policy.
+                'headers': {k: v for k, v in sorted(resp.headers.items()) if k not in ('date', 'etag')},
                 'bodySha256': hashlib.sha256(resp.content).hexdigest(),
             }
         )
