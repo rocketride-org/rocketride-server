@@ -21,9 +21,51 @@
 // SOFTWARE.
 // =============================================================================
 
-// PR2a-1 red-before stub: every export throws until the implementation lands.
+// =============================================================================
+// APP PATHS — store paths an isolated app may name
+// =============================================================================
+//
+// An app's store is `apps/<appKey>` (the key, not the id, so look-alike ids
+// never share a directory). A path is accepted only when it is that root or
+// lies under it after NFC normalisation, with no `.`/`..` or empty segment
+// (raw or percent-encoded), no backslash and no control character.
+// =============================================================================
 
-/** Canonical app path, or null when the path is not under `apps/<appKey>`. */
-export function canonicalAppPath(_path: string, _appKey: string): string | null {
-	throw new Error('not implemented: canonicalAppPath');
+const CONTROL_OR_BACKSLASH = /[\u0000-\u001f\u007f\\]/;
+
+/** Whether one path segment is safe (the last may be empty: a trailing slash). */
+function segmentOk(seg: string, last: boolean): boolean {
+	if (seg === '') return last;
+	if (seg === '.' || seg === '..') return false;
+	if (seg.includes('%')) {
+		let decoded: string;
+		try {
+			decoded = decodeURIComponent(seg);
+		} catch {
+			return false;
+		}
+		if (decoded === '.' || decoded === '..' || decoded.includes('/') || CONTROL_OR_BACKSLASH.test(decoded)) return false;
+	}
+	return true;
+}
+
+/**
+ * The canonical (NFC) form of an app store path.
+ *
+ * @param path - The path as the app sent it.
+ * @param appKey - The realm's app key.
+ * @returns The canonical path, or null when it is not under `apps/<appKey>`.
+ */
+export function canonicalAppPath(path: string, appKey: string): string | null {
+	if (typeof path !== 'string') return null;
+	const nfc = path.normalize('NFC');
+	if (CONTROL_OR_BACKSLASH.test(nfc)) return null;
+	const root = `apps/${appKey}`;
+	if (nfc === root) return nfc;
+	if (!nfc.startsWith(`${root}/`)) return null;
+	const segs = nfc.slice(root.length + 1).split('/');
+	for (let i = 0; i < segs.length; i++) {
+		if (!segmentOk(segs[i], i === segs.length - 1)) return null;
+	}
+	return nfc;
 }

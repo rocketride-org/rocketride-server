@@ -21,13 +21,90 @@
 // SOFTWARE.
 // =============================================================================
 
-// PR2a-1 red-before stub: every export throws until the implementation lands.
+// =============================================================================
+// RATE — per-realm buckets, quotas and size caps (plan section 4.2 and 4.3)
+// =============================================================================
+
+/** Size caps, in bytes unless named otherwise. */
+export const SIZES = {
+	/** One inbound request (UTF-8 JSON, binary members excluded). */
+	request: 256 * 1024,
+	/** One response to a realm (JSON plus binary). */
+	response: 8 * 1024 * 1024,
+	/** One binary member, and all binary members of one request together. */
+	bytes: 8 * 1024 * 1024,
+	/** A `json` argument. */
+	json: 256 * 1024,
+	/** One pref value. */
+	prefValue: 16 * 1024,
+	/** Pref key length, in characters. */
+	prefKey: 64,
+	/** Distinct pref keys per realm. */
+	prefKeys: 256,
+	/** `shell.notify` text, in characters. */
+	notify: 200,
+	/** `shell.statusMessage` text, in characters. */
+	status: 120,
+	/** A `string` argument, in UTF-8 bytes. */
+	string: 4096,
+	/** Names, sources, modes and subcommands, in UTF-8 bytes. */
+	name: 128,
+} as const;
+
+/** Per-realm quotas (`quota`); `inflight` is reported as `rate`. */
+export const QUOTAS = {
+	runs: 8,
+	pipes: 16,
+	fsHandles: 32,
+	monitorKeys: 16,
+	registeredOps: 64,
+	topics: 64,
+	inflight: 32,
+} as const;
+
+/** The request bucket: a burst of 100, refilled at 20 per second. */
+const REQUEST_BURST = 100;
+const REQUEST_PER_MS = 20 / 1000;
+
+/** Ops limited to one call per interval (ms). */
+export const INTERVALS: Readonly<Record<string, number>> = {
+	'shell.notify': 2000,
+	'shell.openExternal': 2000,
+	'shell.loginRequest': 10_000,
+	'shell.frameToken.refresh': 60_000,
+};
 
 export interface IRateLimiter {
+	/** Takes one unit from `bucket` (`request`, or an op of {@link INTERVALS}); false when empty. */
 	allow(bucket: string): boolean;
 }
 
-/** Buckets over an injectable clock. */
-export function createRateLimiter(_now: () => number): IRateLimiter {
-	throw new Error('not implemented: createRateLimiter');
+/**
+ * Buckets over an injectable clock. An unknown bucket name is refused.
+ *
+ * @param now - The clock (ms).
+ * @returns The limiter.
+ */
+export function createRateLimiter(now: () => number): IRateLimiter {
+	let tokens = REQUEST_BURST;
+	let refilledAt = now();
+	const lastCall = new Map<string, number>();
+	return {
+		allow(bucket) {
+			const t = now();
+			if (bucket === 'request') {
+				tokens = Math.min(REQUEST_BURST, tokens + Math.max(0, t - refilledAt) * REQUEST_PER_MS);
+				refilledAt = t;
+				if (tokens < 1) return false;
+				tokens -= 1;
+				return true;
+			}
+			const interval = INTERVALS[bucket];
+			if (interval === undefined) return false;
+			const last = lastCall.get(bucket);
+			if (last !== undefined && t - last < interval) return false;
+			lastCall.set(bucket, t);
+			return true;
+		},
+	};
 }
