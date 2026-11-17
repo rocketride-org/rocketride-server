@@ -386,6 +386,9 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     # appRoot names the app folder inside a workspace-relative zip; its shape
     # is guarded like a zip entry (it becomes a path inside the source tree).
     caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
+    # Server-owned keys are never the caller's (#1022): 'platform' is the
+    # seeder's first-party marker and 'approvedCapabilities' an admin's grant.
+    caller_meta = {k: v for k, v in caller_meta.items() if k not in _SERVER_OWNED_METADATA}
     app_root = str(caller_meta.get('appRoot') or '')
     if app_root and (
         app_root.startswith('/')
@@ -410,6 +413,9 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         _assert_owns_namespace(conn, app_id)
     except ValueError as exc:
         return conn.build_error(request, str(exc))
+    manifest_error = _isolation_manifest_error(manifest)
+    if manifest_error:
+        return conn.build_error(request, manifest_error)
     guard_error = _zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
@@ -564,6 +570,36 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     debug(f'[app_deploy] deployed {app_id} v{artifact["appVersion"]} as registry v{version} (private, build queued)')
     # One generic response shape for every kind: rrext_deploy add -> {artifact}
     return conn.build_response(request, body={'artifact': _rail_entry(entry, artifact)})
+
+
+# Deployment metadata keys only the server writes (stripped from a deploy's
+# caller metadata): the seeder's first-party marker and the admin's grant.
+_SERVER_OWNED_METADATA = frozenset({'platform', 'approvedCapabilities'})
+
+
+def _isolation_manifest_error(manifest: Dict[str, Any]) -> str:
+    """
+    Why the appManifest's isolation fields refuse the deploy, or '' (#1022).
+
+    ``network`` must pass ``validate_network`` (it becomes CSP sources);
+    ``capabilities`` (the app's REQUEST, not a grant) must be a list of names
+    from ``capabilities.json``. An absent field is unchanged behaviour.
+    """
+    from ai.modules.shell.app_origin import known_capabilities, validate_network
+
+    if 'network' in manifest:
+        try:
+            validate_network(manifest['network'])
+        except ValueError as exc:
+            return f'appManifest.network: {exc}'
+    if 'capabilities' in manifest:
+        caps = manifest['capabilities']
+        known = known_capabilities()
+        if known is None:
+            return 'appManifest.capabilities cannot be checked: capabilities.json is not available on this server'
+        if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
+            return f'appManifest.capabilities must be a list of {", ".join(sorted(known))}'
+    return ''
 
 
 def _manifest_of_zip(archive: Any, app_root: str = '') -> 'tuple[Dict[str, Any], str]':
