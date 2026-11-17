@@ -146,8 +146,7 @@ test('G4R3-2 no lost-run lookup after detach or teardown', async (tt) => {
 // Security R3-M1 — the response relay between realms of one app
 // =============================================================================
 
-const codeOfRejection = (r: { ok: boolean; message?: string }): string | undefined =>
-	!r.ok && r.message?.startsWith('RR_DENIED:') ? (JSON.parse(r.message.slice('RR_DENIED:'.length)) as { code?: string }).code : undefined;
+const codeOfRejection = (r: { ok: boolean; message?: string }): string | undefined => (!r.ok && r.message?.startsWith('RR_DENIED:') ? (JSON.parse(r.message.slice('RR_DENIED:'.length)) as { code?: string }).code : undefined);
 
 test('G4R3-M1 a relayed response is size-capped, rebuilt and charged', async (tt) => {
 	await tt.test('size', async (st) => {
