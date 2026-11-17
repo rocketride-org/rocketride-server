@@ -32,6 +32,7 @@ import { ReadOnlyFlowGraphProvider, type FlowNode } from './stand-ins/FlowGraphC
 import { ReadOnlyFlowProjectProvider } from './stand-ins/FlowProjectContext';
 import { ReadOnlyFlowPreferencesProvider } from './stand-ins/FlowPreferencesContext';
 import { ESTIMATED_NODE_SIZE, displayPath, mainFlow, placeNodes, type CanvasModel } from './model';
+import { LAYER_GAP, edgesThroughNodes } from './layout';
 
 /**
  * Canvas height bounds, in px. The height follows the drawing's shape inside
@@ -52,12 +53,17 @@ const NARROW_MAX_HEIGHT = 420;
 export const OVERVIEW_ZOOM = 1;
 /** A label narrower than this on screen is not drawn: it could not hold a word. */
 const LABEL_MIN_WIDTH = 40;
-/** Below this on-screen width a label uses a smaller font on up to two lines. */
+/** Below this on-screen width a two-line label uses the smaller font. */
 const LABEL_WIDE = 90;
 /** Label text sizes, one line and two lines, and the space the icon, gap and padding take. */
 const LABEL_FONT = 12;
 const LABEL_FONT_NARROW = 10.5;
-const LABEL_CHROME = 12 + 5 + 14;
+/** Icon, gap, padding and border of a label, one line and two lines (see canvas.css). */
+const LABEL_CHROME = 12 + 5 + 14 + 2;
+const LABEL_CHROME_NARROW = 12 + 3 + 6 + 2;
+const LABEL_ICON = 12 + 3;
+/** Two neighbouring labels fill at most twice this share of the gap between their nodes. */
+const LABEL_GAP_SHARE = 0.46;
 /** The widest a label grows, in px. */
 const LABEL_MAX_WIDTH = 190;
 /** Height of the builder's top cap and header row at zoom 1, used until the header is measured. */
@@ -335,33 +341,40 @@ function headerBottom(id: string): number {
 	return bottom || NODE_HEADER_HEIGHT;
 }
 
+type Neighbour = { id: string; gap: number } | null;
+
 /**
- * Room for each node's label, in flow units: the node's width plus, on each
- * side, a bit under half the gap to the nearest node whose header band it
- * shares.
- * Positions only change when the widget lays a pipeline out again, so this
- * is worked out once per placement.
+ * The nearest node on each side of every node whose label band it shares,
+ * and the gap to it in flow units. A label band is the node's header, or the
+ * height of a two-line label when that is taller at this zoom. `blocked`
+ * marks a node that overlaps another in its band, whose label stays as wide
+ * as the node. Worked out once per placement and zoom step.
  */
-function useLabelRoom(): Map<string, number> {
+function useNeighbours(zoom: number): Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }> {
 	const nodes = useStore((s) => s.nodes);
 	const nodeLookup = useStore((s) => s.nodeLookup);
+	const step = Math.round(zoom * 50) / 50;
 	return useMemo(() => {
-		const boxes = [...nodeLookup.values()].filter((node) => node.type === INodeType.Default && node.measured?.width).map((node) => ({ id: node.id, x: node.internals.positionAbsolute.x, y: node.internals.positionAbsolute.y, w: node.measured!.width!, h: headerBottom(node.id) }));
-		const room = new Map<string, number>();
+		const boxes = [...nodeLookup.values()].filter((node) => node.type === INodeType.Default && node.measured?.width).map((node) => ({ id: node.id, x: node.internals.positionAbsolute.x, y: node.internals.positionAbsolute.y, w: node.measured!.width!, h: Math.max(headerBottom(node.id), LABEL_MIN_HEIGHT_TWO_LINES / Math.max(step, 0.02)) }));
+		const result = new Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }>();
 		for (const box of boxes) {
-			// A node with no neighbour on a side may overhang into the fit's label margin.
-			let gap = (LABEL_MARGIN_X / 0.42) * 0.9;
+			let left: Neighbour = null;
+			let right: Neighbour = null;
+			let blocked = false;
 			for (const other of boxes) {
 				if (other === box || other.y > box.y + box.h || other.y + other.h < box.y) continue;
-				if (other.x >= box.x + box.w) gap = Math.min(gap, other.x - (box.x + box.w));
-				else if (other.x + other.w <= box.x) gap = Math.min(gap, box.x - (other.x + other.w));
-				else gap = 0;
+				if (other.x >= box.x + box.w) {
+					const gap = other.x - (box.x + box.w);
+					if (!right || gap < right.gap) right = { id: other.id, gap };
+				} else if (other.x + other.w <= box.x) {
+					const gap = box.x - (other.x + other.w);
+					if (!left || gap < left.gap) left = { id: other.id, gap };
+				} else blocked = true;
 			}
-			// A bit under half the gap on each side, so two neighbours' labels never meet.
-			room.set(box.id, box.w + 2 * Math.max(0, gap) * 0.42);
+			result.set(box.id, { left, right, blocked });
 		}
-		return room;
-	}, [nodes, nodeLookup]);
+		return result;
+	}, [nodes, nodeLookup, step]);
 }
 
 /** Width of `text` in the labels' font, measured once per text and size. */
@@ -374,9 +387,11 @@ function textWidth(text: string, size: number): number {
 	if (known !== undefined) return known;
 	measurer ??= document.createElement('canvas').getContext('2d');
 	if (!measurer) return text.length * size * 0.6;
-	const family = getComputedStyle(document.documentElement).getPropertyValue('--rr-font-family') || 'system-ui, sans-serif';
+	// The labels' font (canvas.css): the theme's family, else the page's.
+	const family = getComputedStyle(document.documentElement).getPropertyValue('--rr-font-family').trim() || getComputedStyle(document.body).fontFamily || 'sans-serif';
 	measurer.font = `500 ${size}px ${family}`;
-	const width = measurer.measureText(text).width;
+	// A pixel of slack per side, for rounding and hinting.
+	const width = measurer.measureText(text).width + 2;
 	textWidths.set(key, width);
 	return width;
 }
@@ -385,9 +400,9 @@ function textWidth(text: string, size: number): number {
  * Larger titles over the builder's node headers when the drawing is zoomed
  * out too far to read them, in the spirit of React Flow's contextual zoom.
  * A label is its node's header drawn larger: the same place, width, colours,
- * border and font, the icon first. It widens past the node, up to a bit
- * under half the gap to each neighbour, only when the title does not fit, and
- * a narrow one wraps to two lines. It grows down over the lanes (unreadable
+ * border and font, the icon first. It widens past the node only when the
+ * title does not fit, into the gaps to its neighbours, which two neighbours
+ * share by how much each title needs. A narrow one wraps to two lines. It grows down over the lanes (unreadable
  * at this zoom), never up, so the node's top edge stays where it is. A label
  * that would overlap another is dropped, as map labels are. Labels stay
  * inside the frame. When no label fits, the hint says how to read the names.
@@ -397,35 +412,80 @@ function textWidth(text: string, size: number): number {
 function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue: (needed: boolean) => void }): ReactElement | null {
 	const [tx, ty, zoom] = useStore((s) => s.transform);
 	const frameWidth = useStore((s) => s.width);
+	const frameHeight = useStore((s) => s.height);
 	const nodeLookup = useStore((s) => s.nodeLookup);
-	const room = useLabelRoom();
+	const neighbours = useNeighbours(zoom);
 	const labels: ReactElement[] = [];
 	const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
 	const ordered = [...nodeLookup.values()].filter((node) => zoom < OVERVIEW_ZOOM && node.type === INodeType.Default && node.measured?.width).sort((a, b) => a.internals.positionAbsolute.y - b.internals.positionAbsolute.y || a.internals.positionAbsolute.x - b.internals.positionAbsolute.x);
-	for (const node of ordered) {
+	// What each label wants past its node's width: as wide as its title on one line.
+	const items = ordered.map((node) => {
 		const data = node.data as INodeData;
 		const service = services[data.provider] as { title?: string; icon?: string; capabilities?: number } | undefined;
 		const title = data.name || service?.title || data.provider;
 		const experimental = ((service?.capabilities ?? 0) & IServiceCapabilities.Experimental) === IServiceCapabilities.Experimental;
 		const nodeWidth = node.measured!.width! * zoom;
-		const roomWidth = Math.min(LABEL_MAX_WIDTH, Math.max(nodeWidth, (room.get(node.id) ?? node.measured!.width!) * zoom));
-		// As wide as the node, wider only as far as the title needs.
 		const needed = textWidth(title, LABEL_FONT) + LABEL_CHROME + (experimental ? 9 : 0);
-		const width = Math.max(nodeWidth, Math.min(needed, roomWidth));
+		return { node, service, title, experimental, nodeWidth, needed, wants: Math.max(0, Math.min(LABEL_MAX_WIDTH, needed) - nodeWidth) };
+	});
+	const wants = new Map(items.map((item) => [item.node.id, item.wants]));
+	for (const { node, service, title, experimental, nodeWidth, needed, wants: own } of items) {
+		// Two neighbours share the gap between them by how much each title needs,
+		// leaving a sliver so their labels never meet. A side with no neighbour
+		// takes what a neighbour one column gap away would leave, up to the frame's edge.
+		const near = neighbours.get(node.id);
+		const nodeLeft = node.internals.positionAbsolute.x * zoom + tx;
+		// A node panned out of the frame has no label at the frame's edge.
+		if (nodeLeft + nodeWidth <= 0 || nodeLeft >= frameWidth) continue;
+		const reach = (side: Neighbour, open: number) => {
+			if (!side) return Math.min(own, Math.max(0, open), LAYER_GAP * zoom * 2 * LABEL_GAP_SHARE);
+			const room = side.gap * zoom * 2 * LABEL_GAP_SHARE;
+			const other = wants.get(side.id) ?? 0;
+			return own + other <= room ? own : (room * own) / Math.max(own + other, 1);
+		};
+		const maxLeft = near?.blocked ? 0 : reach(near?.left ?? null, nodeLeft - 2);
+		const maxRight = near?.blocked ? 0 : reach(near?.right ?? null, frameWidth - 2 - (nodeLeft + nodeWidth));
+		// Centred on the node when both sides allow it, else shifted to the roomier side.
+		let toLeft = Math.min(maxLeft, own / 2);
+		const toRight = Math.min(maxRight, own - toLeft);
+		toLeft = Math.min(maxLeft, own - toRight);
+		const width = nodeWidth + toLeft + toRight;
 		if (width < LABEL_MIN_WIDTH) continue;
-		const narrow = needed > width && width < LABEL_WIDE;
+		// A title that does not fit one line takes two, broken between words (or
+		// after a hyphen), never inside one: in the label font when the longest
+		// word fits, else the smaller one, else without the icon. When it still
+		// does not fit, the label is one line cut short with an ellipsis (the
+		// node's tooltip has the whole title).
+		let narrow = needed > width;
+		let font = LABEL_FONT;
+		let icon = !!service?.icon;
+		let short = false;
+		if (narrow) {
+			const words = title.split(/\s+|(?<=-)/);
+			const fits = (size: number, withIcon: boolean) => Math.max(...words.map((word) => textWidth(word, size))) <= width - LABEL_CHROME_NARROW - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
+			if (width < LABEL_WIDE || !fits(LABEL_FONT, icon)) font = LABEL_FONT_NARROW;
+			if (!fits(font, icon)) {
+				icon = false;
+				if (!fits(font, false)) {
+					narrow = false;
+					short = true;
+				}
+			}
+		}
 		const { x, y } = node.internals.positionAbsolute;
 		const header = headerBottom(node.id) * zoom;
-		const height = Math.max(header, narrow ? LABEL_MIN_HEIGHT_TWO_LINES : LABEL_MIN_HEIGHT);
+		const height = Math.max(header, narrow ? (font === LABEL_FONT ? LABEL_MIN_HEIGHT_TWO_LINES + 3 : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
 		// Inside the frame: a label wider than its node must not be cut by the edge.
-		const left = Math.max(2, Math.min(x * zoom + tx + (nodeWidth - width) / 2, frameWidth - width - 2));
-		const top = y * zoom + ty;
+		const left = Math.max(2, Math.min(x * zoom + tx - toLeft, frameWidth - width - 2));
+		// A label taller than a node at the bottom of the frame moves up to stay inside it.
+		const nodeTop = y * zoom + ty;
+		const top = nodeTop < frameHeight ? Math.min(nodeTop, frameHeight - height - 2) : nodeTop;
 		const box = { left, top, right: left + width, bottom: top + height };
 		if (placed.some((p) => box.left < p.right && p.left < box.right && box.top < p.bottom && p.top < box.bottom)) continue;
 		placed.push(box);
 		labels.push(
-			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : 'rr-overview-label'} style={{ left, top, width, height, fontSize: narrow ? LABEL_FONT_NARROW : LABEL_FONT }}>
-				{service?.icon && <Icon name={service.icon} width="12" height="12" className="rr-overview-icon" />}
+			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : short ? 'rr-overview-label rr-overview-short' : 'rr-overview-label'} style={{ left, top, width, height, fontSize: short ? LABEL_FONT_NARROW : font }}>
+				{icon && service?.icon && <Icon name={service.icon} width="12" height="12" className="rr-overview-icon" />}
 				<span className="rr-overview-title">{title}</span>
 				{experimental && <i className="rr-overview-badge" title="Experimental" />}
 			</div>
@@ -557,6 +617,26 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 		return () => cancelAnimationFrame(frame);
 	}, [ready, frameWidth, frameHeight, active, placement, fitAll, getNodes, getNodesBounds, getInternalNode, getViewport, setViewport, moved]);
 
+	// A connection that cannot avoid crossing a node (a long flow wrapped in a
+	// narrow frame) is drawn over it, not hidden behind it, so it never looks
+	// like it ends there.
+	const edges = useMemo(() => {
+		if (!initialized) return model.edges;
+		const positions: Record<string, { x: number; y: number }> = {};
+		const sizes: Record<string, { width: number; height: number }> = {};
+		for (const node of nodes) {
+			const internal = getInternalNode(node.id);
+			if (node.type !== INodeType.Default || !internal?.measured?.width || !internal.measured.height) continue;
+			positions[node.id] = internal.internals.positionAbsolute;
+			sizes[node.id] = { width: internal.measured.width, height: internal.measured.height };
+		}
+		const sizeOf = (id: string) => sizes[id];
+		return model.edges.map((edge) => {
+			const control = !!edge.sourceHandle?.startsWith('invoke-source');
+			return edgesThroughNodes(positions, [{ source: edge.source, target: edge.target, control }], sizeOf) ? { ...edge, zIndex: 1 } : edge;
+		});
+	}, [initialized, nodes, model.edges, getInternalNode]);
+
 	const project = useMemo(() => ({ components: [] }) as unknown as IProject, []);
 
 	// Every node carries its full title and kind as a tooltip, for a label cut short.
@@ -575,10 +655,10 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 	return (
 		<ReadOnlyFlowPreferencesProvider>
 			<ReadOnlyFlowProjectProvider project={project} servicesJson={model.services}>
-				<ReadOnlyFlowGraphProvider nodes={nodes} edges={model.edges}>
+				<ReadOnlyFlowGraphProvider nodes={nodes} edges={edges}>
 					<ReactFlow
 						nodes={nodes}
-						edges={model.edges}
+						edges={edges}
 						nodeTypes={NODE_TYPES}
 						edgeTypes={EDGE_TYPES}
 						onNodesChange={(changes) => onNodesChange(onlyDimensions(changes))}

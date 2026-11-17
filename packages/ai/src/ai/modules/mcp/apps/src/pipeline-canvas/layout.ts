@@ -26,7 +26,7 @@ export const BAND_GAP = 100;
  * zoom. The overview labels keep names readable down to about here, and
  * every wrap adds a long connection, so wrapping is the last resort.
  */
-export const WRAP_BELOW_ZOOM = 0.2;
+export const WRAP_BELOW_ZOOM = 0.3;
 
 export interface LayoutSize {
 	width: number;
@@ -169,11 +169,11 @@ function placeBands(bands: string[][][], satellites: Map<string, string[]>, size
 }
 
 /**
- * How many connections, drawn as a straight line between their handles, pass
- * through a node that is not one of their two ends. A data connection runs
- * from the source's right side to the target's left side, an invoke from the
- * invoker's bottom to the invoked node's top. The drawn curves are close to
- * these lines, so a layout with none here draws no connection behind a node.
+ * How many connections pass through a node that is not one of their two
+ * ends. Each is followed along the curve React Flow's getBezierPath draws for
+ * it (the builder's edge): a data connection from the source's right side to
+ * the target's left side, an invoke from the invoker's bottom to the invoked
+ * node's top. Handles are taken at the middle of each side.
  */
 export function edgesThroughNodes(positions: Positions, edges: LayoutEdge[], sizeOf: (id: string) => LayoutSize): number {
 	const boxes = Object.entries(positions).map(([id, p]) => ({ id, ...p, ...sizeOf(id) }));
@@ -185,12 +185,16 @@ export function edgesThroughNodes(positions: Positions, edges: LayoutEdge[], siz
 		const sa = sizeOf(edge.source);
 		const sb = sizeOf(edge.target);
 		const [x1, y1, x2, y2] = edge.control ? [a.x + sa.width / 2, a.y + sa.height, b.x + sb.width / 2, b.y] : [a.x + sa.width, a.y + sa.height / 2, b.x, b.y + sb.height / 2];
+		// The curve React Flow's getBezierPath draws (curvature 0.25), which the builder's edge uses.
+		const offset = (distance: number) => (distance >= 0 ? 0.5 * distance : 0.25 * 25 * Math.sqrt(-distance));
+		const [c1x, c1y, c2x, c2y] = edge.control ? [x1, y1 + offset(y2 - y1), x2, y2 - offset(y2 - y1)] : [x1 + offset(x2 - x1), y1, x2 - offset(x2 - x1), y2];
 		const hit = boxes.some((box) => {
 			if (box.id === edge.source || box.id === edge.target) return false;
-			for (let i = 1; i < 24; i++) {
-				const t = i / 24;
-				const x = x1 + (x2 - x1) * t;
-				const y = y1 + (y2 - y1) * t;
+			for (let i = 1; i < 48; i++) {
+				const t = i / 48;
+				const u = 1 - t;
+				const x = u * u * u * x1 + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * x2;
+				const y = u * u * u * y1 + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * y2;
 				if (x > box.x + 2 && x < box.x + box.width - 2 && y > box.y + 2 && y < box.y + box.height - 2) return true;
 			}
 			return false;
@@ -299,27 +303,51 @@ export function layoutPipeline(ids: string[], edges: LayoutEdge[], sizeOf: (id: 
 		return result;
 	};
 
+	// Every way to cut the columns into `bands` bands, when there are few
+	// enough to try them all; otherwise the cuts near even positions.
+	const allCutsFor = (bands: number): string[][][][] => {
+		if (bands === 1) return [[columns]];
+		if (columns.length > 16 || bands > 4) return [cutsFor(bands)];
+		const sets: string[][][][] = [];
+		const pick = (start: number, left: number, cuts: number[]) => {
+			if (left === 0) {
+				const ends = [...cuts, columns.length];
+				sets.push([0, ...cuts].map((from, i) => columns.slice(from, ends[i])));
+				return;
+			}
+			for (let cut = start; cut <= columns.length - left; cut++) pick(cut + 1, left - 1, [...cuts, cut]);
+		};
+		pick(1, bands - 1, []);
+		return sets;
+	};
+
 	// Keep one band (the builder's own shape) unless it would be drawn too
 	// small to read in the frame. Then use the fewest bands that reach a
-	// readable zoom with no connection behind a node, else the readable one
-	// with the fewest such connections, else the largest drawing.
-	let readable: { positions: Positions; through: number } | null = null;
+	// readable zoom with no connection behind a node (of those, the largest
+	// drawing), else the readable one with the fewest such connections, else
+	// the largest drawing.
+	let readable: { positions: Positions; through: number; zoom: number } | null = null;
 	let best: Positions | null = null;
 	let bestZoom = -Infinity;
 	for (let bands = 1; bands <= columns.length; bands++) {
-		// Even bands: 8 columns in two bands are about 4 and 4, never 7 and 1.
-		const positions = placeBands(cutsFor(bands), satellites, sizeOf);
-		const size = bounds(positions, sizeOf);
-		const zoom = Math.min(1, frame.width / Math.max(size.width, 1), frame.height / Math.max(size.height, 1));
-		if (zoom >= WRAP_BELOW_ZOOM) {
-			const through = edgesThroughNodes(positions, edges, sizeOf);
-			if (through === 0) return positions;
-			if (!readable || through < readable.through) readable = { positions, through };
+		let clear: { positions: Positions; zoom: number } | null = null;
+		for (const cut of allCutsFor(bands)) {
+			const positions = placeBands(cut, satellites, sizeOf);
+			const size = bounds(positions, sizeOf);
+			const zoom = Math.min(1, frame.width / Math.max(size.width, 1), frame.height / Math.max(size.height, 1));
+			// One readable band stays one band: wrapping cannot help a connection that skips a column.
+			if (bands === 1 && zoom >= WRAP_BELOW_ZOOM) return positions;
+			if (zoom >= WRAP_BELOW_ZOOM) {
+				const through = edgesThroughNodes(positions, edges, sizeOf);
+				if (through === 0 && (!clear || zoom > clear.zoom * 1.01)) clear = { positions, zoom };
+				if (!readable || through < readable.through || (through === readable.through && zoom > readable.zoom * 1.01)) readable = { positions, through, zoom };
+			}
+			if (zoom > bestZoom * 1.05) {
+				best = positions;
+				bestZoom = zoom;
+			}
 		}
-		if (zoom > bestZoom * 1.05) {
-			best = positions;
-			bestZoom = zoom;
-		}
+		if (clear) return clear.positions;
 	}
 	if (readable) return readable.positions;
 	return best!;
