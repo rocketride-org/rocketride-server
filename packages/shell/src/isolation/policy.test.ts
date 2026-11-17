@@ -60,8 +60,9 @@ test('T21 realms register only app.<ownKey>.* and requests stay inside the app n
 	await settle();
 	assert.equal(await A2.request(`app.${keyA}.x`, {}), 'own', 'a second realm of the same app reaches the op');
 
-	// A request or emitOp into another app's namespace is refused.
-	await assertDeniedOp(A.request(`app.${keyB}.x`, {}), 'namespace', 'a request into another app namespace');
+	// A request or emitOp into another app's namespace is refused. (Asked from A2: A itself
+	// holds a local handler for app.<keyB>.x, which its own bus resolves without the root.)
+	await assertDeniedOp(A2.request(`app.${keyB}.x`, {}), 'namespace', 'a request into another app namespace');
 	await assertDeniedOp(B.request(`app.${keyA}.x`, {}), 'namespace', 'a request from another app into this one');
 	A.bus.handle('client.request', () => 'hijack');
 	await settle();

@@ -50,7 +50,7 @@ const IMPLEMENTED = ((): boolean => {
 	}
 })();
 
-async function driveSdk(t: ITestRoot, realm: IOpenedRealm): Promise<{ token: string; projectId: string; pipeId: number }> {
+async function driveSdk(_t: ITestRoot, realm: IOpenedRealm): Promise<{ token: string; projectId: string; pipeId: number }> {
 	const key = refAppKey(ENTRY_A.id);
 	const p = (name: string): string => `apps/${key}/${name}`;
 	const client = new RocketRideClientProxy({ request: (op, params, timeoutMs) => realm.bus.request(op, params, timeoutMs === undefined ? undefined : { timeoutMs }) }, {});
