@@ -18,9 +18,11 @@ ALLOWED is a literal copy of that list, kept here on purpose.
 
 from __future__ import annotations
 
+import http.server
 import importlib.util
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -418,3 +420,58 @@ def test_the_paths_reach_both_apis_and_replay_reasoning(monkeypatch, recorder):
 )
 def test_the_check_itself_refuses_what_the_list_refuses(endpoint, body, expected):
     assert violations(endpoint, body) == expected
+
+
+class _Loopback:
+    """A real HTTP server on 127.0.0.1 that counts requests; the backend answers, the proxy refuses."""
+
+    def __init__(self, answers: bool):
+        hits = self.hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get('content-length') or 0)) or b'{}')
+                hits.append(self.path)
+                if answers:
+                    reply = _responses_reply(body) if self.path.endswith('/responses') else _chat_reply(body)
+                    status, kind, content = reply.status_code, reply.headers['content-type'], reply.content
+                else:
+                    status, kind, content = 502, 'text/plain', b'proxy'
+                self.send_response(status)
+                self.send_header('content-type', kind)
+                self.send_header('content-length', str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+
+            def log_message(self, *_args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+@pytest.mark.parametrize('streamed', [True, False], ids=['streamed', 'invoked'])
+@pytest.mark.parametrize('name', sorted(NODE_CONFIGS))
+def test_calls_on_the_pass_skip_an_environment_proxy(monkeypatch, name, streamed):
+    """With HTTP_PROXY set and no NO_PROXY, every client still calls the backend on loopback directly."""
+    backend, proxy = _Loopback(answers=True), _Loopback(answers=False)
+    try:
+        for var in ('NO_PROXY', 'no_proxy', 'ALL_PROXY', 'all_proxy'):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv('HTTP_PROXY', f'http://127.0.0.1:{proxy.port}')
+        monkeypatch.setenv('HTTPS_PROXY', f'http://127.0.0.1:{proxy.port}')
+        monkeypatch.setattr(sys, 'argv', [*sys.argv, '--hosted'])
+        base_url = f'http://127.0.0.1:{backend.port}/gateway/openai/v1'
+        gateway = {'provider': 'openai', 'base_url': base_url, 'token': TOKEN, 'expires_at': time.time() + 3600}
+        monkeypatch.setenv(GATEWAY_ENV, json.dumps(gateway))
+        node, config = NODE_CONFIGS[name]
+
+        for kind in ('prompt', 'turns'):
+            _run(_driver(monkeypatch, node, config), kind, streamed, stop=False)
+
+        assert proxy.hits == []
+        assert len(backend.hits) >= 3
+    finally:
+        backend.server.shutdown()
+        proxy.server.shutdown()

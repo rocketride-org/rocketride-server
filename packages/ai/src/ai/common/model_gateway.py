@@ -233,6 +233,17 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
     return OpenAICredentials(apikey, base_url, False)
 
 
+def hosted_http_clients() -> dict:
+    """HTTP clients for calls on the run's pass, as ``http_client`` and ``http_async_client``.
+
+    They ignore proxy variables from the environment, so the pass goes straight
+    to the hosted backend on loopback and never to a proxy.
+    """
+    import httpx
+
+    return {'http_client': httpx.Client(trust_env=False), 'http_async_client': httpx.AsyncClient(trust_env=False)}
+
+
 def missing_key_message(logical_type: str) -> Optional[str]:
     """For a save-time check: the message for a node with no key, or None.
 

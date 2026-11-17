@@ -189,7 +189,10 @@ class ChatBase:
         try:
             from openai import OpenAI
 
-            self._raw_openai_client = OpenAI(api_key=api_key, base_url=str(base_url))
+            # Same HTTP client as the model it mirrors (None builds the default)
+            self._raw_openai_client = OpenAI(
+                api_key=api_key, base_url=str(base_url), http_client=getattr(llm, 'http_client', None)
+            )
             self._native_stream_provider = 'openai_compat_reasoning'
         except Exception as e:  # openai SDK missing / bad client → fall back to generic stream
             debug(f'    Native reasoning stream unavailable: {type(e).__name__}: {e}')
