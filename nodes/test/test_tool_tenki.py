@@ -90,8 +90,9 @@ def _stubs() -> dict:
         setattr(tenki, name, type(name, (_SandboxError,), {}))
     for name in ('PermissionDeniedError', 'QuotaExceededError'):
         setattr(tenki, name, type(name, (_SandboxError,), {}))
+    tenki.ResumeWaitTimeoutError = type('ResumeWaitTimeoutError', (_SandboxError, TimeoutError), {})
     names = ('depends', 'ai', 'ai.common', 'ai.common.config')
-    return {'rocketlib': rocketlib, 'tenki': tenki, **{name: MagicMock() for name in names}}
+    return {'rocketlib': rocketlib, 'luxor_ai': tenki, **{name: MagicMock() for name in names}}
 
 
 def _load(name, path):
@@ -203,13 +204,15 @@ class _Process:
         self.pid = next(_PIDS) if pid else None
         self.stdout, self.stderr = _Stream(), _Stream()
         self.killed, self._done = threading.Event(), threading.Event()
-        self._start, self._run_error, self._result = start, run_error, result or _Result(argv=list(argv))
+        self._start, self._run_error, self._final = start, run_error, result or _Result(argv=list(argv))
+        self._result = self._error = None  # recorded when the run ends, before the streams end, as in the SDK
         self._stalls, self._flood, self.escapes = run.get('stalls'), run.get('flood'), run.get('escapes')
         if not self._stalls:
             threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
         if self._run_error is not None:
+            self._error = self._run_error
             self.stdout.fail(self._run_error)
             self.stderr.fail(self._run_error)
         elif self._flood:
@@ -219,13 +222,14 @@ class _Process:
                     break
                 self.stdout.push(chunk)
                 time.sleep(0.002)
-            self._result = dataclasses.replace(self._result, stdout=self.stdout.read())
+            self._result = dataclasses.replace(self._final, stdout=self.stdout.read())
         else:
-            self.stdout.push(self._result.stdout)
-            self.stderr.push(self._result.stderr)
-        self._done.set()
+            self.stdout.push(self._final.stdout)
+            self.stderr.push(self._final.stderr)
+            self._result = self._final
         self.stdout.close()
         self.stderr.close()
+        self._done.set()  # last, as luxor-ai 1.5.2 does
 
     def close_stdin(self):
         self.session.calls.append('close_stdin')
@@ -1087,6 +1091,17 @@ def test_a_look_at_the_session_that_runs_past_its_deadline_is_not_the_calls_time
     inst, _ = _used(monkeypatch, session)
     session.state = 'PAUSED'
     session.refresh = lambda: _raise(mod.CommandTimeoutError('Deadline Exceeded'))
+    result = inst.run_command({'command': 'ls'})
+    assert result['timed_out'] is False and 'recovering the sandbox ran past the deadline' in result['error']
+
+
+def test_a_resume_that_runs_past_its_deadline_is_not_the_calls_timeout(monkeypatch, logs):
+    # luxor-ai 1.5.2 raises ResumeWaitTimeoutError, not CommandTimeoutError, for a resume past the client deadline.
+    session = _Session()
+    inst, _ = _used(monkeypatch, session)
+    session.state = 'PAUSED'
+    monkeypatch.setattr(mod, '_RESUME_RETRY_SECS', 0)
+    session.resume = lambda: _raise(mod.ResumeWaitTimeoutError('timeout waiting for sandbox sb-1 to resume'))
     result = inst.run_command({'command': 'ls'})
     assert result['timed_out'] is False and 'recovering the sandbox ran past the deadline' in result['error']
 

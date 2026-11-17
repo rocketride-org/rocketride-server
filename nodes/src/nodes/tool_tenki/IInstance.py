@@ -42,11 +42,11 @@ from rocketlib import IInstanceBase, tool_function, warning
 
 from ai.common.utils import normalize_tool_input, optional_bool, optional_int, optional_str, require_str
 
-from tenki import CommandTimeoutError, PermissionDeniedError, SandboxError
-from tenki import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
+from luxor_ai import CommandTimeoutError, PermissionDeniedError, SandboxError
+from luxor_ai import FileNotFoundError as TenkiFileNotFoundError  # also subclasses the builtin it shadows
 
 from .IGlobal import CommandNotStartedError, IGlobal, about_the_vm_link
-from .sdk_shims import stop_keeping_output
+from .sdk_shims import run_ended, stop_keeping_output
 
 _HOME = '/home/tenki'  # the home and working directory, and the only root Tenki's file API accepts
 
@@ -438,12 +438,6 @@ def _stopped_by_kill(report: tuple[int, int] | None, ran_on: float) -> int:
     return killed
 
 
-def _run_ended(process) -> bool:
-    """Whether ``process``'s result is in or its run failed (the SDK sets ``_done`` before it ends the streams)."""
-    done = getattr(process, '_done', None)
-    return done is not None and done.is_set()
-
-
 class _OutputGuard:
     """Reads a command's output as it arrives; past ``limit`` bytes the SDK keeps no more and the command is killed."""
 
@@ -481,7 +475,7 @@ class _OutputGuard:
                 if cut:
                     stop_keeping_output(self._process)
                     # A run whose exit already arrived sends nothing more, and what it left running on purpose stays.
-                    if not _run_ended(self._process):
+                    if not run_ended(self._process):
                         self.kill = _kill_command_tree(self._session, self._process, self._marker)
                     self.kill_done = time.monotonic()
         except Exception:

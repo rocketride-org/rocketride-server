@@ -37,13 +37,14 @@ from ai.common.config import Config
 from ai.common.utils import config_int
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 
-from tenki import (
+from luxor_ai import (
     Client,
     CommandTimeoutError,
     FileNotFoundError as TenkiFileNotFoundError,
     InvalidStateError,
     PermissionDeniedError,
     QuotaExceededError,
+    ResumeWaitTimeoutError,
     Sandbox,
     SandboxError,
     SessionNotFoundError,
@@ -179,7 +180,7 @@ def _secret_settings(cfg) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return policies, domains
 
 
-# The name Tenki reads after "secrets://" (tenki 1.4.1); any other name would never be substituted.
+# The name Tenki reads after "secrets://" (luxor-ai 1.5.2); any other name would never be substituted.
 _SECRET_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_-]{0,127}')
 # How GitHub, GitLab and Slack tokens begin: no secret's name does.
 _TOKEN_PREFIXES = ('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_', 'github_pat_', 'glpat-', 'xoxb-', 'xoxp-')
@@ -382,7 +383,7 @@ class IGlobal(IGlobalBase):
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         apikey = str(cfg.get('apikey') or '').strip()
-        # Given an empty key the SDK falls back to TENKI_AUTH_TOKEN / TENKI_API_KEY, letting the engine host's
+        # Given an empty key the SDK falls back to LUXORAI_API_KEY, TENKI_API_KEY and the like, letting the engine host's
         # environment decide which workspace is billed.
         if not apikey:
             raise Exception('tool_tenki: apikey is required')
@@ -446,7 +447,7 @@ class IGlobal(IGlobalBase):
         try:
             return self._call(fn, events, replace, once)
         except SandboxError:
-            raise  # including the SDK errors that are also a plain RuntimeError or TimeoutError (tenki 1.4.1)
+            raise  # including the SDK errors that are also a plain RuntimeError or TimeoutError (luxor-ai 1.5.2)
         except (RuntimeError, TimeoutError) as e:
             # A few SDK failures are plain exceptions (Sandbox.start when the data plane is unreachable).
             warning(f'tool_tenki: sandbox call failed with {type(e).__name__}: {e}')
@@ -470,8 +471,8 @@ class IGlobal(IGlobalBase):
             except (SandboxError, RuntimeError, TimeoutError) as failure:
                 if once is not None and once.done:
                     raise once.error(failure) from failure
-                if isinstance(failure, CommandTimeoutError):
-                    # The look at the session ran past its deadline: not this call's own timeout.
+                if isinstance(failure, (CommandTimeoutError, ResumeWaitTimeoutError)):
+                    # The look at the session, or its resume, ran past its deadline: not this call's own timeout.
                     raise SessionUnavailableError(
                         f'the call failed, and recovering the sandbox ran past the deadline: {failure}'
                     ) from failure
@@ -642,7 +643,7 @@ class IGlobal(IGlobalBase):
     def _create_session(self) -> Sandbox:
         sizing = {'cpu_cores': self.cpu_cores, 'memory_mb': self.memory_mb, 'disk_size_gb': self.disk_size_gb}
         create_kwargs = {
-            # Only what was set: with an image Tenki keeps the image's disk unless one is sent (tenki 1.4.1).
+            # Only what was set: with an image Tenki keeps the image's disk unless one is sent (luxor-ai 1.5.2).
             **{key: value for key, value in sizing.items() if value},
             # Tenki has no idle timeout, so this is what stops a session nothing closes (an engine crash): Tenki
             # pauses it then. sticky stays False: a sticky session discards max_duration.

@@ -137,7 +137,7 @@ That access can change every secret and policy in the workspace, so give the nod
 
 ## Dependencies
 
-- `tenki` `==1.4.1`
+- `luxor-ai` `==1.5.2`
 
 ## Source
 
