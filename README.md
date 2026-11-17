@@ -216,7 +216,7 @@ Everything on [docs.rocketride.org](https://docs.rocketride.org/) is built from 
 | Looking for | Start at |
 |---|---|
 | Using RocketRide: quickstart, concepts, guides, cloud, self-hosting | [`docs/public/product/`](docs/public/product/) (the site, page for page) |
-| SDK guides | [TypeScript](docs/public/typescript/) · [Python](docs/public/python/) · [MCP](docs/public/mcp/) |
+| MCP and SDK guides | [MCP](docs/public/mcp/) · [TypeScript](docs/public/typescript/) · [Python](docs/public/python/) |
 | Building your own client on the engine protocol | [`docs/public/product/connect/websocket/`](docs/public/product/connect/websocket/) |
 | Contributing: setup, builder, engine internals, node authoring | [`docs/development/`](docs/development/index.md) |
 | Node catalog | each node's `README.md` under [`nodes/src/nodes/`](nodes/src/nodes) |

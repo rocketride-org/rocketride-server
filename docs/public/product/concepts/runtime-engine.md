@@ -48,11 +48,11 @@ build, self-hosted in your own network, or managed on RocketRide Cloud. See
 You never call the engine's internals directly. Clients connect over one of two
 protocols and the engine handles the rest:
 
+- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
+  observe pipelines.
 - **[WebSocket](/connect/websocket)**: the native engine protocol. The
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it
   for you.
-- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
-  observe pipelines.
 
 As pipelines run, the engine reports call trees, token usage, and memory so you
 can observe what happened. See [Troubleshooting](/support/troubleshooting) for reading

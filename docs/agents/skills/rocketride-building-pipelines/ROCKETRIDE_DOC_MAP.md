@@ -28,6 +28,14 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 
 > RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
 
+MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, or the VS Code extension.
+
+Use RocketRide when:
+
+- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, PII anonymization) and take them to production.
+- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, the Python and TypeScript SDKs, or your IDE.
+- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.
+
 ## Home
 
 - [RocketRide Documentation](/index.md)

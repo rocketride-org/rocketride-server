@@ -26,10 +26,10 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 
 | Client         | Package          | Document                                    |
 | -------------- | ---------------- | ------------------------------------------- |
+| **MCP**        | built into the engine (`/mcp`) | [MCP server](/connect/mcp/http) |
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
 | **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
 | **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
-| **MCP**        | built into the engine (`/mcp`) | [MCP server](/connect/mcp/http) |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 

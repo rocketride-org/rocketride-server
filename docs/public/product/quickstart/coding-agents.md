@@ -51,6 +51,22 @@ curl http://localhost:5565/version
 
 It answers 200 with `{"status":"OK","data":{"version":"..."}}` and needs no key. Every other unknown path, such as `/ping`, answers 401.
 
+## Use it over MCP locally
+
+A running engine serves MCP at `http://localhost:5565/mcp`. Send the key you started the engine with as a bearer token:
+
+```text
+Authorization: Bearer rr_local
+```
+
+Claude Code:
+
+```bash
+claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
+```
+
+On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
+
 ## Use it from the CLI or SDK
 
 Install the Python package (Python 3.10 or newer) in a virtual environment. It installs the `rocketride` command while the environment is active. The commands are joined with `&&`, so the block stops at the first line with a clear message if `python3` is too old (the `python3` that ships with macOS is 3.9); if it stops, use a newer interpreter in both places, for example `python3.12`:
@@ -167,22 +183,6 @@ Both branches start from the `tags` lane of the webhook. A branch that reads ano
 The pipeline needs no model provider key and no account. A first run on a fresh engine took about 13 seconds on a laptop, and later runs took 5 to 9 seconds. Starting the engine is separate and not counted.
 
 More: [Run from the CLI](/quickstart/cli), [CLI Reference](/connect/cli), [Python SDK](/clients/python), [TypeScript SDK](/clients/typescript).
-
-## Use it over MCP locally
-
-A running engine serves MCP at `http://localhost:5565/mcp`. Send the key you started the engine with as a bearer token:
-
-```text
-Authorization: Bearer rr_local
-```
-
-Claude Code:
-
-```bash
-claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
-```
-
-On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
 
 ## Use the hosted server
 

@@ -18,14 +18,15 @@ const SITE_TITLE = 'RocketRide Documentation';
 // deciding whether RocketRide fits the task.
 const SITE_ABOUT =
 	'MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native ' +
-	'download, or use RocketRide Cloud. Use it from MCP, the CLI, or the Python or TypeScript SDK.';
+	'download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, ' +
+	'or the VS Code extension.';
 const SITE_WHEN = [
-	'## When to use RocketRide',
+	'Use RocketRide when:',
 	'',
 	'- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, ' +
 		'PII anonymization) and take them to production.',
-	'- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, your IDE, the CLI, ' +
-		'or the Python and TypeScript SDKs.',
+	'- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, ' +
+		'the Python and TypeScript SDKs, or your IDE.',
 	'- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.',
 ];
 const SITE_DESC =
@@ -234,7 +235,7 @@ function llmsIndex(manifest) {
 }
 
 async function llmsFull(manifest, generated) {
-	const parts = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, ''];
+	const parts = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, '', SITE_ABOUT, '', ...SITE_WHEN, ''];
 	for (const e of ordered(manifest)) {
 		let content = generated.get(e.id);
 		if (content == null && e.source && (await exists(e.source))) content = await readFile(e.source);
