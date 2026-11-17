@@ -43,11 +43,29 @@ import type { IAppRoot, IsolatedEntry } from '../types';
 
 const ENVELOPE = '__rrbus';
 
-/** Lets pending channel deliveries run (several full event-loop turns). */
-export async function settle(turns = 12): Promise<void> {
+/** Messages delivered on any test channel (both directions), for {@link settle}. */
+let deliveries = 0;
+
+/** One round of event-loop turns. */
+async function turnRound(turns: number): Promise<void> {
 	for (let i = 0; i < turns; i++) await new Promise((resolve) => setImmediate(resolve));
 	await new Promise((resolve) => setTimeout(resolve, 5));
 	for (let i = 0; i < turns; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * Lets pending channel deliveries run: rounds of event-loop turns until no
+ * channel delivered anything for two rounds in a row (at most 60 rounds).
+ * Waiting on quiescence rather than a fixed number of turns keeps tests
+ * that assert a delivery stable on a loaded machine.
+ */
+export async function settle(turns = 12): Promise<void> {
+	let quiet = 0;
+	for (let round = 0; round < 60 && quiet < 2; round++) {
+		const before = deliveries;
+		await turnRound(turns);
+		quiet = deliveries === before ? quiet + 1 : 0;
+	}
 }
 
 /** One structured-clone channel: endpoint `a` for the root, `b` for the realm. */
@@ -67,12 +85,16 @@ export function createChannel(): IChannel {
 	const received: unknown[] = [];
 	// The tap records everything the realm side receives, subscribers or not.
 	port2.addEventListener('message', (event: MessageEvent) => {
+		deliveries++;
 		received.push(event.data);
 	});
 	const wrap = (port: MessagePort): IBusEndpoint => ({
 		post: (message) => port.postMessage(message),
 		subscribe(cb) {
-			const handler = (event: MessageEvent): void => cb(event.data);
+			const handler = (event: MessageEvent): void => {
+				if (port === port1) deliveries++;
+				cb(event.data);
+			};
 			port.addEventListener('message', handler);
 			port.start();
 			return () => port.removeEventListener('message', handler);

@@ -177,8 +177,10 @@ test('G4R2-N3 teardownAll awaits the ending of late answers within its timeout',
 	tt.after(() => release());
 	const pending = clientRequest(A, execMsg());
 	await settle();
-	setTimeout(release, 50);
-	await t.root.teardownAll(3000);
+	// Released right after the teardown starts: the answer is late by construction, with no real timer.
+	const tearing = t.root.teardownAll(3000);
+	release();
+	await tearing;
 	const late = engine.runs.at(-1);
 	assert.ok(late, 'the held execute was answered during teardown');
 	assert.ok(
