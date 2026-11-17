@@ -366,9 +366,11 @@ class MiscCommands(DAPConn):
             conversion = None
             if 'components' in pipeline:
                 conversion = convert_pipeline(pipeline)
-                if conversion.touched and not conversion.errors:
+                if conversion.touched:
+                    # The components that converted are validated as converted;
+                    # one the converter refused keeps its config and its error
                     pipeline = conversion.pipeline
-                elif not conversion.touched and not conversion.errors:
+                elif not conversion.errors:
                     conversion = None
 
             # Build merged environment for variable resolution (same as execute)
@@ -523,7 +525,8 @@ class MiscCommands(DAPConn):
                 # (secrets already moved into secureParameters), never the raw
                 # conversion, so a stored secret is not repeated in plaintext
                 echoed = data.get('pipeline')
-                data['converted'] = echoed if isinstance(echoed, dict) and conversion.touched else conversion.pipeline
+                clean = conversion.touched and not conversion.errors
+                data['converted'] = echoed if isinstance(echoed, dict) and clean else conversion.pipeline
                 data['conversion'] = list(conversion.warnings)
                 if conversion.errors:
                     data['errors'] = list(data.get('errors') or []) + list(conversion.errors)

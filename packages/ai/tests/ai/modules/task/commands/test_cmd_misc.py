@@ -1863,6 +1863,43 @@ async def test_on_rrext_validate_adds_nothing_for_a_current_format_pipeline(monk
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_validates_the_partial_conversion_when_one_component_fails(monkeypatch):
+    """Component A converts and B cannot: the engine validates A as converted, and the reply carries that text."""
+    _schemas(monkeypatch)
+    old = {
+        'components': [
+            {'id': 'a', 'provider': 'store_qdrant', 'config': {'profile': 'local'}},
+            {'id': 'b', 'provider': 'store_qdrant', 'config': {'profile': 'nope'}},
+        ]
+    }
+    partial = {
+        'components': [
+            {'id': 'a', 'provider': 'store_qdrant', 'name': 'Qdrant', 'config': {'mode': 'local'}},
+            {'id': 'b', 'provider': 'store_qdrant', 'config': {'profile': 'nope'}},
+        ]
+    }
+    seen = {}
+    monkeypatch.setattr(
+        cmd_misc,
+        'convert_pipeline',
+        lambda p: _conversion(
+            partial, touched=True, errors=[{'id': 'b', 'message': "profile 'nope' is not one of the old profiles"}]
+        ),
+    )
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: seen.setdefault('payload', payload) and {})
+
+    conn = _make_conn()
+    result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': old, 'source': 'a'}})
+
+    # A is validated as converted, B as the user wrote it
+    assert seen['payload']['pipeline']['components'] == partial['components']
+    body = result['body']
+    # With an error the converted text is the converter's own result, not the engine echo
+    assert body['converted'] == partial
+    assert any('not one of the old profiles' in e['message'] for e in body['errors'])
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_convert_returns_the_conversion_body():
     """`rrext_convert` answers {pipeline, warnings, errors, touched}, unwrapping the file envelope."""
     conn = _make_conn()

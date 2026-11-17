@@ -270,8 +270,11 @@ def test_a_renamed_key_moves_to_its_new_leaf():
 
 
 def test_a_boolean_rename_chooses_the_branch_by_its_value_map():
+    # No old `profile` key: the old merge applied the default profile (sentence,
+    # chunk_overlap 200) under the user's keys, so the node read 200; the
+    # converter writes it because the token branch defaults to 50
     result = convert({'fast': True, 'chunk_size': 400})
-    assert config_of(result) == {'strategy': 'token', 'token': {'chunk_size': 400}}
+    assert config_of(result) == {'strategy': 'token', 'token': {'chunk_size': 400, 'chunk_overlap': 200}}
 
 
 def test_a_constant_marker_is_kept_and_a_stale_override_is_dropped_with_a_warning():
@@ -323,7 +326,7 @@ def test_a_key_of_another_branch_is_kept_under_that_branch():
 
 def test_the_users_own_selector_value_chooses_the_branch_without_an_old_profile():
     result = convert({'strategy': 'token', 'chunk_size': 400, 'parameters': {}})
-    assert config_of(result) == {'strategy': 'token', 'token': {'chunk_size': 400}}
+    assert config_of(result) == {'strategy': 'token', 'token': {'chunk_size': 400, 'chunk_overlap': 200}}
 
 
 def test_the_result_resolves_like_the_node_reads_it():
@@ -336,12 +339,24 @@ def test_the_result_resolves_like_the_node_reads_it():
 # The corpus: every .pipe in the repository against the real definitions
 # ============================================================================
 
-REPO = Path(__file__).resolve().parents[5]
+# packages/ai/tests/ai/modules/task/<this file>: six parents up is the repository root
+REPO = Path(__file__).resolve().parents[6]
 
 
 def _repo_pipes():
-    listed = subprocess.run(['git', '-C', str(REPO), 'ls-files', '*.pipe'], capture_output=True, text=True)
+    """Every tracked .pipe in the repository; empty when git is unavailable (the corpus test then skips visibly)."""
+    try:
+        listed = subprocess.run(['git', '-C', str(REPO), 'ls-files', '*.pipe'], capture_output=True, text=True)
+    except OSError:
+        return []
+    if listed.returncode != 0:
+        return []
     return [REPO / line.strip() for line in listed.stdout.splitlines() if line.strip()]
+
+
+CORPUS = _repo_pipes() or [
+    pytest.param(None, id='no-corpus', marks=pytest.mark.skip(reason='git ls-files found no .pipe'))
+]
 
 
 def _old_shape(component, legacy):
@@ -351,7 +366,7 @@ def _old_shape(component, legacy):
 
 
 @pytest.mark.skipif(rocketlib.getServiceSchema('chunker') is None, reason='the engine definitions are not loaded')
-@pytest.mark.parametrize('path', _repo_pipes(), ids=lambda p: str(p.relative_to(REPO)))
+@pytest.mark.parametrize('path', CORPUS, ids=lambda p: str(p.relative_to(REPO)) if p else 'none')
 def test_every_repository_pipe_round_trips(path):
     """Old-shape components read the same after conversion; the result resolves and is stable."""
     with open(path, encoding='utf-8') as fh:
@@ -389,7 +404,13 @@ def test_every_repository_pipe_round_trips(path):
         skip |= task_convert.OLD_EDITOR_STAMPS | task_convert.COMBO_BLOCKS | task_convert.OWNED_KEYS
         for key, value in old.items():
             short = key.split('.')[-1]
-            if key in skip or short in skip or value in ('', None) or isinstance(value, dict):
+            if (
+                f'{profile}.{key}' in skip
+                or key in skip
+                or short in skip
+                or value in ('', None)
+                or isinstance(value, dict)
+            ):
                 continue
             if short in view:
                 assert view[short] == value or str(view[short]) == str(value), f'{component["id"]}.{key}'
@@ -410,3 +431,122 @@ def test_the_repository_examples_convert_with_only_the_known_defects():
         result = convert_pipeline(doc.get('pipeline', doc))
         unexpected += [(path.name, e['message']) for e in result.errors if not any(a in e['message'] for a in allowed)]
     assert unexpected == []
+
+
+# ============================================================================
+# The cases CodeRabbit raised on PR 3307, pinned on the real definitions
+# ============================================================================
+
+
+def _one(provider, config):
+    pipeline = {
+        'name': 'T',
+        'project_id': 't',
+        'components': [{'id': 'c1', 'provider': provider, 'name': 'C', 'config': config}],
+    }
+    result = convert_pipeline(pipeline)
+    return result, result.pipeline['components'][0]['config']
+
+
+def _view(provider, config):
+    return dict(resolveConfig(rocketlib.getServiceSchema(provider), config))
+
+
+engine = pytest.mark.skipif(
+    rocketlib.getServiceSchema('chunker') is None, reason='the engine definitions are not loaded'
+)
+
+
+@engine
+def test_an_explicit_model_wins_over_the_profile_map():
+    # audio_transcribe: profileMap default->base, but the user wrote model=small
+    result, config = _one('audio_transcribe', {'profile': 'default', 'model': 'small'})
+    assert not result.errors and _view('audio_transcribe', config)['model'] == 'small'
+
+
+@engine
+def test_a_selector_value_that_is_no_branch_is_refused_not_replaced():
+    result, _ = _one('audio_transcribe', {'profile': 'default', 'model': 'large'})
+    assert [e['message'] for e in result.errors] == [
+        "model='large' is not one of ['base', 'large-v3', 'medium', 'small', 'tiny'] of audio_transcribe"
+    ]
+
+
+@engine
+def test_a_profiles_values_that_differ_from_the_new_defaults_are_carried():
+    # context_optimizer ci_tiny -> manual: the budget percentages and the token cap come from the profile
+    result, config = _one('context_optimizer', {'profile': 'ci_tiny'})
+    view = _view('context_optimizer', config)
+    assert not result.errors and view['mode'] == 'manual'
+    assert (
+        view['max_context_tokens'],
+        view['document_budget_pct'],
+        view['history_budget_pct'],
+        view['query_budget_pct'],
+    ) == (
+        112,
+        35,
+        35,
+        20,
+    )
+
+
+@engine
+def test_the_landing_ai_profile_schema_file_is_carried():
+    result, config = _one('landing_ai_extract', {'profile': 'default', 'api_key': 'k'})
+    assert not result.errors and _view('landing_ai_extract', config)['schema_file'].startswith('{"type":"object"')
+
+
+@engine
+def test_the_memory_persistent_custom_profile_keeps_its_no_expiry_ttl():
+    result, config = _one('memory_persistent', {'profile': 'custom', 'custom': {'redis_host': 'r'}})
+    view = _view('memory_persistent', config)
+    assert not result.errors and view['backend'] == 'redis' and view['session_ttl_hours'] == 0
+    assert config == {'backend': 'redis', 'redis': {'redis_host': 'r', 'session_ttl_hours': 0}}
+
+
+@engine
+def test_the_mcp_client_profile_server_name_is_carried_and_an_explicit_one_wins():
+    result, config = _one('mcp_client', {'profile': 'RocketRide'})
+    assert not result.errors and _view('mcp_client', config)['serverName'] == 'RocketRide'
+    result, config = _one('mcp_client', {'profile': 'RocketRide', 'serverName': 'mine'})
+    assert not result.errors and _view('mcp_client', config)['serverName'] == 'mine'
+
+
+@engine
+def test_a_profile_qualified_dropped_key_goes_silently_from_the_profile_block():
+    result, config = _one('scan_cropper', {'profile': 'album', 'album': {'tune': 3}})
+    assert not result.errors and not result.warnings and config == {}
+
+
+@engine
+def test_the_nested_and_the_dotted_old_auth_group_convert_the_same():
+    nested, config_nested = _one('opensearch', {'auth': {'enabled': True, 'username': 'u', 'password': 'p'}})
+    dotted, config_dotted = _one('opensearch', {'auth.enabled': True, 'auth.username': 'u', 'auth.password': 'p'})
+    assert not nested.errors and not dotted.errors and nested.touched and dotted.touched
+    assert config_nested == config_dotted == {'basic': {'username': 'u', 'password': 'p'}}
+    assert _view('opensearch', config_nested)['auth'] == 'basic'
+    off, config_off = _one('opensearch', {'auth': {'enabled': False}})
+    assert not off.errors and _view('opensearch', config_off)['auth'] == 'none'
+
+
+@engine
+def test_a_nested_selectors_branch_leaves_convert_to_that_branch():
+    # tool_n8n: `webhookAuth` is a second selector; webhookToken lives under bearer and under jwt
+    result, config = _one('tool_n8n', {'profile': 'default', 'webhookAuth': 'bearer', 'webhookToken': 't'})
+    assert not result.errors and config == {'webhookAuth': 'bearer', 'bearer': {'webhookToken': 't'}}
+    result, config = _one('tool_n8n', {'profile': 'default', 'default': {'webhookAuth': 'jwt', 'webhookToken': 't'}})
+    assert not result.errors and config == {'webhookAuth': 'jwt', 'jwt': {'webhookToken': 't'}}
+    assert _view('tool_n8n', config)['webhookToken'] == 't'
+
+
+@engine
+def test_an_open_group_is_placed_whole_and_judged_by_the_resolver():
+    # The tools endpoint's `parameters` group declares no members; the converter
+    # keeps the object as one value and the node's resolver has the last word
+    result, config = _one('tools', {'profile': 'default', 'parameters': {}})
+    assert not result.errors and config == {}
+    result, config = _one('tools', {'profile': 'default', 'parameters': {'query': {'type': 'string'}}})
+    assert [e['message'] for e in result.errors] == [
+        'the converted config of tools does not resolve: unknown config key "parameters.query"'
+    ]
