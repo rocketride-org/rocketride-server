@@ -251,7 +251,7 @@ names teams instead of printing raw ids (`--json` keeps `teamId` and adds
 `teamName`). An unnamed pipeline deploys under its file name.
 
 ```bash
-rocketride deploy add pipelines/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version (--kind pipe|node; --deploy-to also points a team at it in the same call)
+rocketride deploy add pipelines/ingest --comment "v2 parse" [--deploy-to <teamId>]        # next registry version from the pipeline BUNDLE folder (its one .pipe + <id>.rrpipe, readme.md, icon, assets/); a bare .pipe beside other pipes is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
 rocketride deploy publish <projectId> 3 --team <teamId>             # point the team at version 3
 rocketride deploy list                                              # deployments overview
 rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules

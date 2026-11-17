@@ -53,6 +53,7 @@ import { bundlePathsFor, isShortId, pipeStemOf } from 'shared/tools/pipelines/si
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
+import { packPipeBundle } from './packBundle';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { downloadJson } from '../../utils/downloadFile';
 
@@ -390,12 +391,14 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const handlePublish = useCallback(
 		async (comment: string, deployTo?: string): Promise<void> => {
 			if (!client || !pipeline) throw new Error('Not connected');
-			// Snapshot carries a display name: the registry's pipelineName is
-			// what every deploy surface renders (names live in filenames here).
-			const documentName = projectDisplayName(filename);
-			const snapshot = { ...pipeline, name: pipeline.name || documentName };
+			// A pipeline publishes as a BUNDLE (plan §9, B7): the folder holding
+			// this one .pipe, its .rrpipe manifest, readme, icon and assets,
+			// packed from the store as saved. A pipe that is not alone in its
+			// folder is refused with the way out.
+			const packed = await packPipeBundle(client, filename);
 			await client.deploy.add({
-				pipeline: snapshot,
+				pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
+				data: packed.data,
 				...(comment ? { comment } : {}),
 				...(deployTo ? { deployTo } : {}),
 			});

@@ -531,10 +531,11 @@ def setup_parser() -> argparse.ArgumentParser:
     )
 
     d_add = deploy_subparsers.add_parser(
-        'add', help='Deploy an artifact file as the next registry version (deploying activates nothing)'
+        'add',
+        help='Deploy a pipeline bundle folder (pipelines/<id>/) or a node package as the next registry version (deploying activates nothing)',
     )
     _add_deploy_connection_args(d_add)
-    d_add.add_argument('file', help='Artifact file (pipeline JSON, or node package JSON)')
+    d_add.add_argument('file', help='Pipeline bundle folder (or its only .pipe), or a node package JSON')
     d_add.add_argument('--kind', default='pipe', help='Artifact kind: pipe or node (default: %(default)s)')
     d_add.add_argument('--comment', help='What-changed note kept in the registry')
     d_add.add_argument('--deploy-to', dest='deploy_to', help='Also point this team at the new version in the same call')

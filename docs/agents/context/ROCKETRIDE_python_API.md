@@ -828,6 +828,14 @@ List-shaped reads (`list`, `versions`, `history`) return the standard envelope `
 
 Deploy an object to the server as the next immutable registry version — the ONE generic rail door for every kind. `kind='pipe'` (default): pass `pipeline`, the full definition dict; its `name` is REQUIRED (server-enforced — artifacts are immutable and the name renders on every deploy surface forever). `kind='app'`: pass `data`, one zip of the app's SOURCE (see [Apps](#10-apps)). `metadata` is an optional blob (e.g. provenance, `appRoot` for app zips); `comment` is a "what changed" note kept in the registry; `deploy_to` optionally points a team at the new version immediately (one-step add+deploy; pipes only). Returns `{'artifact': ...}` plus `'deployment'` when `deploy_to` was given.
 
+#### `async deploy.add_pipe(bundle_dir: str, *, comment=None, deploy_to=None) -> PublishResult`
+
+Pack a pipeline BUNDLE folder and deploy it as the next registry version (the call behind the DEPLOY card and `rocketride deploy add <folder>`). A pipeline publishes as a folder, `pipelines/<id>/`: exactly one `.pipe` (what runs), beside the store manifest `<id>.rrpipe` (display only: `name`, `tagline`, `description`, `category`, `tags`, `icon`, `links`, `mode`, `plans`; never a publisher or author, the server derives those), `readme.md` (the store page), an icon (`icon.svg` or `icon.png`) and `assets/` (the images the readme references). The pipe rides as the artifact, the rest as the content the server stores beside it. `bundle_dir` may also be the `.pipe` itself when it is its folder's only pipe; a bare pipe beside other pipes is refused with the way out. `deploy.add(pipeline)` stays the raw door for a pipeline dict with no bundle (nothing for the store to show until a bundle is deployed).
+
+```python
+await client.deploy.add_pipe('./pipelines/docBrain', comment='v2: faster OCR')
+```
+
 #### `async deploy.deploy(project_id: str, version: int, team_id: str) -> Deployment`
 
 Point a team at a published version. Promotion (Staging to Production) and rollback (v3 to v2) are both this call — the team's pointer moves, nothing else changes. The team is always explicit (no default-team fallback); requires `task.control` on it.

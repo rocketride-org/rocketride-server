@@ -822,6 +822,14 @@ Deploy an object as the next immutable registry version. Returns `{ artifact, de
 - `options.comment?: string` — "what changed" note kept in the registry
 - `options.deployTo?: string` — team id to deploy the new version to immediately (one-step add+deploy; pipes only)
 
+##### `client.deploy.addPipe(bundleDir: string, { comment?, deployTo? }): Promise<PublishResult>`
+
+Pack a pipeline BUNDLE folder and deploy it as the next registry version (Node.js only; the call behind the DEPLOY card and `rocketride deploy add <folder>`). A pipeline publishes as a folder, `pipelines/<id>/`: exactly one `.pipe` (what runs), beside the store manifest `<id>.rrpipe` (display only: `name`, `tagline`, `description`, `category`, `tags`, `icon`, `links`, `mode`, `plans`; never a publisher or author, the server derives those), `readme.md` (the store page), an icon (`icon.svg` or `icon.png`) and `assets/` (the images the readme references). The pipe rides as the artifact, the rest as the content the server stores beside it. `bundleDir` may also be the `.pipe` itself when it is its folder's only pipe; a bare pipe beside other pipes is refused with the way out. `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a pipeline dict with no bundle (nothing for the store to show until a bundle is deployed).
+
+```typescript
+await client.deploy.addPipe('./pipelines/docBrain', { comment: 'v2: faster OCR' });
+```
+
 ##### `client.deploy.deploy(projectId: string, version: number, teamId: string): Promise<Deployment>`
 
 Point a team at a published version. Promotion (Staging → Production) and rollback (v3 → v2) are both this call. The team is always explicit; requires `task.control` on it.
