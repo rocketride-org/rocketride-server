@@ -100,6 +100,8 @@ class IsolationConfig:
         app_port: The template's port, or None (https).
         client_ip_header: ``RR_TRUSTED_CLIENT_IP_HEADER`` lowercased, or ''
             (rate limits then key on the peer address).
+        same_site_asserted: Shell hosts sharing the app suffix's last two
+            labels that ``RR_APP_DOMAIN_SAME_SITE_OK=1`` let through.
     """
 
     mode: str = 'off'
@@ -112,6 +114,7 @@ class IsolationConfig:
     app_suffix: str = ''
     app_port: Optional[int] = None
     client_ip_header: str = ''
+    same_site_asserted: Tuple[str, ...] = ()
 
     def origin_of(self, app_id: str) -> str:
         """The app origin of one app id under the template."""
@@ -212,12 +215,28 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
     # below or above a shell host (or RR_APP_URL's) lets app code toss cookies
     # onto the shell (or the reverse). The local template may sit beside a
     # localhost shell (development only: apps.localhost is plain http).
+    same_site_ok = env.get('RR_APP_DOMAIN_SAME_SITE_OK') == '1'
+    asserted = []
     for host in _shell_hosts(env, shell_origins):
-        if _same_site(suffix, host) and not (local and host == 'localhost'):
+        if local and host == 'localhost':
+            continue
+        if _same_site(suffix, host):
             raise _refuse(
                 f'RR_APP_ORIGIN_TEMPLATE: the app domain {suffix!r} is same-site with the shell host {host!r};'
                 ' use a separate registrable domain'
             )
+        # Without the public suffix list, equal last two labels stand for one
+        # registrable domain (fail safe: under co.uk every pair matches). The
+        # operator may assert otherwise for a multi-part public suffix only.
+        if _last_two(suffix) == _last_two(host):
+            if not same_site_ok:
+                raise _refuse(
+                    f'RR_APP_ORIGIN_TEMPLATE: the app domain {suffix!r} and the shell host {host!r} share'
+                    f' {_last_two(host)!r} (taken as one registrable domain); use a separate domain, or set'
+                    ' RR_APP_DOMAIN_SAME_SITE_OK=1 only if they are different registrable domains under a'
+                    ' multi-part public suffix'
+                )
+            asserted.append(host)
 
     host_source = env.get('RR_APP_HOST_SOURCE')
     host_source = 'host' if host_source is None else host_source
@@ -249,12 +268,18 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         app_suffix=suffix,
         app_port=port,
         client_ip_header=client_ip_header,
+        same_site_asserted=tuple(asserted),
     )
 
 
 def _same_site(a: str, b: str) -> bool:
     """Whether two host names are equal or one is below the other (cookies can cross between them)."""
     return a == b or a.endswith('.' + b) or b.endswith('.' + a)
+
+
+def _last_two(host: str) -> str:
+    """The last two DNS labels of a host name (a registrable-domain approximation)."""
+    return '.'.join(host.split('.')[-2:])
 
 
 def _shell_hosts(env: Mapping[str, str], shell_origins: Optional[Tuple[str, ...]] = None) -> List[str]:
@@ -424,6 +449,12 @@ def validate_isolation_config(account: Any = None) -> None:
                 f'isolation needs the SaaS account to implement {", ".join(inherited)}: {_REMEDY} until it does'
             )
 
+    if config.same_site_asserted:
+        debug(
+            f'[app isolation] WARNING: RR_APP_DOMAIN_SAME_SITE_OK=1: treating {config.app_suffix!r} and'
+            f' {", ".join(config.same_site_asserted)} as different registrable domains (operator assertion;'
+            ' app code can toss cookies onto the shell if it is wrong)'
+        )
     isolated = 'every third-party app' if config.mode == 'enforce' else ', '.join(sorted(config.apps))
     debug(f'[app isolation] mode {config.mode}: isolating {isolated} on {config.origin_template}')
 

@@ -463,3 +463,62 @@ def test_startup_logs_the_effective_mode(isolation_env, monkeypatch):
     isolation_env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.one')
     _validate()
     assert any('optin' in line and 'acme.one' in line for line in lines), lines
+
+
+# ---------------------------------------------------------------------------
+# T8c registrable-domain approximation (G4 round 2, R2-M1)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'template,origins,app_url',
+    [
+        ('https://{label}.apps.rocketride.ai', 'https://app.rocketride.ai', None),  # siblings under rocketride.ai
+        ('https://{label}.usercontent.example.co.uk', 'https://app.example.co.uk', None),  # co.uk: fail safe
+        ('https://{label}.apps.rocketride.ai', 'https://app.other', 'https://saas.rocketride.ai'),  # RR_APP_URL sibling
+    ],
+)
+def test_sibling_under_one_registrable_domain_refuses_start(template, origins, app_url, isolation_env):
+    """T8c: equal last two DNS labels approximate one registrable domain: refused (fail safe for co.uk)."""
+    isolation_env.set(RR_APP_ORIGIN_TEMPLATE=template, RR_SHELL_ORIGINS=origins, RR_APP_URL=app_url)
+    message = _refuses('RR_APP_ORIGIN_TEMPLATE')
+    assert 'RR_APP_DOMAIN_SAME_SITE_OK' in message
+
+
+@pytest.mark.parametrize(
+    'template,origins',
+    [
+        ('https://{label}.rocketride-apps.ai', 'https://app.rocketride.ai'),
+        ('https://{label}.apps.example', 'https://app.other'),
+    ],
+)
+def test_different_registrable_domains_start(template, origins, isolation_env):
+    """T8c control."""
+    isolation_env.set(RR_APP_ORIGIN_TEMPLATE=template, RR_SHELL_ORIGINS=origins)
+    _validate()
+
+
+def test_operator_override_for_a_multi_part_public_suffix(isolation_env, monkeypatch):
+    """T8c: RR_APP_DOMAIN_SAME_SITE_OK=1 lets example-apps.co.uk sit beside example.co.uk, with a warning."""
+    lines = []
+    monkeypatch.setattr(_ao(), 'debug', lambda message: lines.append(str(message)), raising=False)
+    isolation_env.set(
+        RR_APP_ORIGIN_TEMPLATE='https://{label}.example-apps.co.uk',
+        RR_SHELL_ORIGINS='https://app.example.co.uk',
+        RR_APP_DOMAIN_SAME_SITE_OK='1',
+    )
+    _validate()
+    assert any('RR_APP_DOMAIN_SAME_SITE_OK' in line and 'WARNING' in line for line in lines), lines
+    for value in ('true', 'yes', '0', ''):
+        isolation_env.set(RR_APP_DOMAIN_SAME_SITE_OK=value)
+        _refuses('RR_APP_ORIGIN_TEMPLATE')
+
+
+def test_override_never_allows_a_shell_inside_the_app_domain(isolation_env):
+    """T8c: the override covers sibling domains only; equal, below or above stays refused."""
+    isolation_env.set(
+        RR_APP_ORIGIN_TEMPLATE='https://{label}.app.example.co.uk',
+        RR_SHELL_ORIGINS='https://app.example.co.uk',
+        RR_APP_DOMAIN_SAME_SITE_OK='1',
+    )
+    _refuses('RR_APP_ORIGIN_TEMPLATE')
