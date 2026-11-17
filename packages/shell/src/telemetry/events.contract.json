@@ -5,7 +5,7 @@
 		"app": {
 			"type": "string",
 			"pattern": "^[A-Za-z0-9._-]{1,128}$",
-			"description": "Not a super property: stamped per event by the reporter that sent it (rocketride/analytics createReporter, stamped last so caller props cannot overwrite it). 'shell' for the transport's own events (auth:*, consent:*); otherwise the emitting app's descriptor id (e.g. 'rocketride.home'). Absent on SDK-generated events ($pageleave, sdkEvents)."
+			"description": "Not a super property: stamped per event by the reporter that sent it (rocketride/analytics createReporter, stamped last so caller props cannot overwrite it). 'shell' for the transport's own events (auth:*, consent:*); otherwise the emitting app's descriptor id (e.g. 'rocketride.home') or the descriptor's telemetryId when it declares one (fixed once per app, for apps whose dashboards predate the descriptor id). Absent on SDK-generated events ($pageleave, sdkEvents)."
 		}
 	},
 	"superProperties": {
@@ -122,12 +122,18 @@
 				},
 				"auto": {
 					"type": "boolean"
+				},
+				"is_authed": {
+					"type": "boolean",
+					"const": false,
+					"description": "Overrides the is_authed super property: always false (a sign-in is starting), so the replay on the OAuth callback page does not take that load's signed-in state."
 				}
 			},
 			"required": [
 				"register",
 				"from_path",
-				"auto"
+				"auto",
+				"is_authed"
 			]
 		},
 		"auth:complete": {
@@ -154,13 +160,19 @@
 				"source": {
 					"type": "string",
 					"const": "shell"
+				},
+				"is_authed": {
+					"type": "boolean",
+					"const": true,
+					"description": "Overrides the is_authed super property: always true (an identity resolved, waitlisted or not), whatever the state of the page load that sends it (a fact replayed from the hold)."
 				}
 			},
 			"required": [
 				"is_new",
 				"waitlisted",
 				"duration_ms",
-				"source"
+				"source",
+				"is_authed"
 			]
 		},
 		"consent:shown": {
