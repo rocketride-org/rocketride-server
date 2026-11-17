@@ -126,13 +126,46 @@ def test_h1_guest_bundle_is_immutable_and_only_the_marker_file_is_served(isolati
     ],
 )
 def test_h2_wrong_shape_is_not_an_app_host(label, isolation_env):
-    """T10: only a 25-character ``[a-z2-7]`` label is an app host: the shell's own routes keep answering."""
+    """T10: only a 25-character ``[a-z2-7]`` label is an app host, but ANY name under the app suffix is app-domain
+    traffic: it never reaches the engine's own routes (G4 M1: a wildcard DNS name such as ``www.<suffix>``
+    must not serve the engine same-site with every app).
+    """
     hits: list = []
     client = _client(isolation_env, hits=hits)
     host = app_host_of(label)
     assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 404
-    assert client.get('/auth', headers={'host': host}).status_code == 200  # an ordinary host
-    assert ('http', '/auth') in hits
+    assert client.get('/auth', headers={'host': host}).status_code == 404
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect('/ws', headers={'host': host}):
+            pass
+    assert hits == []
+
+
+@pytest.mark.parametrize(
+    'host', ['apps.example', 'www.apps.example', 'x.y.apps.example', 'APPS.EXAMPLE.', 'apps.example:8443']
+)
+def test_names_under_the_app_suffix_never_reach_the_engine(host, isolation_env):
+    """T10 (G4 M1): the bare suffix and every other name below it are app-domain traffic: 404, never the engine."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    for path in ('/', '/auth', '/shell/index.html', '/apps/session'):
+        assert client.get(path, headers={'host': host}).status_code == 404, (host, path)
+    assert hits == []
+
+
+@pytest.mark.parametrize('port', ['\u00b2', '\u0668\u0660', '80x', ''])
+def test_non_ascii_or_malformed_port_is_a_404_not_a_500(port, isolation_env):
+    """T11 (G4 L6): only ASCII digits are a port; anything else under the app suffix is a plain 404."""
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    value = f'{HOST}:{port}'
+    try:
+        raw = value.encode('latin-1')  # how a server decodes header bytes: '\u00b2' arrives as itself
+    except UnicodeEncodeError:
+        raw = value.encode('utf-8')
+    resp = client.get('/_rr/frame.html', headers={'host': raw})
+    assert resp.status_code == 404
+    assert hits == []
 
 
 def test_h2_unknown_but_well_formed_label_still_gets_frame_html(isolation_env):
@@ -168,8 +201,8 @@ def test_h3_wrong_port_is_not_an_app_host(suffix, isolation_env):
     client = _client(isolation_env, hits=hits)
     host = HOST + suffix
     assert client.get('/_rr/frame.html', headers={'host': host}).status_code == 404
-    assert client.get('/auth', headers={'host': host}).status_code == 200
-    assert ('http', '/auth') in hits
+    assert client.get('/auth', headers={'host': host}).status_code == 404  # still app-domain traffic (G4 M1)
+    assert hits == []
 
 
 def test_h3_localhost_template_compares_the_port(isolation_env):
@@ -238,6 +271,20 @@ def test_h5_edge_header_without_the_right_secret_is_not_an_app_host(secret_heade
         assert client.get(path, headers=headers).status_code == 404, (secret_header, path)
     # ... and the Host header alone does not make one either, in this mode
     assert client.get('/_rr/frame.html', headers={'host': HOST}).status_code == 404
+
+
+def test_edge_header_mode_app_suffix_host_without_secret_never_reaches_the_engine(isolation_env):
+    """T13 (G4 M1): with ``edge-header``, an app-suffix Host that arrives without the secret is app-domain
+    traffic too: 404, not the engine's routes.
+    """
+    isolation_env.set(RR_APP_HOST_SOURCE='edge-header', RR_EDGE_SECRET='s' * 32)
+    hits: list = []
+    client = _client(isolation_env, hits=hits)
+    for headers in ({'host': HOST}, {'host': HOST, 'x-rr-app-host': HOST, 'x-rr-edge-secret': 'w' * 32}):
+        assert client.get('/auth', headers=headers).status_code == 404, headers
+    assert hits == []
+    # an ordinary host still reaches the engine in this mode
+    assert client.get('/auth', headers={'host': 'origin.internal'}).status_code == 200
 
 
 # ---------------------------------------------------------------------------
