@@ -319,6 +319,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				} catch (err) {
 					if (err instanceof CapabilityDeniedError) return deniedEnvelope(err);
 					return sanitizeEnvelope({ ok: false, error: serializeError(err) });
+				} finally {
+					req.release();
 				}
 			},
 			(err) => deniedEnvelope(asDenial(err, 'client.request'))
@@ -328,10 +330,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const types = [...new Set(params.types as string[])];
 			const counts = st.ledger.monitors.get(run!.handle) ?? new Map<string, number>();
 			const added = types.filter((t) => !counts.has(t)).length;
-			if (st.ledger.monitorPairCount() + added > QUOTAS.monitorKeys) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
-			await client().addMonitor({ token: run!.token }, types);
-			for (const t of types) counts.set(t, (counts.get(t) ?? 0) + 1);
-			st.ledger.monitors.set(run!.handle, counts);
+			if (st.ledger.used('monitorKeys') + added > QUOTAS.monitorKeys) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
+			const release = st.ledger.reserve('monitorKeys', added);
+			try {
+				await client().addMonitor({ token: run!.token }, types);
+				for (const t of types) counts.set(t, (counts.get(t) ?? 0) + 1);
+				st.ledger.monitors.set(run!.handle, counts);
+			} finally {
+				release();
+			}
 		});
 
 		requestOp('client.removeMonitor', async (params, run) => {

@@ -43,7 +43,7 @@ import type { DenyCode } from './capabilityDenied';
 import { matchRow, parseType } from './capabilities';
 import type { CapabilityRow } from './capabilities';
 import { deny } from './denial';
-import type { IFsEntry, ILedger, IRunEntry } from './ledger';
+import type { IFsEntry, ILedger, IRunEntry, QuotaKind } from './ledger';
 import { uuid4 } from './ledger';
 import { canonicalAppPath } from './paths';
 import { INTERVALS, QUOTAS, SIZES } from './rate';
@@ -92,6 +92,8 @@ export interface IGatedRequest {
 	fs?: IFsEntry | { handle?: undefined; mode: 'r' | 'w' };
 	/** The arguments as forwarded. */
 	args: Record<string, unknown>;
+	/** Releases the quota slots reserved for this request (call once the answer is recorded or lost). */
+	release: () => void;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -318,10 +320,17 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	}
 
 	// (10) rewrite — real values only on the engine side; quotas before anything is started
+	// Quotas count slots reserved by requests still waiting on the engine, so
+	// concurrent requests cannot all pass before the first answer is recorded.
+	const releases: Array<() => void> = [];
+	const reserve = (kind: QuotaKind, limit: number): void => {
+		if (g.ledger.used(kind) >= limit) fail('quota');
+		releases.push(g.ledger.reserve(kind));
+	};
 	let mintedProject: string | undefined;
 	if (run) checked.token = run.token;
 	if (command === 'execute') {
-		if (g.ledger.runs().length >= QUOTAS.runs) fail('quota');
+		reserve('runs', QUOTAS.runs);
 		mintedProject = `rrapp.${g.info.appKey}.${uuid4(g.random)}`;
 		checked.pipeline = { ...(checked.pipeline as Record<string, unknown>), project_id: mintedProject };
 	}
@@ -332,11 +341,11 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	if (command === 'rrext_get_token') {
 		checked.projectId = run!.projectId;
 	}
-	if (command === 'rrext_process' && subcommand === 'open' && g.ledger.pipeCount() >= QUOTAS.pipes) fail('quota');
+	if (command === 'rrext_process' && subcommand === 'open') reserve('pipes', QUOTAS.pipes);
 	if (command === 'rrext_store' && subcommand === 'fs_open') {
-		if (g.ledger.fsHandles().length >= QUOTAS.fsHandles) fail('quota');
+		reserve('fsHandles', QUOTAS.fsHandles);
 		fs = { mode: checked.mode as 'r' | 'w' };
 	}
 	const forwarded = decodeMessageData({ type: 'request', seq: typeof message.seq === 'number' ? message.seq : 0, command, arguments: { ...checked } } as DAPMessage);
-	return { message: forwarded, timeout, command, ...(subcommand !== undefined ? { subcommand } : {}), ...(run ? { run } : {}), ...(mintedProject ? { mintedProject } : {}), ...(fs ? { fs } : {}), args: checked };
+	return { message: forwarded, timeout, command, ...(subcommand !== undefined ? { subcommand } : {}), ...(run ? { run } : {}), ...(mintedProject ? { mintedProject } : {}), ...(fs ? { fs } : {}), args: checked, release: () => releases.forEach((r) => r()) };
 }

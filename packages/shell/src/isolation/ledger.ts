@@ -94,8 +94,15 @@ export function uuid4(random: (n: number) => Uint8Array): string {
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** What a quota counts. */
+export type QuotaKind = 'runs' | 'pipes' | 'fsHandles' | 'monitorKeys';
+
 /** The per-realm ledger. */
 export interface ILedger {
+	/** Live count plus slots reserved by requests still waiting on the engine. */
+	used(kind: QuotaKind): number;
+	/** Reserves `n` slots until the returned release runs (idempotent). */
+	reserve(kind: QuotaKind, n?: number): () => void;
 	/** Records a started run under a fresh handle. */
 	addRun(fields: Omit<IRunEntry, 'handle' | 'projectAlias' | 'taskIdAlias' | 'pipeIds' | 'completedAt'> & { projectAlias?: string }): IRunEntry;
 	/** The live run for a handle (expired runs are dropped here). */
@@ -108,15 +115,12 @@ export interface ILedger {
 	complete(handle: string): void;
 	dropRun(handle: string): void;
 	runs(): IRunEntry[];
-	pipeCount(): number;
 	addFs(handle: string, mode: 'r' | 'w'): void;
 	fs(handle: string): IFsEntry | undefined;
 	dropFs(handle: string): void;
 	fsHandles(): IFsEntry[];
 	/** Monitor refcounts: run handle → event type → count. */
 	monitors: Map<string, Map<string, number>>;
-	/** Distinct (run, event type) pairs. */
-	monitorPairCount(): number;
 	/** Real tokens and public tokens held (for the outbound backstop). */
 	secrets(): string[];
 	clear(): void;
@@ -132,6 +136,7 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 	const runsByHandle = new Map<string, IRunEntry>();
 	const fsByHandle = new Map<string, IFsEntry>();
 	const monitors = new Map<string, Map<string, number>>();
+	const pending: Record<QuotaKind, number> = { runs: 0, pipes: 0, fsHandles: 0, monitorKeys: 0 };
 
 	const dropRun = (handle: string): void => {
 		runsByHandle.delete(handle);
@@ -147,7 +152,30 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 	};
 	const liveRuns = (): IRunEntry[] => [...runsByHandle.values()].filter((e) => live(e) !== undefined);
 
+	const liveCount = (kind: QuotaKind): number => {
+		switch (kind) {
+			case 'runs':
+				return liveRuns().length;
+			case 'pipes':
+				return liveRuns().reduce((n, e) => n + e.pipeIds.size, 0);
+			case 'fsHandles':
+				return fsByHandle.size;
+			case 'monitorKeys':
+				return [...monitors.values()].reduce((n, types) => n + types.size, 0);
+		}
+	};
+
 	return {
+		used: (kind) => liveCount(kind) + pending[kind],
+		reserve(kind, n = 1) {
+			pending[kind] += n;
+			let released = false;
+			return () => {
+				if (released) return;
+				released = true;
+				pending[kind] -= n;
+			};
+		},
 		addRun(fields) {
 			let handle = mintHandle(deps.random);
 			while (runsByHandle.has(handle)) handle = mintHandle(deps.random);
@@ -170,13 +198,11 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 		},
 		dropRun,
 		runs: liveRuns,
-		pipeCount: () => liveRuns().reduce((n, e) => n + e.pipeIds.size, 0),
 		addFs: (handle, mode) => void fsByHandle.set(handle, { handle, mode }),
 		fs: (handle) => fsByHandle.get(handle),
 		dropFs: (handle) => void fsByHandle.delete(handle),
 		fsHandles: () => [...fsByHandle.values()],
 		monitors,
-		monitorPairCount: () => [...monitors.values()].reduce((n, types) => n + types.size, 0),
 		secrets: () => [...runsByHandle.values()].flatMap((e) => [e.token, e.publicToken]).filter((s) => typeof s === 'string' && s !== ''),
 		clear() {
 			runsByHandle.clear();
