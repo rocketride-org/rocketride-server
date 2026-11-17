@@ -181,3 +181,59 @@ export class ConsentStore {
 		}
 	}
 }
+
+// ==== consent at send time for experiment-attributed events =================
+
+/**
+ * The properties that tie an event to an experiment assignment an app stored
+ * under explicit consent (home-ui's Homepage Roulette: the exposure and a
+ * register CTA's exposure properties). The cookieless per-load tag
+ * (roulette_assignment_id) is not one: it exists only for an undecided visitor.
+ */
+export const ATTRIBUTION_KEYS = ['assignment_id', 'exposure_id'] as const;
+
+/**
+ * Whether an event carries an experiment assignment (any ATTRIBUTION_KEYS).
+ *
+ * @param event - The event as before_send receives it.
+ * @returns True when its properties hold a non-empty assignment or exposure id.
+ */
+export function carriesAttribution(event: { properties?: unknown } | null | undefined): boolean {
+	const props = event?.properties;
+	if (!props || typeof props !== 'object') {
+		return false;
+	}
+	return ATTRIBUTION_KEYS.some((key) => {
+		return Boolean((props as Record<string, unknown>)[key]);
+	});
+}
+
+/**
+ * A before_send step that re-checks consent at SEND time for attributed
+ * events: one carrying an experiment assignment is dropped unless `allowed()`
+ * holds at that moment. Apps check consent when they report; an attributed
+ * event can still reach posthog-js later than that — replayed from the
+ * pre-start queue or the sessionStorage hold of an earlier page load — after
+ * a withdrawal (this tab or another) or a privacy signal. home-ui's former
+ * consented before_send did the same. Every other event goes to `next`.
+ *
+ * @param allowed - Whether explicit consent holds now.
+ * @param next - The rest of the before_send chain.
+ * @returns The gated before_send.
+ */
+export function attributionGate<T extends { properties?: unknown } | null>(allowed: () => boolean, next: (event: T) => T): (event: T) => T {
+	return (event: T): T => {
+		if (carriesAttribution(event)) {
+			let ok = false;
+			try {
+				ok = allowed();
+			} catch {
+				ok = false; // fail closed: an attribution whose consent cannot be read is not sent
+			}
+			if (!ok) {
+				return null as T;
+			}
+		}
+		return next(event);
+	};
+}

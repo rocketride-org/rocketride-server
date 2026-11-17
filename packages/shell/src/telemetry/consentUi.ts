@@ -30,6 +30,39 @@ export function takePendingOpen(): boolean {
 	return was;
 }
 
+/** What the lazy banner host knows when it decides whether to mount the banner. */
+export type ConsentHostInputs = {
+	/** A telemetry key is served (false: OSS / keyless, nothing to consent to). */
+	hasKey: boolean;
+	/** The consent source is the stored record (false: VS Code, the editor's setting governs). */
+	storedConsent: boolean;
+	/** Telemetry is live this page load (key, no privacy signal, init not failed). */
+	telemetryLive: boolean;
+	/** The browser sends a privacy signal (DNT / GPC). */
+	privacySignal: boolean;
+	/** The page has settled (the unprompted mount waits for it). */
+	settled: boolean;
+	/** The visitor explicitly asked ("Privacy settings" / openConsentBanner). */
+	requested: boolean;
+};
+
+/**
+ * Whether the lazy host mounts the consent banner. Keyless or host-governed:
+ * never. Live telemetry: once settled or on request (the banner itself decides
+ * whether to prompt). Under a privacy signal telemetry is off, yet an explicit
+ * request still mounts the banner — it states that the signal is honoured and
+ * offers no opt-in — while nothing is ever shown unasked.
+ */
+export function shouldMountConsentBanner(i: ConsentHostInputs): boolean {
+	if (!i.hasKey || !i.storedConsent) {
+		return false;
+	}
+	if (i.telemetryLive) {
+		return i.settled || i.requested;
+	}
+	return i.privacySignal && i.requested;
+}
+
 /**
  * Subscribe to "Privacy settings" requests (the banner and its lazy host do).
  *

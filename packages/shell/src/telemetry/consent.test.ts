@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 // (reload: another tab's storage write)
 import assert from 'node:assert/strict';
-import { ConsentStore, parseConsent, CONSENT_KEY, CONSENT_TTL_MS, CONSENT_VERSION } from './consent.ts';
+import { ConsentStore, attributionGate, carriesAttribution, parseConsent, CONSENT_KEY, CONSENT_TTL_MS, CONSENT_VERSION } from './consent.ts';
 
 function fakeStorage() {
 	const data = new Map<string, string>();
@@ -114,4 +114,34 @@ test('a failed write wins even when the stale record cannot be removed either', 
 	store.reload();
 	assert.equal(store.state(), 'accepted');
 	assert.deepEqual(seen, ['rejected', 'accepted']);
+});
+
+test('carriesAttribution reads a non-empty assignment_id or exposure_id; the cookieless per-load roulette_assignment_id is not one', () => {
+	assert.equal(carriesAttribution({ properties: { assignment_id: 'a' } }), true);
+	assert.equal(carriesAttribution({ properties: { exposure_id: 'e' } }), true);
+	assert.equal(carriesAttribution({ properties: { assignment_id: '' } }), false);
+	assert.equal(carriesAttribution({ properties: { roulette_assignment_id: 'a', roulette_variant: 'v' } }), false);
+	assert.equal(carriesAttribution({}), false);
+	assert.equal(carriesAttribution(null), false);
+});
+
+test('attributionGate drops an attributed event unless consent holds at send time (fail closed), and passes the rest to next', () => {
+	let allowed: () => boolean = () => true;
+	const seen: string[] = [];
+	type Ev = { event: string; properties?: Record<string, unknown> } | null;
+	const gate = attributionGate<Ev>(() => allowed(), (e) => {
+		if (e) seen.push(e.event);
+		return e;
+	});
+	const exposure = { event: 'homepage_roulette_viewed', properties: { assignment_id: 'a', exposure_id: 'e' } };
+	assert.deepEqual(gate(exposure), exposure);
+	allowed = () => false;
+	assert.equal(gate(exposure), null);
+	allowed = () => {
+		throw new Error('unreadable');
+	};
+	assert.equal(gate(exposure), null);
+	assert.deepEqual(gate({ event: '$pageview' }), { event: '$pageview' }, 'an unattributed event is not gated');
+	assert.equal(gate(null), null);
+	assert.deepEqual(seen, ['homepage_roulette_viewed', '$pageview']);
 });

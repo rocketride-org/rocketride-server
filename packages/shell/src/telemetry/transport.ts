@@ -10,9 +10,10 @@
 // transport half; the page-tracking half stayed with home-ui.
 // =============================================================================
 
-import posthog from 'posthog-js';
+import posthog, { type CaptureResult } from 'posthog-js';
 import { EV } from './events';
 import { SCROLL_ROOT, telemetryHost, telemetryKey } from './config';
+import { carriesAttribution } from './consent';
 import { getConsentState } from './consentState';
 import { CaptureMode, clearPostHogStorage, quietly, type SdkLike } from './mode';
 import { sanitizeEvent } from './sanitize';
@@ -168,6 +169,28 @@ export function bindTransport(d: TransportDeps): void {
 }
 
 /**
+ * The cookieless instance's before_send. While the consented instance is active this instance sends nothing but
+ * consent:handoff. An event carrying an experiment assignment (assignment_id / exposure_id) belongs to the
+ * consented instance only: one that lands here — reported under consent, then replayed from the pre-start queue or
+ * an earlier load's sessionStorage hold after a withdrawal — is dropped, never sent cookieless. Everything else is
+ * sanitised and kept for a later bridge. Exported for tests only (posthog-js calls it).
+ *
+ * @param event - The event posthog-js is about to send.
+ * @returns The sanitised event, or null to drop it.
+ */
+export function cookielessBeforeSend(event: CaptureResult | null): CaptureResult | null {
+	if (mode?.isConsented() && event?.event !== EV.CONSENT_HANDOFF) {
+		return null;
+	}
+	if (carriesAttribution(event)) {
+		return null;
+	}
+	const out = sanitizeEvent(event);
+	noteCookielessEvent(out);
+	return out;
+}
+
+/**
  * posthog-js's init for this page load and the capture mode on top of it (the queue's init; it throws when
  * posthog-js cannot start). Verbatim port of home-ui's initPostHog: the cookieless instance, storage guard,
  * capture mode, stale-storage cleanup and the identity start.
@@ -210,14 +233,8 @@ export function initPostHog(): void {
 		// 'always' instance cannot be opted out, and its own $pageleave and web vitals would otherwise go out too.
 		// The one exception is consent:handoff, sent right after the switch to close the cookieless half.
 		// Page views and section views are also kept in memory for a later bridge (accept mid-visit).
-		before_send: (event) => {
-			if (mode?.isConsented() && event?.event !== EV.CONSENT_HANDOFF) {
-				return null;
-			}
-			const out = sanitizeEvent(event);
-			noteCookielessEvent(out);
-			return out;
-		},
+		// An experiment-attributed event never goes out cookieless (cookielessBeforeSend).
+		before_send: cookielessBeforeSend,
 	});
 	// Every write posthog-js makes to its storage is reduced from here on, before any opted-in instance exists.
 	guardStorage(posthog);
