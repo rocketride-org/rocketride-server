@@ -24,9 +24,10 @@
 // useSubscriptions — reads desktop apps from ConnectResult.apps
 // =============================================================================
 
-import { useMemo } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 import type { AppManifestEntry } from 'rocketride';
 import { useAuthUser } from './useAuthUser';
+import { getLocalAppEntries, getLocalAppsVersion, subscribeLocalApps } from '../util/appLoader';
 
 // =============================================================================
 // TYPES
@@ -57,11 +58,21 @@ export function useSubscriptions(): {
 	getStatus: (appId: string) => AppStatus | undefined;
 } {
 	const identity = useAuthUser();
+	// Local/dev registrations change at runtime (an App Builder preview, the
+	// terminal dev loop) — subscribe so the desktop reflects them live.
+	const localVersion = useSyncExternalStore(subscribeLocalApps, getLocalAppsVersion, getLocalAppsVersion);
 
 	return useMemo(() => {
 		// ``identity.apps`` is already the SDK's AppManifestEntry[] (from
 		// ConnectResult.apps) — the true runtime shape of these desktop entries.
-		const raw: AppManifestEntry[] = identity?.apps ?? [];
+		// Local/dev apps the server has never heard of are appended: their
+		// synthetic entries carry onDesktop + appStatus 'dev', so the app
+		// under development gets a desktop card and passes isOnDesktop in
+		// the tab that serves it — a dev registration is this user's most
+		// deliberate possible "this app is mine, show it" signal.
+		const server: AppManifestEntry[] = identity?.apps ?? [];
+		const serverIds = new Set(server.map((entry) => entry?.id).filter(Boolean));
+		const raw: AppManifestEntry[] = [...server, ...getLocalAppEntries().filter((entry) => !serverIds.has(entry.id))];
 
 		// Build lookup maps for fast access
 		const statusMap = new Map<string, AppStatus>();
@@ -78,5 +89,5 @@ export function useSubscriptions(): {
 			isOnDesktop: (appId: string) => desktopSet.has(appId),
 			getStatus: (appId: string) => statusMap.get(appId),
 		};
-	}, [identity?.apps]);
+	}, [identity?.apps, localVersion]);
 }

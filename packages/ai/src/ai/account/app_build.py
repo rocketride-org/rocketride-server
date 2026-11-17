@@ -1485,7 +1485,7 @@ class AppBuildWorker:
         if not user_id:
             return
         try:
-            from ai.account.dev_overlay import push_refresh
+            from ai.account.manifest_push import push_refresh
 
             await push_refresh(self._server, user_id, source='app-build')
         except Exception as exc:

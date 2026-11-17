@@ -371,6 +371,7 @@ typedef Text Backtrace;
 #include <apLib/crypto/api.h>
 #include <apLib/crypto/Key.hpp>
 #include <apLib/crypto/KeyApi.hpp>
+#include <apLib/crypto/paramToken.h>
 #include <apLib/crypto/CipherCtx.h>
 #include <apLib/crypto/EncryptCtx.h>
 #include <apLib/crypto/DecryptCtx.h>

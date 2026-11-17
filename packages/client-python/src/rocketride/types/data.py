@@ -42,10 +42,10 @@ Dynamic Field Access Pattern:
     defines what fields are available and their types. This allows pipelines to
     return arbitrary data structures based on configuration:
 
-    result_types = {"text": "text", "answers": "answers", "metadata": "json"}
+    result_types = {"text": "text", "answers": "answers", "details": "json"}
     result["text"]      # Contains List[str] - text content
     result["answers"]   # Contains List[str] - AI responses
-    result["metadata"]  # Contains dict - JSON metadata
+    result["details"]   # Contains List[dict] - JSON objects
 
 Usage:
     from rocketride.types import PIPELINE_RESULT, UPLOAD_RESULT
@@ -92,7 +92,7 @@ class PIPELINE_RESULT(TypedDict, total=False):
     - {"text": "text"} → response["text"] contains List[str]
     - {"my_text": "text", "my_answers": "answers"} → response["my_text"] and response["my_answers"]
     - {"answers": "answers"} → response["answers"] contains AI-generated chat responses
-    - {"output": "text", "metadata": "json"} → multiple typed fields available
+    - {"output": "text", "details": "json"} → multiple typed fields available
 
     Field Type Mappings:
     - "text": List[str] (array of text segments)

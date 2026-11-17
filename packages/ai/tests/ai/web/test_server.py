@@ -1,5 +1,6 @@
 """Tests for ALLOWED_MODULES allowlist and WebServer.use() validation."""
 
+import logging
 import signal
 import sys
 from types import SimpleNamespace
@@ -87,6 +88,45 @@ class TestDotenvLoading:
         monkeypatch.setattr('ai.web.server.load_dotenv', load)
         WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
         load.assert_not_called()
+
+
+@pytest.fixture
+def uvicorn_loggers_without_redactor():
+    """Start with no RequestTargetRedactor on either uvicorn logger; restore the filter lists afterwards.
+
+    The redactor is a process-global singleton, so an earlier test that constructed a WebServer
+    would otherwise leave it attached and this test could pass with the install call removed.
+    """
+    from ai.web.access_log import UVICORN_LOGGERS, RequestTargetRedactor
+
+    saved = {name: list(logging.getLogger(name).filters) for name in UVICORN_LOGGERS}
+    for name in UVICORN_LOGGERS:
+        logger = logging.getLogger(name)
+        for f in list(logger.filters):
+            if isinstance(f, RequestTargetRedactor):
+                logger.removeFilter(f)
+    yield
+    for name, filters in saved.items():
+        logging.getLogger(name).filters[:] = filters
+
+
+class TestAccessLogRedaction:
+    """Constructing a WebServer installs the request-target redactor on uvicorn's loggers, once."""
+
+    def test_configure_server_installs_one_redactor_per_logger(self, uvicorn_loggers_without_redactor):
+        from ai.web.access_log import UVICORN_LOGGERS, RequestTargetRedactor
+
+        def redactors(name):
+            return [f for f in logging.getLogger(name).filters if isinstance(f, RequestTargetRedactor)]
+
+        for name in UVICORN_LOGGERS:
+            assert redactors(name) == [], name  # precondition: nothing left over from other tests
+
+        WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+        WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+
+        for name in UVICORN_LOGGERS:
+            assert len(redactors(name)) == 1, (name, logging.getLogger(name).filters)
 
 
 def teardown_module() -> None:

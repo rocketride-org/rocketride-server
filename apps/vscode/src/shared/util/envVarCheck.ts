@@ -18,16 +18,17 @@
 
 import * as vscode from 'vscode';
 import type { RocketRideClient } from 'rocketride';
-import { decideEnvVars, extractPipelineEnvVars } from './envVarDecision';
+import { decideEnvVars, extractPipelineEnvVars } from 'shared/utils/envVarDecision';
 import { getLogger } from './output';
 
 /**
- * Opens the Variables page and pre-fills the missing keys as empty entries.
+ * Opens Settings at the Environment Variables section with the missing keys
+ * pre-filled as empty required rows (args: focus, authError, envPrefill).
  */
 async function openWithMissingKeys(missingKeys: string[]): Promise<void> {
-	await vscode.commands.executeCommand('rocketride.page.environment.open', missingKeys);
+	await vscode.commands.executeCommand('rocketride.page.settings.open', 'environment', undefined, missingKeys);
 	vscode.window.showWarningMessage(
-		`Pipeline references ${missingKeys.length} undefined variable${missingKeys.length > 1 ? 's' : ''}. Please fill in the values in the Variables page, then re-run.`
+		`Pipeline references ${missingKeys.length} undefined variable${missingKeys.length > 1 ? 's' : ''}. Please fill in the values under Settings → Environment Variables, then re-run.`
 	);
 }
 

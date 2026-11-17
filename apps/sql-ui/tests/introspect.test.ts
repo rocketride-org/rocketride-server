@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlExecuteResult, ISqlSession } from '../src/connect';
+import type { SqlExecuteResult, SqlSession } from '../src/connect';
 import { fetchForeignKeyNames } from '../src/sql/introspect';
 
 // =============================================================================
@@ -36,7 +36,7 @@ import { fetchForeignKeyNames } from '../src/sql/introspect';
 /** Records the statements a call issued and replays canned rows. */
 interface IFakeSession {
 	/** The session handed to the module under test. */
-	session: ISqlSession;
+	session: SqlSession;
 	/** Every statement the module executed, in order. */
 	statements: string[];
 	/** The bind values each statement rode with, in the same order. */
@@ -44,7 +44,7 @@ interface IFakeSession {
 }
 
 /**
- * Build a fake ISqlSession that answers every execute with the given rows.
+ * Build a fake SqlSession that answers every execute with the given rows.
  *
  * @param rows - The rows every execute returns.
  * @returns The fake session and its statement log.
@@ -54,7 +54,7 @@ function fakeSession(rows: Record<string, unknown>[] = []): IFakeSession {
 	const binds: unknown[][] = [];
 	const session = {
 		endpoint: { key: 'p:s:n' },
-		execute: async (sql: string, opts?: { params?: unknown[] }): Promise<ISqlExecuteResult> => {
+		execute: async (sql: string, opts?: { params?: unknown[] }): Promise<SqlExecuteResult> => {
 			statements.push(sql);
 			binds.push(opts?.params ?? []);
 			return { rows, affected_rows: 0 };
@@ -62,7 +62,7 @@ function fakeSession(rows: Record<string, unknown>[] = []): IFakeSession {
 		getSchema: async () => ({}),
 		refreshSchema: async () => ({}),
 		dialect: async () => 'postgres' as const,
-	} as unknown as ISqlSession;
+	} as unknown as SqlSession;
 	return { session, statements, binds };
 }
 

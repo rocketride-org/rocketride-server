@@ -31,21 +31,21 @@
 // MonitorPage.tsx.
 // =============================================================================
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell';
-import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
+import type { DevToolProps, ShellAppProps } from 'shell';
+import { usePolling, AppLayout, typedToolChannel, useShellConnection, useToolState } from 'shell';
+import { useDashboardData } from './monitor/useDashboardData';
 import { commonStyles } from 'shell';
-import { MonitorView } from 'shell';
-import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
+import MonitorView from './monitor';
+import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse, MonitorPageId } from './monitor';
+import { createMonitorOpsClient } from './ops';
+import type { IDashboardSnapshot, MonitorEventMap, MonitorStateMap } from './ops';
+import { MonitorSidebar } from './MonitorSidebar';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
-// (header + account footer) present with an empty middle slot.
-const SIDEBAR_FRAME_ONLY = <></>;
 
 /** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
 const GRID_POLL_INTERVAL_MS = 3000;
@@ -76,8 +76,24 @@ const styles = {
  * sort, filter, and search server-side, and this host polls their combined
  * refetch every 3 seconds (the admin views' grid pattern).
  */
-const MonitorApp: React.FC<ShellAppProps> = (_props) => {
-	const { client, isConnected } = useShellConnection();
+/** Props for {@link MonitorSurface} — host-controlled page selection. */
+export interface IMonitorSurfaceProps {
+	/** The active page (the host's sidebar menu drives it). */
+	page: MonitorPageId;
+}
+
+/**
+ * The monitor surface — dashboard + grids, no app chrome and NO tab strip
+ * (navigation moved to the sidebar menu, 2026-10-14). Shared by the full app
+ * (inside its AppLayout) and the devToolFrame mount, where a host workbench
+ * renders it directly. All data flows through the shell connection
+ * singleton, which the host has connected before mounting.
+ */
+export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
+	// The realm's own client — real at the root, the realm client (requests
+	// ride the shell bus) in spoke realms.
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
 
 	// Shared 3s dashboard snapshot + activity feed (module-level singleton hook,
 	// so data survives view switches without re-fetching).
@@ -93,7 +109,7 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 		// No client yet (shell still connecting): an empty page — the
 		// connection-gated poll refetches as soon as the shell comes up.
 		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listConnections(req);
+		return client.listConnections(req) as Promise<ListPageResponse<DashboardConnection>>;
 	}, [client]);
 
 	/**
@@ -105,7 +121,7 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
 		// Same shell-connecting guard as listConnections.
 		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return client.listTasks(req);
+		return client.listTasks(req) as Promise<ListPageResponse<DashboardTask>>;
 	}, [client]);
 
 	// Combined remote-grid refetch handed up by MonitorView; polled at the
@@ -127,19 +143,98 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	// =========================================================================
 
 	return (
-		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
-			<div style={styles.container}>
-				<MonitorView
-					data={data}
-					events={events}
-					isConnected={isConnected}
-					onRefresh={refresh}
-					listConnections={listConnections}
-					listTasks={listTasks}
-					onRefetchReady={handleRefetchReady}
-				/>
-			</div>
+		<div style={styles.container}>
+			<MonitorView
+				data={data}
+				events={events}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
+				activePage={page}
+				hideTabs
+			/>
+		</div>
+	);
+};
+
+/**
+ * Server Monitor app — the monitor surface inside the app chrome, with the
+ * page menu in the sidebar (replacing the old top tab strip) and the status
+ * bar below.
+ */
+const MonitorApp: React.FC<ShellAppProps> = (_props) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+	return (
+		<AppLayout sidebar={<MonitorSidebar activeId={page} onSelect={setPage} />} showStatus>
+			<MonitorSurface page={page} />
 		</AppLayout>
+	);
+};
+
+// =============================================================================
+// DEV-TOOL FRAME — the surface in a host workbench, page-synced over peer
+// =============================================================================
+
+/**
+ * The monitor surface as a host-mounted devToolFrame: page selections arrive
+ * from the tool's sidebar mount over the peer channel (user actions only —
+ * the two mounts may be isolated documents), and this frame PUSHES its page
+ * on mount and on every change; the host retains the last push so a
+ * reloaded sidebar highlights correctly without asking.
+ */
+export const MonitorDevToolFrame: React.FC<DevToolProps> = ({ channel }) => {
+	const [page, setPage] = useState<MonitorPageId>('overview');
+
+	// The dashboard snapshot stays CONTROLLER-owned — one poller shared by all
+	// views, published as the retained 'dashboard' topic. The grids page with
+	// this frame's OWN realm client (requests ride the shell bus).
+	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap, MonitorEventMap>(channel), [channel]);
+	const dash = useToolState(toolChannel, 'dashboard') ?? { data: null, events: [] };
+
+	// Apply sidebar selections.
+	useEffect(() => toolChannel.onEvent('page', setPage), [toolChannel]);
+
+	// Push the current page — on mount and on every change (the host retains
+	// the last frame push for a reloaded sidebar).
+	useEffect(() => {
+		toolChannel.sendEvent('page', page);
+	}, [toolChannel, page]);
+
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
+	const ops = useMemo(() => createMonitorOpsClient(channel), [channel]);
+	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listConnections(req) as Promise<ListPageResponse<DashboardConnection>>;
+	}, [client]);
+	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listTasks(req) as Promise<ListPageResponse<DashboardTask>>;
+	}, [client]);
+	const refresh = useCallback(() => {
+		void ops.refresh();
+	}, [ops]);
+
+	// Same silent 3s page re-request the in-app surface runs.
+	const refetchRef = useRef<() => void>(() => {});
+	const handleRefetchReady = useCallback((refetch: () => void) => { refetchRef.current = refetch; }, []);
+	const pollGrids = useCallback(() => { refetchRef.current(); }, []);
+	usePolling(pollGrids, GRID_POLL_INTERVAL_MS);
+
+	return (
+		<div style={styles.container}>
+			<MonitorView
+				data={dash.data}
+				events={dash.events}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
+				activePage={page}
+				hideTabs
+			/>
+		</div>
 	);
 };
 

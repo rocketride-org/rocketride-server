@@ -21,62 +21,33 @@
 // SOFTWARE.
 
 // =============================================================================
-// CONNECTION ERROR BANNER — recovery UI for latched connection failures
+// CONNECTION ERROR DIALOG — recovery UI for latched connection failures
 // =============================================================================
 //
-// Renders a fixed top banner whenever ConnectionStatus carries a latched
-// failure (status.lastFailure). Network failures offer a Retry that re-runs
-// bootstrap via reload; auth failures offer Sign in via the shell's
-// edition-aware login dispatcher (shell:loginRequest).
+// Renders a centered modal dialog whenever ConnectionStatus carries a
+// latched failure (status.lastFailure). Network failures offer a Retry that
+// re-runs bootstrap via reload; auth failures offer Sign in via the shell's
+// edition-aware login dispatcher (shell:loginRequest). A failure is a STOP
+// — a dialog demands the decision a top strip let people scroll past.
 // =============================================================================
 
 import React, { CSSProperties, useEffect, useState } from 'react';
 import { ConnectionManager } from '../../connection/connection';
 import { useConnectionStatus } from '../../hooks/useConnectionStatus';
+import { Modal } from '../modal/Modal';
+import { Button } from '../button/Button';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	banner: {
-		position: 'fixed',
-		top: 0,
-		left: 0,
-		right: 0,
-		zIndex: 1000,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: 12,
-		minHeight: 36,
-		padding: '6px 12px',
-		backgroundColor: 'var(--rr-bg-paper)',
-		borderBottom: '1px solid var(--rr-border)',
-		color: 'var(--rr-text-primary)',
-		fontFamily: 'var(--rr-font-family)',
-		fontSize: 'var(--rr-font-size-widget)',
-	} as CSSProperties,
-	message: { flex: '0 1 auto' } as CSSProperties,
-	action: {
-		border: 0,
-		background: 'none',
-		padding: 0,
-		color: 'var(--rr-brand)',
-		font: 'inherit',
-		fontWeight: 600,
-		cursor: 'pointer',
-	} as CSSProperties,
-	dismiss: {
-		position: 'absolute',
-		right: 12,
-		border: 0,
-		background: 'none',
-		padding: '0 4px',
+	message: {
+		margin: 0,
+		fontSize: 13,
+		lineHeight: 1.6,
 		color: 'var(--rr-text-secondary)',
-		fontSize: 20,
-		lineHeight: 1,
-		cursor: 'pointer',
+		wordBreak: 'break-word',
 	} as CSSProperties,
 };
 
@@ -93,7 +64,9 @@ export interface ConnectionErrorBannerProps {
 	onSignIn?: () => void | Promise<void>;
 }
 
-/** A dismissible recovery banner for authentication and transport failures. */
+/** A dismissible centered recovery dialog for authentication and transport
+ *  failures (the component keeps its historical name — same conditions,
+ *  same actions, modal presentation). */
 export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ message, onRetry, onSignIn }) => {
 	const status = useConnectionStatus();
 	const [dismissed, setDismissed] = useState(false);
@@ -135,19 +108,27 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 			ConnectionManager.getInstance().emit('shell:loginRequest', {});
 		});
 
+	const title = isNetworkFailure ? 'Connection lost' : isOAuthCallbackFailure ? 'Sign-in failed' : 'Session expired';
 	return (
-		<div style={styles.banner} role="alert">
-			<span style={styles.message} title={failure.lastError}>{message ?? defaultMessage}</span>
-			<button type="button" style={styles.action} onClick={() => {
-				void Promise.resolve().then(onAction).catch((error) => {
-					console.error('[ConnectionErrorBanner] Recovery action failed:', error);
-				});
-			}}>
-				{action}
-			</button>
-			<button type="button" style={styles.dismiss} aria-label="Dismiss connection error" onClick={() => setDismissed(true)}>
-				&times;
-			</button>
-		</div>
+		<Modal
+			title={title}
+			onClose={() => setDismissed(true)}
+			footer={
+				<>
+					<Button variant="secondary" onClick={() => setDismissed(true)}>Dismiss</Button>
+					<Button
+						onClick={() => {
+							void Promise.resolve().then(onAction).catch((error) => {
+								console.error('[ConnectionErrorBanner] Recovery action failed:', error);
+							});
+						}}
+					>
+						{action}
+					</Button>
+				</>
+			}
+		>
+			<p style={styles.message} title={failure.lastError}>{message ?? defaultMessage}</p>
+		</Modal>
 	);
 };

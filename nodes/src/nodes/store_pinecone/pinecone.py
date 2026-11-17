@@ -41,7 +41,7 @@ from pinecone.grpc import PineconeGRPC as Pinecone
 from pinecone import ServerlessSpec, PodSpec
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
 
 """
@@ -91,11 +91,12 @@ class Store(DocumentStoreBase):
 
         # check if the similarity matches pinecone configuration options
         similarity = config.get('similarity', 'cosine')
-        if similarity in ['cosine', 'euclidean', 'dotproduct']:
+        supported = ('cosine', 'euclidean', 'dotproduct')
+        if similarity in supported:
             self.similarity = similarity
         else:
             raise Exception(
-                'The metric you provided in the config.json does not match required pinecone configurations'
+                f'Pinecone: unsupported similarity {similarity!r}. Set "similarity" to: {", ".join(supported)}.'
             )
 
         # Init the store
@@ -329,7 +330,7 @@ class Store(DocumentStoreBase):
             return {}
 
         # Build up the filter for chunkId = 0
-        filterList = [{'chunkId': {'$eq': 0}}]
+        filterList = [{'chunkId': {'$eq': 0}}, {'isDeleted': {'$eq': False}}]
 
         # If parent specified, add it to the filter
         if parent is not None:
@@ -387,6 +388,11 @@ class Store(DocumentStoreBase):
         Add document chunks to the document store.
 
         (currently doing it chunk by chunk but will upgrade to batch additions with payload limits like others)
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -398,10 +404,11 @@ class Store(DocumentStoreBase):
 
         points_to_upsert = []
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over; the control row is never deleted
+        objectIds = [objectId for objectId in self.objectIdsToReplace(chunks) if objectId != CONTROL_OBJECT_ID]
 
         def flush():
+            """Delete the replaced objects on the first call, then upsert the queued points."""
             nonlocal points_to_upsert
             nonlocal objectIds
 
@@ -410,20 +417,15 @@ class Store(DocumentStoreBase):
 
             # Batch operation for deletion
             if len(objectIds):
-                self.remove(list(objectIds.keys()))
+                self.remove(objectIds)
 
             # Batch operation for upsert
             if len(points_to_upsert):
                 index.upsert(vectors=points_to_upsert)
 
             # Clear them
-            objectIds = {}
+            objectIds = []
             points_to_upsert = []
-
-        # For each document set objectId to true to make sure we delete any chunks we already have added
-        for chunk in chunks:
-            if chunk.metadata.objectId != 'schema':
-                objectIds[chunk.metadata.objectId] = True
 
         sum_size = 0
         cur_size = 0
@@ -440,7 +442,7 @@ class Store(DocumentStoreBase):
             metadata['content'] = chunk.page_content
 
             # Bogus document which is not compatible with pinecone because it can't accept all zeroes
-            if chunk.metadata.objectId == 'schema':
+            if chunk.metadata.objectId == CONTROL_OBJECT_ID:
                 embedding[-1] = 1
                 metadata['nodeId'] = ''
                 metadata['parent'] = ''

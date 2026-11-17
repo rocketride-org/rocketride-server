@@ -45,8 +45,10 @@ static std::set<std::filesystem::path> dumpsIn(
 // testMain.ipp) so the child registers Crashpad and faults/exits without the
 // fork-in-a-threaded-process deadlock a plain fork() would hit. Returns the
 // child's wait status. `crashDb` overrides the child's crash DB directory --
-// the parent has already resolved (and cached) its own.
-static int runCrashChild(const char *mode, const char *crashDb = nullptr) {
+// the parent has already resolved (and cached) its own. `dumpsFlag` is the
+// child's --dumps argument; with nullptr it gets none.
+static int runCrashChild(const char *mode, const char *crashDb = nullptr,
+                         const char *dumpsFlag = "--dumps") {
     auto exe = _ts(application::execPath());
     // Resolve the handler here (parent) and hand it to the child explicitly: a
     // re-exec'd child can compute an empty execDir(), so it can't self-locate the
@@ -63,7 +65,8 @@ static int runCrashChild(const char *mode, const char *crashDb = nullptr) {
         ::setenv("RR_CRASH_CHILD", mode, 1);
         ::setenv("ROCKETRIDE_CRASHPAD_HANDLER", handler.c_str(), 1);
         if (crashDb) ::setenv("ROCKETRIDE_CRASHDB_DIR", crashDb, 1);
-        char *const argv[] = {const_cast<char *>(exe.c_str()), nullptr};
+        char *const argv[] = {const_cast<char *>(exe.c_str()),
+                              const_cast<char *>(dumpsFlag), nullptr};
         ::execv(exe.c_str(), argv);
         ::_exit(127);  // exec failed
     }
@@ -100,6 +103,27 @@ TEST_CASE("crashpad") {
 
         // The child relocates its own dump at crash time; no parent sweep.
         REQUIRE(dumpsIn(crashDir).size() > before.size());
+    }
+
+    // Dumps are opt-in: without the flag, or with it set false, the crash is
+    // still fatal, but no handler starts, so there is no crash DB and no dump.
+    SECTION("without --dumps a crash writes no dump") {
+        for (const char *flag : {(const char *)nullptr, "--dumps=false"}) {
+            INFO((flag ? flag : "no --dumps"));
+            auto dir =
+                std::filesystem::temp_directory_path() / "rr-crashdb-off";
+            std::error_code ec;
+            std::filesystem::remove_all(dir, ec);
+            auto before = dumpsIn(crashDir);
+
+            int status = runCrashChild("crash", dir.c_str(), flag);
+            REQUIRE(WIFSIGNALED(status));
+
+            ::usleep(1000 * 1000);  // let any stray dump land
+
+            REQUIRE(!std::filesystem::exists(dir, ec));
+            REQUIRE(dumpsIn(crashDir) == before);
+        }
     }
 
     // On macOS the child dumps via SimulateCrash() and must then stop Crashpad
@@ -143,14 +167,17 @@ TEST_CASE("crashpad") {
     }
 
     SECTION("clean exit writes no dump") {
-        auto before = dumpsIn(crashDir);
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-clean";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
 
-        int status = runCrashChild("clean");
+        int status = runCrashChild("clean", dir.c_str());
         REQUIRE(WIFEXITED(status));
 
-        plat::minidumpSweep();
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
 
-        REQUIRE(dumpsIn(crashDir) == before);
+        std::filesystem::remove_all(dir, ec);
     }
 
     // The crash DB sits in world-writable temp, so anything the engine does not

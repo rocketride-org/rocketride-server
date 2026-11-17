@@ -120,8 +120,11 @@ so setting one leaves the others alone. `vad_threshold` and
 
 ### Segmentation and documents
 
-Transcription calls are serialized through a global lock so a single loaded
-model is shared safely across instances. The transcriber combines
+Transcription calls are guarded per run mode: with in-process inference a
+global lock serializes them, so a single loaded model is shared safely
+across instances; with `--modelserver` the guard is a no-op: the task's
+streams are sent concurrently and the model server decides how many it
+transcribes at once. The transcriber combines
 consecutive segments until one ends in `.`, `?`, or `!`, then writes that
 text with the timestamp of its first segment. For document output, each
 document carries `chunkId` (sequential per stream, reset on each new stream)

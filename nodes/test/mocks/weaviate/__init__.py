@@ -100,7 +100,7 @@ class Filter:
         combined = Filter(logic='and')
         for f in filters:
             if isinstance(f, Filter):
-                combined.conditions.extend(f.conditions)
+                combined.conditions.append({'filter': f})
         return combined
 
     @classmethod
@@ -108,7 +108,7 @@ class Filter:
         combined = Filter(logic='or')
         for f in filters:
             if isinstance(f, Filter):
-                combined.conditions.extend(f.conditions)
+                combined.conditions.append({'filter': f})
         return combined
 
     def __and__(self, other: 'Filter') -> 'Filter':
@@ -121,6 +121,9 @@ class Filter:
 
         results = []
         for cond in self.conditions:
+            if 'filter' in cond:
+                results.append(cond['filter'].matches(properties))
+                continue
             prop_name = cond.get('property')
             op = cond.get('op')
             value = cond.get('value')
@@ -359,9 +362,11 @@ class MockAggregate:
     def __init__(self, collection: 'MockCollection'):
         self.collection = collection
 
-    def over_all(self, total_count: bool = False) -> AggregateResult:
-        """Get aggregate statistics."""
-        return AggregateResult(total_count=len(self.collection._storage))
+    def over_all(self, filters: Optional[Filter] = None, total_count: bool = False) -> AggregateResult:
+        """Get aggregate statistics: the number of objects that match ``filters`` (all of them without one)."""
+        rows = self.collection._storage.values()
+        matching = [data for data in rows if filters is None or filters.matches(data['properties'])]
+        return AggregateResult(total_count=len(matching))
 
 
 class MockCollection:

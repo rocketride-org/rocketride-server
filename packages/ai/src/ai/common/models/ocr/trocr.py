@@ -30,7 +30,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency, group_words_into_lines
+from ..device_budget import device_budget
+from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.trocr')
 
@@ -378,20 +379,30 @@ class TrOCR:
         return results[0] if single_input else results
 
     def _read_local(self, images: List[bytes]) -> List[Dict]:
-        """Execute local OCR with perf timing."""
+        """Run OCR in this process and report its timings; inference waits in its device's ``device_budget``.
+
+        Args:
+            images: Encoded images.
+
+        Returns:
+            One result per image, as ``read`` returns them.
+        """
         # Preprocess phase — decode images and prepare for model
         t0 = time.perf_counter()
         preprocessed = TrOCRLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR recognition
+        # GPU inference phase — wait for the device (cost not measured: alone), then run OCR
         t0 = time.perf_counter()
-        raw_output = TrOCRLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(TrOCRLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = TrOCRLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text results
         t0 = time.perf_counter()
-        results = TrOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = TrOCRLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -401,7 +412,7 @@ class TrOCR:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
@@ -415,7 +426,7 @@ class TrOCR:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,
                 },
             )
@@ -425,6 +436,7 @@ class TrOCR:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('TrOCR', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

@@ -38,6 +38,24 @@
 	--rr-bg-surface-alt: var(--vscode-editor-background, #fafafa);
 
 	/* ================================================================== */
+	/* Document tabs (shell DocTabs)                                       */
+	/* ================================================================== */
+
+	/* The real VS Code tab tokens, so an in-app editor tab strip is
+	   indistinguishable from the editor's own: uniform shaded strip
+	   (inactive tabs carry no fill of their own), active tab matching the
+	   editor background, 1px tab separators. The hover overlay is the
+	   NEUTRAL toolbar hover, deliberately not tab.hoverBackground — themes
+	   default that to the active fill, which makes hover read as active. */
+
+	--rr-doctabs-bg: var(--vscode-editorGroupHeader-tabsBackground, var(--rr-bg-widget));
+	--rr-doctabs-tab-active-bg: var(--vscode-tab-activeBackground, var(--vscode-editor-background, #ffffff));
+	--rr-doctabs-tab-hover-bg: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.12));
+	--rr-doctabs-fg-active: var(--vscode-tab-activeForeground, var(--vscode-foreground, #1a1a1a));
+	--rr-doctabs-fg-inactive: var(--vscode-tab-inactiveForeground, var(--vscode-descriptionForeground, #666666));
+	--rr-doctabs-border: var(--vscode-tab-border, var(--rr-border));
+
+	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
 
@@ -58,6 +76,15 @@
 	--rr-shadow-widget: var(--vscode-widget-shadow, rgba(0, 0, 0, 0.16));
 	--rr-font-family-widget: var(--vscode-font-family, 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif);
 	--rr-font-size-widget: var(--vscode-font-size, 13px);
+
+	/* ================================================================== */
+	/* Workbench activity rail                                             */
+	/* ================================================================== */
+
+	--rr-bg-rail: var(--vscode-activityBar-background, #2c2c2c);
+	--rr-bg-rail-hover: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.12));
+	--rr-fg-rail: var(--vscode-activityBar-inactiveForeground, rgba(255, 255, 255, 0.6));
+	--rr-fg-rail-active: var(--vscode-activityBar-foreground, #ffffff);
 
 	/* ================================================================== */
 	/* Text                                                                */

@@ -1,0 +1,26 @@
+[
+	{ "update": { "messages": [], "tools": [{ "name": "a" }] }, "rule": "tools need messages" },
+	{ "update": { "history": [{ "role": "user", "content": "x" }] }, "rule": "history cannot be used with messages" },
+	{ "update": { "questions": [{ "text": "x" }] }, "rule": "questions cannot be used with messages" },
+	{ "update": { "expectJson": true }, "rule": "expectJson cannot be used with messages" },
+	{ "update": { "tools": [{ "name": "a" }, { "name": "a" }] }, "rule": "tool names must be unique" },
+	{
+		"update": {
+			"messages": [
+				{ "role": "user", "content": "x" },
+				{ "role": "assistant", "content": "y" }
+			]
+		},
+		"rule": "last message must be a user message"
+	},
+	{
+		"update": {
+			"messages": [
+				{ "role": "user", "content": "x" },
+				{ "role": "assistant", "content": [{ "type": "tool_call", "id": "", "name": "a", "args": {} }] },
+				{ "role": "user", "content": "y" }
+			]
+		},
+		"rule": "non-empty id|at least 1 character"
+	}
+]

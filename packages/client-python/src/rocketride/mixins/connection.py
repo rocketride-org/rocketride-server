@@ -54,9 +54,23 @@ import asyncio
 import os
 import urllib.parse
 from typing import Any, Dict, Optional
-from ..core import DAPClient, TransportWebSocket, CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_PROTOCOL
+from ..core import (
+    DAPClient,
+    TransportWebSocket,
+    CONST_DEFAULT_WEB_HOST,
+    CONST_DEFAULT_WEB_PORT,
+    CONST_DEFAULT_WEB_PROTOCOL,
+)
 from ..core.exceptions import AuthenticationException
 from ..types.client import ConnectResult
+
+# Exact text the server sends when it receives an empty credential.
+_NO_AUTH_MESSAGE = 'No authorization provided'
+_NO_AUTH_HINT = (
+    'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. '
+    'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. '
+    'RocketRide Cloud needs a key: run `rocketride login`.'
+)
 
 
 class ConnectionMixin(DAPClient):
@@ -153,7 +167,14 @@ class ConnectionMixin(DAPClient):
             raise
         if not response.get('success', False):
             message = response.get('message', 'Authentication failed')
-            raise AuthenticationException({'message': message})
+            result: Dict[str, Any] = {'message': message}
+            if message == _NO_AUTH_MESSAGE and not str(auth_args['auth'] or '').strip():
+                result['hint'] = _NO_AUTH_HINT
+            error = AuthenticationException(result)
+            if 'hint' in result and hasattr(error, 'add_note'):
+                # Python 3.11+: an uncaught traceback prints the hint under the message.
+                error.add_note(result['hint'])
+            raise error
 
         auth_body = response.get('body') or {}
         self._connect_result = auth_body  # type: ignore[assignment]
@@ -375,6 +396,11 @@ class ConnectionMixin(DAPClient):
     @staticmethod
     def normalize_uri(uri: str) -> str:
         """Normalize a user-provided URI into a fully-formed HTTP/HTTPS URL."""
+        # A bare port ('5590') names that port on this host. Without a host,
+        # urlparse would read the digits as a hostname and add the default port.
+        if uri and uri.isdigit():
+            uri = f'{CONST_DEFAULT_WEB_HOST}:{uri}'
+
         if uri and '://' not in uri:
             uri = f'{CONST_DEFAULT_WEB_PROTOCOL}{uri}'
 

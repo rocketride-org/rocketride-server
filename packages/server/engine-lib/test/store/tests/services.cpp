@@ -21,7 +21,17 @@
 // SOFTWARE.
 // =============================================================================
 
+#include <pybind11/embed.h>
+
 #include "test.h"
+
+namespace py = pybind11;
+
+namespace {
+json::Value customNode(const char *name);
+json::Value customList(std::initializer_list<json::Value> defs);
+Text registeredType();
+}  // namespace
 
 TEST_CASE("store::Services") {
     auto _res = IServices::getServiceSchemas();
@@ -41,4 +51,437 @@ TEST_CASE("store::Services") {
         REQUIRE(schema.isMember("services"));
         REQUIRE(schema["services"].isObject());
     }
+
+    // Custom services are seen by the lookups of the call they came with,
+    // and the registry is the same before and after
+    SECTION("custom services: call-scoped") {
+        REQUIRE_FALSE(IServices::getServiceDefinition("custom_a"));
+
+        {
+            auto scope = IServices::withCustomServices(
+                customList({customNode("custom_a")}));
+            REQUIRE_NO_ERROR(scope);
+
+            auto def = IServices::getServiceDefinition("custom_a");
+            REQUIRE(def);
+            CHECK((*def)->isResolved);
+            CHECK((*def)->title == "custom_a");
+
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            CHECK((*schemas)["services"].isMember("custom_a"));
+            CHECK((*schemas)["services"]["custom_a"]["icon"].asString() ==
+                  "data:image/svg+xml;base64,PHN2Zy8+");
+        }
+
+        REQUIRE_FALSE(IServices::getServiceDefinition("custom_a"));
+        auto schemas = IServices::getServiceSchemas();
+        REQUIRE_NO_ERROR(schemas);
+        REQUIRE_FALSE((*schemas)["services"].isMember("custom_a"));
+
+        // Nothing is registered for it either
+        const auto names = Factory::getFactories("iFilterGlobal");
+        REQUIRE(std::find(names.begin(), names.end(), iTextView{"custom_a"}) ==
+                names.end());
+    }
+
+    SECTION("custom services: nest") {
+        auto outer = IServices::withCustomServices(
+            customList({customNode("custom_outer")}));
+        REQUIRE_NO_ERROR(outer);
+
+        {
+            auto inner = IServices::withCustomServices(
+                customList({customNode("custom_inner")}));
+            REQUIRE_NO_ERROR(inner);
+            CHECK(IServices::getServiceDefinition("custom_inner"));
+        }
+
+        CHECK(IServices::getServiceDefinition("custom_outer"));
+        CHECK_FALSE(IServices::getServiceDefinition("custom_inner"));
+    }
+
+    SECTION("custom services: refused") {
+        auto shadow = customNode("custom_b");
+        shadow["protocol"] = _ts(registeredType(), "://");
+
+        auto iconFile = customNode("custom_c");
+        iconFile["icon"] = "icon.svg";
+
+        auto noProtocol = customNode("custom_d");
+        noProtocol.removeMember("protocol");
+
+        auto badCap = customNode("custom_e");
+        badCap["capabilities"].append("nonsense");
+
+        auto cppNoLibrary = customNode("custom_f");
+        cppNoLibrary["node"] = "cpp";
+        cppNoLibrary["path"] = "";
+
+        auto colonOnly = customNode("custom_j");
+        colonOnly["protocol"] = ":";
+
+        auto loop = customNode("custom_k");
+        loop["fields"]["custom_k.loop"] = "custom_k.loop";
+        loop["shape"].append("custom_k.loop");
+
+        auto pingPong = customNode("custom_m");
+        pingPong["fields"]["custom_m.a"] = "custom_m.b";
+        pingPong["fields"]["custom_m.b"] = "custom_m.a";
+        pingPong["shape"].append("custom_m.a");
+
+        auto badLanes = customNode("custom_l");
+        badLanes["lanes"] = customList({"x"});
+        auto badTitle = customNode("custom_p");
+        badTitle["title"] = R"({})"_json;
+        auto badPrefix = customNode("custom_q");
+        badPrefix["prefix"] = customList({"x"});
+
+        // Read later as strings or lists, so refused when they are not
+        auto badIcon = customNode("custom_s");
+        badIcon["icon"] = R"({})"_json;
+        auto badTarget = customNode("custom_t");
+        badTarget["lanes"]["text"] = customList({R"({})"_json});
+        auto badInput = customNode("custom_u");
+        badInput["input"] = customList({"text"});
+        auto badInputLane = customNode("custom_v");
+        badInputLane["input"] = customList({R"({"lane": {}})"_json});
+        auto badOutput = customNode("custom_w");
+        badOutput["input"] =
+            customList({R"({"lane": "text", "output": "text"})"_json});
+        auto badTile = customNode("custom_x");
+        badTile["tile"] = customList({R"({})"_json});
+
+        // Each field lists the next one twice: no cycle, 2^16 references
+        auto fanOut = customNode("custom_r");
+        for (int level = 0; level < 15; level++) {
+            auto &field = fanOut["fields"][_ts("custom_r.f", level)];
+            field["section"] = _ts("s", level);
+            field["properties"].append(_ts("custom_r.f", level + 1));
+            field["properties"].append(_ts("custom_r.f", level + 1));
+        }
+        fanOut["fields"]["custom_r.f15"] = R"({"type": "string"})"_json;
+        fanOut["shape"].append("custom_r.f0");
+
+        // 9 layers of 4 nodes, each combo listing the layer below: no
+        // cycle, the top one copies 4^8 schemas
+        json::Value layers = json::arrayValue;
+        for (int layer = 0; layer < 9; layer++)
+            for (int node = 0; node < 4; node++) {
+                const auto name = _ts("custom_w", layer, "_", node);
+                auto def = customNode(name.c_str());
+                def["classType"] = customList({_ts("custom_layer", layer)});
+                const auto pick = _ts(name, ".pick");
+                def["fields"][pick] = R"({"title": "Pick"})"_json;
+                if (layer)
+                    def["fields"][pick]["combo"] =
+                        _ts("custom_layer", layer - 1);
+                else
+                    def["fields"][pick]["type"] = "string";
+                json::Value section = R"({"section": "Pipe"})"_json;
+                section["properties"].append(pick);
+                def["shape"].append(section);
+                layers.append(def);
+            }
+
+        // A big field listed many times: few references, a large copy
+        // each time (1000 references, about 10^6 JSON values)
+        auto heavy = customNode("custom_y");
+        auto &big = heavy["fields"]["custom_y.big"];
+        big["type"] = "string";
+        for (int value = 0; value < 1000; value++)
+            big["enum"].append(_ts("v", value));
+        json::Value heavySection = R"({"section": "Pipe"})"_json;
+        for (int copy = 0; copy < 1000; copy++)
+            heavySection["properties"].append("custom_y.big");
+        heavy["shape"].append(heavySection);
+
+        // Sections written inline in a provider: no reference pays for
+        // them, but every combo that lists the provider copies them
+        auto inlineBig = customNode("custom_z");
+        inlineBig["classType"] = customList({"custom_kind_z"});
+        json::Value bigSection = R"({"section": "Pipe"})"_json;
+        for (int part = 0; part < 1000; part++) {
+            json::Value inner;
+            inner["section"] = _ts("s", part);
+            inner["properties"] = json::arrayValue;
+            bigSection["properties"].append(inner);
+        }
+        inlineBig["shape"].append(bigSection);
+        auto picks = customNode("custom_za");
+        picks["fields"]["custom_za.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_z"})"_json;
+        json::Value pickSection = R"({"section": "Pipe"})"_json;
+        for (int copy = 0; copy < 1000; copy++)
+            pickSection["properties"].append("custom_za.pick");
+        picks["shape"].append(pickSection);
+
+        // Each definition stays under its own budget (about 60 000 JSON
+        // values); twenty of them together go past the call's
+        json::Value many = json::arrayValue;
+        for (int copy = 0; copy < 20; copy++) {
+            const auto name = _ts("custom_many", copy);
+            auto def = customNode(name.c_str());
+            auto &field = def["fields"][_ts(name, ".big")];
+            field["type"] = "string";
+            for (int value = 0; value < 1000; value++)
+                field["enum"].append(_ts("v", value));
+            json::Value section = R"({"section": "Pipe"})"_json;
+            for (int ref = 0; ref < 60; ref++)
+                section["properties"].append(_ts(name, ".big"));
+            def["shape"].append(section);
+            many.append(def);
+        }
+
+        // Two combos that each wait for the other never resolve
+        auto waitsA = customNode("custom_n");
+        waitsA["classType"] = customList({"custom_kind_n"});
+        waitsA["fields"]["custom_n.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_o"})"_json;
+        waitsA["shape"].append(R"({"section": "Pipe", "title": "N",
+            "properties": ["custom_n.pick"]})"_json);
+        auto waitsB = customNode("custom_o");
+        waitsB["classType"] = customList({"custom_kind_o"});
+        waitsB["fields"]["custom_o.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind_n"})"_json;
+        waitsB["shape"].append(R"({"section": "Pipe", "title": "O",
+            "properties": ["custom_o.pick"]})"_json);
+
+        const json::Value refused[] = {
+            customList({shadow}),
+            customList({customNode("custom_g"), customNode("custom_g")}),
+            customList({iconFile}),
+            customList({noProtocol}),
+            customList({badCap}),
+            customList({cppNoLibrary}),
+            customList({"custom_h"}),
+            customNode("custom_i"),
+            customList({colonOnly}),
+            customList({loop}),
+            customList({pingPong}),
+            customList({badLanes}),
+            customList({badTitle}),
+            customList({badPrefix}),
+            customList({badIcon}),
+            customList({badTarget}),
+            customList({badInput}),
+            customList({badInputLane}),
+            customList({badOutput}),
+            customList({badTile}),
+            customList({fanOut}),
+            layers,
+            customList({heavy}),
+            customList({inlineBig, picks}),
+            customList({waitsA, waitsB}),
+            many,
+        };
+        for (const auto &custom : refused)
+            REQUIRE_FALSE(IServices::withCustomServices(custom));
+
+        // ":" names no logical type: refused before anything reads one
+        auto colon = IServices::withCustomServices(customList({colonOnly}));
+        REQUIRE_FALSE(colon);
+        CHECK(std::string{colon.ccode().message()}.find("No logical type") !=
+              std::string::npos);
+
+        // The budget names the definition that went past it
+        for (const auto &custom :
+             {customList({fanOut}), layers, customList({heavy}),
+              customList({inlineBig, picks})}) {
+            auto expanded = IServices::withCustomServices(custom);
+            REQUIRE_FALSE(expanded);
+            CHECK(std::string{expanded.ccode().message()}.find(
+                      "expand to more than") != std::string::npos);
+        }
+
+        // One of them alone is accepted; the call's budget names the list
+        REQUIRE(IServices::withCustomServices(customList({many[0]})));
+        auto together = IServices::withCustomServices(many);
+        REQUIRE_FALSE(together);
+        CHECK(std::string{together.ccode().message()}.find(
+                  "expand to more than 1000000 JSON values together") !=
+              std::string::npos);
+
+        // A registered type keeps its own definition
+        REQUIRE(IServices::getServiceDefinition(registeredType()));
+    }
+
+    // A combo lists the nodes of its class type a call brings, in a custom
+    // node and in a registered one alike
+    SECTION("custom services: combos") {
+        auto chooser = customNode("custom_chooser");
+        chooser["fields"]["custom_chooser.pick"] =
+            R"({"title": "Pick", "combo": "custom_kind"})"_json;
+        chooser["shape"].append(R"({"section": "Pipe", "title": "Chooser",
+            "properties": ["custom_chooser.pick"]})"_json);
+
+        auto picked = customNode("custom_picked");
+        picked["classType"] = customList({"custom_kind"});
+        picked["fields"]["custom_picked.key"] =
+            R"({"type": "string", "title": "Key"})"_json;
+        picked["shape"].append(R"({"section": "Pipe", "title": "Picked",
+            "properties": ["custom_picked.key"]})"_json);
+
+        auto embedding = customNode("custom_embedding");
+        embedding["classType"] = customList({"embedding"});
+        embedding["fields"]["custom_embedding.key"] =
+            R"({"type": "string", "title": "Key"})"_json;
+        embedding["shape"].append(R"({"section": "Pipe", "title": "Embedding",
+            "properties": ["custom_embedding.key"]})"_json);
+
+        // The registered nodes whose combos name "embedding" (autopipe's
+        // all.embedding) offer the custom one only inside the call
+        const auto registeredOffer = localfcn()->bool {
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            auto services = (*schemas)["services"];
+            services.removeMember("custom_embedding");
+            return services.toStyledString().find("custom_embedding") !=
+                   std::string::npos;
+        };
+        REQUIRE_FALSE(registeredOffer());
+        {
+            auto scope = IServices::withCustomServices(
+                customList({chooser, picked, embedding}));
+            REQUIRE_NO_ERROR(scope);
+
+            auto def = IServices::getServiceDefinition("custom_chooser");
+            REQUIRE(def);
+            CHECK((*def)->serviceSchema.toStyledString().find(
+                      "custom_picked") != std::string::npos);
+            CHECK(registeredOffer());
+        }
+        CHECK_FALSE(registeredOffer());
+
+        // A custom node with no title takes its logical type
+        auto untitled = customNode("custom_untitled");
+        untitled.removeMember("title");
+        {
+            auto scope = IServices::withCustomServices(customList({untitled}));
+            REQUIRE_NO_ERROR(scope);
+            auto def = IServices::getServiceDefinition("custom_untitled");
+            REQUIRE(def);
+            CHECK((*def)->title == "custom_untitled");
+        }
+
+        // A chain of 16 combos resolves one node per pass, the embedding at
+        // its top in the last one: a registered node that lists "embedding"
+        // is still unresolved then, and keeps its start-up definition
+        json::Value chain = json::arrayValue;
+        for (int link = 0; link < 16; link++) {
+            const auto name = _ts("custom_c", link < 10 ? "0" : "", link);
+            auto def = customNode(name.c_str());
+            def["classType"] = customList({_ts("custom_link", link)});
+            if (!link) def["classType"].append("embedding");
+            const auto pick = _ts(name, ".pick");
+            def["fields"][pick] = R"({"title": "Pick"})"_json;
+            if (link < 15)
+                def["fields"][pick]["combo"] = _ts("custom_link", link + 1);
+            else
+                def["fields"][pick]["type"] = "string";
+            json::Value section = R"({"section": "Pipe"})"_json;
+            section["properties"].append(pick);
+            def["shape"].append(section);
+            chain.append(def);
+        }
+        {
+            auto scope = IServices::withCustomServices(chain);
+            REQUIRE_NO_ERROR(scope);
+            auto schemas = IServices::getServiceSchemas();
+            REQUIRE_NO_ERROR(schemas);
+            for (const auto &type : (*schemas)["services"].getMemberNames()) {
+                auto def = IServices::getServiceDefinition(type);
+                REQUIRE(def);
+                CHECK((*def)->isResolved);
+            }
+        }
+    }
+
+    // The Python surface: the catalogue and validation take the same list
+    SECTION("custom services: rocketlib") {
+        const auto python = localfcn()->Error {
+            py::module_::import("__main__").attr("custom") =
+                engine::python::pyjson::jsonToDict(customNode("custom_py"));
+            py::exec(R"(
+import engLib, rocketlib, json
+assert 'custom_py' in rocketlib.getServiceDefinitions(custom=[custom])['services']
+assert 'custom_py' not in rocketlib.getServiceDefinitions()['services']
+
+shadow = dict(custom, protocol=next(iter(rocketlib.getServiceDefinitions()['services'])) + '://')
+try:
+    rocketlib.getServiceDefinitions(custom=[shadow])
+    raise AssertionError('a custom service that shadows a registered one was accepted')
+except AssertionError:
+    raise
+except Exception:
+    pass
+
+# Validation encrypts what the definition marks secure: a user's node secret
+# stays in the clear unless validation sees the custom definition
+secret = dict(custom, fields={'custom_py.apikey': {'type': 'string', 'title': 'Key', 'secure': True}},
+              shape=[{'section': 'Pipe', 'title': 'Custom', 'properties': ['custom_py.apikey']}])
+def pipeline():
+    return {'pipeline': {'source': 'c1', 'version': 1, 'components': [
+        {'id': 'c1', 'provider': 'custom_py', 'config': {'parameters': {'apikey': 's3cret-key'}}}]}}
+assert 's3cret-key' in json.dumps(rocketlib.validatePipeline(pipeline()))
+validated = json.dumps(rocketlib.validatePipeline(pipeline(), custom=[secret]))
+assert 's3cret-key' not in validated and 'secureParameters' in validated, validated
+
+# The component form too: the node has no factory here, so only the schema
+# checks and the encryption apply
+def component():
+    return {'component': {'id': 'c1', 'provider': 'custom_py', 'config': {'parameters': {'apikey': 's3cret-key'}}}}
+validated = rocketlib.validatePipeline(component(), custom=[secret])
+assert 'errors' not in validated, validated
+assert 's3cret-key' not in json.dumps(validated) and 'secureParameters' in json.dumps(validated), validated
+
+# ILoader.getPipeStack has no rocketlib wrapper; it is reached through engLib directly
+
+# The stack-only build EaaS runs at launch resolves the node the same way; the
+# source is not built there, so the custom node is a filter behind one
+source = {'pipeline': {'source': 's1', 'version': 1, 'components': [
+    {'id': 's1', 'provider': 'webhook', 'config': {}},
+    {'id': 'c1', 'provider': 'custom_py', 'config': {}, 'input': [{'lane': 'text', 'from': 's1'}]}]}}
+try:
+    engLib.ILoader.getPipeStack(source)
+    raise AssertionError('a pipeline naming an unknown node was built')
+except AssertionError:
+    raise
+except Exception as e:
+    assert 'custom_py' in str(e), e
+assert engLib.ILoader.getPipeStack(source, custom=[custom]) is not None
+)");
+            return {};
+        };
+        REQUIRE_NO_ERROR(callPython(python));
+    }
 }
+
+namespace {
+
+json::Value customNode(const char *name) {
+    json::Value def = R"({
+        "register": "filter", "node": "python", "classType": ["text"],
+        "capabilities": [], "lanes": {"text": ["text"]}, "fields": {},
+        "shape": [], "icon": "data:image/svg+xml;base64,PHN2Zy8+"
+    })"_json;
+    def["title"] = name;
+    def["protocol"] = _ts(name, "://");
+    def["path"] = _ts("nodes.", name);
+    def["prefix"] = name;
+    return def;
+}
+
+json::Value customList(std::initializer_list<json::Value> defs) {
+    json::Value list = json::arrayValue;
+    for (auto &def : defs) list.append(def);
+    return list;
+}
+
+Text registeredType() {
+    auto schemas = IServices::getServiceSchemas();
+    REQUIRE_NO_ERROR(schemas);
+    return (*schemas)["services"].getMemberNames().front();
+}
+
+}  // namespace

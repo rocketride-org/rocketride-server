@@ -79,12 +79,78 @@ async def test_handle_account_raises_not_implemented_in_oss():
         await acct.handle_account(MagicMock(), {})
 
 
+def _conn(authenticated: bool = False):
+    """A conn stub: build_response/build_error capture their body/message."""
+    conn = MagicMock()
+    conn.build_response.side_effect = lambda _req, body=None: {'success': True, 'body': body}
+    conn.build_error.side_effect = lambda _req, msg='': {'success': False, 'message': msg}
+    if authenticated:
+        conn._account_info = MagicMock(userId='local', organization={'id': 'local'})
+    else:
+        conn._account_info = None
+    return conn
+
+
+def _req(sub: str, **extra):
+    """An rrext_app request dict for one subcommand."""
+    return {'command': 'rrext_app', 'arguments': {'subcommand': sub, **extra}}
+
+
 @pytest.mark.asyncio
-async def test_handle_app_raises_not_implemented_in_oss():
-    """OSS deployments do not implement the app marketplace."""
+async def test_handle_app_list_serves_oss_with_login_decoration():
+    """OSS serves the marketplace READ surface: the login walk's entries,
+    decorated exactly as OSS login decorates (free + onDesktop) so the
+    catalog and the handshake can never disagree.
+    """
     acct = _ConcreteAccount()
-    with pytest.raises(NotImplementedError, match='App marketplace requires SaaS'):
-        await acct.handle_app(MagicMock(), {})
+
+    async def fake_apps(user_id, organizations):
+        return [{'id': 'rocketride.sql', 'name': 'SQL', 'shells': None}]
+
+    acct.get_apps_for_user = fake_apps
+    result = await acct.handle_app(_conn(authenticated=True), _req('list'))
+    assert result['success'] is True
+    (entry,) = result['body']['apps']
+    assert entry['appStatus'] == 'free'
+    assert entry['onDesktop'] is True
+
+
+@pytest.mark.asyncio
+async def test_handle_app_list_anonymous_uses_public_walk():
+    """Anonymous callers get the public walk, same decoration."""
+    acct = _ConcreteAccount()
+
+    async def fake_public():
+        return [{'id': 'rocketride.hello', 'name': 'Home'}]
+
+    acct.get_public_apps = fake_public
+    result = await acct.handle_app(_conn(), _req('list'))
+    assert [a['id'] for a in result['body']['apps']] == ['rocketride.hello']
+
+
+@pytest.mark.asyncio
+async def test_handle_app_desktop_writes_are_acknowledged_no_ops():
+    """desktop_add/remove are acknowledged without error on OSS (decision
+    2026-10-19): everything on an OSS server is implicitly on the desktop,
+    so shared surfaces need no edition branch.
+    """
+    acct = _ConcreteAccount()
+    added = await acct.handle_app(_conn(authenticated=True), _req('desktop_add', appId='x'))
+    removed = await acct.handle_app(_conn(authenticated=True), _req('desktop_remove', appId='x'))
+    assert added['body'] == {'added': True, 'appId': 'x'}
+    assert removed['body'] == {'removed': True, 'appId': 'x'}
+
+
+@pytest.mark.asyncio
+async def test_handle_app_admin_surface_stays_saas_only():
+    """The genuinely SaaS-only marketplace half (admin/pricing/list_mine)
+    still raises — emulating the review ladder or Stripe would be inventing
+    features, not parity.
+    """
+    acct = _ConcreteAccount()
+    for sub in ('admin_queue', 'pricing_list', 'list_mine'):
+        with pytest.raises(NotImplementedError, match='requires SaaS'):
+            await acct.handle_app(_conn(authenticated=True), _req(sub))
 
 
 # ---------------------------------------------------------------------------

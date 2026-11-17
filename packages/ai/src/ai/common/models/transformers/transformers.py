@@ -370,7 +370,7 @@ class TransformersLoader(BaseLoader):
         Postprocess model output.
 
         Args:
-            model: Model (unused but for API consistency)
+            model: Pipeline or server-side ModelInstance
             raw_output: Output from inference()
             batch_size: Expected batch size
             output_fields: Fields to extract
@@ -379,14 +379,26 @@ class TransformersLoader(BaseLoader):
         Returns:
             List of dicts with requested fields
         """
-        from ..extract import extract_outputs
+        from ..extract import extract_outputs, serialize_value
 
         results = []
 
-        # Pipeline output is already a list of dicts
+        actual_model = getattr(model, 'model_obj', model)
+        is_ner = getattr(actual_model, 'task', None) in ('ner', 'token-classification') and 'entities' in output_fields
+        # HF returns one list of entity dictionaries per input. A scalar input
+        # returns that list directly, including [] when nothing was recognized.
+        if is_ner and batch_size == 1 and isinstance(raw_output, list):
+            if not raw_output or isinstance(raw_output[0], dict):
+                raw_output = [raw_output]
+
+        # Keep one output entry per input.
         if isinstance(raw_output, list):
             for item in raw_output:
                 extracted = extract_outputs(item, output_fields)
+                if is_ner:
+                    # 'entities' names the complete per-input result, not a key
+                    # inside each HF entity. Preserve individual-field requests.
+                    extracted['entities'] = serialize_value(item)
                 results.append(extracted)
         else:
             # Model output - extract for each batch item

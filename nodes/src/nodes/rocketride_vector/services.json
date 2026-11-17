@@ -136,7 +136,7 @@
 		"rrvector.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Label for this store in the messages its tool functions return (for example a refused write names rrvector.delete). Agents see the functions as <node id>.search, objdir, get, stats, and upsert / delete when writes through tools are allowed; apps call client.tool with the function name and the node id.",
+			"description": "Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "rrvector",
 			"minLength": 1
 		},
@@ -144,13 +144,13 @@
 			"type": "boolean",
 			"title": "Expose as tools",
 			"default": false,
-			"description": "Offer this table to agents and apps as tool functions: search, objdir, get and stats, plus upsert and delete when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected."
+			"description": "Offer this table to agents and apps as tool functions: search, objdir, list_documents, get and stats, plus upsert, delete, soft_delete and restore when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected."
 		},
 		"rrvector.allow_write": {
 			"type": "boolean",
 			"title": "Allow writes through tools",
 			"default": false,
-			"description": "Permit the upsert and delete tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, get, stats) are unaffected."
+			"description": "Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected."
 		},
 		"rrvector.scope": {
 			"type": "string",
