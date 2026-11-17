@@ -50,9 +50,12 @@ Routes registered:
                                       smoke-test / ops probe)
         anything else               — the static assets tree
     GET  /sitemap.xml               — listed public pages (404 unless RR_APP_URL is set)
-    GET  /robots.txt                — robots policy (Disallow-all unless RR_APP_URL is set)
+    GET  /robots.txt                — robots policy (allow all with RR_APP_URL; Disallow-all
+                                      without it)
     GET  /llms.txt                  — llmstxt.org index (404 unless RR_APP_URL is set)
                                       (the three crawler files answer HEAD like GET)
+    GET  /<RR_INDEXNOW_KEY>.txt     — the IndexNow key file (only with a valid key and an https
+                                      RR_APP_URL; answers HEAD like GET; see indexnow.py)
     ANY  /{public_page_path:path}   — the public-page catch-all; registered LAST by
                                       ``register_public_pages`` (end of startup), not here
 """
@@ -60,9 +63,21 @@ Routes registered:
 from typing import Any, Dict
 
 from ai.web import WebServer
-from . import pages, public_pages
+
+from rocketlib import warning
+
+from . import indexnow, pages, public_pages
 from .pages import public_page, register_public_pages
-from .shell import shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+from .shell import (
+    app_url,
+    shell_static,
+    apps_static,
+    apps_session,
+    sitemap_xml,
+    robots_txt,
+    llms_txt,
+    warn_published_pages_without_app_url,
+)
 
 __all__ = ['initModule', 'register_public_pages']
 
@@ -100,6 +115,22 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # collide with this server's live routes.
     pages.set_web_server(server)
     public_pages.set_live_conflict(pages.live_route_conflict)
+
+    # ── IndexNow ────────────────────────────────────────────────────────
+    # With a valid RR_INDEXNOW_KEY and an https RR_APP_URL: the key file
+    # (registered here, so ahead of the catch-all) and a submission of the
+    # changed pages after each swap. A key that is set but unusable says why
+    # once, here: otherwise IndexNow would be off without a word.
+    if indexnow.enabled():
+        for method in ('GET', 'HEAD'):
+            server.add_route(
+                path=f'/{indexnow.key()}.txt', routeHandler=indexnow.key_file, methods=[method], public=True
+            )
+        public_pages.on_swap(indexnow.on_swap)
+    else:
+        reason = indexnow.misconfiguration()
+        if reason:
+            warning(f'[shell] RR_INDEXNOW_KEY is set but IndexNow is off: {reason}')
 
     # ── Shell assets ──────────────────────────────────────────────────
     # Catch-all for everything under /shell/ — JS, CSS, themes, favicon.
@@ -143,10 +174,19 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # handlers gate on RR_APP_URL at request time (see shell.py): only the
     # hosted SaaS — where RR_APP_URL pins the public origin — serves
     # sitemap/llms content; OSS, self-hosted, and desktop engines get 404s
-    # and a Disallow-all robots policy instead of marketing SEO endpoints.
+    # and a robots policy that keeps crawlers out instead of marketing SEO
+    # endpoints.
     #
     # HEAD answers like GET (crawlers and link checkers send it). One route
     # per method keeps each OpenAPI operation id unique.
     for path, handler in (('/sitemap.xml', sitemap_xml), ('/robots.txt', robots_txt), ('/llms.txt', llms_txt)):
         for method in ('GET', 'HEAD'):
             server.add_route(path=path, routeHandler=handler, methods=[method], public=True)
+
+    # ── Engines without RR_APP_URL ──────────────────────────────────────
+    # robots.txt disallows all crawling there (plan section 4), so their
+    # published pages are never indexed. A production engine that lost
+    # RR_APP_URL warns at the first swap that has some (OSS and desktop
+    # engines publish none and stay quiet).
+    if not app_url():
+        public_pages.on_swap(warn_published_pages_without_app_url)

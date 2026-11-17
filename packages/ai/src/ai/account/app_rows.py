@@ -27,7 +27,7 @@ page aggregate (``ai.modules.shell.public_pages``) must load exactly the same
 apps. Both import from here, so neither imports the other.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .deployment_backend import artifact_content_dir
 
@@ -150,3 +150,100 @@ def holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     """
     required = (row.get('snapshot') or {}).get('requiredPermissions') or []
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
+
+
+async def public_winners(acct: Any) -> Tuple[str, Dict[str, Dict[str, Any]]]:
+    """
+    Each app's winning public binding, as the store walk resolves it for an anonymous caller.
+
+    The public rung is listed under ``''`` (every org) on a SaaS server and
+    ``'local'`` otherwise; both store editions return only public rows for
+    the public audience. A binding competes only when it serves
+    (``serving_block_of``) and requires no permissions; among those, the
+    precedence winner (``precedence_sorted``) is each app's. The public page
+    map and the ``plans:``/``app:`` page data sources both read the rung
+    through here, so they can never disagree about which version serves.
+
+    Args:
+        acct: The account layer to read.
+
+    Returns:
+        ``(org, winners)``: the org the rung was listed under, which is also
+        the org of a winning row that names none; and each app id's winning row.
+
+    Raises:
+        Exception: the account layer could not list the public bindings.
+    """
+    org = 'local'
+    if 'saas' in getattr(acct, 'capabilities', ()):
+        org = ''
+    review_ladder = getattr(acct, 'review_ladder', True)
+    winners: Dict[str, Dict[str, Any]] = {}
+    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
+        # Rows that do not serve an anonymous caller never compete; the
+        # precedence winner among the rest lands last.
+        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
+            continue
+        winners[str(row.get('appId') or '')] = row
+    return org, winners
+
+
+def resolve_account(acct: Any) -> Any:
+    """
+    The account layer to read: ``acct``, or the engine's own when None.
+
+    Args:
+        acct: An account layer, or None.
+
+    Returns:
+        ``acct``, or the ``ai.account.account`` singleton when it is None.
+    """
+    if acct is None:
+        from ai.account import account as acct
+    return acct
+
+
+async def public_artifact(acct: Any, org: str, app_id: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    The artifact an app's winning public row serves, when anonymous callers may see the app.
+
+    The store walk's remaining rules (``app_deploy.resolve_app_pins``) for a
+    row ``public_winners`` picked: the binding snapshot does not say
+    ``public: false``; the version, read from the row's publisher org (the
+    rung's ``org`` when the row names none), is an app artifact; and its own
+    manifest does not say ``public: false`` (the DB edition's snapshot
+    columns drop ``public``, so the manifest is re-read). The public page map
+    and the ``plans:``/``app:`` page data sources both decide visibility
+    here, so they can never disagree about which apps are shown.
+
+    Args:
+        acct: The account layer to read.
+        org: The org ``public_winners`` listed the rung under.
+        app_id: The app the row binds.
+        row: The app's winning row, from ``public_winners``.
+
+    Returns:
+        The artifact, ``metadata.manifest`` attached; None when the app is hidden.
+
+    Raises:
+        ValueError: the row of an app not hidden by its binding is malformed:
+            its version is not an int or it names no ``artifactPath`` (the
+            bound version is not in the registry).
+        StorageError: the artifact could not be read.
+    """
+    snapshot = row.get('snapshot')
+    if isinstance(snapshot, dict) and snapshot.get('public', True) is False:
+        return None
+    version = row.get('version')
+    artifact_path = row.get('artifactPath')
+    if not isinstance(version, int) or not artifact_path:
+        raise ValueError(f'malformed public row (version {version!r}, artifactPath {artifact_path!r})')
+    publisher = row.get('orgId')
+    if not publisher:
+        publisher = org
+    artifact = await acct.deployments_artifact(str(publisher), app_id, version)
+    if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
+        return None
+    if manifest_of(artifact).get('public', True) is False:
+        return None
+    return artifact

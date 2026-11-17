@@ -46,15 +46,11 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 from rocketlib import debug, warning
 
-from ai.account.app_rows import (
-    dist_dir_of,
-    holds_required_permissions,
-    manifest_of,
-    precedence_sorted,
-    serving_block_of,
-)
+from ai.account.app_rows import dist_dir_of, manifest_of, public_artifact, public_winners, resolve_account
 
+from . import data_sources
 from .contract import (
+    MAX_SNAPSHOT_BYTES,
     Page,
     check_manifest,
     check_redirects,
@@ -67,20 +63,29 @@ from .contract import (
 
 @dataclass(frozen=True)
 class Published:
-    """One production-rung (public) app version's manifest, as the loader read it."""
+    """One production-rung (public) app version's manifest, as the loader read it.
+
+    ``version`` is the registry version the public rung serves; ``dist_dir``
+    is that version's build output.
+    """
 
     app_id: str
     manifest: Mapping[str, Any]
     dist_dir: str = ''
     published_at: Optional[float] = None
+    version: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class Aggregate:
     """The immutable page map, keyed by exact path. A rebuild swaps a whole new one (never edited).
 
-    ``redirects`` maps an old path to the page path it 301s to (the root
-    owner's ``site.redirects``).
+    ``redirects`` maps an old path to the page path it 301s to, and
+    ``feeds`` a feed path to its ``{path, prefix, title}`` (the root
+    owner's ``site.redirects`` and ``site.feeds``). ``built_at`` is the
+    wall-clock time it was built; it never makes two aggregates differ, so
+    an unchanged rebuild is not swapped in and the time stays that of the
+    content.
 
     ``published`` maps each app owning a page to the manifest it was read
     from: what a rebuild keeps when that app cannot be read. Comparisons
@@ -92,6 +97,8 @@ class Aggregate:
     published: Mapping[str, Published] = field(default_factory=dict, compare=False, repr=False)
     legacy: bool = False
     redirects: Mapping[str, str] = field(default_factory=dict)
+    feeds: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    built_at: float = field(default_factory=time.time, compare=False)
 
     def pages(self) -> List[Page]:
         """Every claimed page, sorted by path (deterministic output order).
@@ -100,6 +107,10 @@ class Aggregate:
             The pages, ordered by path.
         """
         return sorted(self.exact.values(), key=lambda p: p.path)
+
+    def serves_published_pages(self) -> bool:
+        """Whether platform apps publish pages here; the legacy list and an empty map publish none."""
+        return not self.legacy and bool(self.exact)
 
 
 def _claim_key(pub: Published) -> Tuple[float, str]:
@@ -129,7 +140,7 @@ def _claims(
             if owner is not None:
                 warning(f'[public_pages] {pub.app_id}: {page.path} already claimed by {owner.app_id} (page skipped)')
                 continue
-            exact[page.path] = replace(page, dist_dir=pub.dist_dir, published_at=pub.published_at)
+            exact[page.path] = replace(page, dist_dir=pub.dist_dir, version=pub.version, published_at=pub.published_at)
         if site is not None:
             sites[pub.app_id] = site
     return exact, sites
@@ -150,11 +161,12 @@ def build_aggregate(
     pages are kept; a page colliding with an earlier claim is dropped (first
     claim wins). ``site`` and its redirects come only from the app owning
     ``/``; a redirect whose source (or its slash twin) another app's page
-    serves is dropped. When no page survives, the aggregate is the legacy page
-    list (a broken manifest falls back instead of removing every page), with a
-    warning when a published manifest declared pages to fall back from. A
-    manifest that keeps any valid page does not fall back: its broken pages are
-    only skipped, each with a warning.
+    serves is dropped, and so is a feed at another app's page. When no page
+    survives, the aggregate is the legacy page list (a broken manifest falls
+    back instead of removing every page), with a warning when a published
+    manifest declared pages to fall back from. A manifest that keeps any valid
+    page does not fall back: its broken pages are only skipped, each with a
+    warning.
 
     Args:
         published: The production-rung manifests, as ``load_published`` read them.
@@ -183,12 +195,19 @@ def build_aggregate(
             debug(f'[public_pages] redirect {source} -> {target} collides with a page (redirect skipped)')
             continue
         redirects[source] = target
+    feeds = {}
+    for path, feed in site.pop('feeds', {}).items():
+        if path in exact:
+            debug(f'[public_pages] feed {path} collides with a page (feed skipped)')
+            continue
+        feeds[path] = feed
     owners = {page.app_id for page in exact.values()}
     return Aggregate(
         exact=exact,
         site=site,
         published={pub.app_id: pub for pub in published if pub.app_id in owners},
         redirects=redirects,
+        feeds=feeds,
     )
 
 
@@ -256,10 +275,15 @@ async def load_published(
     enabled, deployment approved on a review-ladder server, build ok),
     anonymous permission reach (no requiredPermissions), platform namespace
     only. One winner per app id, chosen among its serving rows (lowest
-    publisher org, as the store walk resolves ties).
+    publisher org, as the store walk resolves ties) by
+    ``app_rows.public_winners``, which the ``plans:``/``app:`` data sources
+    read too.
 
-    ``public: false`` apps never contribute. One app whose row or artifact
-    cannot be read is skipped (logged) so it cannot freeze the map, and its
+    ``public: false`` apps never contribute (``app_rows.public_artifact``,
+    the data sources' visibility check too). One app whose row is malformed
+    or whose artifact or build output cannot be read or parsed (a
+    ``StorageError`` or ``ValueError``) is skipped (logged) so it cannot
+    freeze the map, and its
     id goes into ``unreadable`` when one is given: it is still published,
     unlike an app missing from the result for any other reason. With
     ``strict`` (the publish gate) an unreadable root claimant raises instead,
@@ -290,43 +314,19 @@ async def load_published(
     """
     from ai.account.store import StorageError
 
-    if acct is None:
-        from ai.account import account as acct
-
-    org = 'local'
-    if 'saas' in getattr(acct, 'capabilities', ()):
-        org = ''
-    review_ladder = getattr(acct, 'review_ladder', True)
-    winners: Dict[str, Dict[str, Any]] = {}
-    for row in precedence_sorted(await acct.publish_list(org, 'app', [{'type': 'public', 'id': ''}])):
-        # The store walk's order: a row that does not serve never competes,
-        # and the precedence winner among the rest lands last.
-        if serving_block_of(row, review_ladder) or not holds_required_permissions(row, set()):
-            continue
-        winners[str(row.get('appId') or '')] = row
+    acct = resolve_account(acct)
+    org, winners = await public_winners(acct)
     out: List[Published] = []
     for app_id, row in sorted(winners.items()):
         if app_id == exclude or not is_privileged(app_id):
             continue
-        if (row.get('snapshot') or {}).get('public', True) is False:
-            continue
-        version = row.get('version')
-        artifact_path = str(row.get('artifactPath') or '')
-        if not isinstance(version, int) or not artifact_path:
-            _skip_unreadable(
-                app_id,
-                f'malformed public row (version {version!r}, artifactPath {artifact_path!r})',
-                strict,
-                unreadable,
-            )
-            continue
         try:
-            artifact = await acct.deployments_artifact(str(row.get('orgId') or org), app_id, version)
-            stored = manifest_of(artifact or {})
-            if stored.get('public', True) is False:
+            # A malformed row is a ValueError here, so it is skipped as unreadable.
+            artifact = await public_artifact(acct, org, app_id, row)
+            if artifact is None:
                 continue
-            dist_dir = dist_dir_of(artifact_path)
-            manifest = await page_manifest(stored, dist_dir)
+            dist_dir = dist_dir_of(str(row['artifactPath']))
+            manifest = await page_manifest(manifest_of(artifact), dist_dir)
         except (StorageError, ValueError) as exc:
             _skip_unreadable(app_id, str(exc), strict, unreadable, exc)
             continue
@@ -336,7 +336,15 @@ async def load_published(
         published_at: Optional[float] = None
         if isinstance(bound_at, (int, float)):
             published_at = float(bound_at)
-        out.append(Published(app_id=app_id, manifest=manifest, dist_dir=dist_dir, published_at=published_at))
+        out.append(
+            Published(
+                app_id=app_id,
+                manifest=manifest,
+                dist_dir=dist_dir,
+                published_at=published_at,
+                version=row['version'],
+            )
+        )
     return out
 
 
@@ -399,7 +407,9 @@ async def read_artifact_file(path: str) -> bytes:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure.
+        StorageError: any other storage failure the store reports as one.
+        Exception: the provider's own error where the store does not wrap it
+            (the S3 and Azure stores, once their retries run out).
     """
     from ai.account.store import Store
 
@@ -420,7 +430,9 @@ async def artifact_file_info(path: str) -> Dict[str, Any]:
 
     Raises:
         StorageNotFoundError: the file does not exist.
-        StorageError: any other storage failure.
+        StorageError: any other storage failure the store reports as one.
+        Exception: the provider's own error where the store does not wrap it
+            (the S3 and Azure stores, once their retries run out).
     """
     from ai.account.store import Store
 
@@ -441,8 +453,10 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
     live route table, data entries, redirects, cross-app collisions (of page
     paths and redirect sources) against every OTHER published platform
     manifest (first claim wins; ownership is derived from published
-    manifests, so unpublishing releases it, with no table), and snapshot
-    files missing from the built version.
+    manifests, so unpublishing releases it, with no table) and of feed
+    paths against their pages, and snapshot files (each page's and
+    ``site.notFound``) missing from the built version or over
+    ``MAX_SNAPSHOT_BYTES`` (sized by a stat, never read).
 
     The collision check sees only what is already published: two platform
     apps publishing the same path at the same moment can both pass. The
@@ -489,8 +503,18 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
         return errors
     # The publishing app's own current version is being replaced: never read it.
     others = await load_published(acct, strict=True, exclude=app_id)
-    exact, _ = _claims(others, page_map.live_conflict)
+    exact, sites = _claims(others, page_map.live_conflict)
+    root = exact.get('/')
+    root_feeds = {}
+    if root is not None:
+        root_feeds = sites.get(root.app_id, {}).get('feeds', {})
     for page in pages:
+        for candidate in with_slash_twin(page.path):
+            if candidate in root_feeds:
+                errors.append(
+                    f'publicPages path {page.path!r} is a feed of the published app {root.app_id}; choose another path'
+                )
+                break
         owner = exact.get(page.path)
         if owner is not None:
             errors.append(
@@ -507,17 +531,66 @@ async def gate_errors(app_id: str, manifest: Mapping[str, Any], dist_dir: str, a
                     'a URL is a page or a redirect, not both: drop the entry'
                 )
                 break
+    for path in (site or {}).get('feeds', {}):
+        owner = exact.get(path)
+        if owner is not None:
+            errors.append(
+                f'site.feeds path {path!r} is a page of the published app {owner.app_id}; choose another path'
+            )
     for page in pages:
         if not page.snapshot:
             continue
+        err = await _stored_snapshot_error(f'{dist_dir}/{page.snapshot}')
+        if err:
+            errors.append(f'publicPages path {page.path!r}: snapshot {page.snapshot!r} {err}')
+    not_found = (site or {}).get('notFound')
+    if not_found:
+        err = await _stored_snapshot_error(f'{dist_dir}/{not_found}')
+        if err:
+            errors.append(f'site.notFound {not_found!r} {err}')
+    images = [(f'publicPages path {page.path!r}: image', page.image) for page in pages]
+    if site is not None:
+        images.append(('site.image', site.get('image', '')))
+    for label, image in images:
+        if not image or image.startswith(('https://', '/')):
+            continue
         try:
-            await artifact_file_info(f'{dist_dir}/{page.snapshot}')
+            await artifact_file_info(f'{dist_dir}/{image}')
         except StorageNotFoundError:
             errors.append(
-                f'publicPages path {page.path!r}: snapshot {page.snapshot!r} is not in the built version; '
-                'emit it into the build output or drop the field'
+                f'{label} {image!r} is not in the built version; emit it into the build output or drop the field'
             )
     return errors
+
+
+async def _stored_snapshot_error(path: str) -> Optional[str]:
+    """Why the snapshot at store ``path`` cannot be published, or None.
+
+    Sized by a stat, never read: a missing file, or one over
+    ``MAX_SNAPSHOT_BYTES``, which the server would never serve.
+
+    Args:
+        path: The snapshot's store path in the version's build output.
+
+    Returns:
+        The reason, ready to follow the snapshot's name, or None.
+
+    Raises:
+        StorageError: any storage failure but a missing file; the caller
+            refuses the publish (fail closed).
+    """
+    from ai.account.store import StorageNotFoundError
+
+    try:
+        info = await artifact_file_info(path)
+    except StorageNotFoundError:
+        return 'is not in the built version; emit it into the build output or drop the field'
+    if info['size'] > MAX_SNAPSHOT_BYTES:
+        return (
+            f'is {info["size"]} bytes, over the {MAX_SNAPSHOT_BYTES}-byte limit; move images, styles and scripts '
+            'into the build output and reference them through {{assets}}'
+        )
+    return None
 
 
 # =============================================================================
@@ -764,11 +837,22 @@ def maybe_refresh() -> None:
 def app_changed(app_id: str) -> None:
     """The app deployment-change hook (``broadcast_app_changed``).
 
-    Only a platform app's publish, unpublish or rung repoint can change the
-    page claims; any other app's is ignored.
+    A change to an app a page names (``plans:<appId>``, ``app:<appId>``) can
+    change what that page may show, so the data sources are invalidated; any
+    other app's change (a build, say) leaves bound renders cached. Only a
+    platform app's publish, unpublish or rung repoint can change the page
+    claims, so only those rebuild the aggregate.
 
     Args:
         app_id: The id of the app whose deployment changed.
     """
+    if _named_by_a_page(app_id):
+        data_sources.invalidate('app')
     if is_privileged(app_id):
         schedule_rebuild()
+
+
+def _named_by_a_page(app_id: str) -> bool:
+    """Whether a page of the current aggregate binds ``app_id``'s data (``plans:<appId>`` or ``app:<appId>``)."""
+    entries = {f'plans:{app_id}', f'app:{app_id}'}
+    return any(entries.intersection(page.data) for page in current().exact.values())

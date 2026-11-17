@@ -47,12 +47,15 @@ manifests (``public_pages``), never from constants here.
 
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404 and
-/robots.txt disallows all crawling; absolute URLs are never derived from
-request headers.
+self-hosted, desktop and staging engines) /sitemap.xml and /llms.txt return
+404 and /robots.txt disallows all crawling, as before public pages (plan
+sections 4 and 8); an engine that serves published pages without it warns
+once (``warn_published_pages_without_app_url``). Absolute URLs are never
+derived from request headers.
 """
 
 import hashlib
+import math
 import mimetypes
 import os
 import posixpath
@@ -60,7 +63,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -70,6 +73,10 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
+from rocketlib import warning
+
+from . import public_pages
+from .contract import Page, own_title, page_instant
 from .settings import app_url
 
 # Engine binary directory — all static paths are relative to this.
@@ -150,12 +157,12 @@ def _capture_for(request: Request) -> Optional[Path]:
     return None
 
 
-def shell_document_path(request: Request) -> Path:
+def shell_document_path(request: Request, *, capture: bool = True) -> Path:
     """The HTML document a browser navigating to this path boots from.
 
     The route's prerendered capture when the shell build carries one (see
-    ``_capture_for``), else the SPA ``index.html``: what ``shell_static``
-    serves for the same navigation.
+    ``_capture_for``) and ``capture`` allows it, else the SPA ``index.html``:
+    what ``shell_static`` serves for the same navigation.
 
     Raises:
         HTTPException: 503 when the shell has not been built.
@@ -163,7 +170,11 @@ def shell_document_path(request: Request) -> Path:
     index_path = Path(_shell_root) / 'index.html'
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
-    return _capture_for(request) or index_path
+    if capture:
+        capture_path = _capture_for(request)
+        if capture_path:
+            return capture_path
+    return index_path
 
 
 async def shell_static(request: Request):
@@ -684,6 +695,31 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
+_warned_unindexed = False
+
+
+def warn_published_pages_without_app_url(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
+    """Swap listener: warn once that published pages go unindexed for lack of ``RR_APP_URL``.
+
+    Without it robots.txt disallows all crawling and the sitemap and llms.txt
+    answer 404, which is right for OSS, desktop and staging engines and a
+    silent deindexing for a production engine that lost the setting.
+
+    Args:
+        old: The aggregate swapped out (unused).
+        new: The aggregate swapped in; the legacy list and an empty map publish nothing.
+    """
+    global _warned_unindexed
+    if _warned_unindexed or not new.serves_published_pages():
+        return
+    _warned_unindexed = True
+    warning(
+        '[shell] RR_APP_URL is not set but public pages are published: robots.txt disallows all '
+        'crawling and /sitemap.xml and /llms.txt answer 404, so search engines will not index them; '
+        'set RR_APP_URL to the public origin on an engine that serves the public site'
+    )
+
+
 def _md(text: str) -> str:
     """One line of llms.txt markdown: whitespace collapsed, link syntax escaped.
 
@@ -704,15 +740,28 @@ def sitemap_entries() -> list:
     return [(page.path, page) for page in current().pages() if page.listed]
 
 
+def _lastmod(page: Page) -> str:
+    """``<lastmod>``: the UTC date of the page's ``modified``, else ``published``; '' when it declares neither.
+
+    A deploy is not a content change. Falling back to when the app's version
+    went live would move every undated page's date on each deploy, and search
+    engines stop trusting ``lastmod`` site-wide when it is not accurate.
+    """
+    declared = page.modified or page.published
+    if not declared:
+        return ''
+    return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
+
+
 async def sitemap_xml(request: Request):
     """
     Serve ``/sitemap.xml`` — one ``<url>`` per listed public page.
 
     Pages come from the page aggregate (published manifests, or the legacy
-    list until one declares pages), sorted by path. Absolute URLs come
-    exclusively from ``RR_APP_URL``. Deployments without it (OSS,
-    self-hosted, desktop) have no public marketing site to index, so the
-    endpoint 404s.
+    list until one declares pages), sorted by path, each with its
+    ``<lastmod>`` when known. Absolute URLs come exclusively from
+    ``RR_APP_URL``. Deployments without it (OSS, self-hosted, desktop) have
+    no public marketing site to index, so the endpoint 404s.
 
     Args:
         request: Incoming HTTP request.
@@ -731,7 +780,9 @@ async def sitemap_xml(request: Request):
         raise HTTPException(status_code=404, detail='Not found')
 
     # escape() guards against XML metacharacters in the configured URL.
-    entries = ''.join(f'  <url><loc>{escape(base_url + path)}</loc></url>\n' for path, _ in sitemap_entries())
+    entries = ''.join(
+        f'  <url><loc>{escape(base_url + path)}</loc>{_lastmod(page)}</url>\n' for path, page in sitemap_entries()
+    )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -751,10 +802,11 @@ async def robots_txt(request: Request):
     Serve ``/robots.txt`` — policy depends on the deployment mode.
 
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
-    sitemap, with one named group per rostered crawler plus ``*``; every
-    group carries the same rule (RFC 9309), so the policy equals ``*``
-    alone. Otherwise (OSS, self-hosted, desktop): a customer engine is not
-    a marketing site — tell crawlers to stay out entirely.
+    sitemap, with one named group per rostered crawler (the roster that
+    also classifies requesters) plus ``*``; every group carries the same
+    rule (RFC 9309), so the policy equals ``*`` alone. Any other engine
+    (OSS, self-hosted, desktop, staging) is not the public site: all
+    crawling is disallowed, published pages or not (plan section 4).
 
     Args:
         request: Incoming HTTP request.
@@ -774,6 +826,13 @@ async def robots_txt(request: Request):
     return PlainTextResponse(content, headers={'Cache-Control': CACHE_CONTROL})
 
 
+def _newest_first(page: Page) -> float:
+    """Sort key of an llms.txt section: dated pages newest first, then the undated ones."""
+    if page.published:
+        return -page_instant(page.published).timestamp()
+    return math.inf
+
+
 async def llms_txt(request: Request):
     """
     Serve ``/llms.txt`` — an llmstxt.org index of the public pages.
@@ -781,8 +840,13 @@ async def llms_txt(request: Request):
     The header from the root owner's ``site`` block (the heading falls back
     to the origin's host: llms.txt requires one), one bullet per listed page
     (title and description from the aggregate), and a final link to
-    ``site.docsUrl``. Same gating as the sitemap: absolute URLs come
-    exclusively from ``RR_APP_URL``, and the endpoint 404s when it is unset.
+    ``site.docsUrl``. A listed page whose parent path (``/blog`` for
+    ``/blog/x``) is a listed page goes in that parent's section, headed by
+    its title without the trailing `` | <site.title>``; every other page is
+    under ``## Pages``, by path. Sections follow by parent path, each with its
+    dated pages newest first, then the rest by path. Same gating as the
+    sitemap: absolute URLs come exclusively from ``RR_APP_URL``, and the
+    endpoint 404s when it is unset.
 
     Args:
         request: Incoming HTTP request.
@@ -807,13 +871,28 @@ async def llms_txt(request: Request):
     lines = [f'# {heading}', '']
     if site.get('blurb'):
         lines += [f'> {_md(site["blurb"])}', '']
-    lines += ['## Pages', '']
-    for path, page in sitemap_entries():
-        bullet = f'- [{_md(page.title)}]({base_url}{path})'
-        description = _md(page.description)
-        if description:
-            bullet = f'{bullet}: {description}'
-        lines.append(bullet)
+    listed = dict(sitemap_entries())
+    sections: Dict[str, List[Page]] = {'': []}
+    for path, page in listed.items():
+        parent = path.rpartition('/')[0]
+        section = ''
+        if parent in listed:
+            section = parent
+        sections.setdefault(section, []).append(page)
+    for parent in sorted(sections):
+        pages = sections[parent]
+        if parent:
+            lines += ['', f'## {_md(own_title(listed[parent].title, site.get("title", "")))}', '']
+            # The stable sort keeps path order among pages with the same key.
+            pages.sort(key=_newest_first)
+        else:
+            lines += ['## Pages', '']
+        for page in pages:
+            bullet = f'- [{_md(page.title)}]({base_url}{page.path})'
+            description = _md(page.description)
+            if description:
+                bullet = f'{bullet}: {description}'
+            lines.append(bullet)
     if site.get('docsUrl'):
         lines += ['', '## Documentation', '', f'- [Docs]({_md(site["docsUrl"])})']
     return PlainTextResponse(

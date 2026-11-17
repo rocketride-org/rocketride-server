@@ -13,8 +13,8 @@ synchronous ``TestClient``:
     all absolute URLs exclusively from it (never from request headers);
   - served-vs-advertised is driven by each page's ``listed`` flag;
   - /robots.txt allows crawlers (one named group per rostered crawler) and
-    points at the sitemap on the hosted SaaS (RR_APP_URL set), and
-    disallows all crawling otherwise;
+    points at the sitemap on the hosted SaaS (RR_APP_URL set); otherwise it
+    disallows all crawling, published pages or not (plan sections 4 and 8);
   - the catch-all registers last, real routes win, it never makes a private
     route public, and it keeps the router's own answers for unclaimed paths;
   - WebServer.add_route rejects duplicate (method, path) registrations.
@@ -304,6 +304,30 @@ def test_sitemap_ignores_forwarded_headers(app_url):
     assert f'<loc>{BASE}/pricing</loc>' in resp.text
 
 
+def test_lastmod_is_the_page_date_and_absent_without_one(app_url):
+    bound = 1_700_000_100.0  # 2023-11-14T22:15:00Z
+    _use(
+        Page('/', 'rocketride.home', 'Home', published_at=bound),
+        Page('/blog/a', 'rocketride.home', 'A', published='2026-11-09', modified='2026-11-09T23:30:00-05:00'),
+        Page('/blog/b', 'rocketride.home', 'B', published='2026-10-01T23:30:00-05:00', published_at=bound),
+        Page('/blog/c', 'rocketride.home', 'C', modified='2026-09-30', published_at=bound),
+        Page('/unbound', 'rocketride.home', 'U'),
+    )
+    text = _client().get('/sitemap.xml').text
+    # The page's own date (its UTC date). A page without one has no lastmod:
+    # when its app's version went live is a deploy, not a content change.
+    assert f'<url><loc>{BASE}/</loc></url>' in text
+    assert f'<url><loc>{BASE}/blog/a</loc><lastmod>2026-11-10</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/b</loc><lastmod>2026-10-02</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/blog/c</loc><lastmod>2026-09-30</lastmod></url>' in text
+    assert f'<url><loc>{BASE}/unbound</loc></url>' in text
+
+
+def test_legacy_pages_have_no_lastmod(app_url):
+    assert pp.current().legacy
+    assert '<lastmod>' not in _client().get('/sitemap.xml').text
+
+
 def test_sitemap_sets_cache_control(app_url):
     resp = _client().get('/sitemap.xml')
     assert resp.headers['cache-control'] == 'public, max-age=3600'
@@ -319,6 +343,19 @@ def test_robots_disallows_all_without_app_url(no_app_url):
     assert resp.status_code == 200
     assert resp.headers['content-type'].startswith('text/plain')
     assert resp.text == 'User-agent: *\nDisallow: /\n'
+
+
+@pytest.mark.parametrize(
+    'aggregate',
+    [Aggregate(exact={'/': Page('/', 'rocketride.home', title='Home')}), Aggregate(exact={}), legacy_aggregate()],
+    ids=['published-pages', 'empty-map', 'legacy-list'],
+)
+def test_robots_without_app_url_disallows_all_crawling_published_pages_or_not(no_app_url, aggregate):
+    # Plan sections 4 and 8: Disallow-all on every engine without RR_APP_URL, and nothing else.
+    pp.swap(aggregate)
+    resp = _client().get('/robots.txt')
+    assert resp.status_code == 200 and resp.text == 'User-agent: *\nDisallow: /\n'
+    assert resp.headers['cache-control'] == 'public, max-age=3600' and 'x-robots-tag' not in resp.headers
 
 
 def test_robots_allows_all_and_points_at_sitemap(app_url):
@@ -401,6 +438,63 @@ def test_llms_docs_link_is_neutralised_like_every_manifest_string(app_url):
     text = _client().get('/llms.txt').text
     assert not re.search(r'(?<!\\)\]\(https://evil', text)
     assert text.endswith('- [Docs](https://docs.example/x\\](https://evil))\n')
+
+
+def test_llms_groups_children_under_parent(app_url):
+    home = 'rocketride.home'
+    _use(
+        Page('/', home, 'RocketRide', 'Home.'),
+        Page('/pricing', home, 'Pricing | RocketRide', 'Plans.'),
+        Page('/blog', home, 'Blog | RocketRide', 'News.'),
+        Page('/blog/b', home, 'B post', 'Bee.', published='2026-10-01'),
+        Page('/blog/a', home, 'A post', 'Ay.', published='2026-11-09T10:00:00+05:00'),
+        Page('/blog/c', home, 'C post', published='2026-11-09T06:00:00Z'),
+        Page('/blog/z', home, 'Z undated'),
+        Page('/blog/m', home, 'M undated'),
+        Page('/blog/hidden', home, 'Hidden', published='2026-12-01', listed=False),
+        Page('/docs', home, 'Guides | Other', 'Docs.'),
+        Page('/docs/x', home, 'X', 'Ex.'),
+        Page('/docs/x/y', home, 'Y'),
+        Page('/drafts', home, 'Drafts', listed=False),
+        Page('/drafts/one', home, 'One', published='2026-11-01'),
+        Page('/news/orphan', home, 'Orphan', published='2026-11-01'),
+        site={'title': 'RocketRide'},
+    )
+    assert _client().get('/llms.txt').text == (
+        '# RocketRide\n\n## Pages\n\n'
+        f'- [RocketRide]({BASE}/): Home.\n'
+        f'- [Blog | RocketRide]({BASE}/blog): News.\n'
+        f'- [Guides | Other]({BASE}/docs): Docs.\n'
+        f'- [One]({BASE}/drafts/one)\n'
+        f'- [Orphan]({BASE}/news/orphan)\n'
+        f'- [Pricing | RocketRide]({BASE}/pricing): Plans.\n'
+        '\n## Blog\n\n'
+        f'- [C post]({BASE}/blog/c)\n'
+        f'- [A post]({BASE}/blog/a): Ay.\n'
+        f'- [B post]({BASE}/blog/b): Bee.\n'
+        f'- [M undated]({BASE}/blog/m)\n'
+        f'- [Z undated]({BASE}/blog/z)\n'
+        '\n## Guides | Other\n\n'
+        f'- [X]({BASE}/docs/x): Ex.\n'
+        '\n## X\n\n'
+        f'- [Y]({BASE}/docs/x/y)\n'
+    )
+
+
+def test_llms_group_headings_are_neutralised_like_every_manifest_string(app_url):
+    _use(
+        Page('/', 'rocketride.home', 'R'),
+        Page('/a', 'rocketride.home', 'A\n## [x](https://evil) | R'),
+        Page('/a/b', 'rocketride.home', 'B'),
+        Page('/c', 'rocketride.home', ' | R'),
+        Page('/c/d', 'rocketride.home', 'D'),
+        site={'title': 'R', 'docsUrl': 'https://docs.example/llms.txt'},
+    )
+    text = _client().get('/llms.txt').text
+    assert '\n## A ## \\[x\\](https://evil)\n\n- [B]' in text
+    # A title that is only the suffix stays whole.
+    assert '\n## | R\n\n- [D]' in text
+    assert text.endswith('\n\n## Documentation\n\n- [Docs](https://docs.example/llms.txt)\n')
 
 
 def test_llms_sets_cache_control(app_url):
@@ -491,7 +585,7 @@ def test_crawler_files_trigger_the_refresh_backstop(monkeypatch, app_url):
 
 
 # ---------------------------------------------------------------------------
-# The public-page catch-all: head metadata, misses
+# The public-page catch-all: UA classes, head metadata, misses
 # ---------------------------------------------------------------------------
 
 
@@ -503,6 +597,7 @@ def test_human_gets_the_shell_document_with_head_metadata(shell_root, app_url):
     assert '<title>Pricing | RocketRide</title>' in resp.text and '<title>shell</title>' not in resp.text
     assert '<meta name="description" content="Plans &amp; prices.">' in resp.text
     assert f'<link rel="canonical" href="{BASE}/pricing">' in resp.text
+    assert resp.headers['vary'] == 'User-Agent'
     # People's document names the current build's bundles: no shared cache may keep it.
     assert resp.headers['cache-control'] == 'private, no-cache'
     assert 'x-robots-tag' not in resp.headers and 'name="robots"' not in resp.text
@@ -517,6 +612,7 @@ def test_crawler_gets_the_same_document_with_the_same_cache_headers(shell_root, 
     # The crawler's copy names the current build's bundles too: a shared cache
     # holding it past a deploy would hand rendering crawlers missing bundles.
     assert resp.headers['cache-control'] == 'private, no-cache'
+    assert resp.headers['vary'] == 'User-Agent'
 
 
 def test_the_shell_document_is_read_once_per_page_and_build(shell_root, monkeypatch):
@@ -594,22 +690,25 @@ def test_a_capture_added_after_the_document_resolved_serves_without_a_swap(shell
 
 
 def test_a_render_cache_miss_renders_off_the_event_loop(shell_root, monkeypatch):
-    # Reading the shell file inside the async handler would block every other request.
+    # Reading the shell file or rewriting its head inside the async handler would block every other request.
     on_loop = []
-    real = pages_mod._render
 
-    def recording(*args):
-        try:
-            asyncio.get_running_loop()
-            on_loop.append(True)
-        except RuntimeError:
-            on_loop.append(False)
-        return real(*args)
+    def recording(real):
+        def call(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop.append(True)
+            except RuntimeError:
+                on_loop.append(False)
+            return real(*args, **kwargs)
 
-    monkeypatch.setattr(pages_mod, '_render', recording)
+        return call
+
+    monkeypatch.setattr(Path, 'read_text', recording(Path.read_text))
+    monkeypatch.setattr(pages_mod, 'inject_head', recording(pages_mod.inject_head))
     _use(Page('/pricing', 'rocketride.home', 'Pricing'))
     assert _client().get('/pricing', headers={'User-Agent': BROWSER}).status_code == 200
-    assert on_loop == [False]
+    assert on_loop == [False, False]
 
 
 def test_a_render_a_swap_overtakes_is_served_not_cached(shell_root, monkeypatch):
@@ -630,6 +729,8 @@ async def test_register_public_pages_installs_the_swap_listener_once(monkeypatch
     # Startup wiring, not an import-time side effect.
     registered = []
     monkeypatch.setattr(pp, 'on_swap', registered.append)
+    invalidations = []
+    monkeypatch.setattr(pages_mod.data_sources, 'on_invalidate', invalidations.append)
 
     async def built():
         return True
@@ -638,6 +739,7 @@ async def test_register_public_pages_installs_the_swap_listener_once(monkeypatch
     routes = []
     await pages_mod.register_public_pages(SimpleNamespace(add_catch_all=routes.append))
     assert registered == [pages_mod._clear_rendered]
+    assert invalidations == [pages_mod._drop_rendered_for]
     assert [route.path for route in routes] == [FALLBACK_PATH]
 
 
@@ -1326,3 +1428,60 @@ def test_any_query_string_gets_the_app_not_the_capture(web_server, shell_root, m
     client = _start_engine(web_server, monkeypatch)
     assert SHELL_BODY in client.get('/pricing?token=abc').text
     assert 'captured pricing' in client.get('/pricing').text
+
+
+# ---------------------------------------------------------------------------
+# No blanket noindex on any engine: robots.txt alone keeps crawlers off one
+# without RR_APP_URL (plan sections 4 and 8)
+# ---------------------------------------------------------------------------
+
+ENGINE_PROBES = (
+    ('GET', '/'),
+    ('GET', '/pricing'),
+    ('GET', '/store'),
+    ('GET', '/robots.txt'),
+    ('GET', '/sitemap.xml'),
+    ('GET', '/no-such-page'),
+    ('GET', '/shell/static/js/missing.abc.js'),
+    ('GET', '/private'),
+    ('GET', '/pricing/'),
+    ('GET', '/terms'),
+    ('POST', '/pricing'),
+)
+
+
+@pytest.mark.parametrize('fixture', ['no_app_url', 'app_url'])
+def test_no_engine_sends_a_blanket_noindex(web_server, shell_root, monkeypatch, request, fixture):
+    request.getfixturevalue(fixture)
+    client = _start_engine(web_server, monkeypatch, before_fallback=[('/private', _real_route, ['GET'], {})])
+    statuses = set()
+    for method, path in ENGINE_PROBES:
+        resp = client.request(method, path)
+        statuses.add(resp.status_code)
+        if path != '/store':
+            assert 'x-robots-tag' not in resp.headers, (method, path, resp.status_code)
+    # Pages, redirects, 404s, a wrong method and an auth refusal alike.
+    assert statuses == {200, 301, 401, 404, 405}
+    # An unlisted page keeps its own page-level noindex.
+    assert client.get('/store').headers['x-robots-tag'] == 'noindex'
+
+
+@pytest.mark.parametrize('fixture,warns', [('no_app_url', True), ('app_url', False)])
+def test_a_published_page_without_rr_app_url_warns_once_at_the_swap(
+    web_server, shell_root, monkeypatch, request, fixture, warns
+):
+    # A production pod without RR_APP_URL keeps crawlers off its published pages: say so, once, when it
+    # has some. Startup stays quiet: OSS and desktop engines have nothing published.
+    request.getfixturevalue(fixture)
+    lines = []
+    monkeypatch.setattr(shell_mod, 'warning', lines.append)
+    monkeypatch.setattr(shell_mod, '_warned_unindexed', False)
+    _start_engine(web_server, monkeypatch)
+    published = pp.Aggregate(exact={'/': pp.Page('/', 'rocketride.home', title='Home')})
+    pp.swap(pp.Aggregate(exact={}))
+    pp.swap(pp.legacy_aggregate())
+    assert lines == []
+    pp.swap(published)
+    pp.swap(pp.Aggregate(exact={'/a': pp.Page('/a', 'rocketride.home', title='A')}))
+    matching = [line for line in lines if 'RR_APP_URL is not set' in line and 'robots.txt disallows all' in line]
+    assert len(matching) == (1 if warns else 0), lines

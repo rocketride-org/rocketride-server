@@ -24,7 +24,10 @@
 
 from __future__ import annotations
 
-from ai.modules.shell.head import inject_head
+import json
+import re
+
+from ai.modules.shell.head import inject_head, jsonld_script, social_tags
 
 DOC = (
     '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -65,9 +68,10 @@ def test_a_greater_than_sign_inside_a_quoted_value_does_not_end_the_tag():
 
 
 def test_an_attribute_inside_a_quoted_value_is_not_the_attribute():
-    doc = '<html><head><meta content="x name=description" property="og:image"></head><body></body></html>'
+    # og:locale: a property inject_head never replaces.
+    doc = '<html><head><meta content="x name=description" property="og:locale"></head><body></body></html>'
     out = inject_head(doc, title='T', description='New.')
-    assert '<meta content="x name=description" property="og:image">' in out
+    assert '<meta content="x name=description" property="og:locale">' in out
 
 
 def test_listed_page_has_no_robots_and_no_canonical_without_base_url():
@@ -104,6 +108,21 @@ def test_headless_documents_only_lose_tags_before_body():
     assert out.count('<title>') == 2 and '<title>keep</title>' in out and 'old' not in out
 
 
+def test_jsonld_cannot_break_out_of_its_script():
+    payload = {'name': '</script><script>alert(1)</script>', 'd': 'a & b \u2028\u2029'}
+    script = jsonld_script(payload)
+    inner = re.match(r'^<script type="application/ld\+json">(.*)</script>$', script, re.S).group(1)
+    assert '<' not in inner and '>' not in inner and '&' not in inner
+    assert '\u2028' not in inner and '\u2029' not in inner
+    assert json.loads(inner) == payload
+
+
+def test_jsonld_blocks_land_in_head():
+    out = inject_head(DOC, title='T', jsonld=[{'@type': 'Organization'}, {'@type': 'WebSite'}])
+    head = out[: out.index('</head>')]
+    assert head.count('application/ld+json') == 2
+
+
 def test_the_charset_declaration_stays_within_the_first_1024_bytes():
     for charset in ('<meta charset="utf-8">', '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">'):
         doc = f'<!doctype html><html lang="en"><head>{charset}<title>shell</title></head><body></body></html>'
@@ -111,3 +130,74 @@ def test_the_charset_declaration_stays_within_the_first_1024_bytes():
         end = out.index(charset) + len(charset)
         assert len(out[:end].encode('utf-8')) <= 1024, charset
         assert end <= out.index('<title>Pricing</title>') < out.index('</head>'), charset
+
+
+def test_extra_tags_land_in_head_verbatim_after_the_metadata():
+    tag = '<link rel="alternate" type="application/rss+xml" href="/blog/feed.xml">'
+    out = inject_head(DOC, title='T', jsonld=[{'@type': 'WebSite'}], extra=[tag])
+    head = out[: out.index('</head>')]
+    assert head.count(tag) == 1
+    assert head.index('<title>T</title>') < head.index('application/ld+json') < head.index(tag)
+
+
+def test_social_tags_of_an_article_with_an_image():
+    assert social_tags(
+        site_name='RocketRide',
+        image='https://rr.example/apps/rocketride.home/v3/blog/launch.png',
+        published='2026-11-09',
+        modified='2026-11-10T09:00:00Z',
+    ) == [
+        '<meta property="og:type" content="article">',
+        '<meta property="og:site_name" content="RocketRide">',
+        '<meta property="og:image" content="https://rr.example/apps/rocketride.home/v3/blog/launch.png">',
+        '<meta name="twitter:card" content="summary_large_image">',
+        '<meta property="article:published_time" content="2026-11-09">',
+        '<meta property="article:modified_time" content="2026-11-10T09:00:00Z">',
+    ]
+
+
+def test_social_tags_of_a_plain_page():
+    assert social_tags() == [
+        '<meta property="og:type" content="website">',
+        '<meta name="twitter:card" content="summary">',
+    ]
+    # An article never modified reports its publication time as the modification time.
+    assert social_tags(published='2026-11-09')[-2:] == [
+        '<meta property="article:published_time" content="2026-11-09">',
+        '<meta property="article:modified_time" content="2026-11-09">',
+    ]
+
+
+def test_social_tags_escape_their_values():
+    tags = social_tags(site_name='"><script>alert(1)</script>', image='https://x.example/a.png?a=1&b="2"')
+    assert '<script>' not in ''.join(tags)
+    assert '<meta property="og:site_name" content="&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">' in tags
+    assert '<meta property="og:image" content="https://x.example/a.png?a=1&amp;b=&quot;2&quot;">' in tags
+
+
+def test_snapshot_twitter_image_is_removed_so_x_falls_back_to_og_image():
+    doc = DOC.replace(
+        '</head>',
+        '<meta name="twitter:image" content="https://old.example/t.png">'
+        '<meta name="twitter:image:alt" content="old alt"></head>',
+    )
+    tags = social_tags(image='https://rr.example/x.png')
+    out = inject_head(doc, title='T', extra=tags)
+    assert 'twitter:image' not in out and 'old.example' not in out and 'old alt' not in out
+    assert out.count('<meta property="og:image" content="https://rr.example/x.png">') == 1
+
+
+def test_social_tags_replace_the_documents_own():
+    doc = DOC.replace(
+        '</head>',
+        '<meta property="og:type" content="website"><meta property="og:site_name" content="old">'
+        '<meta property="og:image" content="https://old.example/x.png"><meta name="twitter:card" content="summary">'
+        '<meta property="article:published_time" content="2001-01-01">'
+        '<meta content="2001-01-02" property="article:modified_time"></head>',
+    )
+    tags = social_tags(site_name='RR', image='https://rr.example/x.png', published='2026-11-09')
+    out = inject_head(doc, title='T', extra=tags)
+    kinds = ('og:type', 'og:site_name', 'og:image', 'twitter:card', 'article:published_time', 'article:modified_time')
+    for kind in kinds:
+        assert out.count(f'"{kind}"') == 1, kind
+    assert 'old.example' not in out and '2001-01' not in out and 'content="old"' not in out

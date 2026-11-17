@@ -63,3 +63,16 @@ def app_url() -> str:
         or an empty string when unset.
     """
     return os.environ.get('RR_APP_URL', '').rstrip('/')
+
+
+def indexnow_key() -> str:
+    """The IndexNow key as configured, unvalidated (``indexnow.key`` checks it).
+
+    Read at startup, once per page map build, and on each request for the
+    key file (``/<key>.txt``); never on a page request.
+
+    Returns:
+        ``RR_INDEXNOW_KEY`` with surrounding whitespace stripped, or an empty
+        string when unset.
+    """
+    return os.environ.get('RR_INDEXNOW_KEY', '').strip()

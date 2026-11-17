@@ -100,13 +100,16 @@ def test_a_newer_home_ui_manifest_still_validates():
     newer = _newer()
     pages, site, errors = check_manifest('rocketride.home', newer)
     assert errors == []
+    assert site.pop('notFound') == 'pages/404.html'
     assert len(pages) == 26
     assert site == {
-        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl')},
+        **{k: newer['site'][k] for k in ('title', 'blurb', 'docsUrl', 'image', 'organization')},
         'redirects': {'/terms': '/legal/terms', '/terms/': '/legal/terms'},
+        'feeds': {'/blog/feed.xml': {'path': '/blog/feed.xml', 'prefix': '/blog/', 'title': 'RocketRide blog'}},
     }
     launch = {p.path: p for p in pages}['/blog/launch']
-    assert dict(launch.extra) == {k: newer['publicPages'][-1][k] for k in ('image', 'published', 'modified', 'authors')}
+    assert (launch.image, launch.published, launch.modified) == ('/og/launch.png', '2026-11-09', '2026-11-10T09:00:00Z')
+    assert launch.authors == (('Ansh', 'https://rocketride.ai/team/ansh'),)
 
 
 async def test_loader_prefers_the_emitted_file_over_metadata():
@@ -146,10 +149,11 @@ async def test_store_errors_other_than_not_found_skip_the_app_or_fail_the_gate(m
 
 async def test_a_newer_home_ui_manifest_still_publishes():
     # The emitted file of a later home-ui build, gated on this engine: the
-    # fields it does not know cost nothing, and the snapshot it names exists.
+    # fields it does not know cost nothing, and the snapshots it names exist.
     from ai.modules.shell.public_pages import gate_errors
 
     dist = dist_of(PLATFORM, 'rocketride.home')
     FILES[f'{dist}/app-manifest.json'] = json.dumps(_newer()).encode()
     FILES[f'{dist}/pages/pricing.html'] = b'<html></html>'
+    FILES[f'{dist}/pages/404.html'] = b'<html></html>'
     assert await gate_errors('rocketride.home', {'name': 'Home'}, dist, HostileAccount()) == []

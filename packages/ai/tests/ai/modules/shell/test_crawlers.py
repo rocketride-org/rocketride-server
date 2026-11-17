@@ -20,11 +20,91 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""The crawler roster: one constant drives the robots.txt named groups."""
+"""The crawler roster: one constant drives UA classification and the robots.txt named groups."""
 
 from __future__ import annotations
 
-from ai.modules.shell.crawlers import CRAWLERS, robots_groups
+import pytest
+
+import ai.modules.shell.crawlers as crawlers
+from ai.modules.shell.crawlers import CRAWLER, CRAWLERS, HUMAN, classify, robots_groups
+
+REAL_UAS = [
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
+    'DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ClaudeBot/1.0; +claudebot@anthropic.com',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; PerplexityBot/1.0)',
+    'CCBot/2.0 (https://commoncrawl.org/faq/)',
+    'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
+    'Twitterbot/1.0',
+    'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient +http://www.linkedin.com)',
+    'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)',
+    'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)',
+    'WhatsApp/2.23.20.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-SearchBot/1.0; +Searchbot@anthropic.com)',
+    'DuckAssistBot/1.2; (+http://duckduckgo.com/duckassistbot.html)',
+    'meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
+    'meta-externalfetcher/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)',
+    'meta-webindexer/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/web-crawlers)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; MistralAI-User/1.0; +https://docs.mistral.ai/robots)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GoogleOther) Chrome/131.0 Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Mobile Safari/537.36 (compatible; Google-InspectionTool/1.0)',
+    'Google-CloudVertexBot',
+    # Claude Code's web fetch: a roster match, so it reads the snapshot.
+    'Claude-User (claude-code/2.1.0; +https://support.anthropic.com/)',
+]
+
+BROWSERS = [
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+]
+
+
+@pytest.mark.parametrize('ua', REAL_UAS)
+def test_rostered_crawlers_classify_as_crawler(ua):
+    assert classify(ua) == CRAWLER
+
+
+@pytest.mark.parametrize('ua', BROWSERS + ['', 'curl/8.4.0', 'SomeNewBot/1.0'])
+def test_everything_else_is_human(ua):
+    assert classify(ua) == HUMAN
+
+
+def test_unknown_non_browser_uas_are_logged_once_and_bounded(monkeypatch):
+    logged = []
+    monkeypatch.setattr(crawlers, '_seen_unknown', set())
+    # A warning, not debug: production runs without debug tracing, and this log is how the roster grows.
+    monkeypatch.setattr(crawlers, 'warning', lambda msg: logged.append(msg))
+    classify('SomeNewBot/1.0')
+    classify('SomeNewBot/1.0')
+    classify(BROWSERS[0])
+    assert len(logged) == 1 and 'somenewbot' in logged[0]
+    monkeypatch.setattr(crawlers, '_MAX_SEEN', 1)
+    classify('OtherBot/2.0')
+    assert len(logged) == 1
+
+
+def test_roster_names_the_search_ai_and_inspection_crawlers():
+    tokens = set(CRAWLERS)
+    for token in (
+        'Claude-SearchBot',
+        'DuckAssistBot',
+        'Meta-ExternalAgent',
+        'meta-externalfetcher',
+        'meta-webindexer',
+        'Amazonbot',
+        'MistralAI-User',
+        'GoogleOther',
+        'Google-InspectionTool',
+        'Google-CloudVertexBot',
+        # Robots-only: Apple's AI-training opt-out, never sent as a user agent.
+        'Applebot-Extended',
+    ):
+        assert token in tokens
 
 
 def test_roster_tokens_are_unique():
