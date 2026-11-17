@@ -40,7 +40,7 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { takeSignupProperties, currentSignupProperties, clearSignupProperties, signupFromState } from '../util/signupAttribution';
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { DAPMessage } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
@@ -62,6 +62,7 @@ import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
 import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
+import { shellReporter } from '../telemetry/host';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
 import {
@@ -613,6 +614,12 @@ export class ConnectionManager implements IConnectionManager {
 	 * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
 	 * whose last listener left before its dispatch. Never throws.
 	 *
+	 * @deprecated The shell owns the telemetry transport now: facts go through
+	 * the shell's own reporter (telemetry/host.ts shellReporter), whose queue
+	 * holds across teardown. Nothing feeds this channel any more — it drains
+	 * empty. Kept because `shell:telemetry`/`drainTelemetry` are frozen v8/v9
+	 * floor surface; real removal is a separate, signed-off contract decision.
+	 *
 	 * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
 	 * @param props - Flat properties; the forwarding app adds its own super properties.
 	 */
@@ -722,6 +729,10 @@ export class ConnectionManager implements IConnectionManager {
 	 * Call once from the app's analytics init, then subscribe to `shell:telemetry`
 	 * for the rest.
 	 *
+	 * @deprecated The shell owns the telemetry transport now; nothing feeds the
+	 * channel, so this drains empty. Kept because it is frozen v8/v9 floor
+	 * surface — real removal is a separate, signed-off contract decision.
+	 *
 	 * @returns The buffered facts in the order they were raised.
 	 */
 	public drainTelemetry(): TelemetryFact[] {
@@ -777,10 +788,12 @@ export class ConnectionManager implements IConnectionManager {
 			// Optional context getters cannot prevent navigation or latch the one-shot guard.
 		}
 		const signup = currentSignupProperties(signupValue);
-		// Held even with an app listening: delivered live, it would depend on the app's analytics
-		// flushing before the redirect unloads the page; the hold's sessionStorage mirror reaches the
-		// callback page, whose drain hands it over.
-		this.holdTelemetry('auth:start', startProps);
+		// Reported on the shell's OWN reporter (the shell owns the telemetry
+		// transport now): beacon when the SDK is up; otherwise the queue's
+		// sessionStorage hold reaches the callback page's drain. Bare — no
+		// experiment props ride auth events (experiment→signup joins are
+		// server-side via the PKCE signup attribution below).
+		shellReporter()('auth:start', startProps, { transport: 'sendBeacon' });
 		try {
 			if (!this.authProvider) {
 				console.error('[ConnectionManager] No auth provider configured');
@@ -906,6 +919,31 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
+		// ── Identity provider error return ────────────────────────────────
+		// The generic OAuth `error`/`error_description` params can reach the
+		// app (the registered redirect URIs are origin roots), but honoring them
+		// would let any unrelated app deep-link (`/app?error=…`) into a false
+		// sign-in banner, so they are never a sign-in failure. A return from OUR
+		// authorize redirect (its PKCE verifier is still stored) carries `state`,
+		// which may hold a cookieless signup context: strip it before the
+		// transport wait, which can fail and return early. Only the OAuth params
+		// go; the rest of the query and the fragment stay for the app.
+		{
+			const returnParams = new URLSearchParams(window.location.search);
+			if (!returnParams.get('code') && !returnParams.get('auth_error') && returnParams.has('error') && returnParams.has('state') && getStoredVerifier()) {
+				clearSignupProperties();
+				for (const key of ['error', 'error_description', 'error_uri', 'state', 'iss']) {
+					returnParams.delete(key);
+				}
+				let url = window.location.pathname;
+				const rest = returnParams.toString();
+				if (rest) {
+					url += `?${rest}`;
+				}
+				window.history.replaceState({ ...(window.history.state ?? {}) }, '', url + String(window.location.hash ?? ''));
+			}
+		}
+
 		// Ensure the transport is attached before any login attempt. The native
 		// attach timeout closes a timed-out handshake before this promise rejects.
 		try {
@@ -924,12 +962,9 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
-		// Only honor `auth_error`: it is set exclusively by our own OAuth
-		// callback (the registered redirect_uri is the server callback, which
-		// wraps every Zitadel failure as `auth_error` before redirecting here).
-		// The generic OAuth `error`/`error_description` params never legitimately
-		// reach the app this way, so reading them would let any unrelated app
-		// deep-link (`/app?error=…`) hijack bootstrap into a false sign-in banner.
+		// Only `auth_error` is honored as a sign-in failure: our own OAuth
+		// callback sets it. Identity provider `error` returns are stripped
+		// above, before the transport wait.
 		const errorDescription = params.get('auth_error');
 
 		if (errorDescription) {
@@ -953,7 +988,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
-			const signup = takeSignupProperties();
+			const signup = takeSignupProperties() ?? signupFromState(params.get('state'));
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.
@@ -995,7 +1030,10 @@ export class ConnectionManager implements IConnectionManager {
 				if (completed) {
 					const isNew = completed.result.isNewUser ?? null;
 					const waitlisted = completed.result.waitlisted === true;
-					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
+					// The shell's own reporter: lands even when NO app ever mounts (a
+				// waitlisted sign-up closing the tab) — the reason the old held
+				// channel and the home remote's ./telemetry expose existed.
+				shellReporter()('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
 				}
 				return completed;
 			} catch (error) {

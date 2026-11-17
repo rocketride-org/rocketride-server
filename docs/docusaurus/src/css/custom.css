@@ -151,7 +151,6 @@ html[data-theme='dark']:not(#\#):not(#\#) {
  *   - breadcrumb active (current page) crumb color
  *   - right TOC "on this page": resting = body text, active = link color + bold
  *   - home/quickstart side cards: no underline on hover; accent border
- *   - no doubled page title (see the .rr-doc-header rule below)
  * If any reverts, the Infima selector specificity changed; re-match the hack.
  * ------------------------------------------------------------------------- */
 
@@ -1092,23 +1091,10 @@ html.docs-doc-id-index .theme-doc-markdown .rr-kicker {
  * Copy / View as Markdown controls (DocItem swizzle)
  * ------------------------------------------------------------------------- */
 /* Custom doc header (DocItem/Content swizzle): title with the markdown
- * controls directly beneath it. The body's duplicate leading h1 is hidden. */
+ * controls directly beneath it. The body's leading h1 is removed at build time
+ * by src/lib/remark-strip-title.mjs. */
 .rr-doc-header {
 	margin-bottom: 1.5rem;
-}
-
-/* CommonMark (.md) wraps the body's leading `# Title` in its own <header>,
- * while .mdx emits a bare <h1>; hide either so it never duplicates the
- * custom header's title.
- * LIMITATION: the adjacent-sibling (`+`) selector only matches when the body's
- * leading heading is the IMMEDIATE next sibling of .rr-doc-header. A page that
- * opens with an admonition or imported component before its first H1 will not
- * match, so its title can render doubled. This is belt-and-suspenders alongside
- * the site-wide `<head><title>` strip; if you see a doubled title, a
- * non-adjacent body H1 is the likely cause. */
-.rr-doc-header + h1,
-.rr-doc-header + header {
-	display: none;
 }
 
 .docs-md-actions {

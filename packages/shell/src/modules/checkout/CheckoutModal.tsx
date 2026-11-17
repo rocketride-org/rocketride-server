@@ -20,6 +20,7 @@ import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-
 import { commonStyles } from '../../themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
 import { isCheckoutNotDispatched } from './checkoutDispatch';
+import { grantSuccessLabel } from './successLabel';
 import type { CheckoutModalProps, CheckoutPlan, PromoValidation } from './types';
 
 // =============================================================================
@@ -465,6 +466,7 @@ interface CheckoutAttempt {
 export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appName,
 	appDescription,
+	appId,
 	stripePublishableKey,
 	preselectedPlan,
 	preselectedPromo,
@@ -850,7 +852,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 								)}
 								Code <b>{grantResult.code}</b>
 							</p>
-							<button style={S.submitBtn(false)} onClick={closeCheckout}>Done</button>
+							{grantResult.mode === 'subscribed'
+								? <button style={S.submitBtn(false)} onClick={() => void notifySuccess()}>{grantSuccessLabel(appName, appId)}</button>
+								: <button style={S.submitBtn(false)} onClick={closeCheckout}>Done</button>}
 						</div>
 
 					) : outcome || replayUnavailable ? (

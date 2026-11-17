@@ -472,7 +472,8 @@ class TestDataOperations:
             assert 'text' in result
             assert isinstance(result['text'], list)
             assert len(result['text']) > 0
-            assert result['text'][0] == '\n\n'.join(chunks) + '\n\n'
+            # The text lane delivers the whole body as one text, however many writes carried it
+            assert result['text'][0] == ''.join(chunks) + '\n\n'
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)

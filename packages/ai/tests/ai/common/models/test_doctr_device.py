@@ -56,6 +56,8 @@ def predictor(monkeypatch):
     monkeypatch.setattr(DocTRLoader, '_ensure_dependencies', staticmethod(lambda: None))
     monkeypatch.setitem(sys.modules, 'doctr', types.SimpleNamespace(models=models))
     monkeypatch.setitem(sys.modules, 'doctr.models', models)
+    # load() marks docTR's drawing helpers absent; setitem removes that entry after the test.
+    monkeypatch.setitem(sys.modules, 'doctr.utils.visualization', None)
     monkeypatch.setitem(sys.modules, 'ai.common.opencv', types.SimpleNamespace(cv2=None))
     monkeypatch.setitem(sys.modules, 'ai.common.torch', types.SimpleNamespace(torch=types.SimpleNamespace(cuda=cuda)))
     return built

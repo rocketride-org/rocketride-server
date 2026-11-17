@@ -571,10 +571,13 @@ def test_get_task_returns_underlying_task():
 
 
 def test_get_task_control_by_public_key_finds_match():
-    """The first control whose public_auth equals the argument is returned."""
+    """The first control whose public_auth equals the argument, on a public source, is returned."""
     ts = _make_server()
     ctrl_a = _make_control(token='tk_a', public_auth='pk_zzz')
     ctrl_b = _make_control(token='tk_b', public_auth='pk_xyz')
+    ctrl_a.source = ctrl_b.source = 'src'
+    ctrl_a.pipeline = ctrl_b.pipeline = {'components': [{'id': 'src', 'provider': 'chat'}]}
+    ctrl_a.task._pipeline = ctrl_b.task._pipeline = ctrl_a.pipeline
     ts._task_control = {'tk_a': ctrl_a, 'tk_b': ctrl_b}
     assert ts.get_task_control_by_public_key('pk_xyz') is ctrl_b
 
@@ -1246,10 +1249,17 @@ def _launch_pipeline():
 
 
 def _seed_running_task(ts, token, task_id):
-    """Register a live (not complete) task with display id ``task_id`` under ``token``."""
+    """Register a live (not complete) task with display id ``task_id`` under ``token``.
+
+    A real TASK_CONTROL, so it has the owner the requests below have (a dev run
+    of user '', the defaults): a token whose run has another owner is refused
+    before the already-running check this is here for.
+    """
     task = MagicMock()
     task.is_task_complete.return_value = False
-    ts._task_control[token] = SimpleNamespace(id=task_id, token=token, pipeline=_launch_pipeline(), task=task)
+    control = task_server_module.TASK_CONTROL()
+    control.id, control.token, control.pipeline, control.task = task_id, token, _launch_pipeline(), task
+    ts._task_control[token] = control
 
 
 def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
@@ -1260,12 +1270,14 @@ def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_task_already_running_with_a_derived_token_says_how_to_run_or_attach():
+async def test_start_task_already_running_with_a_derived_token_says_how_to_run_or_attach(monkeypatch):
     """No token from the caller: the second run of the same pipe hashes to the
     first one's token, so the refusal must identify that existing run.
     """
     ts = _make_server()
-    ts._server.account.generate_token.side_effect = lambda content, prefix: f'{prefix}digest0123'
+    # The tk_ token is keyed (keyed_task_token); generate_token only makes the pk_.
+    monkeypatch.setattr(task_server_module, 'keyed_task_token', lambda key, content: 'tk_digest0123')
+    ts._server.account.generate_token.return_value = 'pk_public'
     # A seeded id unlike the one this request builds ('digest01.src'), so the
     # assertion tells the running task's id from the request's.
     _seed_running_task(ts, 'tk_digest0123', 'running.src')

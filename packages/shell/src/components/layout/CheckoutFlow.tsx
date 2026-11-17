@@ -155,6 +155,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 			key={checkout.id}
 			appName={checkoutApp.name}
 			appDescription={checkoutApp.description}
+			appId={checkoutApp.id}
 			stripePublishableKey={checkoutStripeKey}
 			preselectedPlan={checkout.plan}
 			preselectedPromo={checkout.promo}
