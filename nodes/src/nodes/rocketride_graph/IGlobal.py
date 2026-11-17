@@ -46,7 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2 import sql
 
-from rocketlib import warning
+from rocketlib import debug, warning
 from ai.common.graph import GraphGlobalBase, GraphUnavailableError
 from ai.common.graph.age import (
     CAPABILITY_TABLES,
@@ -351,6 +351,15 @@ class IGlobal(GraphGlobalBase):
                 # The connection is gone: not a verdict on the query. Raised so a
                 # lane fails instead of feeding the outage back to the LLM.
                 warning(f'Graph database unavailable during EXPLAIN validation: {e}')
+                # Some outage errors (SQLSTATE 53200, for one) leave the connection
+                # open inside an aborted transaction; without a rollback the next
+                # validation fails at SET TRANSACTION READ ONLY with an error that
+                # reads as a query rejection. A closed connection refuses the
+                # rollback, which changes nothing here.
+                try:
+                    self.client.rollback()
+                except Exception as rollback_error:  # noqa: BLE001
+                    debug(f'Rollback after an unavailable graph database failed: {rollback_error}')
                 raise GraphUnavailableError('Graph database is unavailable (details are in the engine log)') from None
             self.client.rollback()
             return False, str(e)
