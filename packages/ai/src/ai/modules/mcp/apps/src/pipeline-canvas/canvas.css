@@ -40,6 +40,14 @@ body {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* On a touch screen the buttons share the title row: a long name wraps to two lines. */
+.rr-canvas-coarse .rr-canvas-name {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	white-space: normal;
+	line-height: 1.25;
+}
 .rr-canvas-pill {
 	flex: none;
 	font-size: 11px;
@@ -126,8 +134,10 @@ body {
 .rr-canvas-tool:last-child {
 	border-right: none;
 }
-.rr-canvas-tool:hover {
-	background: var(--rr-inset);
+@media (hover: hover) {
+	.rr-canvas-tool:hover {
+		background: var(--rr-inset);
+	}
 }
 .rr-canvas-tool:focus-visible {
 	outline: 2px solid var(--rr-accent);
@@ -166,10 +176,15 @@ body {
 	font-size: 12px;
 	color: var(--rr-text-primary);
 }
-/* On a phone the drawing is small: the main flow is also written out. */
+/* On a phone the drawing is small: the main flow is also written out (not in full screen). */
 @media (max-width: 560px) {
-	.rr-canvas-flow {
+	.rr-canvas:not(.rr-canvas-full) .rr-canvas-flow {
 		display: block;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.rr-canvas-frame {
+		transition: none;
 	}
 }
 .rr-canvas-howto {
@@ -215,14 +230,13 @@ body {
 	position: absolute;
 	display: flex;
 	align-items: center;
-	justify-content: center;
 	gap: 5px;
-	padding: 0 clamp(3px, 8%, 8px);
+	padding: 0 7px;
+	border: 1px solid var(--rr-border);
 	border-radius: 4px 4px 0 0;
 	background: var(--rr-bg-titleBar-inactive);
-	color: var(--rr-text-primary);
+	color: var(--rr-fg-titleBar-inactive);
 	font-family: var(--rr-font-family);
-	font-size: 12px;
 	font-weight: 500;
 	line-height: 1.2;
 	white-space: nowrap;
@@ -233,11 +247,13 @@ body {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-/* A narrow node: the icon first and a smaller font, so the type still reads. */
+.rr-overview-icon {
+	flex: none;
+}
+/* A narrow node: up to two lines. A word breaks only when it cannot fit a line alone. */
 .rr-overview-narrow {
 	gap: 3px;
-	padding: 0 2px;
-	font-size: 10.5px;
+	padding: 0 4px;
 	letter-spacing: -0.01em;
 }
 .rr-overview-narrow .rr-overview-title {
@@ -245,6 +261,7 @@ body {
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
 	white-space: normal;
+	overflow-wrap: break-word;
 	line-height: 1.15;
 }
 /* The builder's EXPERIMENTAL badge, as a dot. */
@@ -267,24 +284,6 @@ body {
 	border: 1.5px dashed var(--rr-text-secondary);
 	border-radius: 7px;
 	pointer-events: none;
-}
-
-/* The drawing is too small for even an icon per node: say how to read it. */
-.rr-overview-cue {
-	position: absolute;
-	left: 50%;
-	bottom: 12px;
-	transform: translateX(-50%);
-	padding: 4px 12px;
-	border-radius: 999px;
-	border: 1px solid var(--rr-line-strong);
-	background: var(--rr-bg-paper);
-	color: var(--rr-text-secondary);
-	font-size: 12px;
-	white-space: nowrap;
-}
-.rr-overview-icon {
-	flex: none;
 }
 
 /* --- Full screen -------------------------------------------------------- */
