@@ -107,11 +107,7 @@ describe('buildCanvasModel', () => {
 	});
 
 	it('leaves out a note with no text, which would only show an edit prompt', () => {
-		const components = [
-			...COMPONENTS,
-			{ id: 'note_1', provider: 'annotation', config: {}, ui: { nodeType: 'annotation', position: { x: 0, y: 400 } } },
-			{ id: 'note_2', provider: 'annotation', config: { content: 'Keep me' }, ui: { nodeType: 'annotation', position: { x: 300, y: 400 } } },
-		];
+		const components = [...COMPONENTS, { id: 'note_1', provider: 'annotation', config: {}, ui: { nodeType: 'annotation', position: { x: 0, y: 400 } } }, { id: 'note_2', provider: 'annotation', config: { content: 'Keep me' }, ui: { nodeType: 'annotation', position: { x: 300, y: 400 } } }];
 		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
 		if (model.kind !== 'graph') throw new Error(model.kind);
 
@@ -176,11 +172,23 @@ describe('buildCanvasModel', () => {
 	it('tells the person what went wrong, not the model', () => {
 		const base = { ok: false, path: '@/Team/=team_A/.projects/sub/x.pipe', workspace: '@/Team/=team_A/.projects' };
 		const cases: Array<[Record<string, unknown>, { message: string; hint?: string }]> = [
-			[{ error_type: 'NotFound', message: 'No pipeline file at ...', hint: 'Call store_list with path ...' }, { message: 'There is no pipeline at sub/x.pipe.', hint: 'Ask to see your saved pipelines.' }],
-			[{ error_type: 'AccessDenied', path: '@/Team/=team_B/.projects/y.pipe' }, { message: "You don't have access to y.pipe.", hint: 'Ask to see the pipelines you can open.' }],
-			[{ error_type: 'PipelineTooLarge', size: 2_200_033 }, { message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.', hint: 'Open it in the builder instead.' }],
+			[
+				{ error_type: 'NotFound', message: 'No pipeline file at ...', hint: 'Call store_list with path ...' },
+				{ message: 'There is no pipeline at sub/x.pipe.', hint: 'Ask to see your saved pipelines.' },
+			],
+			[
+				{ error_type: 'AccessDenied', path: '@/Team/=team_B/.projects/y.pipe' },
+				{ message: "You don't have access to y.pipe.", hint: 'Ask to see the pipelines you can open.' },
+			],
+			[
+				{ error_type: 'PipelineTooLarge', size: 2_200_033 },
+				{ message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.', hint: 'Open it in the builder instead.' },
+			],
 			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline file, or it is damaged.", hint: 'Open it in the builder to check it.' }],
-			[{ error_type: 'InvalidPath', path: '' }, { message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' }],
+			[
+				{ error_type: 'InvalidPath', path: '' },
+				{ message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' },
+			],
 			[{ error_type: 'Timeout', message: 'view_pipeline timed out waiting for the engine at @/Team/=team_A/.projects' }, { message: 'view_pipeline timed out waiting for the engine at .projects' }],
 		];
 		for (const [fields, expected] of cases) {
@@ -192,10 +200,7 @@ describe('buildCanvasModel', () => {
 	});
 
 	it('marks providers this engine does not have, and draws a connection the catalog does not declare', () => {
-		const components = [
-			...COMPONENTS,
-			{ id: 'mem_1', provider: 'memory_internal', config: {}, control: [{ classType: 'memory', from: 'agent_1' }], ui: { position: { x: 600, y: 200 } } },
-		];
+		const components = [...COMPONENTS, { id: 'mem_1', provider: 'memory_internal', config: {}, control: [{ classType: 'memory', from: 'agent_1' }], ui: { position: { x: 600, y: 200 } } }];
 		const model = buildCanvasModel(result(summaryFor(components as never), { [CANVAS_META_KEY]: { pipeline: { components }, services: SERVICES } }));
 		if (model.kind !== 'graph') throw new Error(model.kind);
 
@@ -269,6 +274,19 @@ describe('mainFlow', () => {
 		expect(mainFlow(summary)).toBe('Chat → Agent → Answers, and 2 more nodes');
 	});
 
+	it('stays one short line: repeats collapse, at most six steps, nothing for a truncated pipeline', () => {
+		const ids = Array.from({ length: 12 }, (_, i) => `n${i}`);
+		const titles = ['Chat', 'Parse', 'Prompt', 'Prompt', 'Prompt', 'Split', 'Embed', 'Store', 'Search', 'Rank', 'LLM', 'Answers'];
+		const summary = summaryFor([], {
+			node_count: 12,
+			nodes: ids.map((id, i) => ({ id, provider: 'p', title: titles[i] })),
+			connections: ids.slice(1).map((id, i) => ({ from: ids[i], to: id, lane: 'x' })),
+		});
+
+		expect(mainFlow(summary)).toBe('Chat → Parse → Prompt ×3 → … → LLM → Answers');
+		expect(mainFlow({ ...summary, truncated: true })).toBe('');
+	});
+
 	it('is empty without data connections, and survives a cycle', () => {
 		expect(mainFlow(summaryFor([], { nodes: [{ id: 'a', provider: 'p' }], connections: [] }))).toBe('');
 		const cyclic = summaryFor([], {
@@ -283,5 +301,53 @@ describe('mainFlow', () => {
 			],
 		});
 		expect(mainFlow(cyclic)).toBe('A → B');
+	});
+
+	it('starts where data enters, not at a tool the agent invokes', () => {
+		// The tool's own chain is longer, but the agent invokes the tool; the person talks to Chat.
+		const summary = summaryFor([], {
+			node_count: 7,
+			nodes: [
+				{ id: 'chat', provider: 'chat', title: 'Chat' },
+				{ id: 'agent', provider: 'agent', title: 'Agent' },
+				{ id: 'answers', provider: 'response', title: 'Answers' },
+				{ id: 'tool', provider: 'tool_pipe', title: 'Tool' },
+				{ id: 'p1', provider: 'prompt', title: 'Prompt' },
+				{ id: 'llm', provider: 'llm', title: 'LLM' },
+				{ id: 'out', provider: 'response', title: 'Tool answers' },
+			],
+			connections: [
+				{ from: 'chat', to: 'agent', lane: 'questions' },
+				{ from: 'agent', to: 'answers', lane: 'answers' },
+				{ from: 'agent', to: 'tool', control: 'tool' },
+				{ from: 'tool', to: 'p1', lane: 'text' },
+				{ from: 'p1', to: 'llm', lane: 'questions' },
+				{ from: 'llm', to: 'out', lane: 'answers' },
+			],
+		});
+		expect(mainFlow(summary)).toBe('Chat → Agent → Answers, and 4 more nodes');
+	});
+
+	it('prefers a path that reaches an output over a longer one that loops', () => {
+		const summary = summaryFor([], {
+			node_count: 6,
+			nodes: [
+				{ id: 'in', provider: 'p', title: 'In' },
+				{ id: 'a', provider: 'p', title: 'A' },
+				{ id: 'b', provider: 'p', title: 'B' },
+				{ id: 'c', provider: 'p', title: 'C' },
+				{ id: 'd', provider: 'p', title: 'D' },
+				{ id: 'out', provider: 'p', title: 'Out' },
+			],
+			connections: [
+				{ from: 'in', to: 'out', lane: 'x' },
+				{ from: 'in', to: 'a', lane: 'x' },
+				{ from: 'a', to: 'b', lane: 'x' },
+				{ from: 'b', to: 'c', lane: 'x' },
+				{ from: 'c', to: 'd', lane: 'x' },
+				{ from: 'd', to: 'a', lane: 'x' },
+			],
+		});
+		expect(mainFlow(summary)).toBe('In → Out, and 4 more nodes');
 	});
 });

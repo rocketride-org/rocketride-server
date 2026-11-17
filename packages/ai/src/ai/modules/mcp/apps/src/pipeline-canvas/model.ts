@@ -224,13 +224,7 @@ export function parentsFirst(nodes: INode[]): INode[] {
  * Without positions there is no saved grouping either, so a child is drawn
  * at the top level instead of inside a group at 0,0.
  */
-export function placeNodes(
-	nodes: INode[],
-	edges: Edge[],
-	hadPositions: boolean,
-	sizeOf: (id: string) => LayoutSize = () => ESTIMATED_NODE_SIZE,
-	frame: LayoutFrame = DEFAULT_FRAME
-): INode[] {
+export function placeNodes(nodes: INode[], edges: Edge[], hadPositions: boolean, sizeOf: (id: string) => LayoutSize = () => ESTIMATED_NODE_SIZE, frame: LayoutFrame = DEFAULT_FRAME): INode[] {
 	if (hadPositions) return nodes;
 	const positions = layoutPipeline(
 		nodes.map((node) => node.id),
@@ -366,35 +360,58 @@ export function displayPath(path?: string, workspace?: string): string {
  * 8 more nodes". Empty when there is no data connection.
  */
 export function mainFlow(summary: ViewPipelineSummary): string {
+	// A truncated pipeline is too large for one line to say much.
+	if (summary.truncated) return '';
 	const nodes = summary.nodes ?? [];
 	const title = new Map(nodes.map((node) => [node.id, node.title || node.provider]));
 	const next = new Map<string, string[]>();
+	const fed = new Set<string>();
 	for (const c of summary.connections ?? []) {
-		if (!c.lane || !title.has(c.from) || !title.has(c.to)) continue;
+		if (!title.has(c.from) || !title.has(c.to)) continue;
+		// Any connection in, data or invoke, means the node is not where the flow starts.
+		fed.add(c.to);
+		if (!c.lane) continue;
 		if (!next.has(c.from)) next.set(c.from, []);
 		next.get(c.from)!.push(c.to);
 	}
 	if (!next.size) return '';
+	// A path that ends at an output (a node that sends no data on) beats one
+	// that stops at a loop; length breaks ties.
+	const reachesOutput = (candidate: string[]) => !next.has(candidate[candidate.length - 1]);
+	const beats = (candidate: string[], best: string[]) => !best.length || (reachesOutput(candidate) !== reachesOutput(best) ? reachesOutput(candidate) : candidate.length > best.length);
 	const memo = new Map<string, string[]>();
-	const longest = (id: string, seen: Set<string>): string[] => {
+	const follow = (id: string, seen: Set<string>): string[] => {
 		if (memo.has(id)) return memo.get(id)!;
 		let best: string[] = [];
 		for (const to of next.get(id) ?? []) {
 			if (seen.has(to)) continue;
 			seen.add(to);
-			const path = longest(to, seen);
+			const path = follow(to, seen);
 			seen.delete(to);
-			if (path.length > best.length) best = path;
+			if (beats(path, best)) best = path;
 		}
 		const result = [id, ...best];
 		memo.set(id, result);
 		return result;
 	};
+	// Start where data enters: a node nothing feeds or invokes.
+	const sources = nodes.filter((node) => !fed.has(node.id) && next.has(node.id));
+	const starts = sources.length ? sources : nodes.filter((node) => next.has(node.id));
 	let path: string[] = [];
-	for (const node of nodes) {
-		const candidate = longest(node.id, new Set([node.id]));
-		if (candidate.length > path.length) path = candidate;
+	for (const node of starts) {
+		const candidate = follow(node.id, new Set([node.id]));
+		if (beats(candidate, path)) path = candidate;
 	}
 	const rest = (summary.node_count ?? nodes.length) - path.length;
-	return path.map((id) => title.get(id)).join(' → ') + (rest > 0 ? `, and ${rest} more ${rest === 1 ? 'node' : 'nodes'}` : '');
+	// Repeated names in a row read as one step ("Prompt ×3"); at most six steps are named.
+	const steps: string[] = [];
+	for (const id of path) {
+		const name = title.get(id)!;
+		const last = steps[steps.length - 1];
+		const match = last && /^(.*?)(?: ×(\d+))?$/.exec(last);
+		if (match && match[1] === name) steps[steps.length - 1] = `${name} ×${Number(match[2] ?? 1) + 1}`;
+		else steps.push(name);
+	}
+	const shown = steps.length > 6 ? [...steps.slice(0, 3), '…', ...steps.slice(-2)] : steps;
+	return shown.join(' → ') + (rest > 0 ? `, and ${rest} more ${rest === 1 ? 'node' : 'nodes'}` : '');
 }

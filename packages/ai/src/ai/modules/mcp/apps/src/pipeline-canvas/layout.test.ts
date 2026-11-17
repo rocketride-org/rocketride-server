@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { BAND_GAP, LAYER_GAP, NODE_GAP, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
+import { BAND_GAP, LAYER_GAP, NODE_GAP, edgesThroughNodes, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -25,7 +25,14 @@ function overlaps(positions: Record<string, { x: number; y: number }>, sizeOf: (
 
 describe('layoutLayers', () => {
 	it('places a chain left to right, one layer apart', () => {
-		const positions = layoutLayers(['a', 'b', 'c'], [{ source: 'a', target: 'b' }, { source: 'b', target: 'c' }], fixed);
+		const positions = layoutLayers(
+			['a', 'b', 'c'],
+			[
+				{ source: 'a', target: 'b' },
+				{ source: 'b', target: 'c' },
+			],
+			fixed
+		);
 
 		expect(positions.a).toEqual({ x: 0, y: 0 });
 		expect(positions.b).toEqual({ x: SIZE.width + LAYER_GAP, y: 0 });
@@ -66,7 +73,15 @@ describe('layoutLayers', () => {
 	it('never overlaps nodes of different sizes', () => {
 		const sizes: Record<string, LayoutSize> = { a: { width: 220, height: 160 }, b: { width: 120, height: 40 }, c: { width: 180, height: 90 }, d: { width: 90, height: 300 } };
 		const sizeOf = (id: string) => sizes[id];
-		const positions = layoutLayers(['a', 'b', 'c', 'd'], [{ source: 'a', target: 'b' }, { source: 'a', target: 'c' }, { source: 'c', target: 'd' }], sizeOf);
+		const positions = layoutLayers(
+			['a', 'b', 'c', 'd'],
+			[
+				{ source: 'a', target: 'b' },
+				{ source: 'a', target: 'c' },
+				{ source: 'c', target: 'd' },
+			],
+			sizeOf
+		);
 
 		expect(overlaps(positions, sizeOf)).toBe(false);
 	});
@@ -87,7 +102,14 @@ describe('layoutLayers', () => {
 	});
 
 	it('ignores edges to unknown nodes and self loops', () => {
-		const positions = layoutLayers(['a'], [{ source: 'a', target: 'ghost' }, { source: 'a', target: 'a' }], fixed);
+		const positions = layoutLayers(
+			['a'],
+			[
+				{ source: 'a', target: 'ghost' },
+				{ source: 'a', target: 'a' },
+			],
+			fixed
+		);
 
 		expect(positions).toEqual({ a: { x: 0, y: 0 } });
 	});
@@ -139,7 +161,7 @@ describe('layoutPipeline', () => {
 		expect(overlaps(positions, fixed)).toBe(false);
 	});
 
-	it('keeps two agents\' rows apart', () => {
+	it("keeps two agents' rows apart", () => {
 		const ids = ['chat', 'a1', 'a2', 'l1', 't1', 'l2'];
 		const positions = layoutPipeline(
 			ids,
@@ -206,7 +228,14 @@ describe('layoutPipeline', () => {
 	});
 
 	it('lays out a graph of invoked nodes only', () => {
-		const positions = layoutPipeline(['x', 'y'], [{ source: 'x', target: 'y', control: true }, { source: 'y', target: 'x', control: true }], fixed);
+		const positions = layoutPipeline(
+			['x', 'y'],
+			[
+				{ source: 'x', target: 'y', control: true },
+				{ source: 'y', target: 'x', control: true },
+			],
+			fixed
+		);
 
 		expect(Object.keys(positions).sort()).toEqual(['x', 'y']);
 		expect(overlaps(positions, fixed)).toBe(false);
@@ -224,10 +253,10 @@ describe('layoutPipeline in a frame', () => {
 
 	it('wraps only when one band would be too small to read', () => {
 		const ids = chain(5);
-		// One band of 5 is 820 px wide: zoom 0.9 in 740 px, so it stays one band.
-		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 740, height: 560 })).map((p) => p.y)).size).toBe(1);
-		// In 360 px it would be zoom 0.44, so it wraps.
-		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 360, height: 560 })).map((p) => p.y)).size).toBeGreaterThan(1);
+		// One band of 5 is 820 px wide: zoom 0.24 in 200 px, still readable with labels, so it stays one band.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 200, height: 560 })).map((p) => p.y)).size).toBe(1);
+		// In 140 px it would be zoom 0.17, so it wraps.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 140, height: 560 })).map((p) => p.y)).size).toBeGreaterThan(1);
 	});
 
 	it('wraps a long flow into bands so it is drawn larger', () => {
@@ -250,7 +279,7 @@ describe('layoutPipeline in a frame', () => {
 
 	it('makes even bands', () => {
 		const ids = chain(8);
-		const positions = layoutPipeline(ids, links(ids), fixed, { width: 600, height: 900 });
+		const positions = layoutPipeline(ids, links(ids), fixed, { width: 250, height: 900 });
 		const rows = new Map<number, number>();
 		for (const p of Object.values(positions)) rows.set(p.y, (rows.get(p.y) ?? 0) + 1);
 
@@ -258,22 +287,27 @@ describe('layoutPipeline in a frame', () => {
 	});
 
 	it('cuts a band where the fewest edges cross', () => {
-		// a b c d e f: a fans out to b, c and d, so a cut after a or b would cut
-		// several edges; the cut after d crosses only d -> e.
-		const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+		// a feeds b and c (one column), both feed d, then a chain: d e f g h.
+		// A cut after a or after b/c would carry two connections; a cut later carries one.
+		const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 		const edges = [
 			{ source: 'a', target: 'b' },
-			{ source: 'b', target: 'c' },
 			{ source: 'a', target: 'c' },
-			{ source: 'c', target: 'd' },
 			{ source: 'b', target: 'd' },
+			{ source: 'c', target: 'd' },
 			{ source: 'd', target: 'e' },
 			{ source: 'e', target: 'f' },
+			{ source: 'f', target: 'g' },
+			{ source: 'g', target: 'h' },
 		];
-		const positions = layoutPipeline(ids, edges, fixed, { width: 420, height: 2000 });
-		const firstBand = ids.filter((id) => positions[id].y === positions.a.y);
+		const positions = layoutPipeline(ids, edges, fixed, { width: 180, height: 2000 });
+		const band = (id: string) => Object.values(positions).filter((p) => p.y < positions[id].y - SIZE.height - NODE_GAP).length > 0;
+		const across = edges.filter((e) => positions[e.target].y > positions[e.source].y + SIZE.height + BAND_GAP / 2);
 
-		expect(firstBand).toEqual(['a', 'b', 'c', 'd']);
+		expect(new Set(Object.values(positions).map((p) => p.y)).size).toBeGreaterThan(1);
+		expect(band('a')).toBe(false);
+		expect(across.length).toBe(1);
+		expect(edgesThroughNodes(positions, edges, fixed)).toBe(0);
 	});
 
 	it('puts an invoked node that sends data below the others in its column', () => {
@@ -294,14 +328,14 @@ describe('layoutPipeline in a frame', () => {
 
 	it('puts bands one under the other with the band gap', () => {
 		const ids = chain(6);
-		const positions = layoutPipeline(ids, links(ids), fixed, { width: 300, height: 2000 });
+		const positions = layoutPipeline(ids, links(ids), fixed, { width: 180, height: 2000 });
 		const rows = [...new Set(Object.values(positions).map((p) => p.y))].sort((a, b) => a - b);
 
 		expect(rows.length).toBeGreaterThan(1);
 		expect(rows[1] - rows[0]).toBe(SIZE.height + BAND_GAP);
 	});
 
-	it('keeps an agent\'s row under its own band', () => {
+	it("keeps an agent's row under its own band", () => {
 		const ids = ['chat', 'agent', 'llm', 'a2', 'a3', 'a4', 'a5', 'a6'];
 		const edges = [
 			{ source: 'chat', target: 'agent' },
@@ -312,10 +346,49 @@ describe('layoutPipeline in a frame', () => {
 			{ source: 'a5', target: 'a6' },
 			{ source: 'agent', target: 'llm', control: true },
 		];
-		const positions = layoutPipeline(ids, edges, fixed, { width: 360, height: 900 });
+		const positions = layoutPipeline(ids, edges, fixed, { width: 160, height: 900 });
 
 		expect(positions.llm.x).toBe(positions.agent.x);
 		expect(positions.llm.y).toBe(positions.agent.y + SIZE.height + LAYER_GAP);
 		expect(overlaps(positions, fixed)).toBe(false);
+	});
+});
+
+describe('edges and nodes', () => {
+	// The shape of tool-pipe-diamond: an agent with an LLM and memory it invokes,
+	// a pipeline tool it invokes that feeds two branches, a join, an LLM and answers.
+	const sizes: Record<string, LayoutSize> = {};
+	const ids = ['chat', 'agent', 'llm', 'memory', 'tool', 'branch_a', 'branch_b', 'join', 'sub_llm', 'sub_answers', 'answers'];
+	for (const id of ids) sizes[id] = { width: 180, height: id === 'tool' || id.startsWith('branch') || id === 'join' ? 150 : id === 'llm' || id === 'memory' ? 60 : 90 };
+	const sizeOf = (id: string) => sizes[id];
+	const edges = [
+		{ source: 'chat', target: 'agent' },
+		{ source: 'agent', target: 'llm', control: true },
+		{ source: 'agent', target: 'memory', control: true },
+		{ source: 'agent', target: 'tool', control: true },
+		{ source: 'tool', target: 'branch_a' },
+		{ source: 'tool', target: 'branch_b' },
+		{ source: 'branch_a', target: 'join' },
+		{ source: 'branch_b', target: 'join' },
+		{ source: 'join', target: 'sub_llm' },
+		{ source: 'sub_llm', target: 'sub_answers' },
+		{ source: 'agent', target: 'answers' },
+	];
+
+	it('counts a connection drawn through another node', () => {
+		const positions = { a: { x: 0, y: 0 }, b: { x: 200, y: 0 }, c: { x: 400, y: 0 } };
+		expect(edgesThroughNodes(positions, [{ source: 'a', target: 'c' }], fixed)).toBe(1);
+		expect(edgesThroughNodes(positions, [{ source: 'a', target: 'b' }], fixed)).toBe(0);
+	});
+
+	it.each([
+		[760, 560],
+		[390, 420],
+		[1100, 700],
+	])('draws no connection behind a node in a %i x %i frame', (width, height) => {
+		const positions = layoutPipeline(ids, edges, sizeOf, { width, height });
+
+		expect(edgesThroughNodes(positions, edges, sizeOf)).toBe(0);
+		expect(overlaps(positions, sizeOf)).toBe(false);
 	});
 });

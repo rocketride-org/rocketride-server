@@ -22,27 +22,7 @@ const CANVAS = resolve(SHARED_SRC, 'tools/pipelines/panels/design/canvas');
  * The builder files the canvas bundle draws with: CanvasApp.tsx imports the
  * first five, and the rest are what they import that is not replaced.
  */
-const REUSED = [
-	'components/node/node-component/NodeComponent.tsx',
-	'components/node/node-group/NodeGroup.tsx',
-	'components/node/node-annotation/NodeAnnotation.tsx',
-	'components/edge/FlowEdge.tsx',
-	'util/Icon.tsx',
-	'util/graph.ts',
-	'util/helpers.tsx',
-	'types.ts',
-	'components/ConditionalRender.tsx',
-	'components/handles/LaneHandle.tsx',
-	'components/handles/InvokeHandle.tsx',
-	'components/node/node-component/header/NodeHeader.tsx',
-	'components/node/node-component/lanes/NodeLanes.tsx',
-	'components/node/node-component/lanes/InsideLines.tsx',
-	'components/node/node-component/top/NodeTop.tsx',
-	'components/node/node-component/status/index.tsx',
-	'components/node/node-component/run-button/index.tsx',
-	'components/node/node-component/header/more-menu/index.tsx',
-	'hooks/useNodeActionLabels.ts',
-].map((file) => resolve(CANVAS, file));
+const REUSED = ['components/node/node-component/NodeComponent.tsx', 'components/node/node-group/NodeGroup.tsx', 'components/node/node-annotation/NodeAnnotation.tsx', 'components/edge/FlowEdge.tsx', 'util/Icon.tsx', 'util/graph.ts', 'util/helpers.tsx', 'types.ts', 'components/ConditionalRender.tsx', 'components/handles/LaneHandle.tsx', 'components/handles/InvokeHandle.tsx', 'components/node/node-component/header/NodeHeader.tsx', 'components/node/node-component/lanes/NodeLanes.tsx', 'components/node/node-component/lanes/InsideLines.tsx', 'components/node/node-component/top/NodeTop.tsx', 'components/node/node-component/status/index.tsx', 'components/node/node-component/run-button/index.tsx', 'components/node/node-component/header/more-menu/index.tsx', 'hooks/useNodeActionLabels.ts'].map((file) => resolve(CANVAS, file));
 
 const EXTENSIONS = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'];
 
@@ -83,7 +63,10 @@ function valueImports(file: string): ValueImport[] {
 				names.push(name.split(/\s+as\s+/)[0].trim());
 			}
 		}
-		const head = clause.replace(/\{[\s\S]*\}/, '').replace(/,/g, ' ').trim();
+		const head = clause
+			.replace(/\{[\s\S]*\}/, '')
+			.replace(/,/g, ' ')
+			.trim();
 		if (keyword === 'import' && head && !head.startsWith('*')) names.push('default');
 		if (head.startsWith('*')) names.push('*');
 		out.push({ importer: file, specifier, names });
