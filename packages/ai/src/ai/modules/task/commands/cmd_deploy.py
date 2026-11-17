@@ -411,7 +411,7 @@ class DeployCommands(_DeployBase):
         return self.build_response(request, body=body)
 
     async def _withdraw_stale_submissions(self, org_id: str, project_id: str, new_version: int) -> None:
-        """Withdraw every OTHER version of the name still in review (submit -> private).
+        """Withdraw every OLDER version of the name still in review (submit -> private).
 
         Deploying supersedes pending reviews (plan S8, the app door's rule):
         a new version makes older submissions stale by definition, and
@@ -425,7 +425,7 @@ class DeployCommands(_DeployBase):
             rail = []
         for row in rail:
             row_version = int(row.get('version', 0))
-            if row_version == new_version or str(row.get('state') or '') != 'submit':
+            if row_version >= new_version or str(row.get('state') or '') != 'submit':
                 continue
             try:
                 await account.set_artifact_state(org_id, project_id, row_version, 'private', self._actor())

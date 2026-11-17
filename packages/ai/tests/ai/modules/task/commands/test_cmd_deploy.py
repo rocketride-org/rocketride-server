@@ -181,8 +181,11 @@ class TestPublish:
     @pytest.mark.asyncio
     async def test_publish_withdraws_stale_pending_reviews(self, account_stub):
         """Deploying supersedes pending reviews (plan S8): older versions still in 'submit' return to 'private'."""
+        # v4 is a NEWER submission (another deploy landed and submitted while
+        # this one ran): only versions OLDER than the deployed v3 are stale
         account_stub.deployments_versions = AsyncMock(
             return_value=[
+                {'version': 4, 'state': 'submit'},
                 {'version': 3, 'state': 'private'},
                 {'version': 2, 'state': 'submit'},
                 {'version': 1, 'state': 'ready'},
