@@ -92,6 +92,12 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	 *  that address, the home team; plan §2.4) — answered by the host that
 	 *  holds the client. A host that cannot mint keys (OSS) rejects. */
 	'host.pipeline.createEndpointKey': ShellOpSpec<{ address: string }, IMintedEndpointKey>;
+	/** The org's developer id ('' when none is claimed yet) — the address
+	 *  namespace every pipeline needs (plan §2.1). */
+	'host.pipeline.developerId': ShellOpSpec<Record<string, never>, { developerId: string }>;
+	/** Claims the org's developer id (org admins; the server refuses others);
+	 *  answers the id as registered. */
+	'host.pipeline.registerDeveloper': ShellOpSpec<{ developerId: string }, { developerId: string }>;
 
 	// ── File-keyed verbs (the sidebar's pipeline rows — no document open) ────
 	/** Opens a .pipe file in the pipeline editor (emitOp). */

@@ -109,6 +109,11 @@ export interface IPipelineEditorHost {
 	 *  that address, the home team; plan §2.4) — the endpoint modal's Create
 	 *  API key. A host that cannot mint keys (OSS) rejects; the modal says so. */
 	createEndpointKey?: EndpointKeyMinter;
+	/** The org's developer id, '' when none is claimed (plan §2.1). A host
+	 *  whose shell identity already carries it may omit this. */
+	getDeveloperId?(): Promise<string>;
+	/** Claims the org's developer id (org admins); answers the registered id. */
+	registerDeveloper?(developerId: string): Promise<string>;
 	/** Exports the pipeline as a download (hosts with a browser context). */
 	exportDocument?(): void;
 	/** Opens the host's RocketRide Cloud setup flow. */
@@ -156,7 +161,40 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// and in a host without the shell identity context (the examples then show
 	// a placeholder).
 	const authUser = useAuthUser();
-	const developerId = authUser?.organization?.developerId || undefined;
+	// The org's developer id: the shell identity carries it where a shell
+	// signs the user in (rocket-ui); a host without that context (the VS Code
+	// webview) answers it through the host seam. '' = the org has none yet
+	// (the onboarding banner), undefined = unknown (no banner either way).
+	const [hostDeveloperId, setHostDeveloperId] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		if (!host.getDeveloperId) return;
+		let live = true;
+		void host
+			.getDeveloperId()
+			.then((id) => {
+				if (live) setHostDeveloperId(id);
+			})
+			.catch(() => {
+				if (live) setHostDeveloperId(undefined);
+			});
+		return () => {
+			live = false;
+		};
+	}, [host]);
+	const knownDeveloperId = authUser?.organization ? (authUser.organization.developerId || '') : hostDeveloperId;
+	const developerId = knownDeveloperId || undefined;
+	/** Claim through the host, then show the claimed id at once. */
+	const registerDeveloper = useMemo(
+		() =>
+			host.registerDeveloper
+				? async (id: string): Promise<string> => {
+						const assigned = await host.registerDeveloper!(id);
+						setHostDeveloperId(assigned);
+						return assigned;
+					}
+				: undefined,
+		[host]
+	);
 
 	// --- Framework state off the bus (mirrors + retained topics) --------------
 
@@ -561,6 +599,8 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				onValidate={handleValidate}
 				getNodeSchema={handleGetNodeSchema}
 				{...(developerId ? { developerId } : {})}
+				knownDeveloperId={knownDeveloperId}
+				onRegisterDeveloper={registerDeveloper}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
 				onOpenLink={host.openLink} onCreateEndpointKey={host.createEndpointKey}

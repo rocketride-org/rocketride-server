@@ -1537,9 +1537,16 @@ export class RocketRideClient extends DAPClient {
 			name?: string;
 			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
 			env?: Record<string, string>;
+			/**
+			 * A spec call's answer to a live `@dev` presence running OTHER content
+			 * (plan §3.4): 'error' fails with `spec_changed` (the server default),
+			 * 'keep' delivers to the running engine, 'auto' repoints the control
+			 * to the new content. The IDEs pass their restart-behavior setting.
+			 */
+			onChange?: 'error' | 'keep' | 'auto';
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, onChange } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1593,6 +1600,9 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (useExisting !== undefined) {
 			arguments_.useExisting = useExisting;
+		}
+		if (onChange !== undefined) {
+			arguments_.onChange = onChange;
 		}
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;

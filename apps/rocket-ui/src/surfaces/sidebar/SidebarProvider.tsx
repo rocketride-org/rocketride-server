@@ -46,6 +46,7 @@ import { registerBuiltinTools } from 'shared/tools/builtins';
 import { appdevFrames } from '../preview/session/appdevFrames';
 import { BxExport, useSidebarCollapsed, useSidebarActiveView } from 'shell';
 import type { ProjectEntry } from 'shared/tools/pipelines/sidebar/types';
+import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { SidebarMode, ToolTabsSidebar } from 'shared/tools/core/chrome/types';
 import type { AppListItem } from 'shared/tools/appdev/sidebarTypes';
 import { useDevToolPins } from '../devtools/devToolPins';
@@ -317,9 +318,17 @@ const SidebarProvider: React.FC = () => {
 					case 'createFolder':
 						await projectVfs.mkdir(path);
 						break;
-					case 'createFile':
-						await projectVfs.write(path, { project_id: crypto.randomUUID(), components: [] });
+					case 'createFile': {
+						// A new pipeline is born as a BUNDLE (plan §9, B7): the typed name
+						// is its short id, the pipe sits in a folder of that name, and the
+						// id is stamped from it (never a GUID, plan §2.1).
+						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
+						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+						const bundle = bundlePathsFor(dir, stem);
+						await projectVfs.mkdir(bundle.folder);
+						await projectVfs.write(bundle.file, { project_id: stem, components: [] });
 						break;
+					}
 				}
 				refresh();
 			} catch (err) {

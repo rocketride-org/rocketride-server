@@ -48,6 +48,8 @@ import type { PipelineConfig } from 'shell';
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
+import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
@@ -123,6 +125,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// Workspace-relative directory preselected when saving an untitled pipeline;
 	// SaveFileDialog renders it even before it exists and mkdirs it on confirm
 	const settingDefaultDir = String(settings['rocketride.pipeBuilder.defaultPipelinePath'] ?? '').replace(/^\/+|\/+$/g, '') || 'pipelines';
+	// What a Play does when the live run holds OTHER content: the same setting
+	// that governs restarts on a file change, passed as the call's onChange
+	const settingRestartBehavior = String(settings['rocketride.pipeBuilder.pipelineRestartBehavior'] ?? 'prompt');
 
 	// Rocket Builder is a paywalled app. Running requires an active sub —
 	// gate the run controls (lock icon) and the run action on this. Reactive:
@@ -234,6 +239,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 						pipelineTraceLevel: traceLevel,
 						...(taskArgs.length > 0 ? { args: taskArgs } : {}),
 						...(ttl !== undefined ? { ttl } : {}),
+						...onChangeArgs(settingRestartBehavior),
 					})
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			} else if (action === 'stop') {
@@ -250,7 +256,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},
-		[client, isConnected, pipeline, filename, isSubscribed, promptSubscribe, settingTraceLevel, settingTtl, settingTaskArguments, settingDebugOutput]
+		[client, isConnected, pipeline, filename, isSubscribed, promptSubscribe, settingTraceLevel, settingTtl, settingTaskArguments, settingDebugOutput, settingRestartBehavior]
 	);
 
 	/** Initiates save — the save dialog for new documents, else direct. */
@@ -272,12 +278,21 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 
 	/** Handles save-dialog confirmation with a new file path. */
 	const handleSaveDialogConfirm = useCallback(
-		async (fileRelPath: string) => {
+		async (dialogPath: string) => {
 			if (!pipeline || !client || !isConnected) return;
 			setSaveDialogOpen(false);
 
+			// The chosen name is the pipeline's short id, and a new pipeline is
+			// born as a BUNDLE (plan §9, B7): `<dir>/<name>/<name>.pipe`, the
+			// folder that later holds its readme, icon and assets and is the
+			// publish unit. The id is stamped from the same name.
+			const stem = pipeStemOf(dialogPath) ?? dialogPath.slice(dialogPath.lastIndexOf('/') + 1);
+			const dir = dialogPath.includes('/') ? dialogPath.slice(0, dialogPath.lastIndexOf('/')) : '';
+			const bundle = bundlePathsFor(dir, stem);
+			const fileRelPath = bundle.file;
 			try {
-				await projectVfs.write(fileRelPath, pipeline);
+				await projectVfs.mkdir(bundle.folder);
+				await projectVfs.write(fileRelPath, { ...pipeline, project_id: stem });
 			} catch (err) {
 				console.error('[PipelineProvider] Save-as failed:', err);
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -396,6 +411,17 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[client, isConnected]
 	);
 
+	/** Developer-id onboarding (plan §2.1): claim the org's id on this
+	 *  connection's client; the server refuses anyone but an org admin. */
+	const handleRegisterDeveloper = useCallback(
+		async (developerId: string): Promise<string> => {
+			if (!client || !isConnected) throw new Error('Not connected to server');
+			const res = await client.registerDeveloper(developerId);
+			return typeof res.developerId === 'string' ? res.developerId : developerId;
+		},
+		[client, isConnected]
+	);
+
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
 			documentTitle,
@@ -414,9 +440,12 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			promptSubscribe,
 			openLink: handleOpenLink,
 			createEndpointKey: handleCreateEndpointKey,
+			// The shell identity already carries the org's developer id here;
+			// only the claim needs the host (plan §2.1).
+			registerDeveloper: handleRegisterDeveloper,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleExport]
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------

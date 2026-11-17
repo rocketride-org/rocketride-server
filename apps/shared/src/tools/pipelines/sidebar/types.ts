@@ -47,6 +47,12 @@ export interface ProjectEntry {
 	projectId?: string;
 	/** Source components parsed from the .pipe JSON (files only). */
 	sources?: ProjectSource[];
+	/**
+	 * For a BUNDLE entry (a folder shown as one pipeline, plan §9): the `.pipe`
+	 * inside it, which is what opening or running the entry acts on; absent on
+	 * a flat pipe, whose `path` is the file itself.
+	 */
+	file?: string;
 }
 
 /** Synthesized directory node — returned by getChildren, never stored. */

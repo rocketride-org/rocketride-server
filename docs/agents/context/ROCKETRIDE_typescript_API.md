@@ -326,6 +326,7 @@ Start a RocketRide pipeline. Returns the server response body; `token` is the ta
 - `pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full'` — when set, captures every lane write and invoke call in the response under `_trace`
 - `name?: string` — display name for the task (shown in dashboards); derived from the filename when `filepath` is used
 - `env?: Record<string, string>` — per-call substitution values merged over the client's filtered `ROCKETRIDE_*` environment (per-call values are not filtered)
+- `onChange?: 'error' | 'keep' | 'auto'` — a spec call's answer to your live `@dev` run already running OTHER content: `error` (server default) fails with `spec_changed`, `keep` delivers to the running engine, `auto` repoints the run to the new content. The IDEs pass their restart-behavior setting
 
 ```typescript
 // From a .pipe file / from a flat config / reusing an existing pipeline:

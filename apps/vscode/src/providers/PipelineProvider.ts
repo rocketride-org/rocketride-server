@@ -32,6 +32,7 @@ import { getLogger } from '../shared/util/output';
 // into the extension-host compile; parse.ts is pure.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -406,6 +407,20 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				const client = this.connectionManager.getClient();
 				if (!client) throw new Error('Not connected to server');
 				return mintEndpointKey(client, p.address);
+			},
+			// Developer-id onboarding (plan §2.1): the webview has no shell
+			// identity, so the extension answers the org's id and the claim.
+			'host.pipeline.developerId': async () => {
+				const client = this.connectionManager.getClient();
+				if (!client) throw new Error('Not connected to server');
+				const status = await client.developerStatus();
+				return { developerId: status.developerId ?? '' };
+			},
+			'host.pipeline.registerDeveloper': async (p) => {
+				const client = this.connectionManager.getClient();
+				if (!client) throw new Error('Not connected to server');
+				const res = await client.registerDeveloper(p.developerId);
+				return { developerId: typeof res.developerId === 'string' ? res.developerId : p.developerId };
 			},
 		};
 		registerOpHandlers<PipelineHostOpMap>(this.busHost.rootBus, impls);
@@ -855,6 +870,9 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
+				// The restart setting is also this Play's answer to a live run of
+				// other content (plan §3.4).
+				...onChangeArgs(cfg.pipelineRestartBehavior),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

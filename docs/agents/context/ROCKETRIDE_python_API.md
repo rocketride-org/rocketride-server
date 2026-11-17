@@ -327,6 +327,7 @@ Start a RocketRide pipeline for processing data.
 - `pipelineTraceLevel` (str, optional): Trace level: `'none'`, `'metadata'`, `'summary'`, or `'full'`. When set, captures every lane write and invoke call in the response under `_trace`.
 - `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`/`.pipe.json`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
+- `on_change` (str, optional): A spec call's answer to your live `@dev` run already running OTHER content: `'error'` (server default) fails with `spec_changed`, `'keep'` delivers to the running engine, `'auto'` repoints the run to the new content. The IDEs pass their restart-behavior setting.
 
 **Returns:** Dictionary containing `token` (the full task address `developerId.pipelineId[.source]`) and other startup metadata.
 

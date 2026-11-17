@@ -235,6 +235,10 @@ const PipelineWebview: React.FC = () => {
 			openLink: (url, displayName) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url, displayName }),
 			// The webview holds no client: the extension host mints the key.
 			createEndpointKey: (address) => ConnectionManager.getInstance().request('host.pipeline.createEndpointKey', { address } as never) as Promise<IMintedEndpointKey>,
+			// Developer-id onboarding: the webview has no shell identity, so the
+			// extension answers the org's id and performs the claim.
+			getDeveloperId: () => (ConnectionManager.getInstance().request('host.pipeline.developerId', {} as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
+			registerDeveloper: (developerId) => (ConnectionManager.getInstance().request('host.pipeline.registerDeveloper', { developerId } as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
 			openCloudSetup: () => {
 				// Focus the Development tab only — the prompt must not stage a
 				// connection-mode change the user never typed.

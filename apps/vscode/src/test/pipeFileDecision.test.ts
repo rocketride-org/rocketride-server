@@ -24,7 +24,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
+import { decidePipeFile, shortIdForPath, SHORT_ID_PATTERN, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
 import type { KnownPipeFile, PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
@@ -179,4 +179,25 @@ test('withProjectId refuses text that is not a pipeline', () => {
 
 test('the skeleton is a valid empty pipeline carrying the id', () => {
 	assert.deepEqual(JSON.parse(emptyPipelineSkeleton(ID_A)), { project_id: ID_A, components: [] });
+});
+
+// --- Short ids: the file's name is the id; a dotted id is refused (plan §2.1, B5) ---
+
+test('a dotted project_id is an address, not a short id: refused, never rewritten', () => {
+	const decision = decidePipeFile({ event: 'changed', filePath: '/w/pipelines/docBrain/docBrain.pipe', text: '{"project_id":"acme.docBrain","components":[]}', known: [] });
+	assert.deepEqual(decision, { kind: 'refuse-dotted', projectId: 'acme.docBrain' });
+});
+
+test('a GUID id and a short id both pass the grammar', () => {
+	for (const id of ['00000000-0000-0000-0000-000000000000', 'docBrain', 'doc-brain_2']) {
+		const decision = decidePipeFile({ event: 'changed', filePath: '/w/a.pipe', text: `{"project_id":"${id}","components":[]}`, known: [] });
+		assert.deepEqual(decision, { kind: 'leave', reason: 'id-ok' }, id);
+	}
+});
+
+test('the short id of a file is its stem, for a bundle the folder name it shares', () => {
+	assert.equal(shortIdForPath('C:\\w\\pipelines\\docBrain\\docBrain.pipe'), 'docBrain');
+	assert.equal(shortIdForPath('/w/pipelines/flat.pipe'), 'flat');
+	assert.equal(shortIdForPath('/w/pipelines/flat.pipe.json'), 'flat');
+	assert.ok(SHORT_ID_PATTERN.test(shortIdForPath('/w/pipelines/doc-brain_2.pipe')));
 });

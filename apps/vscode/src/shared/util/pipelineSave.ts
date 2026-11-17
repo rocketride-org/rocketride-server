@@ -19,6 +19,7 @@
  */
 
 import * as vscode from 'vscode';
+import { shortIdForPath, withProjectId } from './pipeFileDecision';
 import { ConfigManager } from '../../config';
 
 // =============================================================================
@@ -106,11 +107,21 @@ export async function savePipelineDocument(document: vscode.TextDocument): Promi
 		return undefined;
 	}
 
+	// step: the chosen name is the pipeline's short id, and a new pipeline is
+	// born as a BUNDLE (plan §9, B7): `<dir>/<name>/<name>.pipe`, the folder
+	// that later holds its readme, icon and assets and is the publish unit.
+	// The id is stamped from the same name so the file and its folder agree.
+	const stem = shortIdForPath(target.path);
+	const parent = vscode.Uri.joinPath(target, '..');
+	const bundleDir = vscode.Uri.joinPath(parent, stem);
+	const bundleFile = vscode.Uri.joinPath(bundleDir, `${stem}.pipe`);
+	await vscode.workspace.fs.createDirectory(bundleDir);
+	const text = withProjectId(document.getText(), stem) ?? document.getText();
 	// step: write the content, drop the untitled buffer without a discard
 	// prompt (its content is on disk now), then reopen the saved file in the
 	// grid editor via the *.pipe custom-editor association.
-	await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
+	await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(text, 'utf8'));
 	await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
-	await vscode.commands.executeCommand('vscode.openWith', target, 'rocketride.page.project');
-	return target;
+	await vscode.commands.executeCommand('vscode.openWith', bundleFile, 'rocketride.page.project');
+	return bundleFile;
 }

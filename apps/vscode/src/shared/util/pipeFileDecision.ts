@@ -59,8 +59,31 @@ export type PipeFileDecision =
 	| { kind: 'seed-empty' }
 	/** A pipeline with no usable project_id: write one. */
 	| { kind: 'assign-id' }
+	/** The id carries a dot (an address, not a short id): tell the user, write nothing (B5). */
+	| { kind: 'refuse-dotted'; projectId: string }
 	/** The id is in use by `otherPath`: tell the user, write nothing. */
 	| { kind: 'ask-duplicate'; projectId: string; otherPath: string };
+
+/**
+ * A pipeline's SHORT id: one dot-free address segment (plan §2.1, B5), the
+ * grammar the server's address module enforces on every segment.
+ */
+export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * The short id a pipeline FILE is named for (plan §9): its stem, which for a
+ * bundle (`pipelines/docBrain/docBrain.pipe`) is also the folder's name. Both
+ * path separators are accepted. Not validated here: a stem the grammar
+ * refuses is the caller's to report.
+ *
+ * @param filePath - The pipeline file's path.
+ * @returns The stem without its pipeline extension.
+ */
+export function shortIdForPath(filePath: string): string {
+	const segments = filePath.replace(/\\/g, '/').split('/').filter(Boolean);
+	const name = segments[segments.length - 1] ?? '';
+	return name.replace(/\.pipe(?:\.json)?$/i, '') || name;
+}
 
 /**
  * Decide what the watcher should do with one file.
@@ -84,6 +107,10 @@ export function decidePipeFile(input: PipeFileDecisionInput): PipeFileDecision {
 
 	const projectId = projectIdOf(parsed.target);
 	if (projectId === null) return { kind: 'assign-id' };
+	// A dotted id is an ADDRESS (developerId.pipeId), never the short id a file
+	// carries: the namespace is derived from the publisher, not typed (plan
+	// §2.1). Refused, never rewritten: the user chose it and is told why.
+	if (!SHORT_ID_PATTERN.test(projectId)) return { kind: 'refuse-dotted', projectId };
 
 	// The file's own cache entry is never a clash. That was the #2466 defect:
 	// a create event for a file the cache already knew found its own id here.
