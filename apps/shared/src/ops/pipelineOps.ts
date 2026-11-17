@@ -20,6 +20,7 @@
 
 import type { ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
 import type { IMintedEndpointKey } from '../tools/pipelines/components/pipeline-actions/endpointKey';
+import type { NewPipelineIdentity } from '../tools/pipelines/components/NewPipelineForm';
 
 /**
  * What `host.pipeline.load` answers: the document's full boot state. The
@@ -98,6 +99,14 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	/** Claims the org's developer id (org admins; the server refuses others);
 	 *  answers the id as registered. */
 	'host.pipeline.registerDeveloper': ShellOpSpec<{ developerId: string }, { developerId: string }>;
+	/** The New Pipeline form's identity: developer id, create target, names in use (plan §2.1, §9). */
+	'host.pipeline.newIdentity': ShellOpSpec<Record<string, never>, NewPipelineIdentity>;
+	/** Creates the bundle `pipelines/<name>/<name>.pipe` with `project_id: <name>`,
+	 *  retires the untitled document and opens the file. Rejection carries the
+	 *  validation message. */
+	'host.pipeline.create': ShellOpSpec<{ doc: string; name: string; displayName: string }, void>;
+	/** Closes the untitled document without creating anything (the form's Cancel). */
+	'host.pipeline.cancelNew': ShellOpSpec<{ doc: string }, void>;
 
 	// ── File-keyed verbs (the sidebar's pipeline rows — no document open) ────
 	/** Opens a .pipe file in the pipeline editor (emitOp). */

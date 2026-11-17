@@ -66,24 +66,10 @@ export type PipeFileDecision =
 
 /**
  * A pipeline's SHORT id: one dot-free address segment (plan §2.1, B5), the
- * grammar the server's address module enforces on every segment.
+ * grammar the server's address module enforces on every segment. It is the
+ * grammar of the id INSIDE the file; the file itself may be named anything.
  */
 export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-/**
- * The short id a pipeline FILE is named for (plan §9): its stem, which for a
- * bundle (`pipelines/docBrain/docBrain.pipe`) is also the folder's name. Both
- * path separators are accepted. Not validated here: a stem the grammar
- * refuses is the caller's to report.
- *
- * @param filePath - The pipeline file's path.
- * @returns The stem without its pipeline extension.
- */
-export function shortIdForPath(filePath: string): string {
-	const segments = filePath.replace(/\\/g, '/').split('/').filter(Boolean);
-	const name = segments[segments.length - 1] ?? '';
-	return name.replace(/\.pipe(?:\.json)?$/i, '') || name;
-}
 
 /**
  * Decide what the watcher should do with one file.

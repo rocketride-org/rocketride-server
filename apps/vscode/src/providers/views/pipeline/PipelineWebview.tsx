@@ -24,6 +24,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { IMintedEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
@@ -238,6 +239,12 @@ const PipelineWebview: React.FC = () => {
 			// Developer-id onboarding: the webview has no shell identity, so the
 			// extension answers the org's id and performs the claim.
 			getDeveloperId: () => (ConnectionManager.getInstance().request('host.pipeline.developerId', {} as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
+			// The New Pipeline form (an untitled document with no id yet): the
+			// extension lists the names in use, creates the bundle and swaps the
+			// documents; Cancel closes this untitled editor.
+			newPipelineIdentity: () => ConnectionManager.getInstance().request('host.pipeline.newIdentity', {} as never) as Promise<NewPipelineIdentity>,
+			createPipeline: (name, displayName) => ConnectionManager.getInstance().request('host.pipeline.create', { doc: docRef.current, name, displayName } as never).then(() => undefined),
+			cancelNew: () => ConnectionManager.getInstance().emitOp('host.pipeline.cancelNew', { doc: docRef.current }),
 			registerDeveloper: (developerId) => (ConnectionManager.getInstance().request('host.pipeline.registerDeveloper', { developerId } as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
 			openCloudSetup: () => {
 				// Focus the Development tab only — the prompt must not stage a

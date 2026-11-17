@@ -27,6 +27,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { ConfigManager } from '../../config';
 import type { ConnectionManager } from '../../connection/connection';
 // Deep import on purpose: the tools/pipelines BARREL exports the discovery
@@ -37,7 +38,7 @@ import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import type { ParsedPipelineFile, ServiceClassInfo } from 'shared/tools/pipelines/utils/parse';
 import { checkMissingEnvVars } from '../../shared/util/envVarCheck';
 import { getLogger } from '../../shared/util/output';
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, shortIdForPath, withProjectId, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../../shared/util/pipeFileDecision';
 import { SerialQueue } from '../../shared/util/serialQueue';
 import { ReloadingCache, isUnderNodeModules } from '../../shared/util/reloadingCache';
@@ -303,9 +304,10 @@ export class PipelineFiles {
 				// disposed flag.
 				const latest = await this.readFileText(uri);
 				if (latest === null || latest.trim() !== '') return;
-				// The id is the file's own name (plan §2.1): a short, dot-free id
-				// the publisher's namespace is derived onto, never a GUID.
-				await this.writePipeText(uri, emptyPipelineSkeleton(shortIdForPath(uri.fsPath)), 'new empty file, wrote the starter pipeline');
+				// The id lives INSIDE the file and is never derived from its name
+				// (the file may be called anything): a fresh one is minted here and
+				// the author picks the short id on PACKAGE › Identity.
+				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
 				return;
 			}
 			case 'assign-id':
@@ -340,9 +342,9 @@ export class PipelineFiles {
 	private async assignProjectId(uri: vscode.Uri, expectedId: string | null, why: string): Promise<void> {
 		const text = await this.readFileText(uri);
 		if (text === null || readPipeProjectId(text) !== expectedId) return;
-		// The id is the file's own name (plan §2.1), never a GUID; a bundle's
-		// file shares its folder's name, so both read the same.
-		const next = withProjectId(text, shortIdForPath(uri.fsPath));
+		// The id lives INSIDE the file and is never derived from its name: a
+		// fresh one is minted; the author picks the short id on PACKAGE › Identity.
+		const next = withProjectId(text, crypto.randomUUID());
 		if (next === undefined) return;
 		await this.writePipeText(uri, next, why);
 	}

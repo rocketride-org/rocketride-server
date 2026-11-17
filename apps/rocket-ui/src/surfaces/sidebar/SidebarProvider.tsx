@@ -249,7 +249,9 @@ const SidebarProvider: React.FC = () => {
 		const docs = getDocs();
 		if (!docs) return;
 		if (target === 'new') {
-			docs.createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
+			// No id yet: the untitled document opens as the New Pipeline form,
+			// which asks the name (the pipeline's id) and creates the bundle.
+			docs.createDocument(undefined, { components: [] });
 		}
 	}, []);
 
@@ -323,6 +325,11 @@ const SidebarProvider: React.FC = () => {
 						// is its short id, the pipe sits in a folder of that name, and the
 						// id is stamped from it (never a GUID, plan §2.1).
 						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
+						// The name is the id: one dot-free segment (B5), checked before anything is written.
+						if (!isShortId(stem)) {
+							console.error('[SidebarProvider] pipeline name is not a short id:', stem);
+							break;
+						}
 						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 						const bundle = bundlePathsFor(dir, stem);
 						await projectVfs.mkdir(bundle.folder);

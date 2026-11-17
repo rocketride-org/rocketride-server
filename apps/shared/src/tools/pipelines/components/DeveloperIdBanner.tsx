@@ -75,6 +75,12 @@ export interface IDeveloperIdBannerProps {
 	developerId: string | undefined;
 	/** Claims the id for the org (org admins; the server refuses others). Absent = this host cannot claim. */
 	onRegister?: (developerId: string) => Promise<string>;
+	/**
+	 * Whether the viewer may claim (an org admin): false shows the member
+	 * guidance at once; undefined = unknown (no shell identity), the form
+	 * shows and the server decides.
+	 */
+	canRegister?: boolean;
 }
 
 // =============================================================================
@@ -87,7 +93,7 @@ export interface IDeveloperIdBannerProps {
  * @param props - See {@link IDeveloperIdBannerProps}.
  * @returns The banner, or null when nothing needs claiming.
  */
-export const DeveloperIdBanner: React.FC<IDeveloperIdBannerProps> = ({ developerId, onRegister }) => {
+export const DeveloperIdBanner: React.FC<IDeveloperIdBannerProps> = ({ developerId, onRegister, canRegister }) => {
 	const [slug, setSlug] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
@@ -114,7 +120,7 @@ export const DeveloperIdBanner: React.FC<IDeveloperIdBannerProps> = ({ developer
 		<div style={styles.wrap}>
 			<Banner variant="warning">
 				<strong>Your organization has no developer id yet.</strong> Every pipeline address is <code>&lt;developerId&gt;.&lt;pipeId&gt;.&lt;source&gt;</code>, so nothing runs, deploys or publishes until an org admin claims one (letters, digits, _ or -; it names every app and pipeline the organization publishes, and cannot be changed casually).
-				{onRegister ? (
+				{onRegister && canRegister !== false ? (
 					<>
 						<div style={styles.row}>
 							<input style={styles.input} placeholder="developer id (e.g. acme_labs)" value={slug} onChange={(e) => setSlug(e.target.value)} disabled={busy} />

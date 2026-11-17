@@ -26,9 +26,11 @@
  * what the IDE does when a pipeline file changes while its run is live; the
  * same intent is passed to a Play against a live `@dev` run that holds OTHER
  * content, so one setting governs both: `auto` repoints the run to the new
- * content, `manual` keeps delivering to the running engine, `prompt` leaves
- * the server default (`error`, the run fails with `spec_changed`) and the IDE
- * asks, as it does for a file change.
+ * content, `manual` keeps delivering to the running engine, `prompt` sends
+ * `error` (the run fails with `spec_changed` and the IDE asks, as it does
+ * for a file change). `error` is sent explicitly: on the execute path an
+ * OMITTED onChange keeps the `useExisting` rule, which reuses the running
+ * engine whatever its content, so only `submit()` defaults to `error`.
  */
 
 // =============================================================================
@@ -49,28 +51,26 @@ export type OnChange = 'error' | 'keep' | 'auto';
  * Maps the restart-behavior setting to the `onChange` a spec call sends.
  *
  * @param behavior - The setting's value; anything unknown reads as `prompt`.
- * @returns The `onChange` value, or undefined for the server default.
+ * @returns The `onChange` value the call sends.
  */
-export function onChangeOf(behavior: string | undefined): OnChange | undefined {
+export function onChangeOf(behavior: string | undefined): OnChange {
 	switch (behavior) {
 		case 'auto':
 			return 'auto';
 		case 'manual':
 			return 'keep';
 		default:
-			return undefined;
+			return 'error';
 	}
 }
 
 /**
- * The `onChange` argument spread into a `use()` call: `{ onChange }` when the
- * setting names one, `{}` for the server default, so a call site reads
+ * The `onChange` argument spread into a `use()` call, so a call site reads
  * `client.use({ ...onChangeArgs(setting), pipeline })`.
  *
  * @param behavior - The setting's value.
  * @returns The argument object to spread.
  */
-export function onChangeArgs(behavior: string | undefined): { onChange?: OnChange } {
-	const onChange = onChangeOf(behavior);
-	return onChange ? { onChange } : {};
+export function onChangeArgs(behavior: string | undefined): { onChange: OnChange } {
+	return { onChange: onChangeOf(behavior) };
 }

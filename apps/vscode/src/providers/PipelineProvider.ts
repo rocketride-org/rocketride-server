@@ -22,6 +22,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GenericEvent, ConnectionState, ConnectionStatus, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { PIPELINE_PARTITION } from 'shared/tools/pipelines/types';
+import { resolveDefaultPipelineDir } from '../shared/util/pipelineSave';
 import type { TaskStatus } from 'shared/tools/pipelines/types';
 import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
@@ -422,6 +423,53 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				const res = await client.registerDeveloper(p.developerId);
 				return { developerId: typeof res.developerId === 'string' ? res.developerId : p.developerId };
 			},
+			// The New Pipeline form (plan §2.1, §9): the untitled document asks
+			// the name (the pipeline's id); the extension creates the bundle
+			// `<pipelines dir>/<name>/<name>.pipe` and swaps the documents.
+			'host.pipeline.newIdentity': async () => {
+				const folder = vscode.workspace.workspaceFolders?.[0];
+				const developerId = this.connectionManager.getClient()?.getAccountInfo()?.organization?.developerId ?? '';
+				if (!folder) return { developerId, workspaceOpen: false, existingNames: [] };
+				const dir = resolveDefaultPipelineDir();
+				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
+				let existingNames: string[] = [];
+				try {
+					existingNames = (await vscode.workspace.fs.readDirectory(dirUri)).map(([name, type]) => (type === vscode.FileType.Directory ? name : name.replace(/\.pipe(?:\.json)?$/i, '')));
+				} catch {
+					existingNames = [];
+				}
+				return { developerId, workspaceOpen: true, existingNames };
+			},
+			'host.pipeline.create': async (p) => {
+				const folder = vscode.workspace.workspaceFolders?.[0];
+				if (!folder) throw new Error('Open a workspace folder first. The pipeline is created in it.');
+				const dir = resolveDefaultPipelineDir();
+				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
+				const bundleDir = vscode.Uri.joinPath(dirUri, p.name);
+				const bundleFile = vscode.Uri.joinPath(bundleDir, `${p.name}.pipe`);
+				try {
+					await vscode.workspace.fs.stat(bundleDir);
+					throw new Error(`"${vscode.workspace.asRelativePath(bundleDir)}" already exists. Choose another name.`);
+				} catch (error) {
+					if (error instanceof Error && error.message.endsWith('Choose another name.')) throw error;
+				}
+				await vscode.workspace.fs.createDirectory(bundleDir);
+				const content = JSON.stringify({ project_id: p.name, name: p.displayName, components: [] }, null, 2);
+				await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
+				// Retire the untitled form document and open the file in its place.
+				const editorState = this.findLiveEditorState(p.doc);
+				if (editorState) {
+					editorState.webviewPanel.reveal(undefined, false);
+					await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+				}
+				await vscode.commands.executeCommand('vscode.openWith', bundleFile, 'rocketride.page.project');
+			},
+			'host.pipeline.cancelNew': async (p) => {
+				const editorState = this.findLiveEditorState(p.doc);
+				if (!editorState) return;
+				editorState.webviewPanel.reveal(undefined, false);
+				await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+			},
 		};
 		registerOpHandlers<PipelineHostOpMap>(this.busHost.rootBus, impls);
 	}
@@ -467,7 +515,11 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// save-for-run suppression must follow it.
 				savedKey = runTarget.toString();
 				this.savesForRun.add(savedKey);
-				const parsed = JSON.parse(text);
+				// An untitled save stamps the file's name as the id (and may
+				// place it in a bundle), so the run uses what was SAVED, not the
+				// text captured before the save.
+				const savedText = document.isUntitled ? Buffer.from(await vscode.workspace.fs.readFile(runTarget)).toString('utf8') : text;
+				const parsed = JSON.parse(savedText);
 				const pipeName = path.basename(runTarget.fsPath, '.pipe');
 				await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
 			}

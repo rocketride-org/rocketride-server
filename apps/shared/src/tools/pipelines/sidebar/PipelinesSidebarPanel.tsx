@@ -127,12 +127,23 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 			if (!onFileManage) return;
 			const entry = shown.find((e) => e.path === path);
 			if (entry?.file && action === 'rename' && newName) {
-				onFileManage('rename', entry.file, `${newName}.pipe`);
+				onFileManage('rename', entry.file, newName);
 			}
 			onFileManage(action, path, newName);
 		},
 		[onFileManage, shown],
 	);
+
+	/** Host file actions (Export, …) receive the FILE a bundle entry stands for. */
+	const mappedFileActions = useMemo(() => {
+		const map = (actions: ExplorerFileAction[]): ExplorerFileAction[] =>
+			actions.map((a) => ({
+				...a,
+				...(a.onSelect ? { onSelect: (path: string) => a.onSelect!(fileOfEntry(shown, path)) } : {}),
+				...(a.children ? { children: typeof a.children === 'function' ? (path: string) => map((a.children as (p: string) => ExplorerFileAction[])(fileOfEntry(shown, path))) : map(a.children) } : {}),
+			}));
+		return fileActions ? map(fileActions) : fileActions;
+	}, [fileActions, shown]);
 
 	return (
 		<div style={panelStyles.panelColumn}>
@@ -150,7 +161,7 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 
 			{/* ── Explorer (file tree) — vfs is the typed no-op (frozen shell
 			    contract shape; unused here) ───────────────────────────────── */}
-			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={activeTasks as Map<string, ExplorerStatus>} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath ? entryPathOfFile(activeFilePath) : activeFilePath} onOpenFile={handleOpenFile} onFileManage={onFileManage ? handleFileManage : undefined} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={activeTasks as Map<string, ExplorerStatus>} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath ? entryPathOfFile(shown, activeFilePath) : activeFilePath} onOpenFile={handleOpenFile} onFileManage={onFileManage ? handleFileManage : undefined} fileActions={mappedFileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
 			{/* ── Ad-hoc — server tasks with no local .pipe file ──────────── */}
 			{hasUnknown && (

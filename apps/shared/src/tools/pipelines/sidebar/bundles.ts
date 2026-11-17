@@ -23,16 +23,18 @@
 /**
  * Pipeline bundles in the sidebar (plan §9, B7).
  *
- * A publishable pipeline is a DIRECTORY `./pipelines/{pipeId}/` holding
- * `{pipeId}.pipe` beside its readme, icon and assets, mirroring an app's
- * `./apps/{appId}/`. The sidebar shows such a folder as ONE entry named after
- * the pipe (its sources beneath it), never as a folder with one file inside;
+ * A publishable pipeline is a DIRECTORY `./pipelines/{folder}/` holding ONE
+ * `.pipe` beside its readme, icon and assets, mirroring an app's
+ * `./apps/{appId}/`. The sidebar shows such a folder as one entry named after
+ * the folder (its sources beneath it), never as a folder with one file inside;
  * a flat `.pipe` anywhere still shows, opens and runs as today.
  *
- * This module is the pure part: recognising a bundle in the discovered
- * entries, collapsing it, and the short-id grammar a bundle's name follows.
- * It is shared by both hosts, which discover differently but feed the same
- * `ProjectEntry` list.
+ * The file may be named anything: a pipeline's identity is the `project_id`
+ * INSIDE the file (Rod, 2026-11-16), never its name, so a bundle is told by
+ * shape alone (a folder whose only pipe, at any depth, sits directly in it).
+ *
+ * This module is the pure part, shared by both hosts, which discover
+ * differently but feed the same `ProjectEntry` list.
  */
 
 import type { ProjectEntry } from './types';
@@ -42,8 +44,8 @@ import type { ProjectEntry } from './types';
 // =============================================================================
 
 /**
- * A pipeline's SHORT id (plan §2.1, B5): one dot-free address segment, which
- * is also what a bundle folder and its `.pipe` are named.
+ * A pipeline's SHORT id (plan §2.1, B5): one dot-free address segment. This
+ * is the grammar of the id INSIDE the file, not of the file's name.
  */
 export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -61,8 +63,8 @@ export function isShortId(id: string): boolean {
 }
 
 /**
- * The pipeline name a file path carries: the file name without its pipeline
- * extension (`ingest/docBrain.pipe` → `docBrain`).
+ * The file name a pipeline file path carries without its pipeline extension
+ * (`ingest/docBrain.pipe` → `docBrain`). A display stem, never an id.
  *
  * @param path - A '/'-separated path to a `.pipe` or `.pipe.json` file.
  * @returns The stem, or null when the path is not a pipeline file.
@@ -76,11 +78,12 @@ export function pipeStemOf(path: string): string | null {
 }
 
 /**
- * The bundle paths for a new pipeline named `name` under `dir`: the folder
- * and the `.pipe` inside it, both carrying the name.
+ * The bundle paths for a new pipeline file named `name` under `dir`: the
+ * folder and the `.pipe` inside it, both carrying the typed name (the folder
+ * is the publish unit; the pipeline's id is inside the file).
  *
  * @param dir - The parent directory ('' for the pipelines root), '/'-separated.
- * @param name - The pipeline's short id.
+ * @param name - The typed file name without extension.
  * @returns The folder path and the file path.
  */
 export function bundlePathsFor(dir: string, name: string): { folder: string; file: string } {
@@ -92,46 +95,59 @@ export function bundlePathsFor(dir: string, name: string): { folder: string; fil
 // Collapsing
 // =============================================================================
 
-/**
- * Tells whether a pipeline file is the pipe of a bundle: it sits in a folder
- * of its own name (`…/docBrain/docBrain.pipe`).
- *
- * @param path - The file's '/'-separated path.
- * @returns The bundle folder's path, or null when the file is a flat pipe.
- */
-export function bundleFolderOf(path: string): string | null {
-	const stem = pipeStemOf(path);
-	if (stem === null) return null;
+/** The parent folder of a path ('' at the root). */
+function parentOf(path: string): string {
 	const slash = path.lastIndexOf('/');
-	if (slash < 0) return null;
-	const folder = path.slice(0, slash);
-	const folderName = folder.slice(folder.lastIndexOf('/') + 1);
-	return folderName === stem ? folder : null;
+	return slash < 0 ? '' : path.slice(0, slash);
+}
+
+/**
+ * The bundle folders among the discovered entries: a folder (not the root)
+ * holding exactly ONE pipeline file directly in it and none deeper. Any other
+ * folder is an ordinary directory of pipelines.
+ *
+ * @param entries - The discovered entries.
+ * @returns The bundle folder path of each bundle's pipe, by the pipe's path.
+ */
+function bundleFolders(entries: ProjectEntry[]): Map<string, string> {
+	// Step 1: the pipeline files per DIRECT parent folder
+	const direct = new Map<string, ProjectEntry[]>();
+	const pipes = entries.filter((e) => e.type !== 'dir' && pipeStemOf(e.path) !== null);
+	for (const pipe of pipes) {
+		const parent = parentOf(pipe.path);
+		if (!parent) continue;
+		direct.set(parent, [...(direct.get(parent) ?? []), pipe]);
+	}
+	// Step 2: a folder with one direct pipe and no pipe deeper is a bundle
+	const result = new Map<string, string>();
+	for (const [folder, inside] of direct) {
+		if (inside.length !== 1) continue;
+		const deeper = pipes.some((p) => p.path !== inside[0]!.path && p.path.startsWith(`${folder}/`));
+		if (!deeper) result.set(inside[0]!.path, folder);
+	}
+	return result;
 }
 
 /**
  * Collapses every bundle in the discovered entries into one entry at the
- * folder's path: the pipe's `projectId` and `sources` ride it, `file` names
- * the `.pipe` inside, and everything else under the folder (the folder's own
- * dir entry, readme, icon, assets, nested dirs) is dropped from the list.
- * Flat pipes and ordinary folders pass through unchanged. Pure.
+ * folder's path: the pipe's `projectId` and `sources` ride it and `file`
+ * names the `.pipe` inside; everything else under the folder (the folder's
+ * own dir entry, readme, icon, assets) is dropped from the list. Flat pipes
+ * and ordinary folders pass through unchanged. Pure.
  *
  * @param entries - The discovered entries, flat, '/'-separated paths.
  * @returns The entries with bundles collapsed, in the input's order.
  */
 export function collapseBundles(entries: ProjectEntry[]): ProjectEntry[] {
-	// Step 1: find the bundles — a pipe in a folder of its own name
+	const folders = bundleFolders(entries);
+	if (folders.size === 0) return entries;
 	const bundles = new Map<string, ProjectEntry>();
 	for (const entry of entries) {
-		if (entry.type === 'dir') continue;
-		const folder = bundleFolderOf(entry.path);
-		if (folder !== null && !bundles.has(folder)) {
-			bundles.set(folder, { ...entry, path: folder, type: 'file', file: entry.path });
-		}
+		const folder = folders.get(entry.path);
+		if (folder !== undefined) bundles.set(folder, { ...entry, path: folder, type: 'file', file: entry.path });
 	}
-	if (bundles.size === 0) return entries;
-	// Step 2: one entry per bundle where its folder first appears; nothing
-	// else under a bundle folder is listed
+	// One entry per bundle where its folder first appears; nothing else under
+	// a bundle folder is listed
 	const emitted = new Set<string>();
 	const out: ProjectEntry[] = [];
 	for (const entry of entries) {
@@ -160,12 +176,13 @@ export function fileOfEntry(entries: ProjectEntry[], path: string): string {
 }
 
 /**
- * The sidebar path a pipeline file is shown under: its bundle folder when it
- * is a bundle's pipe, else the file path. The inverse of {@link fileOfEntry}.
+ * The sidebar path a pipeline file is shown under: its bundle's folder when
+ * it is a bundle's pipe, else the file path. The inverse of {@link fileOfEntry}.
  *
+ * @param entries - The (collapsed) entries the sidebar shows.
  * @param filePath - A pipeline file path.
  * @returns The entry path.
  */
-export function entryPathOfFile(filePath: string): string {
-	return bundleFolderOf(filePath) ?? filePath;
+export function entryPathOfFile(entries: ProjectEntry[], filePath: string): string {
+	return entries.find((e) => e.file === filePath)?.path ?? filePath;
 }

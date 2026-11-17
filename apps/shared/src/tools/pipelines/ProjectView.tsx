@@ -92,6 +92,8 @@ export interface IProjectViewProps {
 	knownDeveloperId?: string;
 	/** Claims the org's developer id (org admins); absent = this host cannot claim. */
 	onRegisterDeveloper?: (developerId: string) => Promise<string>;
+	/** Whether the viewer may claim (org admin): false shows the member guidance, undefined = unknown (the form shows, the server decides). */
+	canRegisterDeveloper?: boolean;
 	/** Whether the document has unsaved changes. */
 	isDirty?: boolean;
 	/** Whether the document is a new (never-saved) file. */
@@ -262,7 +264,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -663,7 +665,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			<TabControl menu={viewMenu} activeId={activeMode} onSelect={handleModeChange} />
 			{/* Developer-id onboarding (plan §2.1): while the org has no id the
 			    server refuses every run, deploy and publish; claim it here. */}
-			{!isReadonly && <DeveloperIdBanner developerId={knownDeveloperId} onRegister={onRegisterDeveloper} />}
+			{!isReadonly && <DeveloperIdBanner developerId={knownDeveloperId} onRegister={onRegisterDeveloper} canRegister={canRegisterDeveloper} />}
 			{/* Page title, PINNED with the strip — canvas (Design) has none;
 			    only the panel bodies below scroll. */}
 			{documentTitle && activeMode !== 'design' && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[activeMode as DocSubView]} />}

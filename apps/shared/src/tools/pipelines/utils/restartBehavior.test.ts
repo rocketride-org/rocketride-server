@@ -27,17 +27,19 @@ import { test } from 'node:test';
 
 import { onChangeArgs, onChangeOf } from './restartBehavior';
 
-test('auto repoints, manual keeps, prompt and anything else leave the server default', () => {
+test('auto repoints, manual keeps, prompt and anything else send error explicitly', () => {
+	// error is never left to the server: on the execute path an omitted
+	// onChange keeps the useExisting rule and reuses the running engine.
 	assert.equal(onChangeOf('auto'), 'auto');
 	assert.equal(onChangeOf('manual'), 'keep');
-	assert.equal(onChangeOf('prompt'), undefined);
-	assert.equal(onChangeOf(undefined), undefined);
-	assert.equal(onChangeOf('bogus'), undefined);
+	assert.equal(onChangeOf('prompt'), 'error');
+	assert.equal(onChangeOf(undefined), 'error');
+	assert.equal(onChangeOf('bogus'), 'error');
 });
 
-test('the spread form carries onChange only when the setting names one', () => {
+test('the spread form always carries an onChange', () => {
 	assert.deepEqual(onChangeArgs('auto'), { onChange: 'auto' });
 	assert.deepEqual(onChangeArgs('manual'), { onChange: 'keep' });
-	assert.deepEqual(onChangeArgs('prompt'), {});
-	assert.equal('onChange' in onChangeArgs(undefined), false);
+	assert.deepEqual(onChangeArgs('prompt'), { onChange: 'error' });
+	assert.deepEqual(onChangeArgs(undefined), { onChange: 'error' });
 });

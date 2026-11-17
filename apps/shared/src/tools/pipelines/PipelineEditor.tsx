@@ -25,6 +25,9 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { EndpointKeyMinter } from './components/pipeline-actions/endpointKey';
+import { NewPipelineForm } from './components/NewPipelineForm';
+import { DeveloperIdBanner } from './components/DeveloperIdBanner';
+import type { NewPipelineIdentity } from './components/NewPipelineForm';
 
 import type { IProject } from 'shell';
 import { createMirroredPrefsStore, ConnectionManager, PrefsProvider, useAuthUser } from 'shell';
@@ -114,6 +117,16 @@ export interface IPipelineEditorHost {
 	getDeveloperId?(): Promise<string>;
 	/** Claims the org's developer id (org admins); answers the registered id. */
 	registerDeveloper?(developerId: string): Promise<string>;
+	/** The New Pipeline form's identity (plan §2.1, §9): developer id, create
+	 *  target, names in use. A host that offers this shows the form for an
+	 *  untitled document that has no pipeline yet. */
+	newPipelineIdentity?(): Promise<NewPipelineIdentity>;
+	/** Creates `pipelines/<name>/<name>.pipe` with `project_id: <name>` and the
+	 *  display name, retires the untitled document and opens the file; a
+	 *  rejection carries the validation message and re-enables the form. */
+	createPipeline?(name: string, displayName: string): Promise<void>;
+	/** Closes the untitled document without creating anything. */
+	cancelNew?(): void;
 	/** Exports the pipeline as a download (hosts with a browser context). */
 	exportDocument?(): void;
 	/** Opens the host's RocketRide Cloud setup flow. */
@@ -166,6 +179,15 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// webview) answers it through the host seam. '' = the org has none yet
 	// (the onboarding banner), undefined = unknown (no banner either way).
 	const [hostDeveloperId, setHostDeveloperId] = useState<string | undefined>(undefined);
+	// A lookup that failed (the connection was down) is retried on the next
+	// connection status change, so a recovered connection shows the banner.
+	const [developerIdLookup, setDeveloperIdLookup] = useState(0);
+	useEffect(() => {
+		const off = ConnectionManager.getInstance().on('shell:statusChange', () => setDeveloperIdLookup((n) => n + 1));
+		return () => {
+			off();
+		};
+	}, []);
 	useEffect(() => {
 		if (!host.getDeveloperId) return;
 		let live = true;
@@ -180,9 +202,13 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		return () => {
 			live = false;
 		};
-	}, [host]);
-	const knownDeveloperId = authUser?.organization ? (authUser.organization.developerId || '') : hostDeveloperId;
+	}, [host, developerIdLookup]);
+	// A claim made here wins over a shell identity that has not refreshed yet.
+	const knownDeveloperId = hostDeveloperId || (authUser?.organization ? (authUser.organization.developerId || '') : hostDeveloperId);
 	const developerId = knownDeveloperId || undefined;
+	// Who may claim: org admins. Unknown (no shell identity, the VS Code
+	// webview) shows the form and lets the server decide.
+	const canRegisterDeveloper = authUser?.organization ? authUser.organization.permissions.includes('org.admin') : undefined;
 	/** Claim through the host, then show the claimed id at once. */
 	const registerDeveloper = useMemo(
 		() =>
@@ -574,9 +600,62 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		[editorPrefs]
 	);
 
+	// --- New Pipeline form (the unbound state) -----------------------------------
+
+	// An untitled document with no pipeline id yet is the NEW PIPELINE form
+	// (plan §2.1, §9): the author names the pipeline (its short id) and the host
+	// creates the bundle and opens it. The canvas never shows an unnamed pipe.
+	const currentProjectId = (project as { project_id?: unknown } | null)?.project_id;
+	const showNewForm = host.isNew && !!host.createPipeline && !!host.newPipelineIdentity && (typeof currentProjectId !== 'string' || currentProjectId === '');
+	const [newIdentity, setNewIdentity] = useState<NewPipelineIdentity | null>(null);
+	const [newIdentityError, setNewIdentityError] = useState<string | null>(null);
+	const [creating, setCreating] = useState(false);
+	const [createError, setCreateError] = useState<string | null>(null);
+	useEffect(() => {
+		if (!showNewForm || !host.newPipelineIdentity) return;
+		let live = true;
+		void host.newPipelineIdentity().then(
+			(i) => {
+				if (live) setNewIdentity(i);
+			},
+			(err: unknown) => {
+				if (live) setNewIdentityError(err instanceof Error ? err.message : String(err));
+			}
+		);
+		return () => {
+			live = false;
+		};
+	}, [host, showNewForm, developerIdLookup]);
+	const handleCreatePipeline = useCallback(
+		(name: string, displayName: string) => {
+			if (!host.createPipeline) return;
+			setCreateError(null);
+			setCreating(true);
+			// Resolution means the host created the bundle and moved the
+			// document over (this editor goes away); a rejection re-enables the form.
+			host.createPipeline(name, displayName).catch((err: unknown) => {
+				setCreateError(err instanceof Error ? err.message : String(err));
+				setCreating(false);
+			});
+		},
+		[host]
+	);
+
 	// --- Render ----------------------------------------------------------------
 
 	const isReadonly = host.isReadonly === true;
+
+	if (showNewForm) {
+		if (!newIdentity) {
+			return <div style={{ padding: 24, fontSize: 12, color: 'var(--rr-text-secondary)' }}>{newIdentityError ? `Could not load your identity: ${newIdentityError}` : 'Loading…'}</div>;
+		}
+		return (
+			<>
+				<DeveloperIdBanner developerId={knownDeveloperId} onRegister={registerDeveloper} canRegister={canRegisterDeveloper} />
+				<NewPipelineForm identity={{ ...newIdentity, developerId: knownDeveloperId || newIdentity.developerId }} creating={creating} error={createError} onCreate={handleCreatePipeline} onCancel={() => host.cancelNew?.()} />
+			</>
+		);
+	}
 
 	return (
 		<PrefsProvider value={prefsApi}>
@@ -601,6 +680,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				{...(developerId ? { developerId } : {})}
 				knownDeveloperId={knownDeveloperId}
 				onRegisterDeveloper={registerDeveloper}
+				canRegisterDeveloper={canRegisterDeveloper}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
 				onOpenLink={host.openLink} onCreateEndpointKey={host.createEndpointKey}

@@ -50,6 +50,7 @@ import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor'
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
+import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
@@ -210,9 +211,12 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	 * Executes a pipeline action (run, stop, restart) via the RocketRide client.
 	 */
 	const executePipelineAction = useCallback(
-		(action: string, source?: string) => {
-			if (!client || !isConnected || !pipeline) return;
-			const pid = pipeline.project_id;
+		(action: string, source?: string, project?: PipelineConfig) => {
+			// `project` is the SAVED snapshot when a save-as ran first (its id is
+			// the new file's name); otherwise the document as it stands.
+			const target = project ?? pipeline;
+			if (!client || !isConnected || !target) return;
+			const pid = target.project_id;
 			if (!source || !pid) return;
 
 			// Subscription gate (defense-in-depth; the primary gate is in
@@ -233,7 +237,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				if (settingDebugOutput && !settingTaskArguments.includes('--trace=')) taskArgs.push('--trace=debugOut');
 				client
 					.use({
-						pipeline,
+						pipeline: target,
 						source,
 						name: projectDisplayName(filename),
 						pipelineTraceLevel: traceLevel,
@@ -252,7 +256,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 					.getTaskToken({ projectId: pid, source })
 					// No token = no running task to restart; the server rejects a
 					// tokenless restart outright, so skip it exactly as stop does.
-					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: pipeline as unknown as Record<string, unknown> }) : undefined))
+					.then((token: string | undefined) => (token ? client.restart({ token, projectId: pid, source, pipeline: target as unknown as Record<string, unknown> }) : undefined))
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},
@@ -282,17 +286,27 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			if (!pipeline || !client || !isConnected) return;
 			setSaveDialogOpen(false);
 
-			// The chosen name is the pipeline's short id, and a new pipeline is
-			// born as a BUNDLE (plan §9, B7): `<dir>/<name>/<name>.pipe`, the
-			// folder that later holds its readme, icon and assets and is the
-			// publish unit. The id is stamped from the same name.
+			// A new pipeline is born as a BUNDLE (plan §9, B7): `<dir>/<name>/
+			// <name>.pipe`, the folder that later holds its readme, icon and
+			// assets and is the publish unit. The name is the FILE's; the
+			// pipeline's id lives inside the file and is not derived from it (the
+			// author picks it on PACKAGE › Identity).
 			const stem = pipeStemOf(dialogPath) ?? dialogPath.slice(dialogPath.lastIndexOf('/') + 1);
 			const dir = dialogPath.includes('/') ? dialogPath.slice(0, dialogPath.lastIndexOf('/')) : '';
 			const bundle = bundlePathsFor(dir, stem);
 			const fileRelPath = bundle.file;
+			const saved: PipelineConfig = pipeline;
 			try {
+				// The dialog checked the typed path; the bundle's pipe is another
+				// path, so an existing bundle of that name is never replaced unasked.
+				const existing = await projectVfs.list(bundle.folder).catch(() => []);
+				if (existing.some((e) => e.name === `${stem}.pipe` && e.type !== 'dir')) {
+					setPipelineError(`A pipeline named "${stem}" already exists at ${fileRelPath}. Choose another name.`);
+					deferredRunRef.current = null;
+					return;
+				}
 				await projectVfs.mkdir(bundle.folder);
-				await projectVfs.write(fileRelPath, { ...pipeline, project_id: stem });
+				await projectVfs.write(fileRelPath, saved);
 			} catch (err) {
 				console.error('[PipelineProvider] Save-as failed:', err);
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -318,7 +332,8 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			const deferredRun = deferredRunRef.current;
 			deferredRunRef.current = null;
 			if (deferredRun) {
-				executePipelineAction(deferredRun.action, deferredRun.source);
+				// Run what was SAVED, not a later edit of the closed document.
+				executePipelineAction(deferredRun.action, deferredRun.source, saved);
 			}
 		},
 		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs]
@@ -422,6 +437,37 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[client, isConnected]
 	);
 
+	// ── New Pipeline form (plan §2.1, §9) ─────────────────────────────────────
+	/** Names already taken under pipelines/: top-level folders and pipe stems. */
+	const handleNewPipelineIdentity = useCallback(async (): Promise<NewPipelineIdentity> => {
+		if (!client || !isConnected) return { developerId: '', workspaceOpen: false, existingNames: [] };
+		const developerId = client.getAccountInfo()?.organization?.developerId ?? '';
+		const entries = await projectVfs.list(settingDefaultDir === 'pipelines' ? '' : settingDefaultDir).catch(() => []);
+		const existingNames = entries.map((e) => (e.type === 'dir' ? e.name : (pipeStemOf(e.name) ?? e.name)));
+		return { developerId, workspaceOpen: true, existingNames };
+	}, [client, isConnected, projectVfs, settingDefaultDir]);
+	/** Creates the bundle with the name as the id, retires this untitled
+	 *  document and opens the file. */
+	const handleCreatePipeline = useCallback(
+		async (name: string, displayName: string): Promise<void> => {
+			if (!client || !isConnected) throw new Error('Not connected to server');
+			const dir = settingDefaultDir === 'pipelines' ? '' : settingDefaultDir;
+			const bundle = bundlePathsFor(dir, name);
+			const taken = await projectVfs.list(dir).catch(() => []);
+			if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${bundle.folder}" already exists. Choose another name.`);
+			await projectVfs.mkdir(bundle.folder);
+			await projectVfs.write(bundle.file, { project_id: name, name: displayName, components: [] });
+			const docs = getDocs();
+			docs?.discardDocument(uri);
+			await docs?.openDocument(bundle.file);
+			window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: name } }));
+		},
+		[client, isConnected, projectVfs, settingDefaultDir, uri]
+	);
+	const handleCancelNew = useCallback(() => {
+		getDocs()?.discardDocument(uri);
+	}, [uri]);
+
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
 			documentTitle,
@@ -443,9 +489,13 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			// The shell identity already carries the org's developer id here;
 			// only the claim needs the host (plan §2.1).
 			registerDeveloper: handleRegisterDeveloper,
+			// The New Pipeline form: an untitled document with no id yet.
+			newPipelineIdentity: handleNewPipelineIdentity,
+			createPipeline: handleCreatePipeline,
+			cancelNew: handleCancelNew,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleExport]
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------
