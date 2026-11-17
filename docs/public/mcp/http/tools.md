@@ -136,18 +136,24 @@ message instead. It already says everything that can be known.
   and `credits` are all `true`. `model_key` is advice and carries
   `blocking: false`, because a pipeline without a model node needs no key.
   A provider counts as saved when any variable name the catalog suggests
-  for it is set; a variable under a custom name that only mentions a provider
-  is reported as uncertain (`ok: null`), never as saved. When no model key is
-  saved, or one is uncertain, the result adds a `hint` for the agent that
-  points to `list_integrations`. `summary` names everything that
+  for it is set. A variable under a custom name that only mentions a provider
+  is never reported as saved; when no provider has a saved key, the row is
+  uncertain (`ok: null`), and when another provider has one, the row is
+  `ok: true` and the candidate is not named. When no model key is saved, or
+  one is uncertain, the result adds a `hint` for the agent that points to
+  `list_integrations`. When the account can use RocketRide-hosted OpenAI
+  models (`hosted-models:openai`), `model_key` is `ok: true` with no hint even
+  if no key is saved, and its detail says so. `summary` names everything that
   stops a run, or says the account is ready.
 - **Notable:** it answers only for the account behind the credential and takes
   no arguments, and it answers a waitlisted account too. It reads variable
   names to find saved model keys, and its result holds no variable name, key
   value or id. `summary`, `detail` and `next_step` are written for the user
   and can be relayed as they are. The tool's description asks the agent to
-  relay the summary and every next step and, when the account is not ready,
-  to leave out the `model_key` advice unless the pipeline uses a model.
+  relay the summary and every next step, to add a check's `detail` when the
+  user asked about that check (a credits question is answered by the
+  `credits` detail), and, when the account is not ready, to leave out the
+  `model_key` advice unless the pipeline uses a model.
 
 ## Author pipelines
 
