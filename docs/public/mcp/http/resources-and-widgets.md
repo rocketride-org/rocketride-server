@@ -58,10 +58,11 @@ spec, ChatGPT among them, read it from the `resources/read` result.
 
 - `csp`: what the widget may load and contact. The bundles are single files
   with no outside scripts, styles, fonts or frames, so `resourceDomains` is
-  empty for all three. Only the file dropper connects out: its
+  empty for all four. Only the file dropper connects out: its
   `connectDomains` holds the engine's origin, where it uploads files. The
-  pipelines table and the trace viewer call tools through the host and
-  declare no origins.
+  pipelines table and the trace viewer call tools through the host, the
+  pipeline canvas draws the result it is given, and none of them declares an
+  origin.
 - `openai/widgetDomain` (next to `ui`, not inside it): ChatGPT's widget
   domain, from `MCP_UI_DOMAIN` (see [Self-hosting](/connect/mcp/http/self-hosting)).
   It is left out when that is unset. The server never sends `ui.domain`:

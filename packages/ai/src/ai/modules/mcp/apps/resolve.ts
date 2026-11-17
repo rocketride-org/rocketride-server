@@ -26,9 +26,8 @@ export const aliases: Alias[] = [
 	// Bare 'shell' resolves to a small stand-in: the real barrel pulls about
 	// 85 modules, including auth and Module Federation (see shell/src/api.ts).
 	{ find: /^shell$/, replacement: resolve(APPS_ROOT, 'src/shared/shell-shim.ts') },
-	// Deep shell imports (the shim, the theme CSS and the theme token sets).
+	// Deep shell imports (the shim and the theme CSS).
 	{ find: /^shell\/src\//, replacement: resolve(REPO_ROOT, 'apps/shared/node_modules/shell/src') + '/' },
-	{ find: /^shell\/public\//, replacement: resolve(REPO_ROOT, 'apps/shared/node_modules/shell/public') + '/' },
 	// The shell's project types re-export the TypeScript SDK's pipeline and
 	// task types. Resolve them from the SDK's source, so the widgets do not
 	// depend on a built SDK.

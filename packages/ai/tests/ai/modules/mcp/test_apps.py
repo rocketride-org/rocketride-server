@@ -240,7 +240,9 @@ async def test_view_pipeline_links_canvas_widget_and_canvas_is_served(fake_engin
         listed = await client.list_resources()
         canvas = next(r for r in listed.resources if str(r.uri) == apps.PIPELINE_CANVAS_URI)
         assert canvas.name == 'Pipeline canvas'
-        assert canvas.meta is None
+        # The widget makes no request: an empty CSP, like every widget without the engine origin.
+        assert canvas.meta == _csp()
         read = await client.read_resource(apps.PIPELINE_CANVAS_URI)
         assert read.contents[0].mime_type == apps.UI_MIME_TYPE
         assert 'c</body>' in read.contents[0].text
+        assert read.contents[0].meta == _csp()
