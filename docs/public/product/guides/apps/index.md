@@ -405,15 +405,17 @@ nothing for an absent, empty or false value. Sections nest at most 16 deep.
 There is no `{{.}}`: a list item that is not an object adds no names, so a tag
 inside its section reads the enclosing values (`{{b}}` inside `{{#a}}` over
 `["x"]` renders the outer `b`).
-Any other tag renders nothing, as does a tag naming a value the server does
-not provide; a `{{` that does not form a tag stays as text. Escaping makes a
-value safe in HTML text and in quoted attributes that are not URLs; it does not
-make a value safe in a URL attribute (`href`, `src`), an event handler,
-`style`, `<script>` or an unquoted attribute, so only server-derived URLs such
-as `{{assets}}` belong there. `{{assets}}` is the URL of the version's build
-output, `/apps/<appId>/v<N>`, so a snapshot references its images as
-`{{assets}}/seo-assets/logo.svg`, served from the same version it was read
-from. The shell's own document is never treated as a template.
+Any `{{...}}` or `{{{...}}}` on one line, with at most 128 characters and no
+other brace between the braces, is a tag, including inside `<script>` and
+`<style>`; only a `{{` without such a closing `}}` stays as text. A tag of any
+other kind renders nothing, as does a tag naming a value the server does not
+provide. Escaping makes a value safe in HTML text and in quoted attributes that
+are not URLs; it does not make a value safe in a URL attribute (`href`, `src`),
+an event handler, `style`, `<script>` or an unquoted attribute, so only
+server-derived URLs such as `{{assets}}` belong there. `{{assets}}` is the URL
+of the version's build output, `/apps/<appId>/v<N>`, so a snapshot references
+its images as `{{assets}}/seo-assets/logo.svg`, served from the same version it
+was read from. The shell's own document is never treated as a template.
 
 A page's `data` entries add server data to its snapshot, each under its source
 name whatever its argument:
