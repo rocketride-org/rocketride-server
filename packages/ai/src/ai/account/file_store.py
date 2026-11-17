@@ -31,7 +31,7 @@ from pathlib import PurePosixPath
 from typing import Any, Optional
 
 from .models import RequestContext, resolve_task_permissions
-from .store import IStore, StorageError
+from .store import IStore, StorageError, StorageNotFoundError
 
 # Sentinel file used to represent empty directories on object stores
 DIR_MARKER = '.dirmarker'
@@ -966,6 +966,7 @@ class FileStore:
                     entry['size'] = file_info['size']
                     entry['modified'] = file_info['modified']
                 except StorageError:
+                    # Display default only (no size/modified), no write follows: a listing entry stays listed.
                     pass
             entries.append(entry)
 
@@ -1130,9 +1131,10 @@ class FileStore:
                 try:
                     info = await self._store.get_file_info(new_full)
                     dest_exists = bool(info)
-                except StorageError:
-                    # get_file_info raises when the key does not exist — good,
-                    # destination is clear and rename can proceed.
+                except StorageNotFoundError:
+                    # Only a missing key means the destination is clear; any
+                    # other failure propagates rather than letting the move
+                    # overwrite a destination we could not check.
                     pass
                 if dest_exists:
                     raise StorageError(f'Destination already exists: {new_path}')
@@ -1162,8 +1164,8 @@ class FileStore:
         file_info = None
         try:
             file_info = await self._store.get_file_info(full_path)
-        except StorageError:
-            pass
+        except StorageNotFoundError:
+            pass  # only a missing file is absent; an outage must not read as exists=False
 
         # On object stores both a key "foo" and keys "foo/*" can co-exist;
         # surface that rather than silently shadowing the file.

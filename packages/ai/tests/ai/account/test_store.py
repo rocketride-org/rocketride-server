@@ -417,6 +417,18 @@ class TestMemoryStore(BaseStoreTest):
         """Create in-memory store instance."""
         return MemoryStore()
 
+    @pytest.mark.asyncio
+    async def test_text_beyond_latin1_is_a_storage_error_as_bytes(self, store):
+        """The inherited read_bytes and get_file_info raise StorageError for text latin-1 cannot return as bytes."""
+        await store.write_file('pages/dash.html', '<p>a \u2014 b</p>')
+        for read in (store.read_bytes, store.get_file_info):
+            with pytest.raises(StorageError, match='pages/dash.html') as exc_info:
+                await read('pages/dash.html')
+            assert isinstance(exc_info.value.__cause__, UnicodeEncodeError)
+        # Bytes written as bytes still round-trip, every byte value included.
+        await store.write_bytes('blob.bin', bytes(range(256)))
+        assert await store.read_bytes('blob.bin') == bytes(range(256))
+
 
 # ============================================================================
 # S3 Tests
@@ -869,12 +881,33 @@ class TestS3StoreMocked:
         # Mock connection error on all attempts
         mock_s3_client.put_object.side_effect = ConnectionError('Connection failed')
 
-        # Should fail after STORE_MAX_RETRY_ATTEMPTS attempts
-        with pytest.raises(ConnectionError):  # ConnectionError after retries exhausted
+        # Should fail after STORE_MAX_RETRY_ATTEMPTS attempts, with the StorageError IStore promises
+        with pytest.raises(StorageError) as exc_info:
             await store.write_file(filename, data)
+        assert isinstance(exc_info.value.__cause__, ConnectionError)
 
         # Verify it was called STORE_MAX_RETRY_ATTEMPTS times
         assert mock_s3_client.put_object.call_count == STORE_MAX_RETRY_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_raises_storage_error_after_max_retries(self, store, mock_s3_client, monkeypatch):
+        """A transport failure that outlasts every retry reaches the caller as a StorageError, not botocore's."""
+        boto_errors = pytest.importorskip('botocore.exceptions')
+
+        async def instant_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(asyncio, 'sleep', instant_sleep)
+        failure = boto_errors.EndpointConnectionError(endpoint_url='https://s3.amazonaws.com')
+        mock_s3_client.get_object.side_effect = failure
+
+        with pytest.raises(StorageError, match='Could not connect to the endpoint URL') as exc_info:
+            await store.read_bytes('test/fail.bin')
+        # The message names the call and its file, as the store's other errors do.
+        assert "S3Store.read_bytes('test/fail.bin') failed after 10 attempts" in str(exc_info.value)
+
+        assert exc_info.value.__cause__ is failure
+        assert mock_s3_client.get_object.call_count == STORE_MAX_RETRY_ATTEMPTS
 
     @pytest.mark.asyncio
     async def test_write_atomic_with_deleted_file_and_version(self, store, mock_s3_client):
@@ -986,9 +1019,10 @@ class TestS3StoreMocked:
 
         mock_s3_client.put_object.side_effect = NoSuchKeyError('NoSuchKey during PutObject')
 
-        # Should fail after STORE_MAX_RETRY_ATTEMPTS
-        with pytest.raises(S3Store._RaceConditionError):
+        # Should fail after STORE_MAX_RETRY_ATTEMPTS, with a StorageError: the internal race signal never leaks
+        with pytest.raises(StorageError) as exc_info:
             await store.write_file_atomic(filename, data, expected_version=expected_version)
+        assert isinstance(exc_info.value.__cause__, S3Store._RaceConditionError)
 
         # Verify put_object was called STORE_MAX_RETRY_ATTEMPTS times
         assert mock_s3_client.put_object.call_count == STORE_MAX_RETRY_ATTEMPTS
@@ -1294,6 +1328,36 @@ class TestAzureBlobStoreMocked:
 
         assert content == 'Test data'
         assert mock_blob.download_blob.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_raises_storage_error_after_max_retries(self, store, mock_blob_client, monkeypatch):
+        """A transport failure that outlasts every retry reaches the caller as a StorageError, not the raw error."""
+        mock_client, mock_blob = mock_blob_client
+
+        async def instant_sleep(seconds):
+            pass
+
+        monkeypatch.setattr(asyncio, 'sleep', instant_sleep)
+        failure = ConnectionError('Connection reset')
+        mock_blob.download_blob.side_effect = failure
+
+        with pytest.raises(StorageError, match='Connection reset') as exc_info:
+            await store.read_bytes('test/fail.bin')
+        assert "AzureBlobStore.read_file('test/fail.bin') failed after 10 attempts" in str(exc_info.value)
+
+        assert exc_info.value.__cause__ is failure
+        assert mock_blob.download_blob.call_count == STORE_MAX_RETRY_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_read_bytes_of_a_blob_beyond_latin1_is_a_storage_error(self, store, mock_blob_client):
+        """A raw UTF-8 blob with a character past U+00FF fails the inherited latin-1 read_bytes as a StorageError."""
+        mock_client, mock_blob = mock_blob_client
+        mock_blob.download_blob.return_value = Mock(readall=Mock(return_value='<p>a \u2014 b</p>'.encode('utf-8')))
+
+        with pytest.raises(StorageError, match='pages/dash.html') as exc_info:
+            await store.read_bytes('pages/dash.html')
+
+        assert isinstance(exc_info.value.__cause__, UnicodeEncodeError)
 
 
 # ============================================================================

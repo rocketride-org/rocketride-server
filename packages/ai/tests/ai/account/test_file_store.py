@@ -13,7 +13,7 @@ import pytest
 import tempfile
 import shutil
 
-from ai.account.store import Store, StorageError
+from ai.account.store import Store, StorageError, StorageNotFoundError
 from ai.account.file_store import FileStore, DIR_MARKER
 from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
@@ -365,6 +365,26 @@ class TestStat:
         assert result['exists'] is False
 
 
+class TestStatFailure:
+    """An outage is not a missing file: only StorageNotFoundError reads as absent."""
+
+    @pytest.mark.asyncio
+    async def test_stat_raises_on_a_storage_failure(self, fs, istore, monkeypatch):
+        await fs.write('hello.txt', b'world')
+
+        async def down(*args, **kwargs):
+            raise StorageError('store down')
+
+        monkeypatch.setattr(istore, 'get_file_info', down)
+        with pytest.raises(StorageError, match='store down'):
+            await fs.stat('hello.txt')
+
+    @pytest.mark.asyncio
+    async def test_stat_missing_file_is_not_found_error_under_the_hood(self, istore):
+        with pytest.raises(StorageNotFoundError):
+            await istore.get_file_info('nope')
+
+
 # ============================================================================
 # User Isolation
 # ============================================================================
@@ -555,6 +575,23 @@ class TestRenameGuards:
             await fs.rename('src.bin', 'dest.bin')
 
         # Both preserved
+        assert await fs.read('src.bin') == b'source'
+        assert await fs.read('dest.bin') == b'destination'
+
+    @pytest.mark.asyncio
+    async def test_rename_does_not_overwrite_when_the_destination_check_fails(self, fs, istore, monkeypatch):
+        """An outage on the destination check is not 'destination is clear': nothing is moved or overwritten."""
+        await fs.write('src.bin', b'source')
+        await fs.write('dest.bin', b'destination')
+
+        async def down(*args, **kwargs):
+            raise StorageError('store down')
+
+        monkeypatch.setattr(istore, 'get_file_info', down)
+        with pytest.raises(StorageError, match='store down'):
+            await fs.rename('src.bin', 'dest.bin')
+        monkeypatch.undo()
+
         assert await fs.read('src.bin') == b'source'
         assert await fs.read('dest.bin') == b'destination'
 

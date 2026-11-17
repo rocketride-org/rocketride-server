@@ -19,9 +19,11 @@ import tempfile
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
 if TYPE_CHECKING:
+    from tenacity import RetryCallState
+
     from .file_store import FileStore
 
 
@@ -79,6 +81,29 @@ class VersionMismatchError(StorageError):
             msg += f': expected {expected_version}'
 
         super().__init__(msg)
+
+
+def storage_error_after_retries(retry_state: 'RetryCallState') -> NoReturn:
+    """Raise the failure that outlasted a provider's retries as a StorageError, the error IStore promises.
+
+    The cloud providers pass this to every Tenacity ``retry`` as
+    ``retry_error_callback``: without it, Tenacity re-raises the last
+    transient error itself (a builtin or SDK transport error), which no
+    caller expects from a store. The message names the call and, when it was
+    passed positionally, its first argument: the file (or prefix) every
+    retried store method takes first.
+
+    Args:
+        retry_state: Tenacity's state for the call; its last attempt failed.
+
+    Raises:
+        StorageError: always, chained to the last attempt's error.
+    """
+    error = retry_state.outcome.exception()
+    call = retry_state.fn.__qualname__
+    if len(retry_state.args) > 1:
+        call = f'{call}({retry_state.args[1]!r})'
+    raise StorageError(f'{call} failed after {retry_state.attempt_number} attempts: {error}') from error
 
 
 class IStore(ABC):
@@ -243,10 +268,15 @@ class IStore(ABC):
             File contents as bytes
 
         Raises:
-            StorageError: If file doesn't exist or read fails
+            StorageError: If file doesn't exist or read fails, or holds
+                text past U+00FF (written as text, not by ``write_bytes``),
+                which latin-1 cannot return as bytes
         """
         content = await self.read_file(filename)
-        return content.encode('latin-1')
+        try:
+            return content.encode('latin-1')
+        except UnicodeEncodeError as e:
+            raise StorageError(f'Failed to read file {filename} as bytes: {e}') from e
 
     async def move_file(self, src: str, dst: str) -> None:
         """

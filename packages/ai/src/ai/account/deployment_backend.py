@@ -57,7 +57,7 @@ from rocketlib import error
 
 from ai.common.list_rows import paginate_rows
 
-from .store import IStore, StorageError, VersionMismatchError
+from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
 # Mirrors the store's own retry posture for read-modify-write records.
@@ -1078,7 +1078,7 @@ class FileDeploymentBackend:
         out: List[Dict[str, Any]] = []
         try:
             orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
-        except StorageError:
+        except StorageNotFoundError:
             return out
         for org_prefix in orgs:
             org_id = org_prefix.rstrip('/').rsplit('/', 1)[-1]
@@ -1196,10 +1196,11 @@ class FileDeploymentBackend:
         Each item: {orgId, teamId, projectId, version, state, schedules}.
         """
         # Same guard as _project_ids: a fresh store has no orgs/ tree yet —
-        # the scheduler feed yields nothing rather than raising.
+        # the scheduler feed yields nothing rather than raising. Any other
+        # storage failure propagates (the caller logs a failed scan).
         try:
             orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
-        except StorageError:
+        except StorageNotFoundError:
             return
         for org_prefix in orgs:
             org_id = org_prefix.rstrip('/').rsplit('/', 1)[-1]
@@ -1232,20 +1233,27 @@ class FileDeploymentBackend:
         return f'orgs/{org_id}/files/.deployments/'
 
     async def _project_ids(self, org_id: str) -> List[str]:
-        """Project directories present in an org's deployments tree."""
+        """Project directories present in an org's deployments tree.
+
+        Only a missing tree is empty: any other storage failure propagates,
+        so an outage never reads as an org with no projects.
+        """
         try:
             dirs = await self._store.list_entries(
                 self._deployments_prefix(org_id), recursive=False, include_files=False
             )
-        except StorageError:
+        except StorageNotFoundError:
             return []
         return [d.rstrip('/').rsplit('/', 1)[-1] for d in dirs]
 
     async def _read_meta(self, org_id: str, project_id: str) -> Optional[Dict[str, Any]]:
-        """Load and shape-check a project's meta.json; None when absent."""
+        """Load and shape-check a project's meta.json; None when absent.
+
+        Only a missing file is absent: any other storage failure propagates.
+        """
         try:
             data = await self._store.read_file(self._meta_path(org_id, project_id))
-        except StorageError:
+        except StorageNotFoundError:
             return None
         try:
             meta = json.loads(data)
@@ -1264,6 +1272,11 @@ class FileDeploymentBackend:
         result. On version conflict the whole cycle re-runs against fresh
         state, so concurrent publish/deploy/schedule calls serialize
         correctly on any backend that honors expected_version.
+
+        Only a missing meta.json starts a new record. Any other storage
+        failure propagates before ``mutate`` runs: an outage must never be
+        taken for a new project, whose record is written unguarded over the
+        registry.
         """
         last: Exception | None = None
         for _ in range(_CAS_ATTEMPTS):
@@ -1271,7 +1284,7 @@ class FileDeploymentBackend:
             try:
                 data, cas_version = await self._store.read_file_with_metadata(path)
                 meta = json.loads(data)
-            except StorageError:
+            except StorageNotFoundError:
                 meta, cas_version = None, None
             if meta is None:
                 meta = {'projectId': project_id, 'orgId': org_id, 'versions': [], 'deployments': {}, 'history': []}
