@@ -449,7 +449,7 @@ importers:
     dependencies:
       '@module-federation/rsbuild-plugin':
         specifier: ^2.5.1
-        version: 2.5.1(@rsbuild/core@2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.2.8(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
+        version: 2.5.1(@rsbuild/core@2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.51.0))(@rspack/core@2.2.8(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))(node-fetch@2.7.0(encoding@0.1.13))(typescript@5.9.3)(webpack@5.104.1)
       '@xyflow/react':
         specifier: ~12.3.4
         version: 12.3.6(@types/react@18.3.31)(immer@9.0.21)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -474,10 +474,10 @@ importers:
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.2.12
-        version: 2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0)
+        version: 2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.51.0)
       '@rsbuild/plugin-react':
         specifier: ~2.0.1
-        version: 2.0.1(@rsbuild/core@2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.48.0))(@rspack/core@2.2.8(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))
+        version: 2.0.1(@rsbuild/core@2.2.12(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(core-js@3.51.0))(@rspack/core@2.2.8(@module-federation/runtime-tools@2.5.1(node-fetch@2.7.0(encoding@0.1.13)))(@swc/helpers@0.5.23))
       '@types/d3-force':
         specifier: ~3.0.10
         version: 3.0.10
