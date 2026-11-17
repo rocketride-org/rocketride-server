@@ -411,6 +411,14 @@ def test_public_lookups_are_rate_limited_per_client(served_app, monkeypatch):
     assert served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js').status_code in (200, 429)
 
 
+def test_public_route_refuses_non_canonical_ids(served_app):
+    """T19 (G4 round 3 R3-L3): ``/_p/acme.thirdparty./`` is not another name for the app, even on its own label's host."""
+    alias = 'acme.thirdparty.'
+    resp = served_app.get(f'/_p/{alias}/v1/remoteEntry.js', host=app_host_of(label_for(alias)))
+    assert resp.status_code == 404
+    assert served_app.reads == []
+
+
 def test_html_from_a_dist_cannot_be_framed(served_app):
     """T19 (G4 NIT): an HTML file of an app's dist (``/_t``, ``/_p``) gets ``frame-ancestors 'none'``; frame.html is the only framable document."""
     for resp in (

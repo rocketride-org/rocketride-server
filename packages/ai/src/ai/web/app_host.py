@@ -67,6 +67,7 @@ from ai.modules.shell.app_origin import (
     client_ip,
     current_config,
     guest_dir,
+    is_canonical_app_id,
     label_of,
     public_lookup_ok,
     public_version_dirs,
@@ -78,7 +79,6 @@ from ai.modules.shell.app_origin import (
 _LABEL = re.compile(r'[a-z2-7]{25}')
 _HOST_PORT = re.compile(r'(.*):([0-9]{1,5})')
 _VERSION = re.compile(r'v([0-9]{1,9})')
-_APP_ID = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_.\-]{0,127}')
 _APP_HOST_PREFIXES = ('/_t', '/_p', '/_rr')
 
 # Appendix C. frame.html adds frame-ancestors <RR_SHELL_ORIGINS>; every other
@@ -270,7 +270,7 @@ class AppHostMiddleware:
 
     async def _serve_public(self, app_id: str, version: int, rest: list, label: str) -> Response:
         """``/_p/<appId>/v<N>/<file>``: a version an anonymous caller may load, on the app's own host."""
-        if not _APP_ID.fullmatch(app_id) or not hmac.compare_digest(label_of(app_id), label):
+        if not is_canonical_app_id(app_id) or not hmac.compare_digest(label_of(app_id), label):
             return _not_found()
         dirs = await public_version_dirs(app_id)
         return await _read_dist(dirs.get(version), rest, _PUBLIC_CACHE)

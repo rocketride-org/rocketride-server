@@ -780,8 +780,13 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     token = request.cookies.get(_APP_COOKIE, '')
     media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
     headers = {'Cache-Control': _BUNDLE_CACHE}
-    from .app_origin import isolated_for
+    from .app_origin import current_config, is_canonical_app_id, isolated_for
 
+    # A non-canonical spelling (acme.foo. names acme.foo's directory on a
+    # Windows store) is refused while isolation is on, before the isolation
+    # check and before it becomes a store path.
+    if not is_canonical_app_id(app_id) and current_config().mode != 'off':
+        raise HTTPException(status_code=404, detail='Not found')
     if await isolated_for(token, app_id):
         if not media_type.startswith('image/'):
             raise HTTPException(status_code=404, detail='Not found')
@@ -872,7 +877,15 @@ async def apps_frame(request: Request):
     429 ``rate_limited`` (per client address before authentication, then per
     caller).
     """
-    from .app_origin import caller_of, client_ip, client_rate_ok, current_config, frame_grant, frame_rate_ok
+    from .app_origin import (
+        caller_of,
+        client_ip,
+        client_rate_ok,
+        current_config,
+        frame_grant,
+        frame_rate_ok,
+        is_canonical_app_id,
+    )
 
     config = current_config()
     if config.mode == 'off':
@@ -896,7 +909,7 @@ async def apps_frame(request: Request):
         return _frame_error(400, 'bad_request')
     app_id = body.get('appId') if isinstance(body, dict) else None
     version = body.get('version') if isinstance(body, dict) else None
-    if not (isinstance(app_id, str) and len(app_id) <= 128 and _APP_ID_SEG.fullmatch(app_id)):
+    if not is_canonical_app_id(app_id):
         return _frame_error(400, 'bad_request')
     if type(version) is not int or version < 1:
         return _frame_error(400, 'bad_request')

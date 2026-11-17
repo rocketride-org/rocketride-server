@@ -444,6 +444,30 @@ def test_e8_case_variant_id_without_an_entry_is_refused(mode, variant, world, mo
     assert world.reads == []
 
 
+@pytest.mark.parametrize('mode', ['optin', 'enforce'])
+@pytest.mark.parametrize('alias', ['acme.thirdparty.', 'acme.thirdparty..', 'acme..thirdparty', 'acme.thirdparty-.'])
+def test_e8_non_canonical_alias_is_refused(mode, alias, world, monkeypatch):
+    """T35 (G4 round 3 R3-L3): an id that is not canonical (a trailing dot names the same directory on a Windows
+    store) is refused while isolation is on, before the isolation check and the store path.
+    """
+    world.env.set(RR_APP_ISOLATION=mode, RR_APP_ISOLATION_APPS=THIRD if mode == 'optin' else None)
+
+    async def aliasing_dirs(token, app_id, want=None):
+        return {1: world.registry.dist_dir(THIRD, 1)}
+
+    monkeypatch.setattr(shell_mod, '_version_dirs_for', aliasing_dirs)
+    resp = world.client.get(f'/apps/{alias}/v1/remoteEntry.js', headers=COOKIE)
+    assert resp.status_code == 404
+    assert world.reads == []
+
+
+@pytest.mark.parametrize('alias', ['acme.thirdparty.', 'acme..thirdparty', 'acme.'])
+def test_apps_frame_refuses_non_canonical_ids(alias, world):
+    """T28 (R3-L3): the frame route takes canonical ids only (dot-separated segments, no empty one)."""
+    resp = world.post({'appId': alias, 'version': 1}, headers=BEARER)
+    assert resp.status_code == 400 and 'bad_request' in resp.text
+
+
 def _unpublished_preview(world, first_party=False):
     """``acme.preview`` v1 built on u1's own org rail, bound to no audience u1 sees: no entry for the caller."""
     world.registry.add('acme.preview', 1, org='org-1', audience=('team', 'another-team'), deploy_state='private')

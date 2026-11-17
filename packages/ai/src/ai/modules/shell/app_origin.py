@@ -324,6 +324,19 @@ def current_config() -> IsolationConfig:
     return load_isolation_config(os.environ)
 
 
+# A canonical app id: dot-separated non-empty segments of [A-Za-z0-9_-], each
+# starting with a letter, digit or underscore, at most 128 characters. Other
+# spellings that pass the route grammar (a trailing dot, an empty segment)
+# can name the same store directory on some backends (a Windows file store
+# drops a trailing dot), so they are refused while isolation is on.
+_CANONICAL_APP_ID = re.compile(r'[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_][A-Za-z0-9_-]*)*')
+
+
+def is_canonical_app_id(app_id: Any) -> bool:
+    """Whether ``app_id`` is in canonical form (see ``_CANONICAL_APP_ID``)."""
+    return isinstance(app_id, str) and len(app_id) <= 128 and bool(_CANONICAL_APP_ID.fullmatch(app_id))
+
+
 def label_of(app_id: str) -> str:
     """
     The app's host label and namespace key.
@@ -976,6 +989,8 @@ async def isolated_for(token: str, app_id: str) -> bool:
     """
     if current_config().mode == 'off':
         return False
+    if not is_canonical_app_id(app_id):
+        return True  # an alias spelling is never served from the main origin (R3-L3)
     answer = await _caller_answer(token, app_id)
     if answer['verdict'] is not None:
         return answer['verdict'].isolated
