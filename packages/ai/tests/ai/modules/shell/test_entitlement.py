@@ -49,7 +49,13 @@ def _entitled():
 
 @pytest.mark.asyncio
 async def test_entitlement_removed_from_team_then_org(registry, clock):
-    """T26: a team binding entitles ``u1``; removal shows after 60 s or at once on invalidation, org removal too."""
+    """T26: a team binding entitles ``u1``; a removal takes effect when the 60 s verdict expires.
+
+    ``invalidate_app_serving`` drops the verdict at once, but only the app's
+    deploy events (``deploy_events``) call it: a membership change does not, so
+    for a removed member the hard 60 s expiry is the bound. The test calls it
+    directly to pin that it also drops this cache.
+    """
     registry.add(APP, 1, org='pub-org', audience=('team', 't1'), deploy_state='private')
     ok = _entitled()
 

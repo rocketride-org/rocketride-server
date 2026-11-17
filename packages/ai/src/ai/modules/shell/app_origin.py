@@ -50,6 +50,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from rocketlib import debug
 from typing import Any, List, Mapping, NamedTuple, Optional, Tuple
 
 MODES = ('off', 'optin', 'enforce')
@@ -103,7 +105,7 @@ class IsolationConfig:
     mode: str = 'off'
     apps: frozenset = frozenset()
     origin_template: str = ''
-    token_keys: Tuple[Tuple[str, bytes], ...] = ()
+    token_keys: Tuple[Tuple[str, bytes], ...] = field(default=(), repr=False)
     shell_origins: Tuple[str, ...] = ()
     host_source: str = 'host'
     edge_secret: str = field(default='', repr=False)
@@ -172,6 +174,8 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         if not _APP_ID.fullmatch(item.strip()):
             raise _refuse(f'RR_APP_ISOLATION_APPS: {item.strip()!r} is not an app id')
         apps.add(item.strip())
+    if mode == 'optin' and not apps:
+        raise _refuse('RR_APP_ISOLATION_APPS must list at least one app id with RR_APP_ISOLATION=optin')
 
     template = env.get('RR_APP_ORIGIN_TEMPLATE') or ''
     https = _TEMPLATE_HTTPS.fullmatch(template)
@@ -364,7 +368,7 @@ def known_capabilities() -> Optional[frozenset]:
 
 # Account methods a SaaS edition must provide itself (check d): the base
 # versions are the OSS behaviour.
-_SAAS_ACCOUNT_METHODS = ('account_info_for', 'is_first_party', 'set_approved_capabilities')
+_SAAS_ACCOUNT_METHODS = ('account_info_for', 'is_first_party', 'set_approved_capabilities', 'approved_capabilities')
 
 
 def validate_isolation_config(account: Any = None) -> None:
@@ -375,6 +379,7 @@ def validate_isolation_config(account: Any = None) -> None:
     guest runtime marker and ``frame.html`` are present; (c)
     ``capabilities.json`` hashes to the marker's ``capabilitiesSha256``; (d) a
     SaaS account class overrides the account methods isolation relies on.
+    Logs the effective mode once (and an empty ``RR_APP_ISOLATION`` read as off).
 
     Args:
         account: The account to check (default: the loaded singleton).
@@ -384,6 +389,8 @@ def validate_isolation_config(account: Any = None) -> None:
     """
     config = current_config()  # (a)
     if config.mode == 'off':
+        if os.environ.get('RR_APP_ISOLATION') == '':
+            debug('[app isolation] RR_APP_ISOLATION is set but empty: read as off')
         return
 
     marker = read_runtime_marker()  # (b)
@@ -416,6 +423,9 @@ def validate_isolation_config(account: Any = None) -> None:
             raise _refuse(
                 f'isolation needs the SaaS account to implement {", ".join(inherited)}: {_REMEDY} until it does'
             )
+
+    isolated = 'every third-party app' if config.mode == 'enforce' else ', '.join(sorted(config.apps))
+    debug(f'[app isolation] mode {config.mode}: isolating {isolated} on {config.origin_template}')
 
 
 # =============================================================================

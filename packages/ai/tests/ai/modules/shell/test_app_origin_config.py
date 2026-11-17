@@ -33,6 +33,8 @@ Tests T1 to T8 of ``.rr-sec/PR1_PLAN.md``.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import ai.modules.shell as shell_pkg
@@ -230,7 +232,7 @@ def test_capabilities_file_missing_refuses_start(isolation_env):
 # T6 SaaS needs the account methods
 # ---------------------------------------------------------------------------
 
-_OVERRIDES = ('account_info_for', 'is_first_party', 'set_approved_capabilities')
+_OVERRIDES = ('account_info_for', 'is_first_party', 'set_approved_capabilities', 'approved_capabilities')
 
 
 def _stub_account(*, saas: bool, overrides=()):
@@ -247,8 +249,8 @@ def _stub_account(*, saas: bool, overrides=()):
     return cls()
 
 
-def test_the_base_account_has_the_three_methods():
-    """T6 premise: the base class defines the OSS behaviour of all three (design section 2, check d)."""
+def test_the_base_account_has_the_four_methods():
+    """T6 premise: the base class defines the OSS behaviour of all four (design section 2, check d; G4 NIT adds the reader)."""
     from ai.account.base import AccountBase
 
     for name in _OVERRIDES:
@@ -259,6 +261,7 @@ def test_saas_without_account_overrides_refuses_start(isolation_env):
     """T6: a SaaS account that still inherits the base methods stops startup, naming them."""
     message = _refuses('account_info_for', account=_stub_account(saas=True))
     assert 'is_first_party' in message and 'set_approved_capabilities' in message
+    assert re.search(r'(?<!set_)approved_capabilities', message), message
 
 
 @pytest.mark.parametrize('missing', _OVERRIDES)
@@ -419,3 +422,44 @@ def test_trusted_client_ip_header_is_optional(isolation_env):
     assert isolation_env.config().client_ip_header == ''
     isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='X-Real-IP')
     assert isolation_env.config().client_ip_header == 'x-real-ip'
+
+
+# ---------------------------------------------------------------------------
+# G4 L4 / L7: no secret in a repr, no silent fail-open
+# ---------------------------------------------------------------------------
+
+
+def test_config_repr_never_shows_a_key(isolation_env):
+    """G4 L4: a logged or asserted config never prints the token keys or the edge secret."""
+    isolation_env.set(RR_APP_HOST_SOURCE='edge-header', RR_EDGE_SECRET='edge-secret-' + 's' * 32)
+    cfg = isolation_env.config()
+    text = repr(cfg) + str(cfg)
+    key_b64 = isolation_env.values['RR_APP_FRAME_TOKEN_KEYS'].split(':', 1)[1]
+    assert key_b64 not in text and 'edge-secret-' not in text
+    assert repr(cfg.token_keys[0][1])[2:20] not in text
+
+
+def test_optin_with_no_listed_app_refuses_start(isolation_env):
+    """G4 L7: ``optin`` that isolates nothing is a misconfiguration, not a quiet off."""
+    isolation_env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS=None)
+    _refuses('RR_APP_ISOLATION_APPS')
+    isolation_env.set(RR_APP_ISOLATION_APPS='  ')
+    _refuses('RR_APP_ISOLATION_APPS')
+
+
+def test_empty_mode_is_off_and_says_so(isolation_env, monkeypatch):
+    """G4 L7: a present-but-empty RR_APP_ISOLATION is off, and startup logs that it read it as off."""
+    lines = []
+    monkeypatch.setattr(_ao(), 'debug', lambda message: lines.append(str(message)), raising=False)
+    isolation_env.set(RR_APP_ISOLATION='')
+    _validate()
+    assert any('RR_APP_ISOLATION' in line and 'off' in line for line in lines), lines
+
+
+def test_startup_logs_the_effective_mode(isolation_env, monkeypatch):
+    """G4 L7: a non-off start states the mode and the isolated set in one line."""
+    lines = []
+    monkeypatch.setattr(_ao(), 'debug', lambda message: lines.append(str(message)), raising=False)
+    isolation_env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.one')
+    _validate()
+    assert any('optin' in line and 'acme.one' in line for line in lines), lines
