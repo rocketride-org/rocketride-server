@@ -56,6 +56,7 @@ Routes registered:
 from typing import Any, Dict
 
 from ai.web import WebServer
+from .app_origin import validate_isolation_config
 from .shell import PUBLIC_ROUTES, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
 
 
@@ -69,7 +70,16 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     Args:
         server: The WebServer instance where routes will be registered.
         config: Configuration settings (currently unused).
+
+    Raises:
+        RuntimeError: When ``RR_APP_ISOLATION`` is not ``off`` and the
+            isolation setup is incomplete (see ``validate_isolation_config``).
     """
+    # ── App isolation (#1022) ───────────────────────────────────────────
+    # Refuse to start a half-built setup before any route exists. Under
+    # RR_APP_ISOLATION=off (the default) this checks nothing.
+    validate_isolation_config()
+
     # ── Shell SPA entry point + public deep links ────────────────────────
     # Every path in PUBLIC_ROUTES serves index.html: bare "/" is the
     # shell's HTML entry point, and deep links like /pricing must resolve

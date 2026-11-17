@@ -878,6 +878,92 @@ class AccountBase(ABC):
         return self._deployment_backend().iter_enabled()
 
     # =========================================================================
+    # APP ISOLATION (#1022) — what the app-origin decisions ask the account
+    #
+    # The base versions are the OSS behaviour. A SaaS edition overrides
+    # account_info_for, is_first_party and set_approved_capabilities: the
+    # startup check refuses RR_APP_ISOLATION other than 'off' until it does.
+    # =========================================================================
+
+    async def account_info_for(self, user_id: str, org_id: str):
+        """The account of one user in one org, for the frame-token entitlement re-check.
+
+        SaaS returns an AccountInfo with ``userId``, ``organization.teams``
+        and ``sysPermissions`` populated (what ``entitled_version_dirs``
+        reads), or None when the user is not a member of the org. OSS serving
+        is open and never asks, so the base knows nobody.
+
+        Returns:
+            AccountInfo | None: Always None here.
+        """
+        return None
+
+    async def is_first_party(self, app_id: str, binding_org_id: str) -> bool:
+        """Whether ``app_id``, bound by ``binding_org_id``, is the platform's own app.
+
+        OSS rule: the binding org is ``local`` and every version on the app's
+        rail is a seeded one (``metadata.platform is True``, or the build stamp
+        ``metadata.build.seeded is True`` that only the seeder writes). A
+        deploy never carries either marker: ``handle_app_add`` strips
+        ``platform`` from the caller's metadata and writes ``build`` itself.
+        Any error answers False (fail closed: the app is isolated).
+        """
+        if binding_org_id != 'local':
+            return False
+        try:
+            entries = await self.deployments_versions(binding_org_id, app_id)
+        except Exception:
+            return False
+
+        def seeded(entry) -> bool:
+            metadata = entry.get('metadata') if isinstance(entry, dict) else None
+            metadata = metadata if isinstance(metadata, dict) else {}
+            build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+            return metadata.get('platform') is True or build.get('seeded') is True
+
+        return bool(entries) and all(seeded(entry) for entry in entries)
+
+    async def set_approved_capabilities(self, org_id: str, app_id: str, version: int, caps: list, actor: dict) -> dict:
+        """Record the capabilities an admin granted one app version (``metadata.approvedCapabilities``).
+
+        Names must come from ``capabilities.json``. The grant is audited on
+        the app's history stream.
+
+        Returns:
+            The refreshed rail entry.
+
+        Raises:
+            ValueError: ``caps`` is not a list of known capability names.
+        """
+        from ai.modules.shell.app_origin import known_capabilities
+
+        known = known_capabilities()
+        if known is None:
+            raise ValueError('capabilities.json is not available on this server')
+        if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
+            raise ValueError(f'capabilities must be a list of {sorted(known)}')
+        entry = await self._deployment_backend().set_approved_capabilities(org_id, app_id, version, list(caps))
+        await self.deployments_history_append(
+            org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
+        )
+        return entry
+
+    async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:
+        """The capabilities granted to one app version; ``['core']`` when none (or nothing valid) is stored."""
+        try:
+            entries = await self.deployments_versions(org_id, app_id)
+        except Exception:
+            return ['core']
+        for entry in entries or []:
+            if not isinstance(entry, dict) or int(entry.get('version', 0)) != version:
+                continue
+            metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+            caps = metadata.get('approvedCapabilities')
+            if isinstance(caps, list) and caps and all(isinstance(c, str) for c in caps):
+                return list(caps)
+        return ['core']
+
+    # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all of these
     # =========================================================================
 

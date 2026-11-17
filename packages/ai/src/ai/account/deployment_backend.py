@@ -1064,6 +1064,38 @@ class FileDeploymentBackend:
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
+    async def set_approved_capabilities(
+        self,
+        org_id: str,
+        project_id: str,
+        version: int,
+        caps: List[str],
+    ) -> Dict[str, Any]:
+        """Replace ONE registry version's ``metadata.approvedCapabilities`` (the admin's grant, #1022).
+
+        Same single-field mutation as ``set_build``; the review ``state`` is
+        not touched. The caller validates the names and audits the change.
+
+        Returns the refreshed rail entry.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        if not isinstance(caps, list):
+            raise ValueError('caps must be a list')
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Swap the grant on the version's metadata."""
+            entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
+            if entry is None:
+                raise StorageError(f'{project_id} v{version}: not in the registry')
+            metadata = entry.get('metadata')
+            metadata = metadata if isinstance(metadata, dict) else {}
+            metadata['approvedCapabilities'] = list(caps)
+            entry['metadata'] = metadata
+            return dict(entry)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
     async def scan_builds(self, statuses: 'tuple[str, ...]') -> List[Dict[str, Any]]:
         """Every kind:'app' version whose ``metadata.build.status`` matches.
 
