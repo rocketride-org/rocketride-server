@@ -196,9 +196,10 @@ export interface CheckoutModalBaseProps {
 
 	/**
 	 * Id of the app being subscribed to. Optional. It picks the label of the
-	 * button shown after a grant or hackathon code is redeemed: the pipeline
-	 * builder (`rocketride.pipeBuilder`) keeps "Start building", every other
-	 * app gets "Continue to <appName>".
+	 * button shown after a grant or hackathon code subscribes the org to the
+	 * app: the pipeline builder (`rocketride.pipeBuilder`) keeps "Start
+	 * building", every other app gets "Continue to <appName>". A credits-only
+	 * grant shows "Done", which just closes the modal.
 	 */
 	appId?: string;
 
@@ -250,7 +251,7 @@ export interface CheckoutModalBaseProps {
 	/** Require explicit server status before accepting a no-payment response. */
 	requireCheckoutStatus?: boolean;
 
-	/** Called after a successful payment — host should close the modal. */
+	/** Called after a successful payment or a grant that subscribes the org to the app — host should close the modal. */
 	onSuccess: () => void;
 
 	/** Called when the user dismisses the modal without completing checkout. */
