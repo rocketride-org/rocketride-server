@@ -175,10 +175,8 @@ body {
 .rr-canvas-howto {
 	margin-top: 6px;
 	font-size: 12px;
+	line-height: 1.4;
 	color: var(--rr-text-secondary);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 
 /* The builder's node CSS assumes the app's global border-box sizing (MUI's
