@@ -52,7 +52,7 @@ SENTENCES = {
         'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
         'under Account > Billing in RocketRide.'
     ),
-    'rate_limited': 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.',
+    'rate_limited': 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.',
     'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': (
         'RocketRide-hosted models are unavailable right now. Try again shortly, or add your own OpenAI key '
@@ -322,7 +322,7 @@ def test_a_model_not_offered_names_the_model():
     )
     assert friendly_gateway_error(from_backend) == sentence
     assert friendly_gateway_error(_refusal(400, 'model_not_available')) == (
-        "The model isn't offered as a RocketRide-hosted model. Choose another model, "
+        "The model you chose isn't offered as a RocketRide-hosted model. Choose another model, "
         'or add your own OpenAI key in the node settings.'
     )
 

@@ -681,7 +681,7 @@ def test_a_hosted_refusal_reaches_the_caller_as_its_sentence():
     """The refusal's sentence is our own text, so a turn and a text answer both carry it, without a class name."""
     from ai.common.model_gateway import HostedModelError
 
-    sentence = 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.'
+    sentence = 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.'
 
     class _Refused:
         supports_tools = True

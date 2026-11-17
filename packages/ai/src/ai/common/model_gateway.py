@@ -76,7 +76,7 @@ REFUSAL_SENTENCES = {
         'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
         'under Account > Billing in RocketRide.'
     ),
-    'rate_limited': 'RocketRide-hosted models are busy with other requests from this run. Try again shortly.',
+    'rate_limited': 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.',
     'model_not_available': (
         "The model {model} isn't offered as a RocketRide-hosted model. Choose another model, "
         'or add your own OpenAI key in the node settings.'
@@ -102,8 +102,9 @@ _OTHER_REFUSAL = (
 # The backend's own sentences, read back for the value it filled in.
 _MODEL_IN_MESSAGE = re.compile(r"^The model (.+?) isn't offered as a RocketRide-hosted model\.")
 _FIELD_IN_MESSAGE = re.compile(r"^RocketRide-hosted models don't support (.+?)\. Add your own OpenAI key")
-# Used when neither the request nor the refusal names the field.
+# Used when neither the request nor the refusal names the field or the model.
 _SOME_FIELD = 'part of this request'
+_SOME_MODEL = 'you chose'
 
 
 class HostedModelError(RuntimeError):
@@ -270,8 +271,8 @@ def friendly_gateway_error(error: BaseException, model: str = '') -> Optional[st
         return _OTHER_REFUSAL
     if code == 'model_not_available':
         found = _MODEL_IN_MESSAGE.match(message)
-        name = _clean(model) or (_clean(found.group(1)) if found else '')
-        return ' '.join(sentence.format(model=name).split())
+        name = _clean(model) or (_clean(found.group(1)) if found else '') or _SOME_MODEL
+        return sentence.format(model=name)
     if code == 'unsupported_parameter':
         found = _FIELD_IN_MESSAGE.match(message)
         name = _clean(body.get('param')) or (_clean(found.group(1)) if found else '') or _SOME_FIELD
