@@ -50,6 +50,9 @@ SKILL_FILE = 'SKILL.md'
 MAX_NAME_LENGTH = 64
 MAX_DESCRIPTION_LENGTH = 1024
 
+# Longest name or description accepted before it is normalized or cut.
+MAX_FIELD_CHARS = 8 * 1024
+
 # Limits on what one folder may make the node read at startup.
 MAX_SKILL_MD_BYTES = 256 * 1024
 MAX_FILES_PER_SKILL = 200
@@ -63,6 +66,25 @@ _FRONTMATTER = re.compile(r'\A﻿?---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)'
 
 class SkillError(ValueError):
     """A skill definition the node cannot use."""
+
+
+class _NoAliasLoader(yaml.SafeLoader):
+    """SafeLoader that refuses YAML aliases.
+
+    Frontmatter never needs them, and nested aliases (a "billion laughs"
+    block) make a few hundred bytes stand for gigabytes of text.
+    """
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(
+                None,
+                None,
+                f'found the alias *{event.anchor}, and SKILL.md frontmatter may not use aliases',
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
 
 
 @dataclass(frozen=True)
@@ -87,7 +109,8 @@ def parse_skill_md(text: str) -> Tuple[Dict[str, Any], str]:
     if not match:
         return {}, (text or '').strip()
     try:
-        meta = yaml.safe_load(match.group(1))
+        # _NoAliasLoader is a SafeLoader: it builds plain values only.
+        meta = yaml.load(match.group(1), Loader=_NoAliasLoader)
     except Exception as e:
         # Besides YAMLError, building a value can raise: `updated: 2026-02-30`
         # raises ValueError from datetime.
@@ -108,6 +131,34 @@ def normalize_name(raw: Any) -> str:
     return name[:MAX_NAME_LENGTH].rstrip('-')
 
 
+def _text(value: Any, field_name: str) -> str:
+    """A name or description as stripped text; '' when unset."""
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        hint = (
+            ': YAML reads yes, no, on, off, true and false as true or false, so put the value in quotes'
+            if isinstance(value, bool)
+            else ': put the value in quotes'
+        )
+        raise SkillError(f'the {field_name} must be text, not {_kind(value)}{hint}')
+    if len(value) > MAX_FIELD_CHARS:
+        raise SkillError(f'the {field_name} is {len(value)} characters long; the limit is {MAX_FIELD_CHARS}')
+    return value.strip()
+
+
+def _kind(value: Any) -> str:
+    if isinstance(value, bool):
+        return f'{str(value).lower()} (a yes/no value)'
+    if isinstance(value, (int, float)):
+        return 'a number'
+    if isinstance(value, list):
+        return 'a list'
+    if isinstance(value, dict):
+        return 'a set of keys'
+    return f'a {type(value).__name__}'
+
+
 def build_skill(
     *,
     text: str,
@@ -125,12 +176,15 @@ def build_skill(
     """
     meta, body = parse_skill_md(text)
 
-    raw_name = str(name or '').strip() or str(meta.get('name') or '').strip() or fallback_name
+    # A value set in the node wins, and only the value used is checked.
+    raw_name = _text(name, 'name') or _text(meta.get('name'), 'name') or fallback_name
     skill_name = normalize_name(raw_name)
     if not skill_name:
         raise SkillError('the skill has no name: set one in the config or in the SKILL.md frontmatter')
 
-    skill_description = ' '.join((str(description or '').strip() or str(meta.get('description') or '')).split())
+    skill_description = ' '.join(
+        (_text(description, 'description') or _text(meta.get('description'), 'description')).split()
+    )
     if not skill_description:
         raise SkillError(
             f'skill {skill_name!r} has no description: the agent reads the description to decide '

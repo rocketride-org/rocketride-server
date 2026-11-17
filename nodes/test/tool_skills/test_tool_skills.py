@@ -214,6 +214,85 @@ def test_build_skill_requires_a_name_a_description_and_instructions():
         catalog_mod.build_skill(text='---\nname: n\ndescription: d\n---\n')
 
 
+# Five levels of nested aliases: 274 bytes that str() would turn into 2.8 MB.
+ALIAS_BOMB = """---
+name: bomb
+a: &a ["lol","lol","lol","lol","lol","lol","lol","lol","lol"]
+b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]
+description: *e
+---
+body"""
+
+
+def test_frontmatter_with_yaml_aliases_is_refused_before_it_expands():
+    with pytest.raises(SkillError, match='may not use aliases'):
+        catalog_mod.parse_skill_md(ALIAS_BOMB)
+
+
+@pytest.mark.parametrize(
+    'front, message',
+    [
+        ('name: yes\ndescription: d', r'the name must be text, not true .*put the value in quotes'),
+        ('name: n\ndescription: no', r'the description must be text, not false .*put the value in quotes'),
+        ('name: 42\ndescription: d', 'the name must be text, not a number'),
+        ('name: n\ndescription: [a, b]', 'the description must be text, not a list'),
+        ('name: n\ndescription: {k: v}', 'the description must be text, not a set of keys'),
+    ],
+)
+def test_build_skill_refuses_frontmatter_values_that_are_not_text(front, message):
+    with pytest.raises(SkillError, match=message):
+        catalog_mod.build_skill(text=f'---\n{front}\n---\nbody')
+
+
+def test_build_skill_reads_quoted_yes_and_no_as_text():
+    skill = catalog_mod.build_skill(text='---\nname: "yes"\ndescription: "no"\n---\nbody')
+    assert (skill.name, skill.description) == ('yes', 'no')
+
+
+def test_build_skill_refuses_an_oversized_frontmatter_value():
+    too_long = 'x' * (catalog_mod.MAX_FIELD_CHARS + 1)
+    with pytest.raises(SkillError, match=f'the limit is {catalog_mod.MAX_FIELD_CHARS}'):
+        catalog_mod.build_skill(text=f'---\nname: n\ndescription: {too_long}\n---\nbody')
+
+
+def test_a_value_set_in_the_node_wins_over_an_unusable_frontmatter_value():
+    skill = catalog_mod.build_skill(text='---\nname: yes\ndescription: d\n---\nbody', name='Release Notes')
+    assert skill.name == 'release-notes'
+
+
+def test_skills_with_unusable_frontmatter_are_skipped_and_the_rest_still_load():
+    rows = [
+        {'skillInstructions': SKILL_MD.decode()},
+        {'skillInstructions': ALIAS_BOMB},
+        {'skillInstructions': '---\nname: yes\ndescription: d\n---\nbody'},
+        {'skillInstructions': '---\nname: n\ndescription: no\n---\nbody'},
+        {'skillInstructions': '---\nname: 7\ndescription: d\n---\nbody'},
+        {'skillInstructions': '---\nname: n\ndescription: [a]\n---\nbody'},
+    ]
+    skills, problems = catalog_mod.skills_from_config(rows)
+    assert [s.name for s in skills] == ['release-notes']
+    assert [p.split(':')[0] for p in problems] == [f'config row {i}' for i in range(2, 7)]
+    assert 'may not use aliases' in problems[0]
+
+
+def test_load_folder_skips_folders_with_unusable_frontmatter():
+    store = FakeFileStore(
+        {
+            'skills/good/SKILL.md': b'---\ndescription: d\n---\nbody',
+            'skills/bomb/SKILL.md': ALIAS_BOMB.encode(),
+            'skills/yes/SKILL.md': b'---\nname: yes\ndescription: d\n---\nbody',
+        }
+    )
+    skills, problems = _run(catalog_mod.load_folder, store, 'skills')
+    assert [s.name for s in skills] == ['good']
+    joined = '\n'.join(problems)
+    assert "'skills/bomb'" in joined and 'may not use aliases' in joined
+    assert "'skills/yes'" in joined and 'must be text' in joined
+
+
 def test_build_skill_caps_the_description_length():
     skill = catalog_mod.build_skill(text='body', name='n', description='x' * 5000)
     assert len(skill.description) == catalog_mod.MAX_DESCRIPTION_LENGTH

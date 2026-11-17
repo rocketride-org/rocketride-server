@@ -344,6 +344,10 @@ class IGlobal(IGlobalBase):
         if server_name != self.serverName:
             return None
         tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
+        allowed = getattr(self, '_allowed_tools', None)
+        if tool is None and allowed is not None and tool_name not in allowed:
+            # No refresh can make a tool outside allowedTools available.
+            return None
         if tool is None:
             self.refresh_tools(reason=f'lookup miss for {tool_name!r}', min_age_s=REFRESH_MIN_INTERVAL_S)
             # Re-read whatever the attempt returned: False also means "another

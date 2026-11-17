@@ -25,7 +25,7 @@ Enter skills in the node for short instructions that belong to one pipeline. Use
 
 Each row is one skill with three fields: Name, Description and Instructions. Paste a whole `SKILL.md`, frontmatter included, into Instructions and leave Name and Description empty to take them from the frontmatter. Fill in Name or Description to override the frontmatter value.
 
-The name is converted to lowercase letters, numbers and hyphens (`Release Notes` becomes `release-notes`), up to 64 characters. The description is what the agent reads when it decides whether to load the skill, so say what the skill does and when to use it: "Write release notes from a list of merged pull requests. Use when asked for a changelog or release summary." Descriptions longer than 1,024 characters are cut. An empty row is ignored; a row that lacks a name, a description or instructions is skipped with a warning.
+The name is converted to lowercase letters, numbers and hyphens (`Release Notes` becomes `release-notes`), up to 64 characters. The description is what the agent reads when it decides whether to load the skill, so say what the skill does and when to use it: "Write release notes from a list of merged pull requests. Use when asked for a changelog or release summary." Descriptions longer than 1,024 characters are cut, and a name or description longer than 8,192 characters is refused. An empty row is ignored; a row that lacks a name, a description or instructions is skipped with a warning.
 
 ### Instructions
 
@@ -67,6 +67,8 @@ Group the changes by area. Follow references/style.md for wording.
 ```
 
 Frontmatter keys other than `name` and `description` are ignored. A file without frontmatter is all instructions, which works for skills entered in the node when Name and Description are filled in.
+
+`name` and `description` must be text. YAML reads `yes`, `no`, `on`, `off`, `true` and `false` as true or false and a bare number as a number, so put such a value in quotes (`name: "yes"`). The frontmatter may not use YAML anchors and aliases (`&a`, `*a`). A skill that breaks either rule is skipped with a warning that says why, and the other skills still load.
 
 ### When skills change
 

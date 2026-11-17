@@ -77,8 +77,10 @@ class _ScriptedClient:
     def __init__(self, tools):
         self._tools = list(tools)
         self.calls = []
+        self.list_calls = 0
 
     def list_tools(self):
+        self.list_calls += 1
         return list(self._tools)
 
     def call_tool(self, *, name, arguments):
@@ -157,6 +159,21 @@ def test_a_call_to_a_tool_outside_the_list_is_refused_and_not_sent():
     assert client.calls == []
     g.call_tool(server_name='srv', tool_name='search', arguments={'q': 'x'})
     assert client.calls == [('search', {'q': 'x'})]
+
+
+def test_a_name_outside_the_list_is_refused_without_refreshing_the_catalog():
+    client = _ScriptedClient([_tool('search'), _tool('delete_repo')])
+    g = _iglobal(client, {'search', 'fetch'})
+    g._catalog_fetched_at = None  # stale, so a lookup miss may refresh
+    before = client.list_calls
+    with pytest.raises(ToolUnavailableError):
+        g.call_tool(server_name='srv', tool_name='delete_repo', arguments={})
+    assert client.list_calls == before
+    # An allowed name the server adds later is still found by refreshing.
+    client._tools.append(_tool('fetch'))
+    g.call_tool(server_name='srv', tool_name='fetch', arguments={})
+    assert client.list_calls == before + 1
+    assert client.calls == [('fetch', {})]
 
 
 def test_a_refreshed_catalog_keeps_the_filter():
