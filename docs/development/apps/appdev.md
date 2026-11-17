@@ -100,16 +100,19 @@ server push is involved.
 **Framing and credentials.** The engine serves shell documents with
 `Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
 and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. Only the shell's
-own origin and the desktop VS Code webview can frame the shell. A page that
+own origin and the desktop VS Code webview can frame the shell. Any VS Code
+extension's webview matches `vscode-webview:`, so any installed extension can
+frame it; the design accepts this. A page that
 opens the shell with `window.open` gets no `window.opener` handle to it. The
 dev proxy passes these headers through, so the preview panel is covered too.
 Web-hosted VS Code (vscode.dev, github.dev, code-server) frames the preview
 from https origins such as `https://*.vscode-cdn.net` and the code-server
 host. Add those to `RR_SHELL_FRAME_ANCESTORS_EXTRA` (whitespace-separated
 host sources or non-web schemes; an invalid value stops engine startup).
-Apps no longer receive the session token: `identity.userToken`,
+Documented app surfaces carry a blank session token: `identity.userToken`,
 `useAuthUser().userToken` and the `user.userToken` of the `shell:init` and
-`shell:login` iframe messages are `''`, and `shell:init` omits `RR_APIKEY`.
+`shell:login` iframe messages are `''`, and `useShellApiConfig()` and
+`shell:init` omit `RR_APIKEY`.
 This is not isolation yet: app code still runs on the shell origin until
 third-party apps move off-origin (#1022).
 

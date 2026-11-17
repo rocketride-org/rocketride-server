@@ -275,8 +275,11 @@ _CACHE_CONTROL = 'public, max-age=3600'
 # App Builder preview, whose webview iframe (vscode-webview://<id>) sits inside
 # the desktop workbench (vscode-file://vscode-app). frame-ancestors checks
 # every ancestor up to the top, so both schemes are needed for the desktop
-# preview. Web-hosted VS Code (vscode.dev, code-server, github.dev) uses https
-# origins instead; those hosts are added through RR_SHELL_FRAME_ANCESTORS_EXTRA.
+# preview. Any VS Code extension's webview matches vscode-webview:, which the
+# #1022 design accepts. Web-hosted VS Code (vscode.dev, code-server,
+# github.dev) uses https origins instead; those hosts are added through
+# RR_SHELL_FRAME_ANCESTORS_EXTRA. A wildcard over a multi-label public suffix
+# (*.co.uk) is not detected: that needs the public suffix list.
 _FRAME_ANCESTORS_DEFAULT = ("'self'", 'vscode-webview:', 'vscode-file:')
 
 # Sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA (lowercased first): a

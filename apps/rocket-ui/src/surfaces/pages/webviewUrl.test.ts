@@ -82,11 +82,24 @@ test('lets a plain-http engine on a non-loopback host open its own chat and drop
 	assert.equal(isAllowedWebviewUrl('http://10.0.0.6:5565/chat/p/s', 'http://10.0.0.5:5565'), false);
 });
 
-test('refuses app bundles on any origin', () => {
-	for (const url of ['https://docs.example/apps/x/v1/a.html', 'https://docs.example/apps', 'http://localhost:3000/apps/x/remoteEntry.js', 'https://docs.example/a/../apps/x']) {
-		assert.equal(isAllowedWebviewUrl(url, SHELL), false, url);
+test('refuses app bundles on the shell server only', () => {
+	for (const url of [`${SHELL}/apps/x/v1/a.html`, `${SHELL}/apps`, 'http://127.0.0.1:5565/apps/x/remoteEntry.js']) {
+		assert.equal(isAllowedWebviewUrl(url, url.startsWith(SHELL) ? SHELL : 'http://localhost:5565'), false, url);
 	}
-	assert.equal(isAllowedWebviewUrl('https://docs.example/appstore', SHELL), true);
+	for (const url of ['https://github.com/apps/x', 'https://docs.example/apps/x/v1/a.html', 'http://localhost:3000/apps/x/remoteEntry.js', 'https://docs.example/appstore']) {
+		assert.equal(isAllowedWebviewUrl(url, SHELL), true, url);
+	}
+});
+
+test('a shell without an http(s) origin (VS Code webview, file://) has no own server: external rule only', () => {
+	for (const shell of ['vscode-webview://abc123', 'null', 'file://']) {
+		for (const url of ['https://docs.example', 'https://github.com/apps/x', 'http://localhost:5565/chat/p/s']) {
+			assert.equal(isAllowedWebviewUrl(url, shell), true, `${shell} -> ${url}`);
+		}
+		for (const url of ['http://evil.example', 'javascript:alert(1)', 'vscode-webview://abc123/x', 'file:///etc/passwd', 'https://u:p@x.example']) {
+			assert.equal(isAllowedWebviewUrl(url, shell), false, `${shell} -> ${url}`);
+		}
+	}
 });
 
 test('refuses non-http(s) schemes, credentials, non-loopback http and unparsable input', () => {

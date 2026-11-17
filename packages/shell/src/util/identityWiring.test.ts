@@ -88,6 +88,15 @@ test('useIframeBridge sends the API config without RR_APIKEY', () => {
 	assert.ok(has(init, /apiConfig:\s*bridgedApiConfig\(\s*apiConfig\s*\)/), `apiConfig must go through bridgedApiConfig: ${init.replace(/\s+/g, ' ')}`);
 });
 
+test('useShellApiConfig hands app code the config without RR_APIKEY', () => {
+	const code = source('connection/ShellApiConfigContext.tsx');
+	assert.ok(has(code, /from '\.\.\/util\/identity'/), 'ShellApiConfigContext.tsx must import bridgedApiConfig from ../util/identity');
+	const provider = /<ShellApiConfigContext\.Provider value=\{(\w+)\}>/.exec(code);
+	assert.ok(provider, 'one ShellApiConfigContext.Provider with a plain value');
+	assert.notEqual(provider[1], 'config', 'the raw config is put in the context');
+	assert.ok(has(code, new RegExp(`const ${provider[1]} = useMemo\\(\\(\\) => bridgedApiConfig\\(config\\), \\[config\\]\\)`)), 'the context value must be bridgedApiConfig(config)');
+});
+
 // ---- app identity --------------------------------------------------------
 
 test('AppFrame hands the app a credential-free identity', () => {

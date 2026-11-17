@@ -30,13 +30,34 @@
  * starts in a new browsing context group, which clears `window.name`; the
  * IdP's redirect back drops `?rrauth=1`. The role is therefore remembered in
  * this tab's sessionStorage before the redirect, which survives both.
+ *
+ * The marker is narrow on purpose: it is set and read only in a top-level
+ * window (a framed shell never redirects to the IdP), honoured only on the
+ * IdP return leg (`code`, `error` or `state` in the URL), removed whenever it
+ * is read, and ignored when older than ten minutes.
  */
 
-/** sessionStorage key marking this tab as the auth popup. */
+/** sessionStorage key marking this tab as the auth popup; the value is the epoch-ms time it was set. */
 export const AUTH_POPUP_KEY = 'rr:auth:popup';
+
+/** How long a remembered popup role stays valid. */
+const AUTH_POPUP_TTL_MS = 10 * 60 * 1000;
+
+/** URL parameters the IdP puts on the return leg. */
+const RETURN_LEG_PARAMS = ['code', 'error', 'state'];
 
 /** The Storage calls these helpers use (sessionStorage in the browser). */
 type RoleStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+/** Where the helpers run; each field defaults to the live browser value. */
+export interface AuthPopupEnv {
+	/** Where the role is remembered (sessionStorage). */
+	storage?: RoleStorage | null;
+	/** Whether this window is top-level (`window.self === window.top`). */
+	topLevel?: boolean;
+	/** The current time in epoch ms (`Date.now()`). */
+	now?: number;
+}
 
 /**
  * The tab's sessionStorage, or null where it is unavailable.
@@ -52,17 +73,53 @@ function sessionStore(): RoleStorage | null {
 }
 
 /**
+ * Whether this window is top-level.
+ *
+ * @returns True when `window.self === window.top`; false when framed or when the check throws.
+ */
+function isTopLevel(): boolean {
+	try {
+		return typeof window !== 'undefined' && window.self === window.top;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Fill in the live browser values for any field the caller left out.
+ *
+ * @param env - The caller's overrides.
+ * @returns A complete environment.
+ */
+function resolveEnv(env: AuthPopupEnv): Required<AuthPopupEnv> {
+	return {
+		storage: env.storage === undefined ? sessionStore() : env.storage,
+		topLevel: env.topLevel ?? isTopLevel(),
+		now: env.now ?? Date.now(),
+	};
+}
+
+/**
  * Whether this window is the auth popup.
+ *
+ * A remembered role is read (and removed) only in a top-level window on the
+ * IdP return leg, and honoured only when it is at most ten minutes old.
  *
  * @param windowName - `window.name` (cleared by a browsing context group switch).
  * @param params - The page's query parameters (`?rrauth=1` on a fresh popup).
- * @param storage - Where the role is remembered; defaults to sessionStorage.
+ * @param env - Storage, top-level flag and clock; defaults to the browser's.
  * @returns True for a fresh popup or one returning from the IdP.
  */
-export function isAuthPopupWindow(windowName: string, params: URLSearchParams, storage: RoleStorage | null = sessionStore()): boolean {
+export function isAuthPopupWindow(windowName: string, params: URLSearchParams, env: AuthPopupEnv = {}): boolean {
 	if (windowName === 'rrauth' || params.get('rrauth') === '1') return true;
+	const { storage, topLevel, now } = resolveEnv(env);
+	if (!storage || !topLevel || !RETURN_LEG_PARAMS.some((name) => params.has(name))) return false;
 	try {
-		return storage?.getItem(AUTH_POPUP_KEY) === '1';
+		const value = storage.getItem(AUTH_POPUP_KEY);
+		storage.removeItem(AUTH_POPUP_KEY);
+		if (value === null || !/^\d+$/.test(value)) return false;
+		const age = now - Number(value);
+		return age >= 0 && age <= AUTH_POPUP_TTL_MS;
 	} catch {
 		return false;
 	}
@@ -71,11 +128,15 @@ export function isAuthPopupWindow(windowName: string, params: URLSearchParams, s
 /**
  * Remember the popup role for the rest of this tab's OAuth round trip.
  *
- * @param storage - Where to remember it; defaults to sessionStorage.
+ * Does nothing in a framed window.
+ *
+ * @param env - Storage, top-level flag and clock; defaults to the browser's.
  */
-export function rememberAuthPopup(storage: RoleStorage | null = sessionStore()): void {
+export function rememberAuthPopup(env: AuthPopupEnv = {}): void {
+	const { storage, topLevel, now } = resolveEnv(env);
+	if (!topLevel) return;
 	try {
-		storage?.setItem(AUTH_POPUP_KEY, '1');
+		storage?.setItem(AUTH_POPUP_KEY, String(now));
 	} catch {
 		/* storage unavailable: window.name still works without COOP */
 	}

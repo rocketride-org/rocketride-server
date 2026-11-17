@@ -23,10 +23,10 @@
 /**
  * What app code and bridged iframes may see of the session.
  *
- * Apps mounted in the shell (the `identity` prop and `useAuthUser()`) and
- * iframes the shell bridges to (`shell:init`, `shell:login`) get the user
- * with a blank session token, and the iframe config without the API key
- * (#1022). This is preparation, not isolation: app code that runs on the
+ * Documented app surfaces carry a blank session token: apps mounted in the
+ * shell (the `identity` prop and `useAuthUser()`) and iframes the shell
+ * bridges to (`shell:init`, `shell:login`) get the user with `userToken: ''`,
+ * and `useShellApiConfig()` and `shell:init` omit the API key (#1022). This is preparation, not isolation: app code that runs on the
  * shell origin can still read the token from storage or ConnectionManager
  * until PR2 moves third-party apps off-origin. It stops handing the token
  * out through the documented app surface.
@@ -57,8 +57,9 @@ export function withoutCredentials<T extends object>(user: T | null): T | null {
 /**
  * Return a copy of the RR_* runtime config without `RR_APIKEY`.
  *
- * No bridged iframe reads the API key (the iframe talks to the engine
- * through the shell), so it is not sent. The config is never mutated.
+ * This is the config `useShellApiConfig()` and the `shell:init` iframe
+ * message hand out. No app, iframe or shell component reads the API key
+ * from them, so it is not exposed there. The config is never mutated.
  *
  * @param config - The shell's runtime API config.
  * @returns A new object with every key except `RR_APIKEY`.

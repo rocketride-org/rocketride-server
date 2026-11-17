@@ -36,7 +36,7 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** The only shell-origin paths a webview may frame: the engine's chat and dropper pages. */
 const SHELL_ORIGIN_PREFIXES = ['/chat/', '/dropper/'];
 
-/** App bundles (`/apps/...`) are never framed, on any origin: they belong in the shell's own loader. */
+/** App bundles (`/apps/...`) on the shell's server are never framed: they belong in the shell's own loader. */
 const APPS_PATH = /^\/apps(\/|$)/;
 
 /** Percent-encoded dot, slash or backslash: a traversal the URL parser leaves for the server to decode. */
@@ -82,13 +82,15 @@ function isSameServer(a: Endpoint, b: Endpoint): boolean {
  * Decide whether a `webview:` document may frame a URL.
  *
  * Only absolute http(s) URLs without credentials are considered (relative and
- * protocol-relative input would resolve against the shell). App bundles under
- * `/apps/` are refused on any origin. A URL on the shell's own server (same
- * origin, a trailing-dot variant of it, or another loopback name on the
- * shell's port) is accepted only under /chat/ or /dropper/, after the parser
- * has normalised `.` and `..` segments and with no encoded separator left in
- * its path, over whatever scheme the shell itself uses. Any other URL must be
- * https, or http on a loopback host.
+ * protocol-relative input would resolve against the shell). A URL on the
+ * shell's own server (same origin, a trailing-dot variant of it, or another
+ * loopback name on the shell's port) is accepted only under /chat/ or
+ * /dropper/ (never /apps/), after the parser has normalised `.` and `..`
+ * segments and with no encoded separator left in its path, over whatever
+ * scheme the shell itself uses. Any other URL must be https, or http on a
+ * loopback host. A shell without an http(s) origin (a VS Code webview, a
+ * file:// page, an opaque or unparsable origin) has no own server, so only
+ * that external rule applies.
  *
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
@@ -96,21 +98,22 @@ function isSameServer(a: Endpoint, b: Endpoint): boolean {
  */
 export function isAllowedWebviewUrl(raw: string, shellOrigin: string): boolean {
 	let url: URL;
-	let shell: Endpoint | null;
 	try {
 		url = new URL(raw);
-		shell = endpointOf(new URL(shellOrigin));
 	} catch {
 		return false;
 	}
 	const target = endpointOf(url);
-	// No usable shell origin to compare with: refuse rather than guess.
-	if (!target || !shell) return false;
-	if (url.username || url.password) return false;
-	if (APPS_PATH.test(url.pathname)) return false;
+	if (!target || url.username || url.password) return false;
 
-	if (isSameServer(target, shell)) {
-		if (ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
+	let shell: Endpoint | null = null;
+	try {
+		shell = endpointOf(new URL(shellOrigin));
+	} catch {
+		// Opaque ('null') or unparsable: no http(s) URL can share its authority.
+	}
+	if (shell && isSameServer(target, shell)) {
+		if (APPS_PATH.test(url.pathname) || ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
 		return SHELL_ORIGIN_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
 	}
 	return target.protocol === 'https:' || LOOPBACK_HOSTS.has(target.host);

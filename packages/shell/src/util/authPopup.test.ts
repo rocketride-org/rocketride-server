@@ -61,29 +61,68 @@ const brokenStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
 	},
 };
 
+const RETURN = new URLSearchParams('code=abc&state=xyz');
+const T0 = 1_700_000_000_000;
+const TEN_MIN = 10 * 60 * 1000;
+
+/** Environment of a top-level popup tab at time `now`. */
+function top(storage: ReturnType<typeof memoryStorage> | typeof brokenStorage | null, now = T0) {
+	return { storage, topLevel: true, now };
+}
+
 test('a fresh popup is recognised by its window name or the ?rrauth=1 marker', () => {
 	const storage = memoryStorage();
-	assert.equal(isAuthPopupWindow('rrauth', new URLSearchParams(''), storage), true);
-	assert.equal(isAuthPopupWindow('', new URLSearchParams('rrauth=1'), storage), true);
-	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), storage), false);
-	assert.equal(isAuthPopupWindow('other', new URLSearchParams('rrauth=0'), storage), false);
+	assert.equal(isAuthPopupWindow('rrauth', new URLSearchParams(''), top(storage)), true);
+	assert.equal(isAuthPopupWindow('', new URLSearchParams('rrauth=1'), top(storage)), true);
+	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), top(storage)), false);
+	assert.equal(isAuthPopupWindow('other', new URLSearchParams('rrauth=0'), top(storage)), false);
 });
 
-test('the role survives the IdP round trip once remembered (window.name cleared, no marker)', () => {
+test('the role survives the IdP return leg (code, error or state) and the marker is consumed', () => {
+	for (const back of ['code=abc&state=xyz', 'error=access_denied', 'state=xyz']) {
+		const storage = memoryStorage();
+		rememberAuthPopup(top(storage));
+		assert.equal(storage.data.get(AUTH_POPUP_KEY), String(T0), 'the marker holds its timestamp');
+		assert.equal(isAuthPopupWindow('', new URLSearchParams(back), top(storage, T0 + 1000)), true, back);
+		assert.equal(storage.data.has(AUTH_POPUP_KEY), false, `marker removed once read (${back})`);
+		assert.equal(isAuthPopupWindow('', new URLSearchParams(back), top(storage, T0 + 2000)), false, `single use (${back})`);
+	}
+});
+
+test('the marker is ignored, and removed, outside the IdP return leg', () => {
 	const storage = memoryStorage();
-	rememberAuthPopup(storage);
-	assert.equal(storage.data.get(AUTH_POPUP_KEY), '1');
-	assert.equal(isAuthPopupWindow('', new URLSearchParams('code=abc&state=xyz'), storage), true);
-	forgetAuthPopup(storage);
-	assert.equal(isAuthPopupWindow('', new URLSearchParams('code=abc&state=xyz'), storage), false);
+	rememberAuthPopup(top(storage));
+	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), top(storage)), false);
+	assert.equal(isAuthPopupWindow('', new URLSearchParams('appid=x'), top(storage)), false);
+	assert.equal(storage.data.has(AUTH_POPUP_KEY), true, 'not read without a return-leg parameter');
+	assert.equal(isAuthPopupWindow('', RETURN, top(storage, T0 + TEN_MIN + 1)), false, 'older than 10 minutes');
+	assert.equal(storage.data.has(AUTH_POPUP_KEY), false, 'a stale marker is removed when read');
+});
+
+test('a marker from the future or with garbage content is ignored and removed', () => {
+	for (const value of [String(T0 + 60_000), 'garbage', '1', '']) {
+		const storage = memoryStorage();
+		storage.data.set(AUTH_POPUP_KEY, value);
+		assert.equal(isAuthPopupWindow('', RETURN, top(storage)), false, JSON.stringify(value));
+		assert.equal(storage.data.has(AUTH_POPUP_KEY), false, JSON.stringify(value));
+	}
+});
+
+test('a framed window neither sets nor honours the marker', () => {
+	const storage = memoryStorage();
+	rememberAuthPopup({ storage, topLevel: false, now: T0 });
+	assert.equal(storage.data.has(AUTH_POPUP_KEY), false, 'not set when framed');
+	storage.data.set(AUTH_POPUP_KEY, String(T0));
+	assert.equal(isAuthPopupWindow('', RETURN, { storage, topLevel: false, now: T0 }), false, 'not honoured when framed');
+	assert.equal(storage.data.get(AUTH_POPUP_KEY), String(T0), 'a framed window leaves the top-level marker alone');
 });
 
 test('unavailable storage never throws and falls back to name and marker', () => {
-	assert.doesNotThrow(() => rememberAuthPopup(brokenStorage));
+	assert.doesNotThrow(() => rememberAuthPopup(top(brokenStorage)));
 	assert.doesNotThrow(() => forgetAuthPopup(brokenStorage));
-	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), brokenStorage), false);
-	assert.equal(isAuthPopupWindow('rrauth', new URLSearchParams(''), brokenStorage), true);
-	assert.equal(isAuthPopupWindow('', new URLSearchParams(''), null), false);
+	assert.equal(isAuthPopupWindow('', RETURN, top(brokenStorage)), false);
+	assert.equal(isAuthPopupWindow('rrauth', new URLSearchParams(''), top(brokenStorage)), true);
+	assert.equal(isAuthPopupWindow('', RETURN, top(null)), false);
 });
 
 test('Shell.tsx remembers the role before startOAuth and forgets it on completion', () => {
