@@ -1,5 +1,6 @@
 ---
 title: Self-hosting
+description: Run the RocketRide engine on your own machine when you want full control over where data and model calls go. It is the same engine that powers Cloud.
 ---
 
 # Self-hosting

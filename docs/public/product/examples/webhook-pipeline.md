@@ -1,6 +1,7 @@
 ---
 title: Webhook Pipeline
 sidebar_position: 2
+description: "The simplest useful RocketRide pipeline: an HTTP endpoint that accepts a question, sends it to an LLM, and returns the answer. The hello world of RocketRide."
 ---
 
 # Webhook Pipeline
