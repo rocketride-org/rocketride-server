@@ -7,6 +7,7 @@ its backend runs the OpenAI node with no key. The integration tools then list
 every other integration is unchanged, and no output names anything the platform holds.
 """
 
+import asyncio
 import json
 
 import pytest
@@ -156,6 +157,18 @@ async def test_a_client_without_capabilities_has_no_hosted_models():
         pass
 
     assert await creds.fetch_hosted_models(Older()) is False
+
+
+@pytest.mark.asyncio
+async def test_a_capability_lookup_that_never_answers_counts_as_no(monkeypatch):
+    from ai.modules.mcp.tools import _common
+
+    class Stuck:
+        async def get_capabilities(self):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(_common, 'DEFAULT_TIMEOUT_SECONDS', 0.05)
+    assert await asyncio.wait_for(creds.fetch_hosted_models(Stuck()), timeout=5) is False
 
 
 # ---------------------------------------------------------------------------

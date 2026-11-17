@@ -10,6 +10,7 @@ An env-keys read failure yields 'unconfirmed' for everything, never
 'available': a read error must not look like "nothing is set up".
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -192,14 +193,17 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]], hosted_models: bo
 async def fetch_hosted_models(client) -> bool:
     """Whether the engine runs the hosted integrations with no key of the caller's.
 
-    Read from the capability tags of the engine's sign-in result. Any failure
-    counts as no: the integrations then need a key, as on any other engine.
+    Read from the capability tags of the engine's sign-in result, within the
+    tools' engine timeout. Any failure counts as no: the integrations then need
+    a key, as on any other engine.
     """
+    from .tools import _common
+
     getter = getattr(client, 'get_capabilities', None)
     if getter is None:
         return False
     try:
-        capabilities = await getter()
+        capabilities = await asyncio.wait_for(getter(), timeout=_common.DEFAULT_TIMEOUT_SECONDS)
     except Exception as exc:  # noqa: BLE001 - unknown means "needs a key", the safe answer
         logger.warning('get_capabilities failed; hosted models count as off: %s', exc)
         return False
