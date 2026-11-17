@@ -174,6 +174,31 @@ def test_drift_names_the_reresolved_package():
     assert drift == ['apps/foo-ui: react 18.2.0 -> 18.3.1']
 
 
+def test_patch_hash_is_not_drift():
+    """The build drops the developer's patch config, so a patched direct
+    dependency reinstalls as the bare version. The patch hash is stripped
+    from both sides; a peer suffix is still compared.
+    """
+    lock = """
+lockfileVersion: '9.0'
+importers:
+  apps/foo-ui:
+    dependencies:
+      left-pad:
+        specifier: ^1.3.0
+        version: 1.3.0(patch_hash=abc123)
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(patch_hash=def456)(react@18.2.0)
+"""
+    before = _lockfile_importer_pins(lock)
+    assert before['apps/foo-ui'] == {'left-pad': '1.3.0', 'react-dom': '18.2.0(react@18.2.0)'}
+    after = {'apps/foo-ui': {'left-pad': '1.3.0', 'react-dom': '18.2.0(react@18.2.0)'}}
+    assert _drift_of(before, after) == []
+    after['apps/foo-ui']['react-dom'] = '18.2.0(react@18.3.1)'
+    assert _drift_of(before, after) == ['apps/foo-ui: react-dom 18.2.0(react@18.2.0) -> 18.2.0(react@18.3.1)']
+
+
 def test_lockfile_parser_is_tolerant():
     """Unrecognized shapes yield {} — the lock is a fidelity feature, never
     a gate on its own.
