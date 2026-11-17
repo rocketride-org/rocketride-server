@@ -34,6 +34,8 @@
 // copy. Anything else throws `WalkError`, which the gate reports as `schema`.
 // =============================================================================
 
+import { SIZES } from './rate';
+
 /** Why a value was refused. */
 export class WalkError extends Error {
 	constructor(message: string) {
@@ -42,10 +44,20 @@ export class WalkError extends Error {
 	}
 }
 
+/** A value over the walker's string budget (reported as `too_large`, not `schema`). */
+export class WalkTooLargeError extends WalkError {
+	constructor(message: string) {
+		super(message);
+		this.name = 'WalkTooLargeError';
+	}
+}
+
 /** Deepest nesting accepted (the top-level value is depth 0). */
 export const WALK_MAX_DEPTH = 64;
 /** Most values (of any kind) in one walked value. */
 export const WALK_MAX_NODES = 100_000;
+/** Most string characters (values and keys together) in one walked value: one 8 MiB base64 payload plus a full request. */
+export const WALK_MAX_STRING_CHARS = SIZES.stringCeiling + SIZES.request;
 
 const FORBIDDEN_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -65,13 +77,19 @@ export interface IWalkOptions {
  */
 export function walk(value: unknown, options: IWalkOptions = {}): unknown {
 	let nodes = 0;
+	let chars = 0;
 	const ancestors = new Set<object>();
+	const countChars = (s: string): void => {
+		chars += s.length;
+		if (chars > WALK_MAX_STRING_CHARS) throw new WalkTooLargeError('too many string characters');
+	};
 
 	const visit = (v: unknown, depth: number): unknown => {
 		if (++nodes > WALK_MAX_NODES) throw new WalkError('too many nodes');
 		if (depth > WALK_MAX_DEPTH) throw new WalkError('too deep');
 		if (v === null || typeof v === 'boolean') return v;
 		if (typeof v === 'string') {
+			countChars(v);
 			options.onString?.(v);
 			return v;
 		}
@@ -102,6 +120,7 @@ export function walk(value: unknown, options: IWalkOptions = {}): unknown {
 				const d = Object.getOwnPropertyDescriptor(v, key)!;
 				if (!('value' in d)) throw new WalkError('accessor property');
 				if (d.value === undefined) continue;
+				countChars(key);
 				options.onString?.(key);
 				out[key] = visit(d.value, depth + 1);
 			}

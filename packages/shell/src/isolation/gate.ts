@@ -49,7 +49,7 @@ import { canonicalAppPath } from './paths';
 import { INTERVALS, QUOTAS, SIZES } from './rate';
 import type { IRateLimiter } from './rate';
 import type { RealmInfo } from './types';
-import { b64DecodedLength, isWireBinary, measure, utf8Length, walk } from './walk';
+import { b64DecodedLength, isWireBinary, measure, utf8Length, walk, WalkTooLargeError } from './walk';
 
 /** DAP timeout bounds (ms): the server's own timeout error must survive the proxy's slack. */
 export const DAP_TIMEOUT_MIN_MS = 1_000;
@@ -107,6 +107,7 @@ export function directMonitorKey(handle: string, pipeId: number | undefined): st
 
 /** Converts anything thrown inside the gate into a denial (`schema` unless it already is one). */
 export function asDenial(err: unknown, op: string): CapabilityDeniedError {
+	if (err instanceof WalkTooLargeError) return deny('too_large', op);
 	return err instanceof CapabilityDeniedError ? err : deny('schema', op);
 }
 
@@ -266,10 +267,11 @@ export function admitValue(g: IGateContext, lane: string, value: unknown): unkno
  * @returns The checked params, with `run` resolved for monitor keys.
  */
 export function gateOp(g: IGateContext, op: string, raw: unknown): { params: Record<string, unknown>; run?: IRunEntry } {
+	// The bucket is charged before the walk, so a refused flood costs no walk.
+	if (!g.rate.allow('request')) throw deny('rate', op);
 	const params = walkParams(g, op, raw);
 	const size = measure(params);
 	if (size.json + size.bin > SIZES.request) throw deny('too_large', op);
-	if (!g.rate.allow('request')) throw deny('rate', op);
 	if (INTERVALS[op] !== undefined && !g.rate.allow(op)) throw deny('rate', op);
 	const row = matchRow(op, undefined, undefined);
 	if (!row) throw deny('unknown_op', op);
@@ -291,6 +293,8 @@ export function gateOp(g: IGateContext, op: string, raw: unknown): { params: Rec
  */
 export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest {
 	const op = 'client.request';
+	// (3, first) rate: charged before the walk, so a refused flood costs no walk
+	if (!g.rate.allow('request')) throw deny('rate', op);
 	// (1) kind and walk budget
 	const params = walkParams(g, op, raw);
 	// (5, early) params are exactly {message, timeout?}
@@ -300,8 +304,6 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	// (2) size: binary counts as binary only at `arguments.data` (the bytes slot); elsewhere it is JSON
 	const size = measure(message, isPlainObject(message.arguments) ? message.arguments.data : undefined);
 	if (size.json > SIZES.request || size.bin > SIZES.bytes) throw deny('too_large', op);
-	// (3) rate
-	if (!g.rate.allow('request')) throw deny('rate', op);
 	// (5) the DAP envelope
 	const command = message.command;
 	if (message.type !== 'request' || typeof command !== 'string' || command === '' || utf8Length(command) > SIZES.name) throw deny('schema', op);
