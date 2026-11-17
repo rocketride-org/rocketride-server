@@ -42,6 +42,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -674,4 +675,232 @@ def probe_isolation() -> Optional[dict]:
         'originTemplate': config.origin_template,
         'protoMin': marker['protoMin'],
         'protoMax': marker['protoMax'],
+    }
+
+
+# =============================================================================
+# PER-VERSION ANSWERS — POST /apps/frame and the main-origin refusal (E8)
+# =============================================================================
+# One rule everywhere: the caller's scope-walk winner (resolve_app_pins for the
+# caller; anonymous callers see public ready rows only) carries the stamp. The
+# verdict is cached per (app, caller) for 60 s and dropped by
+# ``invalidate_app_serving``.
+
+_verdict_cache: dict = {}
+_frame_rate_cache: dict = {}
+FRAME_RATE_LIMIT = 60
+FRAME_RATE_WINDOW = 60.0
+
+# appManifest.network (Appendix C): strict https origins, at most 8.
+_NETWORK = re.compile(
+    r'https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+)(:(\d{1,5}))?'
+)
+_NETWORK_MAX = 8
+_ORG_OF_DIST = re.compile(r'orgs/([^/]+)/files/')
+
+
+def validate_network(entries: Any) -> List[str]:
+    """
+    Validate ``appManifest.network``: at most 8 strict ``https://host[:port]`` origins.
+
+    Refused: anything but a list of strings, a scheme other than https, a
+    path, query, user or whitespace, an uppercase host, an IP literal,
+    ``localhost``, a port outside 1-65535, and the app domain itself.
+
+    Returns:
+        The entries, as a list.
+
+    Raises:
+        ValueError: Naming the first offending entry.
+    """
+    if not isinstance(entries, list):
+        raise ValueError('network must be a list of https origins')
+    if len(entries) > _NETWORK_MAX:
+        raise ValueError(f'network lists {len(entries)} origins (at most {_NETWORK_MAX})')
+    suffix = current_config().app_suffix
+    for entry in entries:
+        match = _NETWORK.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None:
+            raise ValueError(f'network entry {entry!r} is not an https://host[:port] origin')
+        host, port = match.group(1), match.group(6)
+        try:
+            ipaddress.ip_address(host)
+            is_ip = True
+        except ValueError:
+            is_ip = False
+        if is_ip or host == 'localhost' or host.endswith('.localhost'):
+            raise ValueError(f'network entry {entry!r} names a local or IP host')
+        if port is not None and not 1 <= int(port) <= 65535:
+            raise ValueError(f'network entry {entry!r} has a port outside 1-65535')
+        if suffix and (host == suffix or host.endswith('.' + suffix)):
+            raise ValueError(f'network entry {entry!r} is on the app domain')
+    return list(entries)
+
+
+def _identity_of(info: Any) -> Tuple[str, str, List[str]]:
+    """``(user_id, org_id, team_ids)`` of an AccountInfo-shaped object."""
+    user_id = str(getattr(info, 'userId', '') or '')
+    org = getattr(info, 'organization', None)
+    org_id, team_ids = '', []
+    if org is not None:
+        org_id = str((org.get('id') if isinstance(org, dict) else getattr(org, 'id', '')) or '')
+        for team in (org.get('teams') if isinstance(org, dict) else getattr(org, 'teams', None)) or []:
+            tid = team.get('id') if isinstance(team, dict) else getattr(team, 'id', None)
+            if tid:
+                team_ids.append(str(tid))
+    return user_id, org_id, team_ids
+
+
+async def caller_of(token: str) -> Any:
+    """The AccountInfo a bearer or cookie token authenticates, or None (anonymous or invalid)."""
+    if not token:
+        return None
+    from ai.account import account
+
+    try:
+        info = await account.authenticate(token)
+    except Exception:
+        return None
+    # authenticate() returns an (int, str) error tuple on failure.
+    return info if hasattr(info, 'userId') else None
+
+
+async def version_verdict(token: str, app_id: str) -> Optional[Verdict]:
+    """The stamp of the caller's scope-walk winner for ``app_id``, or None when the caller has no entry."""
+    key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
+    hit = _cached(_verdict_cache, key)
+    if hit is not None:
+        return hit['verdict']
+    from ai.account.app_deploy import resolve_app_pins
+
+    local = '' if _is_saas() else 'local'
+    info = await caller_of(token)
+    if info is not None:
+        user_id, org_id, team_ids = _identity_of(info)
+        entries = await resolve_app_pins(org_id or local, user_id or None, team_ids)
+    else:
+        entries = await resolve_app_pins(local, None, [])
+    entry = next((e for e in entries if e.get('id') == app_id), None)
+    verdict = None
+    if entry is not None and 'isolated' in entry:
+        verdict = Verdict(isolated=entry['isolated'] is True, firstParty=entry.get('firstParty') is True)
+    return _remember(_verdict_cache, key, app_id, verdict=verdict)['verdict']
+
+
+async def isolated_for(token: str, app_id: str) -> bool:
+    """
+    Whether ``app_id`` is isolated for this caller (E8: its dist never serves on the main origin).
+
+    False under ``off`` without asking anything. An app the caller has no
+    entry for is isolated whenever the mode would isolate a third-party app
+    (fail closed).
+    """
+    config = current_config()
+    if config.mode == 'off':
+        return False
+    verdict = await version_verdict(token, app_id)
+    if verdict is None:
+        return _isolates(config, app_id, False)
+    return verdict.isolated
+
+
+def frame_rate_ok(caller: str) -> bool:
+    """One more ``POST /apps/frame`` for this caller inside its window (60 per 60 s)."""
+    hit = _cached(_frame_rate_cache, caller)
+    if hit is None:
+        _remember(_frame_rate_cache, caller, '', ttl=FRAME_RATE_WINDOW, count=1)
+        return True
+    hit['count'] += 1
+    return hit['count'] <= FRAME_RATE_LIMIT
+
+
+async def _version_facts(app_id: str, version: int, dist_dir: str) -> Optional[Tuple[str, str, dict]]:
+    """``(binding org, frame state, metadata)`` of the version behind one entitled dist dir."""
+    from ai.account import account
+    from ai.account.app_deploy import _dist_dir_of
+
+    match = _ORG_OF_DIST.match(dist_dir)
+    if match is None:
+        return None
+    org_id = match.group(1)
+    try:
+        entries = await account.deployments_versions(org_id, app_id)
+    except Exception:
+        return None
+    for entry in entries or []:
+        if int(entry.get('version', 0)) != version or _dist_dir_of(str(entry.get('artifactPath') or '')) != dist_dir:
+            continue
+        deploy_state = str(entry.get('state') or '')
+        state = deploy_state if deploy_state in ('ready', 'submit') else 'internal'
+        metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+        return org_id, state, metadata
+    return None
+
+
+async def _granted(org_id: str, app_id: str, version: int, state: str) -> List[str]:
+    """The effective grant: a ready version's approved capabilities (known names), else ``core``."""
+    caps = ['core']
+    if state == 'ready':
+        from ai.account import account
+
+        try:
+            stored = await account.approved_capabilities(org_id, app_id, version)
+        except Exception:
+            stored = []
+        known = known_capabilities() or frozenset({'core'})
+        for cap in stored if isinstance(stored, list) else []:
+            if isinstance(cap, str) and cap in known and cap not in caps:
+                caps.append(cap)
+    return caps
+
+
+def _network_of(metadata: dict) -> List[str]:
+    """The version's ``appManifest.network``, revalidated; an invalid list is dropped."""
+    manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
+    if 'network' not in manifest:
+        return []
+    try:
+        return validate_network(manifest['network'])
+    except ValueError:
+        return []
+
+
+async def frame_grant(app_id: str, version: int, token: str, info: Any, config: IsolationConfig) -> Optional[dict]:
+    """
+    The ``POST /apps/frame`` 200 body for one caller, or None (the one 404).
+
+    A signed-in caller gets a frame token for a version it is entitled to;
+    an anonymous caller gets the ``/_p/`` prefix of a public ``ready``
+    version. Only an app the caller's winner stamps as isolated is framed.
+    """
+    verdict = await version_verdict(token if info is not None else '', app_id)
+    if verdict is None or not verdict.isolated:
+        return None
+    if info is not None:
+        user_id, org_id, _ = _identity_of(info)
+        dirs = await token_version_dirs(user_id, org_id, app_id)
+    else:
+        dirs = await public_version_dirs(app_id)
+    dist_dir = dirs.get(version)
+    facts = await _version_facts(app_id, version, dist_dir) if dist_dir else None
+    if facts is None:
+        return None
+    org_id_of_version, state, metadata = facts
+    if info is None and state != 'ready':
+        return None
+    if info is not None:
+        frame_token = mint_frame_token(app_id, version, user_id, org_id, config=config)
+        entry_prefix = f'/_t/{frame_token}/v{version}/'
+        expires_at = json.loads(_unb64u(frame_token.split('.')[2]))['exp'] * 1000
+    else:
+        entry_prefix = f'/_p/{app_id}/v{version}/'
+        expires_at = (int(time.time()) + FRAME_TOKEN_TTL) * 1000
+    return {
+        'v': 1,
+        'origin': config.origin_of(app_id),
+        'entryPrefix': entry_prefix,
+        'expiresAt': expires_at,
+        'capabilities': await _granted(org_id_of_version, app_id, version, state),
+        'network': _network_of(metadata),
+        'state': state,
     }

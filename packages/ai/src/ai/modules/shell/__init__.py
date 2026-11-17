@@ -42,6 +42,7 @@ Routes registered:
     GET  /pricing, /store, ...      — shell SPA deep links (see PUBLIC_ROUTES)
     GET  /shell/{file_path:path}    — shell assets (JS, CSS, themes)
     POST /apps/session              — mint the /apps auth cookie
+    POST /apps/frame                — open an isolated app's frame (#1022)
     GET  /apps/{file_path:path}     — app serving, three shapes:
         <appId>/v<N>/<file>         — versioned MF bundle (store-backed)
         <appId>                     — resolution info: what a bundle fetch
@@ -57,7 +58,16 @@ from typing import Any, Dict
 
 from ai.web import WebServer
 from .app_origin import validate_isolation_config
-from .shell import PUBLIC_ROUTES, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+from .shell import (
+    PUBLIC_ROUTES,
+    shell_static,
+    apps_static,
+    apps_session,
+    apps_frame,
+    sitemap_xml,
+    robots_txt,
+    llms_txt,
+)
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -113,6 +123,17 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     server.add_route(
         path='/apps/session',
         routeHandler=apps_session,
+        methods=['POST'],
+        public=True,
+    )
+
+    # ── Isolated app frames (#1022) ─────────────────────────────────────
+    # POST /apps/frame answers what the shell needs to open an isolated
+    # app on its own origin (409 while RR_APP_ISOLATION is off). Registered
+    # BEFORE the catch-all, like /apps/session.
+    server.add_route(
+        path='/apps/frame',
+        routeHandler=apps_frame,
         methods=['POST'],
         public=True,
     )

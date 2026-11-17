@@ -51,6 +51,7 @@ request headers.
 """
 
 import hashlib
+import json
 import mimetypes
 import os
 import posixpath
@@ -623,6 +624,11 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 # warm map forces one re-resolution, refractory-limited below.
 
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
+# An isolated app's image on the main origin (E8): never a script context.
+_SANDBOXED_ASSET_HEADERS = {
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+}
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
@@ -746,7 +752,22 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')
 
-    dirs = await _version_dirs_for(request.cookies.get(_APP_COOKIE, ''), app_id, want=version)
+    # E8 (#1022): an isolated app's code never serves on the main origin, for
+    # any client (an old shell or a stale tab would run it in the shell
+    # realm); it loads only from its own app origin. Its images still feed
+    # <img> tiles, sandboxed so an SVG opened as a document cannot run
+    # script here. Same 404 as an absent version. Skipped under off.
+    token = request.cookies.get(_APP_COOKIE, '')
+    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
+    headers = {'Cache-Control': _BUNDLE_CACHE}
+    from .app_origin import isolated_for
+
+    if await isolated_for(token, app_id):
+        if not media_type.startswith('image/'):
+            raise HTTPException(status_code=404, detail='Not found')
+        headers.update(_SANDBOXED_ASSET_HEADERS)
+
+    dirs = await _version_dirs_for(token, app_id, want=version)
     dist_dir = dirs.get(version)
     if not dist_dir:
         raise HTTPException(status_code=404, detail='Not found')
@@ -757,8 +778,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 async def apps_session(request: Request):
@@ -806,6 +826,55 @@ async def apps_session(request: Request):
         samesite='lax',
     )
     return resp
+
+
+def _frame_error(status: int, code: str) -> JSONResponse:
+    """One ``POST /apps/frame`` error body (Appendix A codes)."""
+    return JSONResponse({'error': code}, status_code=status, headers={'Cache-Control': 'no-store'})
+
+
+async def apps_frame(request: Request):
+    """
+    ``POST /apps/frame {appId, version}``: what the shell needs to open an isolated app (#1022).
+
+    Bearer optional: a signed-in caller gets a frame token for a version it is
+    entitled to (``/_t/<token>/v<N>/``); an anonymous caller gets the
+    ``/_p/<appId>/v<N>/`` prefix of a public ``ready`` version. Answers
+    (design Appendix A): 200 ``{v, origin, entryPrefix, expiresAt,
+    capabilities, network, state}``; 400 ``bad_request``; 401
+    ``invalid_token`` (a bearer that does not authenticate); 404
+    ``not_found``, one answer for every cause (unknown, not entitled, not
+    isolated); 409 ``isolation_off``; 429 ``rate_limited`` (per caller).
+    """
+    from .app_origin import caller_of, current_config, frame_grant, frame_rate_ok
+
+    config = current_config()
+    if config.mode == 'off':
+        return _frame_error(409, 'isolation_off')
+    try:
+        body = json.loads(await request.body())
+    except ValueError:
+        return _frame_error(400, 'bad_request')
+    app_id = body.get('appId') if isinstance(body, dict) else None
+    version = body.get('version') if isinstance(body, dict) else None
+    if not (isinstance(app_id, str) and len(app_id) <= 128 and _APP_ID_SEG.fullmatch(app_id)):
+        return _frame_error(400, 'bad_request')
+    if type(version) is not int or version < 1:
+        return _frame_error(400, 'bad_request')
+
+    auth = request.headers.get('authorization', '')
+    token = auth[7:].strip() if auth[:7].lower() == 'bearer ' else auth.strip()
+    info = await caller_of(token) if token else None
+    if token and info is None:
+        return _frame_error(401, 'invalid_token')
+    caller = f'u:{info.userId}' if info is not None else f'ip:{request.client.host if request.client else ""}'
+    if not frame_rate_ok(caller):
+        return _frame_error(429, 'rate_limited')
+
+    grant = await frame_grant(app_id, version, token, info, config)
+    if grant is None:
+        return _frame_error(404, 'not_found')
+    return JSONResponse(grant, headers={'Cache-Control': 'no-store'})
 
 
 async def apps_static(request: Request):
