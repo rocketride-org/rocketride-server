@@ -927,7 +927,7 @@ the host's one channel per mount over a harness peer
   `inaccessible` is an identity-permission hint plus a failed probe, and a retry
   needs re-discovery.
 - SQL Explorer's `execute` has no client timeout (SQL nodes set no statement
-  deadline; the app offers Stop waiting). Schema reflection waits up to 5
-  minutes and the engine check 15 seconds.
+  deadline; the app offers Stop waiting). Reading the schema waits up to 60
+  seconds, re-reading it 135, and the engine check 15.
 - Nothing cancels a running tool call. Stop waiting stops the client, not the
   node.
