@@ -302,7 +302,8 @@ def register(registry: ToolRegistry) -> None:
         'a message about credits or a denied permission. After a run refused with error_type AccountWaitlisted, '
         'relay that message instead. Tell the user the summary and every next_step, as written. When the user '
         "asked about one check, also give that check's detail. When ready is false, leave out a check with "
-        'blocking false unless the pipeline uses an AI model. The result never holds key values or variable names.',
+        'blocking false unless the pipeline uses an AI model or the user asked about it. The result never holds '
+        'key values or variable names.',
         {'type': 'object', 'properties': {}},
         hints=ToolHints.reads("Reads the caller's own account readiness. Returns no secrets and changes nothing."),
     )(_account_status)

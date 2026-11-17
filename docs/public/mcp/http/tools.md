@@ -143,7 +143,8 @@ message instead. It already says everything that can be known.
   relay the summary and every next step, to add a check's `detail` when the
   user asked about that check (a credits question is answered by the
   `credits` detail), and, when the account is not ready, to leave out the
-  `model_key` advice unless the pipeline uses a model.
+  `model_key` advice unless the pipeline uses a model or the user asked about
+  model keys.
 
 ## Author pipelines
 
