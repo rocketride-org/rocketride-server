@@ -33,7 +33,7 @@ function hostMetadata(): unknown {
 let resultCount = 0;
 app.ontoolresult = (result) => {
 	resultCount += 1;
-	root.render(<CanvasApp key={resultCount} model={buildCanvasModel(result as ToolResultLike, hostMetadata())} />);
+	root.render(<CanvasApp key={resultCount} app={app} model={buildCanvasModel(result as ToolResultLike, hostMetadata())} />);
 };
 app
 	.connect()

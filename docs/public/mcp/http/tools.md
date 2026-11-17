@@ -337,7 +337,9 @@ never edited or run.
 - **Workspace:** a `.projects/...` path is read from your active workspace,
   the same one the builder opens: your development team's shared files
   (`@/Team/=<teamId>/.projects`) when your account has a development team in
-  the current organization, otherwise your own `.projects`. A full team path is
+  the current organization, otherwise your own `.projects`. On a self-hosted
+  open source engine every caller's development team is the built-in `local`
+  team, so the workspace is `@/Team/=local/.projects`. A full team path is
   used as given, and the file store checks that you belong to that team, as it
   does for `store_read`.
 - **Returns:** `{ok, path, workspace, name, description, node_count, truncated,

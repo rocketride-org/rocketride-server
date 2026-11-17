@@ -30,8 +30,9 @@ def workspace_root_for(account_info: Any) -> str:
     only while the team id is a plain id and names one of the active
     organization's teams. Every other case (no team, a team from another
     organization, an unsafe id, no sign-in result) is the caller's private
-    tree. An open source engine has no teams, so it always gets
-    ``.projects``.
+    tree. An open source engine signs every caller in with its single
+    ``local`` team as the development team, so there the root is
+    ``@/Team/=local/.projects``, which is also where the builder saves.
     """
     info = account_info if isinstance(account_info, dict) else {}
     dev_team = info.get('devTeam')
