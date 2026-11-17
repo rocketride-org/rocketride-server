@@ -854,3 +854,16 @@ def test_snapshot_assets_are_served_to_anonymous_crawlers(engine):
     # Only the version the public rung serves, of an app it serves.
     assert engine.get('/apps/rocketride.home/v2/seo-assets/logo.svg').status_code == 404
     assert engine.get('/apps/rocketride.preview/v1/seo-assets/logo.svg').status_code == 404
+
+
+def test_a_snapshot_fetched_as_a_build_file_is_noindex(engine):
+    # The raw template ({{assets}} unrendered) stays out of search; the build's other files do not change.
+    raw = engine.get('/apps/rocketride.home/v3/pages/pricing.html', headers={'User-Agent': GOOGLEBOT})
+    assert raw.status_code == 200 and '{{assets}}' in raw.text
+    assert raw.headers['x-robots-tag'] == 'noindex'
+    # Wherever the manifest puts a snapshot: any HTML file of the build is noindex.
+    FILES[f'{DIST}/seo/landing.html'] = b'<!doctype html><h1>{{assets}}</h1>'
+    elsewhere = engine.get('/apps/rocketride.home/v3/seo/landing.html', headers={'User-Agent': GOOGLEBOT})
+    assert elsewhere.status_code == 200 and elsewhere.headers['x-robots-tag'] == 'noindex'
+    asset = engine.get('/apps/rocketride.home/v3/seo-assets/logo.svg', headers={'User-Agent': GOOGLEBOT})
+    assert asset.status_code == 200 and 'x-robots-tag' not in asset.headers
