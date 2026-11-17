@@ -161,8 +161,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	let epoch = 0;
 
 	/** One DAP request on the root's own behalf (teardown, recovery). */
-	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> =>
-		Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
+	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
 
 	/** Best-effort end of what an answer started when it cannot be recorded (late, detached, or a record failure). */
 	const endOrphan = (req: IGatedRequest, response: DAPMessage): void => {
@@ -578,7 +577,11 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				detached: false,
 				detachRouter: () => {},
 			};
-			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st), admit: (lane, value) => {
+			st.detachRouter = router.addGatedRealm(endpoint, {
+				info,
+				handlers: buildHandlers(st),
+				outbound: outboundFor(st),
+				admit: (lane, value) => {
 					if (closing > 0) throw deny('capability', lane);
 					return admitValue(st.gate, lane, value);
 				},

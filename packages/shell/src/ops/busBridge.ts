@@ -693,8 +693,7 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 			endpoint.post(out);
 		};
 		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, appInflight: 0, inflight: new Map(), unsubscribe: () => {} };
-		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op' | CapabilityDeniedError): void =>
-			post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(code instanceof CapabilityDeniedError ? code : deny(code, op)) });
+		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op' | CapabilityDeniedError): void => post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(code instanceof CapabilityDeniedError ? code : deny(code, op)) });
 		/** Rate, walk and size budget for the router's own lanes; throws a denial. */
 		const admit = (lane: string, value: unknown): unknown => {
 			try {
