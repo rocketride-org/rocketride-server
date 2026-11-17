@@ -240,6 +240,19 @@ def artifact_content_dir(artifact_path: str) -> str:
     return artifact_path[:-5] if artifact_path.endswith('.json') else artifact_path
 
 
+# Deployment metadata keys only the server writes (#1022): the seeder's
+# first-party marker, an admin's capability grant and the build stamp. A
+# caller's metadata never carries them (caller_metadata).
+SERVER_OWNED_METADATA = frozenset({'platform', 'approvedCapabilities', 'build'})
+
+
+def caller_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A caller-supplied metadata blob without the server-owned keys ({} when not a dict)."""
+    if not isinstance(metadata, dict):
+        return {}
+    return {k: v for k, v in metadata.items() if k not in SERVER_OWNED_METADATA}
+
+
 def artifact_metadata(artifact: Dict[str, Any], metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The rail entry's metadata blob, shared verbatim by both editions.
 

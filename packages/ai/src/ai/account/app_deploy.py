@@ -69,7 +69,7 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib import debug
 
-from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
+from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir, caller_metadata
 
 
 def build_of(entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -385,10 +385,10 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, 'data is not a valid zip archive')
     # appRoot names the app folder inside a workspace-relative zip; its shape
     # is guarded like a zip entry (it becomes a path inside the source tree).
-    caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
     # Server-owned keys are never the caller's (#1022): 'platform' is the
-    # seeder's first-party marker and 'approvedCapabilities' an admin's grant.
-    caller_meta = {k: v for k, v in caller_meta.items() if k not in _SERVER_OWNED_METADATA}
+    # seeder's first-party marker, 'approvedCapabilities' an admin's grant and
+    # 'build' the server's own stamp (written below).
+    caller_meta = caller_metadata(args.get('metadata'))
     app_root = str(caller_meta.get('appRoot') or '')
     if app_root and (
         app_root.startswith('/')
@@ -570,11 +570,6 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     debug(f'[app_deploy] deployed {app_id} v{artifact["appVersion"]} as registry v{version} (private, build queued)')
     # One generic response shape for every kind: rrext_deploy add -> {artifact}
     return conn.build_response(request, body={'artifact': _rail_entry(entry, artifact)})
-
-
-# Deployment metadata keys only the server writes (stripped from a deploy's
-# caller metadata): the seeder's first-party marker and the admin's grant.
-_SERVER_OWNED_METADATA = frozenset({'platform', 'approvedCapabilities'})
 
 
 def _isolation_manifest_error(manifest: Dict[str, Any]) -> str:

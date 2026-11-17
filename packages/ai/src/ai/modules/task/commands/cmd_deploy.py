@@ -54,6 +54,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from ai.account import account
+from ai.account.deployment_backend import caller_metadata
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
@@ -341,7 +342,9 @@ class DeployCommands(_DeployBase):
             raise ValueError('pipeline.project_id is required')
 
         org_id = self._org_id()
-        metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
+        # Server-owned keys (platform, approvedCapabilities, build) are never
+        # the caller's: a pipe shares its rail with an app of the same id (#1022).
+        metadata = caller_metadata(args.get('metadata')) if isinstance(args.get('metadata'), dict) else None
         entry = await account.deployments_publish(
             org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata
         )

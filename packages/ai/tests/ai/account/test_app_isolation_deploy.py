@@ -170,31 +170,111 @@ async def test_resolve_app_pins_off_adds_nothing(pins, stamp_env):
         assert 'firstParty' not in entry and 'isolated' not in entry, entry['id']
 
 
+class _Rail:
+    """A fake account whose ``deployments_versions`` returns one rail per app id (on org ``local``)."""
+
+    def __init__(self, rails):
+        self.rails = rails
+        self.orgs = []
+
+    async def deployments_versions(self, org_id, app_id):
+        self.orgs.append(org_id)
+        return [dict(e) for e in self.rails.get(app_id, [])]
+
+
+def _row(version, metadata, kind='app'):
+    return {'version': version, 'kind': kind, 'metadata': metadata}
+
+
+SEEDED = {'platform': True, 'build': {'status': 'ok', 'seeded': True}}
+USER_DEPLOY = {'build': {'status': 'ok'}}
+
+
 @pytest.mark.asyncio
 async def test_oss_base_is_first_party_rule(monkeypatch):
-    """T31: OSS base = deployment metadata ``platform is True`` AND binding org ``local``."""
+    """T31: OSS base = every app version is the seeder's (``metadata.platform is True``) AND binding org ``local``."""
     from ai.account.base import AccountBase
 
     method = sup.need(AccountBase, 'is_first_party')
-
-    class Fake:
-        def __init__(self, metadata_by_app):
-            self.metadata_by_app = metadata_by_app
-
-        async def deployments_versions(self, org_id, app_id):
-            if app_id not in self.metadata_by_app:
-                return []
-            return [{'version': 1, 'metadata': self.metadata_by_app[app_id]}]
-
-        async def deployments_artifact(self, org_id, app_id, version):
-            return {'kind': 'app', 'metadata': self.metadata_by_app.get(app_id, {})}
-
-    fake = Fake({'rocketride.home': {'platform': True}, 'acme.mine': {}, 'acme.liar': {'platform': 'true'}})
+    fake = _Rail(
+        {
+            'rocketride.home': [_row(1, SEEDED)],
+            'acme.mine': [_row(1, {})],
+            'acme.liar': [_row(1, {'platform': 'true'})],
+        }
+    )
     assert await method(fake, 'rocketride.home', 'local') is True
     assert await method(fake, 'rocketride.home', 'acme-org') is False  # platform flag, wrong binding org
     assert await method(fake, 'acme.mine', 'local') is False
     assert await method(fake, 'acme.liar', 'local') is False  # only the boolean True counts
     assert await method(fake, 'acme.unknown', 'local') is False
+
+
+@pytest.mark.asyncio
+async def test_oss_seeded_app_plus_one_user_deploy_is_not_first_party():
+    """T31 (G4 S6): one version on the rail that the seeder did not write makes the app third party."""
+    from ai.account.base import AccountBase
+
+    fake = _Rail({'rocketride.home': [_row(2, USER_DEPLOY), _row(1, SEEDED)]})
+    assert await AccountBase.is_first_party(fake, 'rocketride.home', 'local') is False
+
+
+@pytest.mark.asyncio
+async def test_oss_legacy_seeded_rows_use_the_build_stamp_and_platform_wins():
+    """T31 (G4 S6): rows seeded before the platform flag carry only ``build.seeded``; where both exist, platform decides."""
+    from ai.account.base import AccountBase
+
+    legacy = {'build': {'status': 'ok', 'seeded': True}}
+    fake = _Rail(
+        {
+            'rocketride.legacy': [_row(1, legacy)],
+            'rocketride.mixed': [_row(2, SEEDED), _row(1, legacy)],
+            'rocketride.denied': [_row(1, {'platform': False, 'build': {'status': 'ok', 'seeded': True}})],
+        }
+    )
+    assert await AccountBase.is_first_party(fake, 'rocketride.legacy', 'local') is True
+    assert await AccountBase.is_first_party(fake, 'rocketride.mixed', 'local') is True
+    assert await AccountBase.is_first_party(fake, 'rocketride.denied', 'local') is False
+
+
+@pytest.mark.asyncio
+async def test_oss_first_party_reads_only_app_rows():
+    """T31 (G4 S6): a pipe row on the same rail (any metadata) neither makes nor breaks first party."""
+    from ai.account.base import AccountBase
+
+    pipe_claims = {'platform': True, 'build': {'seeded': True}}
+    fake = _Rail(
+        {
+            'rocketride.home': [_row(2, {}, kind='pipe'), _row(1, SEEDED)],
+            'acme.pipeonly': [_row(1, pipe_claims, kind='pipe')],
+        }
+    )
+    assert await AccountBase.is_first_party(fake, 'rocketride.home', 'local') is True
+    assert await AccountBase.is_first_party(fake, 'acme.pipeonly', 'local') is False
+
+
+@pytest.mark.asyncio
+async def test_deployments_publish_strips_server_owned_keys_from_pipes():
+    """G4 S6: the shared publish door drops platform, approvedCapabilities and build from a pipe's metadata."""
+    from types import SimpleNamespace
+
+    from ai.account.base import AccountBase
+
+    calls = []
+
+    class Backend:
+        async def publish(self, org_id, project_id, pipeline, actor, comment, metadata=None, state=None):
+            calls.append(metadata)
+            return {'version': 1}
+
+    fake = SimpleNamespace(_deployment_backend=lambda: Backend())
+    metadata = {'platform': True, 'approvedCapabilities': ['fs.app'], 'build': {'seeded': True}, 'note': 1}
+    await AccountBase.deployments_publish(fake, 'local', 'p1', {'kind': 'pipe', 'name': 'P'}, {}, metadata=metadata)
+    await AccountBase.deployments_publish(fake, 'local', 'p1', {'name': 'P'}, {}, metadata=dict(metadata))
+    assert calls[0] == {'note': 1} and calls[1] == {'note': 1}
+    # app artifacts come only through handle_app_add (which strips the caller's keys) and the seeder
+    await AccountBase.deployments_publish(fake, 'local', 'a1', {'kind': 'app'}, {}, metadata=dict(metadata))
+    assert calls[2] == metadata
 
 
 @pytest.mark.asyncio

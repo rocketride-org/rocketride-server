@@ -172,6 +172,14 @@ class TestPublish:
         account_stub.audit.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_publish_strips_server_owned_metadata(self, account_stub):
+        """#1022 G4 S6: the pipe door never lets a caller set platform, a grant or a build stamp."""
+        conn = _make_conn(_account_info())
+        metadata = {'platform': True, 'approvedCapabilities': ['fs.app'], 'build': {'seeded': True}, 'note': 'kept'}
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': metadata})
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'note': 'kept'}
+
+    @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):

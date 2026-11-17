@@ -694,8 +694,16 @@ class AccountBase(ABC):
         overrides the by-kind born state — the seeder registers
         pre-approved platform artifacts directly as 'ready'.
 
+        A non-app artifact's ``metadata`` loses the server-owned keys
+        (``platform``, ``approvedCapabilities``, ``build``): only the app
+        deploy and the seeder write them (#1022).
+
         Returns the new registry entry (version, sha256, publishedBy, ...).
         """
+        if isinstance(metadata, dict) and str(pipeline.get('kind') or 'pipe') != 'app':
+            from .deployment_backend import caller_metadata
+
+            metadata = caller_metadata(metadata)
         return await self._deployment_backend().publish(
             org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
         )
@@ -901,12 +909,15 @@ class AccountBase(ABC):
     async def is_first_party(self, app_id: str, binding_org_id: str) -> bool:
         """Whether ``app_id``, bound by ``binding_org_id``, is the platform's own app.
 
-        OSS rule: the binding org is ``local`` and every version on the app's
-        rail is a seeded one (``metadata.platform is True``, or the build stamp
-        ``metadata.build.seeded is True`` that only the seeder writes). A
-        deploy never carries either marker: ``handle_app_add`` strips
-        ``platform`` from the caller's metadata and writes ``build`` itself.
-        Any error answers False (fail closed: the app is isolated).
+        OSS rule: the binding org is ``local`` and every APP version on the
+        app's rail was written by the seeder: ``metadata.platform is True``.
+        Rows seeded before that flag existed carry only the seeder's build
+        stamp, so a row WITHOUT a ``platform`` key falls back to
+        ``metadata.build.seeded is True`` (legacy rows only; where the key
+        exists it decides). No caller can set either: the deploy doors strip
+        ``platform``, ``approvedCapabilities`` and ``build`` from caller
+        metadata. Pipe rows on the same rail are ignored. Any error answers
+        False (fail closed: the app is isolated).
         """
         if binding_org_id != 'local':
             return False
@@ -916,12 +927,14 @@ class AccountBase(ABC):
             return False
 
         def seeded(entry) -> bool:
-            metadata = entry.get('metadata') if isinstance(entry, dict) else None
-            metadata = metadata if isinstance(metadata, dict) else {}
+            metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+            if 'platform' in metadata:
+                return metadata['platform'] is True
             build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
-            return metadata.get('platform') is True or build.get('seeded') is True
+            return build.get('seeded') is True
 
-        return bool(entries) and all(seeded(entry) for entry in entries)
+        apps = [e for e in entries or [] if isinstance(e, dict) and str(e.get('kind') or 'pipe') == 'app']
+        return bool(apps) and all(seeded(entry) for entry in apps)
 
     async def set_approved_capabilities(self, org_id: str, app_id: str, version: int, caps: list, actor: dict) -> dict:
         """Record the capabilities an admin granted one app version (``metadata.approvedCapabilities``).
