@@ -25,7 +25,8 @@
  * shared package tasks.
  *
  * Exposes:
- *   shared:test — type-checks apps/shared source AND tests (tsc -p
+ *   shared:test — builds the TS client SDK (client-typescript:build), then
+ *                    runs shared:test-run, which type-checks apps/shared source AND tests (tsc -p
  *                    tsconfig.test.json), then runs node:test against script
  *                    helpers and TSX component smoke tests. Test files are
  *                    co-located with their subject and discovered recursively.
@@ -153,7 +154,18 @@ module.exports = {
 	name: 'shared',
 	description: 'RocketRide shared source library',
 	actions: [
-		{ name: 'shared:test', action: makeTestAction },
+		// The type-check and node:test run itself (shared:test runs it after the client build).
+		{ name: 'shared:test-run', action: makeTestAction },
+		{
+			// Compile the TS client SDK first: the tests and the source they
+			// type-check import `rocketride`, whose types are its generated
+			// dist/types (the same prerequisite as shell:test).
+			name: 'shared:test',
+			action: () => ({
+				description: 'Testing shared',
+				steps: ['client-typescript:build', 'shared:test-run'],
+			}),
+		},
 		{ name: 'shared:gen-gallery-tokens', action: () => makeGenGalleryTokensAction(false) },
 		{ name: 'shared:check-gallery-tokens', action: () => makeGenGalleryTokensAction(true) },
 	],

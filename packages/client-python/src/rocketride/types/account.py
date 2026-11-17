@@ -40,11 +40,15 @@ Types Defined:
     ProfileUpdate: Mutable profile fields submitted when saving edits.
     CreateKeyParams: Parameters for creating a new API key.
     CreateKeyResult: Result containing the raw key string.
+    TeamAssignment: A team and the permissions to grant an invitee there.
     InviteMemberParams: Parameters for inviting a new member.
+    InvitedMember: The membership the server created for an invite.
     TeamMemberParams: Parameters for adding or updating a team member.
 """
 
 from typing import TypedDict
+
+from typing_extensions import NotRequired
 
 
 # =============================================================================
@@ -330,6 +334,19 @@ CreateKeyResult = TypedDict('CreateKeyResult', {'key': str})
 """Result of creating a new API key, containing the raw key string."""
 
 
+class TeamAssignment(TypedDict):
+    """
+    A team to add an invitee to, with the permissions to grant there.
+
+    Attributes:
+        teamId: The team to add the invitee to.
+        permissions: Permissions to grant within the team.
+    """
+
+    teamId: str
+    permissions: list[str]
+
+
 class InviteMemberParams(TypedDict):
     """
     Parameters for inviting a new member to an organization.
@@ -339,12 +356,42 @@ class InviteMemberParams(TypedDict):
         givenName: First / given name of the invitee.
         familyName: Last / family name of the invitee.
         role: Organization-level role to assign (e.g. "admin" or "member").
+        teamAssignments: Optional teams to add the invitee to.
+        devTeamId: Optional development team for the invitee. It must be one of
+            the ``teamAssignments`` teams with ``task.control`` (any org team
+            when ``role`` is "admin"). When omitted the server picks one if only
+            one team qualifies.
     """
 
     email: str
     givenName: str
     familyName: str
     role: str
+    teamAssignments: NotRequired[list[TeamAssignment]]
+    devTeamId: NotRequired[str]
+
+
+class InvitedMember(TypedDict):
+    """
+    The membership the server created for an invite.
+
+    Attributes:
+        userId: Unique identifier of the invited user.
+        displayName: The invitee's display name.
+        email: The invitee's email address.
+        role: The organization-level role assigned.
+        status: "pending" until the invitee sets a password, "active" if their
+            account already existed.
+        devTeamId: The team recorded as the invitee's development team, or
+            None when none was recorded.
+    """
+
+    userId: str
+    displayName: str
+    email: str
+    role: str
+    status: str
+    devTeamId: str | None
 
 
 class TeamMemberParams(TypedDict):

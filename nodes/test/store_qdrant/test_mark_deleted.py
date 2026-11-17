@@ -91,12 +91,13 @@ def _load_qdrant_module(stubs):
 
 
 # Prefer the installed client: the lightweight unit tests work with it. Without it (a test process where it is
-# installed only later, as a node's depends() does), stub the client and numpy while qdrant.py executes.
+# installed only later, as a node's depends() does), stub the client while qdrant.py executes. numpy is never
+# stubbed: the real one stays in sys.modules for the whole run (nodes/test/_sys_modules_guard.py pins it).
 try:
     importlib.import_module('qdrant_client')
-    _qdrant_mod = _load_qdrant_module(('numpy',))
+    _qdrant_mod = _load_qdrant_module(())
 except ImportError:
-    _qdrant_mod = _load_qdrant_module(('numpy',) + _CLIENT_STUBS)
+    _qdrant_mod = _load_qdrant_module(_CLIENT_STUBS)
 
 Store = _qdrant_mod.Store
 

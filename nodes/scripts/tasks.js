@@ -110,8 +110,8 @@ const CPP_NODE_BUILDS = [...SRC_NODE_DIRS]
 //
 //   module.exports = {
 //     name: 'graph',                      // unique, kebab-case
-//     suites: ['test_graph_x_full.py'],   // files in nodes/test, registered by exactly one domain
-//     poolerSuites: ['test_graph_x_full.py'],   // optional: suites that also run through a pooler
+//     suites: ['test_graph_x_live.py'],   // files in nodes/test, registered by exactly one domain
+//     poolerSuites: ['test_graph_x_live.py'],   // optional: suites that also run through a pooler
 //     poolerEnv: 'RR_TEST_GRAPH_POOLER_DSN',    // names the pooler; unset = the pooler leg is left out
 //     poolerMode: 'second-pass',          // 'second-pass': run poolerSuites again, with
 //                                         //   secondPassEnv(poolerDsn, env) merged into the environment
@@ -133,9 +133,9 @@ const CPP_NODE_BUILDS = [...SRC_NODE_DIRS]
 // every task behave exactly as they did before the registry (no live pass, no
 // extra --ignore). Suites that existed before the registry (DEVELOP_DB_SUITES)
 // keep their old behavior until a domain lists one in its `suites`: develop's
-// `*_full.py` suites stay out of nodes:test (its mocked pass globs them away; only
-// nodes:test-full collects them) and test_pgvector_search.py stays in the mocked
-// pass. Listing one is that domain's deliberate, documented CI change.
+// `test_*_live.py` suites run in nodes:test's mocked pass, each skipping without
+// its RR_TEST_* variable (CI's graph step on AGE 1.6.0 runs one of them directly).
+// Listing one is that domain's deliberate, documented CI change.
 //
 // The live pass runs in one process, in a fixed order that does not depend on
 // which domains are present: the DEVELOP_DB_SUITES that some domain registered,
@@ -228,12 +228,12 @@ function loadDbLanes(dir = DB_LANES_DIR) {
 // The live database suites that exist on develop, in the order the live pass runs the ones a
 // domain registered. Without a registration each keeps its behavior on develop (see above).
 const DEVELOP_DB_SUITES = [
-	'test_rocketride_db_full.py',
-	'test_rocketride_graph_full.py',
-	'test_rocketride_vector_tools_full.py',
-	'test_vector_store_listing_full.py',
-	'test_vector_store_writes_full.py',
-	'test_pgvector_search.py',
+	'test_rocketride_db_live.py',
+	'test_rocketride_graph_live.py',
+	'test_rocketride_vector_tools_live.py',
+	'test_vector_store_listing_live.py',
+	'test_vector_store_writes_live.py',
+	'test_pgvector_search_live.py',
 ];
 
 /**
@@ -558,14 +558,15 @@ function makeRunDbPytestAction(options = {}) {
 			const reportDir = path.join(BUILD_ROOT, 'nodes-db-tests');
 			await fs.promises.mkdir(reportDir, { recursive: true });
 			const passes = [{ suites: DB_LIVE_SUITES, report: 'junit.xml', env: testEnv, pooled: [] }];
+			// Said after the passes: execCommand replaces task.output with each line pytest prints.
+			const notes = [];
 			for (const lane of DB_LANES) {
 				if (!lane.poolerSuites) continue;
 				const poolerDsn = String(testEnv[lane.poolerEnv] || '').trim();
 				if (!poolerDsn) {
 					if (required) {
 						const fallback = `${lane.poolerEnv} is not set: the ${lane.name} pooler leg is not run`;
-						const note = lane.poolerUnsetNote || fallback;
-						task.output = task.output ? `${task.output}\n${note}` : note;
+						notes.push(lane.poolerUnsetNote || fallback);
 					}
 					continue;
 				}
@@ -582,33 +583,38 @@ function makeRunDbPytestAction(options = {}) {
 			}
 
 			const pytestTokens = splitPytestOpts(options.pytest);
-			for (const pass of passes) {
-				const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
-				const report = path.join(reportDir, pass.report);
-				await fs.promises.rm(report, { force: true });
-				await runPytest({
-					engine: ENGINE,
-					testsDir: suites[0],
-					extraArgs: [
-						...suites.slice(1),
-						'-v',
-						'-rs',
-						'--rootdir',
-						PACKAGE_DIR,
-						'-p',
-						'no:xdist',
-						`--junitxml=${report}`,
-						...withoutXdistArgs(pytestTokens),
-					],
-					execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
-				});
-				if (required) {
-					const xml = await fs.promises.readFile(report, 'utf8');
-					checkRequiredDbResults(xml, pass.suites, pass.report);
-					for (const { lane, suites: pooledSuites } of pass.pooled) {
-						checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+			try {
+				for (const pass of passes) {
+					const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
+					const report = path.join(reportDir, pass.report);
+					await fs.promises.rm(report, { force: true });
+					await runPytest({
+						engine: ENGINE,
+						testsDir: suites[0],
+						extraArgs: [
+							...suites.slice(1),
+							'-v',
+							'-rs',
+							'--rootdir',
+							PACKAGE_DIR,
+							'-p',
+							'no:xdist',
+							`--junitxml=${report}`,
+							...withoutXdistArgs(pytestTokens),
+						],
+						execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
+					});
+					if (required) {
+						const xml = await fs.promises.readFile(report, 'utf8');
+						checkRequiredDbResults(xml, pass.suites, pass.report);
+						for (const { lane, suites: pooledSuites } of pass.pooled) {
+							checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+						}
 					}
 				}
+			} finally {
+				// Kept after pytest's last line, whether the passes succeeded or not.
+				if (notes.length > 0) task.output = [task.output, ...notes].filter(Boolean).join('\n');
 			}
 		},
 	};

@@ -23,6 +23,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ConnectionManager, EnvironmentView } from 'shell';
 import type { EnvironmentSlotConfig, EnvironmentScope } from 'shell';
 import type { EnvSlotState } from 'shared/ops/hostOps';
+import { savedEnv } from 'shell/src/modules/account/components/envChanges';
 
 /** The env ops' connection dimension for a slot. */
 const connectionOf = (slot: string): 'dev' | 'deploy' => (slot === 'deployment' ? 'deploy' : 'dev');
@@ -84,12 +85,12 @@ export const EnvironmentSection: React.FC<IEnvironmentSectionProps> = ({ slot, l
 		[cm]
 	);
 
-	/** Persists env data for a scope and updates the local cache. */
+	/** Persists env changes for a scope; the cache then holds the saved names, each masked. */
 	const handleSaveEnv = useCallback(
-		async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
+		async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 			await cm.request('host.env.set', { scope, env, scopeId, connection: connectionOf(slotId) });
 			const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
-			setEnvs((prev) => ({ ...prev, [cacheKey]: env }));
+			setEnvs((prev) => ({ ...prev, [cacheKey]: savedEnv(env) }));
 			setError(null);
 		},
 		[cm]

@@ -43,7 +43,7 @@ given tag fail (:attr:`MockConnection.fail_next`) or mark a table locked
 (:attr:`MockConnection.locked_tables`, which makes the ``meta`` ALTER time out).
 
 Results from this double are never evidence that a backend works: the live
-suites (``test_store_postgres_full.py``, ``test_rocketride_db_full.py``) are.
+suites (``test_store_postgres_full.py``, ``test_rocketride_db_live.py``) are.
 """
 
 from __future__ import annotations

@@ -142,6 +142,12 @@ class DocumentStoreBase(ABC):
     are implemented here but can be overridden
     """
 
+    _NO_DOC_EMBEDDING_MESSAGE = 'Documents have no embedding vectors. Configure embeddings before writing to the store.'
+    _NO_DOC_MODEL_MESSAGE = (
+        'Documents are missing an embedding model name. Check the embedding configuration '
+        'or supply vectors with their model name.'
+    )
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Define the default constructor.
@@ -978,8 +984,14 @@ class DocumentStoreBase(ABC):
             # For each question
             for query in question.questions:
                 # Make sure we have the embeddings
+                if query.embedding is None or len(query.embedding) == 0:
+                    raise Exception(
+                        'Question has no embedding vector. Embed questions with the same model as the stored documents.'
+                    )
                 if not query.embedding_model:
-                    raise Exception('You must run your question through an embedding filter')
+                    raise Exception(
+                        'Question has no embedding model name. Embed questions with the same model as the stored documents.'
+                    )
 
                 # Do a find operation
                 docs = self.searchSemantic(query, question.filter)
@@ -1095,7 +1107,10 @@ class DocumentStoreBase(ABC):
 
             # The collection should contain exactly one control document, otherwise it's corrupted
             if len(doc) != 1:
-                raise Exception(f'Collection does not have control document, found {len(doc)}')
+                raise Exception(
+                    f'Collection setup record is missing or invalid (found {len(doc)}, expected 1). '
+                    'Choose a new collection or table name.'
+                )
 
             # Extract and store the vector size and model name from the control document
             self.vectorSize = doc[0].metadata.vectorSize
@@ -1125,6 +1140,14 @@ class DocumentStoreBase(ABC):
             self.modelMismatch = modelName != self.modelName
         return exists
 
+    @classmethod
+    def _checkDocumentEmbedding(cls, doc: Doc) -> None:
+        """Refuse a document whose embedding vector is missing or empty, or a vector without its model name."""
+        if doc.embedding is None or len(doc.embedding) == 0:
+            raise Exception(cls._NO_DOC_EMBEDDING_MESSAGE)
+        if not doc.embedding_model:
+            raise Exception(cls._NO_DOC_MODEL_MESSAGE)
+
     def createCollection(self, documents: List[Doc]):
         """
         Create a new collection if it does not already exist.
@@ -1141,8 +1164,7 @@ class DocumentStoreBase(ABC):
             if self._checkCollectionExists():
                 # Collection already exists, validate documents against existing collection
                 for doc in documents:
-                    if not doc.embedding_model:
-                        raise Exception('You must run your documents through an embedding filter')
+                    self._checkDocumentEmbedding(doc)
                     if doc.embedding_model != self.modelName:
                         raise Exception(
                             f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
@@ -1156,6 +1178,11 @@ class DocumentStoreBase(ABC):
             # If no documents are provided, exit early
             if not len(documents):
                 return True
+
+            # Validate the entire batch before creating the collection or writing
+            # its setup record, which persists the first document's model name.
+            for doc in documents:
+                self._checkDocumentEmbedding(doc)
 
             # Use the first document as a reference for embedding model and vector size
             modelName = documents[0].embedding_model
@@ -1206,8 +1233,6 @@ class DocumentStoreBase(ABC):
 
             # Validate all provided documents against the newly created collection metadata
             for doc in documents:
-                if not doc.embedding_model:
-                    raise Exception('You must run your documents through an embedding filter')
                 if doc.embedding_model != modelName:
                     raise Exception(
                         f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'

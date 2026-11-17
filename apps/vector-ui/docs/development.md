@@ -503,7 +503,7 @@ runs `check_write` (§6.3).
 | Tool mixin, hooks, math goldens, write gate, envelope and caps | `nodes/test/test_vectordb_tool_mixin.py`, `test_vector_hooks.py`, `test_vector_math.py`, `test_vector_write_gate.py`, `test_vector_tool_envelope.py` | `./builder nodes:test` (mocked pass) |
 | The `embed` tool | `nodes/test/test_embed_tool.py` | `./builder nodes:test` |
 | Call context and tool audience | `test_tool_context.py`, `test_tool_audience.py` | `./builder ai:test` |
-| Live `rocketride_vector` driver on new and legacy collections | `nodes/test/test_rocketride_db_full.py` | `./builder nodes:test-db`, or by name |
+| Live `rocketride_vector` driver on new and legacy collections | `nodes/test/test_rocketride_db_live.py` | `./builder nodes:test-db`, or by name |
 | Live `store_postgres`, Qdrant and Chroma drivers on new and legacy collections | `nodes/test/test_store_postgres_full.py`, `test_store_qdrant_full.py`, `test_store_chroma_full.py` | `./builder nodes:test-db`, or by name |
 | Every tool through a real engine and the shipped templates | `nodes/test/test_vector_toolpath_full.py` (needs `dist/server`) | `./builder nodes:test-db`, or by name |
 | Wire fixtures still match the drivers | `nodes/test/test_vector_wire_fixtures_full.py` | `./builder nodes:test-db`, or by name |
@@ -554,7 +554,7 @@ and no test skips without a `NOT RUN:` reason); see
 
 The pooler pass is part of the suites themselves: the driver cases in
 `test_store_postgres_full.py` and the `rocketride_vector` cases in
-`test_rocketride_db_full.py` run once against the database and, with
+`test_rocketride_db_live.py` run once against the database and, with
 `RR_TEST_PGVECTOR_POOLER_DSN` set, once more through that transaction-mode
 pooler, and `test_vector_toolpath_full.py` runs `rocketride_vector.pipe` through
 it a second time. Without the variable those cases skip with `NOT RUN:`; with

@@ -571,10 +571,13 @@ def test_get_task_returns_underlying_task():
 
 
 def test_get_task_control_by_public_key_finds_match():
-    """The first control whose public_auth equals the argument is returned."""
+    """The first control whose public_auth equals the argument, on a public source, is returned."""
     ts = _make_server()
     ctrl_a = _make_control(token='tk_a', public_auth='pk_zzz')
     ctrl_b = _make_control(token='tk_b', public_auth='pk_xyz')
+    ctrl_a.source = ctrl_b.source = 'src'
+    ctrl_a.pipeline = ctrl_b.pipeline = {'components': [{'id': 'src', 'provider': 'chat'}]}
+    ctrl_a.task._pipeline = ctrl_b.task._pipeline = ctrl_a.pipeline
     ts._task_control = {'tk_a': ctrl_a, 'tk_b': ctrl_b}
     assert ts.get_task_control_by_public_key('pk_xyz') is ctrl_b
 
@@ -1226,3 +1229,141 @@ async def test_monitor_ttl_leaves_a_zero_ttl_counter_alone(monkeypatch):
 
     assert task._idle_time == 0
     ts.stop_task.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# start_task refusals say what happened and what to do (#2476, #2465)
+# ---------------------------------------------------------------------------
+
+
+def _launch_pipeline():
+    """A runnable two-component pipeline whose source is ``src``."""
+    return {
+        'project_id': 'project-1',
+        'source': 'src',
+        'components': [
+            {'id': 'src', 'provider': 'webhook', 'config': {}},
+            {'id': 'llm', 'provider': 'llm_openai', 'config': {}},
+        ],
+    }
+
+
+def _seed_running_task(ts, token, task_id):
+    """Register a live (not complete) task with display id ``task_id`` under ``token``.
+
+    A real TASK_CONTROL, so it has the owner the requests below have (a dev run
+    of user '', the defaults): a token whose run has another owner is refused
+    before the already-running check this is here for.
+    """
+    task = MagicMock()
+    task.is_task_complete.return_value = False
+    control = task_server_module.TASK_CONTROL()
+    control.id, control.token, control.pipeline, control.task = task_id, token, _launch_pipeline(), task
+    ts._task_control[token] = control
+
+
+def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
+    """Name the existing run without implying that other pipelines cannot run."""
+    assert message == (
+        f'Pipeline is already running (task {display_id}). Reuse it (useExisting / use_existing), or stop it and run again.'
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_task_already_running_with_a_derived_token_says_how_to_run_or_attach(monkeypatch):
+    """No token from the caller: the second run of the same pipe hashes to the
+    first one's token, so the refusal must identify that existing run.
+    """
+    ts = _make_server()
+    # The tk_ token is keyed (keyed_task_token); generate_token only makes the pk_.
+    monkeypatch.setattr(task_server_module, 'keyed_task_token', lambda key, content: 'tk_digest0123')
+    ts._server.account.generate_token.return_value = 'pk_public'
+    # A seeded id unlike the one this request builds ('digest01.src'), so the
+    # assertion tells the running task's id from the request's.
+    _seed_running_task(ts, 'tk_digest0123', 'running.src')
+
+    with pytest.raises(ValueError) as excinfo:
+        await ts.start_task({'command': 'launch', 'arguments': {'pipeline': _launch_pipeline()}}, conn=MagicMock())
+
+    _assert_says_how_to_run_or_attach(str(excinfo.value), 'running.src')
+
+
+@pytest.mark.asyncio
+async def test_start_task_already_running_with_a_caller_token_says_how_to_run_or_attach():
+    """A caller-supplied token that is already running is refused the same way.
+
+    A caller's token is not scoped by source: the running task started from
+    ``src`` (id ``mine.src``) while this request asks for ``llm``, so the id it
+    builds is ``mine.llm``. The refusal names the task that is running.
+    """
+    ts = _make_server()
+    ts._server.account.generate_token.return_value = 'pk_public'
+    _seed_running_task(ts, 'tk_mine', 'mine.src')
+
+    with pytest.raises(ValueError) as excinfo:
+        await ts.start_task(
+            {'command': 'launch', 'arguments': {'token': 'tk_mine', 'source': 'llm', 'pipeline': _launch_pipeline()}},
+            conn=MagicMock(),
+        )
+
+    _assert_says_how_to_run_or_attach(str(excinfo.value), 'mine.src')
+
+
+@pytest.mark.parametrize(
+    'arguments',
+    [
+        None,
+        {},
+        {'source': 'src'},
+        {'pipeline': {}},
+        {'pipeline': 'x.pipe'},
+        {'pipeline': 'x.pipe', 'source': 'src'},
+        {'pipeline': ['a']},
+    ],
+    ids=[
+        'null-arguments',
+        'nothing',
+        'source-only',
+        'empty-pipeline',
+        'path-as-pipeline',
+        'path-as-pipeline-with-source',
+        'list-as-pipeline',
+    ],
+)
+@pytest.mark.asyncio
+async def test_start_task_without_a_pipeline_says_how_to_pass_one(arguments):
+    """A request with no usable pipeline is refused before anything reads the pipeline.
+
+    The guard used to sit after the first reads, so a missing pipeline died
+    there instead, with an AttributeError (no source) or a TypeError (source
+    given), and an empty one was reported as having no source component. A
+    pipeline that is not an object (a .pipe path or a list sent as
+    ``pipeline``) failed the same two ways, and ``"arguments": null`` failed
+    with an AttributeError before any of them.
+    """
+    ts = _make_server()
+
+    with pytest.raises(RuntimeError) as excinfo:
+        await ts.start_task({'command': 'launch', 'arguments': arguments}, conn=MagicMock())
+
+    assert str(excinfo.value) == (
+        'Pipeline configuration is missing or invalid. Pass the pipeline object itself; '
+        'to run a .pipe file, pass its path as filepath.'
+    )
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_start_task_without_a_source_component_says_how_to_add_one():
+    """No source argument, no top-level source and no "mode": "Source" component
+    (the empty-config source node of pitfall 7): the refusal says how to fix the pipe.
+    """
+    ts = _make_server()
+    pipeline = {'project_id': 'project-1', 'components': [{'id': 'chat_1', 'provider': 'chat', 'config': {}}]}
+
+    with pytest.raises(ValueError) as excinfo:
+        await ts.start_task({'command': 'launch', 'arguments': {'pipeline': pipeline}}, conn=MagicMock())
+
+    message = str(excinfo.value)
+    assert message == 'Pipeline has no source. Select a source component or add a node configured as a source.'
+    assert ts._task_control == {}

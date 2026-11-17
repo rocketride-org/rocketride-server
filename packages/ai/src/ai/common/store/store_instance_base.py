@@ -49,6 +49,11 @@ from .document_store import DocumentStoreBase, VectorStoreToolMixin, metadataVal
 from .store_global_base import StoreGlobalBase
 from .vx_types import CONTROL_OBJECT_ID
 
+# Raised by the three lanes when the node's store is not open: it failed to open
+# when the pipeline started, or data arrived after it was closed. Public so a
+# store node with its own lane code (store_elasticsearch) raises the same text.
+NO_STORE_MESSAGE = 'Vector store connection is unavailable. Check its connection settings and startup errors.'
+
 
 class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
     """Abstract base for the IInstance layer of any vector store node."""
@@ -72,7 +77,7 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
         """Take a question, perform a search, and write the results as documents."""
         # Check it
         if self.IGlobal.store is None:
-            raise Exception('No document store')
+            raise Exception(NO_STORE_MESSAGE)
 
         # Dispatch to the search handler
         self.IGlobal.store.dispatchSearch(self, question)
@@ -92,7 +97,7 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
         """
         # Check it
         if self.IGlobal.store is None:
-            raise Exception('No document store')
+            raise Exception(NO_STORE_MESSAGE)
 
         # The control record is written only by createCollection, never by the data lane
         for document in documents:
@@ -134,7 +139,7 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
 
         # Check it
         if self.IGlobal.store is None:
-            raise Exception('No document store')
+            raise Exception(NO_STORE_MESSAGE)
 
         # If we do not have a vectorize flag, or we have not vectorized
         # it, allow the next driver to render

@@ -22,24 +22,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Stand in for heavy dependencies only where they are not installed: a stub
-# left in sys.modules would replace the real pymongo/numpy for every later test.
-# ---------------------------------------------------------------------------
-
-for mod_name in (
-    'pymongo',
-    'pymongo.collection',
-    'pymongo.database',
-    'pymongo.errors',
-    'pymongo.operations',
-    'numpy',
-):
-    try:
-        importlib.import_module(mod_name)
-    except ImportError:
-        sys.modules.setdefault(mod_name, MagicMock())
-
 
 # ---------------------------------------------------------------------------
 # Lightweight DocFilter stand-in
@@ -69,12 +51,32 @@ class DocFilter:
 # Load atlas.py directly by file path (bypasses atlas/__init__.py)
 # ---------------------------------------------------------------------------
 
+# pymongo is stubbed only while atlas.py runs: the module binds the names it uses
+# at import, and the tests patch atlas_mod.MongoClient. Afterwards sys.modules
+# holds what it held before (the real pymongo or nothing).
 # Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
 # rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
-_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
-_spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
-atlas_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(atlas_mod)
+_PYMONGO_MODULES = (
+    'pymongo',
+    'pymongo.collection',
+    'pymongo.database',
+    'pymongo.errors',
+    'pymongo.operations',
+)
+_saved_modules = {name: sys.modules.get(name) for name in _PYMONGO_MODULES}
+for _name in _PYMONGO_MODULES:
+    sys.modules[_name] = MagicMock()
+try:
+    _atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
+    _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
+    atlas_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(atlas_mod)
+finally:
+    for _name, _module in _saved_modules.items():
+        if _module is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _module
 
 Store = atlas_mod.Store
 

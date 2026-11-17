@@ -115,9 +115,18 @@ def fake_torch(monkeypatch):
 class _ForwardRecorder:
     """Stands in for the transformer forward pass and records overlap."""
 
-    def __init__(self, hidden_size=3, delay=0.02):
+    def __init__(self, hidden_size=3, delay=0.02, meet=None):
+        """Create the recorder.
+
+        Args:
+            hidden_size (int): Width of the fake hidden state.
+            delay (float): Seconds each forward pass stays in flight.
+            meet (threading.Barrier | None): When set, every forward pass waits
+                on it, so passes that can overlap are guaranteed to meet.
+        """
         self.hidden_size = hidden_size
         self.delay = delay
+        self.meet = meet
         self.active = 0
         self.max_active = 0
         self.calls = 0
@@ -130,6 +139,8 @@ class _ForwardRecorder:
             self.max_active = max(self.max_active, self.active)
 
         # Hold the critical section open long enough for overlap to show up.
+        if self.meet is not None:
+            self.meet.wait()
         time.sleep(self.delay)
 
         with self._state_lock:
@@ -235,7 +246,7 @@ def test_inference_allows_distinct_models_to_overlap(fake_torch):
     # One recorder shared by both bundles, so it observes true overlap across
     # them. Per-model recorders would each see a single call and would pass
     # even if one global lock serialized everything.
-    recorder = _ForwardRecorder(delay=0.05)
+    recorder = _ForwardRecorder(delay=0, meet=threading.Barrier(2, timeout=5))
     model_a = _make_model(recorder)
     model_b = _make_model(recorder)
     metadata = {'device': 'cpu'}
@@ -356,7 +367,7 @@ def test_encode_local_sorts_by_length_and_restores_order(monkeypatch, fake_torch
 
 def test_inference_reports_lock_wait_as_queue_time(fake_torch):
     """Time blocked on another thread's forward pass is queue wait, not compute."""
-    recorder = _ForwardRecorder(delay=0.05)
+    recorder = _ForwardRecorder(delay=0.5)
     shared_model = _make_model(recorder)
     metadata = {'device': 'cpu'}
 

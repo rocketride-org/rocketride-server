@@ -2,12 +2,20 @@
 
 import sys
 import types
+from pathlib import Path
+
+import pytest
 
 from ai.common.models.base import BaseLoader
 from ai.common.models.gliner.gliner import GLiNERLoader, GLiNER
 import ai.common.models.gliner.gliner as glinermod
 
 MODEL = 'urchade/gliner_small-v2.1'
+
+# The requirement file in the source tree, not the copy next to the module the
+# engine imports: under the built engine ``glinermod`` is the shipped package.
+_REPO = Path(__file__).resolve().parents[6]
+_REQUIREMENTS = _REPO / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'models' / 'gliner' / 'requirements_gliner.txt'
 
 
 class _FakeGLiNERModel:
@@ -205,3 +213,14 @@ def test_per_call_override_beats_the_instance_default(monkeypatch):
 
     _, args = _FakeClient.captured['infer']
     assert args['threshold'] == 0.9
+
+
+@pytest.mark.skipif(not _REQUIREMENTS.exists(), reason='needs the source tree')
+def test_requirements_pin_sentencepiece_to_a_protobuf_6_build():
+    """The pin keeps out sentencepiece 0.2.3, whose sentencepiece_model_pb2 needs protobuf 7.
+
+    weaviate-client keeps the engine's protobuf below 7, so without the pin the
+    tokenizer load raises "incompatible Protobuf Gencode/Runtime versions".
+    """
+    lines = [line.strip() for line in _REQUIREMENTS.read_text().splitlines()]
+    assert [line for line in lines if line.startswith('sentencepiece')] == ['sentencepiece==0.2.1']

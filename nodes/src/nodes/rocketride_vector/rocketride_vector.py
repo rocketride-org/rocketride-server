@@ -47,7 +47,7 @@ from typing import Any, Dict
 
 from ai.common.config import Config
 from ai.common.rocketride_db import db_target, parse_dsn_fields, resolve_rocketride_dsn
-from ai.common.store.pgvector import HNSW_MAX_DIMS, PgVectorStore
+from ai.common.store.pgvector import HNSW_MAX_DIMS, PgVectorStore, resolve_metric
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
@@ -79,6 +79,10 @@ class Store(PgVectorStore):
                 f'Invalid collection name: {table!r}. Must be a valid PostgreSQL identifier (letters, digits, underscores; max 63 chars).'
             )
 
+        # An unsupported similarity is refused before the DSN is resolved, too
+        similarity = config.get('similarity', 'cosine')
+        resolve_metric(similarity, 'RocketRide Vector')
+
         # RocketRide cloud: no host/user/password fields. Read the DSN the
         # task engine delivered for this node's scope / target.
         # host/port/database are parsed only for bookkeeping (the connection
@@ -96,9 +100,10 @@ class Store(PgVectorStore):
             bag,
             connect_args={'dsn': dsn},
             table=table,
-            similarity=config.get('similarity', 'cosine'),
+            similarity=similarity,
             threshold=config.get('score', 0.5),
             hnsw_m=config.get('hnsw_m', 16),
             hnsw_ef_construction=config.get('hnsw_ef_construction', 64),
             caveats=('shared_org_table',),
+            store_name='RocketRide Vector',
         )

@@ -55,8 +55,8 @@ async def _start_probe() -> Dict[str, Dict[str, Any]]:
         missing = [n for n in ('vx_probe_receiver', 'vx_probe_caller') if n not in services]
         if missing:
             raise RuntimeError(
-                f'probe nodes {missing} are not registered on {ENGINE_URL}; start the engine with '
-                f'--node_path={PROBE_NODE_PATH}'
+                f'probe nodes {missing} are not registered on {ENGINE_URL}; copy the vx_probe_* folders '
+                f"of {PROBE_NODE_PATH} into the engine's nodes/ folder and restart it (see phase0/README.md)"
             )
         started = {}
         for source_id in PROBE_SOURCES:

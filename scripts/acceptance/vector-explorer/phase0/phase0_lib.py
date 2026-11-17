@@ -38,7 +38,8 @@ FIXTURES = [k.strip() for k in os.environ.get('VX_PHASE0_FIXTURES', 'postgres').
 FIXTURE_COLLECTION = os.environ.get('VX_PHASE0_COLLECTION', 'vx_phase0_docs')
 FIXTURE_RR_TABLE = os.environ.get('VX_PHASE0_RR_TABLE', 'vx_phase0_rr')
 
-# The probe nodes (nodes/test/vx_context_probe) load only with --node_path.
+# The probe nodes (nodes/test/vx_context_probe) load only once their folders are copied
+# into the engine's nodes/ folder (dist/server/nodes): the engine reads no other node folder.
 PROBE_NODE_PATH = REPO / 'nodes' / 'test' / 'vx_context_probe'
 PROBE_PROJECT_ID = '00000000-0000-4000-8000-0000000c0e10'
 PROBE_SOURCES = {'tools_1': 'tools', 'chat_1': 'chat', 'ingest_1': 'dropper'}

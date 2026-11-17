@@ -265,7 +265,7 @@ With `persist: true`, a dropped connection reconnects automatically and replays 
 
 ##### `RocketRideClient.getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>`
 
-Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
+Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, posthogPublishableKey?, posthogHost?, endpoints }`. The PostHog pair is the environment's product-telemetry config (absent = telemetry off); the `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
 
 ```typescript
 const info = await RocketRideClient.getServerInfo('localhost:5565');
@@ -363,7 +363,7 @@ await client.restart({ projectId: 'proj-123', source: 'webhook_1', pipeline });
 
 ### `terminate(token: string): Promise<void>`
 
-Terminate a running pipeline. A failure is re-thrown as a plain `Error` with the server's message and no `code` (see section 18).
+Terminate a running pipeline. A server rejection is re-thrown as the same `DAPException`, with the server's message and `code` (see section 18).
 
 ### `getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS>`
 
@@ -391,9 +391,9 @@ Return the **unresolved** pipeline configuration for a running task — `${ROCKE
 
 ### `validate(options): Promise<ValidationResult>`
 
-Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.
+Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). It checks what `use()` checks, then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Returns `{ errors, warnings, ... }`; treat any `errors` as a reason not to run. `warnings` are non-fatal.
 
-`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs. It checks the component's provider but skips the control and lane checks, which need the whole pipeline.
 
 ```typescript
 const result = await client.validate({ pipeline });
@@ -491,6 +491,8 @@ const rows = await client.tool({
 When the server rejects the call (including when no node handles the tool), `tool()` throws a `DAPException` whose `code` is the server's machine-readable code when it sent one: `TASK_STOPPED` means the task stopped (or is restarting) before the call reached the node, and no code means the tool failed or no node handled it. Classify on `err.code`, never on the message text (see section 18):
 
 ```typescript
+import { DAPException } from 'rocketride';
+
 try {
 	const rows = await client.tool({ token, tool: 'search', input: { q: 'invoices 2026' } });
 } catch (err) {
@@ -916,22 +918,22 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
 
-**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `inviteMember(orgId, { email, givenName, familyName, role })` · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
+**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `invite(orgId, { email, givenName, familyName, role, teamAssignments?, devTeamId? }): Promise<InvitedMember>` (returns `{ userId, displayName, email, role, status, devTeamId }`; `inviteMember` is the deprecated form that returns nothing) · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
 
 **Teams:** `listTeams(orgId): Promise<TeamRecord[]>` · `getTeamDetail(orgId, teamId): Promise<TeamDetail>` (includes members) · `createTeam(orgId, name)` · `deleteTeam(orgId, teamId)` · `addTeamMember(orgId, { teamId, userId, permissions })` · `updateTeamMemberPerms(orgId, { teamId, userId, permissions })` · `removeTeamMember(orgId, { teamId, userId })`
 
 **Environment secrets** (the layered `ROCKETRIDE_*` store, merged server-side at auth):
 
 - `getEnvironmentKeys(): Promise<string[]>` — available key NAMES from the merged environment (no values; for dropdowns)
-- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — read one scope's dict (org: pass orgId; team: pass teamId; user: omit)
-- `setEnv(scope, env, scopeId?): Promise<void>` — write one scope's FULL dict (replaces the entire set at that level)
+- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned (org: pass orgId; team: pass teamId; user: omit)
+- `setEnv(scope, env, scopeId?): Promise<void>` — merge into one scope: a value sets, `null` deletes, the mask keeps the stored value; names not sent are untouched
 
 #### What members can do vs admins
 
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
 - **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); leaving an organization they belong to (`leaveOrg` — refused for its last admin); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
-- **Org admin only**: renaming the org (`updateOrgName`); member management (`inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
+- **Org admin only**: renaming the org (`updateOrgName`); member management (`invite`, `inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `deleteTeam`, `addTeamMember`, `updateTeamMemberPerms`, `removeTeamMember`, and TEAM-scope `getEnv`/`setEnv` — both read and write.
 
 ### `client.billing`
@@ -1076,7 +1078,10 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 The package installs a `rocketride` command (use `pnpm exec rocketride` /
 `npx rocketride` for local installs). The Python client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with fewer verbs: of the `app` commands it has only `create`,
+`verify`, and `deploy`, and it has no `deploy source-config`. It adds
+`diff` and `otel`, which this package lacks. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.
@@ -1228,7 +1233,7 @@ LoginAttemptCancelledError        // extends Error directly — control flow, no
 - `AuthenticationException`: thrown by `login()` (and therefore `connect()`) on auth failure. In persist mode the client does **not** retry after an auth failure — fix credentials and reconnect.
 - `ConnectionException`: `attach()`/`connect()` transport failures; also delivered to the `onConnectError` constructor callback (whose argument is typed `ConnectionException`).
 - `PipeException`: `DataPipe.open()/write()/close()` (and therefore `send()`, `sendFiles()`, `chat()`) on server-reported pipe failures.
-- `DAPException` (the base class itself, not a `RocketRideException`): `call()` and the methods that pass its failure through — `tool()`, `use()`, `getService()`, `getTasks()`, `getTaskToken()`, `getTaskPipeline()` and the other typed methods not listed below — when the server rejects the command. `message` is the server's message and `code` its code when it sent one. Task failures carry `TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`, `TASK_COMPLETED` or `TASK_STOPPED` (the task is stopped, or is terminating during a restart, so the request was never sent). **Classify on `err.code`, never on the message text.** These methods re-wrap the failure and throw a plain `Error` with no `code`: `terminate()`, `restart()`, `getTaskStatus()`, `validate()`, `ping()` and the deprecated `setEvents()`. So do `fsRead()` and `fsReadMany()`, which bypass `call()`, a pipe-level `DataPipe.tool()`, client-side argument checks, and `use()` when the server accepts the start but returns no task token.
+- `DAPException` (the base class itself, not a `RocketRideException`): `call()` and the methods that pass its failure through — `tool()`, `use()`, `getService()`, `getTasks()`, `getTaskToken()`, `getTaskPipeline()` and the other typed methods not listed below — when the server rejects the command. `message` is the server's message and `code` its code when it sent one. Task failures carry `TASK_NOT_REGISTERED`, `TASK_AMBIGUOUS`, `TASK_COMPLETED` or `TASK_STOPPED` (the task is stopped, or is terminating during a restart, so the request was never sent). **Classify on `err.code`, never on the message text.** `terminate()`, `restart()` and `getTaskStatus()` re-throw it with the same message; `validate()`, `ping()` and the deprecated `setEvents()` prefix the message (`Pipeline validation failed: ...`, `Ping failed: ...`, `Event subscription failed: ...`) but keep the class and `code`. These throw a plain `Error` with no `code`: `fsRead()` and `fsReadMany()`, which bypass `call()`, a pipe-level `DataPipe.tool()`, client-side argument checks, and `use()` when the server accepts the start but returns no task token.
 - `LoginAttemptCancelledError`: a `login()`/`connect()` superseded by newer intent (`reason`: `'superseded' | 'logout' | 'detached'`) — treat as control flow, not an error condition.
 
 Catch the most specific type first, then fall back to a broader one. Every class in the tree except `LoginAttemptCancelledError` is a `DAPException`, so test the subclasses before the base:

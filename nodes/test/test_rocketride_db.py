@@ -458,7 +458,7 @@ class TestSqlEnginePoolSize:
 # The real node Store and the real ai.common.store.pgvector driver run against
 # nodes/test/mocks/psycopg2 (an in-memory database that understands the
 # driver's statements). Every behaviour checked here is also checked live in
-# test_rocketride_db_full.py / test_store_postgres_full.py.
+# test_rocketride_db_live.py / test_store_postgres_full.py.
 # ---------------------------------------------------------------------------
 
 _MOCK_PSYCOPG2 = _REPO / 'nodes' / 'test' / 'mocks' / 'psycopg2'
@@ -914,7 +914,7 @@ class TestPgVectorTransactions:
 
 
 class TestPgVectorSearchRecovery:
-    """The filtered-search recovery of the shared driver (#2955; live twin: test_pgvector_search.py).
+    """The filtered-search recovery of the shared driver (#2955; live twin: test_pgvector_search_live.py).
 
     HNSW filters its candidate list after scanning it, so excluded neighbours (a trashed document's
     chunks, other paths) can hide eligible matches. The driver recovers an underfilled answer with
@@ -1083,7 +1083,7 @@ class TestPgVectorSupportLevel:
     """Both pgvector providers report support 'supported' (vector-tool-contract.md §3).
 
     The level is set from the unmocked evidence, never from this file: the live suites
-    test_store_postgres_full.py and test_rocketride_db_full.py (direct DSN and
+    test_store_postgres_full.py and test_rocketride_db_live.py (direct DSN and
     RR_TEST_PGVECTOR_POOLER_DSN) and test_vector_toolpath_full.py (postgres.pipe and
     rocketride_vector.pipe on a new and a legacy table, and through the pooler). These
     pins only keep the constant and the dialect answer from drifting.
@@ -1112,7 +1112,7 @@ class TestPgVectorSupportLevel:
 
 
 class TestRocketrideVectorWriteGate:
-    """The node's tool writes, behind both gates (live twins: test_rocketride_db_full.py TestRocketrideVectorNode).
+    """The node's tool writes, behind both gates (live twins: test_rocketride_db_live.py TestRocketrideVectorNode).
 
     The outer gate is the node's expose_tools and allow_write switches (both off
     by default); past it, every write runs the store write gate

@@ -22,16 +22,21 @@ G0-6 (chunking calibration) lives with the templates, not here.
 ## Running them
 
 1. The containers, fake broker and stub LLM from `../README.md`.
-2. An engine started with the probe nodes (test-only nodes that load only with
-   `--node_path`):
+2. An engine started with the probe nodes. They are test-only nodes, and the
+   engine reads nodes only from its own `nodes/` folder (#2765), so copy them
+   there first and remove them after the run (a later `./builder` sync does not
+   need them):
 
    ```bash
+   cp -R nodes/test/vx_context_probe/vx_probe_caller \
+     nodes/test/vx_context_probe/vx_probe_receiver dist/server/nodes/
    (cd dist/server && \
      RR_STORE_URL=filesystem://$(mktemp -d) \
      ROCKETRIDE_DB_BROKER_URL=http://127.0.0.1:18788/provision \
      ROCKETRIDE_DB_BROKER_TOKEN=local-broker-placeholder \
-     ./engine ai/eaas.py --host=127.0.0.1 --port=5590 \
-       --node_path=$PWD/../../nodes/test/vx_context_probe) &
+     ./engine ai/eaas.py --host=127.0.0.1 --port=5590) &
+   # after the run:
+   rm -rf dist/server/nodes/vx_probe_caller dist/server/nodes/vx_probe_receiver
    ```
 
 3. For G0-8, the TypeScript client's CommonJS build
