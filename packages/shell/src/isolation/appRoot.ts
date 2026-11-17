@@ -285,7 +285,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			}
 			case 'rrext_get_token': {
 				if (!body) return response;
-				const { token, ...rest } = body;
+				const { token, publicToken: _public, ...rest } = body;
+				void _public;
 				const run = typeof token === 'string' ? st.ledger.runByToken(token) : undefined;
 				return withBody(run ? { ...rest, token: run.handle } : rest);
 			}
