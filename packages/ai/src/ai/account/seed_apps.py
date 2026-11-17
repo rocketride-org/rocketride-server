@@ -56,8 +56,9 @@ from rocketlib import debug
 # card's version line), so the fallback only marks a manifest gap.
 SEED_VERSION = '0'
 
-# Registry comment stamped on every seeded version — the marker orchestrators
-# use to tell seed rows from user deploys of the same app id.
+# Registry comment stamped on every seeded version, for people reading the
+# rail. It is NOT how code tells seed rows from user deploys: a deploy's caller
+# chooses its comment. is_seed_row (metadata) decides (#1022).
 SEED_COMMENT = 'Platform seed'
 
 # System actor for seeded rows: no user FK (None), the display copy carries
@@ -415,7 +416,7 @@ def public_serves_user_deploy(rows: List[Dict[str, Any]], public: Optional[Dict[
         return False
     bound = int(public.get('version', 0))
     live = next((row for row in rows or [] if int(row.get('version', 0)) == bound), None)
-    return live is not None and live.get('comment') != SEED_COMMENT
+    return live is not None and not is_seed_row(live)
 
 
 async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
@@ -443,7 +444,7 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
         return False
     rows = await account.deployments_versions(org_id, app_id)
     # Rows are newest-first, so the first seed row is the latest seed.
-    seeds = [row for row in rows or [] if row.get('comment') == SEED_COMMENT]
+    seeds = [row for row in rows or [] if is_seed_row(row)]
     if not seeds:
         return False
     public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)

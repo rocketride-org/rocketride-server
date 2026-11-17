@@ -96,11 +96,17 @@ class _Registry:
         return {}
 
 
-def _seed_row(digest=None, comment=SEED_COMMENT, status='ok', version=1):
-    build = {'status': status, 'seeded': True}
+def _seed_row(digest=None, comment=SEED_COMMENT, status='ok', version=1, seed=None):
+    """A rail row: the seeder's (platform True) when the comment is the seed comment, a user deploy otherwise.
+
+    ``seed`` overrides that, to model a deploy whose caller copied the seed comment (#1022).
+    """
+    seed = comment == SEED_COMMENT if seed is None else seed
+    build = {'status': status, 'seeded': True} if seed else {'status': status}
     if digest is not None:
         build['bundleSha256'] = digest
-    return {'version': version, 'comment': comment, 'state': 'ready', 'metadata': {'build': build}}
+    metadata = {'build': build, 'platform': seed}
+    return {'version': version, 'comment': comment, 'state': 'ready', 'metadata': metadata}
 
 
 # =============================================================================
@@ -408,3 +414,22 @@ async def test_self_heal_picks_a_platform_row_whatever_its_comment(static_apps, 
     row['metadata'] = {'platform': True, 'build': {'status': 'failed', 'seeded': True}}
     healed, copies, registry = await _heal(static_apps, monkeypatch, row)
     assert healed is True and len(copies) == 1 and registry.bindings == [1]
+
+
+@pytest.mark.asyncio
+async def test_bundle_changed_ignores_a_user_deploy_that_copies_the_seed_comment(static_apps):
+    """#1022 G5 M2: the newest SEED row is chosen by metadata; a user deploy commented 'Platform seed' is not one."""
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+    current = bundle_digest(APP_ID)
+    registry = _Registry([_seed_row('0' * 64, version=2, seed=False), _seed_row(current, version=1)])
+    assert await bundle_changed(registry, 'org', ENTRY) is False  # the real seed row is current
+
+
+def test_public_serves_user_deploy_reads_metadata_not_comment():
+    """#1022 G5 M2: a live user deploy commented 'Platform seed' is still a user deploy; a renamed seed row is not."""
+    from ai.account.seed_apps import public_serves_user_deploy
+
+    spoof = _seed_row(version=2, seed=False)
+    assert public_serves_user_deploy([spoof], {'version': 2}) is True
+    renamed = _seed_row(version=3, comment='renamed by an operator', seed=True)
+    assert public_serves_user_deploy([renamed], {'version': 3}) is False
