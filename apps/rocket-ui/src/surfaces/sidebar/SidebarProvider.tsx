@@ -241,6 +241,9 @@ const SidebarProvider: React.FC = () => {
 
 	// --- Callbacks -----------------------------------------------------------
 
+	// Action error state — shown as a dialog when a file action or a run/stop fails
+	const [actionError, setActionError] = useState<string | null>(null);
+
 	/**
 	 * Handles navigation button clicks.
 	 */
@@ -344,6 +347,9 @@ const SidebarProvider: React.FC = () => {
 			} catch (err) {
 				// Constant format string (SAST rule): the action rides as an arg.
 				console.error('[SidebarProvider] action failed:', action, err);
+				// The user asked for this action; a refusal (a bundle that already
+				// exists, a failed rename) is told in the dialog, not only logged.
+				setActionError(err instanceof Error ? err.message : String(err));
 			}
 		},
 		[client, refresh, projectVfs]
@@ -369,8 +375,6 @@ const SidebarProvider: React.FC = () => {
 		[client, projectVfs]
 	);
 
-	// Action error state — shown as a dialog when run/stop fails
-	const [actionError, setActionError] = useState<string | null>(null);
 
 	// The run call honors the pipeline settings (it hard-coded 'full' before
 	// the settings unification — the one reader that bypassed the setting).
