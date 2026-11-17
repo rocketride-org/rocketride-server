@@ -299,7 +299,7 @@ With `persist=True`, a dropped connection reconnects automatically using LINEAR 
 
 #### `staticmethod async RocketRideClient.get_server_info(uri: str, timeout: float = None) -> ServerInfoResult`
 
-Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey`, and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
+Probe a server for its capabilities without authenticating. Returns a dict with `version`, `capabilities` (e.g. `['oss']` or `['saas']`), `platform`, `apps` (public apps), optionally `stripePublishableKey`, optionally `posthogPublishableKey` + `posthogHost` (product-telemetry config; absent = telemetry off), and `endpoints` (`{'api': ..., 'ui': ...}` always resolved to absolute URLs).
 
 ```python
 info = await RocketRideClient.get_server_info('localhost:5565')
@@ -400,9 +400,9 @@ Retrieve the unresolved pipeline for a running task. The pipeline is returned ex
 
 ### `async validate(pipeline: PipelineConfig, *, source: Optional[str] = None) -> VALIDATION_RESULT`
 
-Validate a pipeline configuration server-side (structure, required fields, component references) without starting it. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
+Validate a pipeline configuration server-side without starting it. It checks what `use()` checks (structure, required fields, component references), then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Source resolution follows the same logic as `use()`: the explicit `source` parameter, else the `source` field in the config, else the single component whose `config.mode` is `'Source'`. Returns a validation result containing errors and warnings; raises `RuntimeError` on a validation failure.
 
-`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{'version': ..., 'component': {...}}` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs. It checks the component's provider but skips the control and lane checks, which need the whole pipeline.
 
 ```python
 result = await client.validate(pipeline, source='webhook_1')
@@ -959,7 +959,7 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Members:**
 
 - `async list_members(org_id: str) -> list[MemberRecord]`
-- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams with `task.control` (any org team for an admin). `invite_member` takes the same arguments, returns `None`, and is deprecated.
+- `async invite(org_id: str, *, email: str, given_name: str, family_name: str, role: str, team_assignments: list[TeamAssignment] | None = None, dev_team_id: str | None = None) -> InvitedMember`: returns `{userId, displayName, email, role, status, devTeamId}`. `dev_team_id` must be one of the `team_assignments` teams that grants `task.control`; when the invitee's `role` is `'admin'` any org team qualifies, a `'member'` invitee still needs that grant on the chosen team. `invite_member` takes the same arguments, returns `None`, and is deprecated.
 - `async update_member_role(org_id: str, user_id: str, role: str) -> None`
 - `async remove_member(org_id: str, user_id: str) -> None`
 
@@ -975,8 +975,8 @@ Account management: profile, API keys, organization, members, teams, and server-
 **Server-side environment layers** (`ROCKETRIDE_*` secrets stored per scope and merged org -> team -> user for pipeline resolution):
 
 - `async get_environment_keys() -> list[str]` — merged list of key NAMES across all scopes (no values).
-- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — read one scope's env dict. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
-- `async set_env(scope: str, env: dict[str, str], scope_id: str | None = None) -> None` — write one scope's FULL env dict (replaces the entire set of keys at that scope level).
+- `async get_env(scope: str, scope_id: str | None = None) -> dict[str, str]` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned. `scope` is `'org'`, `'team'`, or `'user'`; `scope_id` is the orgId/teamId (omit for user).
+- `async set_env(scope: str, env: dict[str, str | None], scope_id: str | None = None) -> None` — merge into one scope: a value sets, `None` deletes, the mask keeps the stored value; names not sent are untouched.
 
 ```python
 new_key = await client.account.create_key(name='ci-runner')

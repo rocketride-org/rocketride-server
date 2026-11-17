@@ -1,6 +1,7 @@
 ---
 title: Tools
 sidebar_position: 2
+description: The RocketRide MCP server exposes 33 tools, 32 on a deployed engine where send_files is not offered. This page is the full tool reference.
 ---
 
 # Tools
@@ -103,16 +104,20 @@ node on the connected engine are listed.
 
 ### validate_pipeline
 
-Validate an inline pipeline with the engine's own validator — the same rules
-`use()` applies — plus one client-side addition, a catalog check the engine's
-pipeline path does not cover: every component must name a provider the engine
-has a service for.
+Validate an inline pipeline with the engine's validator. It checks what `use()`
+checks, then checks a whole pipeline against the services it names: every
+provider is a service on this engine, every control entry names a class of the
+node it calls, and every input lane is one the upstream node produces and this
+node takes. A node with no lanes, such as a tool, is not checked for the lanes it
+takes, and a `"*"` in a node's lanes matches any lane. `use()` does not run
+those last checks, so a pipeline that fails them can still start.
 
 The single-component form `{version, component}` that the node editor sends is
-accepted too. It is not static: the engine instantiates the provider and runs
-its configuration probe, which for LLM nodes sends a small completion request to
-the configured endpoint and for stores connects to the configured database. Validate
-whole pipelines unless you want that probe.
+accepted too. It checks the component's provider but skips the control and lane
+checks, which need the whole pipeline. It is not static: the engine instantiates
+the provider and runs its configuration probe, which for LLM nodes sends a small
+completion request to the configured endpoint and for stores connects to the
+configured database. Validate whole pipelines unless you want that probe.
 
 - **Parameters:** `pipeline` (object, required).
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
@@ -142,14 +147,11 @@ nothing itself.
   defaults to `lane_in`); `class_type` (string, optional, defaults to
   `lane_in`).
 - **Returns:** `{ok, name, provider, files, next_steps}` — `files` maps
-  `local_nodes/__init__.py` (the parent package marker) and
-  `local_nodes/<name>/...` paths to file contents. Write every returned path:
-  without the marker `local_nodes` is not a package and the engine cannot
-  import `local_nodes.<name>`.
+  `nodes/<name>/...` paths to file contents.
 - **Notable:** lanes and `class_type` are validated against the connected
   engine's live catalog, so the allowed sets never drift from what is actually
   in service.
-- **Scope:** a local node runs only on an engine started with `--node_path`.
+- **Scope:** a local node runs only on the engine whose `nodes/` directory holds it.
   RocketRide Cloud loads none, and store review rejects pipelines that use
   one, so an app headed for the store stays on catalog nodes.
 

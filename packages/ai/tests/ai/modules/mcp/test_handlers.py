@@ -289,3 +289,52 @@ async def test_call_tool_normalizer_raised_harderror_still_maps_to_mcp_error(fak
     async with Client(server) as client:
         with pytest.raises(MCPError, match='engine went away'):
             await client.call_tool('drops', {})
+
+
+# --- serverInfo version ----------------------------------------------------
+
+
+def _fake_rocketlib(monkeypatch, get_version):
+    """Install a stand-in `rocketlib` so the test needs no compiled engine."""
+    import sys
+    import types as pytypes
+
+    monkeypatch.setitem(sys.modules, 'rocketlib', pytypes.SimpleNamespace(getVersion=get_version))
+
+
+@pytest.mark.asyncio
+async def test_server_info_reports_engine_version_from_dict(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    _fake_rocketlib(monkeypatch, lambda: {'version': '9.9.9.1', 'hash': '', 'stamp': ''})
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '9.9.9.1'
+
+
+@pytest.mark.asyncio
+async def test_server_info_version_falls_back_when_version_is_empty(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    _fake_rocketlib(monkeypatch, lambda: {'version': '', 'hash': '', 'stamp': ''})
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '0.0.0'
+
+
+@pytest.mark.asyncio
+async def test_server_info_version_falls_back_when_get_version_raises(monkeypatch, fake_engine, caplog):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    def _boom():
+        raise RuntimeError('engine not ready')
+
+    _fake_rocketlib(monkeypatch, _boom)
+
+    with caplog.at_level('DEBUG', logger=handlers_mod.logger.name):
+        server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        assert client.server_info.version == '0.0.0'
+    assert 'engine version unavailable' in caplog.text

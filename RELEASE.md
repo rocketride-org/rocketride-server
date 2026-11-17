@@ -182,6 +182,9 @@ Each package is published independently:
 | Python Client | `packages/client-python/pyproject.toml` | `project.version` |
 | MCP Client | `packages/client-mcp/pyproject.toml` | `project.version` |
 | VS Code Extension | `apps/vscode/package.json` | `version` |
+| MCP Registry listing | `server.json` | `version` |
+
+`server.json` must equal the root `package.json` version. The `Validate server.json` check fails a pull request where they differ, so a version bump must also edit `server.json`.
 
 ### How to release a new version
 
@@ -208,7 +211,8 @@ Each package is published independently:
 4. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
 5. **Promote `stage` to `main`** — see [Promoting stage to main](#promoting-stage-to-main) below. A plain `git merge stage` will not work.
 6. The release workflow triggers automatically and publishes all packages with new versions.
-7. **Merge the back-merge PR.** `release-backmerge` opens one automatically once the release succeeds. Until it lands, `develop` still carries the old version numbers and the nightly prereleases publish *below* the shipped stable line.
+7. **Publish to the MCP Registry** if the release changed the server version: run "Publish to MCP Registry" (`.github/workflows/publish-mcp-registry.yml`) on `main` from the GitHub Actions UI. See [MCP Registry](#mcp-registry).
+8. **Merge the back-merge PR.** `release-backmerge` opens one automatically once the release succeeds. Until it lands, `develop` still carries the old version numbers and the nightly prereleases publish *below* the shipped stable line.
 
 ### Promoting stage to main
 
@@ -334,6 +338,15 @@ Keep `CHANGELOG.md` in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **Registry:** https://open-vsx.org/
 - **Authentication:** `OVSX_PAT` secret
 - **Skip logic:** Catches "already exists" error from `ovsx publish`
+
+### MCP Registry
+
+- **Listing:** `io.github.rocketride-org/rocketride` (defined in `server.json`)
+- **Registry:** https://registry.modelcontextprotocol.io/
+- **Workflow:** "Publish to MCP Registry" (`.github/workflows/publish-mcp-registry.yml`), started by hand on `main`. It is not part of `release.yaml`.
+- **Authentication:** GitHub OIDC in the `release` environment; no secret is stored
+- **Skip logic:** None. Registry versions are immutable, so a second run for the same version fails
+- **Who controls the listing:** the registry grants publish rights on `io.github.rocketride-org/*` to any workflow with `id-token: write` in any repository of the organization, so write access to the organization's repositories is what controls the listing, not this workflow's `main` guard
 
 ## Build Matrix
 

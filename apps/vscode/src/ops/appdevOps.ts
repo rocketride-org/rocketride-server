@@ -21,9 +21,8 @@ import type { AppDevOpMap } from 'shared/ops/appdevOps';
 import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
-
-/** The developer id applied when the org has none or the connection is local/offline. */
-const DEFAULT_DEVELOPER_ID = 'local';
+import { DeveloperIdentity, IdentityFeed, STATUS_TIMEOUT_MS, makeRegisterDeveloperHandler, toWizardIdentity } from '../appdev/developerIdentity';
+import { getLogger } from '../shared/util/output';
 
 /** What the registrations need from the host. */
 interface IAppDevOpsDeps {
@@ -43,38 +42,33 @@ interface IAppDevOpsDeps {
 export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void {
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
-	/**
-	 * Resolves the developer id from the connected server's account info.
-	 * Falls back to 'local' when there is no connection, no organization, or
-	 * no developer id set — the historical appManifest.publisher default.
-	 */
-	const resolveDeveloperId = (): { developerId: string; source: 'organization' | 'default' } => {
-		const client = connectionManager.getClient();
-		if (!client || !connectionManager.isConnected()) {
-			return { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
-		}
-		const accountInfo = client.getAccountInfo() as { organization?: { developerId?: string } } | null;
-		const developerId = accountInfo?.organization?.developerId;
-		return developerId ? { developerId, source: 'organization' } : { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
+	/** Resolves and claims the org's developer id (see appdev/developerIdentity). */
+	/** Logs an appdev failure to the RocketRide output channel. */
+	const logError = (message: string): void => {
+		getLogger().error(`[appdev] ${message}`);
 	};
+	const developer = new DeveloperIdentity(connectionManager, STATUS_TIMEOUT_MS, logError);
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
-		const { developerId, source } = resolveDeveloperId();
-		return {
-			developerId,
-			source,
+		// Same resolution scaffolding acts on (resolveForScaffold), so the form
+		// shows what Create will do, including a failed lookup.
+		return toWizardIdentity(await developer.resolve(), {
 			workspaceOpen: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
 			existingFolders: await listAppFolders(),
-		};
+		});
 	};
 
+	/** Stamps each identity with a revision and pushes only the newest. */
+	const feed = new IdentityFeed(buildIdentity, broadcast);
+
 	const impls: OpImplTable<AppDevOpMap> = {
-		'host.appdev.identity': () => buildIdentity(),
+		'host.appdev.identity': () => feed.refresh(false),
 		'host.appdev.scaffold': async (p) => {
 			// Resolve the developer id NOW — the wizard is modeless, so the
 			// form may have been open across a login/logout. scaffoldApp
 			// re-validates the id + folder and opens the App Builder itself.
-			const developerId = resolveDeveloperId().developerId;
+			// A failed live lookup rejects here rather than creating local.<name>.
+			const developerId = await developer.resolveForScaffold();
 			await scaffoldApp({
 				appId: `${developerId}.${p.appName}`,
 				appName: p.displayName,
@@ -83,6 +77,7 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 			// The real builder is open — retire the untitled document.
 			closeWizard();
 		},
+		'host.appdev.registerDeveloper': makeRegisterDeveloperHandler({ identity: developer, feed, log: logError }),
 		'host.appdev.closeWizard': async () => closeWizard(),
 	};
 	registerOpHandlers<AppDevOpMap>(bus, impls);
@@ -90,10 +85,9 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	// A login/logout while the modeless wizard sits open changes the linkage
 	// name — push the fresh identity to every realm.
 	const push = (): void => {
-		void buildIdentity().then(
-			(identity) => broadcast('host.appdev.identityChanged', identity),
-			() => { /* best effort — the page can re-pull */ }
-		);
+		feed.refresh(true).catch((err: unknown) => {
+			logError(`identity refresh failed: ${err instanceof Error ? err.message : String(err)}`);
+		});
 	};
 	for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
 		connectionManager.on(event, push);

@@ -100,7 +100,7 @@ LINUX_DEPS=(
     "|python3-devel"                        # fedora: cffi/cryptography/Cython sdist builds
     "make"
     "ninja-build"
-    "cmake"                                 # version gated (>= 3.19) by check_linux_cmake
+    "cmake"                                 # version gated (>= 3.22) by check_linux_cmake
     "git"
     "gcc"                                   # C compiler + crt objects the llvm.org clang links on every distro; also sdist C extensions
     "g++|gcc-c++"                           # provides libstdc++.so — clang's DEFAULT (non-libc++) link and CMake's compiler check need it; also sdist C++ extensions
@@ -481,7 +481,7 @@ check_linux_python() {
 
 check_linux_cmake() {
     # Version gate only (mirrors check_linux_python): a cmake already on the
-    # system that is older than 3.19 can't be upgraded by the package manager on
+    # system that is older than 3.22 can't be upgraded by the package manager on
     # older distros (Ubuntu 20.04 ships 3.16), so fail fast with a clear message
     # instead of a confusing configure-time error. If cmake is absent it's
     # installed via the dependency list.
@@ -491,11 +491,11 @@ check_linux_cmake() {
     CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
     CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
     CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
-    if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
+    if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 22 ]; then
         echo ""
         echo "=========================================="
         echo "ERROR: CMake version $CMAKE_VERSION is too old!"
-        echo "Minimum required version: CMake 3.19"
+        echo "Minimum required version: CMake 3.22"
         echo "=========================================="
         echo ""
         exit 1
@@ -742,7 +742,7 @@ dep_install_hint() {
 check_dependencies() {
     local mgr="$1"
     check_linux_python  # hard version gate (python >= 3.10), distro-agnostic
-    check_linux_cmake   # hard version gate (cmake >= 3.19), distro-agnostic
+    check_linux_cmake   # hard version gate (cmake >= 3.22), distro-agnostic
 
     local el_family=0
     is_el_family && el_family=1
@@ -888,8 +888,8 @@ check_mac_cmake() {
         CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
         CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
 
-        if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
-            echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.19)"
+        if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 22 ]; then
+            echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.22)"
             COMMANDS+=("    # Upgrading CMake")
             COMMANDS+=("    brew upgrade cmake")
         fi
