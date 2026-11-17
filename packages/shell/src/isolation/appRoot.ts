@@ -56,7 +56,7 @@ import { KNOWN_CAPS } from './capabilities';
 import { CapabilityDeniedError } from './capabilityDenied';
 import type { DenyCode } from './capabilityDenied';
 import { deniedEnvelope, deniedMessage, deny, sanitizeEnvelope } from './denial';
-import { asDenial, DAP_TIMEOUT_MAX_MS, gateClientRequest, gateOp } from './gate';
+import { admitValue, asDenial, DAP_TIMEOUT_MAX_MS, gateClientRequest, gateOp } from './gate';
 import type { IGateContext, IGatedRequest } from './gate';
 import { base64url, createLedger } from './ledger';
 import type { ILedger, IRunEntry } from './ledger';
@@ -457,7 +457,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				loggedDrops: new Set(),
 				detachRouter: () => {},
 			};
-			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st) });
+			st.detachRouter = router.addGatedRealm(endpoint, { info, handlers: buildHandlers(st), outbound: outboundFor(st), admit: (lane, value) => admitValue(st.gate, lane, value) });
 			realms.set(realmId, st);
 			return realmId;
 		},

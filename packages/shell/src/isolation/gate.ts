@@ -224,6 +224,34 @@ function checkArgs(g: IGateContext, row: CapabilityRow, args: Record<string, unk
 }
 
 /**
+ * Admission on the router's own lanes (see `RealmContext.admit`): the rate
+ * bucket, then the walk and the request size cap. `undefined` only charges.
+ *
+ * @param g - The realm's gate context.
+ * @param lane - The op or lane name (for the denial).
+ * @param value - The value as it arrived.
+ * @returns The checked copy.
+ */
+export function admitValue(g: IGateContext, lane: string, value: unknown): unknown {
+	try {
+		if (!g.rate.allow('request')) throw deny('rate', lane);
+		if (value === undefined) return undefined;
+		const session = g.sessionToken();
+		const copy = walk(value, {
+			onString(s) {
+				if (s.length > SIZES.stringCeiling) throw deny('too_large', lane);
+				if (session !== '' && s.includes(session)) throw deny('credential', lane);
+			},
+		});
+		const size = measure(copy);
+		if (size.json + size.bin > SIZES.request) throw deny('too_large', lane);
+		return copy;
+	} catch (err) {
+		throw asDenial(err, lane);
+	}
+}
+
+/**
  * The gate for a request op other than `client.request` (and for emitOps).
  *
  * @param g - The realm's gate context.

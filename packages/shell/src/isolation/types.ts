@@ -71,6 +71,14 @@ export interface RealmContext {
 	handlers: IOpBus;
 	/** Wraps every message posted to the realm (scrub plus backstop). */
 	outbound: (message: unknown) => unknown;
+	/**
+	 * Admits one value on the router's own lanes (`app.<appKey>.*` requests and
+	 * emitOps, publishes, registrations, topic interest and reads, unknown
+	 * ops): charges the realm's rate bucket, walks and size-checks the value
+	 * (`undefined` only charges). Returns the checked copy; throws a
+	 * `CapabilityDeniedError`. Absent: the router walks and size-checks only.
+	 */
+	admit?: (lane: string, value: unknown) => unknown;
 }
 
 /** `/apps/frame` 200 answer (Appendix A, plus `frame` and `identity`). */

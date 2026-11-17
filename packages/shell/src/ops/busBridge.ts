@@ -59,7 +59,8 @@ import { createRetainedRegistry } from './retained';
 import type { IRetainedPort, IRetainedRegistry, RetainedSubscriber } from './retained';
 import { CapabilityDeniedError } from '../isolation/capabilityDenied';
 import { deniedMessage, deny } from '../isolation/denial';
-import { QUOTAS } from '../isolation/rate';
+import { QUOTAS, SIZES } from '../isolation/rate';
+import { measure, walk } from '../isolation/walk';
 import type { RealmContext } from '../isolation/types';
 
 /** The envelope key (coexists with other traffic on a shared transport). */
@@ -431,6 +432,25 @@ function clampBusTimeout(timeoutMs: unknown): number {
 
 /** Private retained topics one app may hold at the root. */
 const MAX_APP_TOPICS = 256;
+/** Longest op or topic name a gated realm may use, in characters. */
+const MAX_NAME = 256;
+
+/**
+ * The router-lane admission when the context brings none: walk and size
+ * check only (the app root's own `admit` also charges the realm's rate).
+ */
+function defaultAdmit(lane: string, value: unknown): unknown {
+	if (value === undefined) return undefined;
+	let copy: unknown;
+	try {
+		copy = walk(value);
+	} catch {
+		throw deny('schema', lane);
+	}
+	const size = measure(copy);
+	if (size.json + size.bin > SIZES.request) throw deny('too_large', lane);
+	return copy;
+}
 
 function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRouter {
 	const summonTimeoutMs = options?.summonTimeoutMs ?? DEFAULT_SUMMON_TIMEOUT_MS;
@@ -446,6 +466,8 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 		/** Gated realms only: the context, and private (`app.<appKey>.*`) topic interests. */
 		gated?: RealmContext;
 		privTopics?: Set<string>;
+		/** Gated realms only: this realm's `app.<appKey>.*` requests still waiting on an owner. */
+		appInflight?: number;
 		/** Requests this router forwarded INTO the realm, by hop id. */
 		inflight: Map<string, { respond: (m: IBusResponseMessage) => void; timer: ReturnType<typeof setTimeout> }>;
 		unsubscribe: () => void;
@@ -633,6 +655,12 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 	const removeRealm = (realm: IRealm): void => {
 		realms.delete(realm);
 		realm.unsubscribe();
+		// The app's private topics go with its last realm.
+		const gatedKey = realm.gated?.info.appKey;
+		if (gatedKey !== undefined && appRetained && ![...realms].some((r) => r.gated?.info.appKey === gatedKey)) {
+			const prefix = `app.${gatedKey}.`;
+			for (const [topic] of appRetained.entries()) if (topic.startsWith(prefix)) appRetained.publish(topic, undefined);
+		}
 		for (const op of realm.ops) {
 			if (opOwners.get(op) === realm) opOwners.delete(op);
 			if (appOwners.get(op) === realm) appOwners.delete(op);
@@ -664,8 +692,25 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 			}
 			endpoint.post(out);
 		};
-		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, inflight: new Map(), unsubscribe: () => {} };
-		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op'): void => post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(deny(code, op)) });
+		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, appInflight: 0, inflight: new Map(), unsubscribe: () => {} };
+		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op' | CapabilityDeniedError): void =>
+			post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(code instanceof CapabilityDeniedError ? code : deny(code, op)) });
+		/** Rate, walk and size budget for the router's own lanes; throws a denial. */
+		const admit = (lane: string, value: unknown): unknown => {
+			try {
+				return ctx.admit ? ctx.admit(lane, value) : defaultAdmit(lane, value);
+			} catch (err) {
+				throw err instanceof CapabilityDeniedError ? err : deny('schema', lane);
+			}
+		};
+		/** Admits a value, or returns the denial. */
+		const tryAdmit = (lane: string, value: unknown): { ok: true; value: unknown } | { ok: false; denial: CapabilityDeniedError } => {
+			try {
+				return { ok: true, value: admit(lane, value) };
+			} catch (err) {
+				return { ok: false, denial: err as CapabilityDeniedError };
+			}
+		};
 		const interestFull = (): boolean => realm.topics.size + realm.privTopics!.size >= QUOTAS.topics;
 
 		realm.unsubscribe = endpoint.subscribe((message) => {
@@ -678,18 +723,41 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					const respond = (resp: IBusResponseMessage): void => post({ ...resp, id: m.id });
 					if (m.op.startsWith('app.')) {
 						if (!m.op.startsWith(ns)) return refuse(m.id, m.op, 'namespace');
+						if (realm.appInflight! >= QUOTAS.inflight) return refuse(m.id, m.op, deny('rate', m.op));
+						const admitted = tryAdmit(m.op, m.params);
+						if (!admitted.ok) return refuse(m.id, m.op, admitted.denial);
 						const owner = appOwners.get(m.op);
 						if (!owner) return refuse(m.id, m.op, 'unknown_op');
-						routeToRealm(owner, m.op, m.params, timeoutMs, respond, `h${++hopSeq}`);
+						realm.appInflight!++;
+						let done = false;
+						routeToRealm(
+							owner,
+							m.op,
+							admitted.value,
+							timeoutMs,
+							(resp) => {
+								if (!done) {
+									done = true;
+									realm.appInflight!--;
+								}
+								respond(resp);
+							},
+							`h${++hopSeq}`
+						);
 						return;
 					}
 					if (m.op === 'bus.topic.read') {
-						const topic = (m.params as { topic?: unknown } | null | undefined)?.topic;
+						const admitted = tryAdmit(m.op, m.params);
+						if (!admitted.ok) return refuse(m.id, m.op, admitted.denial);
+						const topic = (admitted.value as { topic?: unknown } | null | undefined)?.topic;
 						if (typeof topic === 'string' && sharedTopics.has(topic)) return respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result: retained?.read(topic) });
 						if (typeof topic === 'string' && topic.startsWith(ns)) return respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result: appRegistry().read(topic) });
 						return refuse(m.id, m.op, 'namespace');
 					}
-					if (!ctx.handlers.hasHandler(m.op)) return refuse(m.id, m.op, 'unknown_op');
+					if (!ctx.handlers.hasHandler(m.op)) {
+						const charged = tryAdmit(m.op, undefined);
+						return refuse(m.id, m.op, charged.ok ? 'unknown_op' : charged.denial);
+					}
 					ctx.handlers.request(m.op, m.params, { timeoutMs }).then(
 						(result) => respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result }),
 						(err: unknown) => respond({ [ENVELOPE]: 'response', id: m.id, ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -700,22 +768,26 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					if (typeof m.op !== 'string') return;
 					if (m.op.startsWith('app.')) {
 						const owner = m.op.startsWith(ns) ? appOwners.get(m.op) : undefined;
-						if (owner) owner.post({ [ENVELOPE]: 'emitOp', op: m.op, params: m.params } satisfies IBusEmitOpMessage);
+						if (!owner) return;
+						const admitted = tryAdmit(m.op, m.params);
+						if (admitted.ok) owner.post({ [ENVELOPE]: 'emitOp', op: m.op, params: admitted.value } satisfies IBusEmitOpMessage);
 						return;
 					}
 					if (ctx.handlers.hasHandler(m.op)) ctx.handlers.emitOp(m.op, m.params);
 					return;
 				}
-				case 'register':
-					if (!Array.isArray(m.ops)) return;
-					for (const op of m.ops) {
+				case 'register': {
+					const admitted = tryAdmit('register', m.ops);
+					if (!admitted.ok || !Array.isArray(admitted.value)) return;
+					for (const op of admitted.value as unknown[]) {
 						// Only the app's own namespace, within the quota; the first owner keeps it.
-						if (typeof op !== 'string' || !op.startsWith(ns) || realm.ops.has(op)) continue;
+						if (typeof op !== 'string' || op.length > MAX_NAME || !op.startsWith(ns) || realm.ops.has(op)) continue;
 						if (realm.ops.size >= QUOTAS.registeredOps || appOwners.has(op)) continue;
 						realm.ops.add(op);
 						appOwners.set(op, realm);
 					}
 					return;
+				}
 				case 'unregister':
 					if (!Array.isArray(m.ops)) return;
 					for (const op of m.ops) {
@@ -733,15 +805,18 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 				}
 				case 'publish': {
 					// Only the private registry, only the app's namespace, bounded per app.
-					if (typeof m.topic !== 'string' || !m.topic.startsWith(ns)) return;
+					// Snapshots and signals are walked, size-capped and rate-charged like any inbound value.
+					if (typeof m.topic !== 'string' || m.topic.length > MAX_NAME || !m.topic.startsWith(ns)) return;
+					const admitted = tryAdmit('publish', m.snapshot);
+					if (!admitted.ok) return;
 					const registry = appRegistry();
-					if (m.transient) return registry.signal(m.topic, m.snapshot);
-					if (registry.read(m.topic) === undefined && registry.entries().filter(([t]) => t.startsWith(ns)).length >= MAX_APP_TOPICS) return;
-					registry.publish(m.topic, m.snapshot);
+					if (m.transient) return registry.signal(m.topic, admitted.value);
+					if (admitted.value !== undefined && registry.read(m.topic) === undefined && registry.entries().filter(([t]) => t.startsWith(ns)).length >= MAX_APP_TOPICS) return;
+					registry.publish(m.topic, admitted.value);
 					return;
 				}
 				case 'subscribeTopic': {
-					if (typeof m.topic !== 'string') return;
+					if (typeof m.topic !== 'string' || m.topic.length > MAX_NAME || !tryAdmit('subscribeTopic', undefined).ok) return;
 					if (sharedTopics.has(m.topic)) {
 						if (!realm.topics.has(m.topic) && interestFull()) return;
 						realm.topics.add(m.topic);
