@@ -85,5 +85,13 @@ export default defineConfig(() => ({
 	// assignment keeps working.
 	dev: { hmr: true, lazyCompilation: false, client: { protocol: 'ws', host: 'localhost', port: '<port>' } as const },
 	source: { entry: { index: './src/index.ts' } },
-	output: { assetPrefix: 'auto' },
+	output: {
+		distPath: {
+			// The builder (scripts/lib/appModule.js) registers and copies
+			// build/apps/<appId>; honor its overlay build root when set.
+			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', String(pkg.appManifest?.id ?? 'unknown')),
+		},
+		assetPrefix: 'auto',
+		cleanDistPath: true,
+	},
 }));

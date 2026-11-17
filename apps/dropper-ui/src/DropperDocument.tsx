@@ -158,7 +158,14 @@ function outcomeOf(upload: UPLOAD_RESULT | undefined): Pick<IUploadRow, 'status'
 	if (upload.action === 'error' || error) {
 		return { status: 'failed', error: typeof error === 'string' ? error : 'The upload failed' };
 	}
-	return { status: 'done', result: upload.result as Record<string, unknown> | undefined };
+	// The transport succeeded; the pipeline may still have failed the object
+	// and said so in the close body
+	const result = upload.result as Record<string, unknown> | undefined;
+	const resultError = result?.error;
+	if (typeof resultError === 'string' && resultError.length > 0) {
+		return { status: 'failed', error: resultError, result };
+	}
+	return { status: 'done', result };
 }
 
 // =============================================================================

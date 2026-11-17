@@ -403,7 +403,10 @@ Examples:
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const answer = await client.interfaces(address, options.team ? { team: String(options.team) } : {});
+				// `--team` takes a name or an id like the sibling verbs; an omitted
+				// override stays omitted (the caller's team order decides)
+				const team = options.team ? teamArgOf(client, String(options.team)) : '';
+				const answer = await client.interfaces(address, team ? { team } : {});
 				if (!out.jsonRequested) {
 					const where = answer.rung === 'team' ? `@team ${answer.teamId}` : `@${answer.rung}`;
 					out.line(`${answer.address}  v${answer.version}  ${where}`);

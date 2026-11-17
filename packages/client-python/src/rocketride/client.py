@@ -330,6 +330,7 @@ class RocketRideClient(
         token: str = None,
         node_id: str = '',
         input: dict = None,
+        team: str = None,
         timeout: float = None,
     ) -> Any:
         """
@@ -356,6 +357,9 @@ class RocketRideClient(
             node_id: Target node ID.  When empty the call broadcasts to all
                 tool-lane nodes; the first node that owns the tool handles it.
             input: Arguments forwarded to the tool function.
+            team: Resolve the ``@team`` rung through this one of your teams --
+                the same team an :meth:`interfaces` call was made with, so
+                discovery and execution land on the same publication.
             timeout: Optional per-request timeout in ms.
 
         Returns:
@@ -369,15 +373,10 @@ class RocketRideClient(
         target = address or token
         if not target:
             raise ValueError('tool() needs the pipe address (address=)')
-        result = await self.call(
-            'rrext_process',
-            token=target,
-            timeout=timeout,
-            subcommand='tool',
-            tool=tool,
-            nodeId=node_id,
-            input=input or {},
-        )
+        args = {'subcommand': 'tool', 'tool': tool, 'nodeId': node_id, 'input': input or {}}
+        if team:
+            args['team'] = team
+        result = await self.call('rrext_process', token=target, timeout=timeout, **args)
         return result.get('result')
 
     async def interfaces(self, address: str, *, team: str = None) -> dict:

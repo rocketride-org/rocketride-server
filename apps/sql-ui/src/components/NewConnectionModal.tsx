@@ -35,7 +35,7 @@
 // Save validates the single component server-side before persisting.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, ConnectionManager, ContentHeader, Modal } from 'shell';
 import type { IFormData, IService } from 'shell';
@@ -54,6 +54,24 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 // CONSTANTS
 // =============================================================================
+
+/**
+ * The catalog nodes a direct connection may configure: every service carrying
+ * the `database` classType — the catalog is the word for what a node is, never
+ * a list kept here (plan 3.6).
+ *
+ * @param services - The services summary map (name -> entry).
+ * @returns The provider names, sorted.
+ */
+function databaseProviders(services: Record<string, unknown>): string[] {
+	return Object.entries(services)
+		.filter(([, entry]) => {
+			const classType = (entry as { classType?: unknown } | undefined)?.classType;
+			return Array.isArray(classType) && classType.includes(DATABASE_CLASS_TYPE);
+		})
+		.map(([name]) => name)
+		.sort();
+}
 
 /** Fallback titles when the services summary has not arrived yet. */
 const PROVIDER_TITLES: Record<string, string> = {
@@ -244,16 +262,23 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	const [addressDraft, setAddressDraft] = useState('');
 	const [addressError, setAddressError] = useState('');
 	const [describing, setDescribing] = useState(false);
+	// The lookup in flight: a later submission supersedes an earlier one, so
+	// an answer that arrives for a superseded address changes nothing.
+	const describeSeq = useRef(0);
+	const canDescribe = env.ready && !describing && addressDraft.trim().length > 0;
 	const describeAddress = useCallback(async () => {
+		if (!env.ready) return;
 		const address = addressDraft.trim();
 		if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?$/.test(address)) {
 			setAddressError('An address is developerId.pipelineId or developerId.pipelineId.source');
 			return;
 		}
+		const seq = ++describeSeq.current;
 		setDescribing(true);
 		setAddressError('');
 		try {
 			const found = await env.describeAddress(address);
+			if (seq !== describeSeq.current) return;
 			if (found.length === 0) {
 				setAddressError(`${address} has no database node.`);
 				return;
@@ -261,9 +286,10 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 			setDescribed((prev) => [...found, ...prev.filter((e) => !found.some((f) => f.key === e.key))]);
 			setSelectedKey(found[0]!.key);
 		} catch (err) {
+			if (seq !== describeSeq.current) return;
 			setAddressError(err instanceof Error ? err.message : String(err));
 		} finally {
-			setDescribing(false);
+			if (seq === describeSeq.current) setDescribing(false);
 		}
 	}, [addressDraft, env]);
 	useEffect(() => {
@@ -404,15 +430,13 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	// Direct connections configure a node of their own: every catalog node
 	// carrying the `database` classType is offered — the catalog is the word
 	// for what a node is, never a list kept here (plan 3.6).
-	const dbProviders = useMemo(() => {
-		const { services } = ConnectionManager.getInstance().getCachedServices();
-		return Object.entries(services)
-			.filter(([, entry]) => {
-				const classType = (entry as { classType?: unknown } | undefined)?.classType;
-				return Array.isArray(classType) && classType.includes(DATABASE_CLASS_TYPE);
-			})
-			.map(([name]) => name)
-			.sort();
+	// Read now and again whenever the catalog is (re)delivered: the modal can
+	// mount before the first services response, when the cache is empty.
+	const [dbProviders, setDbProviders] = useState<string[]>(() => databaseProviders(ConnectionManager.getInstance().getCachedServices().services));
+	useEffect(() => {
+		const cm = ConnectionManager.getInstance();
+		setDbProviders(databaseProviders(cm.getCachedServices().services));
+		return cm.on('shell:servicesUpdated', ({ services }) => setDbProviders(databaseProviders(services)));
 	}, []);
 
 	// ── Render ───────────────────────────────────────────────────────────────
@@ -490,9 +514,9 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 							placeholder="Pipe address, e.g. acme.docBrain"
 							spellCheck={false}
 							onChange={(e) => setAddressDraft(e.target.value)}
-							onKeyDown={(e) => { if (e.key === 'Enter') void describeAddress(); }}
+							onKeyDown={(e) => { if (e.key === 'Enter' && canDescribe) void describeAddress(); }}
 						/>
-						<Button variant="secondary" small onClick={() => { void describeAddress(); }} disabled={describing || addressDraft.trim().length === 0 || !env.ready}>
+						<Button variant="secondary" small onClick={() => { void describeAddress(); }} disabled={!canDescribe}>
 							{describing ? 'Looking…' : 'Find nodes'}
 						</Button>
 					</div>

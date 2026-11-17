@@ -3831,11 +3831,14 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
 	 *                         tool-lane nodes; the first node that owns the tool handles it.
 	 * @param options.input - Arguments forwarded to the tool function
+	 * @param options.team - Resolve the `@team` rung through this one of your teams — the same
+	 *                       team an `interfaces()` call was made with, so discovery and execution
+	 *                       land on the same publication
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
 	 * @throws Error if the server signals failure or no node handles the requested tool
 	 */
-	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; team?: string; timeout?: number }): Promise<T> {
 		const address = options.address ?? options.token;
 		if (!address) {
 			throw new Error('tool() needs the pipe address (options.address)');
@@ -3847,6 +3850,7 @@ export class RocketRideClient extends DAPClient {
 				tool: options.tool,
 				nodeId: options.nodeId ?? '',
 				input: options.input ?? {},
+				...(options.team ? { team: options.team } : {}),
 			},
 			{
 				token: address,

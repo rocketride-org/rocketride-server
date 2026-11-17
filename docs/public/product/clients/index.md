@@ -4,7 +4,7 @@ title: Client Libraries
 
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. The chat widget embeds a brandable pipeline chat UI in any web page.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. A pipeline's chat and dropper front ends are platform apps (`rocketride.chat`, `rocketride.dropper`), not an embeddable widget.
 
 ---
 
