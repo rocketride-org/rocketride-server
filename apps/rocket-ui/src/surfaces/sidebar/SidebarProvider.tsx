@@ -321,19 +321,16 @@ const SidebarProvider: React.FC = () => {
 						await projectVfs.mkdir(path);
 						break;
 					case 'createFile': {
-						// A new pipeline is born as a BUNDLE (plan §9, B7): the typed name
-						// is its short id, the pipe sits in a folder of that name, and the
-						// id is stamped from it (never a GUID, plan §2.1).
+						// The Explorer's inline create: a new pipeline is born as a BUNDLE
+						// (plan §9, B7), the pipe in a folder of the typed FILE name. The
+						// name is not the id: the identity lives inside the file, minted
+						// fresh here and chosen on PACKAGE › Identity (the New Pipeline
+						// form is the path that asks the id up front).
 						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
-						// The name is the id: one dot-free segment (B5), checked before anything is written.
-						if (!isShortId(stem)) {
-							console.error('[SidebarProvider] pipeline name is not a short id:', stem);
-							break;
-						}
 						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 						const bundle = bundlePathsFor(dir, stem);
 						await projectVfs.mkdir(bundle.folder);
-						await projectVfs.write(bundle.file, { project_id: stem, components: [] });
+						await projectVfs.write(bundle.file, { project_id: crypto.randomUUID(), components: [] });
 						break;
 					}
 				}

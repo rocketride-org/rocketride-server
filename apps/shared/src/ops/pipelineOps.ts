@@ -104,7 +104,7 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	/** Creates the bundle `pipelines/<name>/<name>.pipe` with `project_id: <name>`,
 	 *  retires the untitled document and opens the file. Rejection carries the
 	 *  validation message. */
-	'host.pipeline.create': ShellOpSpec<{ doc: string; name: string; displayName: string }, void>;
+	'host.pipeline.create': ShellOpSpec<{ doc: string; name: string; displayName: string; project: unknown }, void>;
 	/** Closes the untitled document without creating anything (the form's Cancel). */
 	'host.pipeline.cancelNew': ShellOpSpec<{ doc: string }, void>;
 

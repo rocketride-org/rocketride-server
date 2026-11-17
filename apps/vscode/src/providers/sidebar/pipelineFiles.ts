@@ -68,8 +68,6 @@ export class PipelineFiles {
 	private createdFileQueue = new SerialQueue();
 	/** Set by the owner disposing the watchers: a settle wait that outlives them must not write. */
 	private disposed = false;
-	/** `<fsPath>\n<project_id>` pairs the duplicate warning was already shown for. */
-	private duplicatePromptsShown = new Set<string>();
 
 	private logger = getLogger();
 
@@ -287,7 +285,7 @@ export class PipelineFiles {
 		// Not readable (not there yet, or already gone): nothing to decide.
 		if (text === null) return;
 
-		const decision = decidePipeFile({ event, filePath: uri.fsPath, text, known: [...this.parsedFiles.values()], settled });
+		const decision = decidePipeFile({ event, filePath: uri.fsPath, text, settled });
 		switch (decision.kind) {
 			case 'leave':
 				return;
@@ -320,16 +318,6 @@ export class PipelineFiles {
 				// (B5); the namespace is derived from the publisher, not typed.
 				vscode.window.showErrorMessage(`Pipeline ${vscode.workspace.asRelativePath(uri)}: project_id "${decision.projectId}" is not a short id. Use one dot-free segment (letters, digits, _ or -); the developer id is added when the pipeline is published.`);
 				return;
-			case 'ask-duplicate':
-				// Deliberately not awaited: the warning stays open until the user
-				// acts, and the rest of the handler (re-parse, restart) must not
-				// wait for that. The prompt is marked as shown before it opens and
-				// both files are re-read before any write, so a detached, late
-				// answer is safe.
-				void this.offerNewProjectId(uri, decision.projectId, decision.otherPath).catch((error) => {
-					this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: duplicate id prompt failed (${error instanceof Error ? error.message : String(error)}).`);
-				});
-				return;
 		}
 	}
 
@@ -349,45 +337,7 @@ export class PipelineFiles {
 		await this.writePipeText(uri, next, why);
 	}
 
-	/**
-	 * A genuine duplicate: another file carries the same id. Nothing is written
-	 * unless the user asks for it. The clash is confirmed against the disk
-	 * first, because a rename delivers delete and create in no fixed order and
-	 * the cache can briefly still hold the file's previous path, and again
-	 * after the user answers, because the warning can stay open for a long
-	 * time and the clash may have been resolved meanwhile.
-	 */
-	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPath: string): Promise<void> {
-		if ((await this.readProjectIdOnDisk(otherPath)) !== projectId) return;
 
-		const file = vscode.workspace.asRelativePath(uri);
-		const otherFile = vscode.workspace.asRelativePath(otherPath);
-		this.logger.info(`Pipeline ${file}: project_id ${projectId} is also used by ${otherFile}. File left unchanged.`);
-
-		// Ask once per file and id for the session: every save of a file the
-		// user chose to keep as it is would otherwise ask again.
-		const promptKey = `${uri.fsPath}\n${projectId}`;
-		if (this.duplicatePromptsShown.has(promptKey)) return;
-		this.duplicatePromptsShown.add(promptKey);
-
-		const assign = 'Assign new id';
-		// Defence in depth: VS Code renders [label](target) in notification text
-		// as a link, and a file name in a cloned repository can contain that
-		// syntax. Break it so the warning carries no link the extension did not write.
-		const plain = (name: string): string => name.replace(/\]\(/g, '] (');
-		const choice = await vscode.window.showWarningMessage(`${plain(file)} has the same project_id as ${plain(otherFile)}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
-		if (choice !== assign) return;
-		// The warning can stay open for minutes: rewrite only while the clash still exists.
-		if ((await this.readProjectIdOnDisk(otherPath)) !== projectId) return;
-		await this.assignProjectId(uri, projectId, `duplicate of ${otherFile}, new id assigned at the user's request`);
-	}
-
-	/** The project_id a file carries on disk right now, or undefined when it has none / is gone. */
-	private async readProjectIdOnDisk(fsPath: string): Promise<string | undefined> {
-		const text = await this.readFileText(vscode.Uri.file(fsPath));
-		if (text === null) return undefined;
-		return readPipeProjectId(text) ?? undefined;
-	}
 
 	/** Reads a file as UTF-8, or null when unreadable (not there yet, or gone). */
 	private async readFileText(uri: vscode.Uri): Promise<string | null> {

@@ -243,7 +243,7 @@ const PipelineWebview: React.FC = () => {
 			// extension lists the names in use, creates the bundle and swaps the
 			// documents; Cancel closes this untitled editor.
 			newPipelineIdentity: () => ConnectionManager.getInstance().request('host.pipeline.newIdentity', {} as never) as Promise<NewPipelineIdentity>,
-			createPipeline: (name, displayName) => ConnectionManager.getInstance().request('host.pipeline.create', { doc: docRef.current, name, displayName } as never).then(() => undefined),
+			createPipeline: (name, displayName, project) => ConnectionManager.getInstance().request('host.pipeline.create', { doc: docRef.current, name, displayName, project } as never).then(() => undefined),
 			cancelNew: () => ConnectionManager.getInstance().emitOp('host.pipeline.cancelNew', { doc: docRef.current }),
 			registerDeveloper: (developerId) => (ConnectionManager.getInstance().request('host.pipeline.registerDeveloper', { developerId } as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
 			openCloudSetup: () => {

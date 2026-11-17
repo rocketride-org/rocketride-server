@@ -88,6 +88,12 @@ test('a bundle discovered without its folder entry (VS Code lists files only) st
 	assert.deepEqual(out, [{ path: 'pipelines/docBrain', type: 'file', projectId: 'docBrain', file: 'pipelines/docBrain/docBrain.pipe' }]);
 });
 
+test('a bare .pipe counts as a pipeline when telling a bundle from a folder', () => {
+	// `pkg` holds two pipelines (one has no display stem): a folder, not a bundle.
+	const entries: ProjectEntry[] = [{ path: 'pkg/main.pipe', projectId: 'main' }, { path: 'pkg/.pipe', projectId: 'bare' }];
+	assert.equal(collapseBundles(entries), entries);
+});
+
 test('no bundles: the list is returned as is', () => {
 	const entries: ProjectEntry[] = [{ path: 'a.pipe' }, { path: 'dir', type: 'dir' }, { path: 'dir/x.pipe' }, { path: 'dir/y.pipe' }];
 	assert.equal(collapseBundles(entries), entries);

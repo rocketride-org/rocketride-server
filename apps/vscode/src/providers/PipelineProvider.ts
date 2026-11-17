@@ -23,6 +23,7 @@ import * as path from 'path';
 import { GenericEvent, ConnectionState, ConnectionStatus, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { PIPELINE_PARTITION } from 'shared/tools/pipelines/types';
 import { resolveDefaultPipelineDir } from '../shared/util/pipelineSave';
+import { SHORT_ID_PATTERN } from '../shared/util/pipeFileDecision';
 import type { TaskStatus } from 'shared/tools/pipelines/types';
 import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
@@ -443,6 +444,10 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			'host.pipeline.create': async (p) => {
 				const folder = vscode.workspace.workspaceFolders?.[0];
 				if (!folder) throw new Error('Open a workspace folder first. The pipeline is created in it.');
+				// The name is the id AND two path segments: the grammar is enforced
+				// here, not only in the form (a caller that bypasses the form must
+				// not reach the file system with `..`).
+				if (!SHORT_ID_PATTERN.test(p.name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
 				const dir = resolveDefaultPipelineDir();
 				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
 				const bundleDir = vscode.Uri.joinPath(dirUri, p.name);
@@ -454,7 +459,10 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 					if (error instanceof Error && error.message.endsWith('Choose another name.')) throw error;
 				}
 				await vscode.workspace.fs.createDirectory(bundleDir);
-				const content = JSON.stringify({ project_id: p.name, name: p.displayName, components: [] }, null, 2);
+				// The untitled document's content rides along (its components stay);
+				// only the identity is set here.
+				const base = p.project && typeof p.project === 'object' ? (p.project as Record<string, unknown>) : {};
+				const content = JSON.stringify({ ...base, project_id: p.name, name: p.displayName, components: Array.isArray(base.components) ? base.components : [] }, null, 2);
 				await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
 				// Retire the untitled form document and open the file in its place.
 				const editorState = this.findLiveEditorState(p.doc);

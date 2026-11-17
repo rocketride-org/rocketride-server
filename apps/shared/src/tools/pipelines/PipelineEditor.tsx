@@ -124,7 +124,7 @@ export interface IPipelineEditorHost {
 	/** Creates `pipelines/<name>/<name>.pipe` with `project_id: <name>` and the
 	 *  display name, retires the untitled document and opens the file; a
 	 *  rejection carries the validation message and re-enables the form. */
-	createPipeline?(name: string, displayName: string): Promise<void>;
+	createPipeline?(name: string, displayName: string, project: unknown): Promise<void>;
 	/** Closes the untitled document without creating anything. */
 	cancelNew?(): void;
 	/** Exports the pipeline as a download (hosts with a browser context). */
@@ -631,14 +631,16 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 			if (!host.createPipeline) return;
 			setCreateError(null);
 			setCreating(true);
-			// Resolution means the host created the bundle and moved the
-			// document over (this editor goes away); a rejection re-enables the form.
-			host.createPipeline(name, displayName).catch((err: unknown) => {
+			// The document's content rides along: an untitled pipeline that
+			// already has components keeps them under its new id. Resolution means
+			// the host created the bundle and moved the document over (this editor
+			// goes away); a rejection re-enables the form.
+			host.createPipeline(name, displayName, project).catch((err: unknown) => {
 				setCreateError(err instanceof Error ? err.message : String(err));
 				setCreating(false);
 			});
 		},
-		[host]
+		[host, project]
 	);
 
 	// --- Render ----------------------------------------------------------------

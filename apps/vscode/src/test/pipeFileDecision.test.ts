@@ -25,10 +25,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
-import type { KnownPipeFile, PipeFileEvent } from '../shared/util/pipeFileDecision';
+import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
-const OTHER = '/ws/pipelines/b.pipe';
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
 
@@ -37,78 +36,60 @@ function pipe(projectId?: string): string {
 	return JSON.stringify(projectId === undefined ? { components: [] } : { components: [], project_id: projectId }, null, 2);
 }
 
-function decide(text: string, known: KnownPipeFile[], event: PipeFileEvent = 'created', settled = false) {
-	return decidePipeFile({ event, filePath: FILE, text, known, settled });
+function decide(text: string, event: PipeFileEvent = 'created', settled = false) {
+	return decidePipeFile({ event, filePath: FILE, text, settled });
 }
 
 // --- empty reads: the "once emptied a file" half of #2466 ------------------
 
 test('an empty read on a changed file never writes', () => {
 	for (const text of ['', '   ', '\n\t\n']) {
-		assert.deepEqual(decide(text, [], 'changed'), { kind: 'leave', reason: 'empty' });
+		assert.deepEqual(decide(text, 'changed'), { kind: 'leave', reason: 'empty' });
 	}
 });
 
 test('an empty read on a created file is re-checked before anything is written', () => {
-	assert.deepEqual(decide('', []), { kind: 'confirm-empty' });
+	assert.deepEqual(decide(''), { kind: 'confirm-empty' });
 });
 
 test('a created file that is still empty after settling gets the skeleton', () => {
-	assert.deepEqual(decide('', [], 'created', true), { kind: 'seed-empty' });
+	assert.deepEqual(decide('', 'created', true), { kind: 'seed-empty' });
 });
 
 test('a created file that filled in while settling is judged on its content', () => {
-	assert.deepEqual(decide(pipe(ID_A), [], 'created', true), { kind: 'leave', reason: 'id-ok' });
-	assert.deepEqual(decide(pipe(), [], 'created', true), { kind: 'assign-id' });
+	assert.deepEqual(decide(pipe(ID_A), 'created', true), { kind: 'leave', reason: 'id-ok' });
+	assert.deepEqual(decide(pipe(), 'created', true), { kind: 'assign-id' });
 });
 
 // --- own id: the "silently rewrites project_id" half of #2466 ---------------
 
-test("a file's own cached id is not a duplicate", () => {
-	const known = [
-		{ filePath: FILE, projectId: ID_A },
-		{ filePath: OTHER, projectId: ID_B },
-	];
-	assert.deepEqual(decide(pipe(ID_A), known, 'created'), { kind: 'leave', reason: 'id-ok' });
-	assert.deepEqual(decide(pipe(ID_A), known, 'changed'), { kind: 'leave', reason: 'id-ok' });
-});
 
-test('the same file under an unnormalised path is still itself', () => {
-	const known = [{ filePath: '/ws/pipelines/../pipelines/a.pipe', projectId: ID_A }];
-	assert.deepEqual(decide(pipe(ID_A), known), { kind: 'leave', reason: 'id-ok' });
-});
 
-// --- genuine duplicate -------------------------------------------------------
 
-test('a genuine duplicate is not rewritten silently: the user is asked', () => {
-	const known = [{ filePath: OTHER, projectId: ID_A }];
-	assert.deepEqual(decide(pipe(ID_A), known, 'created'), { kind: 'ask-duplicate', projectId: ID_A, otherPath: OTHER });
-	assert.deepEqual(decide(pipe(ID_A), known, 'changed'), { kind: 'ask-duplicate', projectId: ID_A, otherPath: OTHER });
-});
 
 // --- missing id ----------------------------------------------------------------
 
 test('a pipeline with no usable project_id still gets one', () => {
 	const texts = [pipe(), JSON.stringify({ components: [], project_id: '' }), JSON.stringify({ components: [], project_id: '  ' }), JSON.stringify({ components: [], project_id: 42 })];
 	for (const text of texts) {
-		assert.deepEqual(decide(text, [], 'created'), { kind: 'assign-id' });
-		assert.deepEqual(decide(text, [], 'changed'), { kind: 'assign-id' });
+		assert.deepEqual(decide(text, 'created'), { kind: 'assign-id' });
+		assert.deepEqual(decide(text, 'changed'), { kind: 'assign-id' });
 	}
 });
 
 test('the wrapped { pipeline: ... } shape is handled like the bare one', () => {
 	const wrapped = JSON.stringify({ pipeline: { components: [], project_id: ID_A } });
-	assert.deepEqual(decide(wrapped, [{ filePath: OTHER, projectId: ID_A }]), { kind: 'ask-duplicate', projectId: ID_A, otherPath: OTHER });
-	assert.deepEqual(decide(JSON.stringify({ pipeline: { components: [] } }), []), { kind: 'assign-id' });
+	assert.deepEqual(decide(wrapped), { kind: 'leave', reason: 'id-ok' });
+	assert.deepEqual(decide(JSON.stringify({ pipeline: { components: [] } })), { kind: 'assign-id' });
 });
 
 // --- not a pipeline ------------------------------------------------------------
 
 test('invalid JSON and non-pipeline JSON are left alone', () => {
-	assert.deepEqual(decide('{ not json', []), { kind: 'leave', reason: 'invalid-json' });
-	assert.deepEqual(decide('[]', []), { kind: 'leave', reason: 'not-a-pipeline' });
-	assert.deepEqual(decide('{"name":"x"}', []), { kind: 'leave', reason: 'not-a-pipeline' });
-	assert.deepEqual(decide('{"components":{}}', []), { kind: 'leave', reason: 'not-a-pipeline' });
+	assert.deepEqual(decide('{ not json'), { kind: 'leave', reason: 'invalid-json' });
+	assert.deepEqual(decide('[]'), { kind: 'leave', reason: 'not-a-pipeline' });
+	assert.deepEqual(decide('{"name":"x"}'), { kind: 'leave', reason: 'not-a-pipeline' });
+	assert.deepEqual(decide('{"components":{}}'), { kind: 'leave', reason: 'not-a-pipeline' });
 });
 
 // --- readPipeProjectId ---------------------------------------------------------
@@ -184,13 +165,13 @@ test('the skeleton is a valid empty pipeline carrying the id', () => {
 // --- Short ids: the file's name is the id; a dotted id is refused (plan §2.1, B5) ---
 
 test('a dotted project_id is an address, not a short id: refused, never rewritten', () => {
-	const decision = decidePipeFile({ event: 'changed', filePath: '/w/pipelines/docBrain/docBrain.pipe', text: '{"project_id":"acme.docBrain","components":[]}', known: [] });
+	const decision = decidePipeFile({ event: 'changed', filePath: '/w/pipelines/docBrain/docBrain.pipe', text: '{"project_id":"acme.docBrain","components":[]}' });
 	assert.deepEqual(decision, { kind: 'refuse-dotted', projectId: 'acme.docBrain' });
 });
 
 test('a GUID id and a short id both pass the grammar', () => {
 	for (const id of ['00000000-0000-0000-0000-000000000000', 'docBrain', 'doc-brain_2']) {
-		const decision = decidePipeFile({ event: 'changed', filePath: '/w/a.pipe', text: `{"project_id":"${id}","components":[]}`, known: [] });
+		const decision = decidePipeFile({ event: 'changed', filePath: '/w/a.pipe', text: `{"project_id":"${id}","components":[]}` });
 		assert.deepEqual(decision, { kind: 'leave', reason: 'id-ok' }, id);
 	}
 });

@@ -53,6 +53,18 @@ export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 const PIPE_EXTENSIONS = ['.pipe.json', '.pipe'];
 
 /**
+ * Tells whether a path names a pipeline file, by extension alone (the same
+ * rule discovery uses; a bare `.pipe` counts, though it has no display stem).
+ *
+ * @param path - A '/'-separated path.
+ * @returns True for a `.pipe` or `.pipe.json` file.
+ */
+export function isPipelineFile(path: string): boolean {
+	const lower = path.toLowerCase();
+	return PIPE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
  * Tells whether a string is a legal short id (dot-free, one segment).
  *
  * @param id - The candidate id.
@@ -112,7 +124,7 @@ function parentOf(path: string): string {
 function bundleFolders(entries: ProjectEntry[]): Map<string, string> {
 	// Step 1: the pipeline files per DIRECT parent folder
 	const direct = new Map<string, ProjectEntry[]>();
-	const pipes = entries.filter((e) => e.type !== 'dir' && pipeStemOf(e.path) !== null);
+	const pipes = entries.filter((e) => e.type !== 'dir' && isPipelineFile(e.path));
 	for (const pipe of pipes) {
 		const parent = parentOf(pipe.path);
 		if (!parent) continue;

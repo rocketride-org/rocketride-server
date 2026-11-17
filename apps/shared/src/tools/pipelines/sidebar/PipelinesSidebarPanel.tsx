@@ -72,7 +72,7 @@ export interface IPipelinesSidebarPanelProps {
 	/** Open a pipeline file. */
 	onOpenFile: (path: string) => void;
 	/** File management, hosts that support it. */
-	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void;
+	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void | Promise<void>;
 	/** Extra per-file actions (e.g. Export). */
 	fileActions?: ExplorerFileAction[];
 	/** Run/stop a source component. */
@@ -123,13 +123,15 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 	/** File management on a bundle acts on the folder; a rename renames the
 	 *  pipe inside first so the folder stays a bundle (same name, plan §9). */
 	const handleFileManage = useCallback(
-		(action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
+		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string): Promise<void> => {
 			if (!onFileManage) return;
 			const entry = shown.find((e) => e.path === path);
 			if (entry?.file && action === 'rename' && newName) {
-				onFileManage('rename', entry.file, newName);
+				// The pipe first, then the folder: the inner rename must land before
+				// its parent path changes under it.
+				await onFileManage('rename', entry.file, newName);
 			}
-			onFileManage(action, path, newName);
+			await onFileManage(action, path, newName);
 		},
 		[onFileManage, shown],
 	);

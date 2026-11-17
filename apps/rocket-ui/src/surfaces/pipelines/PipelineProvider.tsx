@@ -49,7 +49,7 @@ import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
-import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
+import { bundlePathsFor, isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
@@ -449,14 +449,20 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	/** Creates the bundle with the name as the id, retires this untitled
 	 *  document and opens the file. */
 	const handleCreatePipeline = useCallback(
-		async (name: string, displayName: string): Promise<void> => {
+		async (name: string, displayName: string, project: unknown): Promise<void> => {
 			if (!client || !isConnected) throw new Error('Not connected to server');
+			// The name is the id AND two path segments: the grammar is enforced
+			// here, not only in the form.
+			if (!isShortId(name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
 			const dir = settingDefaultDir === 'pipelines' ? '' : settingDefaultDir;
 			const bundle = bundlePathsFor(dir, name);
 			const taken = await projectVfs.list(dir).catch(() => []);
 			if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${bundle.folder}" already exists. Choose another name.`);
 			await projectVfs.mkdir(bundle.folder);
-			await projectVfs.write(bundle.file, { project_id: name, name: displayName, components: [] });
+			// The untitled document's content rides along (its components stay);
+			// only the identity is set here.
+			const base = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
+			await projectVfs.write(bundle.file, { ...base, project_id: name, name: displayName, components: Array.isArray(base.components) ? base.components : [] });
 			const docs = getDocs();
 			docs?.discardDocument(uri);
 			await docs?.openDocument(bundle.file);

@@ -133,6 +133,9 @@ export const NewPipelineForm: React.FC<INewPipelineFormProps> = ({ identity, cre
 
 	// Step 1: the name is the short id; one dot-free segment (plan §2.1, B5)
 	const nameValid = SHORT_ID_PATTERN.test(name);
+	// A taken name is a folder or file the bundle would overwrite. Two files
+	// carrying one id are the publisher's own concern (Rod, 2026-11-16): no
+	// identity check here, the server resolves by address.
 	const collision = nameValid && identity.existingNames.some((n) => n.toLowerCase() === name.toLowerCase());
 	const canCreate = nameValid && !collision && displayName.trim() !== '' && identity.workspaceOpen && !creating;
 
