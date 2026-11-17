@@ -553,7 +553,9 @@ class LangChainAdapter:
                     skw.pop('stream_usage', None)
                     dropped_usage = True
                 else:
-                    raise
+                    # The error in hand: after a retry it is the retry's own, which a
+                    # bare raise would replace with the first one
+                    raise e
                 try:
                     gen, piece = _open(skw)
                     break

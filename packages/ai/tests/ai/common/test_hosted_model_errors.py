@@ -425,6 +425,39 @@ def test_a_refusal_after_text_was_streamed_on_the_turn_before(monkeypatch, backe
     assert len(gateway.requests) == 2
 
 
+def ordinary_rejection(param: str):
+    """An ordinary provider 400 for one request field (not a hosted refusal)."""
+    err = {
+        'message': f"Unsupported parameter: '{param}' is not supported with this model.",
+        'type': 'invalid_request_error',
+        'param': param,
+        'code': 'unsupported_parameter',
+    }
+    return lambda _body: httpx.Response(400, json={'error': err})
+
+
+@pytest.mark.parametrize('path', ['prompt', 'tool-turn'])
+@pytest.mark.parametrize('dropped', ['stop', 'stream_options'])
+def test_a_refusal_on_the_retry_without_a_flag_is_raised(monkeypatch, backend, hosted, path, dropped):
+    """The first request is rejected for stop or the usage flag; the retry without it is refused.
+
+    The refusal is what the run reports, after exactly two requests: no third request
+    through another path.
+    """
+    node, config, question = PATHS[path]
+    gateway = backend(ordinary_rejection(dropped), refusal('insufficient_credits'))
+    chat = _driver(monkeypatch, node, config)
+
+    error, shown = _ask(chat, question(), True, dropped == 'stop')
+
+    assert isinstance(error, HostedModelError), repr(error)
+    assert str(error) == SENTENCES['insufficient_credits']
+    assert shown == []
+    assert len(gateway.requests) == 2
+    first, second = gateway.bodies
+    assert dropped in first and dropped not in second
+
+
 # ---------------------------------------------------------------------------
 # The JSON repair loop
 # ---------------------------------------------------------------------------
