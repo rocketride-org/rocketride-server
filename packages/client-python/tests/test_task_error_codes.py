@@ -28,10 +28,14 @@ and ``DAPException`` exposes ``code`` / ``hint`` so a caller classifies a
 failure without matching the English message.
 """
 
+import inspect
+import os
+import pickle
+
 import pytest
 
 from rocketride.core.dap_base import DAPBase
-from rocketride.core.exceptions import DAPException, PipeException
+from rocketride.core.exceptions import AuthenticationException, CommandException, DAPException, PipeException
 
 
 class _Base(DAPBase):
@@ -72,6 +76,14 @@ def test_build_exception_ignores_a_non_string_code():
     packet = _Base().build_exception(REQUEST, _Coded(42, 'boom'))
 
     assert 'code' not in packet
+
+
+def test_build_error_traces_the_line_that_called_it():
+    """The trace names the caller's file and line, read from its frame alone."""
+    line = inspect.currentframe().f_lineno + 1
+    packet = _Base().build_error(REQUEST, 'command not allowed')
+
+    assert packet['trace'] == {'file': os.path.basename(__file__), 'lineno': line}
 
 
 def test_exception_exposes_code_and_hint():
@@ -142,3 +154,17 @@ def test_command_failure_keeps_the_fallback_message():
     client = _client_answering({'type': 'response', 'success': False})
     with pytest.raises(RuntimeError, match='^rrext_get_tasks failed$'):
         asyncio.run(client.call('rrext_get_tasks'))
+
+
+@pytest.mark.parametrize('cls', [DAPException, CommandException, PipeException, AuthenticationException])
+def test_exception_survives_pickling(cls):
+    """A process pool or a pickled result rebuilds the exception with its response."""
+    e = cls({'message': 'Task is stopped', 'code': 'TASK_STOPPED', 'hint': 'start it'})
+
+    copy = pickle.loads(pickle.dumps(e))
+
+    assert type(copy) is cls
+    assert str(copy) == 'Task is stopped'
+    assert copy.code == 'TASK_STOPPED'
+    assert copy.hint == 'start it'
+    assert copy.dap_result == e.dap_result

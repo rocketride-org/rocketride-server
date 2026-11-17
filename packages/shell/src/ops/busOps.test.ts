@@ -245,7 +245,8 @@ test('summon on the emit lane buffers and delivers on registration', async () =>
 
 	rootBus.emitOp('appdev:openApp', { appId: 'y1' });
 	rootBus.emitOp('appdev:openApp', { appId: 'y2' });
-	await new Promise((r) => setTimeout(r, 100));
+	const deadline = Date.now() + 5_000;
+	while (got.length < 2 && Date.now() < deadline) await settle();
 	assert.deepEqual(got, [{ appId: 'y1' }, { appId: 'y2' }]);
 });
 

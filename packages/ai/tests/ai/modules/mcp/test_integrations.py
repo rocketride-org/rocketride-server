@@ -304,6 +304,19 @@ async def test_list_integrations_unknown_name_is_bad_request(monkeypatch):
     assert result['hint']
 
 
+def test_shipped_tool_github_wires_only_the_token_when_the_map_variables_exist():
+    # The credential map's row fields are set inside credentialMap, so their variables must not
+    # become top-level bindings the node would ignore.
+    spec = credentials_mod.load_catalog()['tool_github']
+
+    result = credentials_mod.evaluate(
+        spec, ['ROCKETRIDE_GITHUB_TOKEN', 'ROCKETRIDE_GITHUB_CREDENTIAL_REPOSITORY', 'ROCKETRIDE_GITHUB_CREDENTIAL']
+    )
+
+    assert result['status'] == 'configured'
+    assert result['wiring'] == {'github.token': '${ROCKETRIDE_GITHUB_TOKEN}'}
+
+
 def test_shipped_tool_github_still_asks_for_a_token_without_env():
     # tool_github has two auth methods, but the PAT stays the wired default: with every
     # credential optional the surface would report 'configured' with an empty wiring.

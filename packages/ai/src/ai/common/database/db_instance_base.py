@@ -992,16 +992,28 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         return result.answer
 
     def _executeSQLQuery(self, query: str) -> list[dict] | None:
-        """Execute a SQL SELECT query and return rows as a list of dicts."""
+        """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts.
+
+        Args:
+            query: The generated SQL.
+
+        Returns:
+            One dict per row, or None when the database refused or failed the query.
+
+        Raises:
+            Exception: Any error that is not a database failure, such as the RuntimeError of a dialect without a
+                read-only mode.
+        """
         try:
-            with self.IGlobal.engine.connect() as conn:
+            with self.IGlobal.read_only_connection() as conn:
                 result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
         except Exception as e:
-            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException
+            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException,
+            # including when readonly=1 refuses a write
             if not _isDbFailure(e):
                 raise
             error(f'Error executing SQL query: {e}')

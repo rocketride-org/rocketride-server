@@ -63,6 +63,7 @@ except ImportError:
 from ._sys_modules_guard import (  # noqa: E402,F401
     pytest_collectreport,
     pytest_collectstart,
+    pytest_runtest_teardown,
     pytest_sessionfinish,
     pytest_terminal_summary,
 )

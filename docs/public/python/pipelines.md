@@ -29,8 +29,9 @@ environment.
 
 **Running the same pipeline more than once at a time.** Without a custom `token`,
 the server names the task after its owner, `project_id` and source, so a second
-`use()` of the same pipe fails with `Pipeline is already running.` Give each
-instance its own `token` and they run side by side:
+`use()` of the same pipe fails with an error that starts
+`Pipeline is already running`. Give each instance its own `token` and they run
+side by side:
 
 ```python
 result = await client.use(filepath='pipeline.pipe', token=f'tk_{uuid.uuid4().hex}')
@@ -40,9 +41,11 @@ The value you choose is the run's
 [private token](/operate/security#endpoint-authentication): full control of
 the run for anyone who presents it. So make it unguessable, and keep the `tk_`
 prefix (without it the token cannot authenticate on webhook or dropper
-endpoints). Tokens share one namespace across every user of the server: a
-predictable value collides with other people's tasks, and with `use_existing` a
-token that matches a running task attaches to it, whoever started it.
+endpoints). The server refuses a `tk_` token with fewer than 32 characters
+after the prefix (letters, digits, `-` and `_`). Tokens share one namespace across every user of the server: a
+predictable value collides with other people's tasks: a token that matches
+someone else's task is refused, with or without `use_existing`, and a token
+that matches your own running task attaches to it under `use_existing`.
 
 What two instances still share:
 
