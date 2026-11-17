@@ -1336,6 +1336,40 @@ def test_questions_lane_fails_the_step_when_the_service_cannot_answer(failure):
     assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
 
 
+@pytest.mark.parametrize(
+    'outcomes',
+    [
+        [{'status': 'interrupted'}, {'status': 'interrupted'}],
+        [{'status': 'cancelled'}],
+    ],
+    ids=['interrupted-twice', 'cancelled'],
+)
+def test_questions_lane_fails_the_step_when_the_run_ends_not_by_the_sql(outcomes):
+    """A run that is interrupted or cancelled is not the statement's fault: no rewrite, no lane error, the step fails."""
+    seen = []
+    g = _loaded_global(max_attempts=3)
+    g.client = _interrupting_client(outcomes, seen)
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'table', 'answers'])
+
+    with pytest.raises(iinstance_mod.HotdataLaneError, match='could not answer the question'):
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert len(seen) == len(outcomes)  # the same statement, never regenerated
+    assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+
+
+def test_a_run_that_outlives_the_job_timeout_is_a_run_failure():
+    """The poll deadline is about the run, not the SQL: raised as RunFailedError, which the lane turns into a step failure."""
+    g = _loaded_global()
+    g.job_timeout_secs = 0
+    g.client = SimpleNamespace(get_query_run=lambda _run_id, database_id='': {'status': 'running'})
+
+    with pytest.raises(iinstance_mod.RunFailedError, match='did not finish within'):
+        _instance(g)._await_run('run-1', 'db-1')
+    assert iinstance_mod._is_sql_fixable(iinstance_mod.RunFailedError('x')) is False
+
+
 def test_questions_lane_still_emits_an_error_for_a_statement_the_server_rejected():
     """A real SQL rejection (the server minted a query run id) is the statement's fault: reported on the lanes."""
     g = _loaded_global(max_attempts=1)
