@@ -332,6 +332,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				if (body && (body.completed === true || body.final === true)) st.ledger.complete(req.run!.handle);
 				return response;
 			case 'rrext_monitor': {
+				// A run that ended during the call keeps no subscription record (DA N1).
+				if (st.ledger.run(req.run!.handle) !== req.run) return response;
 				const pipeId = req.args.pipeId as number | undefined;
 				const k = directMonitorKey(req.run!.handle, pipeId);
 				const types = [...new Set(req.args.types as string[])];
@@ -488,11 +490,22 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const added = types.filter((t) => !counts.has(t)).length;
 			if (st.ledger.used('monitorKeys') + added > QUOTAS.monitorKeys) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
 			const release = st.ledger.reserve('monitorKeys', added);
+			const startedIn = epoch;
 			try {
 				await client().addMonitor({ token: run!.token }, types);
-			const startedIn = epoch;
-				for (const t of types) counts.set(t, (counts.get(t) ?? 0) + 1);
-				st.ledger.monitors.set(run!.handle, counts);
+				// The run may have ended (terminate, teardown, logout, detach) during the call:
+				// then nothing is recorded, so no slot is held for a dead run.
+				if (st.detached || epoch !== startedIn || st.ledger.run(run!.handle) !== run) {
+					track(
+						Promise.resolve()
+							.then(() => client().removeMonitor({ token: run!.token }, types))
+							.catch(() => undefined)
+					);
+					return;
+				}
+				const current = st.ledger.monitors.get(run!.handle) ?? counts;
+				for (const t of types) current.set(t, (current.get(t) ?? 0) + 1);
+				st.ledger.monitors.set(run!.handle, current);
 			} finally {
 				release();
 			}
@@ -652,6 +665,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const tally = { failed: 0 };
 				const work: Promise<unknown>[] = [];
 				for (const st of realms.values()) work.push(...teardownRealm(st, tally));
+				// Then the root's own background work: engine calls started before the
+				// teardown, and the ending of what their late answers started (DA N3).
+				const drain = async (): Promise<boolean> => {
+					await Promise.allSettled(work);
+					while (background.size > 0) await Promise.allSettled([...background]);
+					return false;
+				};
 				let timer: ReturnType<typeof setTimeout> | undefined;
 				const timedOut = await Promise.race([drain(), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
 				if (timer !== undefined) clearTimeout(timer);
@@ -663,10 +683,3 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		},
 	};
 }
-				// Then the root's own background work: engine calls started before the
-				// teardown, and the ending of what their late answers started (DA N3).
-				const drain = async (): Promise<boolean> => {
-					await Promise.allSettled(work);
-					while (background.size > 0) await Promise.allSettled([...background]);
-					return false;
-				};
