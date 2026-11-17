@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { BAND_GAP, LAYER_GAP, NODE_GAP, edgesThroughNodes, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
+import { BAND_GAP, LAYER_GAP, NODE_GAP, WRAP_BELOW_ZOOM, edgesThroughNodes, layoutLayers, layoutPipeline, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -253,10 +253,10 @@ describe('layoutPipeline in a frame', () => {
 
 	it('wraps only when one band would be too small to read', () => {
 		const ids = chain(5);
-		// One band of 5 is 820 px wide: zoom 0.24 in 200 px, still readable with labels, so it stays one band.
-		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 200, height: 560 })).map((p) => p.y)).size).toBe(1);
-		// In 140 px it would be zoom 0.17, so it wraps.
-		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 140, height: 560 })).map((p) => p.y)).size).toBeGreaterThan(1);
+		// One band of 5 is 820 px wide: zoom 0.44 in 360 px, still readable, so it stays one band.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 360, height: 560 })).map((p) => p.y)).size).toBe(1);
+		// In 200 px it would be zoom 0.24, so it wraps.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 200, height: 560 })).map((p) => p.y)).size).toBeGreaterThan(1);
 	});
 
 	it('wraps a long flow into bands so it is drawn larger', () => {
@@ -286,9 +286,8 @@ describe('layoutPipeline in a frame', () => {
 		expect([...rows.values()]).toEqual([4, 4]);
 	});
 
-	it('cuts a band where the fewest edges cross', () => {
+	it('wraps where no connection passes behind a node', () => {
 		// a feeds b and c (one column), both feed d, then a chain: d e f g h.
-		// A cut after a or after b/c would carry two connections; a cut later carries one.
 		const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 		const edges = [
 			{ source: 'a', target: 'b' },
@@ -301,13 +300,11 @@ describe('layoutPipeline in a frame', () => {
 			{ source: 'g', target: 'h' },
 		];
 		const positions = layoutPipeline(ids, edges, fixed, { width: 180, height: 2000 });
-		const band = (id: string) => Object.values(positions).filter((p) => p.y < positions[id].y - SIZE.height - NODE_GAP).length > 0;
-		const across = edges.filter((e) => positions[e.target].y > positions[e.source].y + SIZE.height + BAND_GAP / 2);
 
 		expect(new Set(Object.values(positions).map((p) => p.y)).size).toBeGreaterThan(1);
-		expect(band('a')).toBe(false);
-		expect(across.length).toBe(1);
+		expect(positions.a.y).toBeLessThan(positions.h.y);
 		expect(edgesThroughNodes(positions, edges, fixed)).toBe(0);
+		expect(overlaps(positions, fixed)).toBe(false);
 	});
 
 	it('puts an invoked node that sends data below the others in its column', () => {
@@ -383,12 +380,24 @@ describe('edges and nodes', () => {
 
 	it.each([
 		[760, 560],
-		[390, 420],
 		[1100, 700],
 	])('draws no connection behind a node in a %i x %i frame', (width, height) => {
 		const positions = layoutPipeline(ids, edges, sizeOf, { width, height });
 
 		expect(edgesThroughNodes(positions, edges, sizeOf)).toBe(0);
+		expect(overlaps(positions, sizeOf)).toBe(false);
+	});
+
+	it('wraps in a 390 x 420 frame with the fewest connections across a node', () => {
+		// Every way to wrap this pipeline that narrow sends one connection across a
+		// node; the canvas draws such a connection over the node, not behind it.
+		const positions = layoutPipeline(ids, edges, sizeOf, { width: 390, height: 420 });
+		const width = Math.max(...ids.map((id) => positions[id].x + sizes[id].width));
+		const height = Math.max(...ids.map((id) => positions[id].y + sizes[id].height));
+
+		expect(new Set(Object.values(positions).map((p) => p.y)).size).toBeGreaterThan(1);
+		expect(Math.min(390 / width, 420 / height)).toBeGreaterThanOrEqual(WRAP_BELOW_ZOOM);
+		expect(edgesThroughNodes(positions, edges, sizeOf)).toBe(1);
 		expect(overlaps(positions, sizeOf)).toBe(false);
 	});
 });

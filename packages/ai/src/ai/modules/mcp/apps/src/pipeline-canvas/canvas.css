@@ -250,10 +250,10 @@ body {
 .rr-overview-icon {
 	flex: none;
 }
-/* A narrow node: up to two lines. A word breaks only when it cannot fit a line alone. */
+/* A narrow node: up to two lines, broken between words (the widget checks the longest word fits). */
 .rr-overview-narrow {
 	gap: 3px;
-	padding: 0 4px;
+	padding: 0 3px;
 	letter-spacing: -0.01em;
 }
 .rr-overview-narrow .rr-overview-title {
@@ -261,8 +261,14 @@ body {
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
 	white-space: normal;
-	overflow-wrap: break-word;
+	overflow-wrap: normal;
+	word-break: normal;
 	line-height: 1.15;
+}
+/* A narrow node whose longest word cannot fit: one line, cut short. */
+.rr-overview-short {
+	padding: 0 3px;
+	letter-spacing: -0.01em;
 }
 /* The builder's EXPERIMENTAL badge, as a dot. */
 .rr-overview-badge {
