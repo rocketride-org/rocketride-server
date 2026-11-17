@@ -271,6 +271,46 @@ DOCS_URL = 'https://docs.rocketride.org/'
 # caches hold them for an hour (same max-age convention as task/fetch.py).
 _CACHE_CONTROL = 'public, max-age=3600'
 
+# Frame-ancestor sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA: a bare
+# scheme ("vscode-webview:") or an http(s) host with an optional port. Anything
+# else (keywords, paths, separators, quotes) could widen or break the policy.
+_FRAME_ANCESTOR_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*:$')
+_FRAME_ANCESTOR_HOST = re.compile(r'^https?://[a-z0-9*.-]+(:\d{1,5})?$')
+
+
+def _frame_ancestor_sources(value: str) -> str:
+    """
+    Validate the extra frame-ancestor sources for shell documents.
+
+    Args:
+        value: Whitespace-separated CSP sources (scheme or http(s) host sources).
+
+    Returns:
+        The sources joined by single spaces (empty when there are none).
+
+    Raises:
+        ValueError: If any token is not a scheme source or an http(s) host
+            source; the message names the offending token.
+    """
+    tokens = value.split()
+    for token in tokens:
+        if not (_FRAME_ANCESTOR_SCHEME.match(token) or _FRAME_ANCESTOR_HOST.match(token)):
+            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {token}')
+    return ' '.join(tokens)
+
+
+# Headers for shell DOCUMENTS (index.html, prerender captures, other .html
+# under the shell root), never hashed assets. frame-ancestors stops a
+# cross-origin page from framing the shell (the VS Code webview is the one
+# legitimate parent by default); COOP cuts the window.opener handle of a page
+# that window.open()s the shell (#1022). Built once at import, so an invalid
+# RR_SHELL_FRAME_ANCESTORS_EXTRA stops engine startup.
+_frame_ancestors_extra = _frame_ancestor_sources(os.environ.get('RR_SHELL_FRAME_ANCESTORS_EXTRA', 'vscode-webview:'))
+_SHELL_DOCUMENT_HEADERS = {
+    'Content-Security-Policy': f"frame-ancestors 'self' {_frame_ancestors_extra}".rstrip(),
+    'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+}
+
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
     """
@@ -351,7 +391,7 @@ async def shell_static(request: Request):
         prerender_root = (Path(_shell_root) / '_prerender').resolve()
         capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
         if capture.is_relative_to(prerender_root) and capture.is_file():
-            return FileResponse(capture)
+            return FileResponse(capture, headers=_SHELL_DOCUMENT_HEADERS)
 
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
@@ -381,16 +421,20 @@ async def shell_static(request: Request):
 
     # Serve the file if it exists. Everything under static/ is content-hashed
     # (a new build changes the name), so the browser may keep it for good.
+    # Any other .html under the shell root is a document and gets the framing
+    # policy; themes, icons and other assets do not.
     if file_path.exists() and file_path.is_file():
         if is_static:
             return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
+        if file_path.suffix.lower() == '.html':
+            return FileResponse(file_path, headers=_SHELL_DOCUMENT_HEADERS)
         return FileResponse(file_path)
 
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.
     index_path = Path(_shell_root) / 'index.html'
     if index_path.exists() and index_path.is_file():
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers=_SHELL_DOCUMENT_HEADERS)
 
     # Shell hasn't been built yet
     raise HTTPException(
