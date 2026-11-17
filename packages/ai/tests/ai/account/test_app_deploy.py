@@ -2230,3 +2230,84 @@ async def test_resolve_derived_owner_beats_an_earlier_impostor(registry, monkeyp
     resolved = await resolve_app_pins('org1', 'u1', [])
 
     assert [e['id'] for e in resolved] == ['acme.brandy']
+
+
+# ── Round 3: publish uses resolve's ownership rule; unreadable claims fail closed
+
+
+@pytest.mark.asyncio
+async def test_add_fails_closed_when_an_existing_artifact_cannot_be_read(registry, content_store, monkeypatch):
+    """An unreadable artifact may store the name, so it is an unknown claim:
+    the deploy is refused rather than treating it as no claim.
+    """
+    _existing_apps(monkeypatch, ['xyz.old'])
+
+    async def unreadable(org_id, project_id, version):
+        raise RuntimeError('storage down')
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', unreadable, raising=False)
+    conn = _FakeConn()
+
+    result = await handle_app_add(conn, _add_request(data=_app_zip()))
+
+    assert result['success'] is False
+    assert registry.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_fails_closed_when_an_existing_artifact_cannot_be_read(registry, quiet_push, monkeypatch):
+    """The publish re-check refuses too when another app's artifact is unreadable."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    _foreign_public_row(registry, 'xyz.old', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    async def unreadable(org_id, project_id, version):
+        if project_id == 'xyz.old':
+            raise RuntimeError('storage down')
+        return registry.artifacts[version]
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', unreadable, raising=False)
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('theirs', [50.0, None], ids=['tie', 'unknown'])
+async def test_publish_refuses_a_tie_or_an_unknown_holder_time(registry, quiet_push, theirs):
+    """Two apps deriving one name with a tied or unknown first-bind time:
+    resolve would withhold both, so publish refuses rather than bind.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 50.0
+    _foreign_public_row(registry, 'acme_brandy', 50.0)
+    if theirs is None:
+        del registry.publishes[('acme_brandy', 'public~')]['createdAt']
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_lets_the_derived_owner_bind_over_an_earlier_impostor(registry, quiet_push):
+    """The publish mirror of test_resolve_derived_owner_beats_an_earlier_impostor:
+    an earlier app that only STORES the name does not block the app whose id
+    derives it, so the live owner can still update and roll back.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_TEAM, 1)
+    registry.publishes[('acme.brandy', 'team~t1')]['createdAt'] = 900.0
+    # xyz.lookalike's v1 artifact stores 'acme_brandy' (the fake's shared artifacts).
+    _foreign_public_row(registry, 'xyz.lookalike', 1.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is True

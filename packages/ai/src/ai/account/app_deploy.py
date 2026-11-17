@@ -369,8 +369,8 @@ async def _container_claims(account: Any, org_id: str, conn: Any, app_id: str, m
     (public rows from every org, plus the caller's team and user rows): the
     engine cannot see other orgs' private apps. A stored name that is
     reserved for the claimant (_reserved_container) is withheld at resolve
-    anyway and holds nothing. Raises on a registry error, so callers refuse
-    rather than skip the check.
+    anyway and holds nothing. Raises on a registry error, an artifact read
+    included, so callers refuse rather than skip the check.
     """
     rows = await account.publish_list(org_id, 'app', _audiences_of(conn))
     by_app: Dict[str, List[Dict[str, Any]]] = {}
@@ -383,12 +383,12 @@ async def _container_claims(account: Any, org_id: str, conn: Any, app_id: str, m
         holds = module_id_of(other) == module_id
         if not holds:
             for row in other_rows:
-                try:
-                    artifact = await account.deployments_artifact(
-                        str(row.get('orgId') or org_id), other, int(row.get('version') or 0)
-                    )
-                except Exception:
-                    continue
+                # No try/except: an unreadable artifact is an unknown claim,
+                # not an absent one. Skipping it would let a newcomer take a
+                # legacy holder's name while its artifact read is failing.
+                artifact = await account.deployments_artifact(
+                    str(row.get('orgId') or org_id), other, int(row.get('version') or 0)
+                )
                 stored = str(artifact.get('moduleId') or '') if isinstance(artifact, dict) else ''
                 if stored == module_id and not _reserved_container(other, stored):
                     holds = True
@@ -396,6 +396,39 @@ async def _container_claims(account: Any, org_id: str, conn: Any, app_id: str, m
         if holds:
             claims[other] = _first_bound_at(other_rows)
     return claims
+
+
+def _container_holder(
+    app_id: str, module_id: str, own_first: Optional[float], claims: Dict[str, Optional[float]]
+) -> Optional[str]:
+    """The claimant that keeps ``module_id`` over ``app_id``, or None when ``app_id`` keeps it.
+
+    The publish-time mirror of _unique_containers, so publishing never binds
+    an app that resolve would then withhold (or that would make resolve
+    withhold an incumbent): when exactly one contender's id derives the name,
+    that app keeps it; otherwise the contenders (the deriving ones, or all of
+    them when none derives) are ordered by first-bind time, and ``app_id``
+    keeps the name only when its own time is known and strictly earlier than
+    every other contender's. A tie or an unknown time on either side blocks
+    (resolve would withhold both). ``claims`` maps each other holder to its
+    first-bind time (_container_claims).
+    """
+    if not claims:
+        return None
+    deriving = sorted(o for o in claims if module_id_of(o) == module_id)
+    if module_id_of(app_id) == module_id:
+        if not deriving:
+            return None
+        contenders = deriving
+    elif deriving:
+        return deriving[0]
+    else:
+        contenders = sorted(claims)
+    for other in contenders:
+        theirs = claims[other]
+        if own_first is None or theirs is None or theirs <= own_first:
+            return other
+    return None
 
 
 # =============================================================================
@@ -945,9 +978,10 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not _is_built(entry):
             return conn.build_error(request, _not_built_error(app_id, version, entry))
         # Container-name re-check (#1022): an app that slipped past receipt
-        # (the holder was not visible then) may not bind while an app bound
-        # EARLIER holds its name. The first-bound app keeps it, the same rule
-        # resolve applies; a never-bound app yields to any holder.
+        # (the holder was not visible then) may not bind unless resolve would
+        # hand it the name (_container_holder applies resolve's rule: the app
+        # whose id derives the name keeps it, else the one bound strictly
+        # first; a tie or an unknown time blocks).
         if developer:
             module_id = str(artifact.get('moduleId') or module_id_of(app_id))
             try:
@@ -956,12 +990,13 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             except Exception as exc:
                 debug(f'[app_deploy] container-name check failed: {exc}')
                 return conn.build_error(request, 'could not check the app id against existing apps; try again')
-            earlier = sorted(o for o, t in claims.items() if own_first is None or (t is not None and t < own_first))
-            if earlier:
+            holder = _container_holder(app_id, module_id, own_first, claims)
+            if holder:
                 return conn.build_error(
                     request,
-                    f'{app_id} loads under the container name {module_id!r}, which {earlier[0]!r} already '
-                    'holds and was published first. Deploy it under a different app id.',
+                    f'{app_id} loads under the container name {module_id!r}, which {holder!r} already '
+                    'holds (its app id derives that name, or it was published first). '
+                    'Deploy it under a different app id.',
                 )
 
         row = await account.publish_set(
