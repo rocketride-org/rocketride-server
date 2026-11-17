@@ -29,5 +29,25 @@
 			]
 		}
 	},
-	"properties": ["type", "microsoft.authType", "excel.access"]
+	"properties": ["type", "microsoft.authType", "excel.access"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Excel",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

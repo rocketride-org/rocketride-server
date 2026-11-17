@@ -114,5 +114,19 @@
 	// Required:
 	//		Defines the properties shown in the pipeline builder side panel, in order.
 	//
-	"properties": ["type", "apikey", "targetLang", "formality", "modelType"]
+	"properties": ["type", "apikey", "targetLang", "formality", "modelType"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "DeepL",
+				"apikey": "",
+				"targetLang": "EN-US",
+				"formality": "default",
+				"modelType": ""
+			}
+		},
+		"dropped": []
+	}
 }

@@ -141,5 +141,30 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "balanced",
+		"profiles": {
+			"balanced": {
+				"title": "Balanced - Equal weight to vector and keyword search",
+				"alpha": 0.5,
+				"top_k": 10,
+				"rrf_k": 60
+			},
+			"semantic": {
+				"title": "Semantic-heavy - Emphasize vector similarity",
+				"alpha": 0.8,
+				"top_k": 10,
+				"rrf_k": 60
+			},
+			"keyword": {
+				"title": "Keyword-heavy - Emphasize BM25 keyword matching",
+				"alpha": 0.2,
+				"top_k": 10,
+				"rrf_k": 60
+			}
+		},
+		"dropped": []
+	}
 }

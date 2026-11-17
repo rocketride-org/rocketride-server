@@ -38,5 +38,17 @@
 			]
 		}
 	},
-	"properties": ["type", "tool_pipe.tool_description", "tool_pipe.return_type"]
+	"properties": ["type", "tool_pipe.tool_description", "tool_pipe.return_type"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Pipeline Tool",
+				"tool_description": "",
+				"return_type": "text"
+			}
+		},
+		"dropped": []
+	}
 }

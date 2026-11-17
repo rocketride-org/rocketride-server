@@ -27,5 +27,16 @@
 			"required": true
 		}
 	},
-	"properties": ["type", "oura.token"]
+	"properties": ["type", "oura.token"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Oura",
+				"token": ""
+			}
+		},
+		"dropped": []
+	}
 }

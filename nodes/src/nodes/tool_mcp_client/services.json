@@ -84,5 +84,30 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "RocketRide",
+		"profiles": {
+			"RocketRide": {
+				"title": "RocketRide MCP server (stdio)",
+				"serverName": "RocketRide",
+				"transport": "stdio",
+				"commandLine": "python -m rocketride_mcp"
+			},
+			"streamable_http": {
+				"title": "Generic MCP server (Streamable HTTP)",
+				"serverName": "mcp",
+				"transport": "streamable-http",
+				"endpoint": ""
+			},
+			"sse": {
+				"title": "Generic MCP server (legacy HTTP+SSE)",
+				"serverName": "mcp",
+				"transport": "sse",
+				"sse_endpoint": ""
+			}
+		},
+		"dropped": []
+	}
 }

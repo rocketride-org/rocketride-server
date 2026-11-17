@@ -222,5 +222,16 @@
 		"http_request.rateLimitPerSecond",
 		"http_request.rateLimitPerMinute",
 		"http_request.maxConcurrentRequests"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "http"
+			}
+		},
+		"dropped": []
+	}
 }

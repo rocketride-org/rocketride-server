@@ -61,5 +61,23 @@
 			"default": false
 		}
 	},
-	"properties": ["type", "google.authType", "access", "allowDelete", "allowPublicSharing"]
+	"properties": ["type", "google.authType", "access", "allowDelete", "allowPublicSharing"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Calendar",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

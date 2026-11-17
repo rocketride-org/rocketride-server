@@ -36,5 +36,25 @@
 			"default": false
 		}
 	},
-	"properties": ["type", "microsoft.authType", "outlook_mail.access", "outlook_mail.allowHardDelete"]
+	"properties": ["type", "microsoft.authType", "outlook_mail.access", "outlook_mail.allowHardDelete"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Outlook Mail",
+				"authType": "service",
+				"tenantId": "",
+				"clientId": "",
+				"clientSecret": "",
+				"userPrincipalName": "",
+				"userToken": "",
+				"access": "modify"
+			}
+		},
+		"dropped": [],
+		"credential": {
+			"userToken": "user.userAuth"
+		}
+	}
 }

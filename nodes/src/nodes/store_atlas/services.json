@@ -102,5 +102,17 @@
 	// Required:
 	//     Defines the properties shown in the node's config panel, in order
 	//
-	"properties": ["atlas.host", "vector.score", "atlas.database", "vector.collection", "atlas.serverName"]
+	"properties": ["atlas.host", "vector.score", "atlas.database", "vector.collection", "atlas.serverName"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"serverName": "atlas"
+			}
+		},
+		"dropped": [
+			"provider"
+		]
+	}
 }

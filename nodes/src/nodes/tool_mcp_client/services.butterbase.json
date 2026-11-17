@@ -45,5 +45,18 @@
 			"minLength": 1
 		}
 	},
-	"properties": ["type", "butterbase.transport", "butterbase.bearer", "butterbase.endpoint", "butterbase.serverName"]
+	"properties": ["type", "butterbase.transport", "butterbase.bearer", "butterbase.endpoint", "butterbase.serverName"],
+	"legacy": {
+		"selector": "profile",
+		"default": "butterbase",
+		"profiles": {
+			"butterbase": {
+				"title": "Butterbase MCP server",
+				"serverName": "butterbase",
+				"transport": "streamable-http",
+				"endpoint": "https://api.butterbase.ai/mcp"
+			}
+		},
+		"dropped": []
+	}
 }

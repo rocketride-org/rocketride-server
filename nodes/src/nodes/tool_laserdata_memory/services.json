@@ -115,5 +115,39 @@
 				"text": "test"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own Apache Iggy server",
+				"connection_string": "",
+				"namespace": "",
+				"show_advanced": false,
+				"stream": "rocketride-memory",
+				"allow_namespace_override": true,
+				"folded": true,
+				"recall_limit": 10,
+				"op_timeout": 30
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "LaserData Cloud",
+				"connection_string": "",
+				"namespace": "",
+				"show_advanced": false,
+				"stream": "rocketride-memory",
+				"allow_namespace_override": true,
+				"folded": true,
+				"recall_limit": 10,
+				"op_timeout": 30
+			}
+		},
+		"dropped": [
+			"mode",
+			"show_advanced"
+		]
 	}
 }

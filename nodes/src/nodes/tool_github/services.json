@@ -216,5 +216,28 @@
 		"github.graphqlMaxResponseBytes",
 		"github.rateLimitBudgetSeconds",
 		"github.rateLimitMaxRetries"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "GitHub",
+				"authType": "pat",
+				"token": "",
+				"appId": "",
+				"privateKey": "",
+				"installationId": "",
+				"credentialMap": [],
+				"defaultRepo": "",
+				"readOnly": false,
+				"tools": [],
+				"graphqlAllowMutations": false,
+				"graphqlMaxResponseBytes": 4194304,
+				"rateLimitBudgetSeconds": 60,
+				"rateLimitMaxRetries": 3
+			}
+		},
+		"dropped": []
+	}
 }

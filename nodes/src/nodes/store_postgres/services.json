@@ -200,5 +200,28 @@
 		"vector.score",
 		"postgres.similarity",
 		"postgres.serverName"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own PostgreSQL server",
+				"host": "your-postgres-host.example.com",
+				"port": 5432,
+				"user": "postgres",
+				"password": "",
+				"database": "rocketride",
+				"collection": "rocketride",
+				"score": 0.5,
+				"similarity": "cosine",
+				"serverName": "postgres"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

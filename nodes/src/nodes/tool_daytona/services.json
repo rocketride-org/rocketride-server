@@ -93,5 +93,16 @@
 				"text": "test query"
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Daytona",
+				"apikey": ""
+			}
+		},
+		"dropped": []
 	}
 }

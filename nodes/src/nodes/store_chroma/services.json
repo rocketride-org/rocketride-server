@@ -228,5 +228,34 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "local",
+		"profiles": {
+			"local": {
+				"mode": "local",
+				"title": "Your own ChromaDB server",
+				"host": "localhost",
+				"port": "8000",
+				"collection": "ROCKETRIDE",
+				"serverName": "chroma"
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "ChromaDB Cloud Server",
+				"host": "",
+				"port": "443",
+				"apikey": "",
+				"tenant": "",
+				"database": "",
+				"collection": "ROCKETRIDE",
+				"serverName": "chroma"
+			}
+		},
+		"dropped": [
+			"mode",
+			"provider"
+		]
+	}
 }

@@ -27,5 +27,16 @@
 			"required": true
 		}
 	},
-	"properties": ["type", "tool_v0.apikey"]
+	"properties": ["type", "tool_v0.apikey"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "v0 by Vercel",
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

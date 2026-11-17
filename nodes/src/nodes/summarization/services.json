@@ -123,5 +123,13 @@
 		"summarization.numberOfSummaryWords",
 		"summarization.numberOfKeyPointWords",
 		"summarization.numberOfEntities"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

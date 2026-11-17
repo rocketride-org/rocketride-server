@@ -38,5 +38,13 @@
 			"required": true
 		}
 	},
-	"properties": ["type", "gcp.authType", "gcp.projectId", "vertex.location", "vertex.indexEndpointId", "vertex.deployedIndexId"]
+	"properties": ["type", "gcp.authType", "gcp.projectId", "vertex.location", "vertex.indexEndpointId", "vertex.deployedIndexId"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": []
+	}
 }

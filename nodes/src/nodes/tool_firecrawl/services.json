@@ -27,5 +27,16 @@
 			"required": true
 		}
 	},
-	"properties": ["type", "tool_firecrawl.apikey"]
+	"properties": ["type", "tool_firecrawl.apikey"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Firecrawl",
+				"apikey": ""
+			}
+		},
+		"dropped": []
+	}
 }

@@ -126,5 +126,21 @@
 		"search_exa.highlightChars",
 		{ "name": "model", "type": "constant", "default": "exa-search" },
 		{ "name": "modelTotalTokens", "type": "constant", "default": 16384 }
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model": "exa-search",
+				"modelTotalTokens": 16384,
+				"apikey": "",
+				"type": "auto",
+				"numResults": 5,
+				"includeHighlights": true,
+				"highlightChars": 600
+			}
+		},
+		"dropped": []
+	}
 }

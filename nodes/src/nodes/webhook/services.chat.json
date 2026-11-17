@@ -77,5 +77,15 @@
 		"hideForm",
 		"type",
 		"source.mode"
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {}
+		},
+		"dropped": [
+			"source.parameters"
+		]
+	}
 }

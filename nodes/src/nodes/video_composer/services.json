@@ -76,5 +76,24 @@
 				}
 			}
 		}
-	]
+	],
+	"legacy": {
+		"selector": "profile",
+		"default": "standard",
+		"profiles": {
+			"standard": {
+				"title": "Standard quality (H.264, CRF 23)",
+				"fps": 1.0,
+				"codec": "libx264",
+				"crf": 23
+			},
+			"high": {
+				"title": "High quality (H.264, CRF 18)",
+				"fps": 1.0,
+				"codec": "libx264",
+				"crf": 18
+			}
+		},
+		"dropped": []
+	}
 }

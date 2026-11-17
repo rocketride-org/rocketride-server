@@ -76,5 +76,16 @@
 			]
 		}
 	},
-	"properties": ["type", "bland_ai.serverName", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.language", "bland_ai.record"]
+	"properties": ["type", "bland_ai.serverName", "bland_ai.apikey", "bland_ai.voice", "bland_ai.maxDuration", "bland_ai.language", "bland_ai.record"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "bland"
+			}
+		},
+		"dropped": []
+	}
 }

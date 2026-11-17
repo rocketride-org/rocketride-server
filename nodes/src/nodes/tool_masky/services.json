@@ -357,5 +357,43 @@
 				"text": "   "
 			}
 		]
+	},
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "masky",
+				"baseUrl": "https://masky.ai/api",
+				"action": "talking_head",
+				"output": "video",
+				"textMode": "literal",
+				"quality": "720p-draft",
+				"aspectRatio": "16:9",
+				"fps": 24,
+				"durationSec": 5,
+				"silent": false,
+				"expandPrompt": true,
+				"share": "private",
+				"sourceImageUrl": "",
+				"speechLine": "",
+				"engine": "default",
+				"editEngine": "default",
+				"conversation": "",
+				"turnMode": "chat",
+				"turnOutput": "audio",
+				"waitForTurn": true,
+				"defaultAvatar": "",
+				"defaultLook": "",
+				"language": "en",
+				"maxCreditsPerCall": 1.0,
+				"timeoutSec": 300,
+				"pollIntervalSec": 3,
+				"includeMediaUrls": true,
+				"readOnly": false
+			}
+		},
+		"dropped": []
 	}
 }
