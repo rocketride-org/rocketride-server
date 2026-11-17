@@ -6,7 +6,7 @@ import path from 'node:path';
 import llms from '../../scripts/lib/llms.js';
 import spine from '../../scripts/lib/spine.js';
 
-const { buildIndex } = llms;
+const { buildIndex, SITE_URL } = llms;
 const { allDocIds } = spine;
 
 describe('buildIndex', () => {
@@ -58,6 +58,61 @@ describe('buildIndex', () => {
 		const full = await readFile(path.join(staticDir, 'llms-full.txt'), 'utf8');
 		assert.match(full, /^# RocketRide Documentation/m);
 		assert.match(full, /Route: \/nodes/);
+	});
+
+	describe('published .md copies', () => {
+		let root;
+		let content;
+		let stat;
+		let twinPath;
+
+		before(async () => {
+			root = await mkdtemp(path.join(os.tmpdir(), 'rr-llms-twin-'));
+			content = path.join(root, 'content');
+			stat = path.join(root, 'static');
+			await mkdir(content, { recursive: true });
+			await mkdir(stat, { recursive: true });
+			const raw = '---\ntitle: Guide\n---\n\nimport Tabs from "@theme/Tabs";\n\n# Guide\n\nBody text.\n';
+			const source = path.join(content, 'guide.mdx');
+			await writeFile(source, raw);
+			await writeFile(path.join(content, '.manifest.json'), JSON.stringify([{ id: 'guide', route: '/guide', title: 'Guide', mdSibling: '/guide.md', source }]));
+			twinPath = path.join(stat, 'guide.md');
+			await writeFile(twinPath, raw);
+			await buildIndex({ contentDir: content, staticDir: stat });
+		});
+
+		after(async () => {
+			await rm(root, { recursive: true, force: true });
+		});
+
+		it('rewrites a raw copy to start with the index line and drop front matter', async () => {
+			const twin = await readFile(twinPath, 'utf8');
+			assert.ok(twin.startsWith(`> Documentation index for agents: ${SITE_URL}/llms.txt\n`));
+			assert.doesNotMatch(twin, /^---$/m);
+			assert.doesNotMatch(twin, /title: Guide/);
+			assert.match(twin, /Body text\./);
+		});
+
+		it('drops import lines from entries whose source is .mdx', async () => {
+			const twin = await readFile(twinPath, 'utf8');
+			assert.doesNotMatch(twin, /^import /m);
+		});
+
+		it('does not add the index line twice on a second run', async () => {
+			const first = await readFile(twinPath, 'utf8');
+			await buildIndex({ contentDir: content, staticDir: stat });
+			const second = await readFile(twinPath, 'utf8');
+			assert.equal(second, first);
+			assert.equal(second.split('> Documentation index for agents').length - 1, 1);
+		});
+
+		it('cleans the page section inside llms-full.txt', async () => {
+			const full = await readFile(path.join(stat, 'llms-full.txt'), 'utf8');
+			assert.match(full, /Route: \/guide/);
+			assert.match(full, /Body text\./);
+			assert.doesNotMatch(full, /^import /m);
+			assert.doesNotMatch(full, /title: Guide/);
+		});
 	});
 });
 

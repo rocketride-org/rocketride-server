@@ -1,5 +1,6 @@
 ---
 title: App Builder
+description: The App Builder is the workspace in the RocketRide VS Code extension that takes an app from an empty folder to a version your team can open.
 ---
 
 # App Builder

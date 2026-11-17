@@ -1,5 +1,6 @@
 ---
 title: Observability
+description: Every RocketRide run is recorded. The mental model behind run logs, the two ways to watch a pipeline (live and replayed), and which surface to use.
 ---
 
 # Observability
