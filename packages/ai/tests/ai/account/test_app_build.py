@@ -938,13 +938,16 @@ async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, buil
 
 @pytest.mark.asyncio
 async def test_typecheck_cannot_write_build_info(monkeypatch, build_store, toolchain):
-    """The typecheck turns incremental and composite off, so a tsconfig
-    tsBuildInfoFile cannot make tsc write a file anywhere.
+    """The typecheck turns incremental and composite off and resets
+    tsBuildInfoFile, so a tsconfig tsBuildInfoFile cannot make tsc write a
+    file anywhere, nor fail typescript < 5.6 with TS5069.
     """
     _rail, fake = await _run_capturing(monkeypatch, _app_source_zip())
     argv = next(c for c in fake.calls if '--noEmit' in c['argv'])['argv']
     assert argv[argv.index('--incremental') + 1] == 'false'
     assert argv[argv.index('--composite') + 1] == 'false'
+    assert argv[argv.index('--tsBuildInfoFile') + 1] == 'null'
+    assert argv.index('--tsBuildInfoFile') < argv.index('-p')
 
 
 @pytest.mark.asyncio

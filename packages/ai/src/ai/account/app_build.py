@@ -67,7 +67,9 @@ bundler refuses any loader outside the platform toolchain and any module
 outside the job directory or the toolchain. What the type checker can still
 READ while it compiles is bounded only by the process sandbox (an infra
 concern, not this module); the typecheck runs with incremental and
-composite off, so tsconfig cannot make it write build-info files.
+composite off and tsBuildInfoFile reset, so tsconfig cannot make it write
+build-info files (and a configured tsBuildInfoFile is not a TS5069 error on
+typescript < 5.6).
 """
 
 import asyncio
@@ -1922,16 +1924,27 @@ class AppBuildWorker:
             if not tsc:
                 raise BuildInfraFailure('typecheck', 'baked typescript missing from the toolchain env')
             await feed.set_phase('typecheck')
+            # `--tsBuildInfoFile null` resets a tsconfig value: typescript
+            # < 5.6 reports TS5069 for tsBuildInfoFile without incremental.
+            tsc_args = [
+                '--noEmit',
+                '--incremental',
+                'false',
+                '--composite',
+                'false',
+                '--tsBuildInfoFile',
+                'null',
+                '-p',
+                tsconfig,
+            ]
             code, out = await _exec(
-                [node, tsc, '--noEmit', '--incremental', 'false', '--composite', 'false', '-p', tsconfig],
+                [node, tsc, *tsc_args],
                 app_dir,
                 _PHASE_TIMEOUTS['typecheck'],
                 on_line=feed.line,
             )
             await feed.flush()
-            log_parts.append(
-                f'== typecheck ==\n$ node {tsc} --noEmit --incremental false --composite false -p {tsconfig}\n{out}'
-            )
+            log_parts.append(f'== typecheck ==\n$ node {tsc} {" ".join(tsc_args)}\n{out}')
             if code != 0:
                 raise BuildFailure('typecheck', f'tsc --noEmit failed (exit {code})', _tsc_errors(out))
 
