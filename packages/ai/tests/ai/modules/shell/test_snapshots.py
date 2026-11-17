@@ -197,7 +197,7 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
 
 def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
     # A bound page's max-age counts down on cache hits: keep the clock still.
-    monkeypatch.setattr(pages, 'time', SimpleNamespace(monotonic=lambda: 1000.0))
+    monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)
     _seed()
     _serve(_page())
     client = _client()

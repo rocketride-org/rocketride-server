@@ -47,9 +47,11 @@ manifests (``public_pages``), never from constants here.
 
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404 and
-/robots.txt disallows all crawling; absolute URLs are never derived from
-request headers.
+self-hosted, desktop and staging engines) /sitemap.xml and /llms.txt return
+404 and /robots.txt disallows all crawling, as before public pages (plan
+sections 4 and 8); an engine that serves published pages without it warns
+once (``warn_published_pages_without_app_url``). Absolute URLs are never
+derived from request headers.
 """
 
 import hashlib
@@ -71,6 +73,9 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from ai.web import Request
 from ai.web.middleware import route_path
 
+from rocketlib import warning
+
+from . import public_pages
 from .contract import Page, own_title, page_instant
 from .settings import app_url
 
@@ -152,12 +157,12 @@ def _capture_for(request: Request) -> Optional[Path]:
     return None
 
 
-def shell_document_path(request: Request) -> Path:
+def shell_document_path(request: Request, *, capture: bool = True) -> Path:
     """The HTML document a browser navigating to this path boots from.
 
     The route's prerendered capture when the shell build carries one (see
-    ``_capture_for``), else the SPA ``index.html``: what ``shell_static``
-    serves for the same navigation.
+    ``_capture_for``) and ``capture`` allows it, else the SPA ``index.html``:
+    what ``shell_static`` serves for the same navigation.
 
     Raises:
         HTTPException: 503 when the shell has not been built.
@@ -165,7 +170,11 @@ def shell_document_path(request: Request) -> Path:
     index_path = Path(_shell_root) / 'index.html'
     if not index_path.is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
-    return _capture_for(request) or index_path
+    if capture:
+        capture_path = _capture_for(request)
+        if capture_path:
+            return capture_path
+    return index_path
 
 
 async def shell_static(request: Request):
@@ -686,6 +695,31 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
+_warned_unindexed = False
+
+
+def warn_published_pages_without_app_url(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
+    """Swap listener: warn once that published pages go unindexed for lack of ``RR_APP_URL``.
+
+    Without it robots.txt disallows all crawling and the sitemap and llms.txt
+    answer 404, which is right for OSS, desktop and staging engines and a
+    silent deindexing for a production engine that lost the setting.
+
+    Args:
+        old: The aggregate swapped out (unused).
+        new: The aggregate swapped in; the legacy list and an empty map publish nothing.
+    """
+    global _warned_unindexed
+    if _warned_unindexed or not new.serves_published_pages():
+        return
+    _warned_unindexed = True
+    warning(
+        '[shell] RR_APP_URL is not set but public pages are published: robots.txt disallows all '
+        'crawling and /sitemap.xml and /llms.txt answer 404, so search engines will not index them; '
+        'set RR_APP_URL to the public origin on an engine that serves the public site'
+    )
+
+
 def _md(text: str) -> str:
     """One line of llms.txt markdown: whitespace collapsed, link syntax escaped.
 
@@ -770,9 +804,9 @@ async def robots_txt(request: Request):
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
     sitemap, with one named group per rostered crawler (the roster that
     also classifies requesters) plus ``*``; every group carries the same
-    rule (RFC 9309), so the policy equals ``*`` alone. Otherwise (OSS,
-    self-hosted, desktop): a customer engine is not a marketing site —
-    tell crawlers to stay out entirely.
+    rule (RFC 9309), so the policy equals ``*`` alone. Any other engine
+    (OSS, self-hosted, desktop, staging) is not the public site: all
+    crawling is disallowed, published pages or not (plan section 4).
 
     Args:
         request: Incoming HTTP request.

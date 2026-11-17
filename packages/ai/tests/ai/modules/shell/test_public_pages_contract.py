@@ -493,6 +493,20 @@ def test_a_docs_url_with_a_query_and_a_fragment_is_accepted(url):
     assert errors == [] and out == {'docsUrl': url}
 
 
+def test_site_not_found_is_a_snapshot_path():
+    _, site, errors = check_manifest(ROOT_APP, {'publicPages': [_page('/')], 'site': {'notFound': 'pages/404.html'}})
+    assert errors == [] and site == {'notFound': 'pages/404.html'}
+
+
+@pytest.mark.parametrize(
+    'not_found', ['', '../404.html', 'pages/../404.html', '/pages/404.html', 'pages//404.html', 'pages/404.htm', 7]
+)
+def test_bad_site_not_found_fails_with_the_field_named(not_found):
+    manifest = {'publicPages': [_page('/')], 'site': {'title': 'R', 'notFound': not_found}}
+    _, site, errors = check_manifest(ROOT_APP, manifest)
+    assert site is None and len(errors) == 1 and errors[0].startswith(f'site.notFound {not_found!r}: ')
+
+
 # ---------------------------------------------------------------------------
 # site.redirects
 # ---------------------------------------------------------------------------
