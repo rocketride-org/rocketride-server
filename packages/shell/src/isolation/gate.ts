@@ -95,6 +95,8 @@ export interface IGatedRequest {
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+/** An own property, never one found on the prototype chain (`toString`, `valueOf`, ...). */
+const own = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
 
 /** Converts anything thrown inside the gate into a denial (`schema` unless it already is one). */
 export function asDenial(err: unknown, op: string): CapabilityDeniedError {
@@ -167,7 +169,7 @@ function checkType(op: string, name: string, base: string, value: unknown, g: IG
 			return s;
 		}
 		case 'monitor-key:run-handle': {
-			if (!isPlainObject(value) || Object.keys(value).length !== 1 || !('token' in value)) return fail('schema');
+			if (!isPlainObject(value) || Object.keys(value).length !== 1 || !own(value, 'token')) return fail('schema');
 			checkType(op, 'token', 'run-handle', value.token, g, fail);
 			return value;
 		}
@@ -206,11 +208,11 @@ function checkArgs(g: IGateContext, row: CapabilityRow, args: Record<string, unk
 	const fail = (code: DenyCode): never => {
 		throw deny(code, where.op, where);
 	};
-	for (const key of Object.keys(args)) if (!(key in row.args)) fail('schema');
+	for (const key of Object.keys(args)) if (!own(row.args, key)) fail('schema');
 	const out: Record<string, unknown> = Object.create(null);
 	for (const [name, typeName] of Object.entries(row.args)) {
 		const { base, optional } = parseType(typeName);
-		if (!(name in args)) {
+		if (!own(args, name)) {
 			if (!optional) fail('schema');
 			continue;
 		}
@@ -282,8 +284,8 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	const row = matchRow(op, command, subcommand);
 	if (!row) throw deny('capability', op, where);
 	// (5, rest) a top-level token only where the row allows it, and never twice
-	if ('token' in message) {
-		if (!row.top?.includes('token') || 'token' in args) throw deny('schema', op, where);
+	if (own(message, 'token')) {
+		if (!row.top?.includes('token') || own(args, 'token')) throw deny('schema', op, where);
 		args.token = message.token;
 	}
 	// (7, 8) capability and argument types
@@ -307,7 +309,7 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	if (command === 'restart' && checked.source !== run!.source) fail('ownership');
 	if (command === 'rrext_get_token' && checked.source !== run!.source) fail('ownership');
 	for (const name of ['pipe_id', 'pipeId']) {
-		if (name in checked && !run!.pipeIds.has(checked[name] as number)) fail('ownership');
+		if (own(checked, name) && !run!.pipeIds.has(checked[name] as number)) fail('ownership');
 	}
 	let fs: IGatedRequest['fs'];
 	if (typeof checked.handle === 'string') {

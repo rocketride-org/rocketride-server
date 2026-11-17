@@ -100,7 +100,8 @@ export function loadTable(json: unknown): CapabilityTable {
 			op: r.op as string,
 			...(r.command !== undefined ? { command: r.command as string } : {}),
 			...(r.subcommands !== undefined ? { subcommands: [...(r.subcommands as string[])] } : {}),
-			args: { ...(args as Record<string, string>) },
+			// Null prototype: `toString` and friends are never argument names.
+			args: Object.assign(Object.create(null) as Record<string, string>, args),
 			...(r.top !== undefined ? { top: [...(r.top as string[])] } : {}),
 		});
 	}
