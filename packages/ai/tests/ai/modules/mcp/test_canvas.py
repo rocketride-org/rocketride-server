@@ -459,6 +459,58 @@ async def test_an_annotation_keeps_only_its_text_and_safe_colours():
     assert note['ui'] == {'nodeType': 'annotation', 'position': {'x': 5, 'y': 6}}
 
 
+async def test_a_node_drawn_as_a_note_keeps_no_settings_unless_it_is_the_note_provider():
+    # Another provider cannot pass its settings off as a note, at the top or inside a group.
+    fake = {
+        'id': 'n',
+        'provider': 'llm_openai',
+        'ui': {'nodeType': 'annotation'},
+        'config': {'content': '${ROCKETRIDE_REVIEW_KEY}', 'bgColor': '#ffffff'},
+    }
+    group = {
+        'id': 'g',
+        'provider': 'group',
+        'ui': {'nodeType': 'group'},
+        'config': {'pipeline': {'components': [dict(fake, id='inner')]}},
+    }
+    engine = StoreEngine({'.projects/a.pipe': _pipe([fake, group])})
+
+    result = await _call(engine, {'path': '.projects/a.pipe'})
+
+    components = result['_meta'][canvas.CANVAS_META_KEY]['pipeline']['components']
+    assert components[0]['config'] == {}
+    assert components[1]['config']['pipeline']['components'][0]['config'] == {}
+    assert 'ROCKETRIDE_REVIEW_KEY' not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    'color, kept',
+    [
+        ('#1a2b3c', True),
+        ('#fff', True),
+        ('var(--rr-annotation-bg-default)', True),
+        ('canaryapikey', False),
+        ('red', False),
+        ('rgb(1, 2, 3)', False),
+        ('var(--other-token)', False),
+        ('url(https://example.test/x.png)', False),
+    ],
+)
+async def test_a_note_colour_is_a_hex_value_or_a_builder_token(color, kept):
+    note = {
+        'id': 'note',
+        'provider': 'annotation',
+        'ui': {'nodeType': 'annotation'},
+        'config': {'content': 'Hi', 'bgColor': color},
+    }
+    engine = StoreEngine({'.projects/a.pipe': _pipe([note])})
+
+    result = await _call(engine, {'path': '.projects/a.pipe'})
+
+    config = result['_meta'][canvas.CANVAS_META_KEY]['pipeline']['components'][0]['config']
+    assert ('bgColor' in config) is kept
+
+
 async def test_ui_keeps_only_drawing_fields_with_numeric_points():
     components = [
         {
