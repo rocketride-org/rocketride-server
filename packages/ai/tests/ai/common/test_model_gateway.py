@@ -39,11 +39,11 @@ TOKEN = 'rrmg_' + 'a' * 43
 NO_KEY_HOSTED = (
     "llm_openai: no API key is set, and RocketRide-hosted models aren't available for this run. "
     'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
-    'and set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
+    "and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 NO_KEY_SELF_HOSTED = (
     'llm_openai: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
-    'as ROCKETRIDE_OPENAI_KEY and set apikey to ${ROCKETRIDE_OPENAI_KEY}.'
+    "as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 
 SENTENCES = {
@@ -334,12 +334,11 @@ def test_an_unsupported_field_is_named():
     def sentence(field):
         return f"RocketRide-hosted models don't support {field}. Add your own OpenAI key in the node settings to run this request."
 
-    assert friendly_gateway_error(_refusal(400, 'unsupported_parameter', param='previous_response_id')) == sentence(
-        'previous_response_id'
-    )
-    from_backend = _refusal(400, 'unsupported_parameter', sentence('tools[0].type=web_search'))
-    assert friendly_gateway_error(from_backend) == sentence('tools[0].type=web_search')
-    assert friendly_gateway_error(_refusal(400, 'unsupported_parameter', 'nope')) == sentence('part of this request')
+    from_backend = _refusal(400, 'unsupported_parameter', sentence('stored responses'), param='previous_response_id')
+    assert friendly_gateway_error(from_backend) == sentence('stored responses')
+    # A raw parameter name means nothing to the user; with no words from the backend the sentence stays general
+    bare = _refusal(400, 'unsupported_parameter', 'nope', param='previous_response_id')
+    assert friendly_gateway_error(bare) == sentence('part of this request')
 
 
 def test_any_other_code_reads_as_the_general_sentence():
@@ -362,7 +361,11 @@ def test_no_sentence_contains_a_star():
     """The engine splits error text on '*', so nothing a backend sends may add one."""
     values = [
         friendly_gateway_error(_refusal(400, 'model_not_available'), 'gpt*5'),
-        friendly_gateway_error(_refusal(400, 'unsupported_parameter', param='a*b')),
+        friendly_gateway_error(
+            _refusal(
+                400, 'unsupported_parameter', "RocketRide-hosted models don't support a*b. Add your own OpenAI key"
+            )
+        ),
         friendly_gateway_error(_refusal(400, 'odd*code')),
         *[friendly_gateway_error(_refusal(400, code)) for code in SENTENCES],
         NO_KEY_HOSTED,

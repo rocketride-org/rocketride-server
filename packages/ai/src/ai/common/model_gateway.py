@@ -54,11 +54,11 @@ _SERVER_HOSTED_FLAG = '--saas'
 _NO_KEY_HOSTED = (
     "{node}: no API key is set, and RocketRide-hosted models aren't available for this run. "
     'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
-    'and set apikey to ${{ROCKETRIDE_OPENAI_KEY}}.'
+    "and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
 )
 _NO_KEY_SELF_HOSTED = (
     '{node}: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
-    'as ROCKETRIDE_OPENAI_KEY and set apikey to ${{ROCKETRIDE_OPENAI_KEY}}.'
+    "as ROCKETRIDE_OPENAI_KEY and enter ${{ROCKETRIDE_OPENAI_KEY}} as the node's API key."
 )
 # A compatible node with an endpoint of its own never runs on hosted models.
 _NO_KEY_OWN_ENDPOINT = '{node}: no API key is set. Add the API key for your endpoint in the node settings.'
@@ -280,8 +280,10 @@ def friendly_gateway_error(error: BaseException, model: str = '') -> Optional[st
         name = _clean(model) or (_clean(found.group(1)) if found else '') or _SOME_MODEL
         return sentence.format(model=name)
     if code == 'unsupported_parameter':
+        # The backend's own sentence names what is not supported in plain words; a raw
+        # parameter name would mean nothing to the user, so `param` stays in the log only
         found = _FIELD_IN_MESSAGE.match(message)
-        name = _clean(body.get('param')) or (_clean(found.group(1)) if found else '') or _SOME_FIELD
+        name = (_clean(found.group(1)) if found else '') or _SOME_FIELD
         return sentence.format(field=name)
     return sentence
 

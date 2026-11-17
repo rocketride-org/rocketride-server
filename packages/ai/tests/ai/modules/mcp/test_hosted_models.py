@@ -19,8 +19,8 @@ from .conftest import FakeEngineClient
 
 TAG = 'hosted-models:openai'
 NOTE = (
-    "Runs on RocketRide-hosted models with no key of your own, using this workspace's compute credits. "
-    'Leave apikey empty, or set it to use your own OpenAI key.'
+    "Runs on RocketRide-hosted models without a key of your own, using this workspace's compute credits. "
+    'Leave apikey empty, or set it to your own OpenAI key.'
 )
 PLATFORM_NAMES = ('ROCKETRIDE_MODEL_GATEWAY', 'RR_MODEL_GATEWAY', 'rrmg_')
 
