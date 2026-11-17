@@ -51,6 +51,9 @@ const MAX_ZIP_BYTES = 50 * 1024 * 1024;
 /** The icon file names a bundle may carry, in preference order. */
 const ICON_NAMES = ['icon.svg', 'icon.png'];
 
+/** The folder of images the readme references. */
+const PIPE_ASSETS_DIR = 'assets';
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -114,7 +117,7 @@ export async function packPipeBundle(client: RocketRideClient, pipePath: string)
 		}
 		if (!manifestIcon || !manifestIcon.startsWith('assets/')) picked.push(icon);
 	}
-	if (entries.some((e) => e.type === 'dir' && e.name === 'assets')) {
+	if (entries.some((e) => e.type === 'dir' && e.name === PIPE_ASSETS_DIR)) {
 		const walk = async (rel: string): Promise<void> => {
 			for (const entry of await view.list(`${folder}/${rel}`)) {
 				const childRel = `${rel}/${entry.name}`;
@@ -122,19 +125,24 @@ export async function packPipeBundle(client: RocketRideClient, pipePath: string)
 				else if (entry.name !== '.dirmarker') picked.push(childRel);
 			}
 		};
-		await walk('assets');
+		await walk(PIPE_ASSETS_DIR);
 	}
 
-	// Step 3: the bytes, read raw from the store (binaries included)
+	// Step 3: the bytes, read raw from the store (binaries included). The
+	// listing carries no sizes and one fsReadMany call is capped at 32 MiB
+	// in total, so the root files (each under its own small cap) go in one
+	// call and every asset (up to 10 MiB each) in a call of its own.
 	const tree: Record<string, Uint8Array> = {};
-	for (let i = 0; i < picked.length; i += 256) {
-		const chunk = picked.slice(i, i + 256);
-		const results = await client.fsReadMany(chunk.map((rel) => toScopedStorePath(`${PROJECTS_DIR}/${folder}/${rel}`)));
+	const readAll = async (rels: string[]): Promise<void> => {
+		const results = await client.fsReadMany(rels.map((rel) => toScopedStorePath(`${PROJECTS_DIR}/${folder}/${rel}`)));
 		results.forEach((entry, idx) => {
-			if (entry.ok && entry.data) tree[chunk[idx]] = entry.data;
-			else throw new Error(`Cannot read ${folder}/${chunk[idx]}: ${entry.error ?? 'unreadable'}.`);
+			if (entry.ok && entry.data) tree[rels[idx]] = entry.data;
+			else throw new Error(`Cannot read ${folder}/${rels[idx]}: ${entry.error ?? 'unreadable'}.`);
 		});
-	}
+	};
+	const rootFiles = picked.filter((rel) => !rel.startsWith(`${PIPE_ASSETS_DIR}/`));
+	await readAll(rootFiles);
+	for (const rel of picked.filter((rel) => rel.startsWith(`${PIPE_ASSETS_DIR}/`))) await readAll([rel]);
 	const pipe = JSON.parse(new TextDecoder().decode(tree[`${stem}.pipe`])) as Record<string, unknown>;
 	const pipeline = { ...pipe, name: String(pipe.name || manifestName || stem) } as Record<string, unknown> & { name: string };
 

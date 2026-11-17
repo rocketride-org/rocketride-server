@@ -323,6 +323,22 @@ class TestPublish:
         assert resp['body']['artifact']['version'] == 3
 
     @pytest.mark.asyncio
+    async def test_publish_keeps_a_boolean_apart_from_a_number_in_the_comparison(self, account_stub):
+        """`True == 1` in Python; in the file they differ, so a dict with 1 is not the bundle's pipe with true."""
+        import io
+        import zipfile
+
+        on_disk = {**PIPE, 'components': [{'id': 'c1', 'enabled': True}]}
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as zf:
+            zf.writestr('proj-1.pipe', json.dumps(on_disk))
+        sent = {**on_disk, 'components': [{'id': 'c1', 'enabled': 1}]}
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match="differs from the bundle's .pipe"):
+            await conn._deploy_add_pipe({}, {'pipeline': sent, 'data': buffer.getvalue()})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):

@@ -51,6 +51,7 @@
 # a team needs task.control on THAT team (cmd_pipe.py).
 # =============================================================================
 
+import json
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from rocketlib import debug
@@ -75,7 +76,9 @@ def _canonical_json(value: Any) -> Any:
 
     JavaScript has no integer type: a TypeScript client sends ``1.0`` as
     ``1``, while the bundle's ``.pipe`` text parses to the Python float
-    ``1.0``. Both describe one pipeline; the comparison must say so.
+    ``1.0``. Both describe one pipeline; the comparison must say so. The
+    caller compares the sorted JSON of the result, never Python equality:
+    ``True == 1`` there, and a boolean is not a number in the file.
     """
     if isinstance(value, float) and value.is_integer():
         return int(value)
@@ -364,7 +367,9 @@ class DeployCommands(_DeployBase):
                 bundle.pipeline['name'] = str(bundle.manifest.get('name') or bundle.stem)
             if pipeline is None:
                 pipeline = bundle.pipeline
-            elif _canonical_json(pipeline) != _canonical_json(bundle.pipeline):
+            elif json.dumps(_canonical_json(pipeline), sort_keys=True) != json.dumps(
+                _canonical_json(bundle.pipeline), sort_keys=True
+            ):
                 raise ValueError("pipeline differs from the bundle's .pipe - deploy the bundle as it is on disk")
         # Shape first, then content: a missing/empty pipeline must report
         # itself, not a misleading "name is required".
