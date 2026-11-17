@@ -142,12 +142,37 @@ def _strip_comments(text: str) -> str:
     return '\n'.join(out)
 
 
+def _strip_trailing_commas(text: str) -> str:
+    """Remove a ``,`` that directly precedes ``}`` or ``]`` (whitespace between), outside strings."""
+    out: List[str] = []
+    quotes = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '\\' and quotes % 2 == 1:
+            out.append(text[i : i + 2])
+            i += 2
+            continue
+        if ch == '"':
+            quotes += 1
+        elif ch == ',' and quotes % 2 == 0:
+            j = i + 1
+            while j < len(text) and text[j] in ' \t\r\n':
+                j += 1
+            if j < len(text) and text[j] in '}]':
+                i += 1
+                continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
 def load_json(text: str) -> Dict[str, Any]:
-    """Parse a services.json, tolerating the ``//`` comments the files carry."""
+    """Parse a services.json, tolerating the ``//`` comments and trailing commas the files may carry."""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        return json.loads(_strip_comments(text))
+        return json.loads(_strip_trailing_commas(_strip_comments(text)))
 
 
 # ============================================================================
@@ -224,6 +249,16 @@ def new_schema(doc: Dict[str, Any], shared: Dict[str, Any]) -> Tuple[Set[str], S
                     walk(branch.get('properties'))
         else:
             leaves.add(key.split('.')[-1])
+            # A referenced GROUP definition: its members are leaves too; so are
+            # an array definition's item members
+            if isinstance(value, dict):
+                if isinstance(value.get('properties'), list):
+                    walk(value['properties'])
+                for item in (value.get('item'), value.get('items')):
+                    if isinstance(item, str):
+                        add_def(item)
+                    elif isinstance(item, dict):
+                        walk([item])
 
     def walk(props: Any) -> None:
         for prop in props or []:
@@ -246,13 +281,18 @@ def new_schema(doc: Dict[str, Any], shared: Dict[str, Any]) -> Tuple[Set[str], S
                 leaves.add(name)
             if isinstance(prop.get('properties'), list):
                 walk(prop['properties'])
+            # An array's item members are declared keys too (an old field that
+            # became an item member is not a dropped key)
+            for item in (prop.get('item'), prop.get('items')):
+                if isinstance(item, str):
+                    add_def(item)
+                elif isinstance(item, dict):
+                    walk([item])
 
+    # Only what `properties` reaches is a schema leaf: the resolver builds the
+    # schema from `properties` alone, so an unreferenced definition declares
+    # nothing and an old key it matches is still a dropped key
     walk(doc.get('properties'))
-    for key, value in (doc.get('propertyDefinitions') or {}).items():
-        if isinstance(value, dict) and isinstance(value.get('enum'), dict):
-            selectors.add(key.split('.')[-1])
-        else:
-            leaves.add(key.split('.')[-1])
     return leaves, selectors
 
 
@@ -355,9 +395,36 @@ def insert_block(text: str, block: Dict[str, Any]) -> str:
     if not body.endswith('}'):
         raise ValueError('file does not end with }')
     body = body[:-1].rstrip()
-    comma = '' if body.endswith('{') else ','
     newline = '\n'
-    return body + comma + newline + rendered + newline + '}' + (trailing or newline)
+    if body.endswith('{'):
+        return body + newline + rendered + newline + '}' + (trailing or newline)
+    # The separator goes after the last member's VALUE: before a trailing
+    # `// comment` on that line, and never doubled after a trailing comma
+    head, _, last = body.rpartition('\n')
+    code, comment = _split_comment(last)
+    code = code.rstrip()
+    if code.endswith(','):
+        code = code[:-1].rstrip()
+    last = code + ',' + ((' ' + comment) if comment else '')
+    body = (head + '\n' + last) if _ else last
+    return body + newline + rendered + newline + '}' + (trailing or newline)
+
+
+def _split_comment(line: str) -> Tuple[str, str]:
+    """Split ``line`` at a ``//`` comment outside strings; (code, comment) with comment '' when none."""
+    quotes = 0
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == '\\' and quotes % 2 == 1:
+            i += 2
+            continue
+        if ch == '"':
+            quotes += 1
+        elif ch == '/' and line[i : i + 2] == '//' and quotes % 2 == 0:
+            return line[:i], line[i:]
+        i += 1
+    return line, ''
 
 
 # ============================================================================
@@ -411,7 +478,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         block = build_block(node_rel, old, load_json(text), shared)
         if node_rel in HAND:
             hand_seen.add(node_rel)
-        if not block['profiles'] and not block['dropped'] and len(block) == 2:
+        if not any(block.get(k) for k in ('profiles', 'dropped', 'renamed', 'credential', 'profileMap')):
             # Nothing an old pipe could carry that the new schema rejects.
             skipped += 1
             continue
