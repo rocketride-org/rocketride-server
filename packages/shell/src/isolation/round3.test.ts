@@ -122,6 +122,27 @@ test('G4R3-1 a lost run that never appears stops counting after 150 s', async (t
 	assert.equal(envelope.ok, true, `150 s later, with the last lookup answering "not found", the slot is free again, got ${brief(denialOf(envelope)?.code ?? envelope)}`);
 });
 
+test('G4R4-L1 a lost run whose lookup fails for another reason keeps counting', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const client = t.cm.engine.client as { request: (m: DAPMessage, timeout?: number) => Promise<DAPMessage> };
+	const original = client.request;
+	loseEveryExecute(t);
+	assert.equal((await clientRequest(A, execMsg())).ok, false);
+	const lossy = client.request;
+	// Every lookup now fails with something other than "not registered" (here a permission error).
+	client.request = async (m, timeout) => {
+		if (m.command === 'rrext_get_token') return { type: 'response', seq: 1, request_seq: m.seq, command: m.command, success: false, message: "Permission 'task.monitor' denied for this task" } as DAPMessage;
+		if (m.command === 'execute') return original(m, timeout);
+		return lossy(m, timeout);
+	};
+	for (let i = 0; i < 7; i++) await startRun(A);
+	await advance(30_000);
+	await advance(120_000);
+	assert.equal(denialOf(await clientRequest(A, execMsg()))?.code, 'quota', 'a lookup that failed for another reason does not release the slot');
+});
+
 test('G4R3-2 no lost-run lookup after detach or teardown', async (tt) => {
 	for (const how of ['detach', 'teardownAll'] as const) {
 		await tt.test(how, async (st) => {

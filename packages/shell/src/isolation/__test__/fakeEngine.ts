@@ -179,6 +179,14 @@ export function createFakeEngine(): IFakeEngine {
 				failures.delete(command);
 				return { ...base, success: false, message: failure };
 			}
+			if (command === 'rrext_get_token') {
+				// As the real engine: on_rrext_get_token (cmd_task.py) re-raises the
+				// TaskError of get_task_control_by_project (task_server.py), which
+				// DAPBase.build_exception turns into success:false with `code`.
+				const args = (message.arguments ?? {}) as Record<string, unknown>;
+				const found = runs.some((r) => r.projectId === args.projectId && (args.source === undefined || r.source === args.source));
+				if (!found) return { ...base, success: false, message: 'Your pipeline is not running', code: 'TASK_NOT_REGISTERED' } as DAPMessage;
+			}
 			if (command === 'rrext_store' && (message.arguments as Record<string, unknown> | undefined)?.subcommand === 'fs_read') {
 				return { ...base, success: true, arguments: { data: new Uint8Array([1, 2, 3, 4]) } } as DAPMessage;
 			}
