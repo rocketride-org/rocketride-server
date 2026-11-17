@@ -808,6 +808,7 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					// Charged like a registration; the array is bounded above.
 					if (charge('unregister') || !Array.isArray(m.ops)) return;
 					for (const op of m.ops) {
+						if (typeof op !== 'string' || op.length > MAX_NAME) continue;
 						if (appOwners.get(op) === realm) appOwners.delete(op);
 						realm.ops.delete(op);
 					}
