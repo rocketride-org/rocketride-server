@@ -889,8 +889,9 @@ class AccountBase(ABC):
     # APP ISOLATION (#1022) — what the app-origin decisions ask the account
     #
     # The base versions are the OSS behaviour. A SaaS edition overrides
-    # account_info_for, is_first_party and set_approved_capabilities: the
-    # startup check refuses RR_APP_ISOLATION other than 'off' until it does.
+    # account_info_for, is_first_party, set_approved_capabilities and
+    # approved_capabilities: the startup check refuses RR_APP_ISOLATION other
+    # than 'off' until it does.
     # =========================================================================
 
     async def account_info_for(self, user_id: str, org_id: str):
@@ -1164,7 +1165,12 @@ class AccountBase(ABC):
         # The wire view of isolated apps (#1022; identity under off).
         from ai.modules.shell.app_origin import wire_view
 
-        page = wire_view(page, getattr(conn, '_shell_caps', ()))
+        # An unauthenticated connection has no stored shellCaps (set by auth),
+        # so the request may declare them, as the probe's arguments do.
+        from ai.modules.shell.app_origin import sanitize_shell_caps
+
+        caps = getattr(conn, '_shell_caps', ()) or sanitize_shell_caps(args.get('shellCaps'))
+        page = wire_view(page, caps)
 
         return conn.build_response(
             request,

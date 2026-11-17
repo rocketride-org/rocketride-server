@@ -326,3 +326,19 @@ async def test_catalog_surfaces_unchanged_under_off(isolation_env):
         entry.update({'appStatus': 'free', 'onDesktop': True})
     assert listed['body']['apps'] == expected
     assert (await AccountBase.handle_public(acct, conn, {'arguments': {}}))['body']['apps'] == stamped_apps()
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_public_catalog_takes_shell_caps_from_its_arguments(isolation_env):
+    """T33b (G5 minor 11): before ``auth`` a connection has no stored caps; the catalog request may declare them,
+    like the probe. Only load fields are at stake (the stamp is public), so the default stays the old-shell view.
+    """
+    from ai.account.base import AccountBase
+
+    acct = _catalog_account()
+    conn = _catalog_conn((), signed_in=False)
+    body = (await AccountBase.handle_public(acct, conn, {'arguments': {'shellCaps': [CAP]}}))['body']
+    _assert_new_shell_view(body['apps'])
+    for junk in ('appIsolation:1', [5], None):
+        body = (await AccountBase.handle_public(acct, conn, {'arguments': {'shellCaps': junk}}))['body']
+        _assert_old_shell_view(body['apps'])
