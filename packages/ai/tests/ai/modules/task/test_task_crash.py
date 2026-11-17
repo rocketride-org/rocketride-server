@@ -240,15 +240,16 @@ def _dump_lines(lines):
     [
         (
             'segv',
-            'Application caught unhandled SEH exception: 0xc0000005',
-            'Application received system signal: SIGSEGV: Invalid access to storage (11)',
+            ['Application caught unhandled SEH exception: 0xc0000005'],
+            ['Application received system signal: SIGSEGV: Invalid access to storage (11)'],
         ),
-        # abort: on Windows the engine's abort handler reports it itself; elsewhere abort() re-raises
-        # SIGABRT once the handler returns, before the engine's signal listener thread writes >EXIT
+        # abort: on Windows the engine's abort handler reports it itself. Elsewhere abort() raises SIGABRT
+        # again once the handler returns, racing the engine's signal listener thread that writes >EXIT:
+        # Linux raises it at once, so the server reads the signal; macOS waits 10 ms, so the engine mostly wins
         (
             'abort',
-            'Application received system signal: SIGABRT: Abnormal termination triggered by abort call (22)',
-            'SIGABRT (code 6)',
+            ['Application received system signal: SIGABRT: Abnormal termination triggered by abort call (22)'],
+            ['Application received system signal: SIGABRT: Abnormal termination (6)', 'SIGABRT (code 6)'],
         ),
     ],
     ids=['segv', 'abort'],
@@ -261,7 +262,7 @@ async def test_a_node_that_crashes_stops_its_task_unexpectedly(server, text, win
         assert status['exitMessage'] == 'Stopped unexpectedly'
 
         expected = windows if os.name == 'nt' else elsewhere
-        assert _crash_lines(lines) == [f'Unexpected termination: {expected}'], lines
+        assert _crash_lines(lines) in [[f'Unexpected termination: {e}'] for e in expected], lines
         if server['dumps']:
             assert len(dumps) == 1
             assert _dump_lines(lines) == [f'Crash dump: {dumps[0].name}'], lines
