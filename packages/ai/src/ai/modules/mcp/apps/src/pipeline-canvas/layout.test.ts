@@ -92,6 +92,20 @@ describe('layoutLayers', () => {
 		expect(positions).toEqual({ a: { x: 0, y: 0 } });
 	});
 
+	it('orders a column by the rows of the nodes that feed it', () => {
+		// b2 is fed by the top node, b1 by the bottom one: b2 goes on top.
+		const positions = layoutLayers(
+			['a1', 'a2', 'b1', 'b2'],
+			[
+				{ source: 'a1', target: 'b2' },
+				{ source: 'a2', target: 'b1' },
+			],
+			fixed
+		);
+
+		expect(positions.b2.y).toBeLessThan(positions.b1.y);
+	});
+
 	it('places 200 disconnected nodes in one column without overlap', () => {
 		const ids = Array.from({ length: 200 }, (_, i) => `n${i}`);
 		const positions = layoutLayers(ids, [], fixed);
@@ -208,6 +222,14 @@ describe('layoutPipeline in a frame', () => {
 		return Math.min(frame.width / w, frame.height / h);
 	};
 
+	it('wraps only when one band would be too small to read', () => {
+		const ids = chain(5);
+		// One band of 5 is 820 px wide: zoom 0.9 in 740 px, so it stays one band.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 740, height: 560 })).map((p) => p.y)).size).toBe(1);
+		// In 360 px it would be zoom 0.44, so it wraps.
+		expect(new Set(Object.values(layoutPipeline(ids, links(ids), fixed, { width: 360, height: 560 })).map((p) => p.y)).size).toBeGreaterThan(1);
+	});
+
 	it('wraps a long flow into bands so it is drawn larger', () => {
 		const ids = chain(12);
 		const frame = { width: 360, height: 560 };
@@ -224,6 +246,15 @@ describe('layoutPipeline in a frame', () => {
 		const positions = layoutPipeline(ids, links(ids), fixed, { width: 740, height: 420 });
 
 		expect(new Set(Object.values(positions).map((p) => p.y))).toEqual(new Set([0]));
+	});
+
+	it('makes even bands', () => {
+		const ids = chain(8);
+		const positions = layoutPipeline(ids, links(ids), fixed, { width: 600, height: 900 });
+		const rows = new Map<number, number>();
+		for (const p of Object.values(positions)) rows.set(p.y, (rows.get(p.y) ?? 0) + 1);
+
+		expect([...rows.values()]).toEqual([4, 4]);
 	});
 
 	it('puts bands one under the other with the band gap', () => {

@@ -178,8 +178,8 @@ describe('buildCanvasModel', () => {
 		const cases: Array<[Record<string, unknown>, { message: string; hint?: string }]> = [
 			[{ error_type: 'NotFound', message: 'No pipeline file at ...', hint: 'Call store_list with path ...' }, { message: 'There is no pipeline at sub/x.pipe.', hint: 'Ask to see your saved pipelines.' }],
 			[{ error_type: 'AccessDenied', path: '@/Team/=team_B/.projects/y.pipe' }, { message: "You don't have access to y.pipe.", hint: 'Ask to see the pipelines you can open.' }],
-			[{ error_type: 'PipelineTooLarge', size: 2_200_033 }, { message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.' }],
-			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline the canvas can read." }],
+			[{ error_type: 'PipelineTooLarge', size: 2_200_033 }, { message: 'sub/x.pipe is too large to show here (2.1 MB). The limit is 2 MB.', hint: 'Open it in the builder instead.' }],
+			[{ error_type: 'InvalidPipeline' }, { message: "sub/x.pipe isn't a pipeline the canvas can read.", hint: 'Ask to see your saved pipelines.' }],
 			[{ error_type: 'InvalidPath', path: '' }, { message: 'Only pipeline files (.pipe or .pipe.json) in your workspace can be shown.', hint: 'Ask to see your saved pipelines.' }],
 			[{ error_type: 'Timeout', message: 'view_pipeline timed out waiting for the engine at @/Team/=team_A/.projects' }, { message: 'view_pipeline timed out waiting for the engine at .projects' }],
 		];

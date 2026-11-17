@@ -307,9 +307,9 @@ export function errorFor(summary: ViewPipelineSummary): Extract<CanvasModel, { k
 		case 'AccessDenied':
 			return { kind: 'error', message: `You don't have access to ${file}.`, hint: 'Ask to see the pipelines you can open.' };
 		case 'PipelineTooLarge':
-			return { kind: 'error', message: `${file} is too large to show here${typeof summary.size === 'number' ? ` (${formatBytes(summary.size)})` : ''}. The limit is 2 MB.` };
+			return { kind: 'error', message: `${file} is too large to show here${typeof summary.size === 'number' ? ` (${formatBytes(summary.size)})` : ''}. The limit is 2 MB.`, hint: 'Open it in the builder instead.' };
 		case 'InvalidPipeline':
-			return { kind: 'error', message: `${file} isn't a pipeline the canvas can read.` };
+			return { kind: 'error', message: `${file} isn't a pipeline the canvas can read.`, hint: 'Ask to see your saved pipelines.' };
 		default:
 			return { kind: 'error', message: withoutTeamIds(summary.message || 'The pipeline could not be opened.') };
 	}
