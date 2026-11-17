@@ -985,7 +985,9 @@ the step when its statement fails; do not catch that error and carry on as if
 the write had happened. The natural-language tools (`get_sql`, `get_data`,
 `get_query`, `get_aql`) do not raise on an outage or a failed query: they
 return `valid: false` with an `error`. Check `valid` on every result before
-using it; a result with `valid: false` is a failed read, not an empty one.
+using it; a result with `valid: false` and an `error` is a failed read, not an
+empty one. A result with `valid: false` and an `answer` instead means the
+question was not a database query.
 
 ### Data in the RocketRide cloud databases
 
