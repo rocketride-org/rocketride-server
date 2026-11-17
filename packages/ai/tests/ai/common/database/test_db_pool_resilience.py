@@ -615,8 +615,8 @@ def test_the_watchdog_fires_an_expired_deadline_and_skips_a_disarmed_one():
     watchdog = connect_retry_module._DeadlineWatchdog()
     fired = []
     done = threading.Event()
-    kept = watchdog.arm(0.05, lambda: fired.append('kept') or done.set())
-    dropped = watchdog.arm(0.01, lambda: fired.append('dropped'))
+    kept = watchdog.arm(0.1, lambda: fired.append('kept') or done.set())
+    dropped = watchdog.arm(0.03, lambda: fired.append('dropped'))
     watchdog.disarm(dropped)
 
     assert done.wait(2)

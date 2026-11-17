@@ -298,9 +298,9 @@ class _DeadlineWatchdog:
     process; it sleeps while nothing is armed.
 
     A disarmed entry stays in the heap until it reaches the top, where it is dropped
-    without waiting for its deadline. Every ping uses the same timeout, so the oldest
-    entry is the next to expire and the heap holds at most the pings armed within
-    one timeout.
+    without waiting for its deadline. The heap is ordered by deadline, so the next
+    entry to expire is always on top even when engines use different ping timeouts;
+    it holds at most the pings armed within the largest ping timeout in use.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
