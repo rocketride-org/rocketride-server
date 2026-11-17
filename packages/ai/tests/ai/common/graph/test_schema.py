@@ -275,7 +275,10 @@ class TestRefresh:
             seen['left'] = deadline - time.monotonic()
 
         make(reflect).IGlobal.refresh_schema_snapshot()
-        assert 1.0 < seen['left'] <= 1.234
+        # deadline is monotonic() + 1.234 in floats; reading monotonic() back can
+        # leave a rounding residue above 1.234 when the clock has not ticked
+        # (Windows' coarse clock), so allow one microsecond of slack.
+        assert 1.0 < seen['left'] <= 1.234 + 1e-6
 
     def test_refresh_schema_rejects_arguments(self):
         with pytest.raises(GraphToolError, match='Invalid refresh_schema input'):
