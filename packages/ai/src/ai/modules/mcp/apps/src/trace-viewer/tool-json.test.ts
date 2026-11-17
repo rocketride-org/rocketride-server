@@ -17,7 +17,8 @@ describe('parseToolJson', () => {
 	});
 
 	it('throws on host-level isError', () => {
-		expect(() => parseToolJson({ isError: true, content: [{ type: 'text', text: 'boom' }] })).toThrow('boom');
+		const failed = { isError: true, content: [{ type: 'text', text: '{"error": "bridge failed"}' }] };
+		expect(() => parseToolJson(failed)).toThrow('The trace could not be read. Try again.');
 	});
 
 	it('throws on missing text content', () => {

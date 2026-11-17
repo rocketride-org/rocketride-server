@@ -551,15 +551,12 @@ def _resolve_ui_domain() -> Tuple[Optional[str], str]:
         source, bare = oauth_resource.ENV_RESOURCE, False
     domain = _widget_domain(value, bare)
     if domain is None:
-        try:
-            shown = _redacted_uri(value)
-        except ValueError:  # unparsable (for example an unclosed IPv6 bracket); never stop the engine
-            shown = '<unparsable value>'
+        # Name the variable, never the value: a malformed value can carry a credential
+        # where a parser would not find user info to strip.
         logger.warning(
-            'Ignoring %s=%s for the MCP widget domain: it must be an https origin (http only on loopback)%s. '
+            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback)%s. '
             'No widget domain is sent.',
             source,
-            shown,
             ', with no path, query or user info' if bare else '',
         )
         return None, f'{source} ignored'

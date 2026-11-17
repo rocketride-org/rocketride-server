@@ -52,7 +52,8 @@ export function parseToolJson(result: unknown): Record<string, unknown> {
 		if (envelope && envelope.ok === false) {
 			throw new ToolError(friendlyToolError(envelope), typeof envelope.error_type === 'string' ? envelope.error_type : undefined);
 		}
-		throw new ToolError(text || 'tool call failed');
+		// Raw failure text (a bridge error, JSON) is not for the card.
+		throw new ToolError('The trace could not be read. Try again.');
 	}
 	if (!text) throw new ToolError('malformed tool result (missing text content)');
 	let payload: Record<string, unknown>;

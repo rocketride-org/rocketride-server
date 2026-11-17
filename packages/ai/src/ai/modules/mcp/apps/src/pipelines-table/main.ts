@@ -128,7 +128,8 @@ function render(rows: TaskRow[]): void {
 			} catch (err) {
 				stop.disabled = false;
 				stop.textContent = 'Retry';
-				showRowError(`Could not stop "${row.name}". It is still running.`);
+				// A Refresh that finished first has replaced this row; leave the new list alone.
+				if (tr.isConnected) showRowError(`Could not stop "${row.name}". It is still running.`);
 				console.error('terminate failed', err);
 			}
 		};

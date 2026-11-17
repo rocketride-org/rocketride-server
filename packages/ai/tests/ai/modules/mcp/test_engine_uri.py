@@ -419,6 +419,7 @@ def test_ui_domain_not_set_without_either_variable(monkeypatch, fake_web_server,
         'https://widgets.example.test:99999',
         'https://',
         'https://[::1',  # unparsable: must not raise while the warning is formatted
+        'https:/user:secret@widgets.example.test',  # parses as a path, so nothing strips the credential
     ],
 )
 def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web_server, caplog, value):
@@ -430,6 +431,7 @@ def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web
     warnings = [r.getMessage() for r in _domain_lines(caplog) if r.levelno == logging.WARNING]
     assert len(warnings) == 1, warnings
     assert 'MCP_UI_DOMAIN' in warnings[0]
+    assert value.strip() not in warnings[0]  # the variable is named, the value never printed
     assert 'secret' not in warnings[0]
     info = [r.getMessage() for r in _domain_lines(caplog) if r.levelno == logging.INFO]
     assert info == ['MCP widget domain: not set']
