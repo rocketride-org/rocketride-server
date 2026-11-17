@@ -33,10 +33,15 @@ MCP tool client node - global (shared) state.
 - Re-reads the catalog on every discovery query and on every lookup miss
   (rate-limited), so tools added or renamed on a running server become
   callable without restarting the engine (issue #1402)
+- Passes configured environment variables to a stdio server, and exposes only
+  the allowed tools when a call sets an allow list (a per-call parameter the
+  instance reads and passes in; the cached catalog itself stays whole)
 """
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
 import threading
 import time
@@ -85,6 +90,14 @@ def _headers(cfg, bearer: str) -> Optional[Dict[str, str]]:
     return headers
 
 
+def _env(cfg) -> Optional[Dict[str, str]]:
+    """The environment variables of the stdio branch, as strings; None when none are set."""
+    raw = cfg.get('env') or None
+    if raw is not None and not (hasattr(raw, 'get') and hasattr(raw, 'items')):
+        raise Exception('mcp_client env must be a dictionary of strings')
+    return {str(k): str(v) for k, v in raw.items()} if raw else None
+
+
 class IGlobal(IGlobalBase):
     """Global state for mcp_client: the MCP session and its tool catalog, keyed by original tool name."""
 
@@ -100,7 +113,7 @@ class IGlobal(IGlobalBase):
                 parts = shlex.split(cfg.commandLine)
                 if not parts:
                     raise Exception('mcp_client commandLine must not be empty')
-                self._client = McpStdioClient(command=parts[0], args=parts[1:])
+                self._client = McpStdioClient(command=parts[0], args=parts[1:], env=_env(cfg))
             else:
                 # The bearer token reaches the node through its config (a
                 # ${ROCKETRIDE_MCP_CLIENT_BEARER} reference resolved per call)
@@ -175,18 +188,40 @@ class IGlobal(IGlobalBase):
                 )
             return True
 
-    def list_namespaced_tools(self, server_name: str) -> List[Dict[str, Any]]:
-        """The catalog under one call's namespace (``server_name.tool``)."""
+    def list_namespaced_tools(self, server_name: str, allowed: Optional[set] = None) -> List[Dict[str, Any]]:
+        """The catalog under one call's namespace (``server_name.tool``).
+
+        ``allowed`` is the call's allow list (``parse_allowed_tools``): when
+        set, tools outside it are left out, so the agent never sees them, and
+        a listed name the server does not offer is reported in a warning
+        together with the names it does offer.
+        """
         self.refresh_tools(reason='catalog query', min_age_s=REFRESH_MIN_INTERVAL_S, label=server_name)
+        catalog = getattr(self, '_tools_by_original', None) or {}
+        if allowed is not None:
+            missing = sorted(allowed - set(catalog))
+            if missing:
+                warning(
+                    f"mcp_client '{server_name}': allowed tools not on the server: {missing}; "
+                    f'server tools: {sorted(catalog)}'
+                )
         out: List[Dict[str, Any]] = []
-        for name, tool in (getattr(self, '_tools_by_original', None) or {}).items():
+        for name, tool in catalog.items():
+            if allowed is not None and name not in allowed:
+                continue
             out.append(
                 {'name': f'{server_name}.{name}', 'description': tool.description, 'inputSchema': tool.inputSchema}
             )
         return out
 
-    def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:
-        """One tool of the catalog by original name; ``server_name`` (the call's, already checked) labels a refresh."""
+    def get_tool(self, *, server_name: str, tool_name: str, allowed: Optional[set] = None) -> Optional[McpToolDef]:
+        """One tool of the catalog by original name; ``server_name`` (the call's, already checked) labels a refresh.
+
+        A name outside the call's ``allowed`` list is None, without a refresh.
+        """
+        if allowed is not None and tool_name not in allowed:
+            # No refresh can make a tool outside allowedTools available.
+            return None
         tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
         if tool is None:
             self.refresh_tools(
@@ -198,17 +233,65 @@ class IGlobal(IGlobalBase):
             tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
         return tool
 
-    def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Call one tool; ``server_name`` (the call's, already checked) names the server in errors."""
+    def call_tool(
+        self, *, server_name: str, tool_name: str, arguments: Dict[str, Any], allowed: Optional[set] = None
+    ) -> Dict[str, Any]:
+        """Call one tool; ``server_name`` (the call's, already checked) names the server in errors.
+
+        A tool outside the call's ``allowed`` list is refused as unknown and
+        never sent to the server.
+        """
         if getattr(self, '_client', None) is None:
             raise Exception('MCP client is not connected')
         # A tool the catalog does not know is refreshed once, then refused
         # loudly rather than handed to the server (whose "not found" a weak
         # planner narrates around).
-        if self.get_tool(server_name=server_name, tool_name=tool_name) is None:
-            known = sorted((getattr(self, '_tools_by_original', None) or {}).keys())
+        if self.get_tool(server_name=server_name, tool_name=tool_name, allowed=allowed) is None:
+            known = sorted(
+                name for name in (getattr(self, '_tools_by_original', None) or {}) if allowed is None or name in allowed
+            )
             raise ToolUnavailableError(
                 f"Tool {tool_name!r} is not available on MCP server '{server_name}' "
                 f'(catalog refreshed; known tools: {known})'
             )
         return self._client.call_tool(name=tool_name, arguments=arguments or {})
+
+
+def parse_allowed_tools(raw: Any) -> Optional[set]:
+    """Read the allowed tool names from a call's settings.
+
+    Accepts the config panel's rows (``[{'toolName': ...}]``), a list of
+    names, or a string of names separated by commas or newlines. Returns
+    ``None`` when no names are set, which allows every tool.
+    """
+    if raw is None or raw == '':
+        return None
+    if not isinstance(raw, (str, list)):
+        # An engine JSON value (IJson) prints as its JSON text.
+        try:
+            raw = json.loads(str(raw))
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f'allowedTools is malformed and cannot be parsed: {e}') from e
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped.startswith(('[', '{')):
+            try:
+                raw = json.loads(stripped)
+            except (json.JSONDecodeError, ValueError) as e:
+                raise ValueError(f'allowedTools is malformed and cannot be parsed: {e}') from e
+        else:
+            raw = re.split(r'[,\n]', stripped)
+    if not isinstance(raw, list):
+        raise ValueError('allowedTools must be a list of tool names')
+    names = set()
+    for item in raw:
+        if hasattr(item, 'get'):
+            # A blank row is ignored, but a row naming its tool under another
+            # key must not leave the list empty and expose every tool.
+            if item and item.get('toolName') is None:
+                raise ValueError(f'allowedTools row {item!r} has no toolName')
+            item = item.get('toolName')
+        name = str(item or '').strip()
+        if name:
+            names.add(name)
+    return names or None

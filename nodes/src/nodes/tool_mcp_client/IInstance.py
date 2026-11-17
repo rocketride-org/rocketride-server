@@ -32,11 +32,11 @@ the external MCP server, not declared with @tool_function decorators.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from rocketlib import IInstanceBase
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, parse_allowed_tools
 from .mcp_schema import strip_synthesized_args
 
 _FRAMEWORK_KEYS = frozenset({'security_context'})
@@ -49,9 +49,14 @@ class IInstance(IInstanceBase):
         """This call's namespace for the server's tools."""
         return self.settings.serverName.strip()
 
+    def _allowed_tools(self) -> Optional[set]:
+        """This call's allow list: the tool names it may see and call, or None for every tool."""
+        # The Butterbase preset declares no allow list, so its settings have no such key
+        return parse_allowed_tools(getattr(self.settings, 'allowedTools', None))
+
     def _tool_query_dynamic(self) -> list:
-        """Return tools discovered from the MCP server, under this call's namespace."""
-        return self.IGlobal.list_namespaced_tools(self._server_name())
+        """Return tools discovered from the MCP server, under this call's namespace and allow list."""
+        return self.IGlobal.list_namespaced_tools(self._server_name(), self._allowed_tools())
 
     def _tool_invoke_dynamic(self, *, tool_name: str, input_obj: Any) -> Any:
         """Dispatch a tool call to the MCP server."""
@@ -59,6 +64,7 @@ class IInstance(IInstanceBase):
         configured = self._server_name()
         if server_name != configured:
             raise Exception(f'Unknown MCP serverName {server_name!r} (this node configured as {configured!r})')
+        allowed = self._allowed_tools()
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
@@ -66,12 +72,14 @@ class IInstance(IInstanceBase):
             # cached tool whose schema normalization actually synthesized it;
             # ``rr_no_args`` remains a valid real MCP argument otherwise.
             arguments = {k: v for k, v in input_obj.items() if k not in _FRAMEWORK_KEYS}
-            tool = self.IGlobal.get_tool(server_name=server_name, tool_name=bare_tool)
+            tool = self.IGlobal.get_tool(server_name=server_name, tool_name=bare_tool, allowed=allowed)
             if tool is not None and getattr(tool, 'has_synthesized_noop_arg', False):
                 arguments = strip_synthesized_args(arguments)
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
-        return self.IGlobal.call_tool(server_name=server_name, tool_name=bare_tool, arguments=arguments)
+        return self.IGlobal.call_tool(
+            server_name=server_name, tool_name=bare_tool, arguments=arguments, allowed=allowed
+        )
 
 
 def _split_tool_name(tool_name: str) -> tuple[str, str]:

@@ -16,7 +16,9 @@
 	// Optional:
 	//		Local property definitions. The transport is the selector; each branch
 	//		carries its own endpoint, the HTTP branches their headers and bearer token
-	//		(a secret the account variable supplies).
+	//		(a secret the account variable supplies), the stdio branch the server's
+	//		environment variables. The allowed-tools list is a per-call parameter an
+	//		agent cannot set.
 	//
 	"propertyDefinitions": {
 		"mcp_client.serverName": {
@@ -35,6 +37,12 @@
 			"default": "python -m rocketride_mcp",
 			"minLength": 1
 		},
+		"mcp_client.env": {
+			"type": "object",
+			"title": "Environment variables",
+			"description": "Environment variables for the server process, such as the API key a server reads at startup. Example: GITHUB_PERSONAL_ACCESS_TOKEN",
+			"default": {}
+		},
 		"mcp_client.endpoint": {
 			"type": "string",
 			"title": "Endpoint",
@@ -52,6 +60,24 @@
 			"title": "Headers",
 			"description": "Extra HTTP headers for streamable-http/sse transports",
 			"default": {}
+		},
+		"mcp_client.toolName": {
+			"type": "string",
+			"title": "Tool name",
+			"description": "Name of the tool as the server lists it, without the server name prefix",
+			"default": ""
+		},
+		"mcp_client.allowedTools": {
+			"type": "array",
+			"title": "Allowed tools",
+			"description": "Expose only these tools from the server to the agent. Leave empty to expose every tool.",
+			"param": true,
+			"tool": false,
+			"minItems": 0,
+			"item": {
+				"name": "entry",
+				"properties": ["mcp_client.toolName"]
+			}
 		},
 		"mcp_client.bearer": {
 			"type": "string",
@@ -74,7 +100,7 @@
 			"enum": {
 				"stdio": {
 					"title": "STDIO (subprocess)",
-					"properties": ["mcp_client.commandLine"]
+					"properties": ["mcp_client.commandLine", "mcp_client.env"]
 				},
 				"streamable-http": {
 					"title": "HTTP (Streamable HTTP)",
@@ -85,7 +111,8 @@
 					"properties": ["mcp_client.sse_endpoint", "mcp_client.headers", "mcp_client.bearer"]
 				}
 			}
-		}
+		},
+		"mcp_client.allowedTools"
 	],
 	"legacy": {
 		"selector": "profile",

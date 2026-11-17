@@ -150,8 +150,13 @@ SCHEMAS = {
     'tool_crustdata': (['defaultLimit'], [], {'apikey': 'k1'}),
     'aparavi_aql': (['db_description'], ['db_description'], {'url': 'https://aql.example'}),
     'tool_pipe': (['tool_description', 'return_type'], ['tool_description', 'return_type'], {}),
-    'mcp_client': (['serverName'], ['serverName'], {'streamable-http': {'endpoint': 'https://mcp.example'}}),
+    'mcp_client': (
+        ['serverName', 'allowedTools'],
+        ['serverName', 'allowedTools'],
+        {'streamable-http': {'endpoint': 'https://mcp.example'}},
+    ),
     'tool_butterbase': (['serverName'], ['serverName'], {'bearer': 'k1'}),
+    'tool_skills': (['skills', 'folder'], ['skills', 'folder'], {}),
     'media_inspect': (
         ['request', 'event_type', 'chunk_kb', 'max_input_mb', 'silence_db', 'silence_ms', 'peak_ms', 'scene_threshold'],
         ['chunk_kb', 'max_input_mb'],
