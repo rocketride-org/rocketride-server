@@ -62,11 +62,12 @@ Call :func:`invalidate`; the next request rebuilds.
 """
 
 import asyncio
-import base64
 import contextlib
 from typing import Any, Dict, Optional, Tuple
 
 from rocketlib import debug, getServiceDefinitions, warning
+
+from ai.common.utils import decode_data_url
 
 from . import node_store
 
@@ -129,7 +130,7 @@ def _read_icon(icon_path: Any) -> Optional[str]:
     if icon_path.startswith('data:'):
         # A node EaaS serves carries its icon inline
         with contextlib.suppress(ValueError):
-            return base64.b64decode(icon_path.partition(',')[2]).decode('utf-8-sig')
+            return decode_data_url(icon_path)[0].decode('utf-8-sig')
         return None
     try:
         with open(icon_path, 'r', encoding='utf-8-sig') as fh:

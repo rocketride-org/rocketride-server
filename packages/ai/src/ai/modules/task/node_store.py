@@ -68,12 +68,12 @@ def start() -> None:
         nodes, providers, definitions = _served(index)
         # The engine parses them now: a definition it refuses would fail every catalogue call
         getServiceDefinitions(list(definitions.values()))
+        _replace_stale(index)
     except Exception as e:
         warning(
             f'NODE_REGISTRY_UNAVAILABLE: the node index could not be used ({e}); only the nodes the server carries are available'
         )
         return
-    _replace_stale(index)
     problem = _unwritable(node_release.nodes_dir()) if nodes else None
     if problem:
         # A read-only install: say so once, rather than refuse every run that names one
@@ -111,7 +111,8 @@ def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict
 def _replace_stale(index: Dict[str, Any]) -> None:
     """Replace the copies an earlier release unpacked into nodes/ with this index's, so the next run loads them.
 
-    The start-up scan loads such a folder like any other node, so it is never served and never placed again.
+    The start-up scan loads such a folder like any other node, so it is never served and never placed again;
+    a copy of a node this index no longer lists is named, so it can be deleted.
     """
     for name, entry in index['nodes'].items():
         folder = os.path.join(node_release.nodes_dir(), name)
@@ -130,6 +131,14 @@ def _replace_stale(index: Dict[str, Any]) -> None:
         warning(
             f"Node {name}: replaced the copy an earlier release unpacked; EaaS lists this release's definition after a restart"
         )
+    # A folder with a digest is EaaS's own copy: one this release does not list is still loaded by every scan
+    nodes_dir = node_release.nodes_dir()
+    for name in sorted(os.listdir(nodes_dir)) if os.path.isdir(nodes_dir) else []:
+        folder = os.path.join(nodes_dir, name)
+        if name not in index['nodes'] and node_packages.digest_of(folder) is not None:
+            warning(
+                f'Node {name}: {folder} holds a node an earlier release unpacked and this release does not list; delete it'
+            )
 
 
 def _unwritable(nodes_dir: str) -> Optional[str]:

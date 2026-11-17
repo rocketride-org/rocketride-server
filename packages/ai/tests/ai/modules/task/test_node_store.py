@@ -85,7 +85,7 @@ def test_an_icon_the_index_does_not_hold_is_dropped(server, monkeypatch):
     assert node_store.custom() == [{'protocol': 'provider_x://', 'maximum': 1.0}]
 
 
-@pytest.mark.parametrize('broken', ['contract', 'unavailable', 'malformed', 'refused'])
+@pytest.mark.parametrize('broken', ['contract', 'unavailable', 'malformed', 'refused', 'no-sha256'])
 def test_an_index_it_cannot_use_serves_nothing(server, monkeypatch, broken):
     if broken == 'contract':
         monkeypatch.setattr(node_store.account, 'node_index', lambda: _index(CONST_NODES_CONTRACT + 1))
@@ -99,6 +99,12 @@ def test_an_index_it_cannot_use_serves_nothing(server, monkeypatch, broken):
         index = _index()
         del index['nodes']['llm_x']['services']
         monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    elif broken == 'no-sha256':
+        # Next to a copy an earlier release unpacked, the entry is read when it is replaced
+        index = _index()
+        del index['nodes']['webhook']['sha256']
+        monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+        _unpacked_before(server, 'webhook', 'older')
     else:
 
         def refuse(definitions):
@@ -266,6 +272,18 @@ def test_an_earlier_copy_that_cannot_be_replaced_names_its_folder(server, monkey
     assert os.path.join(server['nodes'], 'webhook') in server['warnings'][0] and 'delete it' in server['warnings'][0]
     # The nodes it serves are still served
     assert node_store.served('provider_x') is not None
+
+
+def test_a_copy_an_earlier_release_unpacked_that_this_release_does_not_list_is_named(server):
+    _unpacked_before(server, 'llm_gone', 'older')
+    # The server's own folder, which no index lists, is not EaaS's to name
+    os.makedirs(os.path.join(server['nodes'], 'filesys'))
+
+    node_store.start()
+
+    assert len(server['warnings']) == 1
+    assert os.path.join(server['nodes'], 'llm_gone') in server['warnings'][0] and 'delete it' in server['warnings'][0]
+    assert server['unpacked'] == [] and node_store.served('provider_x') is not None
 
 
 def test_nested_providers_are_named_in_lower_case_at_any_depth():

@@ -161,3 +161,7 @@ async def test_the_nodes_eaas_serves_join_the_catalogue_with_their_inline_icon(m
 
     assert asked == [served]
     assert summary['icons'][summary['services']['provider_x']['icon']] == '<svg id="x"/>'
+
+
+def test_an_inline_icon_that_is_not_base64_is_read_too():
+    assert services_catalog._read_icon('data:image/svg+xml;utf8,%3Csvg%20id%3D%22x%22%2F%3E') == '<svg id="x"/>'
