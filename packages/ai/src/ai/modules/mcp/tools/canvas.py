@@ -53,12 +53,10 @@ _TEAM_PATH = re.compile(r'^@/Team/=([A-Za-z0-9][A-Za-z0-9_.-]*)/\.projects/')
 _DEFAULT, _GROUP, _ANNOTATION = 'default', 'group', 'annotation'
 _NODE_TYPES = (_DEFAULT, _GROUP, _ANNOTATION)
 
-# Annotation colours are drawn as inline CSS. Accept the forms the builder
-# writes (a hex colour, an --rr-* token, rgb()/rgba()/hsl(), a colour name),
-# never anything that can load a resource, such as url().
-_SAFE_COLOR = re.compile(
-    r'^(#[0-9a-fA-F]{3,8}|var\(--rr-[A-Za-z0-9-]+\)|(rgb|rgba|hsl|hsla)\([0-9.,%\s/]+\)|[A-Za-z]+)$'
-)
+# Annotation colours are drawn as inline CSS. Accept only the two forms the
+# builder writes (its colour picker's hex value, or its default --rr-* token),
+# so no other text, and nothing that can load a resource, rides in a colour.
+_SAFE_COLOR = re.compile(r'^(#[0-9a-fA-F]{3,8}|var\(--rr-[A-Za-z0-9-]+\))$')
 
 # The catalog fields the widget draws a node with. Everything else in a
 # catalog entry (schemas, defaults, documentation links) stays out.
@@ -254,8 +252,13 @@ class _Cleaner:
         description = _text(raw.get('description'), MAX_DESCRIPTION_CHARS)
         if description:
             out['description'] = description
-        # Node settings never leave the server, with two exceptions the drawing needs.
-        out['config'] = _annotation_config(raw.get('config')) if node_type == _ANNOTATION else {}
+        # Node settings never leave the server, with two exceptions the drawing
+        # needs: a note's text and colours (only for the note provider itself,
+        # so another node cannot pass its settings off as a note) and a group's
+        # nodes, cleaned the same way.
+        out['config'] = (
+            _annotation_config(raw.get('config')) if node_type == _ANNOTATION and provider == _ANNOTATION else {}
+        )
         inputs = _connections(raw.get('input'), 'lane')
         if inputs:
             out['input'] = inputs
