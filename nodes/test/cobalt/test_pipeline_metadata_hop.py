@@ -84,7 +84,6 @@ _OWNED_MODULE_PREFIXES = (
     'ai',
     'cobalt',
     'dataset_cobalt',
-    'depends',
     'eval_cobalt',
     'prompt',
     'rocketlib',
@@ -136,9 +135,12 @@ def _install_mocks():
     rocketlib.invoke_function = lambda fn: fn
     sys.modules['rocketlib'] = rocketlib
 
-    depends = ModuleType('depends')
-    depends.depends = lambda *a, **kw: None
-    sys.modules['depends'] = depends
+    # `depends` is pinned for the whole session (nodes/test/_sys_modules_guard.py), so the
+    # module object stays; the fixture below swaps its `depends` function for a no-op instead.
+    if 'depends' not in sys.modules:
+        depends = ModuleType('depends')
+        depends.depends = lambda *a, **kw: None
+        sys.modules['depends'] = depends
 
     # An empty `cobalt` module keeps the evaluator and the loader on their
     # offline paths, so the assertions below describe behaviour a contributor
@@ -161,6 +163,7 @@ def _install_mocks():
 
     ai_schema.Question = rocketride.Question
     ai_schema.Answer = rocketride.Answer
+    ai_schema.AnswerError = rocketride.AnswerError
     ai_schema.QuestionText = rocketride.QuestionText
     ai_schema.QuestionType = rocketride.QuestionType
     for _name in ('Doc', 'DocFilter', 'DocGroup', 'DocMetadata'):
@@ -197,10 +200,19 @@ def _install_mocks():
 
     ai_adapter.turn_usage = _turn_usage
 
+    # llm_base types a failed turn through these. The real ai.common.llm_tools pulls
+    # the adapter and validation modules, so stand in the three names it reads; a
+    # Question is in turn mode exactly when the schema says so.
+    ai_tools = ModuleType('ai.common.llm_tools')
+    ai_tools.InvalidTurn = type('InvalidTurn', (Exception,), {})
+    ai_tools.ToolsUnsupported = type('ToolsUnsupported', (Exception,), {})
+    ai_tools.is_turn = lambda question: isinstance(question, rocketride.Question) and question.isTurn()
+
     ai.common = ai_common
     ai_common.config = ai_config
     ai_common.llm_adapter = ai_adapter
     ai_common.llm_native_stream = ai_stream
+    ai_common.llm_tools = ai_tools
     ai_common.schema = ai_schema
     ai_common.utils = ai_utils
 
@@ -211,6 +223,7 @@ def _install_mocks():
             'ai.common.config': ai_config,
             'ai.common.llm_adapter': ai_adapter,
             'ai.common.llm_native_stream': ai_stream,
+            'ai.common.llm_tools': ai_tools,
             'ai.common.schema': ai_schema,
             'ai.common.utils': ai_utils,
         }
@@ -248,14 +261,23 @@ def _engine_mocks():
     """Install the engine stubs for this module and undo them afterwards."""
     saved_modules = {name: sys.modules[name] for name in _owned_module_names()}
     saved_path = list(sys.path)
+    real_depends = sys.modules.get('depends')
+    saved_depends = getattr(real_depends, 'depends', None)
 
     _purge_owned_modules()
     _install_mocks()
+    if real_depends is not None:
+        # Same module object, no-op installer: nothing here may install a package.
+        real_depends.depends = lambda *a, **kw: None
     yield
 
     _purge_owned_modules()
     sys.modules.update(saved_modules)
     sys.path[:] = saved_path
+    if real_depends is None:
+        sys.modules.pop('depends', None)
+    else:
+        real_depends.depends = saved_depends
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +348,7 @@ def _drive_object(node, question):
         question: The Question to write on the questions lane.
     """
     node.open(object())
-    node.writeQuestions(question)
+    _dispatch(lambda: node.writeQuestions(question))
     node.closing()
     close = getattr(node, 'close', None)
     if callable(close):
@@ -423,14 +445,10 @@ def _run_pipeline(items, reply, instructions=None, with_prompt=True, threshold=0
     dataset rows produced three ``open``/``closing``/``close`` pairs on the
     prompt node and three questions out of it, not one.
 
-    WHAT THIS HARNESS DOES NOT MODEL. The engine also forwards the prompt
-    node's incoming question after ``writeQuestions`` returns, because the
-    prompt node does not prevent the default forward (base-branch behaviour,
-    tracked as a develop follow-up). Live, the LLM therefore receives TWO
-    questions per row - the merged one this node wrote and the untouched
-    original - and the sink sees two scores per row. This harness models only
-    the merged question the node writes, so its counts are one LLM question and
-    one score per row.
+    ONE QUESTION PER ROW. The prompt node ends ``writeQuestions`` in
+    ``preventDefault()``, so the engine does not also forward the incoming
+    question: the LLM receives only the merged question, and the sink sees one
+    score per row. ``_drive_object`` checks that signal on every write.
 
     The LLM node is still built per staged question. ``LLMBase`` answers inside
     ``writeQuestions`` and holds no cross-object accumulator, so sharing it
@@ -514,7 +532,7 @@ class TestReferenceSurvivesEveryHop:
         _dispatch(lambda: dataset.writeQuestions(Question()))
 
         prompt = _prompt_node(['Answer concisely.'])
-        prompt.writeQuestions(dataset.instance.questions[0])
+        _dispatch(lambda: prompt.writeQuestions(dataset.instance.questions[0]))
         prompt.closing()
 
         emitted = prompt.instance.questions
@@ -734,7 +752,7 @@ class TestPromptNodePreservesExistingBehaviour:
         question.addQuestion('What is the capital of France?')
 
         prompt = _prompt_node(['Answer concisely.', 'Stay factual.'])
-        prompt.writeQuestions(question)
+        _dispatch(lambda: prompt.writeQuestions(question))
         prompt.closing()
 
         emitted = prompt.instance.questions[0]
@@ -751,7 +769,7 @@ class TestPromptNodePreservesExistingBehaviour:
         question.addQuestion('What is the capital of France?')
 
         prompt = _prompt_node(['Answer concisely.'])
-        prompt.writeQuestions(question)
+        _dispatch(lambda: prompt.writeQuestions(question))
         prompt.closing()
 
         emitted = prompt.instance.questions[0]
@@ -783,7 +801,7 @@ class TestPromptNodePreservesExistingBehaviour:
             question = Question()
             question.addQuestion(text)
             question.metadata = dict(metadata)
-            node.writeQuestions(question)
+            _dispatch(lambda: node.writeQuestions(question))
             node.closing()
 
             emitted.append(node.instance.questions[0])
@@ -808,8 +826,8 @@ class TestPromptNodePreservesExistingBehaviour:
         second.metadata = {'item_index': 1}
 
         prompt = _prompt_node(['Answer concisely.'])
-        prompt.writeQuestions(first)
-        prompt.writeQuestions(second)
+        _dispatch(lambda: prompt.writeQuestions(first))
+        _dispatch(lambda: prompt.writeQuestions(second))
         prompt.closing()
 
         merged = prompt.instance.questions[0].metadata
@@ -1033,7 +1051,7 @@ class TestExamplePipelineScores:
         assert question.metadata['expected'] == entries[0]['objectTags']['metadata']['expected']
 
         prompt = _prompt_node(_component(pipe, 'prompt_1')['config']['instructions'])
-        prompt.writeQuestions(question)
+        _dispatch(lambda: prompt.writeQuestions(question))
         prompt.closing()
         staged = prompt.instance.questions[0]
         assert staged.metadata['expected'] == question.metadata['expected']

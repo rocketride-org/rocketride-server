@@ -82,12 +82,9 @@ class IInstance(IInstanceBase):
         of `examples/cobalt-evaluation.pipe` over three dataset rows put three
         open/closing/close rounds and three emitted questions on this node.
 
-        Those three are what this node writes. The engine also forwards each
-        incoming question after `writeQuestions` returns - this node does not
-        call `preventDefault()` - so the same run delivered six questions to
-        the LLM downstream: three merged and three untouched originals. That is
-        base-branch behaviour, recorded here rather than changed, and tracked
-        as a develop follow-up.
+        Those three are all that goes downstream: each collector ends in
+        `preventDefault()`, so the engine does not also forward the incoming
+        question, and the LLM receives one merged question per row.
         """
         # The turn starts here, so the question does too.
         self.has_output = False
@@ -114,8 +111,6 @@ class IInstance(IInstanceBase):
         if question.messages and not self.question.messages:
             self.question.messages = list(question.messages)
             self.question.tools = list(question.tools)
-        return self.preventDefault()
-
         # This node emits a Question it built itself rather than forwarding the
         # one it received, so metadata an upstream node attached would be lost
         # here. Carry it across: metadata is the channel non-prompt pipeline
@@ -123,6 +118,7 @@ class IInstance(IInstanceBase):
         # eval_cobalt scores against downstream), and it must not be rendered
         # into the prompt. Merging unions the keys of every question collected.
         merge_metadata(self.question, getattr(question, 'metadata', None))
+        return self.preventDefault()
 
     def writeDocuments(self, documents):
         """

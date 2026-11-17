@@ -52,8 +52,9 @@ for this change::
     ROCKETRIDE_URI=http://127.0.0.1:5567 pytest nodes/test/cobalt/test_live_pipeline_counts.py
 
 ``ROCKETRIDE_MOCK`` shadows ``langchain_openai``/``openai`` with
-``nodes/test/mocks``, so no API key is needed and the literal
-``${ROCKETRIDE_OPENAI_KEY}`` the example carries is never resolved.
+``nodes/test/mocks``, so no API key is needed. The engine still refuses an
+unresolved ``${ROCKETRIDE_OPENAI_KEY}``, so ``_example_pipe`` swaps the
+placeholder the example carries for a literal.
 
 THE MOCK LLM CAVEAT. Under ``ROCKETRIDE_MOCK`` the model returns one constant
 string for every question, so the similarity scores are low and
@@ -113,8 +114,11 @@ _RUN_CACHE: dict = {}
 
 def _example_pipe():
     """Parse the shipped example."""
-    with _EXAMPLE_PIPE.open(encoding='utf-8') as handle:
-        return json.load(handle)
+    # The engine refuses a credential that is still a ``${NAME}`` placeholder
+    # (ai.common.config), and CI has no such variable. The provider is mocked,
+    # so any literal key will do.
+    text = _EXAMPLE_PIPE.read_text(encoding='utf-8').replace('${ROCKETRIDE_OPENAI_KEY}', 'mock-key')
+    return json.loads(text)
 
 
 def _dataset_rows(pipe):
