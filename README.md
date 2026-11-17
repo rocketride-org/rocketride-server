@@ -21,7 +21,7 @@
 </p>
 
 <p>
- RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: MCP, your terminal or your IDE. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
+ RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal, your coding agent or MCP. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
 </p>
 
 <p>
@@ -31,9 +31,9 @@
 <p>
   <a href="https://rocketride.org">Home</a> |
   <a href="https://docs.rocketride.org/">Documentation</a> |
-  <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
+  <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
   For coding agents: <a href="https://docs.rocketride.org/quickstart/coding-agents/">start page</a>, <a href="https://docs.rocketride.org/llms.txt">llms.txt</a> |
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
   <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
@@ -80,7 +80,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 | **Pipeline Nodes**                | LLM providers, vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                          |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
 | **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
-| **MCP Server, TypeScript & Python SDKs** | Drive the engine through the built-in MCP server, or integrate pipelines into your apps with the SDKs.                                                                                                                               |
+| **TypeScript & Python SDKs, MCP Server** | Integrate pipelines into native apps, drive the engine through the built-in MCP server, or build programmatic workflows into your existing codebase.                                                                                 |
 | **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run, no manual setup.                                                                                                |
 | **One-Click Deploy**              | Run on Docker, on-prem, or [RocketRide Cloud](https://cloud.rocketride.ai/). Production-ready architecture from day one, not retrofitted from a demo.                                                                               |
 
@@ -216,12 +216,12 @@ Everything on [docs.rocketride.org](https://docs.rocketride.org/) is built from 
 | Looking for | Start at |
 |---|---|
 | Using RocketRide: quickstart, concepts, guides, cloud, self-hosting | [`docs/public/product/`](docs/public/product/) (the site, page for page) |
-| MCP and SDK guides | [MCP](docs/public/mcp/) · [TypeScript](docs/public/typescript/) · [Python](docs/public/python/) |
+| SDK guides | [TypeScript](docs/public/typescript/) · [Python](docs/public/python/) · [MCP](docs/public/mcp/) |
 | Building your own client on the engine protocol | [`docs/public/product/connect/websocket/`](docs/public/product/connect/websocket/) |
 | Contributing: setup, builder, engine internals, node authoring | [`docs/development/`](docs/development/index.md) |
 | Node catalog | each node's `README.md` under [`nodes/src/nodes/`](nodes/src/nodes) |
 | Apps: VS Code extension and the shell UIs | each app's own folder under [`apps/`](apps/); how they fit the monorepo in [`docs/development/apps/`](docs/development/apps/index.md) |
-| Docs for coding agents | [`docs/agents/`](docs/agents/README.md) |
+| Pointing an AI assistant at RocketRide | [`docs/agents/`](docs/agents/README.md) |
 
 Repo-wide contributor rules live in [AGENTS.md](AGENTS.md).
 

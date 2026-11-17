@@ -1,7 +1,7 @@
 ---
 title: Use RocketRide from a coding agent
 sidebar_label: Use from a coding agent
-description: Start page for coding agents. Run the engine locally in Docker, check it is up, use it over MCP or from the CLI or SDK, and find the machine-readable docs.
+description: Start page for coding agents. Run the engine locally in Docker, check it is up, use it from the CLI, SDK or MCP, and find the machine-readable docs.
 ---
 
 # Use RocketRide from a coding agent
@@ -10,7 +10,7 @@ This page is the shortest path for a coding agent (or the person driving one) to
 
 ## What RocketRide is
 
-RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage dynamically using the MCP server, from the terminal with the CLI, from code with the Python or TypeScript SDK, or directly from an IDE with the VS Code extension.
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Designed for professional software developers and technical builders, whether solo or teams or organizations, to enable them to easily build, stage, test, publish and maintain agents and AI-enabled applications that scale in production. Leverage directly from an IDE with the VS Code extension, from the terminal with the CLI, from code with the Python or TypeScript SDK, or dynamically using the MCP server.
 
 Open source, MIT licensed. Nodes cover LLM providers, vector stores, OCR, NER, PII anonymization and more.
 
@@ -35,7 +35,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port everywhere below that shows `localhost:5565`: the health check, the MCP address, and the `ROCKETRIDE_URI` you export in your shell.
+To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port everywhere below that shows `localhost:5565`: the health check, the `ROCKETRIDE_URI` you export in your shell, and the MCP address.
 
 - The command is the same on every machine. The image is amd64 only: `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port can take 15 seconds or more to answer there) and has no effect on Intel or AMD machines.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
@@ -50,22 +50,6 @@ curl http://localhost:5565/version
 ```
 
 It answers 200 with `{"status":"OK","data":{"version":"..."}}` and needs no key. Every other unknown path, such as `/ping`, answers 401.
-
-## Use it over MCP locally
-
-A running engine serves MCP at `http://localhost:5565/mcp`. Send the key you started the engine with as a bearer token:
-
-```text
-Authorization: Bearer rr_local
-```
-
-Claude Code:
-
-```bash
-claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
-```
-
-On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
 
 ## Use it from the CLI or SDK
 
@@ -184,6 +168,22 @@ The pipeline needs no model provider key and no account. A first run on a fresh 
 
 More: [Run from the CLI](/quickstart/cli), [CLI Reference](/connect/cli), [Python SDK](/clients/python), [TypeScript SDK](/clients/typescript).
 
+## Use it over MCP locally
+
+A running engine serves MCP at `http://localhost:5565/mcp`. Send the key you started the engine with as a bearer token:
+
+```text
+Authorization: Bearer rr_local
+```
+
+Claude Code:
+
+```bash
+claude mcp add --transport http rocketride-local http://localhost:5565/mcp --header "Authorization: Bearer rr_local"
+```
+
+On engine image 3.6.0 and earlier, when neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER` is set on a Docker engine (or any engine not bound to localhost), `initialize` and `tools/list` still work, but every tool call connects to RocketRide Cloud and fails with `Invalid or revoked API key`. Start the engine with the command above to avoid this. A local Docker engine offers 32 tools (`send_files` needs a loopback bind).
+
 ## Use the hosted server
 
 The hosted MCP server is at `https://api.rocketride.ai/mcp`.
@@ -217,7 +217,7 @@ Take a pipeline's `provider` values from the MCP `list_components` tool or from 
 
 ## Go deeper
 
-- [Quickstart](/quickstart): pick the MCP, CLI, SDK or IDE path.
+- [Quickstart](/quickstart): pick the IDE, SDK or CLI path.
 - [Pipelines](/concepts/pipelines) and [Nodes](/concepts/nodes): the core concepts.
 - [Agents & Tools](/concepts/agents-tools-skills): how agents are wired.
 - [Pipeline JSON Reference](/reference/pipeline-reference): the `.pipe` format.

@@ -52,7 +52,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 
 - **App Builder** - Scaffold, live-preview, publish, and deploy [Shell Apps](/guides/apps) from a template, without leaving VS Code.
 - **Connection manager** - Connect to a local engine (one click, no setup), Docker, a system service, your own server (Direct Connect) or RocketRide Cloud. [Connection Modes](/clients/vscode/usage#connection-modes) says what runs where in each mode.
-- **MCP server and SDKs for TypeScript & Python** - Drive pipelines through the MCP server, or embed them in your apps.
+- **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
 Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-org/awesome-rocketride#demos--examples), a collection of example projects built on RocketRide.
 

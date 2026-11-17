@@ -82,7 +82,7 @@ SDKs) rather than returning partial silence.
 | You are… | Reach for | Where |
 | --- | --- | --- |
 | Writing Python/TypeScript | `get_task_status` / `add_monitor` live; `client.log` chapters, reads, and DVR sessions | [Python](/clients/python/logs) · [TypeScript](/clients/typescript/logs) |
-| Over MCP | `monitor` and `list_running_pipelines` live; `log_chapters`/`log_read`/`log_traces`/`log_trace` for replay — traces render in the trace-viewer widget | [MCP tools](/connect/mcp/http/tools#replay-past-runs) |
+| In an AI assistant (MCP) | `monitor` and `list_running_pipelines` live; `log_chapters`/`log_read`/`log_traces`/`log_trace` for replay — traces render in the trace-viewer widget | [MCP tools](/connect/mcp/http/tools#replay-past-runs) |
 | In VS Code | The Status page, Flow and Trace tabs, and the component debugger | [VS Code usage](/clients/vscode/usage) |
 | Building your own ingester / dashboards | Raw `rrext_monitor` subscriptions over the WebSocket protocol | [WebSocket Events](/connect/websocket/observability) |
 

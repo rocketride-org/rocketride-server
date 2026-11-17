@@ -35,22 +35,22 @@ locally, on-premises, and on RocketRide Cloud. See [Runtime & engine](/concepts/
 
 You start and feed pipelines through one of two protocols:
 
-- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
-  observe pipelines.
 - **[WebSocket](/connect/websocket)**: the native engine protocol (port 5565). The
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it for you:
   `use()` to start a pipeline, `send()`/`pipe()` to stream data, `chat()` for conversational
   flows, `terminate()` to stop.
+- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
+  observe pipelines.
 
 ## How you build
 
-- **Over MCP**: connect any MCP client to the engine's built-in [MCP server](/connect/mcp/http)
-  to build, run and observe pipelines.
-- **In code**: author or run the same pipeline from your application with the SDKs.
 - **Visually**: the VS Code [extension](/clients/vscode) opens `.pipe` files on a
   canvas; wire nodes by connecting lanes and press Run.
+- **In code**: author or run the same pipeline from your application with the SDKs.
 - **As an app**: wrap a pipeline in a UI that runs inside the RocketRide
   shell and deploy it to your team. See [Apps](/concepts/apps).
+- **Over MCP**: connect any MCP client to the engine's built-in [MCP server](/connect/mcp/http)
+  to build, run and observe pipelines.
 
 ## Putting it together
 

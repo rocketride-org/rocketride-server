@@ -6,7 +6,7 @@ Looking for help with RocketRide? Here's where to go.
 
 - **[Documentation site](https://docs.rocketride.org)**: guides, tutorials, API reference
 - **[Build system docs](../docs/development/builder/reference.md)**: building from source
-- **[Client library docs](https://docs.rocketride.org/develop/clients)**: MCP server, TypeScript and Python SDKs
+- **[Client library docs](https://docs.rocketride.org/develop/clients)**: TypeScript, Python, MCP SDKs
 
 ## Getting Help
 

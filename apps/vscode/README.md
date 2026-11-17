@@ -45,7 +45,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Debugging & live traces** - Monitor running pipelines in real time with execution traces, token usage, and memory stats, see exactly what your agents are doing at every step.
 
 - **Connection manager** - Connect to a local engine, Docker container, system service, on-premises server, or RocketRide Cloud. Separate development and deployment targets let you build locally and deploy to a different environment.
-- **MCP server and SDKs for TypeScript & Python** - Drive pipelines through the MCP server, or embed them in your apps.
+- **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
 Need inspiration? Check out [awesome-rocketride](https://github.com/rocketride-org/awesome-rocketride#demos--examples), a collection of example projects built on RocketRide.
 
