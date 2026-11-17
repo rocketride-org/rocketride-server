@@ -131,7 +131,8 @@ message instead. It already says everything that can be known.
   waitlist), `team` (the development team runs are billed to), `credits`
   (compute credits, cloud only) and `model_key` (saved AI model keys),
   each `{id, ok, detail, next_step?}`. `ok` is `null` when a check could not
-  run: a read failed, or the account is waitlisted. `credits` adds `tokens`,
+  run because a read failed. For a waitlisted account, the `access` row is
+  `ok: false` and the other three rows are `ok: null`. `credits` adds `tokens`,
   the balance, when it is above zero. `ready` is true when `access`, `team`
   and `credits` are all `true`. `model_key` is advice and carries
   `blocking: false`, because a pipeline without a model node needs no key.
