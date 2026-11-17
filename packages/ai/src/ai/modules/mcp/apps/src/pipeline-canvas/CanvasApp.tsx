@@ -521,7 +521,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const hint = active
 		? coarse
 			? 'Drag to move, pinch to zoom.'
-			: 'Drag or scroll to move. Pinch or Ctrl + scroll to zoom. Esc closes.'
+			: 'Drag or scroll to move. Ctrl + scroll zooms. Esc closes.'
 		: coarse
 			? host.canFullScreen
 				? 'Use two fingers to move or zoom, or tap Expand.'
