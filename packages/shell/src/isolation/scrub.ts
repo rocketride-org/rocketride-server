@@ -25,110 +25,240 @@
 // SCRUB — what the root rewrites in everything it sends to an app (PR2a-2, N1)
 // =============================================================================
 //
-// `scrubOutbound` order (plan section 4.4):
-//   1. identity fields by key (aliases.ts);
-//   2. replacement: the realm's `tk_` → its handle, `pk_` → "", real task id →
-//      the task-id alias; every `project_id`/`projectId` value and
-//      project-keyed map key → the realm's `rp_` alias (any id); high-entropy
-//      ids (own and `knownProjects`) inside strings, raw and URL-encoded;
-//   3. backstop: the credential and `rrapp.` patterns, and exact match against
-//      every seen token and task id, every realm's live ledger values, the
-//      session token, the API key and the high-entropy ids. A hit inside
-//      `body.notes[*]` turns that note into "[redacted]", a hit inside an
-//      engine error text is redacted in place, any other hit is a
-//      `credential` denial (fail closed).
+// Per string, ONE linear scan (match.ts) over matchers built once per version
+// of the sets they hold (security M2):
+//   - replaced: the realm's own `tk_` → its handle, `pk_` → "", task id → its
+//     alias, high-entropy project id (raw and URL-encoded) → its `rp_`; real
+//     high-entropy user ids → the grant's user alias, team and org ids →
+//     "[redacted]" (DA F1); high-entropy project ids the realm sighted at a
+//     documented engine position, and foreign ones the root saw on its own
+//     event stream → this realm's `rp_` alias;
+//   - hits (the backstop's exact values): every seen token and task id, every
+//     realm's live ledger values, the session token, the API keys.
+// Then the patterns: an engine-format credential `(?:tk|pk)_<32 hex>` or a
+// minted `rrapp.` id is a hit; the broader `(?:tk|pk)_[A-Za-z0-9_-]{16,}`
+// shape is redacted in place (DA F4). Both are anchored on a non-alphanumeric
+// left edge, so base64url data does not trip them.
 //
-// The app's own file content (`rrext_store`) is not rewritten by key and the
-// patterns are not applied to it; exact matches still are. `__rrbin`
-// payloads are app data and are not scanned (plan section 4.4, scope).
+// By key (case-insensitive): identity fields (aliases.ts), and every
+// `project_id`/`projectId` value and project-keyed map key → `rp_`.
+//
+// A hit inside `body.notes[*]` turns that note into "[redacted]"; inside an
+// engine error text it is redacted in place; anywhere else the message is
+// refused (a `credential` denial at the choke point, a dropped event).
+// Only the app's own file content is exempt from by-key rewriting and the
+// patterns: `fs_get_json` `value` and `fs_list_dir` entry names (DA F5).
+// `__rrbin` payloads are app data and are not scanned (plan 4.4, scope).
 // =============================================================================
 
 import type { DAPMessage } from 'rocketride';
-import type { IKnownProjects } from './aliases';
-import { isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, rewriteIdentity } from './aliases';
+import type { IBoundedSet, IdentityKind, IIdentityIds, IKnownProjects } from './aliases';
+import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, learnIdentity, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS } from './aliases';
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
+import { createMatcher, hasMatch, replaceMatches } from './match';
+import type { IMatcher } from './match';
+import { SIZES } from './rate';
 import type { IRealmGrant } from './types';
 import { isWireBinary } from './walk';
 
 /** What replaces a backstop hit in a note or an error text. */
 export const REDACTED = '[redacted]';
 
-/** An engine-shaped credential anywhere in a string (Appendix L). */
-const CREDENTIAL_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/g;
-/** A minted project id anywhere in a string: another app's, or one no realm holds any more. */
-const MINTED_ANYWHERE_RE = /rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/g;
-/** The shortest exact value the backstop matches (shorter values would match ordinary text). */
-const NEEDLE_MIN = 8;
+/** An engine-format credential (`generate_token`, `keyed_task_token`): a hit; also refused inbound (N1-f). */
+export const ENGINE_CREDENTIAL_RE = /(?<![A-Za-z0-9])(?:tk|pk)_[0-9a-fA-F]{32}/;
+const ENGINE_CREDENTIAL_G = new RegExp(ENGINE_CREDENTIAL_RE.source, 'g');
+const ENGINE_CREDENTIAL_HEAD = /^(?:tk|pk)_[0-9a-fA-F]{32}/;
+/** A minted project id: another app's, or one no realm holds any more. A hit. */
+const MINTED_RE = /(?<![A-Za-z0-9.])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
+const MINTED_G = new RegExp(MINTED_RE.source, 'g');
+/** The broad credential shape (Appendix L): redacted in place, never a reason to refuse (DA F4). */
+const BROAD_G = /(?<![A-Za-z0-9])(?:tk|pk)_[A-Za-z0-9_-]{16,}/g;
+/** A FileStore scope prefix in engine error text (`file_store.py`): it names a real user, team or org id. */
+const SCOPE_PREFIX_G = /\b(?:users|teams|orgs)\/[^/\s'"]+\/files\//g;
+
+/** Scrub budget per message, checked before any scrubbing (fail closed as `too_large`). */
+export const SCRUB_BUDGET = { chars: SIZES.response, nodes: 500_000, depth: 128 } as const;
+
+/** What a matched needle becomes. */
+type Repl = { k: 'to'; to: string } | { k: 'project'; id: string } | { k: 'id'; kind: IdentityKind } | { k: 'hit' };
+const HIT: Repl = { k: 'hit' };
+
+/** Root-wide sources the scrubber reads (the app root supplies them). */
+export interface IScrubSources {
+	/** Foreign project ids from the root's own engine-event stream only. */
+	known: IKnownProjects;
+	/** Every token and real task id the root saw. */
+	seen: IBoundedSet;
+	/** Real high-entropy user, team and org ids. */
+	identities: IIdentityIds;
+	sessionToken(): string;
+	/** The shell API keys (cached, plus the client's live key). */
+	apiKeys(): string[];
+	/** Every attached realm's live ledger values: tokens, `pk_`s, task ids, high-entropy project ids (N1-L). */
+	liveValues(): string[];
+	/** The account's own ids from the SDK's account info, read live. */
+	accountIds(): Array<[unknown, IdentityKind]>;
+}
+
+/** The root's matchers, each rebuilt only when its sets change. */
+export interface IScrubRoot {
+	readonly sources: IScrubSources;
+	knownMatcher(): IMatcher<Repl>;
+	identityMatcher(): IMatcher<Repl>;
+	needleMatcher(): IMatcher<Repl>;
+	/** N1-f: a checker for one inbound value (seen and live values, session token, API keys, engine-shaped foreign ids, engine-format credentials). */
+	inbound(): (s: string) => boolean;
+}
+
+/** Projects a high-entropy id in raw and URL-encoded form. */
+function* projectForms(ids: Iterable<string>, repl: (id: string) => Repl): Iterable<readonly [string, Repl]> {
+	for (const id of ids) {
+		const r = repl(id);
+		yield [id, r];
+		const encoded = encodeURIComponent(id);
+		if (encoded !== id) yield [encoded, r];
+	}
+}
+
+/** One cache slot: the value for the last key. */
+function cached<T>(build: () => T): (key: string) => T {
+	let key: string | undefined;
+	let value!: T;
+	return (k) => {
+		if (k !== key) {
+			value = build();
+			key = k;
+		}
+		return value;
+	};
+}
+
+/**
+ * Creates the root's scrub state.
+ *
+ * @param sources - The root-wide sets and accessors.
+ * @returns Matchers cached per set version.
+ */
+export function createScrubRoot(sources: IScrubSources): IScrubRoot {
+	const known = cached(() => createMatcher(projectForms(sources.known.highEntropy(), (id) => ({ k: 'project', id }))));
+	const knownInbound = cached(() =>
+		createMatcher(
+			sources.known
+				.highEntropy()
+				.filter(isEngineShaped)
+				.map((id) => [id, HIT] as const)
+		)
+	);
+	const identity = cached(() => createMatcher(sources.identities.entries().map(([id, kind]) => [id, { k: 'id', kind }] as const)));
+	let needleParts: string[] = [];
+	const needles = cached(() => createMatcher(needleParts.map((n) => [n, HIT] as const)));
+	const root: IScrubRoot = {
+		sources,
+		knownMatcher: () => known(String(sources.known.version())),
+		identityMatcher() {
+			for (const [id, kind] of sources.accountIds()) sources.identities.add(id, kind);
+			return identity(String(sources.identities.version()));
+		},
+		needleMatcher() {
+			const live = sources.liveValues();
+			const keys = sources.apiKeys();
+			const session = sources.sessionToken();
+			needleParts = [...sources.seen.values(), ...live, ...keys, session];
+			return needles(`${sources.seen.version()}\u0001${session}\u0001${keys.join('\u0002')}\u0001${live.join('\u0002')}`);
+		},
+		inbound() {
+			const matchers = [root.needleMatcher(), knownInbound(String(sources.known.version()))];
+			return (s) => ENGINE_CREDENTIAL_RE.test(s) || hasMatch(s, matchers);
+		},
+	};
+	return root;
+}
 
 /** What the scrubber needs for one realm. */
 export interface IScrubContext {
+	root: IScrubRoot;
 	/** The realm's ledger: its own runs are replaced, never denied. */
 	ledger: ILedger;
 	/** The realm's grant (`frame.identity` holds its user alias). */
 	grant: IRealmGrant;
-	/** The root-wide foreign project ids. */
-	known: IKnownProjects;
 	/** This realm's aliases of project ids it does not own: real id → `rp_` (bounded, oldest evicted). */
 	aliases: Map<string, string>;
+	/** Project ids this realm's replies named at a documented engine position (never shared with other realms). */
+	sighted: IKnownProjects;
 	/** A fresh `rp_` alias. */
 	mintAlias(): string;
 	/** Whether any realm's ledger holds this project id as its own (such an id is never "foreign"). */
 	ownedByAnyRealm(projectId: string): boolean;
-	/**
-	 * Exact values no realm may receive in clear: every seen token and real
-	 * task id, every realm's live ledger values, the session token and the
-	 * shell API keys.
-	 */
-	needles(): string[];
+	/** Per-realm matcher caches (internal). */
+	cache?: { own?: { key: string; m: IMatcher<Repl> }; sighted?: { version: number; m: IMatcher<Repl> } };
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 /** Opaque to the scrubber: typed arrays, buffers and exact wire binary members. */
 const isOpaque = (v: unknown): boolean => ArrayBuffer.isView(v) || v instanceof ArrayBuffer || isWireBinary(v);
 
-/** One scrub of one value: the replacement pairs and needles, computed once. */
-interface IPass {
-	subst(s: string): string;
-	projectAlias(id: string): string;
-	isProjectKey(key: string): boolean;
-	/** Notes a project id the value names (first sight: a foreign id joins `knownProjects`). */
-	sight(id: string): void;
-	hit(s: string): boolean;
-	redact(s: string): string;
+/**
+ * The scrub budget (DA F3, security L4): string characters (values and keys),
+ * nodes and depth, walked once before any scrubbing.
+ *
+ * @throws A `too_large` denial when the value is over budget.
+ */
+export function checkBudget(value: unknown, op: string): void {
+	let chars = 0;
+	let nodes = 0;
+	const stack: Array<[unknown, number]> = [[value, 0]];
+	while (stack.length > 0) {
+		const [v, depth] = stack.pop()!;
+		if (++nodes > SCRUB_BUDGET.nodes || depth > SCRUB_BUDGET.depth) throw deny('too_large', op);
+		if (typeof v === 'string') chars += v.length;
+		else if (typeof v === 'object' && v !== null && !isOpaque(v)) {
+			if (Array.isArray(v)) for (const x of v) stack.push([x, depth + 1]);
+			else
+				for (const [k, x] of Object.entries(v)) {
+					chars += k.length;
+					stack.push([x, depth + 1]);
+				}
+		}
+		if (chars > SCRUB_BUDGET.chars) throw deny('too_large', op);
+	}
 }
 
-const replaceAll = (s: string, from: string, to: string): string => (s.includes(from) ? s.split(from).join(to) : s);
+/** How a string is treated: refused on a hit, redacted in place (error text), or app file content (no patterns). */
+type Mode = 'deny' | 'inline' | 'file';
 
-/**
- * Prepares one scrub for a realm.
- *
- * @param ctx - The realm's scrub context.
- * @param extraRuns - Runs to scrub besides the live ones (a run the answer just ended).
- * @param patterns - Whether the credential and `rrapp.` patterns apply (not to the app's own file content).
- */
-function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[], patterns: boolean): IPass {
+/** One scrub of one message for one realm. */
+interface IPass {
+	matchers: ReadonlyArray<IMatcher<Repl>>;
+	userAlias: string | undefined;
+	projectAlias(id: string): string;
+	isProjectKey(key: string): boolean;
+	/** Set by a hit in 'deny' or 'file' mode. */
+	hit: boolean;
+}
+
+/** Prepares one scrub for a realm. `extraRuns`: runs to scrub besides the live ones (a run the answer just ended). */
+function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[]): IPass {
 	const runs = [...ctx.ledger.runs()];
 	for (const r of extraRuns) if (!runs.includes(r)) runs.push(r);
 	const ownProject = new Map(runs.map((r) => [r.projectId, r] as const));
+	const cache = (ctx.cache ??= {});
 
-	// The realm's own values: replaced, longest first.
-	const pairs: Array<[string, string]> = [];
-	for (const r of runs) {
-		pairs.push([r.token, r.handle], [r.publicToken, ''], [r.taskId, r.taskIdAlias]);
-		if (isHighEntropy(r.projectId)) pairs.push([r.projectId, r.projectAlias], [encodeURIComponent(r.projectId), r.projectAlias]);
+	// The realm's own values, cached per set of runs.
+	const ownKey = runs.map((r) => `${r.handle}\u0002${r.token}\u0002${r.publicToken}\u0002${r.taskId}\u0002${r.projectId}`).join('\u0001');
+	if (cache.own?.key !== ownKey) {
+		const entries: Array<readonly [string, Repl]> = [];
+		for (const r of runs) {
+			entries.push([r.token, { k: 'to', to: r.handle }], [r.publicToken, { k: 'to', to: '' }], [r.taskId, { k: 'to', to: r.taskIdAlias }]);
+			if (isHighEntropy(r.projectId)) entries.push(...projectForms([r.projectId], () => ({ k: 'to', to: r.projectAlias })));
+		}
+		cache.own = { key: ownKey, m: createMatcher(entries) };
 	}
-	const ownPairs = pairs.filter(([from]) => from.length >= NEEDLE_MIN).sort((a, b) => b[0].length - a[0].length);
-	// Foreign high-entropy ids the root saw: replaced by this realm's alias (minted only when present).
-	const knownForms: Array<[string, string]> = [];
-	for (const id of ctx.known.highEntropy()) {
-		if (ownProject.has(id)) continue;
-		knownForms.push([id, id]);
-		const encoded = encodeURIComponent(id);
-		if (encoded !== id) knownForms.push([encoded, id]);
+	// This realm's sightings, cached per version.
+	if (cache.sighted?.version !== ctx.sighted.version()) {
+		cache.sighted = { version: ctx.sighted.version(), m: createMatcher(projectForms(ctx.sighted.highEntropy(), (id) => ({ k: 'project', id }))) };
 	}
-	knownForms.sort((a, b) => b[0].length - a[0].length);
 
 	let aliasValues: Set<string> | null = null;
 	const isRealmAlias = (id: string): boolean => {
@@ -148,142 +278,147 @@ function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[], patterns: 
 		}
 		return alias;
 	};
-
-	// The backstop's exact values: everything the root holds, plus every high-entropy id in the scrub sets.
-	const needleSet = new Set(ctx.needles());
-	for (const r of runs) for (const v of [r.token, r.publicToken, r.taskId]) needleSet.add(v);
-	for (const r of runs) if (isHighEntropy(r.projectId)) needleSet.add(r.projectId);
-	for (const id of ctx.known.highEntropy()) needleSet.add(id);
-	const needles = [...needleSet].filter((n) => typeof n === 'string' && n.length >= NEEDLE_MIN).sort((a, b) => b.length - a.length);
-
+	const known = ctx.root.sources.known;
 	return {
-		subst(s) {
-			let out = s;
-			for (const [from, to] of ownPairs) out = replaceAll(out, from, to);
-			for (const [form, id] of knownForms) if (out.includes(form)) out = replaceAll(out, form, projectAlias(id));
-			return out;
-		},
+		// Priority on equal length: own values, identity ids, sightings, foreign ids, then the exact hits.
+		matchers: [cache.own.m, ctx.root.identityMatcher(), cache.sighted.m, ctx.root.knownMatcher(), ctx.root.needleMatcher()],
+		userAlias: ctx.grant.frame?.identity?.userId,
 		projectAlias,
-		isProjectKey: (key) => ownProject.has(key) || ctx.known.has(key) || MINTED_PROJECT_RE.test(key),
-		sight(id) {
-			if (id === '' || ownProject.has(id) || isRealmAlias(id) || ctx.ownedByAnyRealm(id)) return;
-			ctx.known.add(id);
-			if (isHighEntropy(id) && !knownForms.some(([, k]) => k === id)) {
-				knownForms.push([id, id]);
-				const encoded = encodeURIComponent(id);
-				if (encoded !== id) knownForms.push([encoded, id]);
-				knownForms.sort((a, b) => b[0].length - a[0].length);
-				needles.push(id);
-			}
-		},
-		hit(s) {
-			if (patterns) {
-				CREDENTIAL_RE.lastIndex = 0;
-				MINTED_ANYWHERE_RE.lastIndex = 0;
-				if (CREDENTIAL_RE.test(s) || MINTED_ANYWHERE_RE.test(s)) return true;
-			}
-			return needles.some((n) => s.includes(n));
-		},
-		redact(s) {
-			let out = s;
-			for (const n of needles) out = replaceAll(out, n, REDACTED);
-			if (patterns) out = out.replace(CREDENTIAL_RE, REDACTED).replace(MINTED_ANYWHERE_RE, REDACTED);
-			return out;
-		},
+		// Short ids are map keys only when this realm sighted them; root-wide membership counts for high-entropy ids only (security M1).
+		isProjectKey: (key) => ownProject.has(key) || MINTED_PROJECT_RE.test(key) || ctx.sighted.has(key) || (isHighEntropy(key) && known.has(key)),
+		hit: false,
 	};
 }
 
-/** Every `project_id`/`projectId` value of a value, at any depth. */
-function eachProjectField(value: unknown, cb: (id: string) => void): void {
-	const stack: unknown[] = [value];
-	while (stack.length > 0) {
-		const v = stack.pop();
-		if (typeof v !== 'object' || v === null || isOpaque(v)) continue;
-		if (Array.isArray(v)) stack.push(...v);
-		else
-			for (const [k, x] of Object.entries(v)) {
-				if (PROJECT_KEYS.has(k) && typeof x === 'string') cb(x);
-				else stack.push(x);
-			}
+/** Scrubs one string. */
+function scrubString(pass: IPass, s: string, mode: Mode): string {
+	let hit = false;
+	let out = replaceMatches(s, pass.matchers, (m) => {
+		const r = m.value;
+		switch (r.k) {
+			case 'to':
+				return r.to;
+			case 'project':
+				return pass.projectAlias(r.id);
+			case 'id':
+				return r.kind === 'user' && typeof pass.userAlias === 'string' ? pass.userAlias : REDACTED;
+			default:
+				if (mode === 'inline') return REDACTED;
+				hit = true;
+				return m.needle;
+		}
+	});
+	if (mode !== 'file' && (out.includes('k_') || out.includes('rrapp.'))) {
+		out = out.replace(BROAD_G, (x) => (ENGINE_CREDENTIAL_HEAD.test(x) ? x : REDACTED));
+		if (mode === 'inline') out = out.replace(ENGINE_CREDENTIAL_G, REDACTED).replace(MINTED_G, REDACTED);
+		else if (ENGINE_CREDENTIAL_RE.test(out) || MINTED_RE.test(out)) hit = true;
 	}
+	if (hit) pass.hit = true;
+	return out;
 }
 
-/** Step 2 on a copy: by key (project fields and project-keyed map keys) when `byKey`, then substrings. */
-function replaceIn(pass: IPass, value: unknown, byKey: boolean): unknown {
-	const visit = (v: unknown): unknown => {
-		if (typeof v === 'string') return pass.subst(v);
-		if (typeof v !== 'object' || v === null || isOpaque(v)) return v;
-		if (Array.isArray(v)) return v.map(visit);
-		const out: Record<string, unknown> = {};
-		for (const [k, x] of Object.entries(v)) {
-			if (byKey && PROJECT_KEYS.has(k) && typeof x === 'string') {
-				out[k] = pass.projectAlias(x);
+/** Per-key handling of one object: `undefined` falls through to the generic copy. */
+type Special = (key: string, value: unknown) => { value: unknown } | undefined;
+
+/** Scrubs a copy of `v`: by key (identity, project fields, project-keyed map keys) when `byKey`, strings always. */
+function visit(pass: IPass, v: unknown, mode: Mode, byKey: boolean, depth: number, special?: Special): unknown {
+	if (depth > SCRUB_BUDGET.depth) throw deny('too_large', 'outbound');
+	if (typeof v === 'string') return scrubString(pass, v, mode);
+	if (typeof v !== 'object' || v === null || isOpaque(v)) return v;
+	if (Array.isArray(v)) return v.map((x) => visit(pass, x, mode, byKey, depth + 1));
+	const out: Record<string, unknown> = {};
+	for (const [k, x] of Object.entries(v)) {
+		const custom = special?.(k, x);
+		if (custom) {
+			setOwn(out, k, custom.value);
+			continue;
+		}
+		if (byKey) {
+			const lk = k.toLowerCase();
+			if (REMOVED_KEYS.has(lk)) continue;
+			if (USER_KEYS.has(lk)) {
+				if (typeof pass.userAlias === 'string') setOwn(out, k, pass.userAlias);
 				continue;
 			}
-			const key = byKey && pass.isProjectKey(k) ? pass.projectAlias(k) : pass.subst(k);
-			out[key] = visit(x);
+			if (PROJECT_KEYS.has(k) && typeof x === 'string') {
+				setOwn(out, k, pass.projectAlias(x));
+				continue;
+			}
 		}
-		return out;
-	};
-	return visit(value);
-}
-
-/** Whether any string (value or key) of a value is a backstop hit. */
-function anyHit(pass: IPass, value: unknown): boolean {
-	const stack: unknown[] = [value];
-	while (stack.length > 0) {
-		const v = stack.pop();
-		if (typeof v === 'string') {
-			if (pass.hit(v)) return true;
-		} else if (typeof v === 'object' && v !== null && !isOpaque(v)) {
-			if (Array.isArray(v)) stack.push(...v);
-			else
-				for (const [k, x] of Object.entries(v)) {
-					if (pass.hit(k)) return true;
-					stack.push(x);
-				}
-		}
+		const key = byKey && pass.isProjectKey(k) ? pass.projectAlias(k) : scrubString(pass, k, mode === 'inline' ? 'deny' : mode);
+		setOwn(out, key, visit(pass, x, mode, byKey, depth + 1));
 	}
-	return false;
+	return out;
 }
 
-/** Step 3 for a body: a note with a hit becomes "[redacted]". */
-function redactNotes(pass: IPass, body: unknown): void {
-	if (!isPlainObject(body) || !Array.isArray(body.notes)) return;
-	body.notes = body.notes.map((note) => (anyHit(pass, note) ? REDACTED : note));
+/** A note with a hit becomes "[redacted]". */
+function scrubNote(pass: IPass, note: unknown): unknown {
+	const before = pass.hit;
+	pass.hit = false;
+	const out = visit(pass, note, 'deny', true, 2);
+	const hit = pass.hit;
+	pass.hit = before;
+	return hit ? REDACTED : out;
 }
 
-/** The full scrub of a DAP message (a response or an event) for one realm; with `denyHits`, a remaining hit throws a `credential` denial. */
-function scrubMessage(ctx: IScrubContext, message: DAPMessage, opts: { extraRuns: readonly IRunEntry[]; fileContent: boolean; denyHits: boolean }): DAPMessage {
-	const pass = prepare(ctx, opts.extraRuns, !opts.fileContent);
-	let value: unknown = message;
-	if (!opts.fileContent) {
-		eachProjectField(value, (id) => pass.sight(id));
-		value = rewriteIdentity(ctx.grant, value);
-	}
-	const out = replaceIn(pass, value, !opts.fileContent) as Record<string, unknown>;
-	redactNotes(pass, out.body);
-	// An engine error text (success: false) is redacted in place.
-	if (out.success === false && typeof out.message === 'string') out.message = pass.redact(out.message);
-	if (opts.denyHits && anyHit(pass, out)) throw deny('credential', 'client.event');
-	return out as unknown as DAPMessage;
+/** Engine error text: scope prefixes stripped, then every hit redacted in place. */
+function scrubText(pass: IPass, text: string): string {
+	return scrubString(pass, text.replace(SCOPE_PREFIX_G, ''), 'inline');
 }
 
 /**
- * Scrubs any value on its way to the realm (the router's choke point): the
- * realm's own and the known high-entropy values are replaced inside strings,
- * then the backstop runs. No by-key rewriting: this also carries app-to-app
- * traffic, whose fields are the apps' own.
+ * Records the documented engine positions of a body (DA F2): its project ids
+ * as this realm's own sightings and, where the engine stamps the owner
+ * (`stamped`: events and task status, `task_engine.py:2128-2140`), its
+ * identity ids root-wide. Nothing else of a reply feeds a root-wide set.
+ */
+function learnFrom(ctx: IScrubContext, body: Record<string, unknown>, stamped: boolean): void {
+	if (stamped) learnIdentity(ctx.root.sources.identities, body);
+	const pipeline = isPlainObject(body.pipeline) ? body.pipeline : undefined;
+	for (const id of [body.project_id, body.projectId, pipeline?.project_id]) {
+		if (typeof id !== 'string' || id === '' || ctx.ownedByAnyRealm(id)) continue;
+		if (ctx.ledger.runs().some((r) => r.projectAlias === id) || [...ctx.aliases.values()].includes(id)) continue;
+		ctx.sighted.add(id);
+	}
+}
+
+/** The scrub of a DAP message (a response or an event): the scrubbed copy, and whether a hit is left outside notes and error text. */
+function scrubMessage(ctx: IScrubContext, message: DAPMessage, opts: { extraRuns: readonly IRunEntry[]; op: string; store?: string; stamped: boolean }): { message: DAPMessage; hit: boolean } {
+	checkBudget(message, opts.op);
+	const msg = message as unknown as Record<string, unknown>;
+	if (isPlainObject(msg.body)) learnFrom(ctx, msg.body, opts.stamped);
+	const pass = prepare(ctx, opts.extraRuns);
+	// The app's own file content (DA F5): fs_get_json `value`, fs_list_dir entry names.
+	const fileName: Special = (k, x) => (k === 'name' && typeof x === 'string' ? { value: scrubString(pass, x, 'file') } : undefined);
+	const bodySpecial: Special = (k, x) => {
+		if (k === 'notes' && Array.isArray(x)) return { value: x.map((note) => scrubNote(pass, note)) };
+		if (opts.store === 'fs_get_json' && k === 'value') return { value: visit(pass, x, 'file', false, 2) };
+		if (opts.store === 'fs_list_dir' && k === 'entries' && Array.isArray(x)) return { value: x.map((e) => (isPlainObject(e) ? visit(pass, e, 'deny', true, 3, fileName) : visit(pass, e, 'deny', true, 3))) };
+		return undefined;
+	};
+	const out = visit(pass, msg, 'deny', true, 0, (k, x) => {
+		if (k === 'body' && isPlainObject(x)) return { value: visit(pass, x, 'deny', true, 1, bodySpecial) };
+		if (k === 'message' && msg.success === false && typeof x === 'string') return { value: scrubText(pass, x) };
+		return undefined;
+	});
+	return { message: out as DAPMessage, hit: pass.hit };
+}
+
+/**
+ * Scrubs any value on its way to the realm (the router's choke point) that
+ * the root has not scrubbed already: the realm's own and the known values
+ * are replaced inside strings, then the backstop runs. No by-key rewriting:
+ * this also carries app-to-app traffic, whose fields are the apps' own.
  *
  * @param ctx - The realm's scrub context.
  * @param value - The value.
- * @param opts - `patterns: false` for the app's own file content.
- * @returns A scrubbed copy; throws a `credential` denial on a backstop hit.
+ * @returns A scrubbed copy; throws a `credential` (or `too_large`) denial.
  */
-export function scrubOutbound<T>(ctx: IScrubContext, value: T, opts: { patterns?: boolean } = {}): T {
-	const pass = prepare(ctx, [], opts.patterns !== false);
-	const out = replaceIn(pass, value, false);
-	if (anyHit(pass, out)) throw deny('credential', 'outbound');
+export function scrubOutbound<T>(ctx: IScrubContext, value: T): T {
+	checkBudget(value, 'outbound');
+	const pass = prepare(ctx, []);
+	const out = visit(pass, value, 'deny', false, 0);
+	if (pass.hit) throw deny('credential', 'outbound');
 	return out as T;
 }
 
@@ -293,12 +428,12 @@ export function scrubOutbound<T>(ctx: IScrubContext, value: T, opts: { patterns?
  * @param ctx - The realm's scrub context.
  * @param req - The gated request it answers (its run is scrubbed even when the answer ended it).
  * @param response - The engine response.
- * @returns The scrubbed response. A hit left outside notes and error text is
- *   denied at the choke point (`scrubOutbound` in the router's post, N1-e),
- *   which answers the same request id.
+ * @returns The scrubbed response, and whether a hit is left outside notes
+ *   and error text (the root then refuses it at the choke point, N1-e).
+ *   Throws a `too_large` denial when the response is over the scrub budget.
  */
-export function scrubResponse(ctx: IScrubContext, req: IGatedRequest, response: DAPMessage): DAPMessage {
-	return scrubMessage(ctx, response, { extraRuns: req.run ? [req.run] : [], fileContent: req.command === 'rrext_store', denyHits: false });
+export function scrubResponse(ctx: IScrubContext, req: IGatedRequest, response: DAPMessage): { message: DAPMessage; hit: boolean } {
+	return scrubMessage(ctx, response, { extraRuns: req.run ? [req.run] : [], op: 'client.request', stamped: req.command === 'rrext_get_task_status', ...(req.command === 'rrext_store' && req.subcommand !== undefined ? { store: req.subcommand } : {}) });
 }
 
 /**
@@ -306,14 +441,20 @@ export function scrubResponse(ctx: IScrubContext, req: IGatedRequest, response: 
  *
  * @param ctx - The realm's scrub context.
  * @param event - The engine event.
- * @returns The scrubbed event; throws a `credential` denial (the caller drops it).
+ * @returns The scrubbed event, or null when it must be dropped (a hit, or over budget).
  */
-export function scrubEvent(ctx: IScrubContext, event: DAPMessage): DAPMessage {
-	return scrubMessage(ctx, event, { extraRuns: [], fileContent: false, denyHits: true });
+export function scrubEvent(ctx: IScrubContext, event: DAPMessage): DAPMessage | null {
+	try {
+		const { message, hit } = scrubMessage(ctx, event, { extraRuns: [], op: 'client.event', stamped: true });
+		return hit ? null : message;
+	} catch {
+		return null;
+	}
 }
 
 /**
- * Scrubs the text of a thrown engine error: replacements, then every backstop hit redacted in place.
+ * Scrubs the text of a thrown engine error: scope prefixes stripped,
+ * replacements, then every backstop hit redacted in place.
  *
  * @param ctx - The realm's scrub context.
  * @param text - The error message.
@@ -321,6 +462,5 @@ export function scrubEvent(ctx: IScrubContext, event: DAPMessage): DAPMessage {
  * @returns The text to send.
  */
 export function scrubErrorText(ctx: IScrubContext, text: string, run?: IRunEntry): string {
-	const pass = prepare(ctx, run ? [run] : [], true);
-	return pass.redact(pass.subst(text));
+	return scrubText(prepare(ctx, run ? [run] : []), text);
 }
