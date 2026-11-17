@@ -73,29 +73,35 @@ _UNAVAILABLE = (
 REFUSAL_SENTENCES = {
     'insufficient_credits': (
         "This workspace doesn't have enough compute credits left for this request on RocketRide-hosted models. "
-        'Add your own OpenAI key in the node settings, or ask a workspace admin to check compute credits '
+        'Add your own OpenAI key in the node settings. A workspace admin can also manage compute credits '
         'under Account > Billing in RocketRide.'
     ),
-    'rate_limited': 'This run has too many requests open at once on RocketRide-hosted models. Try again shortly.',
+    'rate_limited': (
+        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
+        'requests at once, or add your own OpenAI key in the node settings.'
+    ),
     'model_not_available': (
-        "The model {model} isn't offered as a RocketRide-hosted model. Choose another model, "
-        'or add your own OpenAI key in the node settings.'
+        "The model {model} isn't offered as a RocketRide-hosted model. Choose another model in the node "
+        'settings, or add your own OpenAI key there.'
     ),
     'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': _UNAVAILABLE,
     'upstream_unavailable': _UNAVAILABLE,
     'request_too_large': (
-        'This request is too large for RocketRide-hosted models. Send less text, '
+        'This request is too large for RocketRide-hosted models. Shorten the input, '
         'or add your own OpenAI key in the node settings.'
     ),
     'unsupported_parameter': (
         "RocketRide-hosted models don't support {field}. "
         'Add your own OpenAI key in the node settings to run this request.'
     ),
+    'invalid_request': (
+        "RocketRide-hosted models couldn't accept this request. Check the node settings, then run the pipeline again."
+    ),
 }
 # Any other refusal. Its code stays out of the sentence (a code can name internals); it is in the log.
 _OTHER_REFUSAL = (
-    "RocketRide-hosted models couldn't run this request. Try again later, or add your own OpenAI key in the "
+    "RocketRide-hosted models couldn't run this request. Try again shortly, or add your own OpenAI key in the "
     'node settings.'
 )
 
