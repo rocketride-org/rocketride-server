@@ -51,7 +51,7 @@ import { createGatedBusRouter } from '../ops/busBridge';
 import type { IBusEndpoint } from '../ops/busBridge';
 import { createOpBus } from '../ops/busOps';
 import type { IOpBus } from '../ops/busOps';
-import { appKeyOf } from './appKey';
+import { appKeyOf, isCanonicalAppId } from './appKey';
 import { KNOWN_CAPS } from './capabilities';
 import { CapabilityDeniedError } from './capabilityDenied';
 import type { DenyCode } from './capabilityDenied';
@@ -64,8 +64,6 @@ import { createRateLimiter, QUOTAS, SIZES } from './rate';
 import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
 import { isWireBinary, measure } from './walk';
 
-/** `is_canonical_app_id` (`modules/shell/app_origin.py`). */
-const CANONICAL_APP_ID = /^[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_][A-Za-z0-9_-]*)*$/;
 /** The outbound backstop's credential pattern (Appendix L). */
 const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
 /** Root-internal frame refresh retries (ms). */
@@ -554,7 +552,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	return {
 		attach(entry: IsolatedEntry, endpoint: IBusEndpoint, grant: IRealmGrant = {}): RealmId {
-			if (!entry || entry.isolated !== true || entry.firstParty === true || typeof entry.id !== 'string' || entry.id.length > 128 || !CANONICAL_APP_ID.test(entry.id)) {
+			if (!entry || entry.isolated !== true || entry.firstParty === true || !isCanonicalAppId(entry.id)) {
 				throw new Error('appRoot.attach: only an isolated, third-party entry can be attached');
 			}
 			const realmId = `realm-${base64url(opts.random(12))}`;

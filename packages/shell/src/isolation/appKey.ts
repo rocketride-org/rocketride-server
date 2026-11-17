@@ -100,13 +100,22 @@ function base32(bytes: Uint8Array): string {
 	return out;
 }
 
+/** `is_canonical_app_id` (`modules/shell/app_origin.py`): ASCII segments joined by dots, at most 128 characters. */
+const CANONICAL_APP_ID = /^[A-Za-z0-9_][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_][A-Za-z0-9_-]*)*$/;
+
+/** Whether `appId` is in canonical form (as the server requires while isolation is on). */
+export function isCanonicalAppId(appId: unknown): appId is string {
+	return typeof appId === 'string' && appId.length <= 128 && CANONICAL_APP_ID.test(appId);
+}
+
 /**
  * The app's host label and namespace key (`label_of`, `modules/shell/app_origin.py`).
  *
- * @param appId - The app id.
+ * @param appId - A canonical app id (anything else throws: the key must never be computed from an id the server would refuse).
  * @returns `a` + 24 characters of `[a-z2-7]`.
  */
 export function appKeyOf(appId: string): string {
+	if (!isCanonicalAppId(appId)) throw new Error('appKeyOf: not a canonical app id');
 	return `a${base32(sha256(new TextEncoder().encode(appId))).slice(0, 24)}`;
 }
 
