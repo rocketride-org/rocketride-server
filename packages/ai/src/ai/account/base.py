@@ -1092,6 +1092,11 @@ class AccountBase(ABC):
             shell = args.get('shell')
             if shell:
                 apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
+            # Isolated apps lose their load fields for a client without the
+            # appIsolation:1 shellCap, as on connect (#1022; identity under off).
+            from ai.modules.shell.app_origin import wire_view
+
+            apps = wire_view(apps, getattr(conn, '_shell_caps', ()))
             if sub == 'get':
                 app_id = args.get('appId', '')
                 if not app_id:
@@ -1148,6 +1153,10 @@ class AccountBase(ABC):
         # Basic client-side pagination for OSS
         total = len(apps)
         page = apps[offset : offset + limit]
+        # The wire view of isolated apps (#1022; identity under off).
+        from ai.modules.shell.app_origin import wire_view
+
+        page = wire_view(page, getattr(conn, '_shell_caps', ()))
 
         return conn.build_response(
             request,

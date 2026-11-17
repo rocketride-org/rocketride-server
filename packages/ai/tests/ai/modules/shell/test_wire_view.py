@@ -254,3 +254,75 @@ async def test_probe_ignores_unknown_arguments_and_bad_shell_caps(isolation_env)
     _assert_old_shell_view(body['apps'])
     body = await sup.probe_body(stamped_apps(), [5, None, {'x': 1}])
     _assert_old_shell_view(body['apps'])
+
+
+# ---------------------------------------------------------------------------
+# T33b the catalog surfaces (G4 S5): rrext_app list/get and rrext_public_catalog
+# ---------------------------------------------------------------------------
+
+
+def _catalog_account():
+    from types import SimpleNamespace
+
+    async def apps(*args, **kwargs):
+        return stamped_apps()
+
+    return SimpleNamespace(get_apps_for_user=apps, get_public_apps=apps)
+
+
+def _catalog_conn(shell_caps, signed_in=True):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    conn = SimpleNamespace(
+        _account_info=SimpleNamespace(userId='u1', organization={'id': 'local'}) if signed_in else None,
+        _shell_caps=tuple(shell_caps),
+    )
+    conn.build_response = MagicMock(side_effect=lambda req, body=None: {'body': body})
+    conn.build_error = MagicMock(side_effect=lambda req, msg: {'error': msg})
+    return conn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('signed_in', [True, False])
+async def test_rrext_app_list_and_get_apply_the_wire_view(signed_in, isolation_env):
+    """T33b: the base account's ``rrext_app`` list/get serve the old-shell view without the cap."""
+    from ai.account.base import AccountBase
+
+    acct = _catalog_account()
+    for caps, check in (((), _assert_old_shell_view), ((CAP,), _assert_new_shell_view)):
+        conn = _catalog_conn(caps, signed_in)
+        listed = await AccountBase.handle_app(acct, conn, {'command': 'rrext_app', 'arguments': {'subcommand': 'list'}})
+        check(listed['body']['apps'])
+        got = await AccountBase.handle_app(
+            acct, conn, {'command': 'rrext_app', 'arguments': {'subcommand': 'get', 'appId': 'acme.thirdparty'}}
+        )
+        check([got['body']['app'], *[a for a in stamped_apps() if a['id'] != 'acme.thirdparty']])
+
+
+@pytest.mark.asyncio
+async def test_public_catalog_applies_the_wire_view(isolation_env):
+    """T33b: the base account's ``rrext_public_catalog`` too."""
+    from ai.account.base import AccountBase
+
+    acct = _catalog_account()
+    body = (await AccountBase.handle_public(acct, _catalog_conn((), False), {'arguments': {}}))['body']
+    _assert_old_shell_view(body['apps'])
+    body = (await AccountBase.handle_public(acct, _catalog_conn((CAP,), False), {'arguments': {}}))['body']
+    _assert_new_shell_view(body['apps'])
+
+
+@pytest.mark.asyncio
+async def test_catalog_surfaces_unchanged_under_off(isolation_env):
+    """T33b/T40: under off the catalog answers are the plain lists."""
+    from ai.account.base import AccountBase
+
+    isolation_env.set(RR_APP_ISOLATION=None)
+    acct = _catalog_account()
+    conn = _catalog_conn(())
+    listed = await AccountBase.handle_app(acct, conn, {'command': 'rrext_app', 'arguments': {'subcommand': 'list'}})
+    expected = stamped_apps()
+    for entry in expected:
+        entry.update({'appStatus': 'free', 'onDesktop': True})
+    assert listed['body']['apps'] == expected
+    assert (await AccountBase.handle_public(acct, conn, {'arguments': {}}))['body']['apps'] == stamped_apps()
