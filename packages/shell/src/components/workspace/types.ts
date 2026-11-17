@@ -36,7 +36,7 @@ import type { ToolChannel } from './toolChannel';
 export interface ShellAppProps {
 	/** Whether the RocketRide WebSocket is currently connected. */
 	isConnected: boolean;
-	/** Authenticated user identity, or null when not logged in. */
+	/** Authenticated user identity (with a blank `userToken`, #1022), or null when not logged in. */
 	identity: ConnectResult | null;
 }
 

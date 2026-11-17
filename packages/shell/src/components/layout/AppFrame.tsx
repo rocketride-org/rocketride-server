@@ -59,8 +59,8 @@ export interface AppFrameProps {
 /**
  * Mounts the app's `app` component raw in the client area.
  *
- * The app gets the identity without its session token (`userToken`), which
- * never leaves the shell (#1022).
+ * The app gets the identity with a blank session token (`userToken`); see
+ * `util/identity.ts` for what this does and does not protect (#1022).
  *
  * @param props - See {@link AppFrameProps}.
  */

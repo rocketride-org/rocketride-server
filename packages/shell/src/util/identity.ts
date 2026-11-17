@@ -21,26 +21,49 @@
 // SOFTWARE.
 
 /**
- * The signed-in user as app code may see it.
+ * What app code and bridged iframes may see of the session.
  *
- * Apps mounted in the shell (the `identity` prop) and iframes the shell
- * bridges to (`shell:init`, `shell:login`) get the user without the session
- * token: `userToken` never leaves the shell (#1022). Every other field is
- * passed through unchanged.
+ * Apps mounted in the shell (the `identity` prop and `useAuthUser()`) and
+ * iframes the shell bridges to (`shell:init`, `shell:login`) get the user
+ * with a blank session token, and the iframe config without the API key
+ * (#1022). This is preparation, not isolation: app code that runs on the
+ * shell origin can still read the token from storage or ConnectionManager
+ * until PR2 moves third-party apps off-origin. It stops handing the token
+ * out through the documented app surface.
  */
 
 /**
- * Return a shallow copy of the user without `userToken`.
+ * Return a shallow copy of the user whose `userToken` is blanked (`''`).
  *
- * The stored user object is never mutated.
+ * The token is blanked rather than deleted because `userToken` is a required
+ * string in the frozen shell-api contract (`ConnectResult`): the projection
+ * keeps the published type honest while carrying no credential. A user
+ * without the field is copied as is. The stored user is never mutated.
+ * First-party shell code that needs the token reads it with
+ * `ConnectionManager.loadToken()`.
  *
  * @param user - The authenticated user, or null when not logged in.
- * @returns A new object with every field except `userToken`, or null for null.
+ * @returns A new object with every field kept and `userToken` blank, or null for null.
  */
-export function withoutCredentials<T extends object>(user: T): Omit<T, 'userToken'>;
-export function withoutCredentials<T extends object>(user: T | null): Omit<T, 'userToken'> | null;
-export function withoutCredentials<T extends object>(user: T | null): Omit<T, 'userToken'> | null {
+export function withoutCredentials<T extends object>(user: T): T;
+export function withoutCredentials<T extends object>(user: T | null): T | null;
+export function withoutCredentials<T extends object>(user: T | null): T | null {
 	if (!user) return null;
-	const { userToken: _userToken, ...rest } = user as T & { userToken?: unknown };
+	const copy = { ...user };
+	if ('userToken' in copy) (copy as { userToken?: unknown }).userToken = '';
+	return copy;
+}
+
+/**
+ * Return a copy of the RR_* runtime config without `RR_APIKEY`.
+ *
+ * No bridged iframe reads the API key (the iframe talks to the engine
+ * through the shell), so it is not sent. The config is never mutated.
+ *
+ * @param config - The shell's runtime API config.
+ * @returns A new object with every key except `RR_APIKEY`.
+ */
+export function bridgedApiConfig<T extends object>(config: T): Omit<T, 'RR_APIKEY'> {
+	const { RR_APIKEY: _apiKey, ...rest } = config as T & { RR_APIKEY?: unknown };
 	return rest;
 }

@@ -39,6 +39,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
+import { withoutCredentials } from '../../util/identity';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -281,6 +282,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
+	// What useAuthUser() hands the shell's subtree, apps included: the user
+	// with a blank session token (#1022). Shell code that needs the token
+	// reads it with cm.loadToken().
+	const publicIdentity = useMemo(() => withoutCredentials(identity), [identity]);
 
 	// The resolved identity drives telemetry's signed-in state and the opaque
 	// id the consented instance identifies by (never an email or name).
@@ -952,7 +957,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const orgId = identity?.organization?.id ?? '';
 
 	return (
-		<ShellIdentityContext.Provider value={identity}>
+		<ShellIdentityContext.Provider value={publicIdentity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
 				{/* Mid-rescope the workspace subtree is OUT of the tree (its
 				    unmount flushed the old workspace's stores on the old

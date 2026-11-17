@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-
 // The shell tsconfig deliberately keeps the browser surface node-free
 // ("types": []); this co-located node:test suite opts back in explicitly.
 /// <reference types="node" />
@@ -46,7 +45,7 @@ function has(code: string, re: RegExp): boolean {
 	return re.test(code);
 }
 
-/** Return the text of every `post({ ... })` call that mentions the given message type. */
+/** Return the text of every `post({ ... })` call that mentions the given message type (every call for ''). */
 function postCalls(code: string, messageType: string): string[] {
 	const calls: string[] = [];
 	let from = 0;
@@ -55,7 +54,7 @@ function postCalls(code: string, messageType: string): string[] {
 		if (start < 0) break;
 		const end = code.indexOf('})', start);
 		const text = code.slice(start, end + 2);
-		if (text.includes(`'${messageType}'`)) calls.push(text);
+		if (!messageType || text.includes(`'${messageType}'`)) calls.push(text);
 		from = end + 2;
 	}
 	return calls;
@@ -74,9 +73,19 @@ test('useIframeBridge posts the user only through withoutCredentials (shell:init
 	for (const call of [...init, ...login]) {
 		assert.ok(has(call, /user:\s*withoutCredentials\(/), `user must be projected: ${call.replace(/\s+/g, ' ')}`);
 	}
-	// No raw user object may reach the iframe.
+	// No raw user object may reach the iframe, in any post call.
+	for (const call of postCalls(code, '')) {
+		assert.ok(!has(call, /[{,]\s*user\s*[,}]/), `raw user (shorthand) is posted: ${call.replace(/\s+/g, ' ')}`);
+		assert.ok(!has(call, /\buser:(?!\s*withoutCredentials\()/), `user is posted without withoutCredentials: ${call.replace(/\s+/g, ' ')}`);
+	}
 	assert.ok(!has(code, /user:\s*authUserRef\.current/), 'raw authUserRef.current is posted');
 	assert.ok(!has(code, /type:\s*'shell:login',\s*user\s*\}/), 'raw user is posted in shell:login');
+});
+
+test('useIframeBridge sends the API config without RR_APIKEY', () => {
+	const code = source('hooks/useIframeBridge.ts');
+	const [init] = postCalls(code, 'shell:init');
+	assert.ok(has(init, /apiConfig:\s*bridgedApiConfig\(\s*apiConfig\s*\)/), `apiConfig must go through bridgedApiConfig: ${init.replace(/\s+/g, ' ')}`);
 });
 
 // ---- app identity --------------------------------------------------------
@@ -84,6 +93,17 @@ test('useIframeBridge posts the user only through withoutCredentials (shell:init
 test('AppFrame hands the app a credential-free identity', () => {
 	const code = source('components/layout/AppFrame.tsx');
 	assert.ok(has(code, /from '\.\.\/\.\.\/util\/identity'/), 'AppFrame.tsx must import withoutCredentials from ../../util/identity');
-	assert.ok(has(code, /withoutCredentials\(\s*identity\s*\)/), 'AppFrame.tsx must project identity with withoutCredentials');
+	const projected = /const (\w+) = useMemo\(\(\) => withoutCredentials\(\s*identity\s*\), \[identity\]\)/.exec(code);
+	assert.ok(projected, 'AppFrame.tsx must project identity with withoutCredentials');
+	assert.ok(has(code, new RegExp(`identity=\\{${projected[1]}\\}`)), 'the projected identity is the one passed to the app');
 	assert.ok(!has(code, /identity=\{identity\}/), 'the raw identity prop is passed to the app');
+});
+
+test('the shell identity context carries the credential-free identity', () => {
+	const code = source('components/layout/Shell.tsx');
+	assert.ok(has(code, /from '\.\.\/\.\.\/util\/identity'/), 'Shell.tsx must import withoutCredentials from ../../util/identity');
+	const provider = /<ShellIdentityContext\.Provider value=\{(\w+)\}>/.exec(code);
+	assert.ok(provider, 'one ShellIdentityContext.Provider with a plain value');
+	assert.notEqual(provider[1], 'identity', 'the raw identity is put in the context');
+	assert.ok(has(code, new RegExp(`const ${provider[1]} = useMemo\\(\\(\\) => withoutCredentials\\(identity\\), \\[identity\\]\\)`)), 'the context value must be withoutCredentials(identity)');
 });
