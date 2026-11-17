@@ -139,9 +139,10 @@ message instead. It already says everything that can be known.
   for it is set. A variable under a custom name that only mentions a provider
   is never reported as saved; when no provider has a saved key, the row is
   uncertain (`ok: null`), and when another provider has one, the row is
-  `ok: true` and the candidate is not named. When no model key is saved, or
-  one is uncertain, the result adds a `hint` for the agent that points to
-  `list_integrations`. When the account can use RocketRide-hosted OpenAI
+  `ok: true` and the candidate is not named. The result adds a `hint` for the
+  agent that points to `list_integrations` only when the row is `ok: false`
+  (no key saved) or uncertain because of a candidate; a row that is `ok: true`
+  has no hint, even if it hides a candidate. When the account can use RocketRide-hosted OpenAI
   models (`hosted-models:openai`), `model_key` is `ok: true` with no hint even
   if no key is saved, and its detail says so. `summary` names everything that
   stops a run, or says the account is ready.
