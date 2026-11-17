@@ -35,7 +35,7 @@
 import React, { useEffect, useState } from 'react';
 import { privacySignalOn } from 'rocketride/analytics';
 import { ConsentBanner } from './ConsentBanner';
-import { onConsentHostRequest, shouldMountConsentBanner } from './consentUi';
+import { subscribeConsentHost, shouldMountConsentBanner } from './consentUi';
 import { onIdleAfterLoad } from './settle';
 import { telemetryConfig } from './config';
 import { telemetryEnabled } from './host';
@@ -57,7 +57,7 @@ export const ConsentBannerHost: React.FC<Props> = ({ signedOut }) => {
 			}
 		});
 		// Also fires at once for a request made before this effect subscribed.
-		const off = onConsentHostRequest(() => {
+		const off = subscribeConsentHost(() => {
 			// The banner takes the pending request itself once mounted.
 			if (!disposed) {
 				setIsReady(true);

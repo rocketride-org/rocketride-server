@@ -164,7 +164,8 @@ function attributionAllowed(): boolean {
 
 /**
  * The consented instance's before_send: rich events only from a signed-out surface, an attributed event
- * (assignment_id / exposure_id) only while consent still holds at send time, everything sanitised.
+ * (tagged ATTRIBUTED_TAG by getConsentedCapture's report) only while consent still holds at send time, everything
+ * sanitised with the tag removed.
  * Exported for tests only (posthog-js calls it; nothing else should).
  */
 export const consentedBeforeSend = richEventGate(signedOut, attributionGate(attributionAllowed, consentedNext));

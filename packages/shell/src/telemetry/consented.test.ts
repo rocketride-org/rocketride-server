@@ -2,20 +2,21 @@
 // ("types": []); this co-located node:test suite opts back in explicitly.
 /// <reference types="node" />
 
-// Consent at SEND time for experiment-attributed events (assignment_id /
-// exposure_id), end to end through the real SdkQueue and the real before_send
+// Consent at SEND time for experiment-attributed events (tagged ATTRIBUTED_TAG
+// by getConsentedCapture's report; property names never decide it), end to end
+// through the real SdkQueue and the real before_send
 // functions of both instances. posthog-js runs before_send synchronously
 // inside capture(), so the fake SDK below does the same: the moment an event
 // reaches before_send is the moment it is sent or handed to posthog-js's own
 // batch. An app reports under consent; the event can still reach posthog-js
-// later — replayed from the pre-start queue, or from an earlier page load's
-// sessionStorage hold — and must not go out if consent no longer holds then
+// later (replayed from the pre-start queue, or from an earlier page load's
+// sessionStorage hold) and must not go out if consent no longer holds then
 // (home-ui's former consented before_send dropped it the same way).
 
 import { before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { CaptureResult } from 'posthog-js';
-import { CONSENT_KEY, CONSENT_VERSION } from './consent.ts';
+import { ATTRIBUTED_TAG, CONSENT_KEY, CONSENT_VERSION } from './consent.ts';
 import { HOLD_STORAGE_KEY, SdkQueue, newEventUuid, type HoldStorage } from './sdkQueue.ts';
 
 /** A Web Storage double. */
@@ -54,7 +55,9 @@ function setConsent(choice: 'accepted' | 'rejected' | null): void {
 	local.setItem(CONSENT_KEY, JSON.stringify({ v: CONSENT_VERSION, choice, at: Date.now() }));
 }
 
+/** An exposure as the queue holds it when sent through getConsentedCapture's report: tagged. */
 const EXPOSURE = {
+	[ATTRIBUTED_TAG]: true,
 	experiment: 'homepage',
 	assignment_id: '6f1c2f0e-8f6a-4c55-9b7e-0d7a3c1d2e4f',
 	exposure_id: '3b0c8c7e-1a2b-4c3d-8e9f-0a1b2c3d4e5f',
@@ -107,6 +110,7 @@ test('control: consent still accepted at the start, the queued exposure goes out
 	p.queue.capture('cta:click', { cta_id: 'get_started', intent: 'register', ...EXPOSURE }, { transport: 'sendBeacon' });
 	p.queue.start();
 	assert.deepEqual(p.sent.map((s) => [s.instance, s.event, s.props.assignment_id]), [['consented', 'cta:click', EXPOSURE.assignment_id]]);
+	assert.equal(ATTRIBUTED_TAG in p.sent[0].props, false, 'the tag is never sent');
 });
 
 test('withdrawn before the start: the queued attributed event is dropped, the unattributed one goes out cookieless', () => {
@@ -156,7 +160,7 @@ test('a privacy signal (DNT/GPC) on at send time drops a queued attributed event
 	assert.deepEqual(p.sent.map((s) => [s.instance, s.event]), [['consented', 'cta:click']]);
 });
 
-test('an attributed event never goes out cookieless, even while undecided (the per-load roulette_assignment_id tag does)', () => {
+test('a tagged event never goes out cookieless, even while undecided (the per-load roulette_assignment_id tag does)', () => {
 	setConsent(null);
 	const p = pageLoad();
 	p.state.consented = false;
@@ -164,4 +168,33 @@ test('an attributed event never goes out cookieless, even while undecided (the p
 	p.queue.capture('cta:click', { cta_id: 'get_started', ...EXPOSURE });
 	p.queue.capture('cta:click', { cta_id: 'get_started', roulette_assignment_id: EXPOSURE.assignment_id, roulette_variant: 'mh-1' });
 	assert.deepEqual(p.sent.map((s) => s.props.roulette_assignment_id), [EXPOSURE.assignment_id]);
+});
+
+test('cookieless: an untagged event with its own assignment_id (a task, a ticket) is sent', () => {
+	setConsent(null);
+	const p = pageLoad();
+	p.state.consented = false;
+	p.queue.start();
+	p.queue.capture('task:assigned', { assignment_id: 't1', exposure_id: 'x1' });
+	assert.deepEqual(p.sent.map((s) => [s.instance, s.event, s.props.assignment_id]), [['cookieless', 'task:assigned', 't1']]);
+});
+
+test('consented with a privacy signal on: an untagged event with assignment_id is sent, a tagged one is dropped', () => {
+	setConsent('accepted');
+	const p = pageLoad();
+	p.state.gpc = true;
+	p.queue.start();
+	p.queue.capture('task:assigned', { assignment_id: 't1' });
+	p.queue.capture('homepage_roulette_viewed', { ...EXPOSURE });
+	assert.deepEqual(p.sent.map((s) => [s.instance, s.event, s.props.assignment_id]), [['consented', 'task:assigned', 't1']]);
+});
+
+test('a forged tag that is not exactly true does not gate, and is still never sent', () => {
+	setConsent(null);
+	const p = pageLoad();
+	p.state.consented = false;
+	p.queue.start();
+	p.queue.capture('cta:click', { cta_id: 'docs', [ATTRIBUTED_TAG]: 'yes' });
+	assert.deepEqual(p.sent.map((s) => [s.instance, s.event]), [['cookieless', 'cta:click']]);
+	assert.equal(ATTRIBUTED_TAG in p.sent[0].props, false);
 });

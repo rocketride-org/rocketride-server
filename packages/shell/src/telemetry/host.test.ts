@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Identity, type IdentityMode } from './identity.ts';
-import { clearTelemetryOnSignOut, getReporter, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity, shellReporter, telemetryAppStamp } from './host.ts';
+import { appReporter, clearTelemetryOnSignOut, getReporter, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity, shellReporter, telemetryAppStamp } from './host.ts';
 import { HOLD_STORAGE_KEY } from './sdkQueue.ts';
 import { resetDevGateForTests } from '../util/devGate.ts';
 
@@ -183,6 +183,57 @@ test('the app stamp is the descriptor telemetryId when set, else the descriptor 
 	}
 });
 
+test('the reserved shell stamp is never honoured as an alias', () => {
+	assert.equal(telemetryAppStamp('rocketride.home', 'shell'), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride', 'shell'), 'rocketride');
+});
+
+test('a third-party app cannot choose a telemetry alias', () => {
+	assert.equal(telemetryAppStamp('acme.chat', 'home-ui'), 'acme.chat');
+	assert.equal(telemetryAppStamp('acme.chat', 'rocketride.home'), 'acme.chat');
+	assert.equal(telemetryAppStamp('acme.chat', 'shell'), 'acme.chat');
+	// A lookalike prefix is not the first-party namespace.
+	assert.equal(telemetryAppStamp('rocketrideX.chat', 'home-ui'), 'rocketrideX.chat');
+});
+
+test('an alias equal to another registered app id is rejected', () => {
+	const ids = ['rocketride.home', 'rocketride.models', 'acme.chat'];
+	assert.equal(telemetryAppStamp('rocketride.home', 'acme.chat', ids), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', 'rocketride.models', new Set(ids)), 'rocketride.home');
+	// Its own id is not a collision, and an unregistered alias is still honoured.
+	assert.equal(telemetryAppStamp('rocketride.home', 'rocketride.home', ids), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', 'home-ui', ids), 'home-ui');
+});
+
+test('appReporter returns the cached reporter for the descriptor stamp', () => {
+	resetTelemetryHostForTests();
+	const ids = ['rocketride.home', 'rocketride.models', 'acme.chat'];
+	assert.equal(appReporter('rocketride.home', { telemetryId: 'home-ui' }, ids), getReporter('home-ui'));
+	assert.equal(appReporter('rocketride.models', {}, ids), getReporter('rocketride.models'));
+	assert.equal(appReporter('rocketride.models'), getReporter('rocketride.models'));
+	assert.equal(appReporter('acme.chat', { telemetryId: 'home-ui' }, ids), getReporter('acme.chat'));
+	assert.equal(appReporter('rocketride.home', { telemetryId: 'acme.chat' }, ids), getReporter('rocketride.home'));
+	assert.equal(appReporter('rocketride.home', { telemetryId: 42 }, ids), getReporter('rocketride.home'));
+});
+
+test('an app aliasing shell never gets the shell reporter', () => {
+	resetTelemetryHostForTests();
+	for (const appId of ['rocketride.home', 'rocketride', 'acme.chat']) {
+		assert.notEqual(appReporter(appId, { telemetryId: 'shell' }, [appId]), shellReporter(), appId);
+	}
+	assert.equal(telemetryAppStamp('rocketride.home', 'Shell'), 'rocketride.home', 'the reserved check ignores case');
+	assert.equal(telemetryAppStamp('rocketride.home', 'SHELL'), 'rocketride.home');
+});
+
+test('an app whose own id is shell gets a reporter that never sends, never the shell reporter', () => {
+	resetTelemetryHostForTests();
+	for (const appId of ['shell', 'Shell']) {
+		const reporter = appReporter(appId, {}, [appId]);
+		assert.notEqual(reporter, shellReporter(), appId);
+		assert.notEqual(reporter, getReporter(appId), appId);
+	}
+});
+
 test('a reporter bound to a telemetryId stamps it, and per-event props cannot overwrite it; auth facts still stamp shell', async () => {
 	const { win, runTimers } = page();
 	await withGlobals({ window: win, document: docHidden }, () => {
@@ -327,6 +378,19 @@ test('a privacy-signal boot never throws when every storage accessor throws', as
 		resetTelemetryHostForTests();
 		assert.doesNotThrow(() => initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource: 'stored' }));
 	});
+});
+
+test('a privacy-signal boot still clears what it can read when localStorage throws', async () => {
+	const tab = store([...PH_SESSION, 'rr:auth:start_ts']);
+	const { jar, doc } = cookieDoc(['ph_phc_x_posthog=abc', 'other=1']);
+	const { win } = page({ sessionStorage: tab.storage });
+	Object.defineProperty(win, 'localStorage', { get: () => { throw new Error('SecurityError'); } });
+	await withGlobals({ window: win, document: doc, sessionStorage: tab.storage, navigator: { doNotTrack: '1' } }, () => {
+		resetTelemetryHostForTests();
+		assert.doesNotThrow(() => initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource: 'stored' }));
+	});
+	assert.deepEqual([...tab.data.keys()], ['rr:auth:start_ts'], 'sessionStorage still cleared');
+	assert.deepEqual([...jar.keys()], ['other'], 'cookies still cleared');
 });
 
 test("an embedded preview's disabled boot never touches the host tab's hold", async () => {

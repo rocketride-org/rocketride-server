@@ -82,18 +82,20 @@ export function hasPendingOpen(): boolean {
 }
 
 /**
- * Subscribe the lazy host to "Privacy settings" requests. A request made before
- * the host subscribed is still pending, so `fn` runs once at once for it; the
- * request stays pending for the banner to take when it mounts.
+ * Subscribe the lazy host (ConsentBannerHost) to "Privacy settings" requests.
+ * A request made before the host subscribed is still pending, so `onRequest`
+ * runs once at once for it. The request stays pending for the banner to take
+ * when it mounts. The host must use this, not `onOpenConsentBanner`, or an
+ * early request is missed.
  *
- * @param fn - Called for a pending request, then on every new request.
- * @returns Unsubscribes `fn`.
+ * @param onRequest - Called for a pending request, then on every new request.
+ * @returns Unsubscribes `onRequest`.
  */
-export function onConsentHostRequest(fn: Listener): () => void {
-	const off = onOpenConsentBanner(fn);
+export function subscribeConsentHost(onRequest: () => void): () => void {
+	const off = onOpenConsentBanner(onRequest);
 	if (hasPendingOpen()) {
 		try {
-			fn();
+			onRequest();
 		} catch {
 			/* never throws */
 		}

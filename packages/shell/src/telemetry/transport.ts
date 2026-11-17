@@ -13,9 +13,9 @@
 import posthog, { type CaptureResult } from 'posthog-js';
 import { EV } from './events';
 import { SCROLL_ROOT, telemetryHost, telemetryKey } from './config';
-import { carriesAttribution } from './consent';
+import { carriesAttribution, stripAttribution } from './consent';
 import { getConsentState } from './consentState';
-import { CaptureMode, clearPostHogStorage, quietly, type SdkLike } from './mode';
+import { CaptureMode, clearSiteStorage, quietly, type SdkLike } from './mode';
 import { sanitizeEvent } from './sanitize';
 import { Identity } from './identity';
 import { enableWebVitals, loadWebVitalsExtension } from './vitals';
@@ -66,16 +66,6 @@ const identity = new Identity({
 /** The identity surface the host forwards sign-in state through. */
 export function transportIdentity(): Identity {
 	return identity;
-}
-
-/**
- * Removes PostHog's own storage on this site: its localStorage and sessionStorage keys and its ph_ cookies, on this
- * host and its parent domain. Never throws.
- */
-function clearSiteStorage(): void {
-	quietly(() => {
-		clearPostHogStorage(document, window.localStorage, window.sessionStorage, window.location.hostname);
-	});
 }
 
 /**
@@ -170,9 +160,10 @@ export function bindTransport(d: TransportDeps): void {
 
 /**
  * The cookieless instance's before_send. While the consented instance is active this instance sends nothing but
- * consent:handoff. An event carrying an experiment assignment (assignment_id / exposure_id) belongs to the
- * consented instance only: one that lands here — reported under consent, then replayed from the pre-start queue or
- * an earlier load's sessionStorage hold after a withdrawal — is dropped, never sent cookieless. Everything else is
+ * consent:handoff. An event sent through getConsentedCapture's report (tagged ATTRIBUTED_TAG) belongs to the
+ * consented instance only: one that lands here (reported under consent, then replayed from the pre-start queue or
+ * an earlier load's sessionStorage hold after a withdrawal) is dropped, never sent cookieless. Property names do not
+ * matter: an untagged event with its own assignment_id is an ordinary event. Everything else is
  * sanitised and kept for a later bridge. Exported for tests only (posthog-js calls it).
  *
  * @param event - The event posthog-js is about to send.
@@ -185,7 +176,7 @@ export function cookielessBeforeSend(event: CaptureResult | null): CaptureResult
 	if (carriesAttribution(event)) {
 		return null;
 	}
-	const out = sanitizeEvent(event);
+	const out = sanitizeEvent(stripAttribution(event));
 	noteCookielessEvent(out);
 	return out;
 }
@@ -233,7 +224,7 @@ export function initPostHog(): void {
 		// 'always' instance cannot be opted out, and its own $pageleave and web vitals would otherwise go out too.
 		// The one exception is consent:handoff, sent right after the switch to close the cookieless half.
 		// Page views and section views are also kept in memory for a later bridge (accept mid-visit).
-		// An experiment-attributed event never goes out cookieless (cookielessBeforeSend).
+		// An event tagged by getConsentedCapture's report never goes out cookieless (cookielessBeforeSend).
 		before_send: cookielessBeforeSend,
 	});
 	// Every write posthog-js makes to its storage is reduced from here on, before any opted-in instance exists.

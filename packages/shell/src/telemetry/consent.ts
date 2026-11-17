@@ -185,37 +185,53 @@ export class ConsentStore {
 // ==== consent at send time for experiment-attributed events =================
 
 /**
- * The properties that tie an event to an experiment assignment an app stored
- * under explicit consent (home-ui's Homepage Roulette: the exposure and a
- * register CTA's exposure properties). The cookieless per-load tag
- * (roulette_assignment_id) is not one: it exists only for an undecided visitor.
+ * The property that marks an event as experiment-attributed. The shell sets it
+ * only on events sent through getConsentedCapture's report (host.ts); it
+ * strips it from every other event an app reports and from super properties,
+ * so no app can set it by hand. Property names never decide this: an app's own
+ * assignment_id (a task, a ticket) is an ordinary property. Being a property,
+ * the tag survives the queue's sessionStorage hold, and the before_send gates
+ * remove it before anything is sent.
  */
-export const ATTRIBUTION_KEYS = ['assignment_id', 'exposure_id'] as const;
+export const ATTRIBUTED_TAG = '__rr_attributed';
 
 /**
- * Whether an event carries an experiment assignment (any ATTRIBUTION_KEYS).
+ * Whether an event was sent through getConsentedCapture's report (carries ATTRIBUTED_TAG).
  *
  * @param event - The event as before_send receives it.
- * @returns True when its properties hold a non-empty assignment or exposure id.
+ * @returns True when its properties hold the tag set to true.
  */
 export function carriesAttribution(event: { properties?: unknown } | null | undefined): boolean {
 	const props = event?.properties;
 	if (!props || typeof props !== 'object') {
 		return false;
 	}
-	return ATTRIBUTION_KEYS.some((key) => {
-		return Boolean((props as Record<string, unknown>)[key]);
-	});
+	return (props as Record<string, unknown>)[ATTRIBUTED_TAG] === true;
+}
+
+/**
+ * Remove ATTRIBUTED_TAG from an event's properties, in place, so it is never sent.
+ *
+ * @param event - The event as before_send receives it.
+ * @returns The same event.
+ */
+export function stripAttribution<T extends { properties?: unknown } | null | undefined>(event: T): T {
+	const props = event?.properties;
+	if (props && typeof props === 'object' && ATTRIBUTED_TAG in props) {
+		delete (props as Record<string, unknown>)[ATTRIBUTED_TAG];
+	}
+	return event;
 }
 
 /**
  * A before_send step that re-checks consent at SEND time for attributed
- * events: one carrying an experiment assignment is dropped unless `allowed()`
- * holds at that moment. Apps check consent when they report; an attributed
- * event can still reach posthog-js later than that — replayed from the
- * pre-start queue or the sessionStorage hold of an earlier page load — after
+ * events: one sent through getConsentedCapture's report (tagged with
+ * ATTRIBUTED_TAG) is dropped unless `allowed()` holds at that moment. Apps check consent when they report; an attributed
+ * event can still reach posthog-js later than that (replayed from the
+ * pre-start queue or the sessionStorage hold of an earlier page load) after
  * a withdrawal (this tab or another) or a privacy signal. home-ui's former
- * consented before_send did the same. Every other event goes to `next`.
+ * consented before_send did the same. Only tagged events are gated; every
+ * event that passes goes to `next` with the tag removed.
  *
  * @param allowed - Whether explicit consent holds now.
  * @param next - The rest of the before_send chain.
@@ -234,6 +250,6 @@ export function attributionGate<T extends { properties?: unknown } | null>(allow
 				return null as T;
 			}
 		}
-		return next(event);
+		return next(stripAttribution(event));
 	};
 }

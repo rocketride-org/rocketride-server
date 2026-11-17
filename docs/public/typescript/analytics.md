@@ -27,9 +27,12 @@ at `rocketride.analytics` in the Python SDK.
 Apps running on the platform shell do not call `createReporter` themselves —
 the shell mints their reporter and hands it over (`useReport()` from the shell
 API). The shell stamps the app descriptor's
-`id`, or its optional `telemetryId` when the app declares one (for apps whose
-dashboards predate the descriptor id) — chosen once on the descriptor, never
-per event. Creating reporters directly is for hosts and for standalone code
+`id`, or its optional `telemetryId` alias (for apps whose dashboards predate
+the descriptor id). The alias is honoured only for first-party apps (id
+`rocketride` or starting `rocketride.`). It must match
+`^[A-Za-z0-9._-]{1,128}$`, must not be `shell`, and must not be another
+registered app's id. Otherwise the shell stamps the `id`, with no warning. The
+alias is chosen once on the descriptor, never per event. Creating reporters directly is for hosts and for standalone code
 with its own transport.
 
 ## **Import**

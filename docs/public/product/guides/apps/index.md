@@ -299,6 +299,10 @@ interface AppDescriptor {
       mount these directly instead of booting the full `app`. */
   devToolFrame?: React.ComponentType<DevToolProps>;
   devToolSidebar?: React.ComponentType<DevToolProps>;
+
+  /** First-party apps only: the `app` value stamped on telemetry instead of
+      `id`. See "Telemetry" below. */
+  telemetryId?: string;
 }
 ```
 
@@ -398,8 +402,8 @@ import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager 
 
 ### Telemetry
 
-The shell owns the one product-telemetry transport (keys, consent, delivery —
-served to it at runtime by the platform; your app never carries any of it).
+The shell owns the one product-telemetry transport (keys, consent, delivery).
+The platform serves these to it at runtime; your app never carries any of them.
 Your app receives a bound reporter and simply calls it:
 
 ```typescript
@@ -409,8 +413,24 @@ const report = useReport();
 report('chat:message_sent', { length: 42 });
 ```
 
-The reporter is bound to YOUR app id by the shell — every event is stamped
-with its true emitter, and there is nothing to initialise or configure. Event
+The shell binds the reporter to your app. Every event is stamped with an `app`
+property, last, so your props cannot overwrite it. There is nothing to
+initialise or configure. The stamped value is your descriptor's `telemetryId`
+when the app is first-party (id `rocketride` or starting `rocketride.`) and the
+alias is valid. Otherwise it is your app's `id`. A valid alias matches
+`^[A-Za-z0-9._-]{1,128}$`, is not `shell` (reserved for the shell's own events)
+and is not another registered app's id. An alias that fails these checks falls
+back to the id with no warning. The alias is chosen once on the descriptor,
+never per event. Events the analytics SDK generates on its own (`$pageleave`,
+`$web_vitals`, `$autocapture`, `$exception` and the like) carry no `app`.
+`$host` and `$pathname` do not identify the app either, because the URL does
+not change on an app switch.
+
+Events sent through `getConsentedCapture(...).report` are tagged internally as
+attributed. A tagged event is dropped at send time unless consent is still
+accepted and no browser privacy signal (DNT or GPC) is on. Without consent (the
+cookieless instance) it is always dropped. Ordinary events are never dropped
+because of their property names, and an app cannot set the tag itself. Event
 names are your app's own taxonomy (`object:action` by convention); document
 them beside your call sites. `useConsent()` exposes the visitor's
 analytics-consent state read-only (plus `openSettings()` to the Privacy
@@ -546,7 +566,7 @@ The events marked **Shell-internal** exist only in the shell package's internal 
 
 ### Telemetry facts
 
-The shell reports its own product facts on its own reporter, stamped with app `shell`. No app forwards them. They are `auth:start`, when it starts the OAuth redirect, and `auth:complete`, when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback (null when it is not known). The consent banner's `consent:shown`, `consent:decision` and `consent:handoff` events are the shell's too. A fact raised before the analytics SDK has started waits in the shell's queue, which is mirrored to the tab's sessionStorage, so it is replayed with its original time on the next page load (the OAuth callback, for `auth:start`) if this one ends first.
+The shell reports its own product facts on its own reporter, stamped with app `shell`. No app forwards them. They are `auth:start`, when it starts the OAuth redirect, and `auth:complete`, when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback (null when it is not known). `auth:start` always carries `is_authed: false` and `auth:complete` always carries `is_authed: true`, whatever the state of the page load that sends them. The consent banner's `consent:shown`, `consent:decision` and `consent:handoff` events are the shell's too. A fact raised before the analytics SDK has started waits in the shell's queue, which is mirrored to the tab's sessionStorage, so it is replayed with its original time on the next page load (the OAuth callback, for `auth:start`) if this one ends first.
 
 `connectionManager.drainTelemetry()` and the `shell:telemetry` event are deprecated. Nothing feeds them any more: `drainTelemetry()` always returns an empty list and `shell:telemetry` is never emitted. They stay typed only for compatibility with the frozen v8/v9 floor. Do not subscribe to them or forward from them; your own events go through `useReport()` as described in [Telemetry](#telemetry).
 

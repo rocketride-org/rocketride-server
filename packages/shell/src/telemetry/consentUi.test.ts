@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasPendingOpen, onConsentHostRequest, onOpenConsentBanner, openConsentBanner, shouldMountConsentBanner, takePendingOpen } from './consentUi.ts';
+import { readFileSync } from 'node:fs';
+import { hasPendingOpen, subscribeConsentHost, onOpenConsentBanner, openConsentBanner, shouldMountConsentBanner, takePendingOpen } from './consentUi.ts';
 
 // The two listeners the site has: HomeApp's lazy host (mounts the banner, does not take the request) and the
 // mounted banner (takes the request and opens).
@@ -62,7 +63,7 @@ test('a privacy signal: a request made before the lazy host subscribed still mou
 	takePendingOpen();
 	openConsentBanner();
 	let requested = false;
-	const offHost = onConsentHostRequest(() => {
+	const offHost = subscribeConsentHost(() => {
 		requested = true;
 	});
 	const signal = { ...base, telemetryLive: false, privacySignal: true, settled: true };
@@ -76,7 +77,7 @@ test('a privacy signal: a request made before the lazy host subscribed still mou
 test('a privacy signal: with no request pending, subscribing does not mount the banner', () => {
 	takePendingOpen();
 	let requested = false;
-	const offHost = onConsentHostRequest(() => {
+	const offHost = subscribeConsentHost(() => {
 		requested = true;
 	});
 	assert.equal(requested, false);
@@ -84,6 +85,33 @@ test('a privacy signal: with no request pending, subscribing does not mount the 
 	offHost();
 });
 
+test('subscribeConsentHost: an early request fires once on subscribe and stays pending; later requests fire; unsubscribe stops them', () => {
+	takePendingOpen();
+	openConsentBanner();
+	let calls = 0;
+	const off = subscribeConsentHost(() => {
+		calls += 1;
+	});
+	assert.equal(calls, 1, 'the early request fires once on subscribe');
+	assert.equal(hasPendingOpen(), true, 'subscribing does not consume the request');
+	openConsentBanner();
+	assert.equal(calls, 2, 'a later request fires again');
+	off();
+	openConsentBanner();
+	assert.equal(calls, 2, 'no calls after unsubscribe');
+	assert.equal(takePendingOpen(), true);
+	assert.equal(hasPendingOpen(), false, 'clean state for the next test');
+});
+
 test('telemetry off for another reason (init failed, no signal): no banner even on request', () => {
 	assert.equal(shouldMountConsentBanner({ ...base, telemetryLive: false, settled: true, requested: true }), false);
+});
+
+test('the banner host subscribes with subscribeConsentHost, so a request made before it mounts is honoured', () => {
+	// ConsentBannerHost is a component and the shell has no render tests yet,
+	// so pin its subscription by source: onOpenConsentBanner would consume or
+	// miss a request made before the host subscribed (the f8bf682 fix).
+	const source = readFileSync(new URL('./ConsentBannerHost.tsx', import.meta.url), 'utf8');
+	assert.match(source, /subscribeConsentHost\(/);
+	assert.doesNotMatch(source, /onOpenConsentBanner\(/);
 });

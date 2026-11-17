@@ -546,26 +546,103 @@ function surfaceNames(bundleText) {
 }
 
 /**
- * Is there an ACTIONABLE change vs the newest frozen version — i.e. a genuinely
- * NEW exported name (value member or type)? Removals can't reach here (the floors
- * fail the shell's build first), and the floors guarantee the candidate is a
- * superset of the newest, so the only possibility is additions. A cosmetic edit
- * (reordering, whitespace) or a floor-compatible type tweak leaves the name set
- * unchanged and is therefore NOT actionable — no redundant version is minted.
+ * Map every top-level statement of a bundle to its normalized declaration text,
+ * keyed by declaration (kind + name), so two bundles can be compared one
+ * declaration at a time. Keying by name makes the comparison order-independent:
+ * moving a declaration around in api.ts (or dts-bundle-generator emitting it in
+ * a different order) changes no entry. Each statement is re-printed by the
+ * TypeScript printer with comments removed and its whitespace collapsed, so
+ * JSDoc edits and formatting are not changes either. Merged declarations (an
+ * interface declared twice) share a key; their texts are sorted and joined.
+ *
+ * @param {string} bundleText - A generated/frozen bundle body.
+ * @returns {Map<string, string>} declaration key -> normalized text.
+ */
+function declarationTexts(bundleText) {
+	const sf = ts.createSourceFile('bundle.d.ts', bundleText, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+	const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed, removeComments: true });
+	const groups = new Map();
+	const add = (key, text) => {
+		if (!groups.has(key)) groups.set(key, []);
+		groups.get(key).push(text);
+	};
+	for (const st of sf.statements) {
+		const text = printer.printNode(ts.EmitHint.Unspecified, st, sf).replace(/\s+/g, ' ').trim();
+		if (st.name && ts.isIdentifier(st.name)) {
+			add(`${ts.SyntaxKind[st.kind]}:${st.name.text}`, text);
+		} else if (ts.isVariableStatement(st)) {
+			const names = st.declarationList.declarations.map((d) => d.name.getText(sf)).join(',');
+			add(`VariableStatement:${names}`, text);
+		} else if (ts.isExportDeclaration(st) && st.exportClause && ts.isNamedExports(st.exportClause)) {
+			// `export { A as B, ... }` blocks: one entry per exported name.
+			for (const el of st.exportClause.elements) {
+				add(`Export:${el.name.text}`, el.getText(sf).replace(/\s+/g, ' ').trim());
+			}
+		} else {
+			// Anything else (`export {}`, side-effect statements) is keyed by
+			// its own text: a new or changed one shows up as a new key.
+			add(`Other:${text}`, text);
+		}
+	}
+	const out = new Map();
+	for (const [key, texts] of groups) out.set(key, texts.sort().join('\n'));
+	return out;
+}
+
+/**
+ * Declarations left out of the body comparison. The RocketRideClient class is
+ * inlined from the TypeScript SDK, and its methods gain optional parameters on
+ * the SDK's own release cadence (append-only, held by its covariant floor; see
+ * the NOTE near the top). Without this exemption every such SDK change would
+ * fail shell:check until someone mints a shell version. The client is still
+ * re-captured in full by the next freeze, and a new export is still caught by
+ * the name comparison. Other declarations inlined from the SDK (its exported
+ * interfaces and types) are body-compared like the shell's own, so a change to
+ * one of them needs a shell:freeze.
+ */
+const BODY_COMPARE_EXEMPT = new Set(['ClassDeclaration:RocketRideClient']);
+
+/**
+ * List the ACTIONABLE changes vs the newest frozen version: a declaration that
+ * is new, or whose normalized body differs from the frozen one. Comparing
+ * bodies (not just exported names) is what catches a new member on an EXISTING
+ * type, such as an optional field added to AppDescriptor; a name-only check
+ * reads that as "up to date" and the field never reaches the frozen shell.d.ts
+ * that apps type against. Removals are not listed: the floors fail the shell's
+ * build before this runs. Cosmetic edits (reordering, comments, whitespace)
+ * normalize away and mint no redundant version.
  *
  * @param {number} prev - Newest existing version, or -1.
  * @param {string} candidateBody - The freshly generated bundle body.
- * @returns {boolean} True when a new name appeared since the newest version.
+ * @returns {string[]} Descriptions of the changed declarations (empty = up to date).
  */
-function hasActionableChange(prev, candidateBody) {
-	if (prev < 0) return true; // no prior version — the first freeze is always actionable
+function actionableChanges(prev, candidateBody) {
+	if (prev < 0) return ['no frozen version yet']; // the first freeze is always actionable
 	const prevBody = extractBundleBody(fs.readFileSync(path.join(VERSIONS_DIR, `v${prev}.d.ts`), 'utf8'));
-	if (prevBody === null) return true;
+	if (prevBody === null) return [`v${prev}.d.ts has no frozen bundle markers`];
+	const changes = [];
 	const prevNames = surfaceNames(prevBody);
 	for (const n of surfaceNames(candidateBody)) {
-		if (!prevNames.has(n)) return true;
+		if (!prevNames.has(n)) changes.push(`new export ${n}`);
 	}
-	return false;
+	const prevDecls = declarationTexts(prevBody);
+	for (const [key, text] of declarationTexts(candidateBody)) {
+		if (BODY_COMPARE_EXEMPT.has(key)) continue;
+		if (!prevDecls.has(key)) changes.push(`new declaration ${key}`);
+		else if (prevDecls.get(key) !== text) changes.push(`changed declaration ${key}`);
+	}
+	return changes;
+}
+
+/**
+ * Is there an ACTIONABLE change vs the newest frozen version? See actionableChanges.
+ *
+ * @param {number} prev - Newest existing version, or -1.
+ * @param {string} candidateBody - The freshly generated bundle body.
+ * @returns {boolean} True when the surface changed since the newest version.
+ */
+function hasActionableChange(prev, candidateBody) {
+	return actionableChanges(prev, candidateBody).length > 0;
 }
 
 /**
@@ -916,9 +993,9 @@ function main() {
 	const { next, prev } = determineVersions();
 
 	if (checkMode) {
-		// CI mode: never write; fail only on an ACTIONABLE drift (a new export the
-		// live surface has that the newest frozen version does not). A cosmetic or
-		// floor-compatible change is not flagged — it needs no freeze.
+		// CI mode: never write; fail only on an ACTIONABLE drift (a new export, or
+		// a declaration whose body changed, vs the newest frozen version). A
+		// cosmetic change (order, comments, whitespace) is not flagged.
 		if (prev < 0) {
 			// A missing baseline in CI is a FAILURE, not a pass: an emptied
 			// versions/ directory would otherwise sail through --check (and the
@@ -929,12 +1006,15 @@ function main() {
 			);
 			cleanup();
 			process.exit(1);
-		} else if (!hasActionableChange(prev, candidateBody)) {
+		}
+		const changes = actionableChanges(prev, candidateBody);
+		if (changes.length === 0) {
 			log(`Up to date with v${prev} (no actionable change).`);
 		} else {
 			console.error(
-				`[shell:freeze --check] Shell API has new exports not in v${prev}. Run \`./builder shell:freeze\`.`
+				`[shell:freeze --check] Shell API surface changed since v${prev}. Run \`./builder shell:freeze\`.`
 			);
+			for (const c of changes) console.error(`  - ${c}`);
 			cleanup();
 			process.exit(1);
 		}
@@ -942,9 +1022,9 @@ function main() {
 		return;
 	}
 
-	// Full freeze — append the next version only when the surface ACTUALLY grew.
-	// A cosmetic edit (reordering exports, whitespace) or a floor-compatible type
-	// tweak leaves the exported name set unchanged and mints no redundant version.
+	// Full freeze: append the next version only when the surface ACTUALLY changed
+	// (a new export or a changed declaration body). A cosmetic edit (reordering,
+	// comments, whitespace) normalizes away and mints no redundant version.
 	// (No compatibility gate: removals fail the shell's own tsc via the floors.)
 	if (!hasActionableChange(prev, candidateBody)) {
 		log('No actionable change to the shell API surface — nothing to freeze.');
