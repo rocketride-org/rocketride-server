@@ -31,6 +31,7 @@ start, so they all go through ``rocketlib.resolveConfig`` on the engine-resolved
 schema, from here.
 """
 
+import sys
 from typing import Any, Dict, Optional
 
 from rocketlib import ConfigError, ConfigView, IJson, getServiceSchema, resolveConfig
@@ -44,10 +45,18 @@ def node_schema(provider: str) -> Optional[Dict[str, Any]]:
 
     Returns:
         The schema ``resolveConfig`` consumes (``properties`` with a ``path`` on
-        every leaf, ``params``, ``capabilities``), or None when the engine knows
-        no service of that name.
+        every leaf, ``params``, ``capabilities``), or None when neither the
+        engine nor the node store knows a service of that name.
     """
     schema = getServiceSchema(provider)
+    if schema is None:
+        # A node EaaS serves and has not unpacked is not in the engine's
+        # registry: its schema is the one the engine resolved from its
+        # definition when the node store started. The store exists only in a
+        # process that started it (EaaS), so it is read where it is loaded and
+        # never imported from here.
+        store = sys.modules.get('ai.modules.task.node_store')
+        schema = store.schema(provider) if store is not None and provider else None
     return None if schema is None else IJson.toDict(schema)
 
 

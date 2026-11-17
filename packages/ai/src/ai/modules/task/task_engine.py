@@ -94,6 +94,7 @@ from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
+from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
 from ai.modules.task.task_channel import (
@@ -497,7 +498,14 @@ def hosted_refusal(pipeline: Dict[str, Any]) -> Optional[str]:
         return None
     from rocketlib import getServiceDefinition
 
-    return saas_pipeline_violation(pipeline, getServiceDefinition, resolve_node_config, shared_host=True)
+    # A node EaaS serves is not in the engine's registry, and the gate must see it too
+    # (its config resolves through node_config, which falls back to the node store itself)
+    return saas_pipeline_violation(
+        pipeline,
+        lambda provider: getServiceDefinition(provider) or node_store.served(provider),
+        resolve_node_config,
+        shared_host=True,
+    )
 
 
 def _is_saas_engine() -> bool:
@@ -596,7 +604,7 @@ def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, An
     from rocketlib import getServiceDefinition
 
     config = resolve_node_config(provider, stored).to_dict()
-    service = getServiceDefinition(provider) or {}
+    service = getServiceDefinition(provider) or node_store.served(provider) or {}
     class_types = service.get('classType') or ()
     if isinstance(class_types, str):
         class_types = (class_types,)
@@ -3799,8 +3807,16 @@ class TaskEngine(DAPBase):
             # Parameter tokens the subprocess has no key for are decoded.
             spec = resolve_parameter_tokens(copy.deepcopy(self._pipeline))
 
-            # Write it out, then let the copies go out of scope
+            # Write it out
             self._tmpfile = await self._write_task_file(spec, default_env)
+
+            # The nodes it names that the server does not carry go on disk first: the run's start-up scan
+            # loads them. Every control that attaches later runs this engine's spec, so its nodes are these
+            try:
+                await asyncio.to_thread(node_store.place, resolved)
+            except Exception as e:
+                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+            # Let the copies go out of scope
             del resolved, spec, default_env
 
             # Setup the first part of the command line args

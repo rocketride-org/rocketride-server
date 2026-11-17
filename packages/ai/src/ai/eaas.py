@@ -242,6 +242,11 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     await account.init_account(server)
 
+    # The nodes the server does not carry: their definitions now, their code on demand
+    from ai.modules.task import node_store
+
+    node_store.start()
+
     # The public-page catch-all registers LAST, after every module and account
     # route, so every real route wins (FastAPI matches in registration order).
     # It then builds the first page aggregate from the published app manifests.
