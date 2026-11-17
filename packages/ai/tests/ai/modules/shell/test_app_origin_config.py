@@ -591,3 +591,24 @@ def test_invalid_trusted_proxy_cidrs_refuse_start(cidrs, isolation_env):
     """T8d: RR_TRUSTED_PROXY_CIDRS is a list of networks."""
     isolation_env.set(RR_TRUSTED_PROXY_CIDRS=cidrs)
     _refuses('RR_TRUSTED_PROXY_CIDRS')
+
+
+@pytest.mark.parametrize(
+    'module', ['cryptography.hazmat.primitives.ciphers.aead', 'cryptography.hazmat.primitives.kdf.hkdf']
+)
+def test_missing_cryptography_refuses_start(module, isolation_env, monkeypatch):
+    """T3 (G4 round 2 R2-L3): frame tokens need ``cryptography``; without it startup refuses, it does not fail per request."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, module, None)  # import now raises ImportError
+    _refuses('cryptography')
+
+
+def test_cryptography_is_a_declared_engine_requirement():
+    """T3 (R2-L3): the engine's own requirement file declares it, pinned like the nodes pin."""
+    from pathlib import Path
+
+    import ai
+
+    requirements = (Path(ai.__file__).parent / 'requirements.txt').read_text(encoding='utf-8').splitlines()
+    assert any(line.strip().startswith('cryptography>=') for line in requirements)

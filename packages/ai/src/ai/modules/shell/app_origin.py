@@ -42,6 +42,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import importlib
 import ipaddress
 import json
 import os
@@ -407,6 +408,9 @@ def known_capabilities() -> Optional[frozenset]:
 
 # Account methods a SaaS edition must provide itself (check d): the base
 # versions are the OSS behaviour.
+# What frame tokens import (AES-256-GCM and HKDF), checked at startup.
+_TOKEN_CRYPTO_MODULES = ('cryptography.hazmat.primitives.ciphers.aead', 'cryptography.hazmat.primitives.kdf.hkdf')
+
 _SAAS_ACCOUNT_METHODS = ('account_info_for', 'is_first_party', 'set_approved_capabilities', 'approved_capabilities')
 
 
@@ -431,6 +435,13 @@ def validate_isolation_config(account: Any = None) -> None:
         if os.environ.get('RR_APP_ISOLATION') == '':
             debug('[app isolation] RR_APP_ISOLATION is set but empty: read as off')
         return
+    for module in _TOKEN_CRYPTO_MODULES:  # (a) frame tokens cannot be sealed without it
+        try:
+            importlib.import_module(module)
+        except ImportError:
+            raise _refuse(
+                f'isolation needs the cryptography package ({module}) for frame tokens: install it or {_REMEDY}'
+            ) from None
 
     marker = read_runtime_marker()  # (b)
     guest = guest_dir()

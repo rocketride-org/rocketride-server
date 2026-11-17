@@ -19,3 +19,8 @@ mcp>=2.0.0,<3
 # per-module: task/__init__.py imports .fetch before its own depends() runs,
 # so the package must already be present when `import ai` finishes.
 pyjwt
+
+# AES-256-GCM and HKDF for the app-origin frame tokens (ai/modules/shell/app_origin.py,
+# #1022); startup refuses RR_APP_ISOLATION other than off without it. Same pin as
+# nodes/src/nodes/requirements.txt (the merged constraints must agree).
+cryptography>=46.0.7,<47
