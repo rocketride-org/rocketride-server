@@ -23,13 +23,17 @@
 /**
  * What app code and bridged iframes may see of the session.
  *
- * Documented app surfaces carry a blank session token: apps mounted in the
+ * The identity surfaces carry a blank session token: apps mounted in the
  * shell (the `identity` prop and `useAuthUser()`) and iframes the shell
  * bridges to (`shell:init`, `shell:login`) get the user with `userToken: ''`,
- * and `useShellApiConfig()` and `shell:init` omit the API key (#1022). This is preparation, not isolation: app code that runs on the
- * shell origin can still read the token from storage or ConnectionManager
- * until PR2 moves third-party apps off-origin. It stops handing the token
- * out through the documented app surface.
+ * and `useShellApiConfig()` and `shell:init` omit the API key (#1022).
+ *
+ * This is preparation, not isolation. App code runs on the shell origin, so
+ * these exported paths still return credentials until PR2 moves third-party
+ * apps off-origin: `useShellApiKey()` / the `host.apiKey` op,
+ * `getClient().getAccountInfo()` and `ConnectionManager.getAccountInfo()`,
+ * `ConnectionManager.loadToken()` and web storage, and the `shell:login`
+ * shell event.
  */
 
 /**
