@@ -19,6 +19,7 @@
 // =============================================================================
 
 import type { ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
+import type { IMintedEndpointKey } from '../tools/pipelines/components/pipeline-actions/endpointKey';
 
 /**
  * What `host.pipeline.load` answers: the document's full boot state. The
@@ -87,6 +88,10 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	/** Opens a URL: system browser (`browser`, scheme-allowlisted) or the
 	 *  bridged iframe panel (clipboard/file-dialog/drag bridging). */
 	'host.pipeline.openLink': ShellOpSpec<{ url: string; displayName?: string; browser?: boolean }, void>;
+	/** Mints the owner's scoped API key for one endpoint address (`task.data`,
+	 *  that address, the home team; plan §2.4) — answered by the host that
+	 *  holds the client. A host that cannot mint keys (OSS) rejects. */
+	'host.pipeline.createEndpointKey': ShellOpSpec<{ address: string }, IMintedEndpointKey>;
 
 	// ── File-keyed verbs (the sidebar's pipeline rows — no document open) ────
 	/** Opens a .pipe file in the pipeline editor (emitOp). */

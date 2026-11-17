@@ -160,6 +160,8 @@ interface KeyRow extends Record<string, unknown> {
 	status: string;
 	/** Team scope display string ('' for session keys). */
 	team: string;
+	/** Endpoint scope display string: the address patterns, 'all' when unscoped, '' for session keys. */
+	endpoints: string;
 	/** ISO last-used timestamp, or null if never used. */
 	lastUsedAt: string | null;
 	/** ISO expiry timestamp, or null for no expiry. */
@@ -188,7 +190,7 @@ export interface ApiKeysPanelProps {
 	 */
 	homeTeamId: string;
 	/** Creates a key; resolves with the one-time raw key value. */
-	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string; endpoints?: string[] }) => Promise<{ key: string }>;
 	/** Revokes a key by id. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 }
@@ -277,6 +279,43 @@ function teamScope(k: ApiKeyRecord): string {
 	return k.isSession ? '' : k.teamId == null ? 'All Teams' : k.teamName ?? 'Unknown team';
 }
 
+/**
+ * Endpoint scope display string for a key record (plan §2.4): the address
+ * patterns the key may send to; 'all' for an UNSCOPED key (null or absent);
+ * 'none' for a scoped key whose list is empty (the server's check admits no
+ * address then); '' for session keys.
+ *
+ * @param k - The key record.
+ * @returns The display string.
+ */
+function endpointScope(k: ApiKeyRecord): string {
+	if (k.isSession) return '';
+	if (k.endpoints == null) return 'all';
+	return k.endpoints.length > 0 ? k.endpoints.join(', ') : 'none';
+}
+
+/**
+ * One endpoint pattern: an exact address `developerId.pipelineId.source`, or
+ * `developerId.pipelineId.*` for any source of that pipe. Nothing broader
+ * (plan §2.4); the server enforces the same grammar.
+ */
+const ENDPOINT_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.(?:[A-Za-z0-9_-]+|\*)$/;
+
+/**
+ * Parses the create form's endpoints text: patterns separated by whitespace or
+ * commas. Empty text = an unscoped key.
+ *
+ * @param text - The form's endpoints input.
+ * @returns The accepted patterns and the entries that failed the grammar.
+ */
+export function parseEndpointScope(text: string): { endpoints: string[]; invalid: string[] } {
+	const entries = text.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+	return {
+		endpoints: entries.filter((e) => ENDPOINT_PATTERN.test(e)),
+		invalid: entries.filter((e) => !ENDPOINT_PATTERN.test(e)),
+	};
+}
+
 // =============================================================================
 // API KEYS PANEL
 // =============================================================================
@@ -294,6 +333,8 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 	const [formTeamId, setFormTeamId] = useState('');
 	const [formPerms, setFormPerms] = useState<string[]>([]);
 	const [formExpiry, setFormExpiry] = useState<number | null>(90);
+	// Endpoint scope, typed as whitespace- or comma-separated patterns ('' = unscoped).
+	const [formEndpoints, setFormEndpoints] = useState('');
 	// Async lifecycle shared by create and revoke.
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -317,7 +358,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 	// Create-form dirty flag: any field differs from its seeded default. It
 	// drives the materializing [Create Key] and arms the discard guard; the
 	// reveal step (Present mode) is never dirty — the record already exists.
-	const createDirty = panel?.mode === 'create' && revealed == null && (formName.trim() !== '' || formTeamId !== seededTeamId || !samePerms(formPerms, seededTeamId ? DEFAULT_KEY_PERMS : []) || formExpiry !== 90);
+	const createDirty = panel?.mode === 'create' && revealed == null && (formName.trim() !== '' || formTeamId !== seededTeamId || !samePerms(formPerms, seededTeamId ? DEFAULT_KEY_PERMS : []) || formExpiry !== 90 || formEndpoints.trim() !== '');
 
 	// ── Table rows ──────────────────────────────────────────────────────────
 	const rows = useMemo<KeyRow[]>(
@@ -327,6 +368,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 				name: k.name,
 				status: keyStatus(k),
 				team: teamScope(k),
+				endpoints: endpointScope(k),
 				lastUsedAt: k.lastUsedAt,
 				expiresAt: k.expiresAt,
 				createdAt: k.createdAt,
@@ -366,6 +408,14 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 					const team = cell.getValue() as string;
 					return team === '' ? '' : keyBadgeEl(team === 'All Teams' ? 'member' : 'pending', team);
 				},
+			},
+			{
+				title: 'Endpoints',
+				field: 'endpoints',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Task addresses the key may send to, frozen when the key was created: exact developerId.pipelineId.source entries or developerId.pipelineId.* for any source of that pipe; all = every address the owner can reach; session keys carry no scope.',
+				headerSort: true,
 			},
 			{
 				title: 'Last Used',
@@ -408,6 +458,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 		setFormTeamId(seededTeamId);
 		setFormPerms(seededTeamId ? [...DEFAULT_KEY_PERMS] : []);
 		setFormExpiry(90);
+		setFormEndpoints('');
 		setError(null);
 		setRevealed(null);
 		setPanel({ mode: 'create' });
@@ -437,11 +488,19 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 		setError(null);
 		try {
 			// Step 2: expiry days -> absolute ISO instant (server contract).
+			// Endpoint scope: every entry must be an exact address or a pipe-wide
+			// pattern; the server refuses anything broader, so refuse it here first.
+			const scope = parseEndpointScope(formEndpoints);
+			if (scope.invalid.length > 0) {
+				setError(`Endpoints must be developerId.pipelineId.source or developerId.pipelineId.*: ${scope.invalid.join(', ')}`);
+				return;
+			}
 			const expiresAt = formExpiry ? new Date(Date.now() + formExpiry * 86400000).toISOString() : undefined;
-			const params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string } = {
+			const params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string; endpoints?: string[] } = {
 				name: formName.trim(),
 				permissions: formTeamId ? formPerms : [],
 				...(expiresAt ? { expiresAt } : {}),
+				...(scope.endpoints.length > 0 ? { endpoints: scope.endpoints } : {}),
 			};
 			if (formTeamId) params.teamId = formTeamId;
 			const body = await onCreateKey(params);
@@ -531,6 +590,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 					<Section label="Key">
 						<LabelValue label="Status">{keyStatus(viewedKey)}</LabelValue>
 						<LabelValue label="Team Scope">{teamScope(viewedKey) || 'Session'}</LabelValue>
+						<LabelValue label="Endpoints">{endpointScope(viewedKey) || 'Session'}</LabelValue>
 						<LabelValue label="Created">{viewedKey.createdAt ? parseWireDate(viewedKey.createdAt).toLocaleString() : '--'}</LabelValue>
 						<LabelValue label="Last Used">{viewedKey.lastUsedAt ? `Used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}</LabelValue>
 						<LabelValue label="Expires">{viewedKey.expiresAt ? parseWireDate(viewedKey.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
@@ -642,6 +702,11 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, homeTea
 									))}
 								</select>
 								<div style={commonStyles.textMuted}>{formTeamId ? `Frozen at creation: the key resolves names through this team only${formTeamId === homeTeamId ? ' (your home team)' : ''}. Reordering your teams never moves it.` : 'Key inherits all teams from your account and resolves names through your team order as it stands at each call.'}</div>
+							</div>
+							<div style={S.field}>
+								<div style={S.fieldLabel}>Endpoints</div>
+								<input value={formEndpoints} onChange={(e) => setFormEndpoints(e.target.value)} placeholder="optional, empty = every address" style={commonStyles.inputField} />
+								<div style={commonStyles.textMuted}>Exact developerId.pipelineId.source, or developerId.pipelineId.* for any source of that pipe; separate several with spaces or commas. Nothing broader. Frozen at creation.</div>
 							</div>
 							{formTeamId && (
 								<div style={{ ...S.field, marginBottom: 14 }}>

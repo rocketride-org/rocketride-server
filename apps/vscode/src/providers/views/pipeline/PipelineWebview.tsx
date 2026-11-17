@@ -23,6 +23,7 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import type { IMintedEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
@@ -232,6 +233,8 @@ const PipelineWebview: React.FC = () => {
 			// click opens it directly.
 			promptSubscribe: () => setShowCheckout(true),
 			openLink: (url, displayName) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url, displayName }),
+			// The webview holds no client: the extension host mints the key.
+			createEndpointKey: (address) => ConnectionManager.getInstance().request('host.pipeline.createEndpointKey', { address } as never) as Promise<IMintedEndpointKey>,
 			openCloudSetup: () => {
 				// Focus the Development tab only — the prompt must not stage a
 				// connection-mode change the user never typed.

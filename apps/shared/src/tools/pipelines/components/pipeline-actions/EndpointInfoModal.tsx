@@ -13,7 +13,8 @@
 import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IEndpointInfo } from './PipelineActions';
-import { appendAuthQueryParam, buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
+import { buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
+import type { EndpointKeyMinter, IMintedEndpointKey } from './endpointKey';
 import { commonStyles } from 'shell';
 
 // =============================================================================
@@ -171,14 +172,6 @@ const styles: Record<string, CSSProperties> = {
 		...commonStyles.textEllipsis,
 	},
 
-	configValueMasked: {
-		flex: 1,
-		fontSize: '12px',
-		color: 'var(--rr-text-disabled)',
-		...commonStyles.fontMono,
-		letterSpacing: '2px',
-	},
-
 	iconBtn: {
 		display: 'inline-flex',
 		alignItems: 'center',
@@ -229,6 +222,8 @@ interface IEndpointInfoModalProps {
 	displayName?: string;
 	/** Host to replace {host} placeholders in all values. */
 	host?: string;
+	/** Mints the owner's scoped key for this endpoint (plan §2.4). Absent = the host cannot mint keys. */
+	onCreateEndpointKey?: EndpointKeyMinter;
 }
 
 // =============================================================================
@@ -248,8 +243,6 @@ function processEndpointInfo(info: IEndpointInfo, host?: string): IEndpointInfo 
 	return processed;
 }
 
-const MASKED_VALUE = '•••••••••••••••••••';
-
 const TAB_ORDER: IntegrationTabId[] = ['curl', 'curlCmd', 'powershell', 'wget', 'typescript', 'python', 'http'];
 
 const TAB_LABELS: Record<IntegrationTabId, string> = {
@@ -268,8 +261,15 @@ const INTEGRATION_TABS = TAB_ORDER.map((id) => ({ id, label: TAB_LABELS[id] }));
 // Component
 // =============================================================================
 
-export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, displayName, host }: IEndpointInfoModalProps): ReactElement | null {
-	const [isTokenVisible, setIsTokenVisible] = useState(false);
+export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, displayName, host, onCreateEndpointKey }: IEndpointInfoModalProps): ReactElement | null {
+	// The key minted for THIS endpoint, shown once (plan §2.4): never stored,
+	// dropped when the modal shows another endpoint.
+	const [minted, setMinted] = useState<IMintedEndpointKey | null>(null);
+	const [minting, setMinting] = useState(false);
+	const [mintError, setMintError] = useState<string | null>(null);
+	// Bumped per mint and per endpoint change; a mint whose generation is no
+	// longer current belongs to a previous endpoint and is ignored.
+	const mintGenerationRef = React.useRef(0);
 	const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<IntegrationTabId>('curl');
 	// The picked payload is an OVERRIDE, not the value itself: the modal stays
@@ -285,20 +285,45 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const endpointKey = endpointInfo?.['url-link'] ?? null;
 	React.useEffect(() => {
 		setPayloadOverride(null);
+		setMinted(null);
+		setMintError(null);
+		setMinting(false);
+		mintGenerationRef.current++;
 	}, [endpointKey]);
 
 	if (!endpointInfo || !isOpen) return null;
 
 	const processed = processEndpointInfo(endpointInfo, host);
 	const endpointUrl = processed['url-link'];
-	const authKey = processed['auth-key'];
-	const urlWithAuth = appendAuthQueryParam(endpointUrl, authKey);
+	const address = processed.address;
 	const isLocalEndpoint = /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(endpointUrl);
 	const isWebhookEndpoint = /web[\s-]?hook/i.test(endpointUrl) || /web[\s-]?hook/i.test(processed['url-text'] ?? '');
 
 	const connectedLanes = endpointInfo.lanes;
 	const payloadId = payloadOverride ?? defaultWebhookPayloadId(connectedLanes);
-	const examples = buildIntegrationExamples({ endpointUrl, authKey, isWebhook: isWebhookEndpoint, payloadId });
+	// The snippets carry the minted key once there is one, the placeholder before.
+	const examples = buildIntegrationExamples({ endpointUrl, authKey: minted?.key, isWebhook: isWebhookEndpoint, payloadId });
+
+	/** Create API key: task.data on this address, frozen to the home team, shown once.
+	 *  A mint is tied to the endpoint it started for: the modal stays mounted
+	 *  between endpoints, so a result that lands after the endpoint changed is
+	 *  dropped rather than shown as the new endpoint's key. */
+	const handleMint = async (): Promise<void> => {
+		if (!onCreateEndpointKey || !address) return;
+		const mine = ++mintGenerationRef.current;
+		setMinting(true);
+		setMintError(null);
+		try {
+			const result = await onCreateEndpointKey(address);
+			if (mine !== mintGenerationRef.current) return;
+			setMinted(result);
+		} catch (e) {
+			if (mine !== mintGenerationRef.current) return;
+			setMintError(e instanceof Error ? e.message : String(e));
+		} finally {
+			if (mine === mintGenerationRef.current) setMinting(false);
+		}
+	};
 	const payload = getWebhookPayload(payloadId);
 	const readsChosenLane = connectedLanes?.includes(payload.lane) ?? true;
 
@@ -319,7 +344,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 		...(copyFeedback === label ? styles.iconBtnSuccess : {}),
 	});
 
-	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : isLocalEndpoint ? 'Local URL. For embedding outside VS Code, copy the URL with auth or use the integration examples below.' : 'Use the URL with auth query or the examples below to integrate into your application.';
+	// A chat / dropper PAGE has no sign-in of its own and the task tokens it
+	// took on the URL are gone (plan §2.4); the signed-in rocketride.chat and
+	// rocketride.dropper apps replace it (plan §3.6, Step 5b). Say so rather
+	// than promise a flow the page cannot complete.
+	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : 'This page is being replaced by the signed-in Chat and Dropper apps; until they ship it cannot be opened with a key, since no credential rides a URL any more.';
 
 	return createPortal(
 		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
@@ -328,7 +357,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 			<div style={styles.modal}>
 				{/* Header */}
 				<div style={styles.header}>
-					<div style={styles.title}>Endpoint Configuration</div>
+					<div style={styles.title}>{displayName ? `Endpoint — ${displayName}` : 'Endpoint'}{address ? ` (${address})` : ''}</div>
 					<button style={styles.closeBtn} onClick={() => onCloseRef.current()}>
 						×
 					</button>
@@ -363,68 +392,57 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 						</div>
 					</div>
 
-					{/* URL with auth (query) — easier for apps that cannot set headers */}
-					<div style={styles.configItem}>
-						<div style={styles.configLabel}>URL with auth (query)</div>
-						<div style={styles.envHint}>(e.g. /chat?auth=pk_...). Use when you cannot send an Authorization header.</div>
-						<div style={styles.configValueRow}>
-							<div style={styles.configValueLink} title={urlWithAuth}>
-								<a
-									href="#"
-									style={styles.link}
-									onClick={(e) => {
-										e.preventDefault();
-										onOpenLink?.(urlWithAuth, displayName);
-									}}
-								>
-									{urlWithAuth}
-								</a>
-							</div>
-							<button style={styles.iconBtn} onClick={() => onOpenLink?.(urlWithAuth, displayName)}>
-								Open
-							</button>
-							<button style={iconBtn('urlAuth')} onClick={() => handleCopy(urlWithAuth, 'urlAuth')}>
-								{copyFeedback === 'urlAuth' ? 'Copied!' : 'Copy'}
-							</button>
-						</div>
-					</div>
-
-					{/* Auth Key Section */}
-					<div style={styles.configItem}>
-						<div style={styles.configLabel}>{processed['auth-text']}</div>
-						<div style={styles.configValueRow}>
-							<div style={styles.configValue}>{processed['auth-key']}</div>
-							<button style={iconBtn('key')} onClick={() => handleCopy(processed['auth-key'], 'key')}>
-								{copyFeedback === 'key' ? 'Copied!' : 'Copy'}
-							</button>
-						</div>
-					</div>
-
-					{/* Token Section (if available) */}
-					{processed['token-key'] && processed['token-text'] && (
+					{/* Address — what a caller POSTs to and what a key is scoped to (plan §2.2) */}
+					{address && (
 						<div style={styles.configItem}>
-							<div style={styles.configLabel}>{processed['token-text']}</div>
+							<div style={styles.configLabel}>Address</div>
 							<div style={styles.configValueRow}>
-								<div style={isTokenVisible ? styles.configValue : styles.configValueMasked}>{isTokenVisible ? processed['token-key'] : MASKED_VALUE}</div>
-								<button style={styles.iconBtn} onClick={() => setIsTokenVisible(!isTokenVisible)}>
-									{isTokenVisible ? 'Hide' : 'Show'}
-								</button>
-								<button style={iconBtn('token')} onClick={() => handleCopy(processed['token-key']!, 'token')}>
-									{copyFeedback === 'token' ? 'Copied!' : 'Copy'}
+								<div style={styles.configValue}>{address}</div>
+								<button style={iconBtn('address')} onClick={() => handleCopy(address, 'address')}>
+									{copyFeedback === 'address' ? 'Copied!' : 'Copy'}
 								</button>
 							</div>
 						</div>
 					)}
 
-					{/* Security Note */}
-					<div style={styles.securityNote}>
-						<strong>Security:</strong> Keep your authentication credentials secure. Do not share them publicly or commit them to version control.
-					</div>
+					{/* Key for this endpoint — the modal MINTS it (plan §2.4, mockup 3.5):
+					    task.data, this one address, the home team, shown once; it is
+					    listed and revoked in Settings › Account › API Keys. */}
+					{isWebhookEndpoint && address && (
+						<div style={styles.configItem}>
+							<div style={styles.configLabel}>Key for this endpoint</div>
+							<div style={styles.envHint}>External systems POST to this address with an account key in the Authorization header; ?auth= is not accepted. Create API key mints a key scoped to task.data on {address}, frozen to your home team, with no expiry. Nothing broader.</div>
+							{minted ? (
+								<>
+									<div style={styles.configValueRow}>
+										<div style={styles.configValue}>{minted.key}</div>
+										<button style={iconBtn('mintedKey')} onClick={() => handleCopy(minted.key, 'mintedKey')}>
+											{copyFeedback === 'mintedKey' ? 'Copied!' : 'Copy'}
+										</button>
+									</div>
+									<div style={styles.securityNote}>
+										<strong>Shown once:</strong> copy it now. It is listed in Settings › Account › API Keys as &quot;{minted.name}&quot;{minted.teamId ? ' with its frozen team' : ''}; revoke it there. The examples below carry it.
+									</div>
+								</>
+							) : (
+								<div style={styles.configValueRow}>
+									{onCreateEndpointKey ? (
+										<button style={styles.iconBtn} disabled={minting} onClick={() => void handleMint()}>
+											{minting ? 'Creating…' : 'Create API key'}
+										</button>
+									) : (
+										<div style={styles.envHint}>This host cannot mint keys; create one in Settings › Account › API Keys with this address as its endpoint.</div>
+									)}
+								</div>
+							)}
+							{mintError && <div style={styles.securityNote}>Could not create the key: {mintError}</div>}
+						</div>
+					)}
 
 					{/* Integration examples */}
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
-						<div style={styles.envHint}>{isWebhookEndpoint ? 'Webhook: POST with Bearer auth, or use the URL with ?auth= if supported.' : 'Chat / UI: prefer opening the URL with auth in a browser or embedded webview.'}</div>
+						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: the page URL, for when the signed-in Chat and Dropper apps take it over; it carries no credential.'}</div>
 						{isWebhookEndpoint && (
 							<>
 								<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>

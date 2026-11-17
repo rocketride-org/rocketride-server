@@ -34,6 +34,7 @@
 
 import { ReactElement, ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
+import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
 
@@ -127,6 +128,8 @@ export interface IFlowContainerProps {
 
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
+	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
+	onCreateEndpointKey?: EndpointKeyMinter;
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
@@ -165,7 +168,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -198,7 +201,7 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					onRunPipeline={onRunPipeline}
 					onStopPipeline={onStopPipeline}
 					onOpenStatus={onOpenStatus}
-					serverHost={serverHost}
+					serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey}
 					isConnected={isConnected}
 					cloudConnectionConfigured={cloudConnectionConfigured}
 					isSubscribed={isSubscribed}

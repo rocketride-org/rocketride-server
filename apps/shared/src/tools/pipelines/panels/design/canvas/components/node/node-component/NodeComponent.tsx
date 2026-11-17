@@ -117,7 +117,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	const { nodes, edges, parameters } = useFlowGraph();
 	const { taskStatuses, componentPipeCounts, totalPipes, servicesJson } = useFlowProject();
 	const { setQuickAddState } = useFlowGraph();
-	const { onOpenStatus, onOpenLink, serverHost } = useFlowProject();
+	const { onOpenStatus, onOpenLink, serverHost, onCreateEndpointKey } = useFlowProject();
 	const { isLocked } = useFlowPreferences();
 
 	// =========================================================================
@@ -235,7 +235,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 
 			{/* Pipeline execution status — persists after completion for source nodes */}
 			<ConditionalRender condition={hasStatus}>
-				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenStatus={onOpenStatus} onOpenLink={onOpenLink} serverHost={serverHost} displayName={displayTitle} />
+				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenStatus={onOpenStatus} onOpenLink={onOpenLink} serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey} displayName={displayTitle} />
 			</ConditionalRender>
 
 			{/* Spacer to reserve vertical space for invoke source labels */}

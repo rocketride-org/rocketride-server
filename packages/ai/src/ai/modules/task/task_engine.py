@@ -2669,41 +2669,13 @@ class TaskEngine(DAPBase):
         elif event_type == 'apaevt_status_user':
             notes = body.get('notes', [])
 
-            if not notes:
-                self._status.notes = []
-            else:
-                for note in notes:
-                    if isinstance(note, str):
-                        # Handle string notes - simple replacement; {token} is
-                        # the token SLOT, which carries the address
-                        note = note.replace('{token}', self.address)
-                        # getattr: partially-initialized tasks (and test stubs)
-                        # may not carry the identity attributes at all.
-                        project_id = getattr(self, 'project_id', None)
-                        source = getattr(self, 'source', None)
-                        if project_id is not None:
-                            note = note.replace('{project_id}', str(project_id))
-                        if source is not None:
-                            note = note.replace('{source}', str(source))
-                        self._status.notes.append(note)
-                    elif isinstance(note, dict):
-                        # Handle dict notes - walk through and replace in all string values
-                        processed_note = {}
-                        for key, value in note.items():
-                            if isinstance(value, str):
-                                # Replace placeholders in string values
-                                value = value.replace('{token}', self.address)
-                                project_id = getattr(self, 'project_id', None)
-                                source = getattr(self, 'source', None)
-                                if project_id is not None:
-                                    value = value.replace('{project_id}', str(project_id))
-                                if source is not None:
-                                    value = value.replace('{source}', str(source))
-                            processed_note[key] = value
-                        self._status.notes.append(processed_note)
-                    else:
-                        # Unknown type, append as-is
-                        self._status.notes.append(note)
+            # The notes are stored AS EMITTED, placeholders intact: {token} /
+            # {address}, {project_id} and {source} name a CONTROL's identity,
+            # and one engine may serve several controls (a private engine of
+            # one owner with two addresses of identical content; a shared one
+            # scrubs notes altogether). TaskControl.project_status expands
+            # them with each holder's own address (plan 7.5).
+            self._status.notes = list(notes) if notes else []
 
         # Handle info data from >INF* output
         elif event_type == 'apaevt_status_info':

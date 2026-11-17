@@ -628,32 +628,24 @@ def test_update_status_user_event_with_empty_notes_clears_notes():
     assert t._status.notes == []
 
 
-def test_update_status_user_event_replaces_token_placeholders_in_strings():
-    """String notes have the {token} placeholder (the token SLOT) substituted with the address."""
+def test_update_status_user_event_stores_notes_as_emitted():
+    """Notes keep their identity placeholders ({token}, {address}, {project_id},
+    {source}) in the ENGINE's status: one engine may serve several controls, and
+    TaskControl.project_status expands them per holder (plan 7.5). Strings,
+    dicts and other types ride through unchanged.
+    """
     t = _task(status=_make_status_for_update())
     t.address = 'acme.proj-x.src-x'
+    notes = ['send to {token}', {'url-link': '{host}/webhook/{address}', 'address': '{address}', 'count': 42}, 42]
     TaskEngine._update_status(
         t,
         {
             'event': 'apaevt_status_user',
-            'body': {'notes': ['send to {token}']},
+            'body': {'notes': notes},
         },
     )
-    assert t._status.notes == ['send to acme.proj-x.src-x']
-
-
-def test_update_status_user_event_replaces_placeholders_in_dict_values():
-    """Dict notes have placeholders replaced in every string value, keeping other types."""
-    t = _task(status=_make_status_for_update())
-    t.address = 'acme.proj-x.src-x'
-    TaskEngine._update_status(
-        t,
-        {
-            'event': 'apaevt_status_user',
-            'body': {'notes': [{'msg': 'token is {token}', 'count': 42}]},
-        },
-    )
-    assert t._status.notes == [{'msg': 'token is acme.proj-x.src-x', 'count': 42}]
+    assert t._status.notes == notes
+    assert t._status.notes is not notes
 
 
 def test_update_status_user_event_keeps_unknown_note_types_as_is():

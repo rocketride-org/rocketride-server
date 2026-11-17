@@ -18,6 +18,7 @@
  */
 
 import React, { ReactElement } from 'react';
+import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 import { ITaskStatus, ITaskState } from '../../../../types';
 import { PipelineActions } from 'shared/tools/pipelines/components/pipeline-actions';
@@ -71,11 +72,13 @@ interface INodeStatusProps {
 	onOpenLink?: (url: string, displayName?: string) => void;
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
+	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
+	onCreateEndpointKey?: EndpointKeyMinter;
 	/** Display name for the source node (used as the tab title when opening links). */
 	displayName?: string;
 }
 
-export default function NodeStatus({ componentProvider, isSourceNode, taskStatus, componentPipeCounts, totalPipes, onOpenStatus, onOpenLink, serverHost, displayName }: INodeStatusProps): ReactElement | null {
+export default function NodeStatus({ componentProvider, isSourceNode, taskStatus, componentPipeCounts, totalPipes, onOpenStatus, onOpenLink, serverHost, onCreateEndpointKey, displayName }: INodeStatusProps): ReactElement | null {
 	// ========================================================================
 	// Source node: persistent mini dashboard
 	// ========================================================================
@@ -103,7 +106,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 			</a>
 		) : null;
 
-		const pipelineActions = <PipelineActions notes={taskStatus.notes} host={serverHost} onOpenLink={onOpenLink} displayName={displayName} />;
+		const pipelineActions = <PipelineActions notes={taskStatus.notes} host={serverHost} onOpenLink={onOpenLink} onCreateEndpointKey={onCreateEndpointKey} displayName={displayName} />;
 
 		// ── Starting / Initializing ──────────────────────────────────────
 		if (isRunning && (taskStatus.state === ITaskState.STARTING || taskStatus.state === ITaskState.INITIALIZING)) {

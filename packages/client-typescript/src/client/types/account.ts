@@ -51,6 +51,13 @@ export interface ApiKeyRecord {
 	/** Array of permission strings granted to this key. */
 	permissions: string[];
 
+	/**
+	 * The key's task-address scope: patterns (`developerId.pipelineId.source`
+	 * or `developerId.pipelineId.*`) the key may send to; null or absent for
+	 * an unscoped key. Frozen at mint, like the team.
+	 */
+	endpoints?: string[] | null;
+
 	/** ISO timestamp of when the key was created, or null. */
 	createdAt: string | null;
 

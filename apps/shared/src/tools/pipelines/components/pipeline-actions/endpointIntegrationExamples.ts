@@ -64,21 +64,18 @@ export function defaultWebhookPayloadId(lanes?: string[]): WebhookPayloadId {
 	return 'json';
 }
 
-/** Appends `?auth=` (or `&auth=`) so integrations can use the full URL without an Authorization header. */
-export function appendAuthQueryParam(url: string, authKey: string): string {
-	try {
-		const u = new URL(url);
-		u.searchParams.set('auth', authKey);
-		return u.toString();
-	} catch {
-		const sep = url.includes('?') ? '&' : '?';
-		return `${url}${sep}auth=${encodeURIComponent(authKey)}`;
-	}
-}
+/**
+ * What the snippets show where the account key goes until the modal has
+ * minted one. The data door takes the key ONLY in the Authorization header
+ * (plan §3.5: `?auth=` is gone with the pk_ tokens), so every snippet carries
+ * a header and none carries a query credential.
+ */
+export const API_KEY_PLACEHOLDER = 'YOUR_API_KEY';
 
 export interface IBuildIntegrationExamplesParams {
 	endpointUrl: string;
-	authKey: string;
+	/** The account key the snippets send; the placeholder when none is minted yet. */
+	authKey?: string;
 	isWebhook: boolean;
 	/** Which lane the webhook examples should target. Defaults to JSON. Ignored for chat/dropper. */
 	payloadId?: WebhookPayloadId;
@@ -93,8 +90,8 @@ function parseHttpUrl(url: string): { host: string; pathWithQuery: string } {
 	}
 }
 
-export function buildIntegrationExamples({ endpointUrl, authKey, isWebhook, payloadId }: IBuildIntegrationExamplesParams): Record<IntegrationTabId, string> {
-	const urlWithAuth = appendAuthQueryParam(endpointUrl, authKey);
+export function buildIntegrationExamples({ endpointUrl, authKey: givenKey, isWebhook, payloadId }: IBuildIntegrationExamplesParams): Record<IntegrationTabId, string> {
+	const authKey = givenKey || API_KEY_PLACEHOLDER;
 	const { host, pathWithQuery } = parseHttpUrl(endpointUrl);
 
 	if (isWebhook) {
@@ -164,31 +161,32 @@ ${body}`,
 		};
 	}
 
-	const getPath = parseHttpUrl(urlWithAuth);
-	const curlUiBash = `curl -sS "${urlWithAuth}"`;
-	const curlUiCmd = `REM URL already includes ?auth=, so no Authorization header needed
-curl.exe -sS "${urlWithAuth}"`;
-	const psUiGet = `Invoke-RestMethod -Uri '${urlWithAuth.replace(/'/g, "''")}' -Method Get`;
+	// A chat / dropper page is a browser surface. No credential rides the URL
+	// (plan §3.6: the signed-in shell apps own sign-in).
+	const curlUiBash = `curl -sS "${endpointUrl}"`;
+	const curlUiCmd = `REM A browser page; curl fetches the HTML only
+curl.exe -sS "${endpointUrl}"`;
+	const psUiGet = `Invoke-RestMethod -Uri '${endpointUrl.replace(/'/g, "''")}' -Method Get`;
 
 	return {
-		curl: `# Open in browser (optional, URL includes auth):
-# ${urlWithAuth}
+		curl: `# Open in a browser:
+# ${endpointUrl}
 
 ${curlUiBash}`,
 		curlCmd: curlUiCmd,
 		powershell: psUiGet,
-		wget: `wget -qO- "${urlWithAuth}"`,
-		typescript: `// Open UI with auth in the URL (recommended for embedded apps)
-window.open("${urlWithAuth}", "_blank");
+		wget: `wget -qO- "${endpointUrl}"`,
+		typescript: `// Open the page
+window.open("${endpointUrl}", "_blank");
 
-// Optional: fetch the HTML (usually not needed for chat UI)
-const res = await fetch("${urlWithAuth}");
+// Optional: fetch the HTML (usually not needed for a chat page)
+const res = await fetch("${endpointUrl}");
 console.log(await res.text());`,
 		python: `import webbrowser
 
-webbrowser.open("${urlWithAuth}")`,
-		http: `GET ${getPath.pathWithQuery} HTTP/1.1
-Host: ${getPath.host}
+webbrowser.open("${endpointUrl}")`,
+		http: `GET ${pathWithQuery} HTTP/1.1
+Host: ${host}
 
 `,
 	};

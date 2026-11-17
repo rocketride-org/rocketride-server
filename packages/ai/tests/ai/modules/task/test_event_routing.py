@@ -259,6 +259,35 @@ def test_project_status_scrubs_a_shared_engines_diagnostics_metrics_and_tokens()
     assert body['metrics']['cpu_percent'] == 0.0 and body['tokens']['total'] == 0.0
 
 
+def test_project_status_expands_the_notes_placeholders_with_the_controls_own_address():
+    """The engine stores notes as emitted; two controls of one owner holding one
+    private engine under different addresses each see their own door.
+    """
+    stored = [
+        {'url-link': '{host}/webhook/{address}', 'address': '{address}', 'lanes': ['json']},
+        'send to {token} ({project_id}/{source})',
+        42,
+    ]
+    bodies = {}
+    for address, project_id in (('acme.docBrain.webhook_1', 'docBrain'), ('acme.leadSync.webhook_1', 'leadSync')):
+        control = TaskControl()
+        control.task = SimpleNamespace(dormant_reason=None, state=None, is_live=True)
+        control.engine_starting = False
+        control.address = address
+        control.project_id = project_id
+        bodies[address] = control.project_status({'notes': stored}, shared=False)
+    assert bodies['acme.docBrain.webhook_1']['notes'] == [
+        {'url-link': '{host}/webhook/acme.docBrain.webhook_1', 'address': 'acme.docBrain.webhook_1', 'lanes': ['json']},
+        'send to acme.docBrain.webhook_1 (docBrain/webhook_1)',
+        42,
+    ]
+    assert bodies['acme.leadSync.webhook_1']['notes'][1] == 'send to acme.leadSync.webhook_1 (leadSync/webhook_1)'
+    # The stored notes were not modified: the next holder expands its own.
+    assert stored[1] == 'send to {token} ({project_id}/{source})'
+    # A shared engine's notes are scrubbed, expanded or not.
+    assert control.project_status({'notes': stored}, shared=True)['notes'] == []
+
+
 # =============================================================================
 # OPENER FIRST AND THE OPS GATE
 # =============================================================================

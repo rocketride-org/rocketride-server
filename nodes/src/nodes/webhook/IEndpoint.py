@@ -97,17 +97,18 @@ class IEndpoint(IEndpointBase):
         plus a ``json.dumps``. Called directly from :pyfunc:`_run`.
         """
         try:
+            # The notes carry NO credential (plan 2.4: the pk_/tk_ tokens are
+            # gone; a machine caller holds an account key in the Authorization
+            # header, and the endpoint panel mints one scoped to this address).
+            # {address} is the control's address, developerId.pipeId.source,
+            # which is also the one path form the data door accepts (B36).
             if self.endpoint.logicalType == 'chat':
-                # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Chat now',
-                    'button-link': '{host}/chat/{project_id}/{source}?auth={public_auth}',
+                    'button-link': '{host}/chat/{project_id}/{source}',
                     'url-text': 'Chat interface URL',
                     'url-link': '{host}/chat/{project_id}/{source}',
-                    'auth-text': 'Public Authorization Key',
-                    'auth-key': '{public_auth}',
-                    'token-text': 'Private Token',
-                    'token-key': '{token}',
+                    'address': '{address}',
                 }
                 monitorOther('usr', json.dumps([info]))
                 monitorStatus('Chat ready - system is ready to accept questions')
@@ -115,13 +116,10 @@ class IEndpoint(IEndpointBase):
             elif self.endpoint.logicalType == 'dropper':
                 info = {
                     'button-text': 'Drop now',
-                    'button-link': '{host}/dropper/{project_id}/{source}?auth={public_auth}',
+                    'button-link': '{host}/dropper/{project_id}/{source}',
                     'url-text': 'Dropper interface URL',
                     'url-link': '{host}/dropper/{project_id}/{source}',
-                    'auth-text': 'Public Authorization Key',
-                    'auth-key': '{public_auth}',
-                    'token-text': 'Private Token',
-                    'token-key': '{token}',
+                    'address': '{address}',
                 }
                 monitorOther('usr', json.dumps([info]))
                 monitorStatus('Dropper ready - system is ready to process files')
@@ -138,11 +136,10 @@ class IEndpoint(IEndpointBase):
                 }
                 info = {
                     'url-text': url_text_map[self.endpoint.logicalType],
-                    'url-link': '{host}/webhook/{project_id}/{source}',
-                    'auth-text': 'Public Authorization Key',
-                    'auth-key': '{public_auth}',
-                    'token-text': 'Private Token',
-                    'token-key': '{token}',
+                    # The one path form the data door accepts: the dotted
+                    # address in a single segment (plan 3.5, B36).
+                    'url-link': '{host}/webhook/{address}',
+                    'address': '{address}',
                     # Lets the endpoint panel preselect a Content-Type that
                     # actually reaches a component. Empty when unavailable.
                     'lanes': _connectedLanes(self.target),

@@ -27,6 +27,7 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 import { commonStyles } from 'shell';
 import { ToggleGroup } from 'shell';
@@ -83,6 +84,8 @@ export interface ISourcePanelProps {
 	isSubscribed?: boolean;
 	isReadonly?: boolean;
 	serverHost?: string;
+	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
+	onCreateEndpointKey?: EndpointKeyMinter;
 	/** Run/stop for the dev continuum (hidden on deploy sections). */
 	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	onOpenLink?: (url: string, displayName?: string) => void;
@@ -220,7 +223,7 @@ function formatTime(time: number | null | undefined): string {
 /**
  * The self-contained per-source monitoring + replay section.
  */
-export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
+export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isSubscribed, isReadonly, serverHost, onCreateEndpointKey, onPipelineAction, onOpenLink }) => {
 	// --- Section-local view state --------------------------------------------
 	const [pill, setPill] = useState<SourcePill>('status');
 	const [timeline, setTimeline] = useState<TaskTimeline | null>(null);
@@ -641,7 +644,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 				headerActions={
 					<div style={styles.headerActionsColumn}>
 						<div style={{ ...styles.headerActionsRow, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
-							<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
+							<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} onCreateEndpointKey={onCreateEndpointKey} displayName={source.name} />
 							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && <StatusActions taskStatus={liveTaskStatus ?? null} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} isSubscribed={isSubscribed} />}
 						</div>
 						{isReplay ? (
