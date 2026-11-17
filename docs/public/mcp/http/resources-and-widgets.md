@@ -1,6 +1,7 @@
 ---
 title: Resources & Widgets
 sidebar_position: 3
+description: Beyond the tools, the RocketRide MCP server exposes two read-only resources for live engine state and renders some tool results as interactive widgets.
 ---
 
 # Resources & Widgets

@@ -1,5 +1,6 @@
 ---
-title: OpenTelemetry Bridge
+title: OpenTelemetry Bridge (rocketride otel)
+sidebar_label: OpenTelemetry Bridge
 sidebar_position: 13
 ---
 

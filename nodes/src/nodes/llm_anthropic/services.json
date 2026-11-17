@@ -182,17 +182,6 @@
 				},
 				"apikey": ""
 			},
-			"claude-haiku-latest": {
-				"title": "Anthropic Claude Haiku Latest",
-				"model": "claude-haiku-latest",
-				"modelSource": "openrouter",
-				"modelTotalTokens": 200000, // openrouter
-				"modelOutputTokens": 64000, // openrouter
-				"capabilities": {
-					"reasoning": true
-				},
-				"apikey": ""
-			},
 			"claude-opus-4": {
 				"title": "Anthropic: Claude Opus 4",
 				"model": "claude-opus-4",
@@ -487,12 +476,6 @@
 					]
 				},
 				{
-					"value": "claude-haiku-latest",
-					"properties": [
-						"anthropic.claude-haiku-latest"
-					]
-				},
-				{
 					"value": "claude-opus-4",
 					"properties": [
 						"anthropic.claude-opus-4"
@@ -591,14 +574,6 @@
 		},
 		"anthropic.claude-fable-latest": {
 			"object": "claude-fable-latest",
-			"properties": [
-				"llm.cloud.apikey",
-				"extendedThinking",
-				"llm.cloud.modelSource"
-			]
-		},
-		"anthropic.claude-haiku-latest": {
-			"object": "claude-haiku-latest",
 			"properties": [
 				"llm.cloud.apikey",
 				"extendedThinking",

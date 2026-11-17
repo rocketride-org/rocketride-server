@@ -30,6 +30,7 @@ Global Resources:
 
 import os
 import asyncio
+import inspect
 import contextlib
 import sys
 import json
@@ -40,6 +41,7 @@ import hashlib
 import secrets
 import shlex
 import shutil
+import signal
 from collections import deque
 from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
@@ -58,6 +60,7 @@ from ai.constants import (
     CONST_ANALYTICS_SLOWEST_DOCS,
     CONST_TASK_DATA_PATH,
     CONST_BILLING_UNAVAILABLE,
+    CONST_TASK_TOKEN_KEY_ENV,
     CONST_CHANNEL_DATA_WAIT,
     CONST_CHANNEL_DIAL_LIMIT,
     CONST_CHANNEL_DIAL_WINDOW,
@@ -316,21 +319,53 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
     return frozenset(names), tuple(prefixes)
 
 
+# Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
+# in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
+# token key would let pipeline code mint any run's private token.
+CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV})
+
+
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
     """Return the subset of ``environ`` a task subprocess may inherit.
 
     Names are matched case-insensitively: Windows treats them that way, and the
     POSIX proxy variables are conventionally lowercase. Original spelling is
-    kept in the result.
+    kept in the result. Names in CONST_SUBPROCESS_ENV_NEVER are never passed.
     """
     opt_names, opt_prefixes = _subprocess_env_opt_in(environ)
     prefixes = CONST_SUBPROCESS_ENV_PREFIXES + opt_prefixes
     allowed: Dict[str, str] = {}
     for name, value in environ.items():
         key = name.upper()
+        if key in CONST_SUBPROCESS_ENV_NEVER:
+            continue
         if key in CONST_SUBPROCESS_ENV_NAMES or key in opt_names or key.startswith(prefixes):
             allowed[name] = value
     return allowed
+
+
+# Deployment secret the engine derives the parameter token key from. Like the
+# other deployment keys it is not in the subprocess allowlist above.
+CONST_PARAM_TOKEN_SECRET_ENV = 'RR_PARAM_TOKEN_SECRET'
+
+
+def resolve_parameter_tokens(pipeline: Dict[str, Any], environ: Mapping[str, str] = os.environ) -> Dict[str, Any]:
+    """Return ``pipeline`` with its parameter tokens decoded, when a deployment secret is set.
+
+    With ``RR_PARAM_TOKEN_SECRET`` set, the engine encrypts new parameter
+    tokens (``secureParameters.token``) with a key derived from it. The task
+    subprocess never gets that variable, so the engine decodes the tokens here
+    and drops the ``secureParameters`` blocks; the subprocess then reads plain
+    values from its owner-only task file, like resolved ``${...}`` values.
+    Without the variable the pipeline is returned unchanged and the subprocess
+    decodes the tokens itself.
+    """
+    if not environ.get(CONST_PARAM_TOKEN_SECRET_ENV):
+        return pipeline
+
+    from rocketlib import resolveSecureParameters
+
+    return resolveSecureParameters(pipeline)
 
 
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
@@ -350,6 +385,20 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 # so the task can rely on them.
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
+
+# Signals that end a task process as a crash: the engine's crash signals and an OOM kill
+CONST_CRASH_SIGNALS = ('SIGSEGV', 'SIGBUS', 'SIGFPE', 'SIGILL', 'SIGABRT', 'SIGKILL')
+
+# Windows exception codes that end a task process as a crash
+CONST_CRASH_EXCEPTIONS = {
+    0xC0000005: 'STATUS_ACCESS_VIOLATION',
+    0xC000001D: 'STATUS_ILLEGAL_INSTRUCTION',
+    0xC0000094: 'STATUS_INTEGER_DIVIDE_BY_ZERO',
+    0xC00000FD: 'STATUS_STACK_OVERFLOW',
+    0xC0000374: 'STATUS_HEAP_CORRUPTION',
+    0xC0000409: 'STATUS_STACK_BUFFER_OVERRUN',
+    0xC0000602: 'STATUS_FAIL_FAST_EXCEPTION',
+}
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -394,6 +443,25 @@ def saas_pipeline_violation(
                     'Use streamable-http or sse.'
                 )
     return None
+
+
+def _accepts_credential(authorize: Callable[..., Any]) -> bool:
+    """True when ``authorize`` (an ``authorize_db_target``) takes ``credential=``.
+
+    Read from the signature rather than by calling and catching ``TypeError``:
+    a ``TypeError`` raised inside an implementation would otherwise be taken
+    for a missing keyword, retried without the credential and, on an
+    implementation that audits, recorded twice. A signature that cannot be
+    read counts as accepting, so a credential is never dropped on a guess.
+    """
+    try:
+        parameters = inspect.signature(authorize).parameters
+    except (TypeError, ValueError):
+        return True
+    named = parameters.get('credential')
+    if named is not None and named.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
 
 
 def _is_saas_engine() -> bool:
@@ -639,6 +707,10 @@ class Task(DAPBase):
         # _terminated() falls back to the process exit code.
         self._exit_event_seen = False
 
+        # This run's crash, as the console shows it, and whether the server killed the process
+        self._crash: Optional[str] = None
+        self._process_killed = False
+
         # Server reference
         self._server = server
 
@@ -734,6 +806,15 @@ class Task(DAPBase):
         # Header `seq` is NOT this counter — seq belongs to the DAP
         # per-connection message stream; the continuum rides in `logSeq`.
         self._log_seq_next = 1
+
+        # The databases this run was authorized for, as ``_db_access`` returned
+        # them: ``(distinct (scope, target) pairs, public-endpoint flag)``. Team
+        # and user ids, never a credential or a DSN. Set at each (re)start and
+        # read back when another connection asks to reuse the running task
+        # (``authorize_reuse``). None until the first start reads it; a
+        # connection reusing a starting run waits on ``_db_seen_event``, which
+        # the ``_db_seen`` property keeps in step.
+        self._db_seen = None
 
         # Run-log writer — the per-task event continuum (created at subprocess
         # start; None if logging setup failed, which must never break the run).
@@ -879,7 +960,7 @@ class Task(DAPBase):
         }
 
     async def _authorize_db_targets(
-        self, targets: List[Tuple[str, str]], public_endpoint: bool
+        self, targets: List[Tuple[str, str]], public_endpoint: bool, *, credential: Optional[str] = None
     ) -> List[Tuple[str, str, str]]:
         """Authorize every database the pipeline's DB nodes use (SDD 4.4).
 
@@ -889,6 +970,13 @@ class Task(DAPBase):
         Args:
             targets, public_endpoint: from ``_db_access`` on the resolved
                 pipeline.
+            credential: The ``AccountInfo.auth`` of the connection that started
+                or restarted this run, handed to ``authorize_db_target`` so the
+                account layer can narrow the decision to what that credential
+                may reach. A call argument only: never stored on the task,
+                written to the task file, logged, or put in the identity.
+                ``''`` is the trusted deploy dispatch; ``None`` means there was
+                no connection identity to read.
 
         Returns:
             ``(scope, target, owner)`` per distinct node ``(scope, target)``,
@@ -902,6 +990,18 @@ class Task(DAPBase):
 
         requested = [(scope, target, self._db_owner(scope, target)) for scope, target in targets]
         identity = self._db_identity(public_endpoint)
+        # An account implementation that predates the keyword (an older SaaS
+        # extension against this engine) gets the two-argument call it always
+        # had, instead of a TypeError that fails every DB-node start. Asked
+        # per call, not cached, so there is no module state; the warning names
+        # no credential and takes no keyword (rocketlib's log functions are
+        # positional only).
+        pass_credential = _accepts_credential(account.authorize_db_target)
+        if not pass_credential:
+            warning(
+                'the account implementation predates credential-aware authorize_db_target; '
+                'authorizing the run databases without the presenting credential'
+            )
         approved: Dict[Tuple[str, str], str] = {}
         for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
             request: Dict[str, Any] = {'scope': scope}
@@ -909,7 +1009,10 @@ class Task(DAPBase):
                 request['team_id'] = owner
             elif scope == 'user':
                 request['user_id'] = owner
-            decision = await account.authorize_db_target(identity, request)
+            if pass_credential:
+                decision = await account.authorize_db_target(identity, request, credential=credential)
+            else:
+                decision = await account.authorize_db_target(identity, request)
             if not decision.allowed:
                 named = f' {owner!r}' if owner else ''
                 raise PermissionError(
@@ -917,6 +1020,103 @@ class Task(DAPBase):
                 )
             approved[(scope, owner)] = decision.owner_id
         return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
+
+    @property
+    def _db_seen(self) -> Optional[Tuple[List[Tuple[str, str]], bool]]:
+        """The databases the run was authorized for at its last (re)start, or None while unknown."""
+        return self.__dict__.get('_db_seen_value')
+
+    @_db_seen.setter
+    def _db_seen(self, value: Optional[Tuple[List[Tuple[str, str]], bool]]) -> None:
+        # Set and cleared together with the event, so no writer can leave a
+        # waiter looking at a value the event does not announce.
+        self.__dict__['_db_seen_value'] = value
+        event = self.__dict__.get('_db_seen_event')
+        if event is None:
+            event = self.__dict__['_db_seen_event'] = asyncio.Event()
+        if value is None:
+            event.clear()
+        else:
+            event.set()
+
+    async def _wait_for_db_seen(self) -> Tuple[List[Tuple[str, str]], bool]:
+        """Wait until the run has read the databases it holds.
+
+        Same contract as ``wait_for_running``: a sliding timeout that resets on
+        subprocess events, and a terminal state ends the wait. A restart in
+        progress is not terminal: its stop is followed by the new start.
+
+        Raises:
+            TaskError: the run completed or was stopped first.
+            TimeoutError: no subprocess event for ``CONST_MAX_READY_TIME`` seconds,
+                counted from the later of the last event and the start of this wait.
+        """
+        event = self.__dict__.get('_db_seen_event')
+        if event is None:
+            event = self.__dict__['_db_seen_event'] = asyncio.Event()
+        # The clock starts no earlier than this wait: during a restart
+        # ``_last_event_time`` still holds the old run's last event, which can
+        # be long past on an idle run.
+        wait_started = time.time()
+        while True:
+            seen = self._db_seen
+            if seen is not None:
+                return seen
+            if not getattr(self, '_is_restarting', False):
+                state = self._status.state
+                if state == TASK_STATE.COMPLETED.value:
+                    raise TaskError(TaskError.COMPLETED, 'Task has already completed')
+                if state == TASK_STATE.CANCELLED.value:
+                    raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
+            if time.time() - max(self._last_event_time, wait_started) >= CONST_MAX_READY_TIME:
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. '
+                    'The task never reported its databases'
+                )
+            try:
+                await asyncio.wait_for(event.wait(), CONST_READY_POLL_INTERVAL)
+            except asyncio.TimeoutError:
+                pass
+
+    async def authorize_reuse(self, *, credential: Optional[str] = None) -> None:
+        """Authorize a connection that asks to reuse this RUNNING task.
+
+        A reuse starts nothing, but it hands the caller the live run, whose
+        subprocess already holds the DSNs it was authorized for. So the
+        requester's own credential must reach every database the run holds,
+        under the run's identity: the same ``_authorize_db_targets`` a start
+        runs, over the targets recorded at the last (re)start. Nothing is kept:
+        the credential is an argument, the targets are ids.
+
+        A run without DB nodes needs nothing. A run that is starting or
+        restarting and could hold a DB node is waited for until it has read
+        its databases (see ``_wait_for_db_seen``). An account implementation
+        without the ``credential`` keyword cannot tell callers apart, so it is
+        not asked (a reuse then behaves as it always did).
+
+        Raises:
+            PermissionError: a database the run holds is denied to this credential.
+            TaskError, TimeoutError: the run ended, or stalled, before it
+                reported its databases.
+        """
+        from ai.account import account
+
+        if not _accepts_credential(account.authorize_db_target):
+            return
+        seen = self._db_seen
+        if seen is None:
+            # Starting or restarting: the resolved pipeline has not been read
+            # yet. Only a pipeline that could hold a DB node (or whose node
+            # providers are still placeholders) has anything to wait for.
+            if not any(
+                isinstance(c, dict) and (c.get('provider') in DB_PROVIDERS or '${' in str(c.get('provider')))
+                for c in (self._pipeline or {}).get('components') or []
+            ):
+                return
+            seen = await self._wait_for_db_seen()
+        targets, public_endpoint = seen
+        if targets:
+            await self._authorize_db_targets(targets, public_endpoint, credential=credential)
 
     async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
         """Resolve each authorized database once and key it for the nodes.
@@ -951,11 +1151,16 @@ class Task(DAPBase):
                 raise RuntimeError(f'the {scope} database{named} failed to resolve: {str(e).strip() or repr(e)}') from e
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
-    async def _build_subprocess_env(self, db_access: Tuple[List[Tuple[str, str]], bool]) -> Dict[str, str]:
+    async def _build_subprocess_env(
+        self, db_access: Tuple[List[Tuple[str, str]], bool], *, credential: Optional[str] = None
+    ) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
         ``db_access`` is ``_db_access`` of the resolved pipeline: the
         databases to authorize and resolve, and the public-endpoint flag.
+        ``credential`` is the presenting connection's ``AccountInfo.auth``,
+        passed straight to ``_authorize_db_targets`` and nowhere else: it never
+        reaches the child's environment or the task file.
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
@@ -999,7 +1204,7 @@ class Task(DAPBase):
         # reason passed down.
         targets, public_endpoint = db_access
         if targets:
-            wanted = await self._authorize_db_targets(targets, public_endpoint)
+            wanted = await self._authorize_db_targets(targets, public_endpoint, credential=credential)
             try:
                 dsns = await self._resolve_db_dsns(wanted)
             except NotImplementedError:
@@ -1546,6 +1751,7 @@ class Task(DAPBase):
             except asyncio.TimeoutError:
                 # Output closed but the process is still alive: end it rather
                 # than leave it running behind a task recorded as finished.
+                self._process_killed = True
                 try:
                     engine.kill()
                     await asyncio.wait_for(engine.wait(), timeout=CONST_CANCEL_WAIT_TIMEOUT_SECONDS)
@@ -1561,10 +1767,25 @@ class Task(DAPBase):
         (a task refusing to start) as completed. An exit code that is still
         unknown is not a success either, so it records 1. A requested stop
         keeps its existing exit code: the kill signal is not a task failure.
+
+        A process that reported no crash but ended by a crash signal, an OOM
+        kill or, on Windows, a crash exception code crashed before its handlers
+        could say so, unless the server killed it.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code is None or self._process_killed:
+                return
+            if exit_code < 0:
+                try:
+                    name = signal.Signals(-exit_code).name
+                except ValueError:
+                    return
+                if name in CONST_CRASH_SIGNALS:
+                    self._crash = f'{name} (code {-exit_code})'
+            elif exit_code in CONST_CRASH_EXCEPTIONS:
+                self._crash = f'{CONST_CRASH_EXCEPTIONS[exit_code]} (code 0x{exit_code:08x})'
 
     async def _terminated(self) -> None:
         """
@@ -1595,7 +1816,15 @@ class Task(DAPBase):
 
         self.debug_message(f'Subprocess for task exited with code {exit_code}')
 
+        reported = self._crash
         self._apply_process_exit_code(exit_code)
+
+        # The engine reported nothing: the console still shows the crash
+        if self._crash and not reported:
+            output = f'Unexpected termination: {self._crash}\n'
+            await self._forward_task_event(
+                EVENT_TYPE.OUTPUT, self.build_event('output', body={'category': 'console', 'output': output})
+            )
 
         # If we are not restarting
         if not self._is_restarting:
@@ -1726,6 +1955,12 @@ class Task(DAPBase):
                 self._status.status = 'Stopped'
                 self._status.state = TASK_STATE.CANCELLED.value
                 self.debug_task_message('stopped', reason=self._stop_reason or 'user')
+        elif self._crash:
+            # The crash's detail is in the console
+            self._status.status = 'Stopped unexpectedly'
+            self._status.exitMessage = self._status.status
+            self._status.state = TASK_STATE.CANCELLED.value
+            self.debug_task_message('crashed', reason=self._crash)
         elif self._status.exitCode == 0:
             self._status.status = 'Completed'
             self._status.state = TASK_STATE.COMPLETED.value
@@ -1847,8 +2082,10 @@ class Task(DAPBase):
                 else:
                     # A ttl-window expiry is SUCCESS: the run stayed up
                     # exactly as configured, then shut down. Only a real
-                    # stop (or abnormal exit) reads as cancelled.
-                    if self._status.state == TASK_STATE.CANCELLED.value:
+                    # stop (or abnormal exit) reads as cancelled; a crash is an error.
+                    if self._crash and not self._stop_requested:
+                        outcome = 'error'
+                    elif self._status.state == TASK_STATE.CANCELLED.value:
                         outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'
@@ -2268,6 +2505,10 @@ class Task(DAPBase):
             self._status.exitMessage = exit_message
             self._exit_event_seen = True
 
+            # The engine's handlers caught a crash: its >EXIT code is Crash
+            if body.get('crash'):
+                self._crash = exit_message
+
             # Send out a status update when needed
             self._status_updated = True
 
@@ -2656,6 +2897,8 @@ class Task(DAPBase):
         project_id: str,
         source: str,
         provider: str,
+        *,
+        credential: Optional[str] = None,
     ) -> None:
         """
         Restart the task with new pipeline configuration.
@@ -2668,6 +2911,10 @@ class Task(DAPBase):
             project_id: Project identifier (must match existing)
             source: Source identifier (must match existing)
             provider: Provider name (may be updated)
+            credential: The ``AccountInfo.auth`` of the connection that supplied
+                this new pipeline (the restarter, not the original starter),
+                used only to authorize its cloud databases. Passed on to
+                ``start_task`` as an argument; never stored.
 
         Raises:
             RuntimeError: If debugger attached or restart fails
@@ -2708,6 +2955,8 @@ class Task(DAPBase):
 
             # Update internal task configuration
             self._pipeline = pipeline
+            # The new pipeline's databases are not known until it starts
+            self._db_seen = None
             self._pipeline['source'] = source
             self._pipeline['project_id'] = project_id
             self.project_id = project_id
@@ -2733,7 +2982,7 @@ class Task(DAPBase):
             self._server.debug_message(f'Task "{self.id}" starting with new configuration...')
 
             # Start fresh (full initialization)
-            await self.start_task()
+            await self.start_task(credential=credential)
 
             self._server.debug_message(
                 f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
@@ -2749,7 +2998,7 @@ class Task(DAPBase):
             self._restart_env = None
             self._restart_in_progress = False
 
-    async def start_task(self) -> None:
+    async def start_task(self, *, credential: Optional[str] = None) -> None:
         """
         Launch subprocess and initialize communication interfaces.
 
@@ -2757,6 +3006,12 @@ class Task(DAPBase):
         resource allocation, and interface initialization. Every start mints
         a new channel token for the child's ``/task/data``; the child gets
         only its SHA-256.
+
+        Args:
+            credential: The ``AccountInfo.auth`` of the connection that started
+                (or, via ``restart_task``, restarted) this run. Used only to
+                authorize the run's cloud databases; never stored on the task,
+                written to the task file, or logged.
 
         Raises:
             RuntimeError: If already started or critical startup failure
@@ -2780,6 +3035,8 @@ class Task(DAPBase):
             self._final_events_sent = False
             self._terminated_called = False
             self._exit_event_seen = False
+            self._crash = None
+            self._process_killed = False
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
@@ -2805,6 +3062,10 @@ class Task(DAPBase):
             # come from what runs, not self._pipeline: ${...} expansion can
             # rewrite any string, a node's provider included.
             db_access = self._db_access(resolved)
+            self._db_seen = db_access
+
+            # Decode parameter tokens the subprocess has no key for
+            resolved = resolve_parameter_tokens(resolved)
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
@@ -2884,12 +3145,12 @@ class Task(DAPBase):
                 if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # The engine's own options: --dumps always, trace and node path unless the caller set one
+            # The engine's own options: --dumps always, trace unless the caller set one
             for arg in startup_args():
                 option = arg.split('=', 1)[0] + '='
                 if option == '--dumps=':
                     child_args.append(arg)
-                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                elif option == '--trace=' and not any(a.startswith(option) for a in child_args):
                     child_args.append(arg)
 
             await self._send_status_update()
@@ -2899,7 +3160,7 @@ class Task(DAPBase):
             # ROCKETRIDE_* env namespace is caller-influenced by design.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(db_access)
+            subprocess_env = await self._build_subprocess_env(db_access, credential=credential)
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):

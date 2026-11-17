@@ -34,14 +34,18 @@
 //
 // Reads are confined to the open workspace folders — a realm can never use
 // this to read outside them. Watch subscriptions belong to one webview PAGE
-// (keyed by the realm-generated `sub` string): resetSubscriptions() runs on
-// every page boot, so a reloaded page never inherits (or leaks) its
-// predecessor's watchers. Watch events emit through the callback the owning
-// provider supplies (the realm-registered `sidebar.fs.event` op).
+// (keyed by the realm-generated `sub` string, `fs-<page>-<seq>`):
+// resetSubscriptions() runs on every page boot so a reloaded page never
+// inherits its predecessor's watchers, while the live page's own watchers
+// survive whatever order its watch and view:ready arrive in (the rule and
+// its tests live in ./watchRegistry). Watch events emit through the
+// callback the owning provider supplies (the realm-registered
+// `sidebar.fs.event` op).
 // =============================================================================
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { WatchRegistry } from './watchRegistry';
 
 /** Whether an absolute path lies inside one of the open workspace folders. */
 function insideWorkspace(fsPath: string): boolean {
@@ -60,9 +64,9 @@ function insideWorkspace(fsPath: string): boolean {
  * through it and disposes the service with itself.
  */
 export class WorkspaceFsService {
-	/** Live watch disposables per subscription key (one watcher per glob,
-	 *  plus the workspace-folders listener). */
-	private watchers = new Map<string, vscode.Disposable[]>();
+	/** Live watch subscriptions (one watcher per glob, plus the
+	 *  workspace-folders listener), grouped by page boot. */
+	private watchers = new WatchRegistry();
 
 	/** Glob search over the open workspace folders → absolute fsPaths. */
 	public async findFiles(include: string, exclude?: string): Promise<string[]> {
@@ -163,43 +167,40 @@ export class WorkspaceFsService {
 
 	/** Starts one watch subscription (idempotent-by-replace per key). */
 	public watch(sub: string, globs: string[], emit: (path: string) => void): void {
-		this.unwatch(sub);
-		const onUri = (uri: vscode.Uri): void => emit(uri.fsPath);
-		const disposables: vscode.Disposable[] = globs.map((glob) => {
-			const watcher = vscode.workspace.createFileSystemWatcher(glob);
-			watcher.onDidCreate(onUri);
-			watcher.onDidChange(onUri);
-			watcher.onDidDelete(onUri);
-			return watcher;
+		this.watchers.add(sub, () => {
+			const onUri = (uri: vscode.Uri): void => emit(uri.fsPath);
+			const disposables: vscode.Disposable[] = globs.map((glob) => {
+				const watcher = vscode.workspace.createFileSystemWatcher(glob);
+				watcher.onDidCreate(onUri);
+				watcher.onDidChange(onUri);
+				watcher.onDidDelete(onUri);
+				return watcher;
+			});
+			// Adding/removing a workspace folder fires no file event, but
+			// invalidates any glob's result set — tick the subscription with the
+			// synthetic '' event so the subscriber re-evaluates.
+			disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => emit('')));
+			return disposables;
 		});
-		// Adding/removing a workspace folder fires no file event, but
-		// invalidates any glob's result set — tick the subscription with the
-		// synthetic '' event so the subscriber re-evaluates.
-		disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => emit('')));
-		this.watchers.set(sub, disposables);
 	}
 
 	/** Stops one watch subscription. */
 	public unwatch(sub: string): void {
-		const watchers = this.watchers.get(sub);
-		if (!watchers) return;
-		this.watchers.delete(sub);
-		for (const watcher of watchers) watcher.dispose();
+		this.watchers.remove(sub);
 	}
 
 	/**
-	 * Drops every live subscription — called on the webview's page boot
-	 * (view:ready): a fresh page mints fresh keys and must not inherit (or
-	 * leak) its predecessor's watchers. view:ready stays the page-lifecycle
-	 * signal because HTML rewrites (the CSP reboot, the Dev Tools RESET)
-	 * reboot the page WITHOUT re-resolving the webview.
+	 * Page boot (view:ready): drops earlier pages' watchers and keeps the
+	 * newest page's (see ./watchRegistry). HTML rewrites (the CSP reboot, the
+	 * Dev Tools RESET) reboot the page WITHOUT re-resolving the webview, so
+	 * view:ready stays the page-lifecycle signal.
 	 */
 	public resetSubscriptions(): void {
-		for (const sub of [...this.watchers.keys()]) this.unwatch(sub);
+		this.watchers.resetForPageBoot();
 	}
 
 	/** Disposes all watchers (provider teardown). */
 	public dispose(): void {
-		this.resetSubscriptions();
+		this.watchers.dispose();
 	}
 }

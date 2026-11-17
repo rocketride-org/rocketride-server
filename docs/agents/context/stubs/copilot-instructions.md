@@ -8,6 +8,8 @@ Use RocketRide when building AI pipelines (document processing, RAG, agents, dat
 
 Full docs: `.rocketride/docs/`
 
+RocketRide has a built-in MCP server (hosted at `https://api.rocketride.ai/mcp`). Setup and sign-in are in ROCKETRIDE_INTEGRATIONS.md in that folder.
+
 **Read the relevant doc(s) before generating any RocketRide code.**
 
 | File                              | Read when...                                                        |

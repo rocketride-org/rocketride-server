@@ -1,6 +1,7 @@
 ---
 title: Runtime & Engine
 sidebar_position: 2
+description: The engine is the RocketRide runtime that loads a .pipe definition, brings its nodes to life, and moves data through the graph until the work is done.
 ---
 
 # Runtime & engine
