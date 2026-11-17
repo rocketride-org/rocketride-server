@@ -187,8 +187,9 @@ commands:
    responses arrive incrementally rather than in one block (see the
    [Execution model](/concepts/execution-model)).
 4. **Stop**: `terminate()` closes the task (`terminate`) and releases its
-   resources; closing a data pipe (`rrext_process` / `close`) returns that
-   pipe's result.
+   resources; closing a data pipe (`rrext_process` / `close`) waits for any
+   `write` or `tool` call still running on it, then returns that pipe's
+   result. The pipe is not given to another `open` until then.
 
 The pipeline JSON sent over the socket is identical to the JSON you author
 visually or by hand, the protocol just transports it.

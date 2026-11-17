@@ -10,10 +10,13 @@ this test file focuses on the pure-logic and small-state methods:
 - ``_reset_pipe_activity`` — timestamp setter
 - ``_cleanup_pipe`` — pipe lifecycle finaliser (with monitoring side effects)
 - ``_write`` / ``_close`` on the text lane — UTF-8 decoding across writes
+- close / disconnect / zombie sweep / tool hold a pipe until its running calls return
 """
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -719,3 +722,205 @@ async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypa
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# A pipe is held until the calls running on it return (#3165)
+# ---------------------------------------------------------------------------
+
+
+def _make_held_conn(monkeypatch):
+    """Build a DataConn whose raw-lane pipe (id 1) blocks each write until the test releases it.
+
+    A write's data names the gate it waits on, so overlapping writes can be
+    released one at a time. A released write records its answer on the entry,
+    the way the response node does when the model replies.
+
+    Args:
+        monkeypatch: pytest fixture, used to silence the monitoring hooks.
+
+    Returns:
+        The DataConn, its DataConnPipe, and a function that returns the
+        (started, release) events for a write's data.
+    """
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'raw'
+    conn_pipe.mime_type = 'application/octet-stream'
+    gates = {}
+
+    def gate(data):
+        return gates.setdefault(data, (threading.Event(), threading.Event()))
+
+    def slow_write(data):
+        started, release = gate(data)
+        started.set()
+        assert release.wait(5), 'the test never released the write'
+        conn_pipe.entry.response.toDict.return_value = {'answers': [data.decode()]}
+
+    conn_pipe.pipe.writeTagData.side_effect = slow_write
+    return conn, conn_pipe, gate
+
+
+async def _wait_started(gate, data):
+    """Wait, without blocking the event loop, until the write for ``data`` runs in its worker thread."""
+    started, _ = gate(data)
+    assert await asyncio.to_thread(started.wait, 5)
+
+
+def _ready_to_disconnect(conn, monkeypatch):
+    """Give a bare DataConn the state disconnect() reads, with no monitor task running."""
+    monkeypatch.setattr(data_conn, 'profiler', MagicMock())
+    conn._shutdown_event = asyncio.Event()
+    conn._monitor_task = None
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_a_running_write_and_returns_its_answer(monkeypatch):
+    """A close sent while the model call runs (the SDK's timeout path) collects that call's answer."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'slow'}))
+    await _wait_started(gate, b'slow')
+
+    close = asyncio.create_task(conn._close({}, {'pipe_id': 1}))
+    await asyncio.sleep(0.05)
+    assert not close.done()
+    assert conn_pipe.entry is not None
+
+    gate(b'slow')[1].set()
+    await write
+    result = await close
+
+    assert result['answers'] == ['slow']
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+
+
+@pytest.mark.asyncio
+async def test_close_keeps_the_pipe_from_the_next_open_until_the_write_returns(monkeypatch):
+    """Neither the pipe nor its semaphore slot goes back while the write runs, so no open can share its id."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    conn_pipe.semaphore_acquired = True
+    conn._pipe_sem = MagicMock()
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'slow'}))
+    await _wait_started(gate, b'slow')
+
+    close = asyncio.create_task(conn._close({}, {'pipe_id': 1}))
+    await asyncio.sleep(0.05)
+    conn._target.putPipe.assert_not_called()
+    conn._pipe_sem.release.assert_not_called()
+    assert 1 not in conn._pipe_map
+
+    gate(b'slow')[1].set()
+    await write
+    await close
+
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+    conn._pipe_sem.release.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_zombie_sweep_skips_a_pipe_while_an_overlapping_write_still_runs(monkeypatch):
+    """The first of two writes to finish leaves the pipe in flight; the sweep frees it only once both return."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    conn._pipe_timeout = 0
+    conn._shutdown_event = asyncio.Event()
+    monkeypatch.setattr(data_conn, 'CONST_DATA_SHUTDOWN_TIMEOUT', 0.01)
+
+    first = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'first'}))
+    second = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'second'}))
+    await _wait_started(gate, b'first')
+    await _wait_started(gate, b'second')
+    gate(b'first')[1].set()
+    await first
+
+    assert conn_pipe.in_flight == 1
+    assert not conn_pipe.idle.is_set()
+
+    sweep = asyncio.create_task(conn._monitor_pipes())
+    await asyncio.sleep(0.1)
+    assert conn._pipe_map == {1: conn_pipe}
+    conn._target.putPipe.assert_not_called()
+
+    gate(b'second')[1].set()
+    await second
+    await asyncio.sleep(0.1)
+    assert conn._pipe_map == {}
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+
+    conn._shutdown_event.set()
+    await sweep
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_a_tool_call_running_on_the_pipe(monkeypatch):
+    """A tool call on the caller's pipe holds it like a write does."""
+    conn, conn_pipe = _make_text_conn(monkeypatch)
+    conn_pipe.lane = 'raw'
+    monkeypatch.setattr(data_conn, 'monitorOther', lambda *args: None)
+    monkeypatch.setattr(
+        data_conn, 'IInvokeTool', SimpleNamespace(Invoke=lambda tool_name, input: SimpleNamespace(output=None))
+    )
+    started, release = threading.Event(), threading.Event()
+
+    def slow_invoke(param):
+        started.set()
+        assert release.wait(5), 'the test never released the tool call'
+        param.output = {'ok': True}
+
+    conn_pipe.pipe.pipeType.id = 'tool_1'
+    conn_pipe.pipe.next = None
+    conn_pipe.pipe.pyInstance.invoke.side_effect = slow_invoke
+
+    tool = asyncio.create_task(conn._tool({}, {'tool': 'lookup', 'nodeId': 'tool_1', 'pipe_id': 1}))
+    assert await asyncio.to_thread(started.wait, 5)
+
+    close = asyncio.create_task(conn._close({}, {'pipe_id': 1}))
+    await asyncio.sleep(0.05)
+    assert not close.done()
+    conn._target.putPipe.assert_not_called()
+
+    release.set()
+    assert await tool == {'result': {'ok': True}}
+    await close
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_waits_for_a_running_write_before_freeing_the_pipe(monkeypatch):
+    """A dropped connection lets a running write finish before its pipe goes back."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    _ready_to_disconnect(conn, monkeypatch)
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'slow'}))
+    await _wait_started(gate, b'slow')
+
+    disconnect = asyncio.create_task(conn.disconnect())
+    await asyncio.sleep(0.05)
+    assert not disconnect.done()
+    conn._target.putPipe.assert_not_called()
+
+    gate(b'slow')[1].set()
+    await write
+    await disconnect
+
+    assert conn_pipe.has_failed
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+
+
+@pytest.mark.asyncio
+async def test_disconnect_frees_a_pipe_whose_write_outlasts_the_shutdown_limit(monkeypatch):
+    """Disconnect waits only up to its limit, so a stuck call cannot hang shutdown."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    _ready_to_disconnect(conn, monkeypatch)
+    monkeypatch.setattr(data_conn, 'CONST_DATA_SHUTDOWN_TIMEOUT', 0.05)
+    conn_pipe.semaphore_acquired = True
+    conn._pipe_sem = MagicMock()
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'stuck'}))
+    await _wait_started(gate, b'stuck')
+
+    await asyncio.wait_for(conn.disconnect(), 2)
+
+    assert conn_pipe.has_failed
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+    conn._pipe_sem.release.assert_called_once_with()
+
+    gate(b'stuck')[1].set()
+    await asyncio.gather(write, return_exceptions=True)
