@@ -32,6 +32,7 @@ import { reviewedDocuments } from '../src/adapters/connections';
 import { connectionCaches } from '../src/adapters/explorer';
 import { KEEP_POLICIES, THRESHOLD_DEFAULT, THRESHOLD_MAX, THRESHOLD_MIN, applyPolicy, containment, copyVerdict, dedupeView, docInfo, duplicateGroupOf, groupOf, groups, isCopyGroup, keepOf, markReviewed, pairsAt, queueInit, queueReducer, queued, reviewedOf, unmarkReviewed } from '../src/map/dedupe';
 import { loadSample } from './support/map.samples';
+import { ciBudget } from './support/timing';
 
 // =============================================================================
 // A SMALL SAMPLE BUILDER
@@ -1011,7 +1012,7 @@ test('budget: pairs over 30,000 kNN entries and the groups of a 2,000-point samp
 		groups(pairsAt(big, 0.97));
 		best = Math.min(best, performance.now() - started);
 	}
-	assert.ok(best < 15, `pairs and groups took ${best.toFixed(2)} ms`);
+	assert.ok(best < ciBudget(15), `pairs and groups took ${best.toFixed(2)} ms`);
 });
 
 /**
@@ -1060,7 +1061,7 @@ test("budget: a group across 2,500 documents (pgvector's native pick has no list
 			tVerdict = Math.min(tVerdict, verdictMs);
 			tQueue = Math.min(tQueue, queueMs);
 		}
-		assert.ok(tVerdict <= 60, `${counted} counted: the verdict took ${tVerdict.toFixed(1)} ms`);
-		assert.ok(tQueue <= 30, `${counted} counted: the queue took ${tQueue.toFixed(1)} ms`);
+		assert.ok(tVerdict <= ciBudget(60), `${counted} counted: the verdict took ${tVerdict.toFixed(1)} ms`);
+		assert.ok(tQueue <= ciBudget(30), `${counted} counted: the queue took ${tQueue.toFixed(1)} ms`);
 	}
 });

@@ -29,7 +29,7 @@ import { chainOrder, heatCellAt, matrixInput, matrixRange, matrixRows, reorder }
 import { matrixFailure, matrixSourceLine } from '../src/map/reviewWording';
 import { fixture } from './support/fixtures';
 import { loadSample, modelOf } from './support/map.samples';
-import { bestOf, renderBudget } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 
 const LIMITS = fixture<{ limits: IVectorLimits }>('dialect_enriched').limits;
 const OLD_LIMITS: IVectorLimits = (({ recommend_examples_max: _r, matrix_keys_max: _m, max_components: _c, ...rest }) => rest)(LIMITS);
@@ -112,7 +112,7 @@ test('budget: ordering 100 × 100 (10,000 cells) well within 50 ms', () => {
 		reorder({ keys, matrix: m }, o);
 		return o;
 	});
-	assert.ok(ms < 50, `ordered in ${ms.toFixed(1)} ms`);
+	assert.ok(ms < ciBudget(50), `ordered in ${ms.toFixed(1)} ms`);
 	assert.equal(new Set(order).size, n);
 });
 
@@ -322,7 +322,7 @@ test('budget: the heatmap at the cap is one canvas, a bounded handful of element
 		const { ms, out } = timed(() => body({ state: bigState(), labelOf: bigLabel, selected }));
 		const tags = (out.match(/<[a-z]/g) ?? []).length;
 		assert.ok(tags < 80, `${tags} elements for 10,000 cells`);
-		assert.ok(ms < renderBudget(50), `rendered in ${ms.toFixed(1)} ms`);
+		assert.ok(ms < ciBudget(50), `rendered in ${ms.toFixed(1)} ms`);
 		assert.match(out, /<canvas[^>]*data-matrix-size="100"/);
 		assert.doesNotMatch(out, /data-cell=/, 'no element per cell');
 		assert.equal((out.match(/data-picked=/g) ?? []).length, selected ? 2 : 0, 'the pair and its mirror outlined');
@@ -337,7 +337,7 @@ test('budget: the table alternative at the cap shows 20 rows at a time, every ro
 	const make = (page: number): React.ReactElement => body({ state: bigState(), labelOf: bigLabel, showTable: true, tablePage: page, onTablePage: (p) => pages.push(p) });
 	// `timed` warms up first and keeps the best of three: the budget is the steady-state cost of a page.
 	const { ms, out } = timed(() => make(1));
-	assert.ok(ms < renderBudget(50), `rendered in ${ms.toFixed(1)} ms`);
+	assert.ok(ms < ciBudget(50), `rendered in ${ms.toFixed(1)} ms`);
 	assert.equal((out.match(/<th scope="row"/g) ?? []).length, 20);
 	assert.equal((out.match(/<th scope="col"/g) ?? []).length, 100, 'every column on every page');
 	assert.ok((out.match(/<button/g) ?? []).length <= 2010, 'about 2,000 value buttons, not 10,000');

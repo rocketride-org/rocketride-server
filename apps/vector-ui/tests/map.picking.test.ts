@@ -18,7 +18,7 @@ import { boundsOf, cameraSignature, fitCamera, fitCamera3D, orbitCamera, panBy, 
 import type { ICamera2D, ICamera3D, IViewport } from '../src/map/camera';
 import { lassoSelect, pointInPolygon, simplifyPath } from '../src/map/lasso';
 import { buildScreenIndex, nearestInSector, pickNearest } from '../src/map/picking';
-import { bestOf } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 
 const vp: IViewport = { width: 800, height: 600 };
 const cam: ICamera2D = { mode: '2d', cx: 10, cy: -5, scale: 4 };
@@ -199,7 +199,7 @@ test('a lasso over 20,000 points answers well within a frame budget', () => {
 	for (let a = 0; a < 64; a += 1) ring.push(400 + 200 * Math.cos((a / 64) * 2 * Math.PI), 400 + 200 * Math.sin((a / 64) * 2 * Math.PI));
 	const { ms, out: inside } = bestOf(() => lassoSelect(xy, ring));
 	assert.ok(inside.length > 0.15 * n && inside.length < 0.25 * n, `${inside.length}`);
-	assert.ok(ms < 100, `${ms.toFixed(1)} ms`);
+	assert.ok(ms < ciBudget(100), `${ms.toFixed(1)} ms`);
 });
 
 test('the camera signature (data-camera) changes with any pan, zoom or orbit and is stable otherwise', () => {

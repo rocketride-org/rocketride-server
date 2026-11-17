@@ -25,6 +25,7 @@ import { BLOCKED_SENTENCE, EXPORT_SCHEMA_VERSION, LARGE_EXPORT_ROWS, MAP_NOT_DRA
 import type { ISearchExportRow } from '../src/vector/export';
 import { fixture } from './support/fixtures';
 import { loadSample, modelOf } from './support/map.samples';
+import { ciBudget } from './support/timing';
 
 /** 2026-10-15 09:05 local time (the file-name stamp reads local time). */
 const AT = new Date(2026, 9, 15, 9, 5, 30);
@@ -235,7 +236,7 @@ test('budget: the CSV of 5,000 points is written in at most 50 ms', () => {
 		best = Math.min(best, performance.now() - t0);
 	}
 	assert.equal(parseCsv(text).length, 5001);
-	assert.ok(best <= 50, `CSV of 5,000 points took ${best.toFixed(1)} ms`);
+	assert.ok(best <= ciBudget(50), `CSV of 5,000 points took ${best.toFixed(1)} ms`);
 });
 
 // -----------------------------------------------------------------------------

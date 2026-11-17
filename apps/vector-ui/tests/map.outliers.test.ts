@@ -28,6 +28,7 @@ import { neighboursOf } from '../src/map/model';
 import { OUTLIER_PERCENTILES, medianOf, outlierCount, outlierKey, outlierRows, outliersAt, outliersScope, whyText } from '../src/map/outliers';
 import { loadSample } from './support/map.samples';
 import type { SampleFixture } from './support/map.samples';
+import { ciBudget } from './support/timing';
 
 const FIXTURES: SampleFixture[] = ['sample_demo_1000.json', 'sample_light_5000.json', 'sample_native_knn.json', 'sample_biased_refilled.json'];
 
@@ -132,5 +133,5 @@ test('budget: picking 5 % of a 5,000-point light sample stays within a few milli
 		outlierRows(light, 5);
 		best = Math.min(best, performance.now() - started);
 	}
-	assert.ok(best < 20, `took ${best.toFixed(2)} ms`);
+	assert.ok(best < ciBudget(20), `took ${best.toFixed(2)} ms`);
 });

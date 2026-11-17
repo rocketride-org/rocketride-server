@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { CHUNK_TEXT_MAX, STOP_WORDS, clampText, highlightSegments, markedWords, queryTerms, queryWords, stem } from '../src/vector/highlight';
 import type { ITextSegment } from '../src/vector/highlight';
-import { bestOf } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 
 /** The marked words of a segment list, in order. */
 const marked = (segments: readonly ITextSegment[]): string[] => segments.filter((s) => s.mark).map((s) => s.text);
@@ -95,7 +95,7 @@ test('the panel shows at most 20,000 characters of a chunk and says when it cut'
 	assert.equal(clamped.text.length, CHUNK_TEXT_MAX);
 	assert.equal(clamped.truncated, true);
 	const { ms } = bestOf(() => highlightSegments(`${'water station spring intake '.repeat(800)}`.slice(0, CHUNK_TEXT_MAX), 'water spring intake falcon'));
-	assert.ok(ms < 50, 'a full-size chunk is segmented within a frame budget');
+	assert.ok(ms < ciBudget(50), 'a full-size chunk is segmented within a frame budget');
 });
 
 test("the words the panel names are the query's own (lower-cased, one per stem), not the stems", () => {

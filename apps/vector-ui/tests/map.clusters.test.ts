@@ -23,7 +23,7 @@ import type { ISampleClusters, ISampleResult } from '../src/contract/types';
 import { clusterLabel, clusterOf, clusterRows, clusterSentence, clusterView, fold, medoids } from '../src/map/clusters';
 import { colourAfterQuery, colourForQuery, colourModeReason, colourPoints } from '../src/map/colours';
 import { pcaPositions } from '../src/map/model';
-import { bestOf } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 import { readPalette } from '../src/map/tokens';
 import { CLUSTERS_UNSUPPORTED, clusterAnnouncement, clustersNone } from '../src/map/wording';
 import { deepFreeze, loadSample } from './support/map.samples';
@@ -73,7 +73,7 @@ test('the demo fixture at minimum size 2, 5 and 10: fewer groups as the minimum 
 	// Folding 5,000 points costs a couple of milliseconds (budget 2 ms; 5x slack here).
 	const big: number[] = Array.from({ length: 5000 }, (_, i) => (i % 7 === 0 ? -1 : i % 200));
 	const bigSizes = Array.from({ length: 200 }, (_, g) => big.filter((l) => l === g).length);
-	assert.ok(bestOf(() => fold(big, bigSizes, 5)).ms < 10);
+	assert.ok(bestOf(() => fold(big, bigSizes, 5)).ms < ciBudget(10));
 });
 
 test('rows of the Clusters tab: ordered by size, sized by visible points, with their documents, and they sum to n with the noise', () => {
@@ -94,7 +94,7 @@ test('rows of the Clusters tab: ordered by size, sized by visible points, with t
 	const after = clusterRows(withClusters, view, hidden);
 	assert.equal(after.rows.reduce((s, r) => s + r.size, 0) + after.noise.size, withClusters.n - 3);
 	// Building the rows for 1,000 points is cheap (budget 5 ms; 5x slack).
-	assert.ok(bestOf(() => clusterRows(withClusters, view)).ms < 25);
+	assert.ok(bestOf(() => clusterRows(withClusters, view)).ms < ciBudget(25));
 });
 
 test('a group the node did not label is called "group N"; keywords are joined with a middle dot', () => {

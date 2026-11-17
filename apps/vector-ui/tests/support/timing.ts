@@ -25,15 +25,16 @@ export function bestOf<T>(fn: () => T, samples: number = SAMPLES): { ms: number;
 }
 
 /**
- * A render budget, in milliseconds, for the machine the tests run on.
+ * A wall-clock budget, in milliseconds, for the machine the tests run on.
  *
- * Server-rendering a large tree is CPU-bound, and on a shared CI runner the
- * builder runs every module's tests side by side on a few cores: the best of
- * a few warmed samples still measures the neighbours. CI (where `CI` is set)
- * gets five times the budget; a local run keeps the budget exactly as written.
- * The element-count assertions beside each budget are what pin the bounded
- * DOM, so a regression that renders every row still fails everywhere.
+ * On a shared CI runner the builder runs every module's tests side by side on
+ * a few cores, and the same work there measures 11-15 times slower than on a
+ * developer machine (pure-JS loops and React renders alike), so even the best
+ * of several warmed samples measures the neighbours. CI (where `CI` is set)
+ * gets six times the budget; a local run keeps the budget exactly as written.
+ * The size and count assertions beside each budget still pin the bounded
+ * work, so a regression that renders every row fails everywhere.
  */
-export function renderBudget(ms: number): number {
-	return process.env.CI ? ms * 5 : ms;
+export function ciBudget(ms: number): number {
+	return process.env.CI ? ms * 6 : ms;
 }
