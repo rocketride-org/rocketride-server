@@ -186,8 +186,10 @@ test('G4-F3 private snapshots are walked and size-capped; the registry empties w
 	tt.after(() => t.cleanup());
 	const errors: unknown[] = [];
 	const onError = (err: unknown): void => void errors.push(err);
-	process.on('uncaughtException', onError);
-	tt.after(() => void process.off('uncaughtException', onError));
+	// The shell's global.d.ts narrows `process` to `{env}`; the runtime object is Node's.
+	const proc = process as unknown as NodeJS.EventEmitter;
+	proc.on('uncaughtException', onError);
+	tt.after(() => void proc.off('uncaughtException', onError));
 	const A = t.open(ENTRY_A);
 	const A2 = t.open(ENTRY_A);
 	const R = t.open(ENTRY_A, { raw: true });
