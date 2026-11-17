@@ -22,7 +22,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { IRoleChannel } from 'shared/explorer';
 import type { ConsoleActions, ConsoleModel, IDialectResult, IDocumentItem, IExportItem, IScopeState, VectorChannels } from '../src/contract/types';
 import { fixture } from './support/fixtures';
-import { bestOf } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 
 // The shell's building blocks exist only inside a running shell: plain stand-ins that render their text.
 const shellStandIn = {
@@ -191,7 +191,7 @@ test('the ingest chart with one far-off ingest time: a few dozen bars, not ninet
 	assert.ok((ingest.match(/<rect /g) ?? []).length <= 62, `${(ingest.match(/<rect /g) ?? []).length} bars`);
 	assert.match(ingest, /<tr><td>after \d{4}-\d{2}-\d{2}<\/td><td>1<\/td><\/tr>/);
 	assert.ok(html.length < 100_000, `${html.length} characters`);
-	assert.ok(took < 200, `rendered in ${took.toFixed(1)} ms`);
+	assert.ok(took < ciBudget(200), `rendered in ${took.toFixed(1)} ms`);
 });
 
 test('the strip: a Size card only when the store reports it; the cards say "—" for what the store did not count', () => {

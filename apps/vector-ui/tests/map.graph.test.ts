@@ -20,7 +20,7 @@ import type { IKnnBlock } from '../src/contract/types';
 import { edgeStats, edgesOf, incidentEdges, mergeEdges, spanningTree, topEdges, treeNeighbours } from '../src/map/graph';
 import type { IEdgeSet } from '../src/map/graph';
 import { loadSample } from './support/map.samples';
-import { bestOf } from './support/timing';
+import { bestOf, ciBudget } from './support/timing';
 
 /** A kNN block from rows of [neighbour, similarity] pairs (nearest first). */
 function knnOf(rows: Array<Array<[number, number]>>): IKnnBlock {
@@ -117,11 +117,11 @@ test('the demo sample: the tree spans every point it can, within the Kruskal bud
 	assert.equal(tree.edges.count, sample.n - tree.components);
 	assert.ok(tree.components >= 1);
 	// Budget: 20 ms on 30,000 edges in the browser; asserted with 3x slack here.
-	assert.ok(took < 60, `spanning tree of ${sample.knn.cols.length} kNN entries took ${took.toFixed(1)} ms`);
+	assert.ok(took < ciBudget(60), `spanning tree of ${sample.knn.cols.length} kNN entries took ${took.toFixed(1)} ms`);
 	const light = loadSample('sample_light_5000.json');
 	const { ms: lightTook, out: lightTree } = bestOf(() => spanningTree(light.knn, light.n));
 	assert.equal(lightTree.edges.count, light.n - lightTree.components);
-	assert.ok(lightTook < 120, `light tree of ${light.knn.cols.length} kNN entries took ${lightTook.toFixed(1)} ms`);
+	assert.ok(lightTook < ciBudget(120), `light tree of ${light.knn.cols.length} kNN entries took ${lightTook.toFixed(1)} ms`);
 });
 
 test('edge statistics: count and similarity range, null on no edges', () => {
