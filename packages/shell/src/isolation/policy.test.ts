@@ -64,6 +64,17 @@ test('T21 realms register only app.<ownKey>.* and requests stay inside the app n
 	// holds a local handler for app.<keyB>.x, which its own bus resolves without the root.)
 	await assertDeniedOp(A2.request(`app.${keyB}.x`, {}), 'namespace', 'a request into another app namespace');
 	await assertDeniedOp(B.request(`app.${keyA}.x`, {}), 'namespace', 'a request from another app into this one');
+	// B's real handler for its own op is unreachable from A, even over a raw port.
+	let bCalls = 0;
+	B.bus.handle(`app.${keyB}.y`, () => {
+		bCalls++;
+		return 'from-B';
+	});
+	await settle();
+	const Araw = t.open(ENTRY_A, { raw: true });
+	const raw = await Araw.rawRequest(`app.${keyB}.y`, {});
+	assert.ok(raw && raw.ok === false && String(raw.error).startsWith('RR_DENIED:') && JSON.parse(String(raw.error).slice(10)).code === 'namespace', `a raw request into another app namespace is refused, got ${JSON.stringify(raw)}`);
+	assert.equal(bCalls, 0, "B's handler is never called");
 	A.bus.handle('client.request', () => 'hijack');
 	await settle();
 	const r = await outcome(B.request('client.request', { message: { type: 'request', seq: 1, command: 'rrext_ping' } }));

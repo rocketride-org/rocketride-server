@@ -552,6 +552,28 @@ test('T19 hostile input fails closed and nothing is forwarded', async (tt) => {
 		assertNotForwarded(engine, before, h.name);
 	}
 
+	// The same values inside fields that accept objects (not only as extra keys): execute.pipeline,
+	// fs_put_json.value and the setPref emit lane.
+	const key = refAppKey(ENTRY_A.id);
+	for (const h of hostile) {
+		if (h.transfer) continue; // a port can be transferred once; the extra-key case above covers it
+		const positions: Array<[string, Record<string, unknown>]> = [
+			['execute.pipeline.x', { message: dap('execute', { pipeline: { components: [], source: 'chat_1', x: h.args }, args: [], ttl: 60 }) }],
+			['fs_put_json.value', { message: dap('rrext_store', { subcommand: 'fs_put_json', path: `apps/${key}/j.json`, value: { x: h.args } }) }],
+		];
+		for (const [where, params] of positions) {
+			const before = engine.received.length;
+			const response = await R.rawRequest('client.request', params);
+			assert.ok(response, `${h.name} at ${where}: the root must answer`);
+			assertDenied(response.result, 'schema', `${h.name} at ${where}`);
+			assertNotForwarded(engine, before, `${h.name} at ${where}`);
+		}
+		const emitted = t.cm.opsEmitted.length;
+		R.post({ __rrbus: 'emitOp', op: 'shell.setPref', params: { partition: 'app:acme.alpha', key: 'k', value: { x: h.args } } });
+		await settle();
+		assert.equal(t.cm.opsEmitted.length, emitted, `${h.name} at setPref.value: dropped`);
+	}
+
 	// A hook that throws fails closed.
 	const throwing = makeRoot({ __throwIn: 'gate' });
 	tt.after(() => throwing.cleanup());
