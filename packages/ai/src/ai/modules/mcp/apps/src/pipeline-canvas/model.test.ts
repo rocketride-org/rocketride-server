@@ -179,6 +179,21 @@ describe('buildCanvasModel', () => {
 		expect(buildCanvasModel(result(error))).toEqual({ kind: 'error', message: error.message, hint: error.hint });
 	});
 
+	it('shows team paths without the team id', () => {
+		const error = {
+			ok: false,
+			error_type: 'AccessDenied',
+			message: "You don't have access to the pipeline at @/Team/=team_B/.projects/x.pipe.",
+			hint: 'Call store_list with path @/Team/=team_A/.projects to see the pipelines you can open.',
+		};
+
+		expect(buildCanvasModel(result(error))).toEqual({
+			kind: 'error',
+			message: "You don't have access to the pipeline at .projects/x.pipe.",
+			hint: 'Call store_list with path .projects to see the pipelines you can open.',
+		});
+	});
+
 	it('reads the summary from the text block when structuredContent is missing', () => {
 		const summary = summaryFor(COMPONENTS);
 		const model = buildCanvasModel({ content: [{ type: 'text', text: JSON.stringify(summary) }], _meta: META });
