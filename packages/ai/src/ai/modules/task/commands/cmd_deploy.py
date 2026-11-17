@@ -357,8 +357,19 @@ class DeployCommands(_DeployBase):
 
         org_id = self._org_id()
         metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
+        # Born state (plan S8): on a review-ladder server a pipe deploys
+        # 'private' like an app (team and personal rungs serve it; @public
+        # needs 'ready' after review); without the ladder the developer IS
+        # the admin, so it is born 'ready' — the same rule the app door
+        # applies (app_deploy.handle_app_add).
         entry = await account.deployments_publish(
-            org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata
+            org_id,
+            project_id,
+            pipeline,
+            self._actor(),
+            comment=str(args.get('comment') or ''),
+            metadata=metadata,
+            state=None if account.review_ladder else 'ready',
         )
         await account.audit(
             self._account_info.userId,

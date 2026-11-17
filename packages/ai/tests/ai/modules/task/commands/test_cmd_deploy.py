@@ -125,6 +125,9 @@ def account_stub(monkeypatch):
         'billingTeamId': 'team-1',
     }
     stub = SimpleNamespace(
+        # A review-ladder server (SaaS): a pipe is born 'private' and walks
+        # the ladder to the store, like an app (plan S8).
+        review_ladder=True,
         deployments_publish=AsyncMock(return_value={'version': 3, 'sha256': 'abc'}),
         deployments_deploy=AsyncMock(return_value=dep),
         deployments_set_state=AsyncMock(return_value={**dep, 'state': 'disabled'}),
@@ -170,8 +173,19 @@ class TestPublish:
         assert args[0] == 'org-1' and args[1] == 'proj-1'
         # The audit actor is the denormalized caller identity.
         assert args[3] == {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'}
+        # On a review-ladder server the backend's born state applies ('private', plan S8)
+        assert account_stub.deployments_publish.await_args.kwargs['state'] is None
         assert resp['body']['artifact']['version'] == 3
         account_stub.audit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_publish_is_born_ready_without_a_review_ladder(self, account_stub):
+        """Without the ladder (OSS) the developer IS the admin: the pipe is born 'ready', as an app is."""
+        account_stub.review_ladder = False
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+
+        assert account_stub.deployments_publish.await_args.kwargs['state'] == 'ready'
 
     @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):

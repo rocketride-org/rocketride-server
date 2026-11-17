@@ -1710,12 +1710,34 @@ class _Deployments:
             if (org, pipe) == (org_id, project_id)
         ]
 
-    async def publish_get(self, org_id, kind, app_id, audience):
-        # The audience-publish table (published_apps) of the row source
-        assert kind == 'app'
-        if audience != {'type': 'public', 'id': ''}:
-            return None
-        return self.publics.get((org_id, app_id))
+    async def publish_of_app(self, org_id, kind, app_id):
+        # THE row source (plan 10.1): every live publish row of the project
+        # from the one publish table — the team and personal pointers and the
+        # public row alike, each with its audience and the review state of
+        # the version it points at
+        assert kind == 'pipe'
+        rows = []
+        for (org, slot, project), dep in self.deployments.items():
+            if (org, project) != (org_id, app_id):
+                continue
+            if slot.startswith('user~'):
+                audience = {'type': 'user', 'id': slot[len('user~') :]}
+            else:
+                audience = {'type': 'team', 'id': slot}
+            rows.append(
+                {
+                    'kind': 'pipe',
+                    'audience': audience,
+                    'version': dep['version'],
+                    'state': dep['state'],
+                    'artifactState': self.states.get((org, project, dep['version']), 'ready'),
+                    'billingTeamId': dep.get('billingTeamId', ''),
+                }
+            )
+        public = self.publics.get((org_id, app_id))
+        if public:
+            rows.append({'kind': 'pipe', 'audience': {'type': 'public', 'id': ''}, 'billingTeamId': '', **public})
+        return rows
 
     async def deployments_artifact(self, org_id, project_id, version):
         return copy.deepcopy(self.artifacts[(org_id, project_id, version)])
