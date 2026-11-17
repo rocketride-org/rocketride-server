@@ -980,9 +980,12 @@ and a second user or run never sees it.
 
 When the cloud database is unavailable, do not record the work in `appState`
 instead. Show an honest "database unavailable" state, block the actions that
-need it, and retry with backoff. A DB node's lane or tool call fails the step
-when its statement fails; do not catch that error and carry on as if the write
-had happened.
+need it, and retry with backoff. A DB node's lane, or its `execute` tool, fails
+the step when its statement fails; do not catch that error and carry on as if
+the write had happened. The natural-language tools (`get_sql`, `get_data`,
+`get_query`, `get_aql`) do not raise on an outage or a failed query: they
+return `valid: false` with an `error`. Check `valid` on every result before
+using it; a result with `valid: false` is a failed read, not an empty one.
 
 ### Data in the RocketRide cloud databases
 
