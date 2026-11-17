@@ -197,6 +197,16 @@ test('T117 ids a realm plants in its own replies never change, refuse or evict a
 		await call(Y, 'terminate', { token: String((result as { body: Record<string, unknown> }).body.token) });
 	});
 
+	await tt.test("an identity-looking value X gets echoed in a store reply is never learnt root-wide: Y's text keeps it", async () => {
+		const planted = 'planted-user-id-from-x';
+		t.cm.engine.extendBody('rrext_store', { userId: planted, teamId: `${planted}-team` });
+		expectOk(await call(X, 'rrext_store', { subcommand: 'fs_stat', path: `apps/${keyA}/f` }), "X's fs_stat echoing identity-looking values");
+		t.cm.engine.extendBody('rrext_store', { userId: undefined, teamId: undefined });
+		t.cm.engine.setStatus({ name: `hello ${planted}` });
+		assert.equal(expectOk(await status(Y, runY.token), "Y's status").name, `hello ${planted}`);
+		t.cm.engine.setStatus({});
+	});
+
 	await tt.test('a genuine foreign uuid seen before the plant is still aliased', async () => {
 		t.cm.engine.failWith('terminate', { message: `project ${genuine} failed` });
 		assert.match(engineErrorText(await call(Y, 'terminate', { token: runY.token }), "Y's terminate failure"), /^project rp_[A-Za-z0-9_-]{22} failed$/);
