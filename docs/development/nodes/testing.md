@@ -580,6 +580,65 @@ ROCKETRIDE_TEST_HARDWARE_STRICT=1 ./builder nodes:test-full
 
 The same pytest options work without the builder: `--warmup-models[=plan]`.
 
+### Live database tests
+
+The RocketRide cloud database nodes have suites that run against a real
+PostgreSQL: `nodes/test/test_*_live.py`. They are part of `nodes:test`, and
+each one skips unless its variable points at a test database. A run without the
+variables never connects to a database.
+
+| Variable | Database | Suites |
+| --- | --- | --- |
+| `RR_TEST_PG_DSN` | PG16 + pgvector 0.8.0 | `test_rocketride_db_live.py`, `test_rocketride_vector_tools_live.py`, `test_vector_store_writes_live.py`, `test_vector_store_listing_live.py`, `test_pgvector_search_live.py` |
+| `RR_TEST_AGE_DSN` | PG16 + Apache AGE 1.5.0 or 1.6.0 | `test_rocketride_graph_live.py` |
+
+`RR_REQUIRE_DB_TESTS=1` turns a missing or unreachable database into a failure.
+CI sets all three on Linux and runs the graph suite twice: on AGE 1.5.0 in the
+`Test` step, then on AGE 1.6.0. To run them locally:
+
+```bash
+docker run -d --rm --name rr-test-pg -p 55432:5432 \
+  -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+  pgvector/pgvector:0.8.0-pg16
+docker exec rr-test-pg psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+docker run -d --rm --name rr-test-age -p 55433:5432 \
+  -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+  apache/age:release_PG16_1.5.0 -c shared_preload_libraries=age
+docker exec rr-test-age psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS age;'
+
+# The variables can also go in the repository .env, which nodes:test loads.
+RR_TEST_PG_DSN=postgresql://rruser:rrpass@localhost:55432/rrtenant \
+RR_TEST_AGE_DSN=postgresql://rruser:rrpass@localhost:55433/rrtenant \
+./builder nodes:test
+```
+
+For AGE 1.6.0, start `apache/age:release_PG16_1.6.0` the same way on another
+port and point `RR_TEST_AGE_DSN` at it.
+
+The `store_milvus` node has a suite against a real Milvus,
+`nodes/test/store_milvus/test_store_milvus_live.py`, which reads the server's
+`http://` address from `RR_TEST_MILVUS_URI` (a host name or an IPv4 address:
+pymilvus does not connect to an IPv6 one). CI starts no Milvus yet (#3094), so without
+the variable the suite skips even with `RR_REQUIRE_DB_TESTS=1`; with both set,
+a server that does not answer fails the test. Each test writes to its own
+collection. To run it locally:
+
+```bash
+docker run -d --rm --name rr-test-milvus -p 59530:19530 \
+  -e ETCD_USE_EMBED=true -e ETCD_DATA_DIR=/var/lib/milvus/etcd -e COMMON_STORAGETYPE=local \
+  milvusdb/milvus:v2.5.14 milvus run standalone
+
+RR_TEST_MILVUS_URI=http://127.0.0.1:59530 ./builder nodes:test
+```
+
+A suite that reuses fixed table or graph names marks its module with
+`pytest.mark.xdist_group`, so one worker runs all of its tests (see
+[Parallel runs](#parallel-runs)). Every suite that creates tables in the
+`RR_TEST_PG_DSN` database joins one group, `rocketride_pg_live`, even with a
+table name per test: the SQL node reads every table in the database when it
+starts, and a table that another worker drops during that read fails the test.
+
 ### Listing skipped tests
 
 `--list-skipped` collects the selected tests and prints the ones that will be
@@ -611,13 +670,14 @@ exist:
 If you choose another `--dist` mode with several workers while heavy tests are
 selected, the run stops before any test starts.
 
-### Live database tests
+### Live database lane (registered suites)
 
 Some suites drive a node's real driver against a real database server and stub
 the engine surface themselves, so they need no test server, only their
-databases. They cannot run in the mocked pass: `nodes/test/mocks` replaces
-`psycopg2`, `pgvector`, `qdrant_client`, `chromadb`, `falkordb` and other
-database clients for the whole engine. They are therefore **registered**, and
+databases. A suite that cannot work around the mocks cannot run in the mocked
+pass: `nodes/test/mocks` replaces `psycopg2`, `pgvector`, `qdrant_client`,
+`chromadb`, `falkordb` and other database clients for the whole engine. Such a
+suite is therefore **registered**, and
 `nodes:test` leaves every registered suite out of its mocked pass by absolute
 path and runs them in a separate pass without mocks.
 
@@ -627,9 +687,9 @@ file-name order; the shape is documented in `nodes/scripts/tasks.js`):
 ```js
 module.exports = {
 	name: 'my-domain',
-	suites: ['test_my_domain_full.py'],
+	suites: ['test_my_domain_live.py'],
 	// optional: put suites (yours or another domain's) through a pooler
-	poolerSuites: ['test_my_domain_full.py'],
+	poolerSuites: ['test_my_domain_live.py'],
 	poolerEnv: 'RR_TEST_MY_POOLER_DSN', // unset: the pooler leg is left out
 	poolerMode: 'in-suite', // or 'second-pass' (then also secondPassEnv(poolerDsn, env))
 };
@@ -649,10 +709,10 @@ the domain's registration file or in the app's own docs.
 Registering changes behavior only for the suites registered. With no
 registration `nodes:test` is what it was: no live pass, the mocked pass leaves
 `*_full.py` out by glob and `nodes:test-full` collects everything. The suites
-that exist on develop (`DEVELOP_DB_SUITES` in `tasks.js`) keep that behavior
-until a domain lists one in its `suites`: they stay out of `nodes:test`
-(`test_pgvector_search.py`, which is not named `*_full`, stays in its mocked
-pass). Listing one moves it to the unmocked live pass and, with
+that exist on develop (`DEVELOP_DB_SUITES` in `tasks.js`, the `test_*_live.py`
+suites of [Live database tests](#live-database-tests)) keep that behavior until a
+domain lists one in its `suites`: they run in the mocked pass of `nodes:test`.
+Listing one moves it to the unmocked live pass and, with
 `RR_REQUIRE_DB_TESTS` set as on the Linux CI leg, makes it required: a change
 to CI for every PR, so the domain's PR says so.
 
@@ -667,7 +727,7 @@ enforce that.
 well-formed, every suite file exists and is registered exactly once, and every
 `nodes/test/test_*.py` that reads a live-database variable from the environment (`RR_REQUIRE_DB_TESTS`
 or an `RR_TEST_*_DSN`/`_URI`/`_URL`) is registered or listed in `DEVELOP_DB_SUITES`, so a new live suite cannot
-be collected by the mocked pass by mistake. Name new suites `test_*_full.py`.
+be collected by the mocked pass by mistake. Name new suites `test_*_live.py`, as develop's are.
 
 ```bash
 ./builder nodes:test-db                        # only the live database pass; the databases are required

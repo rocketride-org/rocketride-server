@@ -25,7 +25,7 @@ Four folders, split by **audience**: `public/` is for people outside the repo,
 
 The Docusaurus project (`docusaurus.config.ts`, `sidebars.ts`, `src/`, `static/`,
 `scripts/tasks.js` exposing `docs:build`, `docs:check`, `docs:test` (runs
-`docs:validate` — the node README + client-doc schema validators, blocking —
+`docs:validate` — the node README, client-doc, and CLI-doc validators, blocking —
 then `docs:unit`, the docs helper unit tests), `docs:export`). It holds no
 product content — `docs:gather` assembles the site
 from `public/`, from the co-located node docs, and from the one content folder

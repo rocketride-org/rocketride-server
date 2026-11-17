@@ -265,7 +265,7 @@ With `persist: true`, a dropped connection reconnects automatically and replays 
 
 ##### `RocketRideClient.getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult>`
 
-Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, endpoints }`. The `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
+Probe a server for its capabilities **without authenticating**. Opens a temporary public connection and returns `{ version, capabilities, platform?, apps?, stripePublishableKey?, posthogPublishableKey?, posthogHost?, endpoints }`. The PostHog pair is the environment's product-telemetry config (absent = telemetry off); the `endpoints` block is always resolved to absolute URLs (`api` = where clients open the WebSocket, `ui` = the environment's public web address) — never branch on presence.
 
 ```typescript
 const info = await RocketRideClient.getServerInfo('localhost:5565');
@@ -391,9 +391,9 @@ Return the **unresolved** pipeline configuration for a running task — `${ROCKE
 
 ### `validate(options): Promise<ValidationResult>`
 
-Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). Returns `{ errors, warnings, ... }`: a pipeline will not execute while it has `errors`; `warnings` are non-fatal.
+Validate a pipeline configuration without starting it — a pre-flight check before `use()`. Options: `pipeline` (required); `source?` override, resolved with the same logic as `use()` (explicit option → pipeline's `source` field → the single component whose `config.mode` is `'Source'`). It checks what `use()` checks, then checks a whole pipeline against the services it names: each provider is a service on the engine, each control entry sits on the node being called, and each input's lane is one its upstream node produces and its node takes. A node with no lanes, such as a tool, is not checked for the lanes it takes, and a `"*"` in a node's lanes matches any lane. `use()` does not make those last checks, so a pipeline with a wiring error can still start, then fail or lose data. Returns `{ errors, warnings, ... }`; treat any `errors` as a reason not to run. `warnings` are non-fatal.
 
-`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs.
+`pipeline` also accepts the single-component form `{ version, component }` — the shape a node editor sends when it validates one component on save. That payload is passed through unwrapped so the engine's single-component validator runs. It checks the component's provider but skips the control and lane checks, which need the whole pipeline.
 
 ```typescript
 const result = await client.validate({ pipeline });
@@ -916,22 +916,22 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
 
-**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `inviteMember(orgId, { email, givenName, familyName, role })` · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
+**Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `invite(orgId, { email, givenName, familyName, role, teamAssignments?, devTeamId? }): Promise<InvitedMember>` (returns `{ userId, displayName, email, role, status, devTeamId }`; `inviteMember` is the deprecated form that returns nothing) · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
 
 **Teams:** `listTeams(orgId): Promise<TeamRecord[]>` · `getTeamDetail(orgId, teamId): Promise<TeamDetail>` (includes members) · `createTeam(orgId, name)` · `deleteTeam(orgId, teamId)` · `addTeamMember(orgId, { teamId, userId, permissions })` · `updateTeamMemberPerms(orgId, { teamId, userId, permissions })` · `removeTeamMember(orgId, { teamId, userId })`
 
 **Environment secrets** (the layered `ROCKETRIDE_*` store, merged server-side at auth):
 
 - `getEnvironmentKeys(): Promise<string[]>` — available key NAMES from the merged environment (no values; for dropdowns)
-- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — read one scope's dict (org: pass orgId; team: pass teamId; user: omit)
-- `setEnv(scope, env, scopeId?): Promise<void>` — write one scope's FULL dict (replaces the entire set at that level)
+- `getEnv(scope: 'org' | 'team' | 'user', scopeId?): Promise<Record<string, string>>` — the names stored at one scope, each mapped to the mask `CONST_ENV_MASK` (exported by `rocketride`); values are never returned (org: pass orgId; team: pass teamId; user: omit)
+- `setEnv(scope, env, scopeId?): Promise<void>` — merge into one scope: a value sets, `null` deletes, the mask keeps the stored value; names not sent are untouched
 
 #### What members can do vs admins
 
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
 - **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); leaving an organization they belong to (`leaveOrg` — refused for its last admin); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
-- **Org admin only**: renaming the org (`updateOrgName`); member management (`inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
+- **Org admin only**: renaming the org (`updateOrgName`); member management (`invite`, `inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `deleteTeam`, `addTeamMember`, `updateTeamMemberPerms`, `removeTeamMember`, and TEAM-scope `getEnv`/`setEnv` — both read and write.
 
 ### `client.billing`
@@ -1076,7 +1076,10 @@ Methods: `getState()`, `getDocument(uri)`, `useStore()`, `openDocument(uri, grou
 
 The package installs a `rocketride` command (use `pnpm exec rocketride` /
 `npx rocketride` for local installs). The Python client installs the
-IDENTICAL command — same verbs, same flags, same output. The full reference
+same command with fewer verbs: of the `app` commands it has only `create`,
+`verify`, and `deploy`, and it has no `deploy source-config`. It adds
+`diff` and `otel`, which this package lacks. ROCKETRIDE_CLI.md has the
+table of which package ships which command. The full reference
 (workspace, validate, task, store, app, and deploy verbs, the `--json`
 contract, and when to prefer it over SDK code) is ROCKETRIDE_CLI.md; every
 deploy and app verb there fronts a `client.deploy.*` method from §Deploy.

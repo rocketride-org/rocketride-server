@@ -31,7 +31,7 @@ const MESSAGE_REVISION_PATTERN = /^[a-f0-9]{16}$/;
 const SIGNUP_PROPERTY_KEYS = ['schema_version', 'experiment', 'experiment_revision', 'variant_id', 'assignment_id', 'exposure_id', 'landing_message_revision', 'exposed_at', 'expires_at', 'consent_version'];
 
 function hasExactKeys(properties: Record<string, unknown>): boolean {
-	const keys = Object.keys(properties);
+	const keys = Object.keys(properties).filter((key) => key !== 'consent_state');
 	if (keys.length !== SIGNUP_PROPERTY_KEYS.length) return false;
 	return keys.every((key) => SIGNUP_PROPERTY_KEYS.includes(key));
 }
@@ -68,6 +68,7 @@ export function normalizeSignupProperties(value: unknown, now = Date.now()): Sig
 		if (!hasExactKeys(properties)) return null;
 		if (properties.schema_version !== 1) return null;
 		if (properties.consent_version !== 1) return null;
+		if ('consent_state' in properties && properties.consent_state !== 'undecided') return null;
 		if (!isSlug(properties.experiment)) return null;
 		if (!isSlug(properties.experiment_revision)) return null;
 		if (!isSlug(properties.variant_id)) return null;
