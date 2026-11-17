@@ -39,7 +39,7 @@ body {
 	top: 8px;
 	left: 8px;
 	z-index: 10;
-	max-width: calc(100% - 112px);
+	/* max-width is set inline: the room the view buttons leave. */
 	padding: 2px 7px;
 	border-radius: 6px;
 	background: color-mix(in srgb, var(--rr-bg-default) 88%, transparent);
@@ -226,16 +226,15 @@ body {
 .rr-overview-edge {
 	fill: none;
 	stroke: var(--xy-edge-stroke, var(--rr-text-disabled));
+	/* As the connections it redraws: 1.5 px at zoom 1, scaled with the drawing. */
 	stroke-width: 1.5px;
-	vector-effect: non-scaling-stroke;
 }
 .rr-overview-invoke {
 	stroke-dasharray: 2 4;
 	stroke-linecap: round;
 }
-/* At overview zoom edges keep a 1.5 px line instead of thinning with the zoom. */
+/* At overview zoom edges are drawn 1.5 px wide at zoom 1, so they stay visible when the drawing is small. */
 .react-flow:has(.rr-overview) .react-flow__edge-path {
-	vector-effect: non-scaling-stroke;
 	stroke-width: 1.5px;
 }
 /* A node whose component this engine does not have. */

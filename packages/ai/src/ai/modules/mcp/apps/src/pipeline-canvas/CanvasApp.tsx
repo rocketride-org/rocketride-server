@@ -643,6 +643,12 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 			draft.anchor = line;
 		}
 	}
+	// A group (its rows, and the labels that share a title with them) takes its
+	// tallest row's height, so equal titles are the same size too.
+	for (const group of groups.values()) {
+		const height = Math.max(...group.map((d) => d.height));
+		for (const draft of group) draft.height = height;
+	}
 
 	// A label stays on its node: one whose node the frame cuts is cut the same
 	// way, as map labels are. When two would overlap, the one whose node is
@@ -902,6 +908,8 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 						zoomOnPinch
 						panOnDrag
 						zoomOnDoubleClick
+						// Space presses a focused view button; nothing pans with it.
+						panActivationKeyCode={null}
 						minZoom={0.02}
 						maxZoom={2}
 						proOptions={PRO_OPTIONS}
@@ -1049,6 +1057,8 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 		if (coarse && !active && host.canFullScreen) host.request('fullscreen');
 	};
 	const name = pipelineName(model.summary);
+	// The name stops short of the view buttons (see Toolbar for which show).
+	const tools = 1 + (host.canFullScreen ? 1 : 0) + (!coarse && (active || !host.canFullScreen) ? 2 : 0);
 	const count = model.summary.node_count ?? model.nodes.length;
 	const shown = model.summary.nodes?.length ?? model.nodes.length;
 	const described = [`Read-only diagram of ${name}, ${count} ${count === 1 ? 'node' : 'nodes'}${model.summary.truncated ? `, the first ${shown} drawn` : ''}.`, model.summary.description ? `${model.summary.description.replace(/[.\s]+$/, '')}.` : '', 'Arrow keys move it, plus and minus zoom.'].filter(Boolean).join(' ');
@@ -1057,7 +1067,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 		<div className={`rr-canvas${active ? ' rr-canvas-full' : ''}${coarse ? ' rr-canvas-coarse' : ''}`}>
 			<div ref={boxRef} className="rr-canvas-frame" style={{ height }} tabIndex={0} role="region" aria-label={described} aria-describedby="rr-canvas-text" onKeyDown={onKeyDown} onClick={onTap}>
 				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} onCue={setCueNeeded} />}
-				<div className="rr-canvas-name" title={name}>
+				<div className="rr-canvas-name" title={name} style={{ maxWidth: `calc(100% - ${tools * (coarse ? 44 : 32) + 24}px)` }}>
 					{name}
 				</div>
 				<Toolbar host={host} moved={moved} coarse={coarse} />
