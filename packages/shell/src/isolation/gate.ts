@@ -378,6 +378,7 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	if (command === 'rrext_get_token') {
 		checked.projectId = run!.projectId;
 	}
+	if (command === 'rrext_store' && subcommand === 'fs_read' && (checked.length as number) > SIZES.fsRead) fail('schema');
 	if (command === 'rrext_process' && subcommand === 'open') reserve('pipes', QUOTAS.pipes);
 	if (command === 'rrext_monitor') {
 		// A direct subscription replaces the previous types for (run, pipe): only growth needs room.
