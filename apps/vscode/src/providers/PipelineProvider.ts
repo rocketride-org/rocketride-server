@@ -31,6 +31,7 @@ import { getLogger } from '../shared/util/output';
 // Deep import on purpose — see SidebarProvider: the barrel drags view types
 // into the extension-host compile; parse.ts is pure.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
+import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -397,6 +398,14 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			},
 			'host.pipeline.openLink': (p) => {
 				if (p.url) openExternalLink(p.url, p.displayName, p.browser);
+			},
+			// The endpoint modal's Create API key: the webview holds no client,
+			// so the extension mints on its behalf with the shared minter (one
+			// shape for every host: task.data, this address, the home team).
+			'host.pipeline.createEndpointKey': async (p) => {
+				const client = this.connectionManager.getClient();
+				if (!client) throw new Error('Not connected to server');
+				return mintEndpointKey(client, p.address);
 			},
 		};
 		registerOpHandlers<PipelineHostOpMap>(this.busHost.rootBus, impls);

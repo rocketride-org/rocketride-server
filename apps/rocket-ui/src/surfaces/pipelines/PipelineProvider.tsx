@@ -47,6 +47,7 @@ import type { PipelineConfig } from 'shell';
 // canvas bundles into THIS app, not the shell's eager shared chunk.
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
+import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
@@ -385,6 +386,16 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		return (docState ? Object.values(docState.editors).find((editor) => editor.documentUri === uri)?.label : undefined) || projectDisplayName(filename);
 	}, [uri, filename]);
 
+	/** The endpoint modal's Create API key: the shared minter on this
+	 *  connection's own client (task.data, the one address, the home team). */
+	const handleCreateEndpointKey = useCallback(
+		(address: string) => {
+			if (!client || !isConnected) return Promise.reject(new Error('Not connected to server'));
+			return mintEndpointKey(client, address);
+		},
+		[client, isConnected]
+	);
+
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
 			documentTitle,
@@ -402,9 +413,10 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			isSubscribed,
 			promptSubscribe,
 			openLink: handleOpenLink,
+			createEndpointKey: handleCreateEndpointKey,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleExport]
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------

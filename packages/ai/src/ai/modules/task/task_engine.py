@@ -2675,8 +2675,9 @@ class TaskEngine(DAPBase):
                 for note in notes:
                     if isinstance(note, str):
                         # Handle string notes - simple replacement; {token} is
-                        # the token SLOT, which carries the address
-                        note = note.replace('{token}', self.address)
+                        # the token SLOT, which carries the address; {address}
+                        # names it outright (the webhook door's path segment)
+                        note = note.replace('{token}', self.address).replace('{address}', self.address)
                         # getattr: partially-initialized tasks (and test stubs)
                         # may not carry the identity attributes at all.
                         project_id = getattr(self, 'project_id', None)
@@ -2692,7 +2693,7 @@ class TaskEngine(DAPBase):
                         for key, value in note.items():
                             if isinstance(value, str):
                                 # Replace placeholders in string values
-                                value = value.replace('{token}', self.address)
+                                value = value.replace('{token}', self.address).replace('{address}', self.address)
                                 project_id = getattr(self, 'project_id', None)
                                 source = getattr(self, 'source', None)
                                 if project_id is not None:

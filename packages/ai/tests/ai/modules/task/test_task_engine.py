@@ -656,6 +656,28 @@ def test_update_status_user_event_replaces_placeholders_in_dict_values():
     assert t._status.notes == [{'msg': 'token is acme.proj-x.src-x', 'count': 42}]
 
 
+def test_update_status_user_event_replaces_address_placeholder():
+    """``{address}`` names the address outright: the webhook note's door path
+    ``{host}/webhook/{address}`` and its ``address`` field resolve to the
+    control's address, in strings and in dict values alike.
+    """
+    t = _task(status=_make_status_for_update())
+    t.address = 'acme.proj-x.src-x'
+    TaskEngine._update_status(
+        t,
+        {
+            'event': 'apaevt_status_user',
+            'body': {
+                'notes': ['{host}/webhook/{address}', {'url-link': '{host}/webhook/{address}', 'address': '{address}'}]
+            },
+        },
+    )
+    assert t._status.notes == [
+        '{host}/webhook/acme.proj-x.src-x',
+        {'url-link': '{host}/webhook/acme.proj-x.src-x', 'address': 'acme.proj-x.src-x'},
+    ]
+
+
 def test_update_status_user_event_keeps_unknown_note_types_as_is():
     """A non-string, non-dict note (e.g. int) is appended without modification."""
     t = _task(status=_make_status_for_update())

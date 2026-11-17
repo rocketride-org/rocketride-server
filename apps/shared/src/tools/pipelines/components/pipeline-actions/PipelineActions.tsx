@@ -20,6 +20,7 @@ import React, { ReactElement, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button } from 'shell';
 import EndpointInfoModal from './EndpointInfoModal';
+import type { EndpointKeyMinter } from './endpointKey';
 
 // =============================================================================
 // Styles
@@ -51,14 +52,13 @@ export interface IEndpointInfo {
 	'url-text': string;
 	/** The actual endpoint URL. */
 	'url-link': string;
-	/** Label for the auth key row (e.g. "Public Authorization Key"). */
-	'auth-text': string;
-	/** The actual auth key value. */
-	'auth-key': string;
-	/** Label for an optional private token row. */
-	'token-text'?: string;
-	/** The actual private token value. */
-	'token-key'?: string;
+	/**
+	 * The control's address, `developerId.pipeId.source` — what a machine
+	 * caller POSTs to and what the minted key is scoped to (plan §2.2). The
+	 * notes carry NO credential: the pk_/tk_ tokens are gone (plan §2.4).
+	 * Absent on older engines.
+	 */
+	address?: string;
 	/**
 	 * Data lanes some component downstream of this source reads, as reported by
 	 * the running pipeline. Drives which Content-Type the endpoint panel
@@ -76,6 +76,8 @@ export interface IPipelineActionsProps {
 	onOpenLink?: (url: string, displayName?: string) => void;
 	/** Display name for the source node (used as the tab title when opening links). */
 	displayName?: string;
+	/** Mints the owner's scoped key for the endpoint (the modal's Create API key; plan §2.4). Absent = the host cannot mint. */
+	onCreateEndpointKey?: EndpointKeyMinter;
 }
 
 // =============================================================================
@@ -84,7 +86,7 @@ export interface IPipelineActionsProps {
 
 /** Type guard: checks whether an unknown value is IEndpointInfo. */
 function isEndpointInfo(value: unknown): value is IEndpointInfo {
-	return value != null && typeof value === 'object' && 'url-text' in value && 'url-link' in value && 'auth-text' in value && 'auth-key' in value;
+	return value != null && typeof value === 'object' && 'url-text' in value && 'url-link' in value;
 }
 
 function getEndpointInfo(notes?: (string | Record<string, unknown>)[]): IEndpointInfo | null {
@@ -103,7 +105,7 @@ function processLink(link: string | undefined, host?: string): string | undefine
 // Component
 // =============================================================================
 
-export default function PipelineActions({ notes, host, onOpenLink, displayName }: IPipelineActionsProps): ReactElement | null {
+export default function PipelineActions({ notes, host, onOpenLink, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
 	const endpointInfo = useMemo(() => getEndpointInfo(notes), [notes]);
 	const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -127,7 +129,7 @@ export default function PipelineActions({ notes, host, onOpenLink, displayName }
 					Endpoint Info
 				</Button>
 			</div>
-			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} />
+			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} onCreateEndpointKey={onCreateEndpointKey} />
 		</>
 	);
 }

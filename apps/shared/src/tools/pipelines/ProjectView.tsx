@@ -26,6 +26,7 @@
  */
 
 import React, { useState, useCallback, useRef, useMemo, useEffect, CSSProperties, ReactNode } from 'react';
+import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 import { TabPanel } from 'shell';
 import { ContentHeader } from 'shell';
@@ -84,6 +85,8 @@ export interface IProjectViewProps {
 	statusMap: Record<string, TaskStatus>;
 	/** Server host URL for {host} placeholder replacement in endpoint URLs. */
 	serverHost?: string;
+	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
+	onCreateEndpointKey?: EndpointKeyMinter;
 	/** Whether the document has unsaved changes. */
 	isDirty?: boolean;
 	/** Whether the document is a new (never-saved) file. */
@@ -254,7 +257,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -553,7 +556,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	}, []);
 
 	/** Render the stacked SourcePanels for one continuum. */
-	const renderSections = (runKind: 'dev' | 'deploy'): ReactNode => (sources.length > 0 ? sources.map((src) => <SourcePanel key={`${projectId}.${src.id}.${runKind}`} source={src} runKind={runKind} projectId={projectId} liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []} openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : () => liveStore(`${src.id}.${runKind}.${projectId}`).open()} fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null} liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined} componentNames={componentNames} isSubscribed={isSubscribed} isReadonly={isReadonly} serverHost={serverHost} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>);
+	const renderSections = (runKind: 'dev' | 'deploy'): ReactNode => (sources.length > 0 ? sources.map((src) => <SourcePanel key={`${projectId}.${src.id}.${runKind}`} source={src} runKind={runKind} projectId={projectId} liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []} openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : () => liveStore(`${src.id}.${runKind}.${projectId}`).open()} fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null} liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined} componentNames={componentNames} isSubscribed={isSubscribed} isReadonly={isReadonly} serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>);
 
 	const panels = {
 		design: {
@@ -583,6 +586,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 								onDismissCloudPrompt={handleDismissCloudPrompt}
 								onDismissCloudPromptForever={handleDismissCloudPromptForever}
 								serverHost={serverHost}
+								onCreateEndpointKey={onCreateEndpointKey}
 								isConnected={isConnected}
 								cloudConnectionConfigured={cloudConnectionConfigured}
 								isSubscribed={isSubscribed}

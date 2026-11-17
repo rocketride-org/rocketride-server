@@ -39,6 +39,7 @@ import FlowCanvas from './components/FlowCanvas';
 import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from './types';
 import { buildInventory } from './util/helpers';
 import { IServiceCatalog } from './types';
+import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 
 // =============================================================================
 // Props
@@ -111,6 +112,8 @@ export interface ICanvasPanelProps {
 
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
+	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
+	onCreateEndpointKey?: EndpointKeyMinter;
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
@@ -155,7 +158,7 @@ export interface ICanvasPanelProps {
 // Component
 // =============================================================================
 
-export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, getNodeSchema, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, cloudPromptDismissed, onDismissCloudPrompt, onDismissCloudPromptForever, onExport, isReadonly = false, envKeys }: ICanvasPanelProps) {
+export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, getNodeSchema, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, cloudPromptDismissed, onDismissCloudPrompt, onDismissCloudPromptForever, onExport, isReadonly = false, envKeys }: ICanvasPanelProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -178,7 +181,7 @@ export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExter
 					overflow: 'hidden',
 				}}
 			>
-				<FlowContainer oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} cloudConnectionConfigured={cloudConnectionConfigured} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onOpenCloudSetup={onOpenCloudSetup} onExport={onExport} isReadonly={isReadonly} envKeys={envKeys}>
+				<FlowContainer oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey} isConnected={isConnected} cloudConnectionConfigured={cloudConnectionConfigured} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onOpenCloudSetup={onOpenCloudSetup} onExport={onExport} isReadonly={isReadonly} envKeys={envKeys}>
 					<FlowCanvas cloudPromptDismissed={cloudPromptDismissed} onDismissCloudPrompt={onDismissCloudPrompt} onDismissCloudPromptForever={onDismissCloudPromptForever} />
 				</FlowContainer>
 			</div>

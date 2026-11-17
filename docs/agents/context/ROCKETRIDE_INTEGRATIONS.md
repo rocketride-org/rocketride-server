@@ -188,36 +188,38 @@ lanes you need (ROCKETRIDE_PIPELINES.md §Lanes).
 
 ### URL and credentials
 
-When the pipeline starts, the Project Log (IDE task monitor) publishes three things:
+When the pipeline starts, the source node's **Endpoint Info** panel (on the canvas node and
+in the DEVELOPMENT panel) shows:
 
-- **Webhook interface URL** — `<server>/webhook/<project_id>/<source>`, where
-  `project_id` is the pipeline's GUID and `source` is the source component id
-  (e.g. `webhook_1`). On a local engine `<server>` defaults to `http://localhost:5565`.
-- **Public Authorization Key** — a `pk_...` token.
-- **Private Token** — a `tk_...` token.
+- **Webhook interface URL** — `<server>/webhook/<address>`, the dotted address in ONE
+  path segment: `<developerId>.<pipelineId>.<source>`, e.g.
+  `https://api.rocketride.ai/webhook/acme.docBrain.webhook_1`. On a local engine
+  `<server>` defaults to `http://localhost:5565`.
+- **Address** — the same `developerId.pipelineId.source`; what a key is scoped to.
+- **Key for this endpoint** — a **Create API key** button that mints an account key
+  scoped to `task.data` on exactly this address, frozen to your home team, shown once.
+  It is listed in Settings › Account › API Keys, where you revoke it.
 
-The legacy `POST <server>/webhook` (no path segments) also works; address the run with a
-`?token=<task token>` query parameter or a task-scoped key.
+The notes carry no credential: there are no public (`pk_`) or private (`tk_`) task tokens.
 
 ### Authentication
 
-All requests carry an `Authorization` header. The `Bearer` scheme prefix is optional — the
-server strips it if present. Three credential types are accepted:
+Every request carries an **account API key** (`rr_...`) in the `Authorization` header
+(`Bearer` prefix optional). `?auth=` on the URL is not accepted. Who pays is whose key is
+on the request.
 
-| Credential | Prefix | Scope | Use it for |
-|---|---|---|---|
-| Public Authorization Key | `pk_` | data submission only, locked to this one run | handing to external systems (n8n, partners, webhooks) |
-| Private Token | `tk_` | full task scope (data, monitor, control, debug, store) | your own server-side automation; never share |
-| Account API key | — | your whole account | first-party callers; enables the selectors below |
+| Key | Scope | Use it for |
+|---|---|---|
+| Endpoint-scoped key (from the panel's Create API key) | `task.data` on one address, one team | handing to external systems (Stripe, GitHub, n8n, partners) |
+| Account key with an `endpoints` list (Settings › Account › API Keys) | `task.data` on the listed addresses or `developerId.pipelineId.*` | several webhooks of one integration |
+| Full account key | your whole account | first-party callers and your own automation |
 
-With an **account API key** and the path-addressed URL, the server resolves *your* running
-task for that project/source — your dev run by default. Two query selectors change that:
-`?teamId=<id>` addresses the team's deploy run of the same project, and `?runKind=deploy`
-addresses your personal deploy run. `pk_`/`tk_` keys are already locked to their run, so
-they need no token or selector at all.
-
-If the pipeline is not running, the call fails with `Your pipeline is not running` —
-webhook endpoints exist only while their pipeline is up.
+The server resolves the address through the caller's rungs: your Play'd run (`@dev`),
+your personal deployment (`@me`), the first team in your team order that publishes it
+(`@team`), then the store (`@public`). A key with an `endpoints` scope starts at `@me`: a
+production webhook never lands on a Play'd run. A published pipe that is not running is
+started by the call; a Play'd run that is not up falls through to the next rung, and a
+name nothing publishes fails with `not_found` listing the rungs tried.
 
 ### Calling it
 
@@ -225,7 +227,7 @@ Multipart upload (file plus text fields):
 
 ```bash
 curl -X POST "$WEBHOOK_URL" \
-     -H "Authorization: $ROCKETRIDE_PUBLIC_KEY" \
+     -H "Authorization: Bearer $ROCKETRIDE_API_KEY" \
      -F 'file=@document.pdf' \
      -F 'question=What is this about?'
 ```
@@ -234,7 +236,7 @@ Raw body stream (any content type; `Content-Disposition` names the file):
 
 ```bash
 curl -X POST "$WEBHOOK_URL" \
-     -H "Authorization: $ROCKETRIDE_PUBLIC_KEY" \
+     -H "Authorization: Bearer $ROCKETRIDE_API_KEY" \
      -H 'Content-Type: application/pdf' \
      -H 'Content-Disposition: attachment; filename=document.pdf' \
      --data-binary @document.pdf
@@ -244,7 +246,7 @@ Plain text or JSON:
 
 ```bash
 curl -X POST "$WEBHOOK_URL" \
-     -H "Authorization: $ROCKETRIDE_PUBLIC_KEY" \
+     -H "Authorization: Bearer $ROCKETRIDE_API_KEY" \
      -H 'Content-Type: application/json' \
      -d '{"customer": "ACME", "total": 129.90}'
 ```

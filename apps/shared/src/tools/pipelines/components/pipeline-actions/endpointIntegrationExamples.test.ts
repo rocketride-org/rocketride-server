@@ -19,13 +19,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
+import { API_KEY_PLACEHOLDER, buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
 
 // --- Fixtures ---------------------------------------------------------------
 
-const ENDPOINT = 'http://localhost:5565/webhook/00000000-0000-0000-0000-000000000000/webhook_1';
+const ENDPOINT = 'http://localhost:5565/webhook/acme.docBrain.webhook_1';
 /** Obviously-not-a-credential stand-in: real-looking keys trip secret scanners. */
-const AUTH_KEY = 'pk_EXAMPLE_NOT_A_REAL_KEY';
+const AUTH_KEY = 'rr_EXAMPLE_NOT_A_REAL_KEY';
 
 /** Every tab the generator emits — each one is a separate copy-paste snippet. */
 const ALL_TABS: IntegrationTabId[] = ['curl', 'curlCmd', 'powershell', 'wget', 'typescript', 'python', 'http'];
@@ -144,4 +144,30 @@ test('chat endpoints ignore the payload choice and stay GET-shaped', () => {
 		assert.ok(!asJson.curl.includes(contentType), `chat curl should carry no Content-Type, found ${contentType}`);
 	}
 	assert.ok(asJson.http.startsWith('GET '), asJson.http);
+});
+
+// --- The key rides the Authorization header, never the URL ------------------
+
+test('webhook examples: every snippet sends the key in the Authorization header and none as ?auth=', () => {
+	const examples = webhookExamples('json');
+	for (const tab of ALL_TABS) {
+		assert.ok(examples[tab].includes(`Bearer ${AUTH_KEY}`), `${tab} should carry the Bearer header`);
+		assert.ok(!examples[tab].includes('auth='), `${tab} must not carry a query credential`);
+	}
+});
+
+test('webhook examples: without a minted key every snippet shows the placeholder', () => {
+	const examples = buildIntegrationExamples({ endpointUrl: ENDPOINT, isWebhook: true, payloadId: 'json' });
+	for (const tab of ALL_TABS) {
+		assert.ok(examples[tab].includes(`Bearer ${API_KEY_PLACEHOLDER}`), `${tab} should show the placeholder`);
+		assert.ok(!examples[tab].includes(AUTH_KEY), `${tab} must not invent a key`);
+	}
+});
+
+test('chat examples: the page URL is opened as is, with no credential in it', () => {
+	const examples = buildIntegrationExamples({ endpointUrl: 'http://localhost:5565/chat/p/chat_1', authKey: AUTH_KEY, isWebhook: false });
+	for (const tab of ALL_TABS) {
+		assert.ok(!examples[tab].includes('auth='), `${tab} must not carry a query credential`);
+		assert.ok(!examples[tab].includes(AUTH_KEY), `${tab} must not put the key in a browser URL`);
+	}
 });
