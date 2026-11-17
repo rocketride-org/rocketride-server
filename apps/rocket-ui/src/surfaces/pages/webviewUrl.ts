@@ -30,23 +30,65 @@
 // pages on the shell origin (what pipeline links open) may be framed.
 // =============================================================================
 
-/** Hostnames (as `URL.hostname` reports them) that may be framed over plain http. */
+/** Hostnames (as `URL.hostname` reports them, trailing dot removed) that may be framed over plain http. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** The only shell-origin paths a webview may frame: the engine's chat and dropper pages. */
 const SHELL_ORIGIN_PREFIXES = ['/chat/', '/dropper/'];
 
+/** App bundles (`/apps/...`) are never framed, on any origin: they belong in the shell's own loader. */
+const APPS_PATH = /^\/apps(\/|$)/;
+
 /** Percent-encoded dot, slash or backslash: a traversal the URL parser leaves for the server to decode. */
 const ENCODED_PATH_SEPARATOR = /%2e|%2f|%5c/i;
+
+/** An http(s) origin reduced to the parts that decide "same server". */
+interface Endpoint {
+	protocol: string;
+	host: string;
+	port: string;
+}
+
+/**
+ * Reduce an http(s) URL to protocol, host (lowercase, trailing dot removed) and effective port.
+ *
+ * @param url - A parsed URL.
+ * @returns The endpoint, or null for any other scheme.
+ */
+function endpointOf(url: URL): Endpoint | null {
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+	return {
+		protocol: url.protocol,
+		host: url.hostname.toLowerCase().replace(/\.$/, ''),
+		port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+	};
+}
+
+/**
+ * Whether two endpoints are the same server: the same origin (ignoring a
+ * trailing dot), or two loopback names on the same port.
+ *
+ * @param a - The framed URL's endpoint.
+ * @param b - The shell's endpoint.
+ * @returns True when `a` must be treated as the shell itself.
+ */
+function isSameServer(a: Endpoint, b: Endpoint): boolean {
+	if (a.port !== b.port) return false;
+	if (LOOPBACK_HOSTS.has(a.host) && LOOPBACK_HOSTS.has(b.host)) return true;
+	return a.protocol === b.protocol && a.host === b.host;
+}
 
 /**
  * Decide whether a `webview:` document may frame a URL.
  *
- * Only absolute URLs are accepted (relative and protocol-relative input would
- * resolve against the shell). A URL with credentials is refused. A URL on the
- * shell origin is accepted only under /chat/ or /dropper/ after the parser has
- * normalised `.` and `..` segments, and never with an encoded separator left
- * in its path. Any other URL must be https, or http on a loopback host.
+ * Only absolute http(s) URLs without credentials are considered (relative and
+ * protocol-relative input would resolve against the shell). App bundles under
+ * `/apps/` are refused on any origin. A URL on the shell's own server (same
+ * origin, a trailing-dot variant of it, or another loopback name on the
+ * shell's port) is accepted only under /chat/ or /dropper/, after the parser
+ * has normalised `.` and `..` segments and with no encoded separator left in
+ * its path, over whatever scheme the shell itself uses. Any other URL must be
+ * https, or http on a loopback host.
  *
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
@@ -54,22 +96,22 @@ const ENCODED_PATH_SEPARATOR = /%2e|%2f|%5c/i;
  */
 export function isAllowedWebviewUrl(raw: string, shellOrigin: string): boolean {
 	let url: URL;
+	let shell: Endpoint | null;
 	try {
 		url = new URL(raw);
+		shell = endpointOf(new URL(shellOrigin));
 	} catch {
 		return false;
 	}
+	const target = endpointOf(url);
+	// No usable shell origin to compare with: refuse rather than guess.
+	if (!target || !shell) return false;
 	if (url.username || url.password) return false;
-	if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) return false;
+	if (APPS_PATH.test(url.pathname)) return false;
 
-	let shell: string;
-	try {
-		shell = new URL(shellOrigin).origin;
-	} catch {
-		// No usable shell origin to compare with: refuse rather than guess.
-		return false;
+	if (isSameServer(target, shell)) {
+		if (ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
+		return SHELL_ORIGIN_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
 	}
-	if (url.origin !== shell) return true;
-	if (ENCODED_PATH_SEPARATOR.test(url.pathname)) return false;
-	return SHELL_ORIGIN_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
+	return target.protocol === 'https:' || LOOPBACK_HOSTS.has(target.host);
 }
