@@ -444,6 +444,38 @@ def test_e8_case_variant_id_without_an_entry_is_refused(mode, variant, world, mo
     assert world.reads == []
 
 
+def _unpublished_preview(world, first_party=False):
+    """``acme.preview`` v1 built on u1's own org rail, bound to no audience u1 sees: no entry for the caller."""
+    world.registry.add('acme.preview', 1, org='org-1', audience=('team', 'another-team'), deploy_state='private')
+    if first_party:
+        world.registry.first_party.add(('acme.preview', 'org-1'))
+    return world.client.get('/apps/acme.preview/v1/remoteEntry.js', headers=COOKIE)
+
+
+def test_e8_unpublished_preview_of_an_unlisted_app_loads_under_optin(world):
+    """T35 (G4 round 2 SHOULD-2): no entry, not listed under optin: the developer's own preview still loads."""
+    world.env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.net')
+    assert _unpublished_preview(world).status_code == 200
+
+
+def test_e8_unpublished_first_party_preview_loads_under_enforce(world):
+    """T35 (SHOULD-2): no entry, but first party for the caller's org (resolve_isolation): it loads."""
+    assert _unpublished_preview(world, first_party=True).status_code == 200
+
+
+def test_e8_unpublished_third_party_preview_is_refused_under_enforce(world):
+    """T35 (SHOULD-2): no entry and not first party: isolated, the main origin refuses it."""
+    resp = _unpublished_preview(world)
+    assert resp.status_code == 404
+    assert world.reads == []
+
+
+def test_e8_listed_id_matches_case_insensitively(world):
+    """T35 (SHOULD-2): RR_APP_ISOLATION_APPS is compared case-folded, for entries and for ids without one."""
+    world.env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='ACME.Preview')
+    assert _unpublished_preview(world).status_code == 404
+
+
 def test_e8_refusal_is_not_an_existence_oracle(world):
     """T35: the refusal adds no oracle: an isolated version and a version that does not exist answer the same."""
     same = world.client.get(f'/apps/{THIRD}/v1/remoteEntry.js', headers=COOKIE)

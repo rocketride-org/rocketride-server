@@ -726,10 +726,14 @@ class Verdict(NamedTuple):
 
 
 def _isolates(config: IsolationConfig, app_id: str, first_party: bool) -> bool:
-    """``isolated`` for an app: never under off, never first party, every app or the listed ones."""
+    """
+    ``isolated`` for an app: never under off, never first party, every app or the listed ones.
+
+    The list is compared case-folded, so no spelling of a listed id escapes it.
+    """
     if config.mode == 'off' or first_party:
         return False
-    return config.mode == 'enforce' or app_id in config.apps
+    return config.mode == 'enforce' or app_id.casefold() in {listed.casefold() for listed in config.apps}
 
 
 async def resolve_isolation(app_id: str, binding_org_id: str) -> Optional[Verdict]:
@@ -898,41 +902,54 @@ async def caller_of(token: str) -> Any:
     return info if hasattr(info, 'userId') else None
 
 
-async def version_verdict(token: str, app_id: str) -> Optional[Verdict]:
-    """The stamp of the caller's scope-walk winner for ``app_id``, or None when the caller has no entry."""
+async def _caller_answer(token: str, app_id: str) -> dict:
+    """``{verdict, org}``: the caller's winning stamp for ``app_id`` (None: no entry) and the caller's org."""
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     hit = _cached(_verdict_cache, key)
     if hit is not None:
-        return hit['verdict']
+        return hit
     from ai.account.app_deploy import resolve_app_pins
 
     local = '' if _is_saas() else 'local'
     info = await caller_of(token)
+    org_id = local
     if info is not None:
-        user_id, org_id, team_ids = _identity_of(info)
-        entries = await resolve_app_pins(org_id or local, user_id or None, team_ids)
+        user_id, caller_org, team_ids = _identity_of(info)
+        org_id = caller_org or local
+        entries = await resolve_app_pins(org_id, user_id or None, team_ids)
     else:
         entries = await resolve_app_pins(local, None, [])
     entry = next((e for e in entries if e.get('id') == app_id), None)
     verdict = None
     if entry is not None and 'isolated' in entry:
         verdict = Verdict(isolated=entry['isolated'] is True, firstParty=entry.get('firstParty') is True)
-    return _remember(_verdict_cache, key, app_id, verdict=verdict)['verdict']
+    return _remember(_verdict_cache, key, app_id, verdict=verdict, org=org_id)
+
+
+async def version_verdict(token: str, app_id: str) -> Optional[Verdict]:
+    """The stamp of the caller's scope-walk winner for ``app_id``, or None when the caller has no entry."""
+    return (await _caller_answer(token, app_id))['verdict']
 
 
 async def isolated_for(token: str, app_id: str) -> bool:
     """
     Whether ``app_id`` is isolated for this caller (E8: its dist never serves on the main origin).
 
-    False under ``off`` without asking anything. Otherwise only the caller's
-    own entry for this exact id can say "not isolated": an id the caller has
-    no entry for is isolated in every mode (fail closed; a case variant of a
-    listed id, or a store that ignores case, must not reopen the main origin).
+    False under ``off`` without asking anything. The caller's own entry for
+    this exact id decides when there is one. Without one (an unpublished
+    preview on the caller's own rail, or a spelling no entry has), the
+    decision is ``resolve_isolation(app_id, caller's org)``: first party for
+    that org loads, otherwise ``enforce`` isolates and ``optin`` isolates a
+    listed id, compared case-folded so a case variant cannot reopen the main
+    origin.
     """
     if current_config().mode == 'off':
         return False
-    verdict = await version_verdict(token, app_id)
-    return verdict is None or verdict.isolated
+    answer = await _caller_answer(token, app_id)
+    if answer['verdict'] is not None:
+        return answer['verdict'].isolated
+    fallback = await resolve_isolation(app_id, answer['org'])
+    return fallback is None or fallback.isolated
 
 
 def _rate_ok(cache: dict, key: str, limit: int) -> bool:
