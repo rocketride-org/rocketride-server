@@ -225,9 +225,10 @@ what is not:
   is dropped within about a minute.
 - **The pre-ping health check**: `ping_timeout` (default 5 s) bounds it, which also
   covers a pooler process that keeps acknowledging but has stopped answering. A
-  watchdog shuts the connection's socket down if the ping overruns; it never touches
-  a connection whose ping already returned. It does nothing on Windows, where the
-  socket cannot be duplicated, so there the ping is not bounded.
+  watchdog (one thread per engine process, shared by every pool) shuts the
+  connection's socket down if the ping overruns; it never touches a connection
+  whose ping already returned. It is not installed on Windows, where the socket
+  cannot be duplicated, so there the ping is not bounded.
 - **Not bounded: a statement already running on a healthy connection.** Use the
   server's `statement_timeout` for that. A statement that was sent is never sent
   again.

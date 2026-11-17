@@ -449,6 +449,9 @@ def test_the_save_time_probe_is_unchanged():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    not connect_retry_module.PING_WATCHDOG_SUPPORTED, reason='Windows cannot duplicate a socket, so no watchdog there'
+)
 def test_the_abort_shuts_down_the_socket_so_a_blocked_read_returns():
     """The mechanism: shutting down the descriptor frees a thread blocked reading from a silent peer."""
     import socket
@@ -519,42 +522,39 @@ def test_a_ping_that_answers_in_time_is_left_alone():
     assert aborted == []
 
 
-class _ManualTimer:
-    """Stands in for ``threading.Timer``: records the callback and lets the test choose when it runs."""
+class _ManualWatchdog:
+    """Stands in for the shared watchdog: records each armed callback and lets the test choose when it runs."""
 
-    created: list = []
+    def __init__(self):
+        self.armed = []
 
-    def __init__(self, interval, function, args=(), kwargs=None):
-        self.function = function
-        self.cancelled = False
-        _ManualTimer.created.append(self)
+    def arm(self, timeout, callback):
+        entry = types.SimpleNamespace(timeout=timeout, function=callback, disarmed=False)
+        self.armed.append(entry)
+        return entry
 
-    daemon = True
-
-    def start(self):
-        pass
-
-    def cancel(self):
-        self.cancelled = True  # like the real one: it cannot stop a callback that already started
+    def disarm(self, entry):
+        entry.disarmed = True  # like the real one: it cannot stop a callback that already started
 
 
 def _watched_engine(monkeypatch, real_ping):
     engine = create_engine('sqlite://')
     engine.dialect.do_ping = real_ping
-    _ManualTimer.created = []
-    monkeypatch.setattr(connect_retry_module.threading, 'Timer', _ManualTimer)
+    watchdog = _ManualWatchdog()
+    monkeypatch.setattr(connect_retry_module, '_PING_WATCHDOG', watchdog)
     aborted = []
     monkeypatch.setattr(connect_retry_module, '_abort_connection', aborted.append)
     install_ping_watchdog(engine, 5)
-    return engine, aborted
+    return engine, aborted, watchdog
 
 
-def test_a_timer_that_fires_after_the_ping_returned_does_not_shut_the_connection_down(monkeypatch):
-    """The race: the callback had already started when the ping finished, so cancel() was too late."""
-    engine, aborted = _watched_engine(monkeypatch, lambda dbapi_connection: True)
+def test_a_callback_that_fires_after_the_ping_returned_does_not_shut_the_connection_down(monkeypatch):
+    """The race: the callback had already started when the ping finished, so disarm() was too late."""
+    engine, aborted, watchdog = _watched_engine(monkeypatch, lambda dbapi_connection: True)
 
     assert engine.dialect.do_ping('connection') is True
-    _ManualTimer.created[0].function()  # the timer thread gets to run after the ping returned
+    assert watchdog.armed[0].disarmed
+    watchdog.armed[0].function()  # the watchdog thread gets to run it after the ping returned
 
     assert aborted == []  # before the lock: the healthy connection was shut down under the caller
 
@@ -563,30 +563,90 @@ def test_a_ping_that_returned_true_but_was_aborted_reports_failure(monkeypatch):
     """The abort won the race: the connection is unusable, so the ping must not say it is fine."""
     holder = {}
 
-    def ping_during_which_the_timer_fires(dbapi_connection):
-        holder['engine_timer'].function()  # the abort lands while the ping is still running
+    def ping_during_which_the_watchdog_fires(dbapi_connection):
+        holder['watchdog'].armed[0].function()  # the abort lands while the ping is still running
         return True  # and the ping still answers True
 
-    engine, aborted = _watched_engine(monkeypatch, ping_during_which_the_timer_fires)
-    original_start = _ManualTimer.start
-    _ManualTimer.start = lambda self: holder.setdefault('engine_timer', self)
-    try:
-        assert engine.dialect.do_ping('connection') is False
-    finally:
-        _ManualTimer.start = original_start
+    engine, aborted, watchdog = _watched_engine(monkeypatch, ping_during_which_the_watchdog_fires)
+    holder['watchdog'] = watchdog
 
+    assert engine.dialect.do_ping('connection') is False
     assert aborted == ['connection']
 
 
-def test_the_timer_callback_runs_the_abort_at_most_once_per_ping(monkeypatch):
-    engine, aborted = _watched_engine(monkeypatch, lambda dbapi_connection: True)
+def test_the_callback_runs_the_abort_at_most_once_per_ping(monkeypatch):
+    engine, aborted, watchdog = _watched_engine(monkeypatch, lambda dbapi_connection: True)
     engine.dialect.do_ping('connection')
 
-    callback = _ManualTimer.created[0].function
+    callback = watchdog.armed[0].function
     callback()
     callback()
 
     assert aborted == []
+
+
+def test_each_ping_arms_the_shared_watchdog_with_the_ping_timeout(monkeypatch):
+    engine, _aborted, watchdog = _watched_engine(monkeypatch, lambda dbapi_connection: True)
+    for _ in range(3):
+        engine.dialect.do_ping('connection')
+
+    assert [entry.timeout for entry in watchdog.armed] == [5, 5, 5]
+    assert all(entry.disarmed for entry in watchdog.armed)
+
+
+# ---------------------------------------------------------------------------
+# The shared deadline thread
+# ---------------------------------------------------------------------------
+
+
+def test_the_watchdog_runs_every_ping_on_one_thread_not_one_per_checkout():
+    """A checkout used to start a threading.Timer; now all deadlines share one thread."""
+    watchdog = connect_retry_module._DeadlineWatchdog()
+    started = threading.active_count()
+    entries = [watchdog.arm(5, lambda: None) for _ in range(200)]
+    for entry in entries:
+        watchdog.disarm(entry)
+
+    assert threading.active_count() - started <= 1
+    assert watchdog._thread is not None and watchdog._thread.daemon
+
+
+def test_the_watchdog_fires_an_expired_deadline_and_skips_a_disarmed_one():
+    watchdog = connect_retry_module._DeadlineWatchdog()
+    fired = []
+    done = threading.Event()
+    kept = watchdog.arm(0.05, lambda: fired.append('kept') or done.set())
+    dropped = watchdog.arm(0.01, lambda: fired.append('dropped'))
+    watchdog.disarm(dropped)
+
+    assert done.wait(2)
+    time.sleep(0.05)
+    assert fired == ['kept']
+    assert kept[2] is not None  # handed to the thread, not disarmed
+
+
+def test_an_earlier_deadline_wakes_the_watchdog_that_sleeps_toward_a_later_one():
+    watchdog = connect_retry_module._DeadlineWatchdog()
+    watchdog.arm(30, lambda: None)  # the thread now sleeps for 30 s
+    done = threading.Event()
+    started = time.monotonic()
+    watchdog.arm(0.05, done.set)
+
+    assert done.wait(2)
+    assert time.monotonic() - started < 1
+
+
+def test_a_failing_callback_does_not_stop_the_watchdog():
+    watchdog = connect_retry_module._DeadlineWatchdog()
+    done = threading.Event()
+
+    def boom():
+        raise RuntimeError('callback failed')
+
+    watchdog.arm(0.01, boom)
+    watchdog.arm(0.05, done.set)
+
+    assert done.wait(2)
 
 
 def _open_descriptors():
@@ -619,7 +679,8 @@ def test_the_abort_swallows_the_error_of_an_already_closed_connection():
     _abort_connection(types.SimpleNamespace(fileno=closed))  # must not raise out of the timer thread
 
 
-def test_begin_global_installs_the_watchdog_on_a_postgres_engine(monkeypatch):
+@pytest.mark.parametrize('supported, expected', [(True, [5.0]), (False, [])], ids=['posix', 'windows'])
+def test_begin_global_installs_the_watchdog_on_a_postgres_engine_except_on_windows(monkeypatch, supported, expected):
     real = create_engine
 
     def spy(db_url, **kwargs):
@@ -638,6 +699,7 @@ def test_begin_global_installs_the_watchdog_on_a_postgres_engine(monkeypatch):
     monkeypatch.setattr(
         connect_retry_module, 'install_ping_watchdog', lambda engine, timeout: installed.append(timeout)
     )
+    monkeypatch.setattr(connect_retry_module, 'PING_WATCHDOG_SUPPORTED', supported)
     glb = _UrlGlobal.__new__(_UrlGlobal)
     glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={})
     glb.reflect_lock = threading.Lock()
@@ -645,7 +707,7 @@ def test_begin_global_installs_the_watchdog_on_a_postgres_engine(monkeypatch):
     glb._getTableSchema = lambda table: None
     glb.beginGlobal()
 
-    assert installed == [5.0]
+    assert installed == expected
 
 
 # ---------------------------------------------------------------------------

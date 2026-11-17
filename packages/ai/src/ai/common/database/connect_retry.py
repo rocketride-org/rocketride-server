@@ -56,6 +56,8 @@ What is and is not bounded in time (PostgreSQL through psycopg2):
 
 from __future__ import annotations
 
+import heapq
+import itertools
 import os
 import random
 import socket
@@ -280,29 +282,111 @@ def _abort_connection(dbapi_connection: Any) -> None:
         pass
 
 
-def install_ping_watchdog(engine: Any, timeout: float) -> None:
+# The ping watchdog shuts a socket down from another thread, through a duplicate of
+# its descriptor. Windows cannot duplicate a socket with ``os.dup``, so there the
+# watchdog would arm a deadline on every checkout and never be able to act on it:
+# it is not installed, and the ping is not bounded.
+PING_WATCHDOG_SUPPORTED = os.name != 'nt'
+
+
+class _DeadlineWatchdog:
+    """One daemon thread that runs a callback when its deadline passes, unless disarmed first.
+
+    Shared by every engine in the process, so a pool checkout costs a heap push and
+    two lock round trips instead of a new thread (``threading.Timer`` starts one per
+    call). The thread starts on the first ``arm`` and then lives as long as the
+    process; it sleeps while nothing is armed.
+
+    A disarmed entry stays in the heap until it reaches the top, where it is dropped
+    without waiting for its deadline. Every ping uses the same timeout, so the oldest
+    entry is the next to expire and the heap holds at most the pings armed within
+    one timeout.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._cond = threading.Condition()
+        self._heap: list = []  # [deadline, sequence, callback or None once disarmed]
+        self._sequence = itertools.count()
+        self._thread: Optional[threading.Thread] = None
+
+    def arm(self, timeout: float, callback: Callable[[], None]) -> list:
+        """Run ``callback`` on the watchdog thread after ``timeout`` seconds; return a handle for ``disarm``."""
+        entry = [self._clock() + timeout, next(self._sequence), callback]
+        with self._cond:
+            heapq.heappush(self._heap, entry)
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._run, name='db-ping-watchdog', daemon=True)
+                self._thread.start()
+            elif self._heap[0] is entry:
+                self._cond.notify()  # the thread sleeps toward a later deadline
+        return entry
+
+    def disarm(self, entry: list) -> None:
+        """Stop ``entry`` from firing. A callback that is already running is not stopped."""
+        with self._cond:
+            entry[2] = None
+
+    def _reset_after_fork(self) -> None:
+        """In a forked child: the thread did not survive the fork, so start afresh on the next ``arm``."""
+        self._cond = threading.Condition()
+        self._heap = []
+        self._thread = None
+
+    def _due(self) -> Optional[Callable[[], None]]:
+        """Pop and return the next expired callback; wait while none is due. Caller holds the lock."""
+        while True:
+            while self._heap and self._heap[0][2] is None:
+                heapq.heappop(self._heap)
+            if not self._heap:
+                self._cond.wait()
+                continue
+            wait = self._heap[0][0] - self._clock()
+            if wait > 0:
+                self._cond.wait(wait)
+                continue
+            return heapq.heappop(self._heap)[2]
+
+    def _run(self) -> None:
+        while True:
+            with self._cond:
+                callback = self._due()
+            try:
+                callback()  # outside the lock: an abort can take a moment
+            except Exception:  # noqa: BLE001 - the watchdog thread must survive any callback
+                pass
+
+
+_PING_WATCHDOG = _DeadlineWatchdog()
+if hasattr(os, 'register_at_fork'):
+    os.register_at_fork(after_in_child=_PING_WATCHDOG._reset_after_fork)
+
+
+def install_ping_watchdog(engine: Any, timeout: float, watchdog: Optional[_DeadlineWatchdog] = None) -> None:
     """Bound the ``pool_pre_ping`` health check on ``engine`` to ``timeout`` seconds.
 
     No TCP setting detects a pooler that keeps acknowledging segments but has
     stopped answering, and libpq has no read timeout, so the check would block
-    forever. A timer shuts the connection's socket down when the ping overruns; the
-    ping then fails as a dropped connection and SQLAlchemy replaces the pooled
-    connection through the (bounded) connect path. Only the ping is bounded, never a
-    statement.
+    forever. The process's watchdog thread shuts the connection's socket down when
+    the ping overruns; the ping then fails as a dropped connection and SQLAlchemy
+    replaces the pooled connection through the (bounded) connect path. Only the
+    ping is bounded, never a statement.
 
-    ``Timer.cancel()`` does not stop a callback that has already started, so the
-    timer and the ping agree through a lock: the callback aborts only while holding
-    it and only if the ping has not finished, and the ping marks itself finished
-    under the same lock before it returns. A ping that returned just before the
-    deadline therefore never has its connection shut down after it was handed to the
+    ``disarm`` does not stop a callback that has already started, so the watchdog
+    and the ping agree through a lock: the callback aborts only while holding it
+    and only if the ping has not finished, and the ping marks itself finished under
+    the same lock before it returns. A ping that returned just before the deadline
+    therefore never has its connection shut down after it was handed to the
     caller; and if the abort did happen the ping reports failure, even if
     ``real_ping`` answered, so the connection is replaced and never reused.
 
-    PostgreSQL through psycopg2 on POSIX only: on Windows ``os.dup`` cannot duplicate
-    the socket, so the watchdog does nothing there and the ping is not bounded.
+    PostgreSQL through psycopg2 on POSIX only: the caller checks
+    ``PING_WATCHDOG_SUPPORTED`` first, since on Windows ``os.dup`` cannot duplicate
+    the socket and the ping is not bounded there.
     """
     dialect = engine.dialect
     real_ping = dialect.do_ping
+    watchdog = watchdog or _PING_WATCHDOG
 
     def bounded_ping(dbapi_connection):
         lock = threading.Lock()
@@ -315,16 +399,14 @@ def install_ping_watchdog(engine: Any, timeout: float) -> None:
                 state['aborted'] = True
                 _abort_connection(dbapi_connection)
 
-        timer = threading.Timer(timeout, abort)
-        timer.daemon = True
-        timer.start()
+        entry = watchdog.arm(timeout, abort)
         try:
             result = real_ping(dbapi_connection)
         finally:
             with lock:
                 state['done'] = True
                 aborted = state['aborted']
-            timer.cancel()
+            watchdog.disarm(entry)
         return False if aborted else result
 
     dialect.do_ping = bounded_ping

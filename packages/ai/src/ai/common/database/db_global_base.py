@@ -1103,6 +1103,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # connect timeout bounds one attempt: with none, a black-holed host
         # holds the statement for the OS TCP timeout (minutes).
         from ai.common.database.connect_retry import (
+            PING_WATCHDOG_SUPPORTED,
             install_connect_retry,
             install_ping_watchdog,
             network_settings_from_config,
@@ -1122,9 +1123,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # Retry only the opening of a connection, never a statement: nothing has
         # been sent when an attempt is repeated, so no write can be duplicated.
         install_connect_retry(self.engine, policy_from_config(raw))
-        if self.engine.dialect.name == 'postgresql':
+        if self.engine.dialect.name == 'postgresql' and PING_WATCHDOG_SUPPORTED:
             # Bound the pre-ping check itself: TCP settings cannot detect a pooler that
             # keeps acknowledging but stopped answering, and libpq has no read timeout.
+            # Not on Windows, where the watchdog cannot shut a socket down.
             install_ping_watchdog(self.engine, self.network_settings['ping_timeout'])
 
         from ai.common.database.tx_registry import TransactionRegistry
