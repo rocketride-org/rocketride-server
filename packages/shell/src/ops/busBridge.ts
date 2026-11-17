@@ -54,8 +54,12 @@
 // =============================================================================
 
 import type { IBusForwarder, IOpBus } from './busOps';
-import { BusNoHandlerError } from './busOps';
+import { BusNoHandlerError, DEFAULT_BUS_REQUEST_TIMEOUT_MS } from './busOps';
+import { createRetainedRegistry } from './retained';
 import type { IRetainedPort, IRetainedRegistry, RetainedSubscriber } from './retained';
+import { CapabilityDeniedError } from '../isolation/capabilityDenied';
+import { deniedMessage, deny } from '../isolation/denial';
+import { QUOTAS } from '../isolation/rate';
 import type { RealmContext } from '../isolation/types';
 
 /** The envelope key (coexists with other traffic on a shared transport). */
@@ -380,14 +384,68 @@ export interface IBusRouter {
  * @returns The router.
  */
 export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IBusRouter {
+	const { addRealm, broadcastEmitOp, dispose } = buildRouter(rootBus, options);
+	return { addRealm, broadcastEmitOp, dispose };
+}
+
+/** What a gated realm is attached with. */
+export interface IGatedBusRouter extends IBusRouter {
+	/**
+	 * Attaches one gated realm (an isolated app frame); returns its detach
+	 * function. Its inbound traffic resolves against `ctx.handlers` only.
+	 */
+	addGatedRealm(endpoint: IBusEndpoint, ctx: RealmContext): () => void;
+	/** Delivers one fire-and-forget op to exactly one realm (by `ctx.info.realmId`). */
+	deliver(realmId: string, op: string, params: unknown): void;
+}
+
+/**
+ * Internal: the router for isolated apps. Nothing outside `src/isolation/`
+ * uses it (the public `createBusRouter` is unchanged).
+ *
+ * A gated realm, compared with an ordinary one:
+ *   - its requests and emitOps resolve against `ctx.handlers` only — never
+ *     the root's own handlers, another realm's ops, or the summon table;
+ *   - it may register, request, publish and subscribe only inside
+ *     `app.<appKey>.*`, shared with the realms of the same app (op owners
+ *     and topics in tables of their own, out of the root's reach), and read
+ *     two retained topics of the shared registry: `host:connection` and its
+ *     own prefs partition;
+ *   - its inbound bus timeout is clamped to 120 s;
+ *   - every message to it passes `ctx.outbound`, and a refused `response`
+ *     becomes an error response with the same id (never a timeout);
+ *   - `broadcastEmitOp` skips it; `deliver` targets it.
+ *
+ * @param rootBus - The root's op bus.
+ * @param options - Router options.
+ * @returns The router.
+ */
+export function createGatedBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRouter {
+	return buildRouter(rootBus, options);
+}
+
+/** A gated realm's bus timeout: at most the default request budget (120 s). */
+function clampBusTimeout(timeoutMs: unknown): number {
+	return typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.min(timeoutMs, DEFAULT_BUS_REQUEST_TIMEOUT_MS) : DEFAULT_BUS_REQUEST_TIMEOUT_MS;
+}
+
+/** Private retained topics one app may hold at the root. */
+const MAX_APP_TOPICS = 256;
+
+function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRouter {
 	const summonTimeoutMs = options?.summonTimeoutMs ?? DEFAULT_SUMMON_TIMEOUT_MS;
 
 	interface IRealm {
 		endpoint: IBusEndpoint;
+		/** Sends to the realm (through `ctx.outbound` for a gated realm). */
+		post: (message: BusWireMessage) => void;
 		label: string;
 		ops: Set<string>;
 		/** Retained topics this realm announced interest in. */
 		topics: Set<string>;
+		/** Gated realms only: the context, and private (`app.<appKey>.*`) topic interests. */
+		gated?: RealmContext;
+		privTopics?: Set<string>;
 		/** Requests this router forwarded INTO the realm, by hop id. */
 		inflight: Map<string, { respond: (m: IBusResponseMessage) => void; timer: ReturnType<typeof setTimeout> }>;
 		unsubscribe: () => void;
@@ -395,6 +453,8 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 
 	const realms = new Set<IRealm>();
 	const opOwners = new Map<string, IRealm>();
+	/** `app.<appKey>.*` op owners (gated realms only; out of the root's reach). */
+	const appOwners = new Map<string, IRealm>();
 	let hopSeq = 0;
 	let disposed = false;
 
@@ -416,13 +476,7 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 		// 2. A realm that registered the op.
 		const owner = opOwners.get(op);
 		if (owner) {
-			const hopId = mintId();
-			const timer = setTimeout(() => {
-				owner.inflight.delete(hopId);
-				respond({ [ENVELOPE]: 'response', id: '', ok: false, error: `Op '${op}' timed out after ${timeoutMs}ms (routed to ${owner.label})` });
-			}, timeoutMs);
-			owner.inflight.set(hopId, { respond, timer });
-			owner.endpoint.post({ [ENVELOPE]: 'request', id: hopId, op, params, timeoutMs } satisfies IBusRequestMessage);
+			routeToRealm(owner, op, params, timeoutMs, respond, mintId());
 			return;
 		}
 		// 3. Summon an installed-but-dormant owner, then retry on register.
@@ -458,6 +512,16 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 		respond({ [ENVELOPE]: 'response', id: '', ok: false, error: new BusNoHandlerError(op).message });
 	};
 
+	/** Forwards one request into the realm that owns the op; answers via respond. */
+	function routeToRealm(owner: IRealm, op: string, params: unknown, timeoutMs: number, respond: (m: IBusResponseMessage) => void, hopId: string): void {
+		const timer = setTimeout(() => {
+			owner.inflight.delete(hopId);
+			respond({ [ENVELOPE]: 'response', id: '', ok: false, error: `Op '${op}' timed out after ${timeoutMs}ms (routed to ${owner.label})` });
+		}, timeoutMs);
+		owner.inflight.set(hopId, { respond, timer });
+		owner.post({ [ENVELOPE]: 'request', id: hopId, op, params, timeoutMs } satisfies IBusRequestMessage);
+	}
+
 	/** One-shot waiters per op for summon completion. */
 	const opWaiters = new Map<string, Set<() => void>>();
 	const registerWaiters = (op: string, cb: () => void): (() => void) => {
@@ -489,7 +553,7 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 		}
 		const owner = opOwners.get(op);
 		if (owner) {
-			owner.endpoint.post({ [ENVELOPE]: 'emitOp', op, params } satisfies IBusEmitOpMessage);
+			owner.post({ [ENVELOPE]: 'emitOp', op, params } satisfies IBusEmitOpMessage);
 			return;
 		}
 		const activate = options?.summon?.(op);
@@ -537,9 +601,10 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 	let offRetained: (() => void) | null = null;
 	if (retained) {
 		offRetained = retained.onChange((topic, value, transient) => {
+			// A gated realm's `topics` only ever holds its allowlisted shared topics.
 			for (const realm of realms) {
 				if (realm.topics.has(topic)) {
-					realm.endpoint.post({ [ENVELOPE]: 'topic', topic, snapshot: value, ...(transient ? { transient } : {}) } satisfies IBusTopicMessage);
+					realm.post({ [ENVELOPE]: 'topic', topic, snapshot: value, ...(transient ? { transient } : {}) } satisfies IBusTopicMessage);
 				}
 			}
 		});
@@ -548,9 +613,169 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 		}
 	}
 
+	/** The root-private registry for `app.<appKey>.*` topics (created on first use). */
+	let appRetained: IRetainedRegistry | null = null;
+	const appRegistry = (): IRetainedRegistry => {
+		if (!appRetained) {
+			appRetained = createRetainedRegistry();
+			appRetained.onChange((topic, value, transient) => {
+				for (const realm of realms) {
+					if (realm.privTopics?.has(topic)) {
+						realm.post({ [ENVELOPE]: 'topic', topic, snapshot: value, ...(transient ? { transient } : {}) } satisfies IBusTopicMessage);
+					}
+				}
+			});
+		}
+		return appRetained;
+	};
+
+	/** Removes a realm: registrations go, everything in flight to it is rejected. */
+	const removeRealm = (realm: IRealm): void => {
+		realms.delete(realm);
+		realm.unsubscribe();
+		for (const op of realm.ops) {
+			if (opOwners.get(op) === realm) opOwners.delete(op);
+			if (appOwners.get(op) === realm) appOwners.delete(op);
+		}
+		// A dead realm answers nothing: reject everything in flight to it.
+		for (const [, entry] of realm.inflight) {
+			clearTimeout(entry.timer);
+			entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: `Realm '${realm.label}' detached` });
+		}
+		realm.inflight.clear();
+	};
+
+	/** Attaches a gated realm (see {@link createGatedBusRouter}). */
+	const addGatedRealm = (endpoint: IBusEndpoint, ctx: RealmContext): (() => void) => {
+		const { appId, appKey } = ctx.info;
+		const ns = `app.${appKey}.`;
+		const sharedTopics = new Set(['host:connection', `shell:prefs:app:${appId}`]);
+		const post = (message: BusWireMessage): void => {
+			let out: unknown;
+			try {
+				out = ctx.outbound(message);
+			} catch (err) {
+				// Refused on the way out: a response still answers its id.
+				if (message[ENVELOPE] === 'response') {
+					const denial = err instanceof CapabilityDeniedError ? err : deny('credential', 'bus.response');
+					endpoint.post({ [ENVELOPE]: 'response', id: message.id, ok: false, error: deniedMessage(denial) } satisfies IBusResponseMessage);
+				}
+				return;
+			}
+			endpoint.post(out);
+		};
+		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, inflight: new Map(), unsubscribe: () => {} };
+		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op'): void => post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(deny(code, op)) });
+		const interestFull = (): boolean => realm.topics.size + realm.privTopics!.size >= QUOTAS.topics;
+
+		realm.unsubscribe = endpoint.subscribe((message) => {
+			const m = asBusMessage(message);
+			if (!m) return;
+			switch (m[ENVELOPE]) {
+				case 'request': {
+					if (typeof m.id !== 'string' || typeof m.op !== 'string') return;
+					const timeoutMs = clampBusTimeout(m.timeoutMs);
+					const respond = (resp: IBusResponseMessage): void => post({ ...resp, id: m.id });
+					if (m.op.startsWith('app.')) {
+						if (!m.op.startsWith(ns)) return refuse(m.id, m.op, 'namespace');
+						const owner = appOwners.get(m.op);
+						if (!owner) return refuse(m.id, m.op, 'unknown_op');
+						routeToRealm(owner, m.op, m.params, timeoutMs, respond, `h${++hopSeq}`);
+						return;
+					}
+					if (m.op === 'bus.topic.read') {
+						const topic = (m.params as { topic?: unknown } | null | undefined)?.topic;
+						if (typeof topic === 'string' && sharedTopics.has(topic)) return respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result: retained?.read(topic) });
+						if (typeof topic === 'string' && topic.startsWith(ns)) return respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result: appRegistry().read(topic) });
+						return refuse(m.id, m.op, 'namespace');
+					}
+					if (!ctx.handlers.hasHandler(m.op)) return refuse(m.id, m.op, 'unknown_op');
+					ctx.handlers.request(m.op, m.params, { timeoutMs }).then(
+						(result) => respond({ [ENVELOPE]: 'response', id: m.id, ok: true, result }),
+						(err: unknown) => respond({ [ENVELOPE]: 'response', id: m.id, ok: false, error: err instanceof Error ? err.message : String(err) })
+					);
+					return;
+				}
+				case 'emitOp': {
+					if (typeof m.op !== 'string') return;
+					if (m.op.startsWith('app.')) {
+						const owner = m.op.startsWith(ns) ? appOwners.get(m.op) : undefined;
+						if (owner) owner.post({ [ENVELOPE]: 'emitOp', op: m.op, params: m.params } satisfies IBusEmitOpMessage);
+						return;
+					}
+					if (ctx.handlers.hasHandler(m.op)) ctx.handlers.emitOp(m.op, m.params);
+					return;
+				}
+				case 'register':
+					if (!Array.isArray(m.ops)) return;
+					for (const op of m.ops) {
+						// Only the app's own namespace, within the quota; the first owner keeps it.
+						if (typeof op !== 'string' || !op.startsWith(ns) || realm.ops.has(op)) continue;
+						if (realm.ops.size >= QUOTAS.registeredOps || appOwners.has(op)) continue;
+						realm.ops.add(op);
+						appOwners.set(op, realm);
+					}
+					return;
+				case 'unregister':
+					if (!Array.isArray(m.ops)) return;
+					for (const op of m.ops) {
+						if (appOwners.get(op) === realm) appOwners.delete(op);
+						realm.ops.delete(op);
+					}
+					return;
+				case 'response': {
+					const entry = realm.inflight.get(m.id);
+					if (!entry) return;
+					realm.inflight.delete(m.id);
+					clearTimeout(entry.timer);
+					entry.respond(m);
+					return;
+				}
+				case 'publish': {
+					// Only the private registry, only the app's namespace, bounded per app.
+					if (typeof m.topic !== 'string' || !m.topic.startsWith(ns)) return;
+					const registry = appRegistry();
+					if (m.transient) return registry.signal(m.topic, m.snapshot);
+					if (registry.read(m.topic) === undefined && registry.entries().filter(([t]) => t.startsWith(ns)).length >= MAX_APP_TOPICS) return;
+					registry.publish(m.topic, m.snapshot);
+					return;
+				}
+				case 'subscribeTopic': {
+					if (typeof m.topic !== 'string') return;
+					if (sharedTopics.has(m.topic)) {
+						if (!realm.topics.has(m.topic) && interestFull()) return;
+						realm.topics.add(m.topic);
+						const snapshot = retained?.read(m.topic);
+						if (snapshot !== undefined) post({ [ENVELOPE]: 'topic', topic: m.topic, snapshot } satisfies IBusTopicMessage);
+					} else if (m.topic.startsWith(ns)) {
+						if (!realm.privTopics!.has(m.topic) && interestFull()) return;
+						realm.privTopics!.add(m.topic);
+						const snapshot = appRegistry().read(m.topic);
+						if (snapshot !== undefined) post({ [ENVELOPE]: 'topic', topic: m.topic, snapshot } satisfies IBusTopicMessage);
+					}
+					return;
+				}
+				case 'unsubscribeTopic':
+					realm.topics.delete(m.topic);
+					realm.privTopics!.delete(m.topic);
+					return;
+			}
+		});
+		realms.add(realm);
+		return () => removeRealm(realm);
+	};
+
 	return {
+		addGatedRealm,
+
+		deliver(realmId, op, params) {
+			for (const realm of realms) {
+				if (realm.gated?.info.realmId === realmId) realm.post({ [ENVELOPE]: 'emitOp', op, params } satisfies IBusEmitOpMessage);
+			}
+		},
+
 		addRealm(endpoint, label) {
-			const realm: IRealm = { endpoint, label, ops: new Set(), topics: new Set(), inflight: new Map(), unsubscribe: () => {} };
+			const realm: IRealm = { endpoint, post: (message) => endpoint.post(message), label, ops: new Set(), topics: new Set(), inflight: new Map(), unsubscribe: () => {} };
 			realm.unsubscribe = endpoint.subscribe((message) => {
 				const m = asBusMessage(message);
 				if (!m) return;
@@ -612,23 +837,13 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 			});
 			realms.add(realm);
 
-			return () => {
-				realms.delete(realm);
-				realm.unsubscribe();
-				for (const op of realm.ops) {
-					if (opOwners.get(op) === realm) opOwners.delete(op);
-				}
-				// A dead realm answers nothing: reject everything in flight to it.
-				for (const [, entry] of realm.inflight) {
-					clearTimeout(entry.timer);
-					entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: `Realm '${realm.label}' detached` });
-				}
-				realm.inflight.clear();
-			};
+			return () => removeRealm(realm);
 		},
 
 		broadcastEmitOp(op, params) {
 			for (const realm of realms) {
+				// Gated realms get engine events only through `deliver` (owned runs, PR2a-2).
+				if (realm.gated) continue;
 				realm.endpoint.post({ [ENVELOPE]: 'emitOp', op, params } satisfies IBusEmitOpMessage);
 			}
 		},
@@ -646,34 +861,8 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 			}
 			realms.clear();
 			opOwners.clear();
+			appOwners.clear();
 			rootBus.setForwarder(null);
-		},
-	};
-}
-
-/** What a gated realm is attached with (PR2a-1 red-before stub). */
-export interface IGatedBusRouter extends IBusRouter {
-	/** Attaches one gated realm; returns its detach function. */
-	addGatedRealm(endpoint: IBusEndpoint, ctx: RealmContext): () => void;
-	/** Delivers one fire-and-forget op to exactly one realm. */
-	deliver(realmId: string, op: string, params: unknown): void;
-}
-
-/**
- * Internal: the router for isolated apps. PR2a-1 red-before STUB: the plain
- * router, with `addGatedRealm` an ordinary `addRealm`.
- *
- * @param rootBus - The root's op bus.
- * @param options - Router options.
- * @returns The router.
- */
-export function createGatedBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRouter {
-	const router = createBusRouter(rootBus, options);
-	return {
-		...router,
-		addGatedRealm: (endpoint, ctx) => router.addRealm(endpoint, ctx.info.appId),
-		deliver: () => {
-			throw new Error('not implemented: deliver');
 		},
 	};
 }
