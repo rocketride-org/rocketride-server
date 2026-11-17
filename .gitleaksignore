@@ -16,3 +16,9 @@ fd6b61d56b0671f7a3d24d0314d060a3d0d61b8c:nodes/src/nodes/tool_exa_search/service
 ac6a40ae05fc07e87d2d825b7daf6eaeb9af8caf:packages/server/engine-lib/test/store/pipeline/secure_parameters.cpp:pipe-file-api-key:79
 ac6a40ae05fc07e87d2d825b7daf6eaeb9af8caf:packages/server/engine-lib/test/store/pipeline/secure_parameters.cpp:pipe-file-api-key:81
 ac6a40ae05fc07e87d2d825b7daf6eaeb9af8caf:packages/server/engine-core/test/crypto/paramToken.cpp:pipe-file-api-key:29
+
+# False positive: stand-in task/public tokens ('tk_...', 'pk_...') in the #2987
+# reuse-credential test fixture, added in bbe1c713. A later commit builds them
+# at runtime; these fingerprints cover the original commit still in the PR range.
+bbe1c7130b0ffc708767d4b7a7dc676f27f44a01:packages/ai/tests/ai/modules/task/test_task_db_credential.py:generic-api-key:233
+bbe1c7130b0ffc708767d4b7a7dc676f27f44a01:packages/ai/tests/ai/modules/task/test_task_db_credential.py:generic-api-key:234
