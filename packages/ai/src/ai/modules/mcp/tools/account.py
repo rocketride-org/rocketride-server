@@ -61,10 +61,14 @@ CREDITS_TRY_AGAIN = 'Ask me to check the compute credits again in a moment.'
 
 MODEL_NOT_YET = 'RocketRide can check saved AI model keys once the account is activated.'
 MODEL_HOSTED = (
-    "OpenAI models can run on RocketRide without a key of your own. They use this workspace's compute credits."
+    "Some OpenAI models can run on RocketRide without a key of your own. They use this workspace's compute credits."
 )
-MODEL_HOSTED_OTHERS = 'Other AI providers need your own key, saved in RocketRide under Settings > Variables.'
-MODEL_HOSTED_OTHERS_SAVED = 'Any other AI provider needs your own key, saved in RocketRide under Settings > Variables.'
+MODEL_HOSTED_OTHERS = (
+    'Other OpenAI models and other AI providers need your own key, saved in RocketRide under Settings > Variables.'
+)
+MODEL_HOSTED_OTHERS_SAVED = (
+    'Other OpenAI models and any other AI provider need your own key, saved in RocketRide under Settings > Variables.'
+)
 MODEL_SAVED_ONE = 'RocketRide has a saved AI model key for {providers}.'
 MODEL_SAVED_MANY = 'RocketRide has saved AI model keys for {providers}.'
 MODEL_NONE = 'No AI model key is saved.'
