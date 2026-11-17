@@ -81,8 +81,16 @@ interface IAppBuilderClient {
 	withdrawApp(appId: string, version: number): Promise<unknown>;
 	replyApp(appId: string, message: string, version?: number): Promise<unknown>;
 	call<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+	developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null }>;
+	registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<{ developerId?: string } | undefined>;
 	deploy: { history(projectId: string, options?: { page?: number; pageSize?: number }): Promise<unknown> };
 }
+
+/** Longest wait for the developer_status lookup (matches the New App wizard's). */
+const DEVELOPER_STATUS_TIMEOUT_MS = 10_000;
+
+/** Longest wait for a register request (matches the New App wizard's; under the bus's 120 s). */
+const DEVELOPER_REGISTER_TIMEOUT_MS = 30_000;
 
 /** Inputs fixed per mounted App Builder surface. */
 export interface IBusAppBuilderHostOptions {
@@ -189,11 +197,15 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 				}
 			: undefined,
 		getDeveloperId: async () => {
-			const res = await client().call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' });
+			// Bounded like the New App wizard's lookup: a silent server hides the
+			// banner (the caller's catch) instead of holding the request open.
+			const res = await client().developerStatus({ timeout: DEVELOPER_STATUS_TIMEOUT_MS });
 			return res?.developerId ?? '';
 		},
 		registerDeveloper: async (developerId) => {
-			const res = await client().call<{ developerId?: string } | undefined>('rrext_deploy_app', { subcommand: 'developer_register', developerId });
+			// Bounded like the New App wizard's claim: a stalled server rejects here
+			// (the form shows the error) instead of holding the request open.
+			const res = await client().registerDeveloper(developerId, { timeout: DEVELOPER_REGISTER_TIMEOUT_MS });
 			return res?.developerId ?? developerId;
 		},
 

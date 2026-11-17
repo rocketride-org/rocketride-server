@@ -1,6 +1,7 @@
 ---
 title: Nodes
 sidebar_position: 3
+description: A pipeline is a graph and nodes are its vertices. Each node does one job, such as calling a model, embedding text, or querying a vector store.
 ---
 
 # Nodes
@@ -65,7 +66,7 @@ pipeline after changing a provider.
 
 ## The catalog
 
-Every available provider (100+ nodes across 15+ LLM providers, 9 vector
+Every available provider (LLM providers, vector
 databases, OCR, NER, PII anonymization, transcription, and web tools) is
 documented with its config, inputs, and outputs in
 **[Nodes](/nodes)**.

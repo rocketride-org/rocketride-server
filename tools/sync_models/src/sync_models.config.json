@@ -144,7 +144,10 @@
 				"include_prefixes": ["claude-"],
 				"exclude_prefixes": [],
 				// Exclude Vertex-style IDs (e.g. claude-3-5-haiku@20241022) added by litellm
-				"exclude_patterns": ["@"]
+				"exclude_patterns": ["@"],
+				// OpenRouter has listed claude-haiku-latest, but Anthropic's API answers it
+				// with 404 not_found_error. Keep it out so a fallback sync cannot add it back.
+				"exclude_exact": ["claude-haiku-latest"]
 			},
 			// Authoritative context windows (from https://docs.anthropic.com/en/docs/about-claude/models/overview):
 			//   claude-opus-4-6, claude-sonnet-4-6 → 1,000,000 tokens
