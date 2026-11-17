@@ -227,6 +227,16 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     await account.init_account(server)
 
+    # The public-page catch-all registers LAST, after every module and account
+    # route, so every real route wins (FastAPI matches in registration order).
+    # It then builds the first page aggregate from the published app manifests.
+    # Bounded: a slow store starts the engine on the legacy page list while the
+    # build finishes in the background; a failed build keeps the legacy list
+    # until the next platform app deploy event or the refresh backstop.
+    from ai.modules.shell import register_public_pages
+
+    await register_public_pages(server)
+
     # Start the FastAPI server loop
     await server.serve()
 
