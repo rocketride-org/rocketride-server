@@ -501,8 +501,14 @@ describe('createFrameCaller — the identity is captured at ISSUE (DA-R31-01, DA
 		let identity: string | null = 'fp-A';
 		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
 		await settle();
+		// A deadline far longer than the call needs, and an elapsed bound well
+		// under it: a slow CI runner can take a second or more to get through the
+		// identity look-out and the controller round trip, and that must not read
+		// as running out the deadline. (Running out the deadline would also
+		// reject the call as unsent, never resolve it.)
+		const timeoutMs = 10_000;
 		const started = Date.now();
-		const call = caller.callReply('f.echo', { x: 2 }, { timeoutMs: 800 }).then((value) => `resolved:${value}`, (error: { kind?: string }) => `rejected:${error.kind}`);
+		const call = caller.callReply('f.echo', { x: 2 }, { timeoutMs }).then((value) => `resolved:${value}`, (error: { kind?: string }) => `rejected:${error.kind}`);
 		identity = null;
 		const attached = attachController<FrameOps>({
 			channel: shellProtocol.createToolChannel(h.sidebarPeer),
@@ -512,7 +518,7 @@ describe('createFrameCaller — the identity is captured at ISSUE (DA-R31-01, DA
 		await settle();
 		identity = 'fp-A';
 		assert.equal(await call, 'resolved:2');
-		assert.ok(Date.now() - started < 600, 'it did not wait out its deadline');
+		assert.ok(Date.now() - started < timeoutMs / 2, 'it did not wait out its deadline');
 		caller.dispose();
 		attached.dispose();
 	});
