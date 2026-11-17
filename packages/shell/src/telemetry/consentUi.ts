@@ -75,3 +75,28 @@ export function onOpenConsentBanner(fn: Listener): () => void {
 		listeners.delete(fn);
 	};
 }
+
+/** Whether a request is waiting for the banner; unlike `takePendingOpen`, it leaves the request in place. */
+export function hasPendingOpen(): boolean {
+	return pending;
+}
+
+/**
+ * Subscribe the lazy host to "Privacy settings" requests. A request made before
+ * the host subscribed is still pending, so `fn` runs once at once for it; the
+ * request stays pending for the banner to take when it mounts.
+ *
+ * @param fn - Called for a pending request, then on every new request.
+ * @returns Unsubscribes `fn`.
+ */
+export function onConsentHostRequest(fn: Listener): () => void {
+	const off = onOpenConsentBanner(fn);
+	if (hasPendingOpen()) {
+		try {
+			fn();
+		} catch {
+			/* never throws */
+		}
+	}
+	return off;
+}

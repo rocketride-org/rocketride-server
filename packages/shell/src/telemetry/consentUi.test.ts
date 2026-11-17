@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { onOpenConsentBanner, openConsentBanner, shouldMountConsentBanner, takePendingOpen } from './consentUi.ts';
+import { hasPendingOpen, onConsentHostRequest, onOpenConsentBanner, openConsentBanner, shouldMountConsentBanner, takePendingOpen } from './consentUi.ts';
 
 // The two listeners the site has: HomeApp's lazy host (mounts the banner, does not take the request) and the
 // mounted banner (takes the request and opens).
@@ -56,6 +56,32 @@ test('keyless (OSS) or host-governed (VS Code): no banner, even on request or un
 			assert.equal(shouldMountConsentBanner(i), false, JSON.stringify(i));
 		}
 	}
+});
+
+test('a privacy signal: a request made before the lazy host subscribed still mounts the banner, which then takes it', () => {
+	takePendingOpen();
+	openConsentBanner();
+	let requested = false;
+	const offHost = onConsentHostRequest(() => {
+		requested = true;
+	});
+	const signal = { ...base, telemetryLive: false, privacySignal: true, settled: true };
+	assert.equal(requested, true, 'the host sees the early request on subscribe');
+	assert.equal(hasPendingOpen(), true, 'the check leaves the request for the banner');
+	assert.equal(shouldMountConsentBanner({ ...signal, requested }), true);
+	assert.equal(takePendingOpen(), true, 'the mounted banner opens from it');
+	offHost();
+});
+
+test('a privacy signal: with no request pending, subscribing does not mount the banner', () => {
+	takePendingOpen();
+	let requested = false;
+	const offHost = onConsentHostRequest(() => {
+		requested = true;
+	});
+	assert.equal(requested, false);
+	assert.equal(shouldMountConsentBanner({ ...base, telemetryLive: false, privacySignal: true, settled: true, requested }), false);
+	offHost();
 });
 
 test('telemetry off for another reason (init failed, no signal): no banner even on request', () => {
