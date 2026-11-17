@@ -2,6 +2,11 @@
 
 Documentation written for AI coding assistants, not people.
 
+> **Using RocketRide from a coding agent?** This folder is the source of the
+> bundled docs and of the skills. To run RocketRide, start at the
+> [coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/)
+> or read [llms.txt](https://docs.rocketride.org/llms.txt).
+
 - **`context/`** — installed verbatim into a workspace's `.rocketride/docs/` by the
   VS Code extension and by `rocketride init`. `client-docs:agent`
   (`scripts/tasks.js` here) packs this folder — the `ROCKETRIDE_*.md` files at
