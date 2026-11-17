@@ -579,7 +579,7 @@ class _Component:
                 # key, is refused here rather than silently replaced
                 selector = self.plan.selector(target)
                 if key not in from_profile and selector is not None and str(value) != str(choices.get(target)):
-                    if value in selector.branches:
+                    if isinstance(value, str) and value in selector.branches:
                         self.errors.append(
                             f'{target}={value!r} contradicts {target}={choices.get(target)!r} chosen from the other keys'
                         )

@@ -277,6 +277,18 @@ def test_a_boolean_rename_chooses_the_branch_by_its_value_map():
     assert config_of(result) == {'strategy': 'token', 'token': {'chunk_size': 400, 'chunk_overlap': 200}}
 
 
+def test_a_selector_value_of_the_wrong_type_is_an_error_not_a_crash():
+    result = convert({'profile': 'sentence', 'strategy': ['token']})
+    assert [e['message'] for e in result.errors] == [
+        "strategy=['token'] is not one of ['sentence', 'token'] of chunker"
+    ]
+
+
+def test_a_selector_value_that_contradicts_the_other_keys_is_an_error():
+    result = convert({'profile': 'sentence', 'strategy': 'token', 'fast': False})
+    assert any('contradicts' in e['message'] for e in result.errors)
+
+
 def test_a_constant_marker_is_kept_and_a_stale_override_is_dropped_with_a_warning():
     kept = convert({'profile': 'token', 'type': 'chunker'})
     assert config_of(kept)['type'] == 'chunker'
