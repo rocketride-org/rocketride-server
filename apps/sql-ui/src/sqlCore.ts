@@ -723,7 +723,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			// known: a remount's cleanup release lands while this resolve is still
 			// waiting, and must see this holder (else it stops the pipeline).
 			const early = getSavedConnection(connId);
-			const holderId = holder ?? `anon-${holderSeq + 1}`;
+			const holderId = holder ?? `anon-${++holderSeq}`;
 			let claimed: string | null = null;
 			let added = false;
 			const claim = (record: SavedSqlConnection): void => {
