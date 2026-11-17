@@ -16,7 +16,7 @@
  * gesture goes to the canvas.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactElement } from 'react';
-import { Background, BaseEdge, MiniMap, ReactFlow, ReactFlowProvider, getSmoothStepPath, getViewportForBounds, useNodesInitialized, useNodesState, useReactFlow, useStore, type EdgeProps, type NodeChange, type Viewport } from '@xyflow/react';
+import { Background, BaseEdge, MiniMap, ReactFlow, ReactFlowProvider, getViewportForBounds, useNodesInitialized, useNodesState, useReactFlow, useStore, type EdgeProps, type NodeChange, type Viewport } from '@xyflow/react';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import '@xyflow/react/dist/style.css';
 
@@ -26,24 +26,24 @@ import NodeGroup from '@app-shared/tools/pipelines/panels/design/canvas/componen
 import NodeAnnotation from '@app-shared/tools/pipelines/panels/design/canvas/components/node/node-annotation/NodeAnnotation';
 import FlowEdge from '@app-shared/tools/pipelines/panels/design/canvas/components/edge/FlowEdge';
 import { Icon, registerServiceIcons } from '@app-shared/tools/pipelines/panels/design/canvas/util/Icon';
-import { INodeType, IServiceCapabilities, type IProject, type INodeData, type IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
+import { INodeType, type IProject, type INodeData, type IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 
 import { ReadOnlyFlowGraphProvider, type FlowNode } from './stand-ins/FlowGraphContext';
 import { ReadOnlyFlowProjectProvider } from './stand-ins/FlowProjectContext';
 import { ReadOnlyFlowPreferencesProvider } from './stand-ins/FlowPreferencesContext';
-import { ESTIMATED_NODE_SIZE, displayPath, mainFlow, placeNodes, type CanvasModel } from './model';
-import { LAYER_GAP, WRAP_OFFSET, bandGaps, edgesThroughNodes, wrapCenterY, type Positions } from './layout';
+import { ESTIMATED_NODE_SIZE, displayPath, placeNodes, type CanvasModel, type ViewPipelineSummary } from './model';
+import { LAYER_GAP, WRAP_OFFSET, bandGaps, edgesThroughNodes, wrapCenterY, wrapCorners, wrapTrunkX, type Positions } from './layout';
 
 /**
  * Canvas height bounds, in px. The height follows the drawing's shape inside
  * these bounds, always as a pixel value: host auto-resize measures the
  * document, and a % or vh height would collapse the widget.
  */
-export const CANVAS_MAX_HEIGHT = 560;
-export const CANVAS_MIN_HEIGHT = 160;
+export const CANVAS_MAX_HEIGHT = 620;
+export const CANVAS_MIN_HEIGHT = 200;
 /** On a phone-width frame the canvas stays shorter, so it never fills the whole chat. */
 const NARROW_FRAME = 480;
-const NARROW_MAX_HEIGHT = 420;
+const NARROW_MAX_HEIGHT = 480;
 
 /**
  * Below this zoom the builder's node titles (12 px at zoom 1) are smaller than
@@ -62,6 +62,8 @@ const LABEL_FONT_NARROW = 10.5;
 const LABEL_CHROME = 12 + 5 + 14 + 2;
 const LABEL_CHROME_NARROW = 12 + 3 + 6 + 2;
 const LABEL_ICON = 12 + 3;
+/** Labels whose anchor lines are this close, in px, form one row. */
+const ROW_TOLERANCE = 8;
 /** A label keeps its icon while this much room is left for text beside it, about six letters. */
 const LABEL_TEXT_MIN = 34;
 /** Two neighbouring labels fill at most twice this share of the gap between their nodes. */
@@ -83,9 +85,11 @@ const FULL_READ_NODE_WIDTH_NARROW = 100;
 /** Under this frame width the full-screen minimap would cover too much of the drawing. */
 const MINIMAP_MIN_FRAME_WIDTH = 320;
 /** The inline canvas of a truncated pipeline stays short: 200 thumbnails are an overview, not a read. */
-const TRUNCATED_MAX_HEIGHT = 320;
+const TRUNCATED_MAX_HEIGHT = 360;
 
 const FIT_PADDING = 0.04;
+/** The band at the top of the drawing the name and the view buttons sit on, in px. */
+const OVERLAY_TOP = 36;
 const FIT_MAX_ZOOM = 1.25;
 /** Room beside the drawing for the overview labels' side overhang, in flow units. */
 const LABEL_MARGIN_X = 30;
@@ -117,7 +121,7 @@ function useFitAll(): (options?: { duration?: number }) => void {
 			const invoked = new Set(edges.filter((edge) => edge.sourceHandle?.startsWith('invoke-source')).map((edge) => edge.target));
 			const footroom = (zoom: number) => (zoom < OVERVIEW_ZOOM ? Math.max(0, ...nodes.filter((node) => invoked.has(node.id) && node.measured?.height).map((node) => node.position.y + Math.max(node.measured!.height!, LABEL_TALLEST / zoom) - (box.y + box.height))) : 0);
 			const fit = (zoom: number) => {
-				const top = labelHeadroom(zoom);
+				const top = labelHeadroom(zoom) + OVERLAY_TOP / zoom;
 				return getViewportForBounds({ x: box.x - LABEL_MARGIN_X, y: box.y - top, width: box.width + 2 * LABEL_MARGIN_X, height: box.height + top + footroom(zoom) }, width, height, 0.02, FIT_MAX_ZOOM, FIT_PADDING);
 			};
 			// The room depends on the zoom it leads to; a few rounds settle it.
@@ -162,17 +166,36 @@ const NODE_TYPES = {
 /** The builder's edge pulls each end 8 px into its handle (FlowEdge HANDLE_OFFSET). */
 const HANDLE_OFFSET = 8;
 
+/** An SVG path through `points` with each corner rounded by up to `radius`. */
+function roundedPath(points: Array<[number, number]>, radius: number): string {
+	let d = `M${points[0][0]},${points[0][1]}`;
+	for (let i = 1; i < points.length - 1; i++) {
+		const [px, py] = points[i - 1];
+		const [x, y] = points[i];
+		const [nx, ny] = points[i + 1];
+		const r = Math.min(radius, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2);
+		const ax = x - Math.sign(x - px) * r;
+		const ay = y - Math.sign(y - py) * r;
+		const bx = x + Math.sign(nx - x) * r;
+		const by = y + Math.sign(ny - y) * r;
+		d += ` L${ax},${ay} Q${x},${y} ${bx},${by}`;
+	}
+	const [lx, ly] = points[points.length - 1];
+	return `${d} L${lx},${ly}`;
+}
+
 /**
  * A connection into a later band of a flow the widget wrapped. It has the
- * builder edge's stroke, but runs right out of its source, down into the gap
- * above its target's band, across, and down into the target, so it never
- * crosses the drawing. Only a layout the widget made has bands.
+ * builder edge's stroke, but runs right out of its source to a drop clear of
+ * the nodes and labels below it (see wrapTrunkX), down into the gap above its
+ * target's band, across, and down into the target, so it never crosses the
+ * drawing. Only a layout the widget made has bands.
  */
-function WrapEdge({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style, markerEnd, data }: EdgeProps): ReactElement | null {
-	if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) return null;
-	const centerY = (data as { centerY?: number } | undefined)?.centerY;
-	const [path] = getSmoothStepPath({ sourceX: sourceX - HANDLE_OFFSET, sourceY, sourcePosition, targetX: targetX + HANDLE_OFFSET, targetY, targetPosition, centerY, offset: WRAP_OFFSET + HANDLE_OFFSET, borderRadius: 8 });
-	return <BaseEdge path={path} markerEnd={markerEnd} style={style} />;
+function WrapEdge({ sourceX, sourceY, targetX, targetY, style, markerEnd, data }: EdgeProps): ReactElement | null {
+	const route = data as { centerY?: number; trunkX?: number } | undefined;
+	if (![sourceX, sourceY, targetX, targetY, route?.centerY, route?.trunkX].every(Number.isFinite)) return null;
+	const points = wrapCorners(sourceX - HANDLE_OFFSET, sourceY, targetX + HANDLE_OFFSET, targetY, Math.max(route!.trunkX!, sourceX + WRAP_OFFSET), route!.centerY!);
+	return <BaseEdge path={roundedPath(points, 8)} markerEnd={markerEnd} style={style} />;
 }
 
 const EDGE_TYPES = { default: FlowEdge, wrap: WrapEdge };
@@ -212,7 +235,7 @@ function estimatedBounds(nodes: GraphModel['nodes']): Bounds {
 function inlineHeight(width: number, bounds: Bounds, max: number): number {
 	const inner = width * (1 - 2 * FIT_PADDING);
 	const zoom = inner / (bounds.width + 2 * LABEL_MARGIN_X);
-	const wanted = zoom * (bounds.height + labelHeadroom(zoom)) + width * 2 * FIT_PADDING;
+	const wanted = zoom * (bounds.height + labelHeadroom(zoom)) + width * 2 * FIT_PADDING + OVERLAY_TOP;
 	return Math.round(Math.min(max, Math.max(CANVAS_MIN_HEIGHT, wanted)));
 }
 
@@ -281,10 +304,13 @@ function Svg({ path }: { path: string }): ReactElement {
 	);
 }
 
+/** A small icon button: the face is drawn smaller than the hit area, which is 44 px on a touch screen. */
 function ToolButton({ label, icon, onClick }: { label: string; icon: string; onClick: () => void }): ReactElement {
 	return (
 		<button type="button" className="rr-canvas-tool" title={label} aria-label={label} onClick={onClick}>
-			<Svg path={icon} />
+			<span className="rr-canvas-tool-face">
+				<Svg path={icon} />
+			</span>
 		</button>
 	);
 }
@@ -323,12 +349,13 @@ function Toolbar({ host, moved, coarse }: { host: HostView; moved: MutableRefObj
 	const fitAll = useFitAll();
 	const zoomBy = useZoomAroundNodes();
 	const active = host.mode === 'fullscreen';
-	// Inline, the toolbar is Fit and Expand: zooming in a chat reply is for full screen.
+	// Inline, the buttons are Fit and Expand: zooming in a chat reply is for full screen.
 	// A host without full screen keeps the zoom buttons inline. On a touch screen pinch
-	// zooms, so the zoom buttons give their room back to the canvas.
+	// zooms, so there are no zoom buttons.
 	const zoomButtons = !coarse && (active || !host.canFullScreen);
 	return (
-		<div className="rr-canvas-tools" role="toolbar" aria-label="View">
+		// A tap on a button is not a tap on the drawing (which opens full screen on touch).
+		<div className="rr-canvas-tools" role="toolbar" aria-label="View" onClick={(event) => event.stopPropagation()}>
 			{zoomButtons && (
 				<ToolButton
 					label="Zoom out"
@@ -349,24 +376,15 @@ function Toolbar({ host, moved, coarse }: { host: HostView; moved: MutableRefObj
 					}}
 				/>
 			)}
-			<button
-				type="button"
-				className="rr-canvas-tool rr-canvas-expand"
-				aria-label="Fit to view"
+			<ToolButton
+				label="Fit to view"
+				icon={FIT_ICON}
 				onClick={() => {
 					moved.current = false;
 					fitAll({ duration: motion(200) });
 				}}
-			>
-				<Svg path={FIT_ICON} />
-				<span>Fit</span>
-			</button>
-			{host.canFullScreen && (
-				<button type="button" className="rr-canvas-tool rr-canvas-expand" onClick={() => host.request(active ? 'inline' : 'fullscreen')} aria-label={active ? 'Close full screen' : 'Expand to full screen'}>
-					<Svg path={active ? COLLAPSE_ICON : EXPAND_ICON} />
-					<span>{active ? 'Close' : 'Expand'}</span>
-				</button>
-			)}
+			/>
+			{host.canFullScreen && <ToolButton label={active ? 'Close full screen' : 'Expand to full screen'} icon={active ? COLLAPSE_ICON : EXPAND_ICON} onClick={() => host.request(active ? 'inline' : 'fullscreen')} />}
 		</div>
 	);
 }
@@ -387,7 +405,29 @@ function headerBottom(id: string): number {
 type Neighbour = { id: string; gap: number } | null;
 
 /** One overview label before the row pass settles its height, font and icon. */
-type Draft = { id: string; row: number; down: boolean; inside: boolean; nodeTop: number; nodeHeader: number; service?: { icon?: string }; title: string; experimental: boolean; left: number; width: number; height: number; lines: number; font: number; icon: boolean; headerBottomY: number };
+type Draft = {
+	id: string;
+	title: string;
+	service?: { icon?: string };
+	/** Grows down from the node's top (an invoked node), else up from its header bottom. */
+	down: boolean;
+	/** The node is wholly in the frame. */
+	inside: boolean;
+	nodeLeft: number;
+	nodeWidth: number;
+	/** How far the label reaches left of its node. */
+	toLeft: number;
+	width: number;
+	nodeTop: number;
+	nodeHeader: number;
+	/** The line the label sits on: its node's header bottom, or an invoked node's top. */
+	anchor: number;
+	row: number;
+	icon: boolean;
+	font: number;
+	lines: number;
+	height: number;
+};
 
 /**
  * The nearest node on each side of every node whose label band it shares,
@@ -407,8 +447,10 @@ function useNeighbours(zoom: number, invoked: Set<string>): Map<string, { left: 
 			.filter((node) => node.type === INodeType.Default && node.measured?.width)
 			.map((node) => {
 				const top = node.internals.positionAbsolute.y;
-				const h = Math.max(headerBottom(node.id), LABEL_TALLEST / Math.max(step, 0.02));
-				const y = invoked.has(node.id) ? top : top + headerBottom(node.id) - h;
+				// A row lines its labels up within ROW_TOLERANCE px, so a band reaches that much further.
+				const slack = ROW_TOLERANCE / Math.max(step, 0.02);
+				const h = Math.max(headerBottom(node.id), LABEL_TALLEST / Math.max(step, 0.02)) + slack;
+				const y = invoked.has(node.id) ? top - slack : top + headerBottom(node.id) + slack - h;
 				return { id: node.id, x: node.internals.positionAbsolute.x, y, w: node.measured!.width!, h };
 			});
 		const result = new Map<string, { left: Neighbour; right: Neighbour; blocked: boolean }>();
@@ -473,31 +515,29 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 	const edges = useStore((s) => s.edges);
 	const invoked = useMemo(() => new Set(edges.filter((edge) => edge.sourceHandle?.startsWith('invoke-source')).map((edge) => edge.target)), [edges]);
 	const neighbours = useNeighbours(zoom, invoked);
-	const labels: ReactElement[] = [];
-	const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
 	const drafts: Draft[] = [];
 	const ordered = [...nodeLookup.values()].filter((node) => zoom < OVERVIEW_ZOOM && node.type === INodeType.Default && node.measured?.width).sort((a, b) => a.internals.positionAbsolute.y - b.internals.positionAbsolute.y || a.internals.positionAbsolute.x - b.internals.positionAbsolute.x);
 	// What each label wants past its node's width: as wide as its title on one line.
 	const items = ordered.map((node) => {
 		const data = node.data as INodeData;
-		const service = services[data.provider] as { title?: string; icon?: string; capabilities?: number } | undefined;
+		const service = services[data.provider] as { title?: string; icon?: string } | undefined;
 		const title = data.name || service?.title || data.provider;
-		const experimental = ((service?.capabilities ?? 0) & IServiceCapabilities.Experimental) === IServiceCapabilities.Experimental;
 		const nodeWidth = node.measured!.width! * zoom;
-		const needed = textWidth(title, LABEL_FONT) + LABEL_CHROME + (experimental ? 9 : 0);
-		return { node, service, title, experimental, nodeWidth, needed, wants: Math.max(0, Math.min(LABEL_MAX_WIDTH, needed) - nodeWidth) };
+		const needed = textWidth(title, LABEL_FONT) + LABEL_CHROME;
+		return { node, service, title, nodeWidth, wants: Math.max(0, Math.min(LABEL_MAX_WIDTH, needed) - nodeWidth) };
 	});
 	const wants = new Map(items.map((item) => [item.node.id, item.wants]));
-	for (const { node, service, title, experimental, nodeWidth, needed, wants: own } of items) {
+	for (const { node, service, title, nodeWidth, wants: own } of items) {
 		// Two neighbours share the gap between them by how much each title needs,
-		// leaving a sliver so their labels never meet. A side with no neighbour
-		// takes what a neighbour one column gap away would leave, up to the frame's edge.
+		// leaving a sliver so their labels never meet; a short title leaves its
+		// share to its neighbour. A side with no neighbour takes its share of
+		// one column gap (the reach wrapTrunkX allows for), up to the frame's edge.
 		const near = neighbours.get(node.id);
 		const nodeLeft = node.internals.positionAbsolute.x * zoom + tx;
 		// A node panned out of the frame has no label at the frame's edge.
 		if (nodeLeft + nodeWidth <= 0 || nodeLeft >= frameWidth) continue;
 		const reach = (side: Neighbour, open: number) => {
-			if (!side) return Math.min(own, Math.max(0, open), LAYER_GAP * zoom * 2 * LABEL_GAP_SHARE);
+			if (!side) return Math.min(own, Math.max(0, open), LAYER_GAP * zoom * LABEL_GAP_SHARE);
 			const room = side.gap * zoom * 2 * LABEL_GAP_SHARE;
 			const other = wants.get(side.id) ?? 0;
 			return own + other <= room ? own : (room * own) / Math.max(own + other, 1);
@@ -509,79 +549,167 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 		const toRight = Math.min(maxRight, own - toLeft);
 		toLeft = Math.min(maxLeft, own - toRight);
 		const width = nodeWidth + toLeft + toRight;
-		const room = (chrome: number, withIcon: boolean) => width - chrome - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
 		// Too narrow to hold a short word: no label (the node's tooltip has the title).
-		if (width < LABEL_MIN_WIDTH || room(LABEL_CHROME_NARROW, false) < textWidth('Data', LABEL_FONT_NARROW)) continue;
+		if (width < LABEL_MIN_WIDTH || width - LABEL_CHROME_NARROW + LABEL_ICON < textWidth('Data', LABEL_FONT_NARROW)) continue;
 		const nodeTop = node.internals.positionAbsolute.y * zoom + ty;
-		const headerBottomY = nodeTop + headerBottom(node.id) * zoom;
+		const nodeHeader = headerBottom(node.id) * zoom;
 		const down = invoked.has(node.id);
 		const inside = nodeLeft >= 0 && nodeLeft + nodeWidth <= frameWidth && nodeTop >= 0 && nodeTop + node.measured!.height! * zoom <= frameHeight;
-		// The icon leads, as on the node, when every word of the title still fits
-		// a line beside it (and at least a few letters do).
-		const longest = Math.max(...title.split(/\s+|(?<=-)/).map((word) => textWidth(word, LABEL_FONT_NARROW)));
-		const icon = !!service?.icon && room(LABEL_CHROME_NARROW, true) >= Math.max(LABEL_TEXT_MIN, longest);
-		drafts.push({ id: node.id, row: Math.round(down ? nodeTop : headerBottomY), down, inside, service, title, experimental, left: nodeLeft - toLeft, width, height: 0, lines: 1, font: LABEL_FONT, icon, headerBottomY, nodeTop, nodeHeader: headerBottom(node.id) * zoom });
+		drafts.push({ id: node.id, title, service, down, inside, nodeLeft, nodeWidth, toLeft, width, nodeTop, nodeHeader, anchor: down ? nodeTop : nodeTop + nodeHeader, row: 0, icon: false, font: LABEL_FONT, lines: 1, height: 0 });
 	}
-	// One row reads as one: every label whose node header ends on the same
-	// line has an icon, or none does, and they share one height and font.
+
+	// One node is never drawn two ways: labels with the same title take the
+	// narrowest width among them, keeping each one's place on its node.
+	const byTitle = new Map<string, Draft[]>();
+	for (const draft of drafts) byTitle.set(draft.title, [...(byTitle.get(draft.title) ?? []), draft]);
+	for (const same of byTitle.values()) {
+		const extra = Math.min(...same.map((d) => d.width - d.nodeWidth));
+		for (const draft of same) {
+			const own = draft.width - draft.nodeWidth;
+			draft.toLeft = own > 0 ? (draft.toLeft * extra) / own : 0;
+			draft.width = draft.nodeWidth + extra;
+		}
+	}
+
+	// A row is every label whose anchor line (its node's header bottom, or an
+	// invoked node's top) is within 8 px of the next one's.
+	const sorted = [...drafts].sort((a, b) => Number(a.down) - Number(b.down) || a.anchor - b.anchor);
+	sorted.forEach((draft, i) => {
+		const previous = sorted[i - 1];
+		draft.row = previous && previous.down === draft.down && draft.anchor - previous.anchor <= ROW_TOLERANCE ? previous.row : i;
+	});
+
+	// A row, every label with a title that also appears in it, and every label
+	// on the same visual line decide together: all show the icon or none do,
+	// and all use one font size.
+	const parent = new Map(drafts.map((d) => [d, d]));
+	const find = (d: Draft): Draft => (parent.get(d) === d ? d : find(parent.get(d)!));
+	const join = (a: Draft, b: Draft) => parent.set(find(a), find(b));
+	const firstOfRow = new Map<number, Draft>();
+	const firstOfTitle = new Map<string, Draft>();
+	for (const draft of drafts) {
+		if (firstOfRow.has(draft.row)) join(draft, firstOfRow.get(draft.row)!);
+		else firstOfRow.set(draft.row, draft);
+		if (firstOfTitle.has(draft.title)) join(draft, firstOfTitle.get(draft.title)!);
+		else firstOfTitle.set(draft.title, draft);
+	}
+	// Labels that sit on one visual line decide together too, whichever way
+	// they grow: their boxes overlap by half or more.
+	const extent = (d: Draft) => {
+		const height = Math.max(d.nodeHeader, LABEL_MIN_HEIGHT_TWO_LINES);
+		return d.down ? [d.anchor, d.anchor + height] : [d.anchor - height, d.anchor];
+	};
+	for (const a of drafts) {
+		for (const b of drafts) {
+			if (a === b) continue;
+			const [at, ab] = extent(a);
+			const [bt, bb] = extent(b);
+			if (Math.min(ab, bb) - Math.max(at, bt) >= Math.min(ab - at, bb - bt) / 2) join(a, b);
+		}
+	}
+	const groups = new Map<Draft, Draft[]>();
+	for (const draft of drafts) groups.set(find(draft), [...(groups.get(find(draft)) ?? []), draft]);
+	const wordsOf = (title: string) => title.split(/\s+|(?<=-)/).filter(Boolean);
+	const longest = (title: string, size: number) => Math.max(...wordsOf(title).map((word) => textWidth(word, size)));
+	for (const group of groups.values()) {
+		// The icon leads, as on the node, when every label in the group still
+		// has room beside it for each word of its title (and a few letters).
+		const icon = group.every((d) => !d.service?.icon || d.width - LABEL_CHROME_NARROW >= Math.max(LABEL_TEXT_MIN, longest(d.title, LABEL_FONT_NARROW)));
+		for (const draft of group) draft.icon = icon && !!draft.service?.icon;
+		const room = (d: Draft, chrome: number) => d.width - chrome + (d.icon ? 0 : LABEL_ICON);
+		// The label font when the title fits one line in it, or two lines with
+		// every word fitting on a wide label; the smaller font otherwise.
+		const fontFor = (d: Draft) => (textWidth(d.title, LABEL_FONT) <= room(d, LABEL_CHROME) || (d.width >= LABEL_WIDE && longest(d.title, LABEL_FONT) <= room(d, LABEL_CHROME_NARROW)) ? LABEL_FONT : LABEL_FONT_NARROW);
+		const font = Math.min(...group.map(fontFor));
+		for (const draft of group) {
+			draft.font = font;
+			// One line when the title fits; else two, broken between words (never
+			// inside one; the second ends in an ellipsis when the title runs on).
+			// A word too long for a line leaves one line, cut short.
+			const chrome = font === LABEL_FONT && textWidth(draft.title, font) <= room(draft, LABEL_CHROME) ? LABEL_CHROME : LABEL_CHROME_NARROW;
+			draft.lines = textWidth(draft.title, font) <= room(draft, chrome) || longest(draft.title, font) > room(draft, LABEL_CHROME_NARROW) ? 1 : 2;
+		}
+	}
+
+	// Labels in one row share one height and line up: up-growing labels on
+	// the row's lowest header bottom, down-growing ones on its highest top.
 	const rows = new Map<number, Draft[]>();
 	for (const draft of drafts) rows.set(draft.row, [...(rows.get(draft.row) ?? []), draft]);
 	for (const row of rows.values()) {
-		const icons = row.every((d) => d.icon || !d.service?.icon);
-		for (const draft of row) {
-			draft.icon = icons && !!draft.service?.icon;
-			const room = (chrome: number) => draft.width - chrome - (draft.experimental ? 9 : 0) + (draft.icon ? 0 : LABEL_ICON);
-			// One line in the label font when the title fits, else one line in the
-			// smaller font, else two lines, broken between words (never inside one;
-			// the second line ends in an ellipsis when the title runs past it).
-			// A word too long for a line leaves the title on one line, cut short
-			// with an ellipsis.
-			if (textWidth(draft.title, LABEL_FONT) > room(LABEL_CHROME)) {
-				draft.font = LABEL_FONT_NARROW;
-				const words = draft.title.split(/\s+|(?<=-)/);
-				const longest = (size: number) => Math.max(...words.map((word) => textWidth(word, size)));
-				if (textWidth(draft.title, LABEL_FONT_NARROW) > room(LABEL_CHROME_NARROW) && longest(LABEL_FONT_NARROW) <= room(LABEL_CHROME_NARROW)) {
-					draft.lines = 2;
-					if (draft.width >= LABEL_WIDE && longest(LABEL_FONT) <= room(LABEL_CHROME_NARROW)) draft.font = LABEL_FONT;
-				}
-			}
-			draft.height = Math.max(draft.nodeHeader, draft.lines === 2 ? (draft.font === LABEL_FONT ? LABEL_TALLEST : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
-		}
-		const height = Math.max(...row.map((d) => d.height));
-		const font = Math.min(...row.map((d) => d.font));
+		const line = row[0].down ? Math.min(...row.map((d) => d.anchor)) : Math.max(...row.map((d) => d.anchor));
+		const height = Math.max(...row.map((d) => Math.max(d.down ? d.nodeHeader : line - d.nodeTop, d.lines === 2 ? (d.font === LABEL_FONT ? LABEL_TALLEST : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT)));
 		for (const draft of row) {
 			draft.height = height;
-			draft.font = font;
+			draft.anchor = line;
 		}
 	}
+
 	// A label stays on its node: one whose node the frame cuts is cut the same
 	// way, as map labels are. When two would overlap, the one whose node is
 	// wholly in view wins.
+	const labels: ReactElement[] = [];
+	const placed: Array<{ id: string; left: number; top: number; right: number; bottom: number }> = [];
 	for (const draft of [...drafts].sort((a, b) => Number(b.inside) - Number(a.inside))) {
-		// The label's bottom sits on its node's header bottom: it covers the
-		// header and grows up, so the lanes and their connections stay in view.
-		// An invoked node's invoke connection comes in from above, so its label
+		// A label's bottom sits on its node's header bottom: it covers the header
+		// and grows up, so the lanes and their connections stay in view. An
+		// invoked node's invoke connection comes in from above, so its label
 		// starts at the node's top and grows down over its own lanes instead.
-		const top = draft.down ? draft.nodeTop : draft.headerBottomY - draft.height;
-		const box = { left: draft.left, top, right: draft.left + draft.width, bottom: top + draft.height };
+		const left = draft.nodeLeft - draft.toLeft;
+		const top = draft.down ? draft.anchor : draft.anchor - draft.height;
+		const box = { id: draft.id, left, top, right: left + draft.width, bottom: top + draft.height };
 		if (placed.some((p) => box.left < p.right && p.left < box.right && box.top < p.bottom && p.top < box.bottom)) continue;
 		placed.push(box);
 		const kind = draft.lines === 2 ? ' rr-overview-narrow' : draft.font === LABEL_FONT_NARROW ? ' rr-overview-short' : '';
 		labels.push(
-			<div key={draft.id} data-node={draft.id} className={`rr-overview-label${kind}`} style={{ left: draft.left, top, width: draft.width, height: draft.height, fontSize: draft.font }}>
+			<div key={draft.id} data-node={draft.id} className={`rr-overview-label${kind}`} style={{ left, top, width: draft.width, height: draft.height, fontSize: draft.font }}>
 				{draft.icon && draft.service?.icon && <Icon name={draft.service.icon} width="12" height="12" className="rr-overview-icon" />}
 				<span className="rr-overview-title">{draft.title}</span>
-				{draft.experimental && <i className="rr-overview-badge" title="Experimental" />}
 			</div>
 		);
 	}
-	// When no label fits, the hint under the drawing says how to read the names.
+
+	// A connection that runs under a label other than its own ends' would
+	// read as passing through that node. It is drawn again above the labels,
+	// with the same path and stroke, so it reads as crossing over.
+	const [over, setOver] = useState<Array<{ id: string; d: string; invoke: boolean }>>([]);
+	const placedKey = placed.map((p) => `${p.id}:${Math.round(p.left)},${Math.round(p.top)},${Math.round(p.right)},${Math.round(p.bottom)}`).join('|');
+	useLayoutEffect(() => {
+		const next: Array<{ id: string; d: string; invoke: boolean }> = [];
+		for (const edge of placed.length ? edges : []) {
+			const path = document.querySelector(`.react-flow__edge[data-id="${CSS.escape(edge.id)}"] .react-flow__edge-path`) as SVGPathElement | null;
+			const foreign = placed.filter((p) => p.id !== edge.source && p.id !== edge.target);
+			if (!path || !foreign.length) continue;
+			const total = path.getTotalLength();
+			const step = Math.max(0.5, 1 / zoom);
+			let under = 0;
+			for (let at = 0; at <= total; at += step) {
+				const point = path.getPointAtLength(at);
+				const x = point.x * zoom + tx;
+				const y = point.y * zoom + ty;
+				if (foreign.some((p) => x > p.left && x < p.right && y > p.top && y < p.bottom)) under += step * zoom;
+			}
+			if (under > 2) next.push({ id: edge.id, d: path.getAttribute('d') ?? '', invoke: !!edge.sourceHandle?.startsWith('invoke-source') });
+		}
+		setOver((current) => (current.length === next.length && current.every((o, i) => o.id === next[i].id && o.d === next[i].d) ? current : next));
+		// placedKey stands for `placed`, which is a new array on every render.
+	}, [placedKey, edges, tx, ty, zoom]);
+
+	// When no label fits, a cue in the drawing says how to read the names.
 	const cue = ordered.length > 0 && labels.length === 0;
 	useEffect(() => onCue(cue), [cue, onCue]);
 	if (!labels.length) return null;
 	return (
 		<div className="rr-overview" aria-hidden="true">
 			{labels}
+			{over.length > 0 && (
+				<svg className="rr-overview-edges">
+					<g transform={`translate(${tx} ${ty}) scale(${zoom})`}>
+						{over.map((edge) => (
+							<path key={edge.id} data-edge={edge.id} d={edge.d} className={edge.invoke ? 'rr-overview-edge rr-overview-invoke' : 'rr-overview-edge'} />
+						))}
+					</g>
+				</svg>
+			)}
 		</div>
 	);
 }
@@ -695,7 +823,7 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 				// minimap shows the rest. Fit is one tap away.
 				if (fitZoom * typical < FULL_FIT_MIN_NODE_WIDTH) {
 					const zoom = Math.min(1.25, (frameWidth < NARROW_FRAME ? FULL_READ_NODE_WIDTH_NARROW : FULL_READ_NODE_WIDTH) / typical);
-					setViewport({ x: 24 - all.x * zoom, y: 24 - all.y * zoom, zoom });
+					setViewport({ x: 24 - all.x * zoom, y: OVERLAY_TOP + 12 - all.y * zoom, zoom });
 					return;
 				}
 			}
@@ -725,7 +853,7 @@ function Flow({ model, host, moved, onBounds, onCue }: { model: GraphModel; host
 		return model.edges.map((edge) => {
 			const link = { source: edge.source, target: edge.target, control: !!edge.sourceHandle?.startsWith('invoke-source') };
 			const centerY = wrapCenterY(positions, link, gaps);
-			const routed = centerY === undefined ? edge : { ...edge, type: 'wrap', data: { ...edge.data, centerY } };
+			const routed = centerY === undefined ? edge : { ...edge, type: 'wrap', data: { ...edge.data, centerY, trunkX: wrapTrunkX(positions, link, sizeOf, centerY) } };
 			return edgesThroughNodes(positions, [link], sizeOf) ? { ...routed, zIndex: 1 } : routed;
 		});
 	}, [initialized, nodes, model.edges, getInternalNode]);
@@ -815,48 +943,20 @@ function useFrameKeys(moved: MutableRefObject<boolean>): (event: KeyboardEvent<H
 	};
 }
 
-function Header({ summary, count, shown, missing, tools }: { summary: GraphModel['summary']; count: number; shown: number; missing: string[]; tools?: ReactElement }): ReactElement {
+/** The pipeline's name, or its file name when it has none. */
+function pipelineName(summary: ViewPipelineSummary): string {
 	const file = displayPath(summary.path, summary.workspace);
 	const stem = file.replace(/^.*\//, '').replace(/\.pipe(\.json)?$/, '');
-	const name = summary.name || stem || 'Pipeline';
-	// A pipeline without its own name is titled by its file name; the file is then shown only when it adds a folder.
-	const showFile = !!file && (summary.name ? summary.name !== stem : file !== `${stem}.pipe` && file !== `${stem}.pipe.json`);
+	return summary.name || stem || 'Pipeline';
+}
+
+/** The two notes shown only when they apply: a cut-short drawing, and node types this engine lacks. */
+function Notes({ truncated, count, shown, missing }: { truncated: boolean; count: number; shown: number; missing: string[] }): ReactElement | null {
+	const notes = [truncated ? `Showing the first ${shown} of ${count} nodes. The builder shows all of it.` : '', missing.length === 1 ? `${missing[0]} isn't installed on this engine, so it is drawn with a plain icon.` : missing.length > 1 ? `${missing.join(', ')} aren't installed on this engine, so they are drawn with a plain icon.` : ''].filter(Boolean);
+	if (!notes.length) return null;
 	return (
-		<div className="rr-canvas-head">
-			<div className="rr-canvas-heading">
-				<div className="rr-canvas-title">
-					<span className="rr-canvas-name" title={name}>
-						{name}
-					</span>
-					<span className="rr-canvas-pill">Read only</span>
-				</div>
-				<div className="rr-canvas-meta">
-					<span className="rr-canvas-count">
-						{count} {count === 1 ? 'node' : 'nodes'}
-					</span>
-					{showFile && (
-						<span className="rr-canvas-path" title={file}>
-							{file}
-						</span>
-					)}
-				</div>
-				{summary.description && (
-					<div className="rr-canvas-description" title={summary.description}>
-						{summary.description}
-					</div>
-				)}
-			</div>
-			{(summary.truncated || missing.length > 0) && (
-				<div className="rr-canvas-notes" role="status">
-					{summary.truncated && (
-						<div>
-							Showing the first {shown} of {count} nodes. The builder shows all of it.
-						</div>
-					)}
-					{missing.length > 0 && <div>{missing.length === 1 ? `${missing[0]} isn't installed on this engine, so it is drawn with a plain icon.` : `${missing.join(', ')} aren't installed on this engine, so they are drawn with a plain icon.`}</div>}
-				</div>
-			)}
-			{tools}
+		<div className="rr-canvas-notes" role="status">
+			{notes.join(' ')}
 		</div>
 	);
 }
@@ -891,7 +991,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const active = host.mode === 'fullscreen';
 	const moved = useRef(false);
 	const boxRef = useRef<HTMLDivElement>(null);
-	const headRef = useRef<HTMLDivElement>(null);
+	const notesRef = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(0);
 	const [bounds, setBounds] = useState<Bounds>(() => estimatedBounds(model.nodes));
 	const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
@@ -936,31 +1036,36 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 
 	const onBounds = useCallback((next: Bounds) => setBounds((current) => (Math.abs(current.width - next.width) < 1 && Math.abs(current.height - next.height) < 1 ? current : next)), []);
 
-	const headBottom = headRef.current?.getBoundingClientRect().bottom ?? 90;
 	const inlineMax = model.summary.truncated ? TRUNCATED_MAX_HEIGHT : width && width < NARROW_FRAME ? NARROW_MAX_HEIGHT : CANVAS_MAX_HEIGHT;
-	// Full screen leaves room under the drawing for the hint (up to two lines) and the host's safe area.
-	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 56 - host.safeBottom) : width ? inlineHeight(width, bounds, inlineMax) : CANVAS_MIN_HEIGHT;
+	// Full screen: the drawing takes the window, less the notes line and the host's safe area.
+	const frameTop = boxRef.current?.getBoundingClientRect().top ?? 12;
+	const notesHeight = notesRef.current?.getBoundingClientRect().height ?? 0;
+	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - frameTop - notesHeight - 16 - host.safeBottom) : width ? inlineHeight(width, bounds, inlineMax) : CANVAS_MIN_HEIGHT;
 	const [cueNeeded, setCueNeeded] = useState(false);
-	const cue = host.canFullScreen ? (coarse ? 'Tap to expand and read the names.' : 'Expand or zoom in to read the names.') : 'Zoom in to read the names.';
+	// Shown only when the names are too small to read.
+	const cue = active || !host.canFullScreen ? 'Zoom in to read the names' : coarse ? 'Tap to read the names' : 'Expand or zoom in to read the names';
 	// On a touch screen a tap on the inline canvas opens full screen, where every gesture works.
 	const onTap = () => {
 		if (coarse && !active && host.canFullScreen) host.request('fullscreen');
 	};
-
-	const hint = active ? (coarse ? 'Drag to move, pinch to zoom.' : 'Drag or scroll to move. Pinch or Ctrl + scroll zooms. Esc closes.') : coarse ? (host.canFullScreen ? 'Tap to expand. Two fingers move or zoom here.' : 'Two fingers move or zoom.') : 'Drag to move. Pinch or Ctrl + scroll to zoom.';
-	// On a phone the drawing is small: one line says what the pipeline does.
-	const flowLine = useMemo(() => mainFlow(model.summary), [model.summary]);
+	const name = pipelineName(model.summary);
+	const count = model.summary.node_count ?? model.nodes.length;
+	const shown = model.summary.nodes?.length ?? model.nodes.length;
+	const described = [`Read-only diagram of ${name}, ${count} ${count === 1 ? 'node' : 'nodes'}${model.summary.truncated ? `, the first ${shown} drawn` : ''}.`, model.summary.description ? `${model.summary.description.replace(/[.\s]+$/, '')}.` : '', 'Arrow keys move it, plus and minus zoom.'].filter(Boolean).join(' ');
 
 	return (
 		<div className={`rr-canvas${active ? ' rr-canvas-full' : ''}${coarse ? ' rr-canvas-coarse' : ''}`}>
-			<div ref={headRef}>
-				<Header summary={model.summary} count={model.summary.node_count ?? model.nodes.length} shown={model.summary.nodes?.length ?? model.nodes.length} missing={model.missingProviders} tools={<Toolbar host={host} moved={moved} coarse={coarse} />} />
-			</div>
-			<div ref={boxRef} className="rr-canvas-frame" style={{ height }} tabIndex={0} role="region" aria-label={`Read-only diagram of ${model.summary.name || 'the pipeline'}. Arrow keys move it, plus and minus zoom.`} aria-describedby="rr-canvas-text" onKeyDown={onKeyDown} onClick={onTap}>
+			<div ref={boxRef} className="rr-canvas-frame" style={{ height }} tabIndex={0} role="region" aria-label={described} aria-describedby="rr-canvas-text" onKeyDown={onKeyDown} onClick={onTap}>
 				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} onCue={setCueNeeded} />}
+				<div className="rr-canvas-name" title={name}>
+					{name}
+				</div>
+				<Toolbar host={host} moved={moved} coarse={coarse} />
+				{cueNeeded && <div className="rr-canvas-cue">{cue}</div>}
 			</div>
-			<div className="rr-canvas-howto">{cueNeeded && !active ? `${cue} ${hint}` : hint}</div>
-			{flowLine && <div className="rr-canvas-flow">{flowLine}</div>}
+			<div ref={notesRef}>
+				<Notes truncated={!!model.summary.truncated} count={count} shown={shown} missing={model.missingProviders} />
+			</div>
 			<TextAlternative summary={model.summary} />
 		</div>
 	);
@@ -992,8 +1097,10 @@ export function CanvasApp({ model, app }: { model: CanvasModel; app?: App }): Re
 	if (model.kind === 'empty') {
 		return (
 			<div className="rr-canvas">
-				<Header summary={model.summary} count={0} shown={0} missing={[]} />
 				<div className="rr-card rr-canvas-empty" role="status">
+					<div className="rr-canvas-empty-name" title={pipelineName(model.summary)}>
+						{pipelineName(model.summary)}
+					</div>
 					This pipeline has no nodes yet. Open it in the builder to add some.
 				</div>
 			</div>

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, formatBytes, mainFlow, type ToolResultLike, type ViewPipelineSummary } from './model';
+import { CANVAS_META_KEY, UNKNOWN_ICON, buildCanvasModel, displayPath, formatBytes, type ToolResultLike, type ViewPipelineSummary } from './model';
 
 const SERVICES = {
 	webhook: { title: 'Webhook', classType: ['source'], lanes: { _source: ['questions'] }, invoke: {}, capabilities: 0, icon: 'webhook.svg' },
@@ -249,105 +249,5 @@ describe('displayPath', () => {
 		expect(displayPath('@/Team/=team_B/.projects/shared.pipe', '@/Team/=team_A/.projects')).toBe('shared.pipe');
 		expect(displayPath('odd/path.pipe', '.projects')).toBe('odd/path.pipe');
 		expect(displayPath(undefined, '.projects')).toBe('');
-	});
-});
-
-describe('mainFlow', () => {
-	it('names the longest chain of data connections and counts the rest', () => {
-		const summary = summaryFor(COMPONENTS, {
-			node_count: 5,
-			nodes: [
-				{ id: 'chat', provider: 'chat', title: 'Chat' },
-				{ id: 'agent', provider: 'agent', title: 'Agent' },
-				{ id: 'out', provider: 'response', title: 'Answers' },
-				{ id: 'llm', provider: 'llm', title: 'LLM' },
-				{ id: 'side', provider: 'response', title: 'Log' },
-			],
-			connections: [
-				{ from: 'chat', to: 'agent', lane: 'questions' },
-				{ from: 'agent', to: 'out', lane: 'answers' },
-				{ from: 'chat', to: 'side', lane: 'questions' },
-				{ from: 'agent', to: 'llm', control: 'llm' },
-			],
-		});
-
-		expect(mainFlow(summary)).toBe('Chat → Agent → Answers, and 2 more nodes');
-	});
-
-	it('stays one short line: repeats collapse, at most six steps, nothing for a truncated pipeline', () => {
-		const ids = Array.from({ length: 12 }, (_, i) => `n${i}`);
-		const titles = ['Chat', 'Parse', 'Prompt', 'Prompt', 'Prompt', 'Split', 'Embed', 'Store', 'Search', 'Rank', 'LLM', 'Answers'];
-		const summary = summaryFor([], {
-			node_count: 12,
-			nodes: ids.map((id, i) => ({ id, provider: 'p', title: titles[i] })),
-			connections: ids.slice(1).map((id, i) => ({ from: ids[i], to: id, lane: 'x' })),
-		});
-
-		expect(mainFlow(summary)).toBe('Chat → Parse → Prompt ×3 → … → LLM → Answers');
-		expect(mainFlow({ ...summary, truncated: true })).toBe('');
-	});
-
-	it('is empty without data connections, and survives a cycle', () => {
-		expect(mainFlow(summaryFor([], { nodes: [{ id: 'a', provider: 'p' }], connections: [] }))).toBe('');
-		const cyclic = summaryFor([], {
-			node_count: 2,
-			nodes: [
-				{ id: 'a', provider: 'p', title: 'A' },
-				{ id: 'b', provider: 'p', title: 'B' },
-			],
-			connections: [
-				{ from: 'a', to: 'b', lane: 'x' },
-				{ from: 'b', to: 'a', lane: 'x' },
-			],
-		});
-		expect(mainFlow(cyclic)).toBe('A → B');
-	});
-
-	it('starts where data enters, not at a tool the agent invokes', () => {
-		// The tool's own chain is longer, but the agent invokes the tool; the person talks to Chat.
-		const summary = summaryFor([], {
-			node_count: 7,
-			nodes: [
-				{ id: 'chat', provider: 'chat', title: 'Chat' },
-				{ id: 'agent', provider: 'agent', title: 'Agent' },
-				{ id: 'answers', provider: 'response', title: 'Answers' },
-				{ id: 'tool', provider: 'tool_pipe', title: 'Tool' },
-				{ id: 'p1', provider: 'prompt', title: 'Prompt' },
-				{ id: 'llm', provider: 'llm', title: 'LLM' },
-				{ id: 'out', provider: 'response', title: 'Tool answers' },
-			],
-			connections: [
-				{ from: 'chat', to: 'agent', lane: 'questions' },
-				{ from: 'agent', to: 'answers', lane: 'answers' },
-				{ from: 'agent', to: 'tool', control: 'tool' },
-				{ from: 'tool', to: 'p1', lane: 'text' },
-				{ from: 'p1', to: 'llm', lane: 'questions' },
-				{ from: 'llm', to: 'out', lane: 'answers' },
-			],
-		});
-		expect(mainFlow(summary)).toBe('Chat → Agent → Answers, and 4 more nodes');
-	});
-
-	it('prefers a path that reaches an output over a longer one that loops', () => {
-		const summary = summaryFor([], {
-			node_count: 6,
-			nodes: [
-				{ id: 'in', provider: 'p', title: 'In' },
-				{ id: 'a', provider: 'p', title: 'A' },
-				{ id: 'b', provider: 'p', title: 'B' },
-				{ id: 'c', provider: 'p', title: 'C' },
-				{ id: 'd', provider: 'p', title: 'D' },
-				{ id: 'out', provider: 'p', title: 'Out' },
-			],
-			connections: [
-				{ from: 'in', to: 'out', lane: 'x' },
-				{ from: 'in', to: 'a', lane: 'x' },
-				{ from: 'a', to: 'b', lane: 'x' },
-				{ from: 'b', to: 'c', lane: 'x' },
-				{ from: 'c', to: 'd', lane: 'x' },
-				{ from: 'd', to: 'a', lane: 'x' },
-			],
-		});
-		expect(mainFlow(summary)).toBe('In → Out, and 4 more nodes');
 	});
 });

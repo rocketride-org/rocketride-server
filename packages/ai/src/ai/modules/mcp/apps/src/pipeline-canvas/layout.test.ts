@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { BAND_GAP, LAYER_GAP, NODE_GAP, WRAP_BELOW_ZOOM, bandGaps, edgesThroughNodes, layoutLayers, layoutPipeline, wrapCenterY, type LayoutSize } from './layout';
+import { BAND_GAP, LABEL_REACH, LAYER_GAP, NODE_GAP, WRAP_BELOW_ZOOM, WRAP_OFFSET, bandGaps, edgesThroughNodes, layoutLayers, layoutPipeline, wrapCenterY, wrapTrunkX, type LayoutSize } from './layout';
 
 const SIZE: LayoutSize = { width: 100, height: 40 };
 const fixed = () => SIZE;
@@ -348,6 +348,23 @@ describe('layoutPipeline in a frame', () => {
 		expect(positions.llm.x).toBe(positions.agent.x);
 		expect(positions.llm.y).toBe(positions.agent.y + SIZE.height + LAYER_GAP);
 		expect(overlaps(positions, fixed)).toBe(false);
+	});
+});
+
+describe('wrapTrunkX', () => {
+	const size = { width: 160, height: 80 };
+	const sizeOf = () => size;
+
+	it('drops just right of its source when nothing is below', () => {
+		const positions = { a: { x: 0, y: 0, band: 0 }, b: { x: 0, y: 300, band: 1 } };
+		expect(wrapTrunkX(positions, { source: 'a', target: 'b' }, sizeOf, 250)).toBe(160 + WRAP_OFFSET);
+	});
+
+	it('drops clear of a lower node and the room its label can take', () => {
+		// c sits under a, a little to the right: a drop at a's edge would run under c's label.
+		const positions = { a: { x: 0, y: 0, band: 0 }, c: { x: 20, y: 120, band: 0 }, b: { x: 0, y: 400, band: 1 } };
+		const x = wrapTrunkX(positions, { source: 'a', target: 'b' }, sizeOf, 350);
+		expect(x).toBe(20 + 160 + LABEL_REACH.side + WRAP_OFFSET);
 	});
 });
 

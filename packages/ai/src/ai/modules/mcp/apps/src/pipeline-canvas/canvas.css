@@ -3,8 +3,9 @@
  * Copyright (c) 2026 Aparavi Software AG
  * See LICENSE file for details.
  *
- * Canvas widget chrome: the header, the view buttons, the frame, the larger
- * titles drawn at overview zoom, and the read-only adjustments to React Flow.
+ * Canvas widget chrome: the frame, the name and view buttons on its corners,
+ * the larger titles drawn at overview zoom, and the read-only adjustments to
+ * React Flow.
  * The nodes and edges themselves are styled by the builder's own CSS.
  */
 body {
@@ -12,152 +13,8 @@ body {
 	background: transparent;
 }
 
-/* --- Header: title, meta and the view buttons on one block ------------- */
-.rr-canvas-head {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
-	grid-template-areas:
-		'heading tools'
-		'notes notes';
-	align-items: center;
-	column-gap: 12px;
-	margin: 0 0 8px;
-}
-.rr-canvas-heading {
-	grid-area: heading;
-	min-width: 0;
-}
-.rr-canvas-title {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	min-width: 0;
-}
-.rr-canvas-name {
-	font-size: 15px;
-	font-weight: 650;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-/* On a touch screen the buttons share the title row: a long name wraps to two lines. */
-.rr-canvas-coarse .rr-canvas-name {
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	-webkit-box-orient: vertical;
-	white-space: normal;
-	line-height: 1.25;
-}
-.rr-canvas-pill {
-	flex: none;
-	font-size: 11px;
-	line-height: 18px;
-	padding: 0 8px;
-	border-radius: 999px;
-	border: 1px solid var(--rr-line-strong);
-	color: var(--rr-text-secondary);
-}
-.rr-canvas-meta {
-	display: flex;
-	align-items: baseline;
-	gap: 10px;
-	min-width: 0;
-	font-size: 12px;
-	color: var(--rr-text-secondary);
-}
-.rr-canvas-count {
-	flex: none;
-}
-.rr-canvas-path {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-family: ui-monospace, monospace;
-	font-size: 11px;
-}
-.rr-canvas-description {
-	margin-top: 2px;
-	font-size: 12px;
-	color: var(--rr-text-secondary);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-/* A phone-width chat: the buttons get their own row under the title. */
-@media (max-width: 560px) {
-	.rr-canvas:not(.rr-canvas-coarse) .rr-canvas-head {
-		grid-template-columns: minmax(0, 1fr);
-		grid-template-areas:
-			'heading'
-			'notes'
-			'tools';
-	}
-	.rr-canvas:not(.rr-canvas-coarse) .rr-canvas-tools {
-		justify-self: start;
-		margin-top: 8px;
-	}
-}
-.rr-canvas-notes {
-	grid-area: notes;
-	margin-top: 6px;
-	font-size: 12px;
-	color: var(--rr-text-secondary);
-}
-
-/* --- View buttons (32 px; 44 px on a touch screen) ---------------------- */
-.rr-canvas-tools {
-	grid-area: tools;
-	display: flex;
-	flex: none;
-	align-self: start;
-	border: 1px solid var(--rr-line-strong);
-	border-radius: 8px;
-	overflow: hidden;
-}
-.rr-canvas-tool {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	min-width: 32px;
-	height: 32px;
-	padding: 0;
-	border: none;
-	border-right: 1px solid var(--rr-line);
-	background: transparent;
-	color: var(--rr-text-primary);
-	font: inherit;
-	font-size: 12px;
-	cursor: pointer;
-}
-.rr-canvas-tool:last-child {
-	border-right: none;
-}
-@media (hover: hover) {
-	.rr-canvas-tool:hover {
-		background: var(--rr-inset);
-	}
-}
-.rr-canvas-tool:focus-visible {
-	outline: 2px solid var(--rr-accent);
-	outline-offset: -2px;
-}
-.rr-canvas-tool svg {
-	width: 16px;
-	height: 16px;
-	fill: currentColor;
-}
-.rr-canvas-expand {
-	padding: 0 10px 0 8px;
-	font-weight: 600;
-}
-.rr-canvas-coarse .rr-canvas-tool {
-	min-width: 44px;
-	height: 44px;
-}
-
-/* --- The drawing area (height set in px by CanvasApp.tsx) --------------- */
+/* --- The drawing area (height set in px by CanvasApp.tsx) ---------------
+   No header: the name and the view buttons sit on the drawing's top corners. */
 .rr-canvas-frame {
 	position: relative;
 	transition: height 150ms ease;
@@ -170,24 +27,111 @@ body {
 	outline: 2px solid var(--rr-accent);
 	outline-offset: 2px;
 }
-.rr-canvas-flow {
-	display: none;
-	margin-top: 4px;
-	font-size: 12px;
-	color: var(--rr-text-primary);
-}
-/* On a phone the drawing is small: the main flow is also written out (not in full screen). */
-@media (max-width: 560px) {
-	.rr-canvas:not(.rr-canvas-full) .rr-canvas-flow {
-		display: block;
-	}
-}
 @media (prefers-reduced-motion: reduce) {
 	.rr-canvas-frame {
 		transition: none;
 	}
 }
-.rr-canvas-howto {
+
+/* The pipeline's name: small and quiet, in the top-left corner. */
+.rr-canvas-name {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 10;
+	max-width: calc(100% - 112px);
+	padding: 2px 7px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--rr-bg-default) 88%, transparent);
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* View buttons: icon only, in the top-right corner. A 28 px face; on a touch
+   screen the hit area around it is 44 px. */
+.rr-canvas-tools {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 10;
+	display: flex;
+}
+.rr-canvas-tool {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--rr-text-primary);
+	cursor: pointer;
+}
+.rr-canvas-coarse .rr-canvas-tool {
+	width: 44px;
+	height: 44px;
+}
+.rr-canvas-tool-face {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	border: 1px solid var(--rr-line-strong);
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-coarse .rr-canvas-tool-face {
+	width: 32px;
+	height: 32px;
+}
+@media (hover: hover) {
+	.rr-canvas-tool:hover .rr-canvas-tool-face {
+		background: var(--rr-inset);
+	}
+}
+.rr-canvas-tool:focus-visible {
+	outline: none;
+}
+.rr-canvas-tool:focus-visible .rr-canvas-tool-face {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: 1px;
+}
+.rr-canvas-tool svg {
+	width: 16px;
+	height: 16px;
+	fill: currentColor;
+}
+
+/* How to read the names, shown only while they are too small to read. */
+.rr-canvas-cue {
+	position: absolute;
+	left: 50%;
+	bottom: 10px;
+	z-index: 10;
+	transform: translateX(-50%);
+	max-width: calc(100% - 24px);
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--rr-line);
+	background: color-mix(in srgb, var(--rr-bg-paper) 92%, transparent);
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+	line-height: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	pointer-events: none;
+}
+
+/* The notes that apply only sometimes: a cut-short drawing, a node type this engine lacks. */
+.rr-canvas-notes {
 	margin-top: 6px;
 	font-size: 12px;
 	line-height: 1.4;
@@ -270,13 +214,24 @@ body {
 	padding: 0 3px;
 	letter-spacing: -0.01em;
 }
-/* The builder's EXPERIMENTAL badge, as a dot. */
-.rr-overview-badge {
-	flex: none;
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: var(--rr-color-warning);
+/* A connection drawn again above the labels where it would run under another node's label. */
+.rr-overview-edges {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	pointer-events: none;
+}
+.rr-overview-edge {
+	fill: none;
+	stroke: var(--xy-edge-stroke, var(--rr-text-disabled));
+	stroke-width: 1.5px;
+	vector-effect: non-scaling-stroke;
+}
+.rr-overview-invoke {
+	stroke-dasharray: 2 4;
+	stroke-linecap: round;
 }
 /* At overview zoom edges keep a 1.5 px line instead of thinning with the zoom. */
 .react-flow:has(.rr-overview) .react-flow__edge-path {
@@ -335,6 +290,15 @@ body {
 }
 .rr-canvas-empty {
 	color: var(--rr-text-secondary);
+}
+.rr-canvas-empty-name {
+	margin-bottom: 2px;
+	color: var(--rr-text-primary);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 .rr-canvas-error {
 	display: flex;
