@@ -121,6 +121,11 @@ export interface ILedger {
 	fsHandles(): IFsEntry[];
 	/** Monitor refcounts: run handle → event type → count. */
 	monitors: Map<string, Map<string, number>>;
+	/**
+	 * Direct subscriptions made with `rrext_monitor` (replace semantics: the
+	 * last call's types), keyed `<handle>:<pipeId>`.
+	 */
+	directMonitors: Map<string, { handle: string; pipeId?: number; types: string[] }>;
 	/** Real tokens and public tokens held (for the outbound backstop). */
 	secrets(): string[];
 	clear(): void;
@@ -136,11 +141,13 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 	const runsByHandle = new Map<string, IRunEntry>();
 	const fsByHandle = new Map<string, IFsEntry>();
 	const monitors = new Map<string, Map<string, number>>();
+	const directMonitors = new Map<string, { handle: string; pipeId?: number; types: string[] }>();
 	const pending: Record<QuotaKind, number> = { runs: 0, pipes: 0, fsHandles: 0, monitorKeys: 0 };
 
 	const dropRun = (handle: string): void => {
 		runsByHandle.delete(handle);
 		monitors.delete(handle);
+		for (const [k, d] of directMonitors) if (d.handle === handle) directMonitors.delete(k);
 	};
 	const live = (entry: IRunEntry | undefined): IRunEntry | undefined => {
 		if (!entry) return undefined;
@@ -161,7 +168,7 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 			case 'fsHandles':
 				return fsByHandle.size;
 			case 'monitorKeys':
-				return [...monitors.values()].reduce((n, types) => n + types.size, 0);
+				return [...monitors.values()].reduce((n, types) => n + types.size, 0) + [...directMonitors.values()].reduce((n, d) => n + d.types.length, 0);
 		}
 	};
 
@@ -203,11 +210,13 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 		dropFs: (handle) => void fsByHandle.delete(handle),
 		fsHandles: () => [...fsByHandle.values()],
 		monitors,
+		directMonitors,
 		secrets: () => [...runsByHandle.values()].flatMap((e) => [e.token, e.publicToken]).filter((s) => typeof s === 'string' && s !== ''),
 		clear() {
 			runsByHandle.clear();
 			fsByHandle.clear();
 			monitors.clear();
+			directMonitors.clear();
 		},
 	};
 }

@@ -56,7 +56,7 @@ import { KNOWN_CAPS } from './capabilities';
 import { CapabilityDeniedError } from './capabilityDenied';
 import type { DenyCode } from './capabilityDenied';
 import { deniedEnvelope, deniedMessage, deny, sanitizeEnvelope } from './denial';
-import { admitValue, asDenial, DAP_TIMEOUT_MAX_MS, gateClientRequest, gateOp } from './gate';
+import { admitValue, asDenial, DAP_TIMEOUT_MAX_MS, directMonitorKey, gateClientRequest, gateOp } from './gate';
 import type { IGateContext, IGatedRequest } from './gate';
 import { base64url, createLedger } from './ledger';
 import type { ILedger, IRunEntry } from './ledger';
@@ -216,6 +216,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				}
 			}
 		}
+		for (const d of st.ledger.directMonitors.values()) {
+			const run = st.ledger.run(d.handle);
+			if (run && d.types.length > 0) work.push(sendEngine('rrext_monitor', { token: run.token, types: [], ...(d.pipeId !== undefined ? { pipeId: d.pipeId } : {}) }).catch(() => undefined));
+		}
 		for (const fs of st.ledger.fsHandles()) work.push(sendEngine('rrext_store', { subcommand: 'fs_close', handle: fs.handle, mode: fs.mode }).catch(() => undefined));
 		return work;
 	};
@@ -280,6 +284,14 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'rrext_get_task_status':
 				if (body && (body.completed === true || body.final === true)) st.ledger.complete(req.run!.handle);
 				return response;
+			case 'rrext_monitor': {
+				const pipeId = req.args.pipeId as number | undefined;
+				const k = directMonitorKey(req.run!.handle, pipeId);
+				const types = [...new Set(req.args.types as string[])];
+				if (types.length === 0) st.ledger.directMonitors.delete(k);
+				else st.ledger.directMonitors.set(k, { handle: req.run!.handle, ...(pipeId !== undefined ? { pipeId } : {}), types });
+				return response;
+			}
 			case 'rrext_process':
 				if (req.subcommand === 'open' && body && Number.isSafeInteger(body.pipe_id)) req.run!.pipeIds.add(body.pipe_id as number);
 				if (req.subcommand === 'close') req.run!.pipeIds.delete(req.args.pipe_id as number);

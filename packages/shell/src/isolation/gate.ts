@@ -100,6 +100,11 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v ===
 /** An own property, never one found on the prototype chain (`toString`, `valueOf`, ...). */
 const own = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
 
+/** The ledger key of a direct (`rrext_monitor`) subscription. */
+export function directMonitorKey(handle: string, pipeId: number | undefined): string {
+	return `${handle}:${pipeId ?? ''}`;
+}
+
 /** Converts anything thrown inside the gate into a denial (`schema` unless it already is one). */
 export function asDenial(err: unknown, op: string): CapabilityDeniedError {
 	return err instanceof CapabilityDeniedError ? err : deny('schema', op);
@@ -373,6 +378,16 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 		checked.projectId = run!.projectId;
 	}
 	if (command === 'rrext_process' && subcommand === 'open') reserve('pipes', QUOTAS.pipes);
+	if (command === 'rrext_monitor') {
+		// A direct subscription replaces the previous types for (run, pipe): only growth needs room.
+		const types = new Set(checked.types as string[]).size;
+		const previous = g.ledger.directMonitors.get(directMonitorKey(run!.handle, checked.pipeId as number | undefined))?.types.length ?? 0;
+		const growth = types - previous;
+		if (growth > 0) {
+			if (g.ledger.used('monitorKeys') + growth > QUOTAS.monitorKeys) fail('quota');
+			releases.push(g.ledger.reserve('monitorKeys', growth));
+		}
+	}
 	if (command === 'rrext_store' && subcommand === 'fs_open') {
 		reserve('fsHandles', QUOTAS.fsHandles);
 		fs = { mode: checked.mode as 'r' | 'w' };
