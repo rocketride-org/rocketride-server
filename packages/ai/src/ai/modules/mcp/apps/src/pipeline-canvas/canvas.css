@@ -1,0 +1,94 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * See LICENSE file for details.
+ *
+ * Canvas widget chrome: the header above the drawing and the zoom controls.
+ * The nodes and edges are styled by the builder's own CSS.
+ */
+body {
+	color: var(--rr-text-primary);
+	background: transparent;
+}
+
+.rr-canvas-head {
+	margin: 0 0 8px;
+	min-width: 0;
+}
+.rr-canvas-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.rr-canvas-name {
+	font-size: 15px;
+	font-weight: 650;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.rr-canvas-pill {
+	flex: none;
+	font-size: 11px;
+	line-height: 18px;
+	padding: 0 8px;
+	border-radius: 999px;
+	border: 1px solid var(--rr-line-strong);
+	color: var(--rr-text-secondary);
+}
+.rr-canvas-meta {
+	display: flex;
+	gap: 10px;
+	min-width: 0;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+.rr-canvas-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: ui-monospace, monospace;
+	font-size: 11px;
+}
+.rr-canvas-note {
+	margin-top: 6px;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+
+.rr-canvas-error {
+	border-left: 3px solid var(--rr-flame);
+}
+.rr-canvas-hint {
+	margin-top: 4px;
+	color: var(--rr-text-secondary);
+}
+
+/* Zoom controls: 32 px touch targets that follow the theme. */
+.rr-canvas .react-flow__controls {
+	box-shadow: none;
+	border: 1px solid var(--rr-line-strong);
+	border-radius: 8px;
+	overflow: hidden;
+}
+.rr-canvas .react-flow__controls-button {
+	width: 32px;
+	height: 32px;
+	background: var(--rr-bg-paper);
+	color: var(--rr-text-primary);
+	border-bottom: 1px solid var(--rr-line);
+}
+.rr-canvas .react-flow__controls-button:hover {
+	background: var(--rr-bg-surface-alt);
+}
+.rr-canvas .react-flow__controls-button svg {
+	fill: currentColor;
+	max-width: 14px;
+	max-height: 14px;
+}
+
+/* Read only: no handle invites a connection. */
+.rr-canvas .react-flow__handle {
+	cursor: inherit;
+}

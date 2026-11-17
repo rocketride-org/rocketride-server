@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Pipeline canvas</title>
+		<!-- Minimal pre-JS styling only; the widget design system
+		     (../shared/theme.css) and canvas.css are imported by main.tsx and
+		     inlined at build. The canvas has a fixed pixel height (see
+		     CanvasApp.tsx), never a % or vh one: host auto-resize measures
+		     this document, and a relative height would collapse it. -->
+		<style>
+			:root {
+				color-scheme: light dark;
+			}
+			body {
+				font:
+					13px/1.5 system-ui,
+					sans-serif;
+				margin: 12px;
+			}
+			.rr-waiting {
+				opacity: 0.6;
+				padding: 8px 0;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="root"><div class="rr-waiting" role="status">Loading pipeline...</div></div>
+		<script type="module" src="./main.tsx"></script>
+	</body>
+</html>

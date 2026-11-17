@@ -7,6 +7,8 @@ import { resolve } from 'path';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
+import { aliases, canvasStandIns } from './resolve';
+
 // One entry per widget. Each must bundle to ONE self-contained HTML file
 // (MCP Apps MVP forbids external URLs), so we build entries one at a time
 // via the WIDGET env var rather than rollup multi-input.
@@ -15,24 +17,17 @@ const widget = process.env.WIDGET ?? 'pipelines-table';
 export default defineConfig({
 	root: resolve(__dirname, 'src', widget),
 	resolve: {
-		alias: [
-			// Bare 'shell' → 3-symbol shim (the real barrel drags in ~85 modules
-			// incl. auth + Module Federation — see shell/src/api.ts).
-			{ find: /^shell$/, replacement: resolve(__dirname, 'src/trace-viewer/shell-shim.ts') },
-			// Deep shell imports (used only by the shim + theme CSS).
-			{ find: /^shell\/src\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/node_modules/shell/src') + '/' },
-			// The shared app source tree (trace components).
-			{ find: /^@app-shared\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/src') + '/' },
-			// apps/shared uses its OWN 'shared/' alias internally (trace reaches
-			// the pipeline types, the event parser and json-tree that way), so a
-			// consumer of that tree has to resolve it too.
-			{ find: /^shared\//, replacement: resolve(__dirname, '../../../../../../../apps/shared/src') + '/' },
-		],
+		// Shared with vitest.config.ts; see resolve.ts.
+		alias: aliases,
 		// apps/shared and shell each have their own node_modules copy of react;
-		// force a single copy or hooks break at runtime.
-		dedupe: ['react', 'react-dom'],
+		// force a single copy or hooks break at runtime. The canvas container
+		// and the builder's node components must also share one React Flow
+		// store, so @xyflow/react resolves once too.
+		dedupe: ['react', 'react-dom', '@xyflow/react'],
 	},
-	plugins: [viteSingleFile()],
+	// The stand-ins only apply to the canvas: the other widgets never import
+	// the builder's canvas files, and build exactly as before.
+	plugins: widget === 'pipeline-canvas' ? [canvasStandIns(), viteSingleFile()] : [viteSingleFile()],
 	build: {
 		outDir: resolve(__dirname, 'dist'),
 		emptyOutDir: false,

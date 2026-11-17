@@ -45,6 +45,52 @@ async def test_call_tool_dispatches_to_registered_handler(monkeypatch, fake_engi
 
 
 @pytest.mark.asyncio
+async def test_handler_meta_goes_to_result_meta_and_never_to_the_model(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    widget_only = {
+        'rocketride/canvas': {'pipeline': {'components': [{'id': 'a', 'provider': 'p'}]}, 'icons': {'i': '<svg/>'}}
+    }
+
+    def _register_all(registry):
+        @registry.register('dummy_tool', 'A dummy tool', _dummy_schema())
+        async def _handler(client, tasks, args):
+            return {'ok': True, 'thing': 1, '_meta': widget_only}
+
+    monkeypatch.setattr(handlers_mod.tools_pkg, 'register_all', _register_all)
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        result = await client.call_tool('dummy_tool', {})
+
+    # The SDK adds its own keys (serverInfo) next to the handler's.
+    assert result.meta['rocketride/canvas'] == widget_only['rocketride/canvas']
+    assert json.loads(result.content[0].text) == {'ok': True, 'thing': 1}
+    assert result.structured_content == {'ok': True, 'thing': 1}
+    assert '<svg/>' not in result.content[0].text
+    assert result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_handler_meta_that_is_not_a_dict_stays_in_the_payload(monkeypatch, fake_engine):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    def _register_all(registry):
+        @registry.register('dummy_tool', 'A dummy tool', _dummy_schema())
+        async def _handler(client, tasks, args):
+            return {'ok': True, '_meta': 'not a dict'}
+
+    monkeypatch.setattr(handlers_mod.tools_pkg, 'register_all', _register_all)
+
+    server = handlers_mod.build_mcp_server(lambda: fake_engine)
+    async with Client(server) as client:
+        result = await client.call_tool('dummy_tool', {})
+
+    assert 'rocketride/canvas' not in (result.meta or {})
+    assert json.loads(result.content[0].text) == {'ok': True, '_meta': 'not a dict'}
+
+
+@pytest.mark.asyncio
 async def test_call_tool_unknown_name_returns_error_result_not_crash(fake_engine):
     import ai.modules.mcp.handlers as handlers_mod
 
