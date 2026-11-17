@@ -27,6 +27,13 @@ export const BAND_GAP = 100;
 /** How far a connection between bands runs out of its source and into its target before it turns, in px. */
 export const WRAP_OFFSET = 20;
 /**
+ * How far past its node an overview label can reach, in px at zoom 1: to the
+ * side, a share of the column gap (see LABEL_GAP_SHARE in CanvasApp.tsx); up,
+ * a two-line label at the lowest zoom a wrapped flow is drawn at; down, the
+ * same for an invoked node's label, which grows down from its top.
+ */
+export const LABEL_REACH = { side: Math.ceil(LAYER_GAP * 0.46), up: 70, down: 60 };
+/**
  * A flow wraps into bands only when one band would be drawn smaller than this
  * zoom. The overview labels keep names readable down to about here, and
  * every wrap adds a long connection, so wrapping is the last resort.
@@ -71,6 +78,39 @@ export function wrapCenterY(positions: Positions, edge: LayoutEdge, gaps: Map<nu
 	const to = positions[edge.target]?.band;
 	if (edge.control || from === undefined || to === undefined || to <= from) return undefined;
 	return gaps.get(to);
+}
+
+/**
+ * Where a connection into a later band drops: right of its source, and right
+ * of every other node, with the room its label can take (LABEL_REACH), that
+ * the drop would pass on its way down to `centerY`.
+ */
+export function wrapTrunkX(positions: Positions, edge: LayoutEdge, sizeOf: (id: string) => LayoutSize, centerY: number): number {
+	const source = positions[edge.source];
+	const size = sizeOf(edge.source);
+	const top = source.y + size.height / 2;
+	const boxes = Object.entries(positions)
+		.filter(([id]) => id !== edge.source && id !== edge.target)
+		.map(([id, p]) => ({ left: p.x - LABEL_REACH.side, right: p.x + sizeOf(id).width + LABEL_REACH.side, top: p.y - LABEL_REACH.up, bottom: p.y + sizeOf(id).height + LABEL_REACH.down }));
+	let x = source.x + size.width + WRAP_OFFSET;
+	for (let i = 0; i < boxes.length; i++) {
+		const hit = boxes.find((box) => x > box.left && x < box.right && box.bottom > top && box.top < centerY);
+		if (!hit) break;
+		x = hit.right + WRAP_OFFSET;
+	}
+	return x;
+}
+
+/** The corners of a connection into a later band, from its source handle to its target handle. */
+export function wrapCorners(x1: number, y1: number, x2: number, y2: number, trunkX: number, centerY: number): Array<[number, number]> {
+	return [
+		[x1, y1],
+		[trunkX, y1],
+		[trunkX, centerY],
+		[x2 - WRAP_OFFSET, centerY],
+		[x2 - WRAP_OFFSET, y2],
+		[x2, y2],
+	];
 }
 
 /**
@@ -218,14 +258,7 @@ export function edgesThroughNodes(positions: Positions, edges: LayoutEdge[], siz
 		const points: Array<[number, number]> = [];
 		const centerY = wrapCenterY(positions, edge, gaps);
 		if (centerY !== undefined) {
-			const corners: Array<[number, number]> = [
-				[x1, y1],
-				[x1 + WRAP_OFFSET, y1],
-				[x1 + WRAP_OFFSET, centerY],
-				[x2 - WRAP_OFFSET, centerY],
-				[x2 - WRAP_OFFSET, y2],
-				[x2, y2],
-			];
+			const corners = wrapCorners(x1, y1, x2, y2, wrapTrunkX(positions, edge, sizeOf, centerY), centerY);
 			for (let i = 1; i < corners.length; i++) {
 				const [px, py] = corners[i - 1];
 				const [qx, qy] = corners[i];
