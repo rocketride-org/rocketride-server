@@ -434,6 +434,8 @@ function clampBusTimeout(timeoutMs: unknown): number {
 const MAX_APP_TOPICS = 256;
 /** Longest op or topic name a gated realm may use, in characters. */
 const MAX_NAME = 256;
+/** Longest error text relayed from one gated realm to another, in characters. */
+const MAX_RELAYED_ERROR = 1024;
 
 /**
  * The router-lane admission when the context brings none: walk and size
@@ -815,8 +817,16 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 					if (!entry) return void charge('bus.response');
 					realm.inflight.delete(m.id);
 					clearTimeout(entry.timer);
-					entry.respond(m);
-					return;
+					// The answer is charged to this (owner) realm, walked and size-capped like any
+					// inbound value, and relayed rebuilt from allowlisted fields (security R3-M1).
+					if (m.ok === true) {
+						const admitted = tryAdmit('bus.response', m.result);
+						if (!admitted.ok) return entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: deniedMessage(admitted.denial) });
+						return entry.respond({ [ENVELOPE]: 'response', id: '', ok: true, result: admitted.value });
+					}
+					const refused = charge('bus.response');
+					if (refused) return entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: deniedMessage(refused) });
+					return entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: typeof m.error === 'string' ? m.error.slice(0, MAX_RELAYED_ERROR) : 'Op failed' });
 				}
 				case 'publish': {
 					// Only the private registry, only the app's namespace, bounded per app.
