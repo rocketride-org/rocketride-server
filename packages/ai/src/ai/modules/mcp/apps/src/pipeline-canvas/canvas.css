@@ -154,6 +154,9 @@ body {
 	margin-top: 6px;
 	font-size: 12px;
 	color: var(--rr-text-secondary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* The builder's node CSS assumes the app's global border-box sizing (MUI's
@@ -218,11 +221,24 @@ body {
 	overflow: hidden;
 	background: var(--rr-bg-paper);
 }
+.rr-canvas-full .react-flow__minimap svg {
+	display: block;
+	width: 168px;
+	height: 108px;
+}
+@media (max-width: 560px) {
+	.rr-canvas-full .react-flow__minimap svg {
+		width: 120px;
+		height: 78px;
+	}
+}
 .rr-canvas-full .react-flow__minimap-mask {
-	fill: color-mix(in srgb, var(--rr-bg-default) 70%, transparent);
+	fill: color-mix(in srgb, var(--rr-text-primary) 8%, transparent);
+	stroke: var(--rr-accent);
+	stroke-width: 2;
 }
 .rr-canvas-full .rr-minimap-node {
-	fill: var(--rr-bg-titleBar-active);
+	fill: var(--rr-text-disabled);
 	stroke: none;
 }
 
