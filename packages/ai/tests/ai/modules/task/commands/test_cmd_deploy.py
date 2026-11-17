@@ -179,6 +179,23 @@ class TestPublish:
         account_stub.audit.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_publish_withdraws_stale_pending_reviews(self, account_stub):
+        """Deploying supersedes pending reviews (plan S8): older versions still in 'submit' return to 'private'."""
+        account_stub.deployments_versions = AsyncMock(
+            return_value=[
+                {'version': 3, 'state': 'private'},
+                {'version': 2, 'state': 'submit'},
+                {'version': 1, 'state': 'ready'},
+            ]
+        )
+        account_stub.set_artifact_state = AsyncMock(return_value={'version': 2, 'state': 'private'})
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+
+        withdrawn = [call.args[:4] for call in account_stub.set_artifact_state.await_args_list]
+        assert withdrawn == [('org-1', 'proj-1', 2, 'private')]
+
+    @pytest.mark.asyncio
     async def test_publish_is_born_ready_without_a_review_ladder(self, account_stub):
         """Without the ladder (OSS) the developer IS the admin: the pipe is born 'ready', as an app is."""
         account_stub.review_ladder = False

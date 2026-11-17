@@ -886,7 +886,8 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         artifact = await _artifact_of(account, home, app_id, {'version': version})
-        if not isinstance(artifact, dict) or artifact.get('kind') not in REVIEWED_KINDS:
+        # A pipe's JSON carries no kind (the backend defaults it to 'pipe')
+        if not isinstance(artifact, dict) or (artifact.get('kind') or 'pipe') not in REVIEWED_KINDS:
             return conn.build_error(request, f'Registry version {version} of {app_id} is not a reviewable artifact')
         # Latest-only review: submission is legal ONLY for the newest
         # non-'failed' version — review tracks current work (deploying
@@ -913,7 +914,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the build runs, and approving a version that can never serve would
         # strand a broken 'ready'.
         submit_entry = await _registry_entry_of(account, home, app_id, version)
-        if artifact.get('kind') == 'app' and not _is_built(submit_entry):
+        if (artifact.get('kind') or 'pipe') == 'app' and not _is_built(submit_entry):
             return conn.build_error(request, _not_built_error(app_id, version, submit_entry))
         try:
             updated = await account.set_artifact_state(home, app_id, version, 'submit', _actor_of(conn))
@@ -946,7 +947,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         except ValueError as exc:
             return conn.build_error(request, str(exc))
         artifact = await _artifact_of(account, home, app_id, {'version': version})
-        if not isinstance(artifact, dict) or artifact.get('kind') not in REVIEWED_KINDS:
+        if not isinstance(artifact, dict) or (artifact.get('kind') or 'pipe') not in REVIEWED_KINDS:
             return conn.build_error(request, f'Registry version {version} of {app_id} is not a reviewable artifact')
         entry = await _registry_entry_of(account, home, app_id, version)
         state = str((entry or {}).get('state') or 'unknown')

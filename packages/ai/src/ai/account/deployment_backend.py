@@ -59,7 +59,7 @@ from rocketlib import error
 
 from ai.common.list_rows import paginate_rows
 
-from .store import IStore, StorageError, VersionMismatchError
+from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
 # Mirrors the store's own retry posture for read-modify-write records.
@@ -391,7 +391,10 @@ class FileDeploymentBackend:
             # is fixed at the first deploy (B37) and its nextVersion hands
             # out numbers that are never reused (a legacy meta without one
             # starts past its highest version).
+            # A pre-C.17 meta carries no kind: its versions say what the name is
             existing_kind = str(meta.get('kind') or '')
+            if not existing_kind and meta['versions']:
+                existing_kind = str(meta['versions'][-1].get('kind') or 'pipe')
             if existing_kind and existing_kind != kind:
                 raise ValueError(kind_mismatch_message(project_id, existing_kind, kind))
             meta['kind'] = kind
@@ -1360,9 +1363,12 @@ class FileDeploymentBackend:
 
     async def _read_meta(self, org_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         """Load and shape-check a project's meta.json; None when absent."""
+        # Only a MISSING file is 'no project'; any other storage failure
+        # propagates, so a name is never reported unpublished because the
+        # store was down (the resolver's row source reads through here)
         try:
             data = await self._store.read_file(self._meta_path(org_id, project_id))
-        except StorageError:
+        except StorageNotFoundError:
             return None
         try:
             return self._normalize_meta(json.loads(data), org_id, project_id)
@@ -1386,6 +1392,11 @@ class FileDeploymentBackend:
         meta.setdefault('versions', [])
         meta.setdefault('history', [])
         publishes = self._publishes_of(meta)
+        # A pre-C.17 publish row carries no kind: stamp the kind of the version
+        # it points at, so every reader and every row returned agree
+        for row in publishes.values():
+            if isinstance(row, dict) and not row.get('kind'):
+                row['kind'] = str(self._artifact_entry_of(meta, int(row.get('version') or 0)).get('kind') or 'pipe')
         legacy = meta.pop('deployments', None)
         if isinstance(legacy, dict):
             for team_id, dep in legacy.items():
