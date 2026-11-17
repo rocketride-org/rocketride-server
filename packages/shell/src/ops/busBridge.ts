@@ -56,6 +56,7 @@
 import type { IBusForwarder, IOpBus } from './busOps';
 import { BusNoHandlerError } from './busOps';
 import type { IRetainedPort, IRetainedRegistry, RetainedSubscriber } from './retained';
+import type { RealmContext } from '../isolation/types';
 
 /** The envelope key (coexists with other traffic on a shared transport). */
 const ENVELOPE = '__rrbus';
@@ -144,7 +145,7 @@ interface IBusTopicMessage {
 	transient?: boolean;
 }
 
-type BusWireMessage = IBusRequestMessage | IBusResponseMessage | IBusEmitOpMessage | IBusRegisterMessage | IBusPublishMessage | IBusTopicSubMessage | IBusTopicMessage;
+export type BusWireMessage = IBusRequestMessage | IBusResponseMessage | IBusEmitOpMessage | IBusRegisterMessage | IBusPublishMessage | IBusTopicSubMessage | IBusTopicMessage;
 
 /** Narrows an arbitrary transport payload to bus traffic. */
 function asBusMessage(message: unknown): BusWireMessage | null {
@@ -646,6 +647,33 @@ export function createBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): I
 			realms.clear();
 			opOwners.clear();
 			rootBus.setForwarder(null);
+		},
+	};
+}
+
+/** What a gated realm is attached with (PR2a-1 red-before stub). */
+export interface IGatedBusRouter extends IBusRouter {
+	/** Attaches one gated realm; returns its detach function. */
+	addGatedRealm(endpoint: IBusEndpoint, ctx: RealmContext): () => void;
+	/** Delivers one fire-and-forget op to exactly one realm. */
+	deliver(realmId: string, op: string, params: unknown): void;
+}
+
+/**
+ * Internal: the router for isolated apps. PR2a-1 red-before STUB: the plain
+ * router, with `addGatedRealm` an ordinary `addRealm`.
+ *
+ * @param rootBus - The root's op bus.
+ * @param options - Router options.
+ * @returns The router.
+ */
+export function createGatedBusRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRouter {
+	const router = createBusRouter(rootBus, options);
+	return {
+		...router,
+		addGatedRealm: (endpoint, ctx) => router.addRealm(endpoint, ctx.info.appId),
+		deliver: () => {
+			throw new Error('not implemented: deliver');
 		},
 	};
 }
