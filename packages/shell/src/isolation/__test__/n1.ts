@@ -283,10 +283,11 @@ export interface IPkReproduction {
 /**
  * Tries every `(ownerKey, ownerValue, project_id, source)` candidate built
  * from the realm's transcript (plus `'local'`) against `targets`:
- * owner values are `'local'` and every string seen as `userId`, `user_id`,
- * `client_id`, `teamId` or an `ru_`/`ro_`/`rp_`/`rh_` alias; project ids are
- * every token of every string; sources are `'chat_1'` and every `source`
- * value. Owner shapes are `{userId}`, `{teamId}` and `{userId, run_kind: 'deploy'}`.
+ * owner values are `'local'`, every string seen as `userId`, `user_id`,
+ * `client_id`, `teamId` or an `ru_`/`ro_`/`rp_`/`rh_` alias, and every token
+ * of every free-text string (a real id quoted in an error or a note counts);
+ * project ids are every token of every string; sources are `'chat_1'` and
+ * every `source` value. Owner shapes are `{userId}`, `{teamId}` and `{userId, run_kind: 'deploy'}`.
  *
  * @param realm - The realm.
  * @param targets - The `pk_` values (the run's real public tokens).
@@ -307,7 +308,7 @@ export function reproducePk(realm: IReceiver, targets: string[], from = 0): IPkR
 				projects.add(v);
 				for (const token of v.match(/[A-Za-z0-9._:-]{3,}/g) ?? []) {
 					projects.add(token);
-					if (/^r[uohp]_/.test(token)) owners.add(token);
+					owners.add(token);
 				}
 			} else if (typeof v === 'object' && v !== null && !seen.has(v) && !(v instanceof Uint8Array)) {
 				seen.add(v);

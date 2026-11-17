@@ -291,7 +291,9 @@ test('T115 per-realm identity aliases: copied from the grant, key-scoped, team f
 		assert.ok(!('teamId' in (body.meta as { list: object[] }).list[0]), 'also at depth');
 	});
 
-	await tt.test("'local' and the real user id inside a note text are unchanged and pass the backstop", async () => {
+	// G4 round 1 F1: the real user id is a high-entropy identity value, so free text now carries the
+	// grant's alias in its place. 'local' (low entropy) is still never rewritten.
+	await tt.test("'local' inside a note text is unchanged; the real user id there becomes the grant's alias", async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		t.cm.engine.userId = USER;
@@ -299,7 +301,7 @@ test('T115 per-realm identity aliases: copied from the grant, key-scoped, team f
 		const run = await startRun(A);
 		t.cm.engine.setStatus({ notes: [`user local ran it for ${USER}`] });
 		const body = expectOk(await status(A, run.token), 'status with a note naming local and the user id');
-		assert.deepEqual(body.notes, [`user local ran it for ${USER}`], 'free text is never rewritten: identity fields are key-scoped');
+		assert.deepEqual(body.notes, [`user local ran it for ${GRANT_A.frame!.identity!.userId}`], "'local' is untouched; the real user id is replaced by the alias");
 	});
 
 	await tt.test('an anonymous grant (identity: null) loses userId fields', async () => {

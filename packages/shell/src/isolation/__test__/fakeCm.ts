@@ -62,6 +62,8 @@ export interface IFakeCm extends IAppRootCm {
 	apiKey: string;
 	/** Which of the two sources answer with the key: `getClient().getApiKey()` and the `host.apiKey` op (both on by default). */
 	apiKeySources: { client: boolean; host: boolean };
+	/** Holds `host.apiKey` answers until the returned release function runs. */
+	holdApiKey(): () => void;
 	/** `emit('shell:event', {event})`: an engine event the root's connection received (`types/shell.ts:150`). */
 	emitEngineEvent(event: DAPMessage): void;
 	setConnected(connected: boolean): void;
@@ -77,7 +79,11 @@ export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
 	const key = { value: `rr_${randomBytes(20).toString('hex')}`, sources: { client: true, host: true } };
 	// The SDK accessor (`client.ts:3420`) and the shell's own op (`hostOps.ts:122`).
 	engine.client.getApiKey = () => (key.sources.client ? key.value : undefined);
-	bus.handle('host.apiKey', async () => ({ apiKey: key.sources.host ? key.value : null }));
+	let apiKeyHold: Promise<void> | null = null;
+	bus.handle('host.apiKey', async () => {
+		if (apiKeyHold) await apiKeyHold;
+		return { apiKey: key.sources.host ? key.value : null };
+	});
 	const opsEmitted: Array<{ op: string; params: unknown }> = [];
 	const rawEmitOp = bus.emitOp;
 	const ops: IOpBus = {
@@ -130,6 +136,16 @@ export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
 			key.value = value;
 		},
 		apiKeySources: key.sources,
+		holdApiKey() {
+			let release!: () => void;
+			apiKeyHold = new Promise<void>((resolve) => {
+				release = () => {
+					apiKeyHold = null;
+					resolve();
+				};
+			});
+			return release;
+		},
 		emitEngineEvent(event) {
 			this.emit('shell:event', { event });
 		},

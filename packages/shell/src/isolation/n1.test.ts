@@ -367,6 +367,21 @@ test("T44 B3: no (owner, project, source) candidate built from the realm transcr
 		await readAll(t, A, run.token, run.projectId);
 		noRebuild(A, [lastRun(t.cm).publicToken], 'OSS team run');
 	});
+
+	await tt.test('(d) a user run whose real user id the engine quotes in free text (a note and an error string)', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const user = 'u-1234567890abcdef';
+		t.cm.engine.userId = user;
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(A);
+		t.cm.engine.setStatus({ notes: [`started by ${user}`] });
+		t.cm.engine.failWith('rrext_get_pipeline', { message: `pipeline of users/${user}/files/x is locked by ${user}` });
+		await call(A, 'rrext_get_pipeline', { token: run.token });
+		await readAll(t, A, run.token, run.projectId);
+		noRebuild(A, [lastRun(t.cm).publicToken], 'user id in free text');
+		assertNoReal(A, t.cm);
+	});
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

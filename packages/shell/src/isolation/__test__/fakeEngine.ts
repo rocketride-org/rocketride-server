@@ -250,6 +250,8 @@ export function createFakeEngine(options: IFakeEngineOptions = {}): IFakeEngine 
 			if (counts.size === 0) monitors.delete(k);
 		},
 		log: { openEventStream: () => ({ closeEventStream() {} }) },
+		// The SDK's account info (`ConnectResult`): the engine's user and dev team, no org (as on OSS).
+		getAccountInfo: () => ({ userId: owner.userId, devTeam: owner.teamId, organization: null }),
 	};
 
 	return {
