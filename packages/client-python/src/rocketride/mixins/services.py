@@ -41,7 +41,7 @@ from typing import Dict, Any, Optional
 
 from ..core import DAPClient
 from ..types.pipeline import PipelineConfig
-from ..types.service import SERVICES_RESPONSE, SERVICE_DEFINITION, VALIDATION_RESULT
+from ..types.service import CONVERT_RESULT, SERVICES_RESPONSE, SERVICE_DEFINITION, VALIDATION_RESULT
 
 
 class ServicesMixin(DAPClient):
@@ -192,3 +192,40 @@ class ServicesMixin(DAPClient):
             return result
         except Exception as err:
             raise RuntimeError(f'Pipeline validation failed: {err}') from err
+
+    async def convert(self, pipeline: PipelineConfig) -> CONVERT_RESULT:
+        """
+        Rewrite a pipeline from the old node-config format to the current one.
+
+        A ``.pipe`` saved against the old ``profile``-based node configuration
+        is converted by the server from each node's migration data; the
+        server also converts on its own at validate, start and publish, so this
+        call is for writing the converted text back to a file. Nothing is
+        stored server-side.
+
+        Args:
+            pipeline: Pipeline configuration, flat or in the ``.pipe`` file envelope.
+
+        Returns:
+            ``{'pipeline', 'warnings', 'errors', 'touched'}``: the pipeline to
+            use (the input when ``touched`` is False), what changed per
+            component, and the components that could not be converted (they
+            keep their original config). ``warnings`` and ``errors`` are
+            ALWAYS lists.
+
+        Raises:
+            RuntimeError: If the server refuses the request.
+
+        Example:
+            result = await client.convert(pipeline)
+            if result['touched'] and not result['errors']:
+                save(result['pipeline'])
+        """
+        try:
+            result = await self.call('rrext_convert', pipeline=pipeline)
+            result.setdefault('warnings', [])
+            result.setdefault('errors', [])
+            result.setdefault('touched', False)
+            return result
+        except Exception as err:
+            raise RuntimeError(f'Pipeline conversion failed: {err}') from err

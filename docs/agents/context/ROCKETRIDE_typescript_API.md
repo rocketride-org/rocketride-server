@@ -436,6 +436,19 @@ if (result.errors.length > 0) {
 }
 ```
 
+When the pipeline is in the OLD node-config format (a `profile` key, a profile-named block, flat keys), the server converts it before validating and the result carries `converted` (the rewritten pipeline) and `conversion` (what changed, per component). A component the converter cannot map is one of the result's `errors`, naming the key.
+
+### `convert(options): Promise<ConvertResult>`
+
+Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. Options: `pipeline` (required; flat or in the `.pipe` file envelope). Returns `{ pipeline, warnings, errors, touched }`: the pipeline to use (the input when `touched` is false), what was changed, dropped or filled in per component (`{ message, id? }`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` false. Throws when the server refuses the request.
+
+```typescript
+const result = await client.convert({ pipeline });
+if (result.touched && result.errors.length === 0) {
+	await fs.writeFile(path, JSON.stringify(result.pipeline, null, 2));
+}
+```
+
 ### `getServices()` / `getService(service)`
 
 `getServices(options?: { definitions?: boolean }): Promise<ServicesResponse>` returns the server's service catalog. By default every entry is a summary (title, classType, lanes, capabilities bitmask, ...) **without** its configuration schema, plus a deduplicated `icons` table (icon id → raw SVG) that each summary's `icon` id points into. With `{ definitions: true }` every entry is the FULL definition (configuration schema included) and there is no icons table: the bulk form of `getService()`. `getService(service: string): Promise<ServiceDefinition>` returns one service's FULL definition by name (e.g. `'ocr'`, `'chat'`): the summary fields plus the dynamic configuration sections (schema + UI schema per section). An unknown service name is an error, not an `undefined` result.

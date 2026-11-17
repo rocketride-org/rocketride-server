@@ -439,6 +439,18 @@ Validate a pipeline configuration server-side (structure, required fields, compo
 result = await client.validate(pipeline, source='webhook_1')
 ```
 
+When the pipeline is in the OLD node-config format (a `profile` key, a profile-named block, flat keys), the server converts it before validating and the result carries `converted` (the rewritten pipeline) and `conversion` (what changed, per component). A component the converter cannot map is one of the result's `errors`, naming the key.
+
+### `async convert(pipeline: PipelineConfig) -> CONVERT_RESULT`
+
+Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. Returns `{'pipeline', 'warnings', 'errors', 'touched'}`: the pipeline to use (the input when `touched` is False), what was changed, dropped or filled in per component (`{'message', 'id'}`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` False. Raises `RuntimeError` when the server refuses the request.
+
+```python
+result = await client.convert(pipeline)
+if result['touched'] and not result['errors']:
+    path.write_text(json.dumps(result['pipeline'], indent=2))
+```
+
 ### `async get_services(*, definitions: bool = False) -> SERVICES_RESPONSE`
 
 Retrieve all service (component/connector) summaries from the server. Returns a dict with `services` (logical type -> summary), `icons` (icon id -> raw SVG, deduplicated; each summary's `icon` field indexes into it), and `version`. With `definitions=True` every entry is the FULL definition (configuration schema included) and there is no `icons` table: the bulk form of `get_service()`.

@@ -54,6 +54,7 @@ from ai.common.parameters import validate_parameters
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..address import in_endpoint_scope
+from ..task_convert import convert_pipeline
 from ..pipeline import (
     MultipleSourcesError,
     resolve_implied_source,
@@ -356,6 +357,20 @@ class MiscCommands(DAPConn):
             if isinstance(pipeline.get('pipeline'), dict):
                 pipeline = pipeline['pipeline']
 
+            # Old-format node config is converted before anything else sees
+            # it (plan 5.6.8): the reply validates and echoes the CONVERTED
+            # pipeline and carries it as `converted`, with the conversion's
+            # warnings as `conversion`; a component the converter cannot map
+            # is one of this reply's errors. The single-component form is the
+            # drawer's own save and is never converted here.
+            conversion = None
+            if 'components' in pipeline:
+                conversion = convert_pipeline(pipeline)
+                if conversion.touched and not conversion.errors:
+                    pipeline = conversion.pipeline
+                elif not conversion.touched and not conversion.errors:
+                    conversion = None
+
             # Build merged environment for variable resolution (same as execute)
             merged_env: Dict[str, str] = {}
             if hasattr(self, '_account_info') and self._account_info:
@@ -502,6 +517,16 @@ class MiscCommands(DAPConn):
                 if sharing is not None:
                     data = dict(data)
                     data['engineSharing'] = sharing
+            if conversion is not None:
+                data = dict(data)
+                # The converted text is the engine's echo of what it validated
+                # (secrets already moved into secureParameters), never the raw
+                # conversion, so a stored secret is not repeated in plaintext
+                echoed = data.get('pipeline')
+                data['converted'] = echoed if isinstance(echoed, dict) and conversion.touched else conversion.pipeline
+                data['conversion'] = list(conversion.warnings)
+                if conversion.errors:
+                    data['errors'] = list(data.get('errors') or []) + list(conversion.errors)
             # Return the results
             return self.build_response(request, body=data)
 
@@ -513,6 +538,39 @@ class MiscCommands(DAPConn):
             if substituted:
                 raise RuntimeError(message) from None
             raise
+
+    async def on_rrext_convert(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_convert': rewrite a pipeline from the old node-config format.
+
+        Plan 5.6.8. The IDE calls this when a loaded pipeline has a node with
+        keys the current schema does not declare, replaces the document text
+        with ``pipeline`` from the reply, and shows ``warnings``; a component
+        the converter cannot map is listed in ``errors`` and keeps its original
+        config. Nothing is written server-side. A pipeline already in the
+        current format comes back unchanged with ``touched`` false.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any]):
+                    - pipeline (Dict[str, Any]): The pipeline, flat or in the
+                      ``{'pipeline': {...}}`` file envelope.
+
+        Returns:
+            Dict[str, Any]: DAP response whose body is
+            ``{pipeline, warnings, errors, touched}`` (``warnings``/``errors``
+            entries are ``{message, id?}``).
+
+        Usage Example:
+        { "command": "rrext_convert", "arguments": { "pipeline": { "components": [...] } } }
+        """
+        args = request.get('arguments', {}) or {}
+        pipeline = args.get('pipeline')
+        if isinstance(pipeline, dict) and isinstance(pipeline.get('pipeline'), dict):
+            pipeline = pipeline['pipeline']
+        if not isinstance(pipeline, dict) or not isinstance(pipeline.get('components'), list):
+            raise ValueError("'pipeline' must be a pipeline object with a 'components' list")
+        return self.build_response(request, body=convert_pipeline(pipeline).as_body())
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

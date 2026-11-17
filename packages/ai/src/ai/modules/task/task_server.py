@@ -102,6 +102,7 @@ from ai.constants import (
 )
 from ai.common.parameters import validate_parameters
 from .pipeline import references_env, substituted_env, validate_placeholders
+from .task_convert import ConvertResult, convert_pipeline
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
@@ -310,6 +311,36 @@ class EngineRegistry(Mapping):
     def starting(self) -> frozenset:
         """The engine keys with a start in progress (or starters waiting)."""
         return frozenset(self._starts)
+
+
+def _require_converted(pipeline: Dict[str, Any]) -> ConvertResult:
+    """
+    Convert a pipeline from the old node-config format at the start door (plan 5.6.8).
+
+    The converted pipeline is what runs (and what the engine key hashes); the
+    stored file or artifact is never rewritten here. A component the converter
+    cannot map is refused with the key named, never guessed.
+
+    Args:
+        pipeline: The pipeline about to start, as submitted.
+
+    Returns:
+        The conversion: ``.pipeline`` is the one to run (``pipeline`` itself
+        when ``.touched`` is False), ``.warnings`` what changed.
+
+    Raises:
+        TaskError: TASK_INVALID_ARGUMENT on ``pipeline`` naming every unmappable key.
+    """
+    result = convert_pipeline(pipeline)
+    if result.errors:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            'conversion: ' + '; '.join(e['message'] for e in result.errors),
+            field='pipeline',
+        )
+    if not result.touched:
+        result.pipeline = pipeline
+    return result
 
 
 def _require_valid_parameters(pipeline: Dict[str, Any]) -> None:
@@ -2569,6 +2600,10 @@ class TaskServer(DAPBase):
                 task running when the connection closes. The original creator
                 of the task controls its life cycle
         """
+        # The conversion from the old node-config format, once the submitted
+        # pipeline has been through it (plan 5.6.8); the result stamps carry
+        # the converted text so the caller can make its file current
+        conversion: Dict[str, ConvertResult] = {}
 
         def _return_results(
             control: TaskControl,
@@ -2609,6 +2644,10 @@ class TaskServer(DAPBase):
                 result['specMatch'] = spec_match
             if warnings:
                 result['warnings'] = list(warnings)
+            converted = conversion.get('result')
+            if converted is not None and converted.touched:
+                result['converted'] = converted.pipeline
+                result['conversion'] = list(converted.warnings)
             return result
 
         # Initialize task control structure for new task
@@ -2712,8 +2751,11 @@ class TaskServer(DAPBase):
             control.project_id = str(uuid.uuid4())
 
         # The address grammar, enforced at execute: project id, source and
-        # every component id are single dot-free segments.
+        # every component id are single dot-free segments. Then old-format node
+        # config is converted (plan 5.6.8); the converted pipeline is what runs.
         validate_component_ids(control.pipeline)
+        conversion['result'] = _require_converted(control.pipeline)
+        control.pipeline = conversion['result'].pipeline
         _require_valid_parameters(control.pipeline)
         _require_valid_placeholders(control.pipeline)
         control.address = build_address(control.developer_id, control.project_id, control.source)
@@ -3345,9 +3387,11 @@ class TaskServer(DAPBase):
                     f'({control.source!r} -> {requested_source!r})'
                 )
 
-            # The address grammar holds on restart too: a restarted pipeline
-            # must not smuggle in a dotted component id
+            # The conversion and the address grammar hold on restart too: a
+            # restarted pipeline must not smuggle in a dotted component id
             validate_component_ids(pipeline)
+            restart_conversion = _require_converted(pipeline)
+            pipeline = restart_conversion.pipeline
             _require_valid_parameters(pipeline)
             _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
@@ -3383,7 +3427,7 @@ class TaskServer(DAPBase):
 
             converged = 'repointed' if engine is not old_engine else 'none'
             self.debug_message(f'Task "{control.id}" restart: {converged} ("{engine.engine_key}")')
-            return {
+            result = {
                 'id': control.id,
                 'token': control.address,
                 'projectId': control.project_id,
@@ -3392,6 +3436,11 @@ class TaskServer(DAPBase):
                 'engineKey': engine.engine_key,
                 'converged': converged,
             }
+            if restart_conversion.touched:
+                # The converted text, so the caller can make its file current (plan 5.6.8)
+                result['converted'] = restart_conversion.pipeline
+                result['conversion'] = list(restart_conversion.warnings)
+            return result
 
         except Exception as e:
             self.debug_message(f'Failed to restart task: {str(e)}')

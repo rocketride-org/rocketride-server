@@ -211,9 +211,34 @@ and config detail.
 
 ## Profiles & Config
 
-### The profile system
+### Config is a tree addressed by the schema's paths
 
-Most configurable components select a named **profile** and optionally override its fields:
+A component's `config` stores ONLY the values you set, at the paths the node's schema
+declares. A **selector** (an enum whose values carry their own property sets, e.g.
+`strategy`, `model`, `authType`) is stored at its own path; the leaves of the chosen branch
+live under the branch value; leaves shared by every branch sit at the root. Defaults are
+never written: an absent key means "the node's default", so a better default shipped later
+flows through.
+
+```json
+"config": {
+	"model": "gpt-5.2",
+	"apikey": "${ROCKETRIDE_OPENAI_KEY}"
+}
+```
+
+- Switching a selector writes ONE key. The other branch's block stays in the file (not
+  validated, not read) so switching back finds its values intact.
+- A key the schema does not declare is a HARD error at validate, start and publish, naming
+  the key. The only tolerated extra is the editor's `name`.
+- The resolver validates every reachable leaf (type, min, max, enum, required, minLength).
+- Discover a component's schema with `get_service(provider)` / `getService(provider)`; the
+  catalog summary carries no config schema.
+
+### Converting pipelines written against the old format
+
+Pipelines saved before this format stored a `profile` key, a block named after the profile
+and flat keys, plus a per-node `"parameters": {}` stub:
 
 ```json
 "config": {
@@ -223,12 +248,15 @@ Most configurable components select a named **profile** and optionally override 
 }
 ```
 
-- `profile` picks a preset defined by the component; the preset's defaults (model id, token
-  limits, hosts, ports) merge in automatically.
-- The section named after the profile is **optional**; when present it must be an object, and
-  its fields override the preset's defaults. Typically you only supply `apikey`.
-- Include `"parameters": {}` in profile-based configs — all shipped examples carry it.
-- Discover a component's profiles in `.rocketride/schema/<provider>.json`.
+The server converts that shape automatically wherever a pipeline arrives (validate, start,
+publish), from migration data each pre-existing node carries: the profile becomes the
+selector value, the block's keys land at their new paths, the old defaults and stubs are
+dropped, and a value for a leaf that is now a constant is removed with a warning. The
+converted text is returned (`validate()` → `converted` + `conversion`; `convert()` for a
+plain rewrite) and nothing is written back server-side: save the returned pipeline to make
+the file current. A component the converter cannot map (a key that was never declared, a
+profile that never existed, a credential the node now requires) is an error naming the
+component and the key; that component keeps its original config until you fix it.
 
 ### LLM model selection (`llm_openai`)
 
