@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import { normalizeSignupProperties } from './signup.js';
+import type { PkceCredential } from './types/signup.js';
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
@@ -35,6 +37,13 @@ import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
+
+// Exact text the server sends when it receives an empty credential.
+const NO_AUTH_MESSAGE = 'No authorization provided';
+const NO_AUTH_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. ' +
+	'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. ' +
+	'RocketRide Cloud needs a key: run `rocketride login`.';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -347,6 +356,7 @@ interface LoginLifecycleOperation {
 	readonly generation: number;
 	readonly endpoint: string;
 	readonly credentialKey: string;
+	pkce?: PkceCredential;
 	readonly priority: LifecyclePriority;
 	readonly promise: Promise<ConnectResult>;
 	resolve: (result: ConnectResult) => void;
@@ -644,9 +654,17 @@ export class RocketRideClient extends DAPClient {
 	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
-	private _resolveCredential(credential?: string | { code: string; verifier: string; redirectUri: string }): string {
+	private _resolveCredential(credential?: string | PkceCredential): string {
 		if (credential && typeof credential === 'object') {
-			// Keep the established deterministic PKCE wire encoding.
+			// No context retains the established deterministic PKCE wire encoding.
+			let signupValue: unknown;
+			try {
+				const value = credential.signupProperties;
+				signupValue = typeof value === 'function' ? value() : value;
+			} catch {
+				// Optional getters and resolvers cannot prevent authentication.
+			}
+			const signup = normalizeSignupProperties(signupValue);
 			return (
 				'cd_' +
 				btoa(
@@ -654,6 +672,13 @@ export class RocketRideClient extends DAPClient {
 						code: credential.code,
 						verifier: credential.verifier,
 						redirectUri: credential.redirectUri,
+						// The Zitadel client that MINTED the code — Zitadel
+						// binds codes to their client, so non-web clients
+						// (VS Code native app, CLI) must name themselves or
+						// the server-side exchange fails with invalid_client.
+						// Omitted = the server's default (web) client.
+						...(credential.clientId ? { clientId: credential.clientId } : {}),
+						...(signup ? { signup_properties: signup } : {}),
 					})
 				)
 			);
@@ -823,7 +848,8 @@ export class RocketRideClient extends DAPClient {
 			await this._prepareOperationTransport(operation, timeout);
 			this._assertCurrentOperation(operation);
 
-			const authArguments: Record<string, unknown> = { auth: operation.credentialKey };
+			// Consent/expiry may change while transport is opening. No await between resolution and send.
+			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey };
 			if (this._clientDisplayName) authArguments.clientName = this._clientDisplayName;
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 
@@ -831,6 +857,9 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
+					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
+				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
 			}
 
@@ -867,7 +896,7 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number): LoginLifecycleOperation | undefined {
+	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number, pkce?: PkceCredential): LoginLifecycleOperation | undefined {
 		const current = this._lifecycleOperation;
 		if (priority === 'foreground') this._clearReconnectTimer();
 		if (priority === 'background' && current?.priority === 'foreground' && !current.settled) {
@@ -879,6 +908,7 @@ export class RocketRideClient extends DAPClient {
 
 		let priorCleanup = Promise.resolve();
 		const operation = this._createLifecycleOperation(endpoint, credentialKey, priority);
+		operation.pkce = pkce;
 		this._lifecycleOperation = operation;
 		this._uri = endpoint;
 		this._desiredState = 'authenticated';
@@ -903,9 +933,27 @@ export class RocketRideClient extends DAPClient {
 		return operation;
 	}
 
-	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	private _startForegroundLogin(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
-		const credentialKey = this._resolveCredential(credential);
+		let pkce: PkceCredential | undefined;
+		if (credential && typeof credential === 'object') {
+			pkce = {
+				code: credential.code,
+				verifier: credential.verifier,
+				redirectUri: credential.redirectUri,
+				// Credential IDENTITY: the minting Zitadel client. Stays in the
+				// reconnect key (unlike signupProperties) — a key that dropped it
+				// would alias a VS Code login onto a web login.
+				clientId: credential.clientId,
+				// Defer even property access to the guarded send boundary.
+				signupProperties: () => {
+					const value = credential.signupProperties;
+					return typeof value === 'function' ? value() : value ?? null;
+				},
+			};
+		}
+		// Optional attribution is not credential identity and must not survive in the reconnect key.
+		const credentialKey = this._resolveCredential(pkce ? { ...pkce, signupProperties: undefined } : credential);
 		const current = this._lifecycleOperation;
 		if (current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && (current.credentialKey === credentialKey || (current.accepted && this._apikey === credentialKey))) {
 			return current.promise;
@@ -913,7 +961,7 @@ export class RocketRideClient extends DAPClient {
 		if (current?.accepted && current.settled && this._authenticated && current.endpoint === endpoint && (current.credentialKey === credentialKey || this._apikey === credentialKey)) {
 			return Promise.resolve(this._connectResult ?? ({} as ConnectResult));
 		}
-		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout);
+		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout, pkce);
 		if (!operation) throw new Error('Unable to start foreground login');
 		return operation.promise;
 	}
@@ -951,7 +999,7 @@ export class RocketRideClient extends DAPClient {
 			if (this._desiredState === 'authenticated') {
 				const lifecycleOperation = this._lifecycleOperation;
 				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted ? lifecycleOperation.credentialKey : (this._apikey ?? lifecycleOperation?.credentialKey ?? '');
-				const operation = this._startLoginOperation(this._uri, credentialKey, 'background');
+				const operation = this._startLoginOperation(this._uri, credentialKey, 'background', undefined, !lifecycleOperation?.accepted ? lifecycleOperation?.pkce : undefined);
 				if (!operation) return;
 				void operation.promise.then(
 					() => {
@@ -1091,7 +1139,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
-	async login(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async login(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1184,7 +1232,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication).
 	 */
-	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async connect(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1293,8 +1341,13 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Validate a pipeline configuration.
 	 *
-	 * Sends the pipeline to the server for structural validation, checking
-	 * required fields and component references.
+	 * Sends the pipeline to the server, which checks required fields and
+	 * component references, then checks the pipeline against the services
+	 * it names: each provider is a service on the engine, each control
+	 * entry sits on the node being called, and each input's lane is one
+	 * its upstream node produces and its node takes. A node with no lanes,
+	 * such as a tool, is not checked for the lanes it takes, and a `"*"`
+	 * in a node's lanes matches any lane.
 	 *
 	 * Source resolution follows the same logic as {@link use}:
 	 * 1. Explicit `source` option (if provided)
@@ -1361,7 +1414,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
-	 * @param options.threads - Number of threads for execution (default: 1)
+	 * @param options.threads - Number of threads for execution (omit to let the server decide)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -1854,6 +1907,9 @@ export class RocketRideClient extends DAPClient {
 			if (!question) {
 				throw new Error('Question cannot be empty');
 			}
+
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
 
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
@@ -2891,11 +2947,14 @@ export class RocketRideClient extends DAPClient {
 	 * every app id it owns. Readable on both editions (OSS answers the
 	 * fixed namespace its sessions carry; there is no Stripe Connect there).
 	 *
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table, so a late reply is ignored.
 	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
 	 *   `developerId` is null until an org admin registers one
 	 */
-	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	async developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' }, options)) as any;
 	}
 
 	/**
@@ -2904,10 +2963,14 @@ export class RocketRideClient extends DAPClient {
 	 * publish beyond the workspace.
 	 *
 	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table (the claim may still land
+	 *   on the server, so callers should re-check developerStatus()).
 	 * @returns The server's registration record
 	 */
-	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	async registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId }, options)) as any;
 	}
 
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —
@@ -2958,15 +3021,42 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	/** Read a JSON file. */
+	/**
+	 * Read a JSON file.
+	 *
+	 * ONE round trip (`fs_get_json`), not open/read/close — see
+	 * {@link fsWriteJson} for why that matters.
+	 *
+	 * @param path - Relative path within the account store
+	 * @returns The parsed value
+	 */
 	async fsReadJson<T = any>(path: string): Promise<T> {
-		const text = await this.fsReadString(path);
-		return JSON.parse(text);
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', { subcommand: 'fs_get_json', path });
+		return body.value as T;
 	}
 
-	/** Write an object as JSON. */
+	/**
+	 * Write an object as JSON.
+	 *
+	 * ONE round trip (`fs_put_json`). The handle sequence this used to run —
+	 * fs_open, fs_write, fs_close — leaves a write handle open between
+	 * messages, and the server commits that handle when the connection
+	 * drops: a client that dies after fs_open replaces the file with an
+	 * empty buffer. A browser reload mid-save was enough to zero a
+	 * workspace file. A single request has no such window; one that never
+	 * arrives leaves the file exactly as it was.
+	 *
+	 * The whole value travels in that one message, so this is for complete
+	 * documents (it always was — the object is serialised in full either
+	 * way). Large payloads still belong on the streaming handle API.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param obj - Any JSON-serialisable value
+	 */
 	async fsWriteJson(path: string, obj: any): Promise<void> {
-		await this.fsWriteString(path, JSON.stringify(obj, null, 2));
+		this.validateStorePath(path);
+		await this.call('rrext_store', { subcommand: 'fs_put_json', path, value: obj });
 	}
 
 	// ============================================================================
@@ -3112,7 +3202,10 @@ export class RocketRideClient extends DAPClient {
 	 * @param target  - Task token to profile a pipeline subprocess, or
 	 *                  undefined/null to profile the server process itself.
 	 * @param session - Optional human-readable session name.
-	 * @returns Status object with session info and start time.
+	 * @returns Status object with session info and start time. If a session is
+	 *          already active, status is 'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3125,7 +3218,11 @@ export class RocketRideClient extends DAPClient {
 	 * Stop the active cProfile profiling session.
 	 *
 	 * @param target - Task token if profiling a pipeline, or undefined for server.
-	 * @returns Result with session name and runtime.
+	 * @returns Result with session name and runtime. With no active session, or a
+	 *          server-process session another connection started, status is
+	 *          'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
 		const args: Record<string, unknown> = {};
@@ -3138,6 +3235,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
 	 * @returns Status indicating active/inactive, owner, runtime.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3149,7 +3248,10 @@ export class RocketRideClient extends DAPClient {
 	 * Get the full cProfile report from the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the full pstats text report.
+	 * @returns Object containing the full pstats text report, or a placeholder
+	 *          message when no session has completed.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
 		const args: Record<string, unknown> = {};
@@ -3172,6 +3274,9 @@ export class RocketRideClient extends DAPClient {
 	 *                   all threads merged when omitted.
 	 * @returns Object containing the tree root, functions (exact per-function
 	 *          totals; absent from older servers), total_time, and total_calls.
+	 *          With no completed session, tree is null and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
@@ -3188,7 +3293,10 @@ export class RocketRideClient extends DAPClient {
 	 * List the threads profiled in the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the threads, busiest first.
+	 * @returns Object containing the threads, busiest first. With no completed
+	 *          session, threads is empty and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse> {
 		const args: Record<string, unknown> = {};

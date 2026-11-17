@@ -53,6 +53,49 @@ import type { ConnectResult, MemberRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, Avatar, Badge, initials, avatarColor } from './shared';
 
 // =============================================================================
+// TEAM ACCESS HELPERS
+// =============================================================================
+
+/** Team-access assignments: teamId -> selected permission keys. */
+type TeamAssignments = Record<string, string[]>;
+
+/** Permissions seeded when a team is checked in the invite form. */
+const DEFAULT_TEAM_PERMS = ['task.control', 'task.monitor'];
+
+/**
+ * Seed the invite form's team access: the org's default development team
+ * (by id, when it is one of the org's teams) pre-checked with the default
+ * permissions; otherwise no assignments.
+ *
+ * @param teams            - The org's teams.
+ * @param defaultDevTeamId - The org's default development team id, if any.
+ * @returns The seeded assignments.
+ */
+const seedTeamAssignments = (teams: Array<{ id: string; name: string }>, defaultDevTeamId: string | null | undefined): TeamAssignments => {
+	const dev = defaultDevTeamId ? teams.find((t) => t.id === defaultDevTeamId) : undefined;
+	return dev ? { [dev.id]: [...DEFAULT_TEAM_PERMS] } : {};
+};
+
+/**
+ * Deep-equal two assignment maps (same team ids, same permission sets).
+ *
+ * @param a - First assignments map.
+ * @param b - Second assignments map.
+ * @returns True when equal.
+ */
+const sameAssignments = (a: TeamAssignments, b: TeamAssignments): boolean => {
+	const ak = Object.keys(a);
+	if (ak.length !== Object.keys(b).length) return false;
+	return ak.every((id) => {
+		const pa = a[id];
+		const pb = b[id];
+		if (!pb || pa.length !== pb.length) return false;
+		const set = new Set(pb);
+		return pa.every((p) => set.has(p));
+	});
+};
+
+// =============================================================================
 // STYLES
 // =============================================================================
 
@@ -165,6 +208,13 @@ const styles = {
 		fontWeight: 500,
 		color: checked ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
 	}),
+
+	/** Helper copy under the Team Access list. */
+	teamHint: {
+		...commonStyles.textMuted,
+		marginTop: 8,
+		lineHeight: 1.4,
+	} as React.CSSProperties,
 
 	/** Compact "Edit Perms" / "Done" toggle on a checked team row. */
 	permsToggle: {
@@ -364,7 +414,10 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	const [formFamilyName, setFormFamilyName] = useState('');
 	const [formRole, setFormRole] = useState('member');
 	// Team access assignments: teamId -> selected permission keys.
-	const [formTeams, setFormTeams] = useState<Record<string, string[]>>({});
+	const [formTeams, setFormTeams] = useState<TeamAssignments>({});
+	// Snapshot of the assignments seeded on open (the org's default development
+	// team pre-checked); the dirty flag compares against it, not against {}.
+	const [initialFormTeams, setInitialFormTeams] = useState<TeamAssignments>({});
 	// Which team row's PermGrid editor is expanded, or null for none.
 	const [editPermsTeamId, setEditPermsTeamId] = useState<string | null>(null);
 	// EDIT mode flag for the view panel: true while the role select is staged.
@@ -385,7 +438,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 
 	// The viewed record resolves LIVE from props so server refreshes (e.g. a
 	// role save flipping role -> admin) update the open panel in place.
-	const viewedMember = panel?.mode === 'view' ? members.find((m) => m.userId === panel.userId) ?? null : null;
+	const viewedMember = panel?.mode === 'view' ? (members.find((m) => m.userId === panel.userId) ?? null) : null;
 
 	// Gating derived from the viewed record: never self-edit/remove, and only
 	// org admins manage members at all (ported from the old Actions column).
@@ -397,9 +450,30 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	// the materializing [Save] and arms the discard guard.
 	const roleDirty = editingRole && viewedMember != null && roleValue !== viewedMember.role;
 
+	// The org's default development team (by id, from the org payload) — the
+	// team pre-checked on open and named in the Team Access hint. Null when
+	// the org has none or the id is not one of the listed teams.
+	const defaultDevTeamId = profile?.organization?.defaultDevTeamId ?? null;
+	const defaultDevTeam = defaultDevTeamId ? (teams.find((t) => t.id === defaultDevTeamId) ?? null) : null;
+
 	// CREATE-mode dirty flag: any invite field differs from its seeded
-	// default. Drives the materializing [Send Invite] and the discard guard.
-	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || Object.keys(formTeams).length > 0);
+	// default (team access compares against the seeded snapshot, so the
+	// pre-checked default development team alone does not dirty the form).
+	// Drives the materializing [Send Invite] and the discard guard.
+	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || !sameAssignments(formTeams, initialFormTeams));
+
+	// Teams and the profile load independently, so an admin can open the
+	// invite panel before the team list (or the default dev team id) arrives
+	// and the seed on open is empty. Re-seed the untouched form when either
+	// changes; a form whose assignments differ from the seeded snapshot has
+	// been edited and is left alone.
+	useEffect(() => {
+		if (panel?.mode !== 'create' || !sameAssignments(formTeams, initialFormTeams)) return;
+		const seeded = seedTeamAssignments(teams, defaultDevTeamId);
+		if (sameAssignments(seeded, initialFormTeams)) return;
+		setFormTeams(seeded);
+		setInitialFormTeams(seeded);
+	}, [panel?.mode, teams, defaultDevTeamId, formTeams, initialFormTeams]);
 
 	// Mounted flag guarding the async resend flow — the await and the 3s
 	// confirmation timer can both outlive the panel (e.g. the dialog closes).
@@ -408,7 +482,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		() => () => {
 			mountedRef.current = false;
 		},
-		[],
+		[]
 	);
 
 	// ── Table rows ──────────────────────────────────────────────────────────
@@ -446,7 +520,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 					return memberCellEl(row.displayName, row.email, row.id === profile?.userId);
 				},
 			},
-			{ title: 'Email', field: 'email', rrType: 'string', rrDefault: true, rrDescription: 'Sign-in email address of the member\'s user account; invitations are sent here.', headerSort: true },
+			{ title: 'Email', field: 'email', rrType: 'string', rrDefault: true, rrDescription: "Sign-in email address of the member's user account; invitations are sent here.", headerSort: true },
 			{
 				title: 'Role',
 				field: 'role',
@@ -501,7 +575,11 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		setFormGivenName('');
 		setFormFamilyName('');
 		setFormRole('member');
-		setFormTeams({});
+		// Pre-check the org's default development team (if any) with default
+		// perms and snapshot it so the untouched form is not dirty.
+		const seeded = seedTeamAssignments(teams, defaultDevTeamId);
+		setFormTeams(seeded);
+		setInitialFormTeams(seeded);
 		setEditPermsTeamId(null);
 		setError(null);
 		setPanel({ mode: 'create' });
@@ -562,7 +640,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		setSaving(true);
 		setError(null);
 		try {
-			// Step 2: build team assignments from the checked teams.
+			// Step 2: build team assignments from the checked teams (always an
+			// array, possibly empty).
 			const teamAssignments = Object.entries(formTeams).map(([teamId, permissions]) => ({ teamId, permissions }));
 			// Step 3: delegate to the host action; success closes the panel.
 			await onInviteMember({
@@ -570,7 +649,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 				givenName: formGivenName.trim(),
 				familyName: formFamilyName.trim(),
 				role: formRole,
-				teamAssignments: teamAssignments.length > 0 ? teamAssignments : undefined,
+				teamAssignments,
 			});
 			closePanel();
 		} catch (e) {
@@ -842,7 +921,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 															if (editingPerms) setEditPermsTeamId(null);
 														} else {
 															// Checking seeds the default capability permissions.
-															setFormTeams({ ...formTeams, [t.id]: ['task.control', 'task.monitor'] });
+															setFormTeams({ ...formTeams, [t.id]: [...DEFAULT_TEAM_PERMS] });
 														}
 													}}
 												>
@@ -875,6 +954,10 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 									);
 								})}
 							</div>
+							{/* Helper copy: names the org's default development team when
+							    it has one (pre-selected, still uncheckable), else what Run
+							    access means. */}
+							<div style={styles.teamHint}>{defaultDevTeam ? `${defaultDevTeam.name} is this organization's development team and is pre-selected. Uncheck it to invite without it.` : 'Teams with Run access can run pipelines billed to this organization.'}</div>
 						</div>
 					)}
 				</DetailPanel>

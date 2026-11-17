@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse } from '../src/connect';
+import type { SqlSchemaResponse } from '../src/connect';
 import { HEADER_HEIGHT, ROW_HEIGHT, buildErModel, nodeHeight, sourceHandle, targetHandle } from '../src/canvas/erModel';
 
 // =============================================================================
@@ -34,7 +34,7 @@ import { HEADER_HEIGHT, ROW_HEIGHT, buildErModel, nodeHeight, sourceHandle, targ
 // =============================================================================
 
 /** Two tables joined by a single-column foreign key. */
-const SCHEMA: ISqlSchemaResponse = {
+const SCHEMA: SqlSchemaResponse = {
 	database: 'shop',
 	tables: {
 		customers: {

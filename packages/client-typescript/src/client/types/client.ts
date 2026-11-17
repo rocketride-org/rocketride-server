@@ -316,6 +316,19 @@ export interface OrgInfo {
 	 * Each entry includes team-scoped permissions.
 	 */
 	teams: TeamInfo[];
+
+	/**
+	 * Id of the organisation's default development team — the team invites
+	 * pre-select for new members. Null/absent when the organisation has none.
+	 */
+	defaultDevTeamId?: string | null;
+
+	/**
+	 * True when the authenticated user is the organisation's only active
+	 * admin. Leaving is refused until another member is promoted. Absent on
+	 * OSS servers and on task-scoped synthetic organisations.
+	 */
+	isLastAdmin?: boolean;
 }
 
 /**
@@ -414,6 +427,13 @@ export interface ConnectResult {
 	 * The shell should show a waitlist page instead of the main workspace.
 	 */
 	waitlisted?: boolean;
+
+	/**
+	 * Whether this authentication created the account: true or false when the
+	 * server's account provider knows (its upsert reported it), null when it
+	 * does not, absent on servers that predate the field.
+	 */
+	isNewUser?: boolean | null;
 
 	/**
 	 * All org memberships the user has (for the org switcher UI).
@@ -560,6 +580,26 @@ export interface ServerInfoResult {
 	 * Absent on servers without billing (OSS).
 	 */
 	stripePublishableKey?: string;
+
+	/**
+	 * PostHog project token (`phc_*`) configured on this server.
+	 *
+	 * Lets the shell initialise product telemetry with the key matching
+	 * this environment instead of a build-time value; apps never carry a
+	 * key at all. Absent on servers without telemetry (OSS) — telemetry is
+	 * then structurally off. Always accompanied by {@link ServerInfoResult.posthogHost}.
+	 */
+	posthogPublishableKey?: string;
+
+	/**
+	 * The analytics ingestion address telemetry requests go to.
+	 *
+	 * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
+	 * is: the server serves neither unless the operator configured both,
+	 * so a self-hosted engine never sends its users' events to a host it
+	 * did not choose.
+	 */
+	posthogHost?: string;
 
 	/**
 	 * The server's public addresses, RESOLVED to absolute URLs.

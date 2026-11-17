@@ -25,14 +25,14 @@
 // =============================================================================
 
 import type { Edge, Node } from '@xyflow/react';
-import type { ISqlSchemaResponse } from '../connect';
+import type { SqlSchemaResponse } from '../connect';
 
 // =============================================================================
 // NODE DATA
 // =============================================================================
 
 /** One column row rendered inside a table node. */
-export interface IErColumn {
+export interface ErColumn {
 	/** Column name. */
 	name: string;
 	/** Datatype string. */
@@ -44,15 +44,15 @@ export interface IErColumn {
 }
 
 /** Data payload of a table node. */
-export interface IErTableData extends Record<string, unknown> {
+export interface ErTableData extends Record<string, unknown> {
 	/** Table name (node header). */
 	table: string;
 	/** Column rows in engine order. */
-	columns: IErColumn[];
+	columns: ErColumn[];
 }
 
 /** The xyflow node type used for tables. */
-export type ErNode = Node<IErTableData, 'table'>;
+export type ErNode = Node<ErTableData, 'table'>;
 
 // =============================================================================
 // NODE SIZING (shared with the elk layout)
@@ -110,7 +110,7 @@ export function targetHandle(column: string): string {
  * @param schema - The reflected schema.
  * @returns The nodes and edges.
  */
-export function buildErModel(schema: ISqlSchemaResponse): { nodes: ErNode[]; edges: Edge[] } {
+export function buildErModel(schema: SqlSchemaResponse): { nodes: ErNode[]; edges: Edge[] } {
 	const tables = schema.tables ?? {};
 
 	// Column names that participate in any FK, per table (drives the glyphs).

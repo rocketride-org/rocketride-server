@@ -24,12 +24,12 @@
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 from typing import Any, Dict
 
 from rocketlib import debug, expand
 from ai.common.config import Config
 from ai.common.models import GLiNER
+from ai.common.models.base import make_device_lock
 from .Ruleparser import RuleParser
 from .anonymize import (
     anonymize as _anonymize,
@@ -71,11 +71,15 @@ class GliNERRecognizer:
         # Use ai.common.models.GLiNER - auto-detects local vs model server mode
         self.model = GLiNER(self.model_name)
 
-        # GLiNER wraps a single torch module, which cannot run concurrent forward
-        # passes: doing so corrupts the CUDA heap and aborts the worker. predict()
-        # holds this around the predict_entities call only, so chunking, offset
-        # arithmetic and the overlap filter still run concurrently.
-        self._predict_lock = Lock()
+        # In-process GLiNER wraps a single torch module, which cannot run concurrent
+        # forward passes: doing so corrupts the CUDA heap and aborts the worker. With
+        # --modelserver the forward pass runs in the model server, which has its own
+        # workers, so a node-side lock would only hold the chunk workers
+        # below to one request in flight: make_device_lock() is that lock in-process
+        # and a no-op in proxy mode. predict() holds it around the predict_entities
+        # call only, so chunking, offset arithmetic and the overlap filter still run
+        # concurrently.
+        self._predict_lock = make_device_lock()
 
     def extract_keywords_from_xml(self, data):
         """
@@ -174,7 +178,13 @@ class GliNERRecognizer:
                         chunk_results.append(res)
 
                 except Exception as e:
-                    debug(f'Anonymize: GLiNER Error on chunk {chunk_idx} with labels {label_batch}: {str(e)}')
+                    # A failed prediction is not evidence that the chunk contains
+                    # no sensitive entities. Never return partially redacted text.
+                    # The cause goes in the message: the engine reports only the
+                    # raised exception's text, never its __cause__.
+                    raise RuntimeError(
+                        f'GLiNER inference failed for chunk {chunk_idx}: {str(e) or type(e).__name__}'
+                    ) from e
 
             return chunk_results
 
@@ -187,9 +197,11 @@ class GliNERRecognizer:
                 try:
                     all_results.extend(future.result())
                 except Exception as e:
-                    # Per-batch failures are already handled inside process_chunk,
-                    # so this only catches a failure in the surrounding scaffolding.
-                    debug(f'Anonymize: Error processing chunk: {str(e)}')
+                    for pending in futures:
+                        pending.cancel()
+                    # e is process_chunk's error, which already names the chunk and
+                    # the root cause, so its text is appended once here.
+                    raise RuntimeError(f'Anonymization failed; no redacted result is available: {e}') from e
 
                 completed += 1
                 if completed % 5 == 0 or completed == total_chunks:

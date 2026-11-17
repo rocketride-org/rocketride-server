@@ -55,7 +55,15 @@ Usage:
         print(f"Event: {event['event']}")
 """
 
-from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
+from typing import Any, Callable, Awaitable, Literal, Optional, Union
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # SDK floor is 3.10: pydantic consumers (the engine's AccountInfo model)
+    # refuse typing.TypedDict before 3.12; typing_extensions provides both.
+    from typing_extensions import TypedDict
 
 from typing_extensions import NotRequired
 
@@ -382,6 +390,16 @@ class ServerInfoResult(TypedDict, total=False):
             on this server, so clients initialise Stripe Elements with the key
             matching the server's Stripe account (test vs live) instead of a
             build-time value. Absent on servers without billing (OSS).
+        posthogPublishableKey (str): PostHog project token (``phc_*``)
+            configured on this server, so the shell initialises product
+            telemetry with the key matching this environment instead of a
+            build-time value. Absent on servers without telemetry (OSS) —
+            telemetry is then structurally off.
+        posthogHost (str): The analytics ingestion address telemetry requests
+            go to. Present exactly when ``posthogPublishableKey`` is: the
+            server serves neither unless the operator configured both, so a
+            self-hosted engine never sends its users' events to a host it did
+            not choose.
         endpoints (ServerEndpoints): The server's public addresses, RESOLVED
             to absolute URLs by :meth:`RocketRideClient.get_server_info` —
             the server's ``'origin'`` sentinel ("the address you probed me
@@ -395,6 +413,8 @@ class ServerInfoResult(TypedDict, total=False):
     platform: str
     apps: list[AppManifestEntry]
     stripePublishableKey: str
+    posthogPublishableKey: str
+    posthogHost: str
     endpoints: 'ServerEndpoints'
 
 

@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { IHistoryEntry } from '../src/history/types';
+import type { HistoryEntry } from '../src/history/types';
 import {
 	DEFAULT_HISTORY_LIMITS,
 	MAX_HISTORY_BAG_CHARS,
@@ -45,7 +45,7 @@ import {
  * @param over - Fields to override.
  * @returns The entry.
  */
-function entry(over: Partial<IHistoryEntry> = {}): IHistoryEntry {
+function entry(over: Partial<HistoryEntry> = {}): HistoryEntry {
 	return {
 		id: over.id ?? `e${over.at ?? 0}`,
 		sql: 'SELECT 1',
@@ -65,7 +65,7 @@ function entry(over: Partial<IHistoryEntry> = {}): IHistoryEntry {
  * @param over - Fields applied to every entry.
  * @returns The entries, newest first.
  */
-function series(count: number, over: Partial<IHistoryEntry> = {}): IHistoryEntry[] {
+function series(count: number, over: Partial<HistoryEntry> = {}): HistoryEntry[] {
 	return Array.from({ length: count }, (_, i) => entry({
 		id: `e${count - i}`,
 		sql: `SELECT ${count - i}`,
@@ -292,7 +292,7 @@ describe('trimBag', () => {
 
 	it('keeps pinned entries until only pinned entries are left', () => {
 		const filler = 'z'.repeat(400);
-		const bag: Record<string, IHistoryEntry[]> = {
+		const bag: Record<string, HistoryEntry[]> = {
 			k: [
 				entry({ id: 'pin', at: 1, sql: filler, pinned: true }),
 				entry({ id: 'a', at: 2, sql: `${filler}a` }),

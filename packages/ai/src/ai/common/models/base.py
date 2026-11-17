@@ -204,6 +204,18 @@ class BaseLoader:
         """Postprocess outputs - must be implemented by subclasses."""
         raise NotImplementedError('Subclasses must implement postprocess()')
 
+    @staticmethod
+    def inference_cost_mb(preprocessed: Dict[str, Any]) -> Optional[float]:
+        """Device memory one in-process ``inference`` call needs, for ``device_budget``.
+
+        Args:
+            preprocessed: The output of ``preprocess`` for the call.
+
+        Returns:
+            The cost in MB; ``None`` (not measured) makes the call run alone on its device.
+        """
+        return None
+
 
 # =============================================================================
 # MODEL SERVER ADDRESS

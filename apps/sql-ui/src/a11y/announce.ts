@@ -36,7 +36,7 @@
 // =============================================================================
 
 /** One announcement: the text, plus a revision that changes on every call. */
-export interface IAnnouncement {
+export interface Announcement {
 	/** The sentence to speak. */
 	text: string;
 	/** Monotonic revision — repeating the SAME text still re-announces. */
@@ -47,7 +47,7 @@ export interface IAnnouncement {
  * The current announcement. Replaced (never mutated) on every call, so a
  * `useSyncExternalStore` snapshot stays referentially stable between them.
  */
-let snapshot: IAnnouncement = { text: '', revision: 0 };
+let snapshot: Announcement = { text: '', revision: 0 };
 
 const listeners = new Set<() => void>();
 
@@ -81,6 +81,6 @@ export function subscribeAnnouncements(callback: () => void): () => void {
  *
  * @returns The latest announcement.
  */
-export function getAnnouncement(): IAnnouncement {
+export function getAnnouncement(): Announcement {
 	return snapshot;
 }

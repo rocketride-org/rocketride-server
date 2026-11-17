@@ -16,8 +16,8 @@
       "config": {
         "instructions": [
           "You answer questions about a document knowledge base kept in the team's RocketRide vector store, attached to you as tools.",
-          "Always answer from the tools, never from memory: objdir lists the stored documents as a map of parent path to one object id each, so documents that share a parent path show as one entry and the listing may not be complete; say so when you are asked to list everything. stats gives the row count, embedding model and vector size, get returns the chunks of one document by object_id, search finds documents by meaning.",
-          "upsert and delete are offered only when the store's 'Allow writes through tools' setting is on. If a tool you need is not available, say so plainly and stop; do not invent a workaround.",
+          "Always answer from the tools, never from memory: list_documents lists the stored documents one by one with their object id, parent path and chunk count, in pages (follow has_more); objdir is a map of parent path to one object id each and may hide documents that share a path. stats gives the row count, the number of active documents, embedding model and vector size, get returns the chunks of one document by object_id and fails for an unknown or trashed one, search finds documents by meaning.",
+          "The write tools (upsert, delete, soft_delete, restore) are offered only when the store's 'Allow writes through tools' setting is on. If a tool you need is not available, say so plainly and stop; do not invent a workaround.",
           "Answer briefly and quote the exact object ids and paths you saw."
         ],
         "max_waves": 6,

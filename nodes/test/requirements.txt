@@ -1,18 +1,29 @@
 # Test dependencies for nodes/test.
 # Installed by nodes:test / nodes:test-full through depends(), so versions follow
 # the engine constraints (the same pins the nodes get at runtime).
-pytest
+
+# nodes:test runs xdist with --dist loadgroup. With pytest-xdist 3.8.0, pytest 9.2
+# spreads the tests of one xdist_group over all workers, with no error
+# (pytest-dev/pytest#15303, pytest-dev/pytest-xdist#1407). Drop the cap once a
+# pytest-xdist release newer than 3.8.0 is out, and require that release instead:
+# without the floor, uv keeps an installed 3.8.0. Same cap in
+# packages/server/build-requirements.txt; the two files must agree.
+pytest<9.2
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+# The sys.modules guard (_sys_modules_guard.py) uses @pytest.hookimpl(wrapper=True),
+# which pluggy supports from 1.2; pytest<9.2 alone would also allow an older pluggy.
+# Same floor in packages/server/build-requirements.txt.
+pluggy>=1.2
 
 # Packages the tests import directly. At runtime they come from the node that
 # declares them, which installs them only when a pipeline first loads it, so
 # without these the tests below skip depending on what ran earlier on the dist.
 # Base engine packages (numpy, pillow, requests, SQLAlchemy, antlr4) need no entry.
 img2table                   # ocr: test_model_server_ocr.py
-psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
-pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_full.py
+psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_live.py, test_rocketride_graph_live.py
+pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_live.py
 python-docx                 # tool_microsoft_365: test_word.py
 smbprotocol                 # text_output: test_validate_config.py
 pygit2                      # tool_git: test_tools.py
@@ -20,3 +31,7 @@ google-api-python-client    # tool_google_workspace: test_google_client.py, gmai
 google-auth                 # tool_google_workspace
 langchain-aws               # llm_bedrock: test_token_count.py, test_prompt_cache.py
 langchain-anthropic         # llm_anthropic: test_prompt_cache.py
+langchain-core              # agent_langchain, agent_deepagent: test_tool_builder.py; test_real_langchain.py
+astrapy                     # store_astra: test_active_paths.py
+pymilvus                    # store_milvus: test_store_milvus_live.py
+langchain-text-splitters    # summarization: test_summarization.py

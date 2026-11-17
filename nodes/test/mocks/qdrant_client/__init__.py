@@ -520,7 +520,7 @@ class QdrantClient:
         """
         pass
 
-    def set_payload(self, collection_name: str, payload: dict, points: Any) -> None:
+    def set_payload(self, collection_name: str, payload: dict, points: Any, key: Optional[str] = None) -> None:
         """
         Update payload on existing points.
 

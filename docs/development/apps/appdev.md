@@ -54,33 +54,43 @@ the `rocketride` twin) — logged loudly, since the yaml is user-owned. A
 workspace that already overrides `shell`/`rocketride` (the platform
 monorepos pin `workspace:*`) is left untouched.
 
-## Live preview overlay & dev servers
+## Local-first preview & dev servers
 
-A local dev build is previewed by registering a per-user `moduleId → entry URL`
-overlay (via `rrext_deploy_app.register_dev`) so the developer's shell points at
-their locally built bundle. The extension manages the underlying rsbuild dev
-servers through a serialized per-app operation chain (start/stop/restart run one
-at a time). Closing a preview **lingers** the server for 60 s so a quick reopen
-revives it instantly; a Reload or extension deactivation stops immediately.
-Every dev server is **owned** by the current extension host and runs under a
-guard wrapper whose stdin tether kills it the moment the host dies (window
-reload, crash, EDH stop — any death mode), so orphaned dev servers cannot
-exist. A server that crashes while its panel is open respawns itself
-automatically (bounded, so a crash loop gives up and points at the Console).
-The dev overlay holds one registration **per editor session** — several
-editors (or windows) can dev-serve the same app concurrently; previews
-launched from an editor carry its `rrsession` nonce and resolve that
-editor's server, and shells without a nonce take the newest registration.
+The preview is **local-first**: the app's rsbuild dev server runs as a
+**passthrough proxy** to the connected engine origin. It serves the dev app's
+workspace files (bundle, chunks, icon, `package.json`) from disk under the
+conventional `/apps/<appId>/dev/**` prefix and proxies EVERYTHING else —
+`/task` websocket, auth, published app bundles — to the engine untouched, so
+the preview shell is same-origin with its dev assets and the server holds
+zero dev state. Registration is a **push**: the preview panel posts
+`rrdev:registerRemote { appId, moduleId, entry, manifest }` into the shell
+(re-posted on rebuild and on manifest change — the workspace `package.json`
+is the metadata truth in dev); a top-level tab (F5 external-browser debug)
+instead **self-registers by URL convention**, fetching
+`/apps/<appId>/dev/package.json` from its own origin. A locally registered
+app id REPLACES the server's manifest row wholesale.
+
+The extension manages the dev servers through a serialized per-app operation
+chain (start/stop/restart run one at a time). Closing a preview **lingers**
+the server for 60 s so a quick reopen revives it instantly; a Reload or
+extension deactivation stops immediately. Every dev server is **owned** by
+the current extension host and runs under a guard wrapper whose stdin tether
+kills it the moment the host dies (window reload, crash, EDH stop — any
+death mode), so orphaned dev servers cannot exist. A server that crashes
+while its panel is open respawns itself automatically (bounded, so a crash
+loop gives up and points at the Console). Several editors can dev-serve the
+same app concurrently — each preview loads through its OWN editor's proxy
+origin, so no cross-editor routing exists to disambiguate.
 
 The dev-loop primitives live in the SDK, `rocketride/app-dev`
 (`packages/client-typescript/src/app-dev/`), shared with `rocketride app
-dev`: the session nonce and `devPreviewUrl`, `resolveRsbuildInvocation`, the
+dev`: `devPreviewUrl`, `resolveRsbuildInvocation`, the
 rsbuild output classifier (`splitCompleteLines`, `classifyDevOutput`), the
-guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the overlay calls
-(`registerDevOverlay`, `unregisterDevOverlay`), and the guard program itself
+guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the proxy config
+writer (`writeProxyConfig`, `webOriginFor`), and the guard program itself
 (`DEV_SERVER_GUARD_SOURCE`, written to a private temp file by
 `materializeDevServerGuard` — no host ships it as a separate file). The
-extension's `WatchManager` keeps only the panel orchestration (op chains,
+extension's `DevSessionManager` keeps only the panel orchestration (op chains,
 linger, panel-gated respawn, the install badge); `DevSession` composes the
 same primitives into the single-app foreground loop the CLI runs. Any page
 that loaded a dev bundle — the panel or a plain browser tab — updates on save
@@ -121,7 +131,7 @@ missing/non-numeric version is rejected, not sent as `null`).
 | `preflight`       | —                             | tiered readiness rows `{ id, state, label, note?, tier }` from the SDK's `preflightApp`: the `package` tier is the personal-publish bar, the `store` tier adds the public-submission bar |
 | `history`         | —                             | the app's full `deployment_history` stream, **oldest-first** — audit rows plus the review thread (`reply` rows); the host walks the server's 100-row pages. Rows are self-describing: audience rows carry the dereferenced `name`/`handle` (plus `previousVersion` on a repoint), deploy rows the deploy `comment`, review rows their `from`/`to` states — the view never needs a second lookup |
 | `reply`           | `[message, registryVersion?]` | appends a developer message to the review thread (side `'developer'`) |
-| `buildLog`        | `[registryVersion]`           | one version's durable server build log (phase-by-phase output; `''` = no log) — the Deploy card's `failed` badge opens it |
+| `buildLog`        | `[registryVersion]`           | one version's durable server build log (phase-by-phase output; `''` = no log) — the Deploy card's `failed` badge and the Dashboard's failed-build line open it |
 | `pickFile`        | `['icon' \| 'readme']`        | native file picker for a manifest asset; returns the APP-FOLDER-relative `./`-prefixed path (picks outside the app folder are refused — the server only serves app-relative assets) or `null` on cancel |
 | `readFile`        | `[appRelativePath]`           | one app-folder-relative text file (icon SVG / README markdown) for preview; traversal-guarded, 512KB cap |
 | `readImage`       | `[appRelativePath]`           | one app-folder-relative image as a data: URI (README images are binary; mime by extension, 256KB cap, `null` when unservable) — the README viewer resolves relative image refs against the README's own directory through this |

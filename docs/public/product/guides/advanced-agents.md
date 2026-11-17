@@ -1,6 +1,7 @@
 ---
 title: Advanced Agents
 sidebar_position: 9
+description: Builds on Agents and Tools to cover multi-agent patterns, memory strategies, and safety techniques for production agent pipelines in RocketRide.
 ---
 
 # Advanced Agents

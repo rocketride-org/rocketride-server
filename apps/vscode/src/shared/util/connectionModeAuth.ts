@@ -21,7 +21,9 @@
 // SOFTWARE.
 // =============================================================================
 
-export type RocketRideConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
+// ONE declaration for this union — see shared/types/connection.ts.
+import type { ConnectionMode } from '../types/connection';
+export type RocketRideConnectionMode = ConnectionMode;
 
 export interface CloudConnectionConfig {
 	development: {
@@ -46,13 +48,6 @@ export function connectionModeRequiresApiKey(connectionMode: RocketRideConnectio
  */
 export function connectionModeUsesOAuth(connectionMode: RocketRideConnectionMode | string): boolean {
 	return connectionMode === 'cloud';
-}
-
-/**
- * Whether the mode has a fixed URL that the user cannot change.
- */
-export function connectionModeHasFixedUrl(connectionMode: RocketRideConnectionMode | string): boolean {
-	return connectionMode === 'cloud' || connectionMode === 'docker' || connectionMode === 'service' || connectionMode === 'local';
 }
 
 /**

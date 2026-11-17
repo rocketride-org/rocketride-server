@@ -48,7 +48,7 @@
 // therefore a date, not a string — that is where most of the win is.
 // =============================================================================
 
-import type { ISqlSchemaResponse, SqlDialect } from '../connect';
+import type { SqlSchemaResponse, SqlDialect } from '../connect';
 import { stripSqlComments } from './split';
 
 // =============================================================================
@@ -59,7 +59,7 @@ import { stripSqlComments } from './split';
 export type RrType = 'string' | 'number' | 'date' | 'boolean' | 'json';
 
 /** What was decided about one result column, and on what basis. */
-export interface IColumnTypeInfo {
+export interface ColumnTypeInfo {
 	/** The grid type to declare for this column. */
 	rrType: RrType;
 	/** Where the type came from. */
@@ -238,15 +238,15 @@ function singleSourceTable(sql: string, dialect: SqlDialect): string | null {
  * @param schema - The connection's schema snapshot, when one is loaded.
  * @param sql - The statement that produced the rows, when it is known.
  * @param dialect - The engine dialect.
- * @returns One {@link IColumnTypeInfo} per column, keyed by column name.
+ * @returns One {@link ColumnTypeInfo} per column, keyed by column name.
  */
 export function inferColumnTypes(
 	rows: Record<string, unknown>[],
-	schema?: ISqlSchemaResponse | null,
+	schema?: SqlSchemaResponse | null,
 	sql?: string,
 	dialect: SqlDialect = 'unknown',
-): Record<string, IColumnTypeInfo> {
-	const out: Record<string, IColumnTypeInfo> = {};
+): Record<string, ColumnTypeInfo> {
+	const out: Record<string, ColumnTypeInfo> = {};
 	if (rows.length === 0) return out;
 
 	// Column set, in first-seen order.

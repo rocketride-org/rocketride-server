@@ -38,6 +38,7 @@ const {
 	BUILD_ROOT,
 	DIST_ROOT,
 	hasSourceChanged,
+	hasBuildInputChanged,
 	saveSourceHash,
 	setState,
 	exists,
@@ -67,10 +68,21 @@ const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
 // shared (appdev templates) into rocketride.js, and reusing the webview's
 // SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
 const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
+// The webview builds' config files — a config-only change must rebuild too.
+const WEBVIEW_CONFIG_HASH_KEY = 'vscode.webviewConfigHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
 const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
+const BUILD_DEVTOOL_DIR = path.join(BUILD_WEBVIEW_DIR, 'devtool');
+
+// Webview build configs (and the local plugin they import) — changes here
+// must invalidate the cached webview build just like source changes.
+const WEBVIEW_CONFIG_FILES = [
+	path.join(APP_ROOT, 'rsbuild.config.mjs'),
+	path.join(APP_ROOT, 'rsbuild.devtool.config.mjs'),
+	path.join(PROJECT_ROOT, 'apps', 'shared', 'scripts', 'rsbuild-plugin-icons.mjs'),
+];
 
 // .vsix output directory
 const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
@@ -83,20 +95,50 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'v
 // =============================================================================
 
 async function hasVscodeOrSharedUiChanged() {
-	const [vscode, sharedUi] = await Promise.all([
+	const [vscode, sharedUi, config] = await Promise.all([
 		hasSourceChanged(SRC_DIR, SRC_HASH_KEY),
 		hasSourceChanged(SHARED_UI_SRC, SHARED_UI_HASH_KEY),
+		hasBuildInputChanged(WEBVIEW_CONFIG_HASH_KEY, [], WEBVIEW_CONFIG_FILES),
 	]);
 	return {
-		changed: vscode.changed || sharedUi.changed,
+		changed: vscode.changed || sharedUi.changed || config.changed,
 		srcHash: vscode.hash,
 		sharedUiHash: sharedUi.hash,
+		configHash: config.hash,
 	};
 }
 
-async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash) {
+async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash) {
 	await saveSourceHash(SRC_HASH_KEY, srcHash);
 	await saveSourceHash(SHARED_UI_HASH_KEY, sharedUiHash);
+	await saveSourceHash(WEBVIEW_CONFIG_HASH_KEY, configHash);
+}
+
+/**
+ * Fails the build if any webview bundle externalizes the 'vscode' module.
+ *
+ * The rsbuild config externalizes 'vscode' (`commonjs vscode`) so an
+ * extension-host import that leaks into webview-reachable code compiles
+ * SILENTLY into `require("vscode")` — a load-time ReferenceError that
+ * blanks the page. tsc passes, rsbuild passes; this scan is the gate
+ * (alongside the eslint ban on 'vscode'/util/output in views/**).
+ */
+async function assertNoVscodeExternalInWebviews(task) {
+	const bundles = await glob('**/*.js', { cwd: BUILD_WEBVIEW_DIR, absolute: true, nodir: true });
+	const offenders = [];
+	for (const file of bundles) {
+		const text = await readFile(file, 'utf8');
+		if (text.includes('require("vscode")') || text.includes("require('vscode')")) {
+			offenders.push(path.relative(BUILD_WEBVIEW_DIR, file));
+		}
+	}
+	if (offenders.length > 0) {
+		throw new Error(
+			`webview bundle(s) contain require("vscode") — an extension-host module leaked into webview code ` +
+			`(usually via getLogger/util/output; see the eslint webview-realm ban): ${offenders.join(', ')}`
+		);
+	}
+	task.output = `webview bundles verified vscode-free (${bundles.length} files)`;
 }
 
 // =============================================================================
@@ -106,8 +148,8 @@ async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash) {
 function makeBuildWebviewAction() {
 	return {
 		run: async (ctx, task) => {
-			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
-			const outputExists = await exists(BUILD_WEBVIEW_DIR);
+			const { changed, srcHash, sharedUiHash, configHash } = await hasVscodeOrSharedUiChanged();
+			const outputExists = (await exists(BUILD_WEBVIEW_DIR)) && (await exists(BUILD_DEVTOOL_DIR));
 
 			if (!changed && outputExists) {
 				task.output = 'No changes detected';
@@ -122,7 +164,15 @@ function makeBuildWebviewAction() {
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
 
-			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
+			// The dev-tool page is a Module Federation HOST — it needs a normal
+			// chunk graph, so it builds from its own config into webview/devtool/.
+			const devtoolArgs = ['exec', 'rsbuild', 'build', '--config', 'rsbuild.devtool.config.mjs'];
+			await execCommand('pnpm', devtoolArgs, { task, cwd: APP_ROOT });
+
+			// Gate BEFORE saving hashes — a failed scan must re-run next build.
+			await assertNoVscodeExternalInWebviews(task);
+
+			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash);
 		},
 	};
 }
@@ -179,7 +229,7 @@ function makeBundleExtensionAction() {
 function makeStageFilesAction() {
 	return {
 		run: async (ctx, task) => {
-			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
+			const { changed, srcHash, sharedUiHash, configHash } = await hasVscodeOrSharedUiChanged();
 			const stagedPkgPath = path.join(BUILD_DIR, 'package.json');
 			const buildHasManifest = await exists(stagedPkgPath);
 
@@ -198,10 +248,9 @@ function makeStageFilesAction() {
 				'webview/**',
 				'shell.tgz',
 				'rocketride-client.tgz',
+				'devServerGuard.cjs',
 				'rocketride-dark-icon.png',
 				'rocketride-light-icon.png',
-				'docker.svg',
-				'onprem.svg',
 				'package.json',
 				'LICENSE',
 				'README.md',
@@ -261,6 +310,17 @@ function makeStageFilesAction() {
 			if (await exists(iconLight)) {
 				await copyFile(iconLight, path.join(BUILD_DIR, 'rocketride-light-icon.png'));
 			}
+			// The dev-server guard wrapper — spawned as a real file by the
+			// watch manager (it cannot live inside the esbuild bundle), so it
+			// ships beside the bundle. Sourced under src/ so the source-hash
+			// change detection restages it on edit. FUNCTIONAL, unlike the
+			// cosmetic icons around it: a missing guard fails every dev-server
+			// start with ENOENT at runtime — fail the STAGE instead.
+			const guardSrc = path.join(SRC_DIR, 'appdev', 'devServerGuard.cjs');
+			if (!(await exists(guardSrc))) {
+				throw new Error(`devServerGuard.cjs missing at ${guardSrc} — the dev-server tether cannot ship`);
+			}
+			await copyFile(guardSrc, path.join(BUILD_DIR, 'devServerGuard.cjs'));
 			const dockerSvg = path.join(APP_ROOT, 'docker.svg');
 			const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
 			if (await exists(dockerSvg)) {
@@ -290,7 +350,7 @@ function makeStageFilesAction() {
 				await rm(legacyDocsDir);
 			}
 
-			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
+			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash);
 			task.output = 'Manifest staged in build/vscode';
 		},
 	};
@@ -340,11 +400,13 @@ function makeTestAction() {
 	return {
 		description: 'Testing vscode',
 		run: async (ctx, task) => {
-			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true }))
-				// extension.test.ts requires the real extension-host-only `vscode` module.
-				// Compare basenames: glob yields backslash-separated paths on Windows.
-				.filter((file) => path.basename(file) !== 'extension.test.ts')
-				.sort();
+			// Typecheck the webview project as part of the test graph. The build
+			// action runs the same gate, but behind its change-detection hash —
+			// so `./builder test` alone never caught webview/protocol drift
+			// (e.g. a shell type consumed by webview code changing underneath it).
+			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
+
+			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true })).sort();
 
 			// Fail rather than pass silently: this target exists because these tests
 			// previously ran nowhere, so a glob that matches nothing must not read as green.
@@ -435,6 +497,9 @@ module.exports = {
 					await setState(SRC_HASH_KEY, null);
 					await setState(BUNDLE_HASH_KEY, null);
 					await setState(SHARED_UI_HASH_KEY, null);
+					// Every hash key, or a survivor marks the next build clean —
+					// the exact hazard the comment at BUNDLE_SHARED_UI_HASH_KEY warns of.
+					await setState(BUNDLE_SHARED_UI_HASH_KEY, null);
 					task.output = 'Cleaned vscode';
 				},
 			}),

@@ -1,0 +1,403 @@
+{
+	"title": "Masky",
+	"protocol": "tool_masky://",
+	"classType": ["video", "tool"],
+	"capabilities": ["invoke", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_masky",
+	"prefix": "masky",
+	"icon": "masky.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_masky",
+	"description": ["Masky AI avatars that speak, plus scene video, images and live conversations.", "Use it as an agent tool covering the Masky API, or as a pipeline step that turns text into a talking head, a scene clip, an image or a live-conversation turn.", "Requires a Masky API key from https://masky.ai/developer"],
+	"tile": ["Masky: ${parameters.tool_masky.action}"],
+	//
+	// Text in; the configured action decides which media lane receives the
+	// downloaded file. A JSON receipt always goes out on text.
+	//
+	"lanes": {
+		"text": ["video", "audio", "image", "text"],
+		"questions": ["video", "audio", "image", "text"],
+		"answers": ["video", "audio", "image", "text"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default",
+				"serverName": "masky",
+				"baseUrl": "https://masky.ai/api",
+				"action": "talking_head",
+				"output": "video",
+				"textMode": "literal",
+				"quality": "720p-draft",
+				"aspectRatio": "16:9",
+				"fps": 24,
+				"durationSec": 5,
+				"silent": false,
+				"expandPrompt": true,
+				"share": "private",
+				"sourceImageUrl": "",
+				"speechLine": "",
+				"engine": "default",
+				"editEngine": "default",
+				"conversation": "",
+				"turnMode": "chat",
+				"turnOutput": "audio",
+				"waitForTurn": true,
+				"defaultAvatar": "",
+				"defaultLook": "",
+				"language": "en",
+				"maxCreditsPerCall": 1.0,
+				"timeoutSec": 300,
+				"pollIntervalSec": 3,
+				"includeMediaUrls": true,
+				"readOnly": false
+			}
+		}
+	},
+	"fields": {
+		//
+		// Always shown
+		//
+		"tool_masky.apikey": {
+			"optional": true,
+			"type": "string",
+			"title": "API Key",
+			"description": "Masky API key (mky_...). Get one at https://masky.ai/developer. Leave blank to use ROCKETRIDE_MASKY_KEY.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_masky.serverName": {
+			"hidden": true,
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the tools: <serverName>.list_avatars, <serverName>.speak, ...",
+			"default": "masky"
+		},
+		"tool_masky.baseUrl": {
+			"hidden": true,
+			"type": "string",
+			"title": "API base URL",
+			"description": "Masky API root. Change only to point at a staging environment.",
+			"default": "https://masky.ai/api"
+		},
+		"tool_masky.defaultAvatar": {
+			"optional": true,
+			"type": "string",
+			"title": "Default Avatar",
+			"description": "Avatar id or @handle used when a call or pipeline record names none. Find ids with masky.list_avatars.",
+			"default": ""
+		},
+		"tool_masky.defaultLook": {
+			"optional": true,
+			"type": "string",
+			"title": "Default Look",
+			"description": "A look_id from masky.list_looks, or a look image URL. Blank uses the avatar's default look.",
+			"default": ""
+		},
+		"tool_masky.language": {
+			"type": "string",
+			"title": "Language",
+			"description": "Spoken language code, e.g. en, es, fr.",
+			"default": "en"
+		},
+		"tool_masky.maxCreditsPerCall": {
+			"type": "number",
+			"title": "Max Credits per Call",
+			"description": "Cost guard: refuse any render whose estimate is higher. 0 turns the guard off.",
+			"default": 1.0,
+			"minimum": 0
+		},
+		"tool_masky.timeoutSec": {
+			"type": "integer",
+			"title": "Render Timeout (seconds)",
+			"description": "Longest to wait for a render. Scene video can take about 3 minutes.",
+			"default": 300,
+			"minimum": 10
+		},
+		"tool_masky.pollIntervalSec": {
+			"type": "integer",
+			"title": "Poll Interval (seconds)",
+			"default": 3,
+			"minimum": 1
+		},
+		"tool_masky.includeMediaUrls": {
+			"type": "boolean",
+			"title": "Include Media URLs in Tool Results",
+			"description": "Turn off when an agent calls this node: results then carry job ids only, so signed URLs stay out of the model's context. Pipeline receipts always include URLs.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		//
+		// Permission switches for agent tools (conventions from tool_github,
+		// tool_gohighlevel, tool_filesystem and the calendar node)
+		//
+		"tool_masky.readOnly": {
+			"type": "boolean",
+			"title": "Read-only mode",
+			"description": "When enabled, every agent tool that changes or spends anything (create, train, set, add, speak, generate, edit, conversations and turns, agent binding, visibility, rename, delete, restore) is hidden from the agent rather than merely refused. Listing, get, get_generation and estimate_cost remain. Does not affect the pipeline action. Safe for agents that should only inspect the account.",
+			"default": false,
+			"enum": [
+				[true, "Yes: read only"],
+				[false, "No: allow writes"]
+			]
+		},
+		"tool_masky.allowDelete": {
+			"type": "boolean",
+			"title": "Allow deletion",
+			"description": "Destructive: enable only when the agent is trusted to delete Masky conversations, turns and agent bindings. Deleted conversations can't be recovered.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_masky.allowPublicSharing": {
+			"type": "boolean",
+			"title": "Allow public sharing",
+			"description": "Off by default. When off, making an avatar or conversation public, creating a public avatar, and scene video with Share Page Public (agent tools and the scene_video action) are refused. Making something private is never gated.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		//
+		// Pipeline action and its fields (shown by conditional)
+		//
+		"tool_masky.action": {
+			"type": "string",
+			"title": "Pipeline Action",
+			"description": "What the node does with each text record when it sits in a pipeline. Agent tool calls ignore this.",
+			"default": "talking_head",
+			"enum": [
+				["talking_head", "Talking head (avatar speaks the text)"],
+				["scene_video", "Scene video (text is the prompt)"],
+				["image", "Image (text is the prompt or edit instruction)"],
+				["live", "Live conversation turn"]
+			],
+			"conditional": [
+				{ "value": "talking_head", "properties": ["tool_masky.output", "tool_masky.textMode"] },
+				{
+					"value": "scene_video",
+					"properties": ["tool_masky.quality", "tool_masky.aspectRatio", "tool_masky.fps", "tool_masky.durationSec", "tool_masky.seed", "tool_masky.silent", "tool_masky.expandPrompt", "tool_masky.share", "tool_masky.sourceImageUrl", "tool_masky.speechLine"]
+				},
+				{ "value": "image", "properties": ["tool_masky.engine", "tool_masky.editEngine", "tool_masky.sourceImageUrl"] },
+				{ "value": "live", "properties": ["tool_masky.conversation", "tool_masky.turnMode", "tool_masky.turnOutput", "tool_masky.waitForTurn"] }
+			]
+		},
+		"tool_masky.output": {
+			"type": "string",
+			"title": "Output",
+			"default": "video",
+			"enum": [
+				["video", "Video (lip-synced talking head)"],
+				["audio", "Audio (voice only)"]
+			]
+		},
+		"tool_masky.textMode": {
+			"type": "string",
+			"title": "Text Mode",
+			"description": "Literal reads the text as written; Personality lets the avatar rephrase it in its own voice.",
+			"default": "literal",
+			"enum": [
+				["literal", "Literal"],
+				["personality", "Personality"]
+			]
+		},
+		"tool_masky.quality": {
+			"type": "string",
+			"title": "Quality",
+			"description": "Draft costs about 40% less; 1080p costs about twice 720p.",
+			"default": "720p-draft",
+			"enum": [
+				["720p-draft", "720p draft"],
+				["720p", "720p"],
+				["1080p-draft", "1080p draft"],
+				["1080p", "1080p"]
+			]
+		},
+		"tool_masky.aspectRatio": {
+			"type": "string",
+			"title": "Aspect Ratio",
+			"default": "16:9",
+			"enum": [
+				["16:9", "16:9 landscape"],
+				["9:16", "9:16 portrait"],
+				["4:3", "4:3"],
+				["3:4", "3:4"],
+				["3:2", "3:2"],
+				["2:3", "2:3"],
+				["1:1", "1:1 square"]
+			]
+		},
+		"tool_masky.fps": {
+			"type": "integer",
+			"title": "Frame Rate",
+			"default": 24,
+			"enum": [
+				[24, "24 fps"],
+				[48, "48 fps"]
+			]
+		},
+		"tool_masky.durationSec": {
+			"type": "integer",
+			"title": "Duration (seconds)",
+			"description": "1 to 20. Ignored when a speech line is set; the line sets the length.",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20
+		},
+		"tool_masky.seed": {
+			"optional": true,
+			"type": "integer",
+			"title": "Seed",
+			"description": "Optional. The same seed and prompt give a similar clip.",
+			"minimum": 0
+		},
+		"tool_masky.silent": {
+			"type": "boolean",
+			"title": "Silent",
+			"description": "Render the clip without an audio track.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_masky.expandPrompt": {
+			"type": "boolean",
+			"title": "Expand Prompt",
+			"description": "Let Masky enrich the prompt. Turn off to use it word for word.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"tool_masky.share": {
+			"type": "string",
+			"title": "Share Page",
+			"description": "Masky creates a share page for every clip; choose who can open it.",
+			"default": "private",
+			"enum": [
+				["private", "Private"],
+				["public", "Public"]
+			]
+		},
+		"tool_masky.sourceImageUrl": {
+			"optional": true,
+			"type": "string",
+			"title": "Source Image URL",
+			"description": "Optional public http(s) image. Scene video animates it; Image edits it, using the incoming text as the instruction.",
+			"default": ""
+		},
+		"tool_masky.speechLine": {
+			"optional": true,
+			"type": "string",
+			"title": "Speech Line",
+			"description": "Optional, up to 300 characters. The clip speaks it in the avatar's voice (not lip-synced) and it sets the length.",
+			"default": ""
+		},
+		"tool_masky.engine": {
+			"type": "string",
+			"title": "Generation Engine",
+			"description": "Ideogram costs about 3x the default.",
+			"default": "default",
+			"enum": [
+				["default", "Default"],
+				["ideogram", "Ideogram"]
+			]
+		},
+		"tool_masky.editEngine": {
+			"type": "string",
+			"title": "Edit Engine",
+			"description": "Used when a source image URL is set. Qwen costs about 3x the default.",
+			"default": "default",
+			"enum": [
+				["default", "Default"],
+				["qwen", "Qwen"]
+			]
+		},
+		"tool_masky.conversation": {
+			"optional": true,
+			"type": "string",
+			"title": "Conversation",
+			"description": "An existing conversation slug (c-..). Blank creates one per pipeline run; its share and live URLs go out on the text lane.",
+			"default": ""
+		},
+		"tool_masky.turnMode": {
+			"type": "string",
+			"title": "Turn Mode",
+			"description": "Chat lets the avatar answer the text; Speak has it say the text as written.",
+			"default": "chat",
+			"enum": [
+				["chat", "Chat"],
+				["speak", "Speak"]
+			]
+		},
+		"tool_masky.turnOutput": {
+			"type": "string",
+			"title": "Turn Output",
+			"default": "audio",
+			"enum": [
+				["audio", "Audio"],
+				["video", "Video"]
+			]
+		},
+		"tool_masky.waitForTurn": {
+			"type": "boolean",
+			"title": "Wait for Each Turn",
+			"description": "Wait for each turn to render before sending the next.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		}
+	},
+	//
+	// Starts the node with a real key (skipped without ROCKETRIDE_MASKY_KEY)
+	// and sends a whitespace-only record, which the node skips: no render, no
+	// credits. A paid render case needs the owner's approval before it is added.
+	//
+	"test": {
+		"requires": ["ROCKETRIDE_MASKY_KEY"],
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Masky node starts with a real key and skips an empty record",
+				"text": "   "
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Masky",
+			"properties": [
+				"type",
+				"tool_masky.apikey",
+				"tool_masky.action",
+				"tool_masky.defaultAvatar",
+				"tool_masky.defaultLook",
+				"tool_masky.language",
+				"tool_masky.readOnly",
+				"tool_masky.allowDelete",
+				"tool_masky.allowPublicSharing",
+				"tool_masky.maxCreditsPerCall",
+				"tool_masky.timeoutSec",
+				"tool_masky.pollIntervalSec",
+				"tool_masky.includeMediaUrls"
+			]
+		}
+	]
+}

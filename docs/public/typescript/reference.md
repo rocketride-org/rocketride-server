@@ -18,10 +18,10 @@ exceptions on [Error Handling](/clients/typescript/errors).
 | `attach` | `attach(uri?: string, options?: { timeout?: number }): Promise<void>` | `Promise<void>` | Opens an anonymous WebSocket attachment without authenticating. Public `rrext_public_*` requests are available. A URI override becomes the current endpoint. |
 | `detach` | `detach(): Promise<void>` | `Promise<void>` | Cancels pending login and reconnect work, closes a CONNECTING or OPEN transport, and leaves the client detached. An in-flight login rejects with cancellation reason `detached`. |
 | `isAttached` | `isAttached(): boolean` | `boolean` | Whether the WebSocket transport is open, regardless of authentication. |
-| `login` | `login(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Attaches if needed, authenticates, restores monitor subscriptions, and returns account data. The credential and URI may override construction-time values. |
+| `login` | `login(credential?: string \| PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Attaches if needed, authenticates, restores monitor subscriptions, and returns account data. The credential and URI may override construction-time values. |
 | `logout` | `logout(): Promise<void>` | `Promise<void>` | Clears authentication while retaining an anonymous attachment. During an in-flight login it cancels all joined waiters with reason `logout` and establishes a fresh anonymous attachment. |
 | `isAuthenticated` | `isAuthenticated(): boolean` | `boolean` | Whether authentication succeeded for the current attachment. |
-| `connect` | `connect(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation. |
+| `connect` | `connect(credential?: string \| PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation. |
 | `disconnect` | `disconnect(): Promise<void>` | `Promise<void>` | Best-effort logout/deauthentication, then cancels pending work and detaches. |
 | `isConnected` | `isConnected(): boolean` | `boolean` | Compatibility **alias for `isAttached()`**; it does not imply authentication. |
 | `setEnv` | `setEnv(env: Record<string, string>): void` | `void` | Replaces the client's environment map. `use()` uses it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied. |
@@ -113,7 +113,7 @@ node).
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows }>` | Execute raw SQL or Cypher through the pipeline's `execute` tool function. `params` is a positional array for SQL nodes, or an object keyed by placeholder name for the `rocketride_graph` and `graph_neo4j` nodes (`graph_falkordb` rejects params). `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
+| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows, truncated? }>` | Execute raw SQL or Cypher through the pipeline's `execute` tool function. `params` is a positional array for SQL nodes, or an object keyed by placeholder name for the graph nodes (`rocketride_graph`, `graph_neo4j`, `graph_falkordb`). When `graph_falkordb` saves a write but cuts its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`, the result also carries `truncated: true`. `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
 | `database.beginTransaction` | `database.beginTransaction({ token, nodeId? }): Promise<{ session_id }>` | Open a transaction (`begin` tool function). |
 | `database.commit` | `database.commit({ token, sessionId, nodeId? }): Promise<{ ok }>` | Commit the open transaction. |
 | `database.rollback` | `database.rollback({ token, sessionId, nodeId? }): Promise<{ ok }>` | Roll back the open transaction. |
@@ -177,8 +177,8 @@ live on `client.deploy`; the unprefixed verbs are methods on the client itself
 | `disableAppPublish` | `disableAppPublish(appId, target): Promise<{publish}>` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `removeAppPublish`. Publishing any version to that audience re-enables it. Returns the binding row (state `disabled`). |
 | `whereApp` | `whereApp(appId): Promise<Array<{rung, handle, version, appVersion, state, deployedAt?}>>` | The reverse index: one row per audience serving the app — `state` is the bound DEPLOYMENT's review state. |
 | `waitForAppBuild` | `waitForAppBuild(appId, registryVersion, { timeoutMs?, intervalMs?, onStatus? }): Promise<RailEntry>` | Wait for one version's server build — deploying returns at once with `buildStatus: 'queued'`, and publish/submit/serve gate on a finished (`ok`) build. Polls the rail; throws on a failed build (read it with `buildLog`), an unknown version, or the timeout (default 10 minutes). |
-| `developerStatus` | `developerStatus(): Promise<{developerId, stripeAccountId, stripeAccountStatus}>` | The caller org's developer namespace — the `<developerId>` half of every app id it owns. `developerId` is `null` until an org admin registers one. Readable on both editions (OSS answers the fixed namespace its sessions carry). |
-| `registerDeveloper` | `registerDeveloper(developerId): Promise<Record<string, unknown>>` | Claim the caller org's developer id slug (org.admin, self-service, SaaS only). |
+| `developerStatus` | `developerStatus(options?: { timeout?: number }): Promise<{developerId, stripeAccountId, stripeAccountStatus}>` | The caller org's developer namespace — the `<developerId>` half of every app id it owns. `developerId` is `null` until an org admin registers one. Readable on both editions (OSS answers the fixed namespace its sessions carry). `options.timeout` bounds the request in ms; on expiry it rejects and a late reply is ignored. |
+| `registerDeveloper` | `registerDeveloper(developerId, options?: { timeout?: number }): Promise<Record<string, unknown>>` | Claim the caller org's developer id slug (org.admin, self-service, SaaS only). `options.timeout` bounds the request in ms; a timed-out claim may still land, so re-check `developerStatus()`. |
 
 Serving needs no verb: a version's bundle loads from the stable
 `/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
@@ -192,19 +192,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
 | submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
@@ -282,6 +281,11 @@ constructor(options?: {
 | `addDocuments` | `addDocuments(documents: Doc \| Doc[]): void` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(goal: string): void` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(hasPreviousJsonFailed?: boolean): string` | Returns the full prompt (internal use). |
+| `messages` | field, default `[]` | The conversation, as `UserMessage` / `AssistantMessage` items. Non-empty switches the question to turn mode (native tool calling). See [Chat](/clients/typescript/chat#native-tool-calling). |
+| `tools` | field, default `[]` | `{ name, description?, inputSchema? }` items the model may call. Turn mode only. |
+| `addMessage` | `addMessage(message: Message): void` | Appends a message, such as `answer.message`. Throws if the question uses a field turn mode rejects. |
+| `addToolResult` | `addToolResult(callId: string, content: string, isError?: boolean): void` | Adds a tool result to the user message after the assistant turn that made the call. Throws for an unknown `callId`. |
+| `checkTurn` | `checkTurn(): void` | Checks the turn-mode rules (`fromDict` runs it); throws an `Error` naming the broken rule. |
 | `cachePrefix` | field, default `false` | Set to `true` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
@@ -300,6 +304,12 @@ constructor(expectJson?: boolean)  // default false
 | `getJson` | `getJson(): unknown` | The stored answer as parsed JSON; **throws** if it is not JSON-compatible. |
 | `isJson` | `isJson(): boolean` | Returns the `expectJson` flag this `Answer` was constructed with (does not inspect content). |
 | `Answer.parsePython` | `parsePython(value: string): string` | Static. Extracts Python code from a code block in the response. |
+| `Answer.fromResult` | `fromResult(result: PIPELINE_RESULT, key?: string): Answer` | Static. Reads the answer a turn-mode `client.chat()` returned. A text entry gives a text `Answer`. Throws if `result` has no entry under `key`. |
+| `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
+| `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
+| `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
+| `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
+| `tokens` | field | Turn token usage, set by `fromResult`. |
 
 ## Types
 
@@ -308,6 +318,9 @@ constructor(expectJson?: boolean)  // default false
 - **PIPELINE_RESULT**: `{ name, path, objectId, result_types?, [key: string]: any }`.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **UPLOAD_RESULT**: Per-file result with e.g. `action` (`'complete'` \| `'error'`), `filepath`, `error?`, `result?`, `upload_time?`.
+- **SignupProperties**: Version 1 analytics context with experiment, variant, UUID assignment/exposure, message revision and a 30-minute exposure window; never an authorization claim. <!-- language-specific -->
+- **normalizeSignupProperties(value, now?)**: Validates untrusted context and returns a copy or `null`; the account service validates its experiment/catalog separately. <!-- language-specific -->
+- **PkceCredential**: PKCE code, verifier and redirect URI, plus optional consent-aware `signupProperties` [signup attribution](/clients/typescript/connection#optional-signup-attribution).
 - **ConnectResult**: Identity payload returned by `connect()`/`login()` — user, organizations, apps, teams.
 - **QuestionHistory**: `{ role: string, content: string }` · **QuestionExample**: `{ given: string, result: string }` · **QuestionType**/**QuestionText**.
 - **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListEnvelope<T>` (the generic list/versions/history envelope), `DeployListParams`, `SchedulePreview`, `AppVerifyReport`, `AppVerifyCheck` (from `rocketride`).

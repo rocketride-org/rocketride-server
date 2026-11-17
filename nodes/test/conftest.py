@@ -12,7 +12,7 @@ This module provides:
 - Dynamic test generation from service.json 'test' configs
 
 Configuration via environment variables:
-    ROCKETRIDE_URI           - Server URI (default: http://localhost:5565)
+    ROCKETRIDE_URI           - Server URI (default: http://127.0.0.1:5565)
     ROCKETRIDE_APIKEY        - API key for authentication (default: MYAPIKEY)
     ROCKETRIDE_INCLUDE_SKIP  - Comma-separated node names to opt into (e.g. embedding_image,ocr).
                                Use to run skip_nodes when explicitly requested.
@@ -63,6 +63,7 @@ except ImportError:
 from ._sys_modules_guard import (  # noqa: E402,F401
     pytest_collectreport,
     pytest_collectstart,
+    pytest_runtest_teardown,
     pytest_sessionfinish,
     pytest_terminal_summary,
 )
@@ -78,7 +79,8 @@ class TestConfig:
 
     def __init__(self) -> None:
         """Initialize test configuration from ROCKETRIDE_* environment variables."""
-        self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
+        # An IP, not 'localhost': on Windows the name tries ::1 first, ~2 s per connect.
+        self.uri = os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565')
         self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
         self.timeout = float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0'))
 

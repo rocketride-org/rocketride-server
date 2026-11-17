@@ -5,12 +5,22 @@ Validates that hits below ``retrieval_score_threshold`` are excluded
 from the result set returned by ``searchSemantic``.
 """
 
+import importlib.util
 import sys
 import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'store_milvus'))
+_NODE_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'store_milvus')
+sys.path.insert(0, _NODE_DIR)
+
+
+def _load_mode():
+    """The driver's local-vs-cloud helper, loaded alone: through the package it would load the whole node."""
+    spec = importlib.util.spec_from_file_location('nodes.store_milvus.mode', os.path.join(_NODE_DIR, 'mode.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # Mock heavy dependencies only for the duration of the milvus import so that
@@ -32,6 +42,7 @@ with patch.dict(
         'ai.common.schema': MagicMock(),
         'ai.common.store': MagicMock(DocumentStoreBase=_FakeDocumentStoreBase),
         'ai.common.config': MagicMock(),
+        'nodes.store_milvus.mode': _load_mode(),
     },
 ):
     from milvus import Store

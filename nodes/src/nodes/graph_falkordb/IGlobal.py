@@ -38,7 +38,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from redis.exceptions import RedisError
 
-from rocketlib import OPEN_MODE, warning
+from rocketlib import OPEN_MODE, debug, warning
 
 from ai.common.graph import GraphGlobalBase
 from ai.common.utils import config_int, parse_bool
@@ -51,6 +51,9 @@ DEFAULT_GRAPH = 'agent'
 URL_SCHEMES = ('falkor://', 'falkors://', 'redis://', 'rediss://', 'unix://')
 DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_ROW_CAP = 250
+# Statistics lines that describe how a statement ran, not what it changed.
+# FalkorDB 6 adds "Graph version" to every reply, reads included.
+RUN_STATS = ('cached execution', 'internal execution time', 'graph version')
 
 # FalkorDB has no db.schema.nodeTypeProperties(), so property names are read
 # off one live node per label.
@@ -63,6 +66,8 @@ SCHEMA_LABEL_LIMIT = 200
 
 class IGlobal(GraphGlobalBase):
     """FalkorDB-specific global connection state."""
+
+    supports_execute_params = True
 
     client: Optional[FalkorDB] = None
 
@@ -187,19 +192,57 @@ class IGlobal(GraphGlobalBase):
         result = self.select_graph().ro_query(query, params=params or None, timeout=self.query_timeout_ms)
         return self._rows_as_dicts(result, cap=cap)
 
-    def _run_query_raw(self, query: str) -> Dict[str, Any]:
-        """Execute a raw statement with writes allowed (the EXECUTE path)."""
+    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a raw statement with writes allowed (the EXECUTE path).
+
+        FalkorDB saves a statement before it returns and has no rollback, so a
+        write is already stored when the row cap is checked. A result is over
+        the cap when it passes ``max_execute_rows``, or when it reaches the
+        server's ``RESULTSET_SIZE``: the server cuts a reply there without
+        saying so. A read over the cap raises. A write over it returns the
+        rows it has, at most ``max_execute_rows``, with ``'truncated': True``:
+        an error there would make the caller retry a saved write and store it
+        twice.
+
+        Args:
+            query (str): The raw Cypher statement.
+            params (Optional[Dict[str, Any]]): Values for ``$name`` placeholders,
+                bound through the client's ``CYPHER`` header.
+
+        Returns:
+            Dict[str, Any]: ``{'rows': [...], 'affected_rows': int}``, plus
+            ``'truncated': True`` for a write over the cap.
+
+        Raises:
+            ValueError: A read result is over the cap.
+        """
         max_rows = self.max_execute_rows
-        result = self.select_graph().query(query, timeout=self.query_timeout_ms)
+        server_cap = self._server_reply_cap()
+        result = self.select_graph().query(query, params=params or None, timeout=self.query_timeout_ms)
 
         rows = self._rows_as_dicts(result, cap=max_rows + 1)
-        if len(rows) > max_rows:
-            raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
-
         # Count writes unconditionally: unlike SQL, a Cypher write commonly also
         # returns rows (CREATE (n) RETURN n), so `rows` being non-empty does not
         # mean nothing was written. _affected_rows is 0 for a pure read anyway.
-        return {'rows': rows, 'affected_rows': _affected_rows(result)}
+        affected = _affected_rows(result)
+        if len(rows) > max_rows:
+            read_error = f'EXECUTE query exceeded max_execute_rows={max_rows}'
+            write_note = f'EXECUTE result cut to max_execute_rows={max_rows}; the statement is saved'
+        elif server_cap is not None and len(result.result_set or []) >= server_cap:
+            # A reply of exactly RESULTSET_SIZE rows reads the same whether it is complete or cut.
+            read_error = (
+                f'EXECUTE query reached the server RESULTSET_SIZE={server_cap}, so its result may be cut; '
+                'add LIMIT or raise RESULTSET_SIZE'
+            )
+            write_note = f'EXECUTE result reached the server RESULTSET_SIZE={server_cap}; the statement is saved'
+        else:
+            return {'rows': rows, 'affected_rows': affected}
+
+        if not _wrote(result):
+            raise ValueError(read_error)
+
+        warning(write_note)
+        return {'rows': rows[:max_rows], 'affected_rows': affected, 'truncated': True}
 
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
@@ -255,6 +298,24 @@ class IGlobal(GraphGlobalBase):
     def list_graphs(self) -> List[str]:
         """List the graph names that exist on this server."""
         return [str(g) for g in (self.client.list_graphs() or [])]
+
+    def _server_reply_cap(self) -> Optional[int]:
+        """Return the server's ``RESULTSET_SIZE``, the row count it cuts every reply to.
+
+        Read on every call rather than once at connect, because
+        ``GRAPH.CONFIG SET`` changes it while the server runs.
+
+        Returns:
+            Optional[int]: The limit, or None when the server sets none (``-1``)
+            or the value cannot be read (for example, an ACL that denies
+            ``GRAPH.CONFIG``).
+        """
+        try:
+            size = int(self.client.config_get('RESULTSET_SIZE'))
+        except (RedisError, TypeError, ValueError) as e:
+            debug(f'FalkorDB RESULTSET_SIZE is unreadable, so a reply the server cuts is not detected: {e}')
+            return None
+        return size if size > 0 else None
 
     def _sample_properties(self, graph, label: str) -> List[Tuple[str, str]]:
         """Read property names off one node of ``label``; FalkorDB has no schema catalog."""
@@ -434,8 +495,44 @@ def _header_names(header) -> List[str]:
     return names
 
 
+def _wrote(result) -> bool:
+    """Tell whether a QueryResult reports any change to the graph.
+
+    Reads every statistics line of the reply, so a write counter missing from
+    _affected_rows (for example, one a newer server adds) still counts as a
+    write. Only the RUN_STATS lines are skipped. A line it cannot read counts as
+    a change: taking a write for a read would raise, and the caller's retry
+    would store the write twice.
+
+    Args:
+        result: A falkordb QueryResult.
+
+    Returns:
+        bool: True when some line reports a non-zero change. Falls back to
+        _affected_rows when the client exposes no raw statistics lines.
+    """
+    lines = getattr(result, '_raw_stats', None)
+    if not isinstance(lines, (list, tuple)):
+        return _affected_rows(result) > 0
+    for line in lines:
+        text = line.decode('utf-8', 'replace') if isinstance(line, bytes) else str(line)
+        name, _, value = text.partition(':')
+        if any(stat in name.lower() for stat in RUN_STATS):
+            continue
+        try:
+            if float(value.split()[0]) != 0:
+                return True
+        except (IndexError, ValueError):
+            return True
+    return False
+
+
 def _affected_rows(result) -> int:
-    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows)."""
+    """Sum the write counters of a QueryResult (CREATE/DELETE/SET return no rows).
+
+    This is the ``affected_rows`` number the caller sees. Whether the statement
+    wrote at all is decided by _wrote, which also counts lines this list lacks.
+    """
     total = 0
     for attr in (
         'nodes_created',
@@ -445,7 +542,9 @@ def _affected_rows(result) -> int:
         'properties_set',
         'properties_removed',
         'labels_added',
+        'labels_removed',
         'indices_created',
+        'indices_deleted',
     ):
         try:
             total += int(getattr(result, attr, 0) or 0)

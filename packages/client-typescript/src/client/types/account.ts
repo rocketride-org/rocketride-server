@@ -92,6 +92,17 @@ export interface OrgDetail {
 	teamCount: number;
 }
 
+/** The `deleteOrgPrecheck` dry-run result: what deleting the org involves —
+ *  the confirm dialog names the member count and the billing blocker before
+ *  anything is destroyed. */
+export interface DeleteOrgPrecheck {
+	/** How many members lose the workspace (and all of its data). */
+	members: number;
+
+	/** True when an active subscription blocks deletion (cancel billing first). */
+	subscriptionActive: boolean;
+}
+
 // =============================================================================
 // MEMBERS
 // =============================================================================
@@ -251,6 +262,34 @@ export interface InviteMemberParams {
 	 * Each entry specifies a team ID and the permissions to grant.
 	 */
 	teamAssignments?: Array<{ teamId: string; permissions: string[] }>;
+
+	/**
+	 * Optional development team for the invitee. It must be one of the
+	 * `teamAssignments` teams with `task.control` (any org team when `role`
+	 * is "admin"). When omitted the server picks one if only one team qualifies.
+	 */
+	devTeamId?: string;
+}
+
+/** The membership the server created for an invite. */
+export interface InvitedMember {
+	/** Unique identifier of the invited user. */
+	userId: string;
+
+	/** The invitee's display name. */
+	displayName: string;
+
+	/** The invitee's email address. */
+	email: string;
+
+	/** The organization-level role assigned. */
+	role: string;
+
+	/** "pending" until the invitee sets a password, "active" if their account already existed. */
+	status: string;
+
+	/** The team recorded as the invitee's development team, or null when none was recorded. */
+	devTeamId: string | null;
 }
 
 /** Parameters for adding or updating a team member. */

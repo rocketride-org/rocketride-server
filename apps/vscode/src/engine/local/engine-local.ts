@@ -66,16 +66,6 @@ export class EngineLocal extends EngineBackend {
 	// PUBLIC API
 	// =========================================================================
 
-	/** The EngineInstaller (for version fetching in UI). */
-	getInstaller(): EngineInstaller {
-		return this.installer;
-	}
-
-	/** The port the engine is listening on (after start). */
-	getActualPort(): number | undefined {
-		return this.actualPort;
-	}
-
 	/** Returns installed engine version info, or null. */
 	getInfo(): EngineInfo | null {
 		const installed = this.installer.getInstalledVersion();
@@ -127,17 +117,20 @@ export class EngineLocal extends EngineBackend {
 	async start(config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
 		const versionSpec = config.local.engineVersion || 'latest';
 
+		// --- Phase 0: Stop any running engine FIRST ---
+		// The install clears the engine directory before extracting, so a
+		// still-running engine.exe would hold its own files (lib/, DLLs)
+		// locked and break the replacement. Must precede Phase 1.
+		if (this.child) {
+			await this.stopProcess();
+		}
+
 		// --- Phase 1: Download/Install ---
 		await this.install(versionSpec, config, token);
 
 		// --- Phase 2: Start process ---
 		this.emitStatus({ phase: 'working', message: 'Starting server...' });
 		this.logger.output(`${icons.launch} Starting local server (dynamic port)`);
-
-		// Stop any existing process before starting a new one
-		if (this.child) {
-			await this.stopProcess();
-		}
 
 		// The engine process spawns with base args only. Task arguments and debug
 		// output are per-task settings passed via `.use` at execution time, not

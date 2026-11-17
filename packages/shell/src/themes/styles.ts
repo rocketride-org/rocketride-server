@@ -570,6 +570,46 @@ const labelUppercase: CSSProperties = {
 };
 
 // =============================================================================
+// PANE HEADERS — sidebar-section title rows (Explorer, Source Control, …)
+// =============================================================================
+
+/**
+ * Pane-header action cluster — VS Code's view-title treatment: the icon
+ * buttons exist only while the pointer is over the PANE (fading, not
+ * unmounting, so the header never reflows and a mid-fade click still
+ * lands). The pane tracks its own hover state and passes it down.
+ *
+ * THE standard for every sidebar-section header across the platform's
+ * apps — pair each button with `paneHeaderButton` and an 18px icon.
+ *
+ * @param visible - True while the pointer is over the pane (or a flow,
+ *                  e.g. inline create, needs the buttons pinned visible).
+ */
+const paneHeaderActions = (visible: boolean): CSSProperties => ({
+	display: 'flex',
+	alignItems: 'center',
+	opacity: visible ? 1 : 0,
+	pointerEvents: visible ? 'auto' : 'none',
+	transition: 'opacity 100ms',
+});
+
+/**
+ * One pane-header icon button — the standard size for section-header
+ * actions (new file, refresh, collapse all, …): 4px padding around an
+ * 18px icon. Render inside a `paneHeaderActions` cluster.
+ */
+const paneHeaderButton: CSSProperties = {
+	background: 'none',
+	border: 'none',
+	cursor: 'pointer',
+	padding: 4,
+	borderRadius: 5,
+	color: 'var(--rr-text-secondary)',
+	display: 'flex',
+	alignItems: 'center',
+};
+
+// =============================================================================
 // OVERLAYS & MODALS
 // =============================================================================
 // Two backdrop variants exist:
@@ -859,6 +899,10 @@ export const commonStyles = {
 	section,
 	sectionHeader,
 	sectionHeaderLabel,
+	// Pane headers — paneHeaderActions(visible) wraps paneHeaderButton items
+	// (the hover-revealed icon cluster every sidebar section header uses)
+	paneHeaderActions,
+	paneHeaderButton,
 
 	// Buttons — primary/secondary/danger; small pre-composed variants; disabled modifier
 	buttonPrimary,
