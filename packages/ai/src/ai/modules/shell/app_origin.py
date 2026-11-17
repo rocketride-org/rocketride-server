@@ -1019,6 +1019,7 @@ def client_rate_ok(client: str) -> bool:
 
 
 _CLIENT_IP_MAX = 64
+_NAT64 = ipaddress.ip_network('64:ff9b::/96')
 
 
 def _bucket_of(value: str) -> Optional[str]:
@@ -1027,9 +1028,11 @@ def _bucket_of(value: str) -> Optional[str]:
 
     Accepted forms: a bare address, ``v4:port``, ``[v6]`` or ``[v6]:port``,
     and CloudFront's unbracketed ``v6:port`` when the whole value is not
-    itself an address. An IPv4 address is its own bucket; an IPv6 address
-    is keyed by its /64 (one subscriber's allocation), so neither rotating
-    the low 64 bits nor a port read as the last group (``2a01:db8::1:443``
+    itself an address. An IPv4 address is its own bucket, also when it
+    arrives IPv4-mapped (``::ffff:a.b.c.d``) or through NAT64
+    (``64:ff9b::/96``); any other IPv6 address is keyed by its /64 (one
+    subscriber's allocation), so neither rotating the low 64 bits nor a
+    port read as the last group (``2a01:db8::1:443``
     is also a valid address) gives a client another bucket.
     """
     value = value.strip()
@@ -1053,11 +1056,19 @@ def _bucket_of(value: str) -> Optional[str]:
     for candidate in candidates:
         try:
             address = ipaddress.ip_address(candidate)
+            if address.version == 6:
+                # An IPv4 client seen through IPv6 (a dual-stack listener's
+                # ::ffff:a.b.c.d, or NAT64 64:ff9b::/96) is that IPv4 client:
+                # bucketing it by /64 would put every IPv4 client in ::/64.
+                embedded = address.ipv4_mapped
+                if embedded is None and address in _NAT64:
+                    embedded = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+                if embedded is not None:
+                    return str(embedded)
+                return str(ipaddress.ip_network(f'{address}/64', strict=False))
+            return str(address)
         except ValueError:
-            continue
-        if address.version == 6:
-            return str(ipaddress.ip_network(f'{address}/64', strict=False))
-        return str(address)
+            continue  # including scope-id forms some Python releases refuse as a network
     return None
 
 

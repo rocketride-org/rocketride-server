@@ -646,3 +646,30 @@ def test_trusted_header_without_proxy_cidrs_warns_at_startup(isolation_env, monk
     isolation_env.set(RR_TRUSTED_PROXY_CIDRS='10.0.0.0/8')
     _validate()
     assert not any('RR_TRUSTED_PROXY_CIDRS' in line and 'WARNING' in line for line in lines), lines
+
+
+def test_ipv4_mapped_and_nat64_addresses_bucket_as_their_ipv4(isolation_env):
+    """T8d (G4 round 4 R4-L1): a dual-stack listener reports IPv4 peers as ::ffff:a.b.c.d; those (and NAT64
+    64:ff9b::/96) must bucket per IPv4 address, not all together in ::/64.
+    """
+    cfg = isolation_env.config()
+    first = _client_ip(cfg, '::ffff:203.0.113.7')
+    second = _client_ip(cfg, '::ffff:198.51.100.9')
+    assert first == '203.0.113.7' and second == '198.51.100.9'
+    assert first == _client_ip(cfg, '203.0.113.7') and second == _client_ip(cfg, '198.51.100.9')
+    assert _client_ip(cfg, '64:ff9b::cb00:7107') == '203.0.113.7'
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='CloudFront-Viewer-Address')
+    cfg = isolation_env.config()
+    assert _client_ip(cfg, '10.0.0.1', ('cloudfront-viewer-address', '[::ffff:203.0.113.7]:443')) == '203.0.113.7'
+
+
+@pytest.mark.parametrize('value', ['fe80::1%eth0', 'fe80::1%25eth0', '[fe80::1%eth0]:443'])
+def test_scope_id_values_never_raise(value, isolation_env):
+    """T8d (R4-L1): a scope-id form is a bucket or the peer fallback, never an exception (a 500 on an open route)."""
+    cfg = isolation_env.config()
+    assert isinstance(_client_ip(cfg, value), str)
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='CloudFront-Viewer-Address')
+    assert _client_ip(isolation_env.config(), '10.0.0.1', ('cloudfront-viewer-address', value)) in (
+        '10.0.0.1',
+        'fe80::/64',
+    )
