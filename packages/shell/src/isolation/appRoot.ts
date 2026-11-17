@@ -88,7 +88,7 @@ interface IRealmState {
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Calls `cb` for every string (values and keys), skipping binary members. Throws what `cb` throws. */
+/** Calls `cb` for every string (values and keys), skipping exact binary members only. Throws what `cb` throws. */
 function scanStrings(value: unknown, cb: (s: string) => void): void {
 	const seen = new Set<object>();
 	const stack: unknown[] = [value];
@@ -380,7 +380,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		emitOp('shell.setPref', (params) => {
 			const key = params.key as string;
 			if (key === '' || key.length > SIZES.prefKey) throw deny('schema', 'shell.setPref');
-			if (measure(params.value).json > SIZES.prefValue) throw deny('too_large', 'shell.setPref');
+			const size = measure(params.value);
+			if (size.json + size.bin > SIZES.prefValue) throw deny('too_large', 'shell.setPref');
 			if (!st.prefKeys.has(key) && st.prefKeys.size >= SIZES.prefKeys) throw deny('quota', 'shell.setPref');
 			st.prefKeys.add(key);
 			// A plain (not null-prototype) copy for the prefs store.

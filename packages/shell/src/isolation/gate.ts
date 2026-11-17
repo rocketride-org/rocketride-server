@@ -107,6 +107,7 @@ function walkParams(g: IGateContext, op: string, raw: unknown): Record<string, u
 	const session = g.sessionToken();
 	const copy = walk(raw === undefined ? {} : raw, {
 		onString(s) {
+			if (s.length > SIZES.stringCeiling) throw deny('too_large', op);
 			if (session !== '' && s.includes(session)) throw deny('credential', op);
 		},
 	});
@@ -135,9 +136,11 @@ function checkType(op: string, name: string, base: string, value: unknown, g: IG
 		case 'string[]':
 			if (!Array.isArray(value) || value.length > 32 || !value.every((t) => typeof t === 'string' && EVENT_TYPE_RE.test(t))) fail('schema');
 			return value;
-		case 'json':
-			if (measure(value).json > SIZES.json) fail('too_large');
+		case 'json': {
+			const size = measure(value);
+			if (size.json + size.bin > SIZES.json) fail('too_large');
 			return value;
+		}
 		case 'object':
 		case 'object:mint-project':
 		case 'object:handle-project':
@@ -150,7 +153,7 @@ function checkType(op: string, name: string, base: string, value: unknown, g: IG
 			if (!isPlainObject(value) || Object.keys(value).length !== 0) fail('schema');
 			return value;
 		case 'bytes<=8MiB': {
-			if (!isWireBinary(value) || Object.keys(value).length !== 2) return fail('schema');
+			if (!isWireBinary(value)) return fail('schema');
 			const n = b64DecodedLength(value.b64);
 			if (n < 0) fail('schema');
 			if (n > SIZES.bytes) fail('too_large');
@@ -226,7 +229,8 @@ function checkArgs(g: IGateContext, row: CapabilityRow, args: Record<string, unk
  */
 export function gateOp(g: IGateContext, op: string, raw: unknown): { params: Record<string, unknown>; run?: IRunEntry } {
 	const params = walkParams(g, op, raw);
-	if (measure(params).json > SIZES.request) throw deny('too_large', op);
+	const size = measure(params);
+	if (size.json + size.bin > SIZES.request) throw deny('too_large', op);
 	if (!g.rate.allow('request')) throw deny('rate', op);
 	if (INTERVALS[op] !== undefined && !g.rate.allow(op)) throw deny('rate', op);
 	const row = matchRow(op, undefined, undefined);
@@ -255,8 +259,8 @@ export function gateClientRequest(g: IGateContext, raw: unknown): IGatedRequest 
 	for (const key of Object.keys(params)) if (key !== 'message' && key !== 'timeout') throw deny('schema', op);
 	const message = params.message;
 	if (!isPlainObject(message)) throw deny('schema', op);
-	// (2) size
-	const size = measure(message);
+	// (2) size: binary counts as binary only at `arguments.data` (the bytes slot); elsewhere it is JSON
+	const size = measure(message, isPlainObject(message.arguments) ? message.arguments.data : undefined);
 	if (size.json > SIZES.request || size.bin > SIZES.bytes) throw deny('too_large', op);
 	// (3) rate
 	if (!g.rate.allow('request')) throw deny('rate', op);

@@ -129,9 +129,14 @@ export function utf8Length(s: string): number {
 	return n;
 }
 
-/** Whether a value is the bus's binary member (`connection/binaryWire.ts`). */
+/**
+ * Whether a value is exactly the bus's binary member (`connection/binaryWire.ts`):
+ * own keys `__rrbin` (true) and `b64` (a string), nothing else.
+ */
 export function isWireBinary(v: unknown): v is { __rrbin: true; b64: string } {
-	return typeof v === 'object' && v !== null && (v as Record<string, unknown>).__rrbin === true && typeof (v as Record<string, unknown>).b64 === 'string';
+	if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+	const keys = Object.keys(v);
+	return keys.length === 2 && (v as Record<string, unknown>).__rrbin === true && typeof (v as Record<string, unknown>).b64 === 'string';
 }
 
 const B64 = /^[A-Za-z0-9+/]*={0,2}$/;
@@ -144,18 +149,20 @@ export function b64DecodedLength(b64: string): number {
 }
 
 /**
- * The byte measure of plan section 4.3: UTF-8 `JSON.stringify`, with each
- * binary member (`__rrbin` or a byte array) counted at its decoded size in
- * `bin` instead of in `json`.
+ * The byte measure of plan section 4.3: UTF-8 `JSON.stringify`. Byte arrays,
+ * and the one binary member at `binarySlot` (a valid `__rrbin` in a
+ * `bytes<=8MiB` position), count at their decoded size in `bin`; any other
+ * binary-shaped object is ordinary JSON, base64 text included.
  *
  * @param value - A walked value (or an engine response).
+ * @param binarySlot - The member allowed to count as binary, if any.
  * @returns The JSON and binary byte counts.
  */
-export function measure(value: unknown): { json: number; bin: number } {
+export function measure(value: unknown, binarySlot?: unknown): { json: number; bin: number } {
 	let bin = 0;
 	const text = JSON.stringify(value, (_key, v: unknown) => {
-		if (isWireBinary(v)) {
-			bin += Math.max(0, b64DecodedLength(v.b64));
+		if (binarySlot !== undefined && v === binarySlot && isWireBinary(v) && b64DecodedLength(v.b64) >= 0) {
+			bin += b64DecodedLength(v.b64);
 			return null;
 		}
 		if (ArrayBuffer.isView(v)) {

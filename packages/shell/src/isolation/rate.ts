@@ -49,6 +49,8 @@ export const SIZES = {
 	string: 4096,
 	/** Names, sources, modes and subcommands, in UTF-8 bytes. */
 	name: 128,
+	/** Any one inbound string, in characters, checked before it is scanned (an 8 MiB base64 payload plus slack). */
+	stringCeiling: Math.ceil((8 * 1024 * 1024 * 4) / 3) + 1024,
 } as const;
 
 /** Per-realm quotas (`quota`); `inflight` is reported as `rate`. */
