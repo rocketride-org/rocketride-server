@@ -85,6 +85,7 @@ class FakeEngineClient:
         fs_get_url_result='https://signed.example/f?sig=abc',
         env_keys=None,
         auth=None,
+        capabilities=None,
     ):
         self._tasks = (
             tasks
@@ -181,6 +182,9 @@ class FakeEngineClient:
         self.auth = auth
         self._env_keys = env_keys if env_keys is not None else []
         self.get_environment_keys_calls = 0
+        # The capability tags of the engine's sign-in result (or an exception to raise)
+        self._capabilities = capabilities if capabilities is not None else []
+        self.get_capabilities_calls = 0
         self.closed = False
         self.close_calls = 0
 
@@ -378,6 +382,12 @@ class FakeEngineClient:
         if isinstance(self._env_keys, Exception):
             raise self._env_keys
         return list(self._env_keys)
+
+    async def get_capabilities(self):
+        self.get_capabilities_calls += 1
+        if isinstance(self._capabilities, Exception):
+            raise self._capabilities
+        return list(self._capabilities)
 
     async def close(self):
         self.close_calls += 1

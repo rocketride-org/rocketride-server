@@ -53,6 +53,10 @@ setup).
   `wiring` (a config-path → `${ENV_VAR}` map) appears only for configured
   credentialed integrations; `note` appears when unconfigured integrations were
   omitted.
+- **Notable:** on an engine that runs `llm_openai` on RocketRide-hosted models
+  (the engine reports the `hosted-models:openai` capability), `llm_openai` is
+  listed even when you saved no key, with an empty `wiring`: leave `apikey`
+  empty. A key you saved still wires as usual.
 
 ### describe_component
 
@@ -89,13 +93,18 @@ node on the connected engine are listed.
 - **Parameters:** `name` (string, optional) — request full field detail for one
   integration.
 - **Returns (bare call):** `{ok, integrations: [{name, title, status,
-  missing_count}], note}` with status one of `configured`, `available`
+  missing_count, hosted?}], note}` with status one of `configured`, `available`
   (needs setup — no matching variables found), or `unconfirmed` (candidate
   variables found for you to confirm, or the variable read failed).
 - **Returns (with `name`):** `{ok, name, title, fields, caller_variables,
-  status, missing, candidates, wiring | setup}` — `setup` carries the
-  suggested variable names, instructions to relay to the user, and a docs
-  link.
+  status, missing, candidates, wiring | setup, hosted?, note?}` — `setup`
+  carries the suggested variable names, instructions to relay to the user, and
+  a docs link.
+- **Hosted models:** on an engine that reports the `hosted-models:openai`
+  capability, `llm_openai` with no saved key is `configured` with an empty
+  `wiring`, `hosted: true` and a one-line `note` to relay: the node runs on
+  RocketRide-hosted models when `apikey` is left empty. A saved key still wins
+  and wires as usual. No other integration changes.
 - **Notable:** only environment-variable **names** are read and reported —
   values never transit MCP. Wiring values are emitted as `${VAR}` placeholder
   strings for use in a pipeline config.

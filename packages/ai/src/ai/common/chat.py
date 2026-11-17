@@ -282,6 +282,29 @@ class ChatBase:
         """
         return error
 
+    def terminal_error(self, error: Exception) -> Optional[Exception]:
+        """Return the error to raise at once for ``error``, or None to handle it as usual.
+
+        A terminal error ends the call where it is caught: no engine retry, no
+        fallback request through another path, no empty answer in its place.
+        A driver returns one for an error that sending again cannot change.
+
+        Args:
+            error (Exception): The error a model call raised.
+        Returns:
+            Optional[Exception]: The error to raise instead, or None.
+        """
+        return None
+
+    def _raise_if_terminal(self, error: Exception) -> None:
+        """Raise ``terminal_error(error)`` when it is not None. Called first in every handler that retries or falls back."""
+        terminal = self.terminal_error(error)
+        if terminal is None:
+            return
+        if terminal is error:
+            raise error
+        raise terminal from error
+
     def is_retryable_error(self, error: Exception) -> bool:
         """
         Determine if an error is retryable based on common API and network error patterns.
@@ -420,6 +443,8 @@ class ChatBase:
                 return call()
 
             except Exception as e:
+                self._raise_if_terminal(e)
+
                 # Determine if this is a retryable error
                 is_retryable = self.is_retryable_error(e)
 
@@ -477,12 +502,18 @@ class ChatBase:
                 on_finish(adapter.finish_reason)
             return text
         except Exception as e:
+            self._raise_if_terminal(e)
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
                 adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
-                content_text, _items = adapter.collect(prompt)
+                try:
+                    content_text, _items = adapter.collect(prompt)
+                except Exception as e2:
+                    # The fallback is a request of its own, and can be the one refused
+                    self._raise_if_terminal(e2)
+                    raise
                 # Reasoning reaches its own lane; it must never land in the visible text.
                 if adapter.reasoning and on_reasoning_chunk is not None:
                     on_reasoning_chunk(adapter.reasoning)
@@ -584,6 +615,7 @@ class ChatBase:
                     if on_finish is not None:
                         on_finish(adapter.finish_reason)
             except Exception as e:
+                self._raise_if_terminal(e)
                 warning(
                     f'Streaming disabled for model={self._model} '
                     f'({type(e).__name__}): {e}. Falling back to non-streaming response.'
@@ -658,6 +690,7 @@ class ChatBase:
                 drive_adapter(adapter, None, on_text, on_reasoning_chunk)
                 message = adapter.message
             except Exception as e:
+                self._raise_if_terminal(e)
                 if emitted:
                     raise
                 warning(

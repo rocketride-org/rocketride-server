@@ -228,6 +228,37 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
+# The error type a hosted model backend puts on its own refusals. Such a refusal
+# is final: sending the request again, with or without a flag, cannot change it.
+HOSTED_REFUSAL_TYPE = 'rocketride_gateway_error'
+
+
+def hosted_refusal_body(e: BaseException) -> Optional[dict]:
+    """Return the error object of a hosted backend's refusal, or None.
+
+    The openai SDK unwraps the outer ``error`` object before it builds the
+    exception, so ``body`` is usually ``{type, code, message}``; the wrapped
+    ``{error: {...}}`` shape is accepted too. An exception raised ``from`` a
+    refusal counts as that refusal.
+    """
+    seen = 0
+    while e is not None and seen < 4:
+        body = getattr(e, 'body', None)
+        if isinstance(body, dict):
+            nested = body.get('error')
+            err = nested if isinstance(nested, dict) else body
+            if err.get('type') == HOSTED_REFUSAL_TYPE:
+                return err
+        e = e.__cause__
+        seen += 1
+    return None
+
+
+def is_hosted_refusal(e: BaseException) -> bool:
+    """True when ``e`` is a hosted model backend's refusal (see HOSTED_REFUSAL_TYPE)."""
+    return hosted_refusal_body(e) is not None
+
+
 # Word-boundary match so "stopped" / "nonstop" / "stop_reason" do not trip the heuristic.
 # Anthropic names the parameter stop_sequences; `_` is a word char so `\bstop\b` misses it.
 _STOP_WORD_RE = re.compile(r'\bstop(?:_sequences)?\b', re.IGNORECASE)
@@ -250,6 +281,8 @@ def is_stop_rejection(e: Exception, stop_sent: bool) -> bool:
     stop sequence; agent-level truncation (``truncate_at_stop_words``) is the
     backstop.
     """
+    if is_hosted_refusal(e):
+        return False
     if not stop_sent:
         return False
 
@@ -303,8 +336,11 @@ def is_usage_flag_rejection(e: Exception) -> bool:
     (UnprocessableEntityError) is what a FastAPI-based server — vLLM's OpenAI-compatible
     server is one — answers request-validation failures with. Auth, timeout and rate-limit
     statuses say nothing about the flag, so they re-raise without a second round trip, and a
-    transient connection failure carries no ``status_code`` at all.
+    transient connection failure carries no ``status_code`` at all. A hosted backend's
+    refusal is never a flag rejection.
     """
+    if is_hosted_refusal(e):
+        return False
     status = getattr(e, 'status_code', None)
     return isinstance(status, int) and 400 <= status < 500 and status not in (401, 403, 408, 429)
 

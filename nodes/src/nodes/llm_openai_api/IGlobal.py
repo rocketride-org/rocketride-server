@@ -45,6 +45,11 @@ class IGlobal(IGlobalBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
                 return
 
+            # No key and no endpoint of its own: on a hosted engine the run gets its
+            # models when it starts, so there is nothing to probe now
+            if (not isinstance(apikey, str) or not apikey.strip()) and not base_url:
+                return
+
             # Simple API validation using provider-driven exceptions
             try:
                 kwargs = {'api_key': apikey, 'timeout': 10.0}

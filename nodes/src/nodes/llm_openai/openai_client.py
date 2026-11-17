@@ -28,6 +28,7 @@ OpenAI binding for the ChatLLM.
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.model_gateway import HostedModelError, friendly_gateway_error, resolve_openai_credentials
 from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -54,6 +55,8 @@ class Chat(ChatBase):
     SUPPORTS_REASONING_STREAMING = True
     SUPPORTS_NATIVE_TOOLS = True
     _responses_llm = None
+    # True when the clients run on the run's hosted models pass (no key of our own)
+    _hosted_models = False
 
     _llm: ChatOpenAI
 
@@ -67,24 +70,30 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the api key, don't save it
-        apikey = config.get('apikey')
+        # The node's own key, or on a hosted engine with no key, the run's hosted
+        # models pass. Every client below gets the same key and base URL.
+        credentials = resolve_openai_credentials(provider, config.get('apikey'))
+        apikey = credentials.apikey
         self._apikey = apikey
+        self._hosted_models = credentials.hosted
+        self._client_kwargs = {'api_key': apikey}
+        if credentials.base_url:
+            self._client_kwargs['base_url'] = credentials.base_url
 
         # Reasoning models stream via the Responses API + max_completion_tokens.
         if self._is_reasoning:
             # Raw client for the Responses API path (reasoning models).
-            self._raw_client = OpenAI(api_key=apikey)
+            self._raw_client = OpenAI(**self._client_kwargs)
             self._llm = ChatOpenAI(
                 model=self._model,
-                api_key=apikey,
+                **self._client_kwargs,
                 model_kwargs={'max_completion_tokens': self._modelOutputTokens},
             )
         else:
             self._raw_client = None
             self._llm = ChatOpenAI(
                 model=self._model,
-                api_key=apikey,
+                **self._client_kwargs,
                 temperature=config['temperature'] if 'temperature' in config else 0,
                 max_tokens=self._modelOutputTokens,
             )
@@ -100,7 +109,7 @@ class Chat(ChatBase):
         if self._responses_llm is None:
             self._responses_llm = _ResponsesChatOpenAI(
                 model=self._model,
-                api_key=self._apikey,
+                **self._client_kwargs,
                 use_responses_api=True,
                 max_tokens=self._modelOutputTokens,
                 reasoning={'summary': 'auto'},
@@ -108,6 +117,15 @@ class Chat(ChatBase):
                 store=False,
             )
         return self._responses_llm
+
+    def terminal_error(self, error):
+        """
+        A refusal from the hosted models backend ends the call with its sentence.
+        """
+        if not self._hosted_models:
+            return None
+        sentence = friendly_gateway_error(error, self._model)
+        return HostedModelError(sentence) if sentence else None
 
     def is_retryable_error(self, error):
         """
