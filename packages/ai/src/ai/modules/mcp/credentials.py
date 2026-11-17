@@ -39,6 +39,12 @@ _GENERIC_TOKENS = frozenset(
     }
 )
 
+# The capability tag an engine's account reports when the integrations below run
+# with no key of the caller's own (contract: checked by membership, never equality).
+HOSTED_MODELS_CAPABILITY = 'hosted-models:openai'
+HOSTED_INTEGRATIONS = frozenset({'llm_openai'})
+HOSTED_NOTE = 'Runs on RocketRide-hosted models, billed to your compute tokens. Leave apikey empty.'
+
 SETUP_HOW = (
     'Set these variables in RocketRide: VS Code extension -> RocketRide: '
     'Settings -> Variables, or https://app.rocketride.ai/settings/variables. '
@@ -122,7 +128,14 @@ def node_tokens(name: str) -> frozenset:
     return frozenset(parts) if parts else frozenset({name.upper()})
 
 
-def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
+def evaluate(spec: Integration, env_keys: Optional[List[str]], hosted_models: bool = False) -> dict:
+    """The caller's readiness for one integration.
+
+    ``hosted_models``: the engine runs this integration with no key of the
+    caller's (see HOSTED_INTEGRATIONS). A saved key still wins and wires as
+    usual; without one the node is configured with nothing to wire, and the
+    state carries ``hosted``.
+    """
     if not spec.wire:
         # Optional-auth nodes must stay listed and must not emit a secret-only
         # wiring dict (that would recreate #2495: authToken with authType none).
@@ -134,6 +147,17 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
             'wiring': None,
         }
     required = [f for f in spec.fields if f.required]
+    if hosted_models and spec.name in HOSTED_INTEGRATIONS:
+        have = set(env_keys) if env_keys is not None else set()
+        if env_keys is None or any(f.suggests not in have for f in required):
+            return {
+                'status': 'configured',
+                'env_error': env_keys is None,
+                'missing': [],
+                'candidates': [],
+                'wiring': {},
+                'hosted': True,
+            }
     if env_keys is None:
         return {
             'status': 'unconfirmed',
@@ -159,6 +183,23 @@ def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
     )
     status = 'unconfirmed' if candidates else 'available'
     return {'status': status, 'env_error': False, 'missing': missing, 'candidates': candidates, 'wiring': None}
+
+
+async def fetch_hosted_models(client) -> bool:
+    """Whether the engine runs the hosted integrations with no key of the caller's.
+
+    Read from the capability tags of the engine's sign-in result. Any failure
+    counts as no: the integrations then need a key, as on any other engine.
+    """
+    getter = getattr(client, 'get_capabilities', None)
+    if getter is None:
+        return False
+    try:
+        capabilities = await getter()
+    except Exception as exc:  # noqa: BLE001 - unknown means "needs a key", the safe answer
+        logger.warning('get_capabilities failed; hosted models count as off: %s', exc)
+        return False
+    return HOSTED_MODELS_CAPABILITY in (capabilities or ())
 
 
 async def fetch_env_keys(client) -> Optional[List[str]]:
@@ -195,4 +236,7 @@ def describe_state(spec: Integration, state: dict) -> dict:
         result['wiring'] = state['wiring']
     else:
         result['setup'] = setup_block(spec)
+    if state.get('hosted'):
+        result['hosted'] = True
+        result['note'] = HOSTED_NOTE
     return result

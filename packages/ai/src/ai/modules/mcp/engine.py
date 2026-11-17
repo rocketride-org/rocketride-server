@@ -103,6 +103,7 @@ class EngineClient(Protocol):
         self, project_id: str, source: str, team_id: str = '', *, begin_seq: int = 0
     ) -> Dict[str, Any]: ...
     async def get_environment_keys(self) -> List[str]: ...
+    async def get_capabilities(self) -> List[str]: ...
     async def close(self) -> None: ...
 
 
@@ -431,6 +432,13 @@ class WsEngineClient:
 
     async def get_environment_keys(self) -> List[str]:
         return await self._guarded(lambda: self._client.account.get_environment_keys())
+
+    async def get_capabilities(self) -> List[str]:
+        """The capability tags of the engine's sign-in result, as the SDK kept them."""
+        await self._ensure_connected()
+        info = self._client.get_account_info() or {}
+        capabilities = info.get('capabilities') if isinstance(info, dict) else None
+        return [c for c in capabilities if isinstance(c, str)] if isinstance(capabilities, (list, tuple)) else []
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:

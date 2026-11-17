@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterator
 from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.model_gateway import HostedModelError, friendly_gateway_error, resolve_openai_credentials
 from langchain_openai import ChatOpenAI as _LangChainChatOpenAI
 from openai import APIError, APIStatusError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -157,6 +158,8 @@ class Chat(ChatBase):
     _llm: ChatOpenAI
 
     SUPPORTS_NATIVE_TOOLS = True
+    # True when the client runs on the run's hosted models pass (no key of our own)
+    _hosted_models = False
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -168,9 +171,12 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the api key and base url
-        apikey = config.get('apikey')
-        base_url = config.get('base_url') or None
+        # The node's own key and base url, or on a hosted engine with neither,
+        # the run's hosted models pass
+        credentials = resolve_openai_credentials(provider, config.get('apikey'), config.get('base_url') or None)
+        apikey = credentials.apikey
+        base_url = credentials.base_url or None
+        self._hosted_models = credentials.hosted
 
         # Build kwargs for ChatOpenAI
         kwargs = {
@@ -189,6 +195,15 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def terminal_error(self, error):
+        """
+        A refusal from the hosted models backend ends the call with its sentence.
+        """
+        if not self._hosted_models:
+            return None
+        sentence = friendly_gateway_error(error, self._model)
+        return HostedModelError(sentence) if sentence else None
 
     def is_retryable_error(self, error):
         """

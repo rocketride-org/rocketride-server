@@ -126,6 +126,20 @@ Set `apikey` to an OpenAI API key for every profile (including `custom`). The ke
 verified with a live one-word test call during pipeline validation, so a bad key or model
 name is reported before the pipeline runs rather than at first invoke.
 
+On a hosted engine that offers RocketRide-hosted models, you can leave `apikey` empty.
+Each run then gets a pass from the engine when it starts, and the node sends its requests
+with it to the hosted models instead of to your own OpenAI account. A key you enter always
+wins. A pipeline can mix the two: a node with a key uses it, and a node without one uses
+the hosted models.
+
+With an empty `apikey` and nothing else to use, the node stops before it sends a request:
+
+- On a hosted engine that offers no hosted models for the run: `llm_openai: no API key is
+  set, and RocketRide-hosted models aren't available for this run.` followed by how to add
+  a key.
+- On a self-hosted engine with no `OPENAI_API_KEY` in its environment: `llm_openai: no API
+  key is set.` followed by how to add a key.
+
 ## Notes
 
 ### Reasoning streaming
@@ -141,7 +155,11 @@ reasoning models ignore it, because OpenAI's Responses API controls sampling sep
 
 ### Validation and errors
 
-Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
+Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. With an empty `apikey` it makes no call. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
+
+When the hosted models refuse a request, for example because the workspace doesn't have
+enough compute tokens left, the run fails with a sentence that says what happened and what
+to do. The request is not sent again, and no other request is tried in its place.
 
 ### Testing
 

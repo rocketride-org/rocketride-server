@@ -178,6 +178,12 @@ class AccountBase(ABC):
     # the safe, gated behavior.
     review_ladder: bool = True
 
+    # Model providers this engine can run through a hosted backend: a node of
+    # that provider with no key of its own uses the per-run pass from
+    # issue_model_pass. A hosted backend reads this to decide whether it
+    # offers hosted models at all.
+    hosted_model_providers: tuple = ('openai',)
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================
@@ -737,6 +743,32 @@ class AccountBase(ABC):
             return dsn
         separator = '&' if parsed.query else '?'
         return f'{dsn}{separator}sslmode=require'
+
+    # =========================================================================
+    # HOSTED MODELS — a per-run pass for a node that has no model key
+    # =========================================================================
+
+    async def issue_model_pass(self, identity: dict) -> dict | None:
+        """Give one run a pass for hosted models, or None when this engine has none.
+
+        The task engine calls this at task start, only on a hosted engine and
+        only when the pipeline has an OpenAI node with no key, and hands the
+        result to the task as ``ROCKETRIDE_MODEL_GATEWAY``.
+
+        Args:
+            identity: ``{org_id, user_id, team_id, run_id, task_id}``, all
+                strings. ``run_id`` is new at every task start.
+
+        Returns:
+            None, or ``{provider, base_url, token, expires_at}``: an
+            OpenAI-style root on ``127.0.0.1`` that ends in ``/v1``, an opaque
+            bearer token, and the pass's end as a Unix time.
+        """
+        return None
+
+    async def revoke_model_pass(self, run_id: str) -> None:
+        """End a run's pass. Safe to call for an unknown run."""
+        return None
 
     # =========================================================================
     # DEPLOYMENTS — the teams-as-environments interface.

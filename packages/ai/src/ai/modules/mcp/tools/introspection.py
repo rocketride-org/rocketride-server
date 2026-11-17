@@ -44,6 +44,8 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
     # matching node here is irrelevant to this call.
     has_credentialed_node = any(name in catalog for name in definitions)
     env_keys = await credentials_mod.fetch_env_keys(client) if has_credentialed_node else None
+    has_hosted_node = any(name in credentials_mod.HOSTED_INTEGRATIONS for name in definitions)
+    hosted_models = await credentials_mod.fetch_hosted_models(client) if has_hosted_node else False
 
     components = []
     skipped = 0
@@ -59,7 +61,7 @@ async def _list_components(client, tasks, args: Dict[str, Any]) -> dict:
         }
         spec = catalog.get(name)
         if spec is not None:
-            state = credentials_mod.evaluate(spec, env_keys)
+            state = credentials_mod.evaluate(spec, env_keys, hosted_models)
             if state['status'] != 'configured':
                 # Not ready to use: omit rather than list a component the
                 # caller can't actually run yet (env_error included -- a
@@ -95,7 +97,10 @@ async def _describe_component(client, tasks, args: Dict[str, Any]) -> dict:
     spec = credentials_mod.load_catalog().get(name)
     if spec is not None:
         env_keys = await credentials_mod.fetch_env_keys(client)
-        state = credentials_mod.evaluate(spec, env_keys)
+        hosted_models = (
+            await credentials_mod.fetch_hosted_models(client) if name in credentials_mod.HOSTED_INTEGRATIONS else False
+        )
+        state = credentials_mod.evaluate(spec, env_keys, hosted_models)
         result['credentials'] = credentials_mod.describe_state(spec, state)
     return result
 
