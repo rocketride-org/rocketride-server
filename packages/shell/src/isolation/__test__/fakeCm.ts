@@ -36,7 +36,8 @@ import { ConnectionState } from '../../types/connection';
 import type { ConnectionStatus } from '../../types/connection';
 import type { IAppRootCm } from '../types';
 import { createFakeEngine } from './fakeEngine';
-import type { IFakeEngine } from './fakeEngine';
+import type { IFakeEngine, IFakeEngineOptions } from './fakeEngine';
+import type { DAPMessage } from 'rocketride';
 
 /** Retained topics seeded into the fake root's registry, with their markers. */
 export const SEEDED_TOPICS = {
@@ -57,6 +58,12 @@ export interface IFakeCm extends IAppRootCm {
 	opsEmitted: Array<{ op: string; params: unknown }>;
 	/** The fixed session token (while signed in). */
 	sessionToken: string;
+	/** The shell API key (default `rr_` + 40 random chars). Settable. */
+	apiKey: string;
+	/** Which of the two sources answer with the key: `getClient().getApiKey()` and the `host.apiKey` op (both on by default). */
+	apiKeySources: { client: boolean; host: boolean };
+	/** `emit('shell:event', {event})`: an engine event the root's connection received (`types/shell.ts:150`). */
+	emitEngineEvent(event: DAPMessage): void;
 	setConnected(connected: boolean): void;
 	/** Signed out: no token, not connected, state DISCONNECTED. */
 	setSignedIn(signedIn: boolean): void;
@@ -64,9 +71,13 @@ export interface IFakeCm extends IAppRootCm {
 }
 
 /** Creates a fake manager with a seeded retained registry. */
-export function createFakeCm(): IFakeCm {
-	const engine = createFakeEngine();
+export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
+	const engine = createFakeEngine(options);
 	const bus = createOpBus();
+	const key = { value: `rr_${randomBytes(20).toString('hex')}`, sources: { client: true, host: true } };
+	// The SDK accessor (`client.ts:3420`) and the shell's own op (`hostOps.ts:122`).
+	engine.client.getApiKey = () => (key.sources.client ? key.value : undefined);
+	bus.handle('host.apiKey', async () => ({ apiKey: key.sources.host ? key.value : null }));
 	const opsEmitted: Array<{ op: string; params: unknown }> = [];
 	const rawEmitOp = bus.emitOp;
 	const ops: IOpBus = {
@@ -112,6 +123,16 @@ export function createFakeCm(): IFakeCm {
 		loadToken: () => (signedIn ? sessionToken : ''),
 		getConnectionStatus: () => ({ ...status }),
 		retained: () => registry,
+		get apiKey() {
+			return key.value;
+		},
+		set apiKey(value: string) {
+			key.value = value;
+		},
+		apiKeySources: key.sources,
+		emitEngineEvent(event) {
+			this.emit('shell:event', { event });
+		},
 		setConnected(value) {
 			connected = value;
 		},

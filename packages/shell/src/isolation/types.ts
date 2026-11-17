@@ -140,6 +140,8 @@ export interface IRealmGrant {
 	viewId?: string;
 	version?: number;
 	capabilities?: readonly string[];
+	/** The `/apps/frame` answer for this realm: its identity aliases (PR2a-2). */
+	frame?: FrameOk;
 }
 
 /** Root options. */
@@ -173,4 +175,6 @@ export interface IAppRoot {
 	detach(realmId: RealmId): void;
 	/** Terminates live runs, closes fs handles, removes monitors, clears ledgers. */
 	teardownAll(timeoutMs: number): Promise<void>;
+	/** Test-only counters (PR2a-2): engine events dropped because no realm owns them, and project ids held. */
+	__stats?(): { eventsDropped: number; knownProjects: number };
 }
