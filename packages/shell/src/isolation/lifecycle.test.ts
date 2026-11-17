@@ -69,6 +69,11 @@ test('G4-F4 teardownAll refuses new requests and terminates a run that answers l
 	const pending = clientRequest(A, execMsg());
 	await settle();
 	const releaseTerm = engine.hold('terminate');
+	// Released on every path, so a failing assertion cannot leave held requests (and their 120 s bus timers) behind.
+	tt.after(() => {
+		releaseExec();
+		releaseTerm();
+	});
 	const tearing = t.root.teardownAll(3000);
 	await settle();
 	assertDenied(await clientRequest(A, dap('rrext_ping')), ['capability', 'rate', 'unknown_op'], 'a request while the root is closing');
