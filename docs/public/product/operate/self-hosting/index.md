@@ -1,5 +1,6 @@
 ---
 title: Self-hosting
+description: Run the RocketRide engine on your own machine when you want full control over where data and model calls go. It is the same engine that powers Cloud.
 ---
 
 # Self-hosting
@@ -10,7 +11,9 @@ powers [Cloud](/operate/cloud); only the operator changes.
 
 > **Fastest path:** the [VS Code extension](/clients/vscode) manages a
 > local runtime for you while you build, with no manual setup. Use the steps below
-> when you want to run the engine as a standalone service.
+> when you want to run the engine as a standalone service. Setting it up from a
+> coding agent? The [coding-agents start page](/quickstart/coding-agents) has the
+> copy-paste Docker commands to run the engine, check it and connect over MCP.
 
 ## Get the engine
 

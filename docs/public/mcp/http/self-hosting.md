@@ -1,6 +1,7 @@
 ---
 title: Self-hosting
 sidebar_position: 4
+description: Every RocketRide engine serves the MCP endpoint automatically, with nothing extra to install or start. Find the URL for a self-hosted engine.
 ---
 
 # Self-hosting

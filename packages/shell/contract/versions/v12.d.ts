@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-16T16:27:09.536Z
-// Source commit: c9a43ba46379db86d43e8fab1e581efc831fe914
+// Generated:     2026-11-16T17:08:11.309Z
+// Source commit: 9fcbf0d335355b0965c669f971b350e8e96b604b
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1019,27 +1019,10 @@ export interface CreateKeyParams {
     name: string;
     /** Array of permission strings to grant to this key. Empty for full PAT. */
     permissions: string[];
-    /**
-     * Optional ISO timestamp for key expiration. Omit to ask for no expiry.
-     * The server may grant an EARLIER expiry than requested (a key created
-     * over a sign-in session expires with that session's bound); the granted
-     * value is in {@link CreateKeyResult.expiresAt}.
-     */
+    /** Optional ISO timestamp for key expiration. Omit for no expiry. */
     expiresAt?: string;
     /** Optional team UUID to scope this key to. Omit for all teams. */
     teamId?: string;
-}
-/** Result of creating an API key. */
-export interface CreateKeyResult {
-    /** The raw key string. Shown once; it cannot be retrieved later. */
-    key: string;
-    /**
-     * The expiry the server actually granted, as an ISO timestamp, or null when
-     * the key does not expire. It can be earlier than the requested one.
-     * Absent when the server did not report it (an older server), so callers
-     * must not read a missing value as "never expires".
-     */
-    expiresAt?: string | null;
 }
 /** Parameters for inviting a new member to an organization. */
 export interface InviteMemberParams {
@@ -2232,6 +2215,24 @@ export interface ServerInfoResult {
      * Absent on servers without billing (OSS).
      */
     stripePublishableKey?: string;
+    /**
+     * PostHog project token (`phc_*`) configured on this server.
+     *
+     * Lets the shell initialise product telemetry with the key matching
+     * this environment instead of a build-time value; apps never carry a
+     * key at all. Absent on servers without telemetry (OSS) — telemetry is
+     * then structurally off. Always accompanied by {@link ServerInfoResult.posthogHost}.
+     */
+    posthogPublishableKey?: string;
+    /**
+     * The analytics ingestion address telemetry requests go to.
+     *
+     * Present exactly when {@link ServerInfoResult.posthogPublishableKey}
+     * is: the server serves neither unless the operator configured both,
+     * so a self-hosted engine never sends its users' events to a host it
+     * did not choose.
+     */
+    posthogHost?: string;
     /**
      * The server's public addresses, RESOLVED to absolute URLs.
      *
@@ -3821,14 +3822,14 @@ declare class AccountApi {
      */
     listKeys(): Promise<ApiKeyRecord[]>;
     /**
-     * Creates a new API key and returns the raw key string and its real expiry.
+     * Creates a new API key and returns the raw key string.
      *
      * @param params - Key creation parameters (name, permissions, expiresAt).
-     * @returns The raw key, and the expiry the server granted (`expiresAt`,
-     *   which may be earlier than requested; absent when the server did not
-     *   report it).
+     * @returns Object containing the raw key string.
      */
-    createKey(params: CreateKeyParams): Promise<CreateKeyResult>;
+    createKey(params: CreateKeyParams): Promise<{
+        key: string;
+    }>;
     /**
      * Revokes an API key by its ID.
      *
@@ -3959,10 +3960,9 @@ declare class AccountApi {
      *
      * A name with a value is set, a name with `null` is deleted, and a name
      * whose value is the mask from `getEnv` keeps its stored value. Names not
-     * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
-     * whole write, and so does a name given a new value with whitespace, `=`,
-     * `#`, a quote or NUL in it; a stored name can always be kept or deleted.
-     * A server too old to merge rejects the write too.
+     * in `env` are left as they are. A name outside `ROCKETRIDE_*`, or with
+     * whitespace, `=`, `#`, a quote or NUL in it, rejects the whole write, and
+     * so does a server too old to merge.
      *
      * @param scope   - One of 'org', 'team', 'user'.
      * @param env     - Names to set, delete (`null`) or keep (mask).
@@ -6063,15 +6063,10 @@ export declare class RocketRideClient extends DAPClient {
      * every app id it owns. Readable on both editions (OSS answers the
      * fixed namespace its sessions carry; there is no Stripe Connect there).
      *
-     * @param options - Optional request settings.
-     * @param options.timeout - Per-request timeout in ms; on expiry the request
-     *   rejects and is dropped from the pending table, so a late reply is ignored.
      * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
      *   `developerId` is null until an org admin registers one
      */
-    developerStatus(options?: {
-        timeout?: number;
-    }): Promise<{
+    developerStatus(): Promise<{
         developerId: string | null;
         stripeAccountId: string | null;
         stripeAccountStatus: string;
@@ -6082,15 +6077,9 @@ export declare class RocketRideClient extends DAPClient {
      * publish beyond the workspace.
      *
      * @param developerId - The slug to claim (lowercase letters/underscores)
-     * @param options - Optional request settings.
-     * @param options.timeout - Per-request timeout in ms; on expiry the request
-     *   rejects and is dropped from the pending table (the claim may still land
-     *   on the server, so callers should re-check developerStatus()).
      * @returns The server's registration record
      */
-    registerDeveloper(developerId: string, options?: {
-        timeout?: number;
-    }): Promise<Record<string, unknown>>;
+    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
@@ -7390,6 +7379,10 @@ export interface ShellApiConfig {
     RR_APIKEY?: string;
     /** Stripe publishable key — required for Stripe Elements checkout. */
     RR_STRIPE_PUBLISHABLE_KEY?: string;
+    /** PostHog project token (phc_*), served by the probe; absent = telemetry off. */
+    RR_POSTHOG_KEY?: string;
+    /** The analytics ingestion address, served by the probe alongside the key. */
+    RR_POSTHOG_HOST?: string;
     /** Zitadel instance base URL — required for PKCE OAuth login. */
     RR_ZITADEL_URL?: string;
     /** Zitadel application client ID — required for PKCE OAuth login. */
@@ -8162,8 +8155,24 @@ interface ShellConnectionEventMap {
      * it is kept in the connection manager's buffer, as are facts raised before
      * any app subscribed or whose last listener left before their dispatch, and
      * handed over by `drainTelemetry()`.
+     *
+     * @deprecated The shell owns the telemetry transport now (the reporter is
+     * handed to the app via TelemetryProvider/useReport); this event is typed
+     * for frozen-floor compatibility and is no longer emitted. Removal is a
+     * separate, signed-off contract decision.
      */
     "shell:telemetry": TelemetryFact;
+    /**
+     * The device's analytics-consent state changed: a banner or Settings
+     * decision in this tab ('local') or another tab's decision relayed through
+     * storage ('external'). Platform state — apps that gate their own
+     * experiment captures on consent (home-ui's roulette) follow this instead
+     * of owning a consent store.
+     */
+    "shell:consentChange": {
+        state: "undecided" | "accepted" | "rejected";
+        origin: "local" | "external";
+    };
     /**
      * Request the shell open a built-in overlay (e.g. from a guest app's
      * profile/account menu, which can't render the shell's overlays directly).
@@ -8505,6 +8514,14 @@ on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:t
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function — call it to remove the handler.
  */
+on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
@@ -8820,6 +8837,16 @@ emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry
  * @param event   - The event name from `ShellConnectionEventMap`.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
@@ -8988,7 +9015,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void) & ((event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void) & ((event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']) => void) & ((event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -9038,6 +9065,8 @@ on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell
 on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -9261,6 +9290,120 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
+/** What a visitor can choose: opt in, or decline. */
+export type ConsentChoice = "accepted" | "rejected";
+/** A choice, or 'undecided' while there is no valid record. */
+export type ConsentState = "undecided" | ConsentChoice;
+type SendOptions = {
+    transport?: "sendBeacon";
+    timestamp?: Date;
+    uuid?: string;
+};
+type Reporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => void;
+/** Where a state change came from: this page ('local') or another tab's storage write ('external'). */
+export type ConsentOrigin = "local" | "external";
+/** Props for the provider the shell wraps the app outlet in. */
+export type TelemetryProviderProps = {
+    /** The active app's bound reporter (host.ts getReporter). */
+    reporter: Reporter;
+    children?: React$1.ReactNode;
+};
+/**
+ * Scopes the bound reporter to the app subtree and marks an app page active
+ * for the transport (shell-owned screens are not pages: no $pageleave, no web
+ * vitals attributed to them).
+ */
+export declare const TelemetryProvider: React$1.FC<TelemetryProviderProps>;
+/**
+ * The active app's bound `report(event, props?, options?)`. Stable identity;
+ * outside a provider (a shell screen) it reports nothing.
+ *
+ * @returns The bound reporter.
+ */
+export declare function useReport(): Reporter;
+/** What useConsent returns: the device's consent state and the way to change it. */
+export type ConsentApi = {
+    /** The device's consent record: 'undecided' | 'accepted' | 'rejected'. */
+    state: ConsentState;
+    /** Open the Settings overlay at the Privacy section (the one write surface besides the banner). */
+    openSettings(): void;
+};
+/**
+ * The device's analytics-consent state, live: re-renders on decisions made in
+ * the banner, the Settings toggle, or another tab. Apps that gate their own
+ * experiment captures follow this instead of owning a consent store.
+ *
+ * @returns The state and the Settings affordance.
+ */
+export declare function useConsent(): ConsentApi;
+/**
+ * Ask the consent banner to open. The banner is a lazy chunk mounted once the
+ * page has settled, so a request that arrives before it exists is kept until
+ * the banner mounts and takes it (`takePendingOpen`).
+ */
+export declare function openConsentBanner(): void;
+/**
+ * The visitor's consent state (our own record).
+ *
+ * @returns The choice, or 'undecided' when nothing valid is stored.
+ */
+export declare function getConsentState(): ConsentState;
+/**
+ * Listen for consent changes, in this tab ('local') or another ('external');
+ * the banner uses it to close after a decision and to reopen after another
+ * tab's withdrawal, the Settings toggle to render the current state.
+ *
+ * @param fn Called with the new state and where the change came from.
+ * @returns Unsubscribes `fn`.
+ */
+export declare function subscribeConsent(fn: (state: ConsentState, origin: ConsentOrigin) => void): () => void;
+/**
+ * Accepted consent expiry in milliseconds, or null when not accepted/valid.
+ * Pure localStorage read — experiment gates (home-ui's roulette) use it
+ * without starting any SDK.
+ */
+export declare function consentExpiresAt(): number | null;
+/**
+ * A report bound to one consented session: it sends through the app's own
+ * reporter (sanitised, app-stamped, consent-routed) and returns whether the
+ * event went out. It refuses, returning false, once the moment the capture was
+ * taken in has passed: consent withdrawn, the SDK gone, or the session rotated.
+ */
+export type ConsentedReporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => boolean;
+/**
+ * What an app gets from getConsentedCapture: the consented session it was
+ * taken in, a report bound to it, and the surface state. Never the SDK: no
+ * app can reconfigure the transport or record a screen through this.
+ */
+export type ConsentedCapture = {
+    /** The app's report, bound to this session (ConsentedReporter). */
+    report: ConsentedReporter;
+    /** The consented instance's session id when this capture was taken. */
+    sessionId: string;
+    /** Subscribe to session rotation on the consented instance; returns the unsubscribe. */
+    onSessionId(callback: (sessionId: string) => void): () => void;
+    /** True only on a known signed-out surface. */
+    signedOut: boolean;
+};
+/**
+ * The explicit-consent measurement seam, the same for every app: the consented
+ * session's id with a report bound to it, or null while there is none (no
+ * consent, SDK not started, no session yet, or the transport chunk not in).
+ * An app that keys a measurement on the session (one exposure per session, a
+ * deterministic uuid from it) takes this, decides, and reports through the
+ * bound report, which drops anything the session no longer covers.
+ *
+ * @param report - The app's bound reporter (useReport, or the one handed to the app).
+ * @returns The consented capture, or null.
+ */
+export declare function getConsentedCapture(report: Reporter): ConsentedCapture | null;
+/**
+ * After a sign-out on this page load, restart the recording once the home app
+ * shows a signed-out surface (its transition screen is gone) — only the app
+ * knows that moment, so it calls this; everything else about the resume is
+ * transport-internal.
+ */
+export declare function resumeSignedOutCapture(): void;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 /**
  * A ref whose `.current` always holds the latest render's value.
@@ -9449,6 +9592,12 @@ export declare class ConnectionManager implements IConnectionManager {
      * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
      * whose last listener left before its dispatch. Never throws.
      *
+     * @deprecated The shell owns the telemetry transport now: facts go through
+     * the shell's own reporter (telemetry/host.ts shellReporter), whose queue
+     * holds across teardown. Nothing feeds this channel any more — it drains
+     * empty. Kept because `shell:telemetry`/`drainTelemetry` are frozen v8/v9
+     * floor surface; real removal is a separate, signed-off contract decision.
+     *
      * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
      * @param props - Flat properties; the forwarding app adds its own super properties.
      */
@@ -9457,6 +9606,10 @@ export declare class ConnectionManager implements IConnectionManager {
      * Hand over every buffered telemetry fact, oldest first, and clear the buffer.
      * Call once from the app's analytics init, then subscribe to `shell:telemetry`
      * for the rest.
+     *
+     * @deprecated The shell owns the telemetry transport now; nothing feeds the
+     * channel, so this drains empty. Kept because it is frozen v8/v9 floor
+     * surface — real removal is a separate, signed-off contract decision.
      *
      * @returns The buffered facts in the order they were raised.
      */
@@ -9806,6 +9959,14 @@ emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry
  * @param event   - The event name from ShellConnectionEventMap.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:consentChange', payload: ShellConnectionEventMap['shell:consentChange']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
@@ -10062,6 +10223,14 @@ on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myAp
  * @returns An unsubscribe function.
  */
 on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:consentChange', handler: (payload: ShellConnectionEventMap['shell:consentChange']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
  *
@@ -15025,7 +15194,6 @@ interface IAccountViewProps {
         teamId?: string;
     }) => Promise<{
         key: string;
-        expiresAt?: string | null;
     }>;
     /** Revokes an API key by its ID. */
     onRevokeKey: (keyId: string) => Promise<void>;
@@ -15515,6 +15683,15 @@ export declare const shellApi: {
     };
     readonly useShellConnection: typeof useShellConnection;
     readonly useShellApiKey: typeof useShellApiKey;
+    readonly TelemetryProvider: import("react").FC<TelemetryProviderProps>;
+    readonly useReport: typeof useReport;
+    readonly useConsent: typeof useConsent;
+    readonly openConsentBanner: typeof openConsentBanner;
+    readonly getConsentState: typeof getConsentState;
+    readonly subscribeConsent: typeof subscribeConsent;
+    readonly consentExpiresAt: typeof consentExpiresAt;
+    readonly getConsentedCapture: typeof getConsentedCapture;
+    readonly resumeSignedOutCapture: typeof resumeSignedOutCapture;
     readonly useAuthUser: typeof useAuthUser;
     readonly useLogout: typeof useLogout;
     readonly useWorkspace: typeof useWorkspace;

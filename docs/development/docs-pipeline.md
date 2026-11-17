@@ -15,10 +15,13 @@ Everything here lives in `docs/docusaurus/`:
 | `scripts/lib/spine.js` | The information-architecture spine — the single source of truth for routes and navigation |
 | `scripts/lib/gather.js` | Discovery + staging: finds every doc source and assembles the content tree |
 | `scripts/lib/release-notes.js` | The `/support/release-notes` page, generated from GitHub releases at build time |
+| `scripts/lib/description.js` | Builds a page's meta description from its first prose paragraph (used by `gather.js` and by `docusaurus.config.ts`) |
+| `scripts/lib/twin.js` | Cleans a page source into the markdown served as its `.md` copy and in `llms-full.txt` |
+| `scripts/lib/markdown.js` | The fence, code-span and front-matter scanners that `description.js`, `twin.js` and `gather.js` share |
 | `scripts/lib/llms.js` | The `/nodes` catalog page and the `llms.txt` / `llms-full.txt` surfaces |
 | `scripts/lib/export.js` | Copies docs-owned files out to the package destinations that consume them |
 | `redirects.ts` | Old-URL → new-route map |
-| `docusaurus.config.ts`, `sidebars.ts` | Site config; the sidebar is derived from the spine |
+| `docusaurus.config.ts`, `sidebars.ts` | Site config; the sidebar is derived from the spine. The config also builds the meta description in `parseFrontMatter` for pages without a `description:` (and skips `_`-prefixed partials, where front matter would break the MDX loader) |
 
 ---
 
@@ -59,7 +62,7 @@ collects whatever is present in the tree at the time.
 | --- | --- | --- |
 | `CONTENT_STATIC_DIR` | `docs/public/product/` | The shell-authored **spine pages**, staged first because they own the routes |
 | `CONTENT_DIR` | `build/docs-content/` | The assembled tree Docusaurus reads. Rebuilt from scratch every gather; never edit it |
-| `STATIC_DIR` | `docs/docusaurus/static/` | Raw pre-MDX `.md` siblings of every page, for the LLM surface and copy-as-markdown |
+| `STATIC_DIR` | `docs/docusaurus/static/` | Cleaned `.md` siblings of every page (front matter, imports and JSX removed), for the LLM surface and copy-as-markdown |
 | `SITE_OUT` | `dist/docs/` | The compiled static site |
 
 Docusaurus finds the assembled tree through the `ROCKETRIDE_DOCS_CONTENT`
@@ -163,9 +166,13 @@ below.
 **5. The manifest.** `build/docs-content/.manifest.json` records every staged
 page (id, route, title, source, description, category) for `docs:index`.
 
-Alongside each staged page, gather writes the raw pre-MDX source to
+Alongside each staged page, gather writes the pre-MDX source to
 `docs/docusaurus/static/<id>.md` — that is the copy-as-markdown and LLM surface.
-It also stamps each page's front matter with the **source** file's last git
+The LLM build step then rewrites each copy as cleaned markdown: `scripts/lib/twin.js`
+removes the front matter, `import`/`export` lines and JSX wrappers, keeps the text
+and links (and leaves fenced code, inline code and comments untouched), and adds
+the page title as a heading when the body has none.
+Gather also stamps each page's front matter with the **source** file's last git
 commit date, because the assembled tree is not git-tracked and Docusaurus would
 otherwise find no date at all. (A shallow CI clone collapses every date to the
 clone day, which is why the docs workflow checks out with full history.)
@@ -222,7 +229,8 @@ offline builds never break.
 - `/nodes` — the generated node catalog landing page, grouped by category with a
   one-line description per group (`CATEGORY_DESCRIPTIONS`).
 - `/llms.txt` — a per-section index linking each page's `.md` sibling.
-- `/llms-full.txt` — every page's raw markdown, concatenated.
+- `/llms-full.txt`: every page's cleaned markdown (front matter, imports and JSX
+  removed by `scripts/lib/twin.js`), concatenated.
 
 Section grouping comes from `sections()` / `sectionFor()` in the spine, so the
 LLM surface follows the same IA as the sidebar.
