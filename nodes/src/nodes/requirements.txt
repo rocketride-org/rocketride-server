@@ -25,3 +25,6 @@ safetensors
 # Needed for dependencies compilations
 Cython
 versioneer
+
+# Installed by ai/__init__.py for every `nodes` root: `nodes` is a namespace
+# package, so no __init__.py runs here.

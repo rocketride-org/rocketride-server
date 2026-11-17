@@ -28,6 +28,9 @@ and ``DAPException`` exposes ``code`` / ``hint`` so a caller classifies a
 failure without matching the English message.
 """
 
+import inspect
+import os
+
 from rocketride.core.dap_base import DAPBase
 from rocketride.core.exceptions import DAPException, PipeException
 
@@ -70,6 +73,14 @@ def test_build_exception_ignores_a_non_string_code():
     packet = _Base().build_exception(REQUEST, _Coded(42, 'boom'))
 
     assert 'code' not in packet
+
+
+def test_build_error_traces_the_line_that_called_it():
+    """The trace names the caller's file and line, read from its frame alone."""
+    line = inspect.currentframe().f_lineno + 1
+    packet = _Base().build_error(REQUEST, 'command not allowed')
+
+    assert packet['trace'] == {'file': os.path.basename(__file__), 'lineno': line}
 
 
 def test_exception_exposes_code_and_hint():

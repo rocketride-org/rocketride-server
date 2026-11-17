@@ -32,7 +32,7 @@
 
 import { DataPipe, RocketRideClient } from '../src/client/client';
 import { DAPException, PipeException } from '../src/client/exceptions';
-import type { Question } from '../src/client/schema/Question';
+import { Question } from '../src/client/schema/Question';
 
 /** A client stub: enough surface for DataPipe.open(), no transport. */
 function stubClient(response: Record<string, unknown>): RocketRideClient {
@@ -120,7 +120,7 @@ describe('RocketRideClient.chat() failure', () => {
 	}
 
 	it('rethrows the typed PipeException so chat callers keep code and hint', async () => {
-		const caught = await chatAndCatch(clientThatFailsOpen(notRunning), {} as Question);
+		const caught = await chatAndCatch(clientThatFailsOpen(notRunning), new Question());
 
 		expect(caught).toBeInstanceOf(PipeException);
 		const e = caught as PipeException;
@@ -141,10 +141,24 @@ describe('RocketRideClient.chat() failure', () => {
 		};
 		stub.didFail = (r: Record<string, unknown>) => r.success === false;
 
-		const caught = await chatAndCatch(client, {} as Question);
+		const caught = await chatAndCatch(client, new Question());
 
 		expect(caught).toBeInstanceOf(Error);
 		expect(caught).not.toBeInstanceOf(DAPException);
 		expect((caught as Error).message).toBe('socket closed');
+	});
+
+	it('refuses a broken turn rule before it opens a pipe', async () => {
+		const client = new RocketRideClient({ env: {} });
+		(client as unknown as Record<string, unknown>).pipe = async () => {
+			throw new Error('a pipe was opened');
+		};
+		const question = new Question();
+		question.addMessage({ role: 'user', content: 'hi' });
+		question.addMessage({ role: 'assistant', content: 'cut off at max_tokens' });
+
+		const caught = await chatAndCatch(client, question);
+
+		expect((caught as Error).message).toBe('the last message must be a user message');
 	});
 });

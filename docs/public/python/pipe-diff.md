@@ -1,5 +1,6 @@
 ---
-title: Pipeline Diff
+title: Pipeline Diff (rocketride diff)
+sidebar_label: Pipeline Diff
 sidebar_position: 14
 ---
 
