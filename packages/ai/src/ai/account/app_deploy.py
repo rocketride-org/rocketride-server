@@ -334,7 +334,10 @@ async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: 
         return
     try:
         rail = await account.deployments_versions(org_id, project_id)
-    except Exception:
+    except Exception as exc:
+        # Fail closed (no history means no exception), but say why: a
+        # registry read failure is not a namespace problem.
+        debug(f'[app_deploy] pipe namespace check: rail lookup failed for {project_id}: {exc}')
         rail = []
     # Pipe-ONLY history: a node row (or any other non-pipe kind) on the id is
     # not a pipe the org already ships, so it earns no exception. A kind-less
