@@ -157,6 +157,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Pref keys written per app, for the 256-key cap (outlives any one realm). */
 	const prefKeysByApp = new Map<string, Set<string>>();
 
+	/** Root-internal timers (see `IAppRootOptions.schedule`). */
+	const schedule =
+		opts.schedule ??
+		((cb: () => void, ms: number): (() => void) => {
+			const timer = setTimeout(cb, ms);
+			(timer as { unref?: () => void }).unref?.();
+			return () => clearTimeout(timer);
+		});
+
 	/** Teardowns in progress: every realm request is refused meanwhile. */
 	let closing = 0;
 	/** Bumped by teardown and logout: an answer to a request started earlier is ended, not recorded. */
@@ -222,8 +231,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			track(endLostRun(ledger, project, source)).then((found) => {
 				if (found || retriesLeft.length === 0 || !ledger.lostRuns.has(project)) return;
 				const [delay, ...rest] = retriesLeft;
-				const timer = setTimeout(() => attempt(rest), delay);
-				(timer as { unref?: () => void }).unref?.();
+				schedule(() => attempt(rest), delay);
 			});
 		};
 		attempt([...LOST_RUN_RETRY_MS]);

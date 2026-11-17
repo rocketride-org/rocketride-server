@@ -156,6 +156,12 @@ export interface IAppRootOptions {
 	};
 	openWindow(url: string, target: string, features: string): void;
 	log(level: 'debug' | 'info' | 'warn' | 'error', line: string): void;
+	/**
+	 * Schedules a root-internal timer (the later lost-run lookups); returns a
+	 * cancel. Default: `setTimeout`, unref'd where the runtime allows. Tests
+	 * pass one driven by their fake clock.
+	 */
+	schedule?(cb: () => void, ms: number): () => void;
 	/** Test-only: makes the named hook throw (the gate must then fail closed). */
 	__throwIn?: 'gate' | 'ledger' | 'outbound';
 }
