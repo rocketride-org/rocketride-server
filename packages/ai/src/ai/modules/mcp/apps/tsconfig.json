@@ -9,12 +9,10 @@
 		"resolveJsonModule": true,
 		"lib": ["ES2022", "DOM"],
 		"types": ["node", "vite/client"],
-		"resolveJsonModule": true,
 		"baseUrl": ".",
 		"paths": {
 			"shell": ["./src/shared/shell-shim.ts"],
 			"shell/src/*": ["../../../../../../../apps/shared/node_modules/shell/src/*"],
-			"shell/public/*": ["../../../../../../../apps/shared/node_modules/shell/public/*"],
 			"rocketride": ["../../../../../../../packages/client-typescript/src/client/types/index.ts"],
 			"@app-shared/*": ["../../../../../../../apps/shared/src/*"],
 			"shared/*": ["../../../../../../../apps/shared/src/*"]

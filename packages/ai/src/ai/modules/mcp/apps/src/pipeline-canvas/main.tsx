@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 // brand row: the chat host already names the app above the widget.
 import 'shell/src/themes/rocketride-default.css';
 import '../shared/theme.css';
-import { applyHostTheme, syncHostTheme } from './host-theme';
+import { applyHostTheme } from '../shared/host-theme';
 import { CanvasApp } from './CanvasApp';
 import { buildCanvasModel, type ToolResultLike } from './model';
 // After CanvasApp, so it lands after the builder's canvas CSS it adjusts.
@@ -35,9 +35,6 @@ app.ontoolresult = (result) => {
 	resultCount += 1;
 	root.render(<CanvasApp key={resultCount} app={app} model={buildCanvasModel(result as ToolResultLike, hostMetadata())} />);
 };
-app
-	.connect()
-	.then(() => syncHostTheme(app))
-	.catch((err) => {
-		root.render(<div className="rr-card rr-canvas-error">Could not connect to the chat host: {err instanceof Error ? err.message : String(err)}</div>);
-	});
+app.connect().catch((err) => {
+	root.render(<div className="rr-card rr-canvas-error">Could not connect to the chat host: {err instanceof Error ? err.message : String(err)}</div>);
+});
