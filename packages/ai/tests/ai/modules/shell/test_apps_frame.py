@@ -215,6 +215,50 @@ def test_apps_frame_rate_limit_is_not_shared_between_callers(world, clock):
     assert resp.status_code == 200
 
 
+def test_apps_frame_rate_limit_runs_before_authentication(world, monkeypatch):
+    """T28 (G4 S7): a flood of junk bearers is throttled per client before it reaches ``authenticate``."""
+    from ai.account import account
+
+    calls = []
+    real = account.authenticate
+
+    async def counting(credential):
+        calls.append(credential)
+        return await real(credential)
+
+    monkeypatch.setattr(account, 'authenticate', counting)
+    statuses = [
+        world.post({'appId': THIRD, 'version': 1}, headers={'Authorization': f'Bearer junk-{i}'}).status_code
+        for i in range(800)
+    ]
+    assert statuses[0] == 401
+    assert statuses[-1] == 429 and 'rate_limited' in world.post({'appId': THIRD, 'version': 1}).text
+    assert len(calls) < 800  # the limiter answered the tail without asking the auth backend
+
+
+def test_apps_frame_body_is_capped(world):
+    """T28 (G4 S7): a body over 4 KiB is 413 ``too_large`` before it is parsed."""
+    resp = world.post({'appId': THIRD, 'version': 1, 'pad': 'x' * 5000}, headers=BEARER)
+    assert resp.status_code == 413
+    assert 'too_large' in resp.text
+    assert world.frame(THIRD).status_code == 200  # a normal body still works
+
+
+def test_apps_frame_anonymous_limit_uses_the_trusted_client_ip_header_only_when_configured(world, clock):
+    """T28 (G4 S7): behind a proxy the anonymous bucket is the client's, but only via the configured header."""
+
+    def anonymous(ip):
+        return world.post({'appId': THIRD, 'version': 1}, headers={'x-real-ip': ip}).status_code
+
+    # not configured: the header is ignored, every request shares the peer's bucket
+    assert 429 in [anonymous(f'10.0.0.{i}') for i in range(80)]
+    clock.advance(3600)
+    world.env.set(RR_TRUSTED_CLIENT_IP_HEADER='X-Real-IP')
+    statuses = [anonymous('1.1.1.1') for _ in range(80)]
+    assert 429 in statuses
+    assert anonymous('2.2.2.2') == 200  # another client behind the same proxy is not locked out
+
+
 def test_apps_frame_optin_isolates_only_listed_apps(world):
     """T28: under ``optin`` an unlisted third-party app is not isolated (404); a listed one is."""
     world.env.set(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.net')

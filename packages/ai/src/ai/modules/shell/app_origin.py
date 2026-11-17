@@ -76,6 +76,8 @@ _MIN_SECRET_BYTES = 32
 _GUEST_NAME = re.compile(r'guest-[A-Za-z0-9_.-]+\.js')
 _SHA256_HEX = re.compile(r'[0-9a-f]{64}')
 
+_HEADER_NAME = re.compile(r'[A-Za-z0-9-]{1,64}')
+
 _REMEDY = 'set RR_APP_ISOLATION=off'
 
 
@@ -94,6 +96,8 @@ class IsolationConfig:
         edge_secret: ``RR_EDGE_SECRET`` (``edge-header`` only).
         app_suffix: The host name after ``{label}.``.
         app_port: The template's port, or None (https).
+        client_ip_header: ``RR_TRUSTED_CLIENT_IP_HEADER`` lowercased, or ''
+            (rate limits then key on the peer address).
     """
 
     mode: str = 'off'
@@ -105,6 +109,7 @@ class IsolationConfig:
     edge_secret: str = field(default='', repr=False)
     app_suffix: str = ''
     app_port: Optional[int] = None
+    client_ip_header: str = ''
 
     def origin_of(self, app_id: str) -> str:
         """The app origin of one app id under the template."""
@@ -222,6 +227,13 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
                 f'RR_EDGE_SECRET must be at least {_MIN_SECRET_BYTES} bytes with RR_APP_HOST_SOURCE=edge-header'
             )
 
+    # The header a trusted edge sets to the real client address (rate limits
+    # of the unauthenticated routes); unset means the peer address.
+    client_ip_header = env.get('RR_TRUSTED_CLIENT_IP_HEADER')
+    if client_ip_header is not None and not _HEADER_NAME.fullmatch(client_ip_header):
+        raise _refuse(f'RR_TRUSTED_CLIENT_IP_HEADER must be one header name (got {client_ip_header!r})')
+    client_ip_header = (client_ip_header or '').lower()
+
     return IsolationConfig(
         mode=mode,
         apps=frozenset(apps),
@@ -232,6 +244,7 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         edge_secret=edge_secret,
         app_suffix=suffix,
         app_port=port,
+        client_ip_header=client_ip_header,
     )
 
 
@@ -745,7 +758,9 @@ def probe_isolation() -> Optional[dict]:
 
 _verdict_cache: dict = {}
 _frame_rate_cache: dict = {}
-FRAME_RATE_LIMIT = 60
+_client_rate_cache: dict = {}
+FRAME_RATE_LIMIT = 60  # per caller (user, or client address when anonymous)
+CLIENT_RATE_LIMIT = 600  # per client address, before any authentication
 FRAME_RATE_WINDOW = 60.0
 
 # appManifest.network (Appendix C): strict https origins, at most 8.
@@ -862,14 +877,40 @@ async def isolated_for(token: str, app_id: str) -> bool:
     return verdict is None or verdict.isolated
 
 
-def frame_rate_ok(caller: str) -> bool:
-    """One more ``POST /apps/frame`` for this caller inside its window (60 per 60 s)."""
-    hit = _cached(_frame_rate_cache, caller)
+def _rate_ok(cache: dict, key: str, limit: int) -> bool:
+    """One more request for ``key`` inside its fixed window (``FRAME_RATE_WINDOW``)."""
+    hit = _cached(cache, key)
     if hit is None:
-        _remember(_frame_rate_cache, caller, '', ttl=FRAME_RATE_WINDOW, count=1)
+        _remember(cache, key, '', ttl=FRAME_RATE_WINDOW, count=1)
         return True
     hit['count'] += 1
-    return hit['count'] <= FRAME_RATE_LIMIT
+    return hit['count'] <= limit
+
+
+def frame_rate_ok(caller: str) -> bool:
+    """One more ``POST /apps/frame`` for this caller (60 per 60 s)."""
+    return _rate_ok(_frame_rate_cache, caller, FRAME_RATE_LIMIT)
+
+
+def client_rate_ok(client: str) -> bool:
+    """One more unauthenticated-cost request for this client address (600 per 60 s), checked before any lookup."""
+    return _rate_ok(_client_rate_cache, client, CLIENT_RATE_LIMIT)
+
+
+def client_ip(headers: Mapping[str, str], peer: str, config: IsolationConfig) -> str:
+    """
+    The client address rate limits key on.
+
+    The peer address, unless ``RR_TRUSTED_CLIENT_IP_HEADER`` names the header a
+    trusted edge sets: then its last comma-separated entry (the address the
+    edge itself saw). A client cannot pick its bucket otherwise.
+    """
+    if config.client_ip_header:
+        value = headers.get(config.client_ip_header, '')
+        entries = [item.strip() for item in value.split(',') if item.strip()]
+        if entries:
+            return entries[-1]
+    return peer
 
 
 async def _version_facts(app_id: str, version: int, dist_dir: str) -> Optional[Tuple[str, str, dict]]:

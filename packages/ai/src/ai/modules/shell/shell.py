@@ -848,6 +848,10 @@ async def apps_session(request: Request):
     return resp
 
 
+# POST /apps/frame bodies are {appId, version}: anything near this is not one.
+_FRAME_BODY_MAX = 4096
+
+
 def _frame_error(status: int, code: str) -> JSONResponse:
     """One ``POST /apps/frame`` error body (Appendix A codes)."""
     return JSONResponse({'error': code}, status_code=status, headers={'Cache-Control': 'no-store'})
@@ -864,15 +868,30 @@ async def apps_frame(request: Request):
     capabilities, network, state}``; 400 ``bad_request``; 401
     ``invalid_token`` (a bearer that does not authenticate); 404
     ``not_found``, one answer for every cause (unknown, not entitled, not
-    isolated); 409 ``isolation_off``; 429 ``rate_limited`` (per caller).
+    isolated); 409 ``isolation_off``; 413 ``too_large`` (a body over 4 KiB);
+    429 ``rate_limited`` (per client address before authentication, then per
+    caller).
     """
-    from .app_origin import caller_of, current_config, frame_grant, frame_rate_ok
+    from .app_origin import caller_of, client_ip, client_rate_ok, current_config, frame_grant, frame_rate_ok
 
     config = current_config()
     if config.mode == 'off':
         return _frame_error(409, 'isolation_off')
+    # Per client address BEFORE anything costs a lookup: junk bearers never
+    # reach the auth backend unthrottled.
+    client = client_ip(request.headers, request.client.host if request.client else '', config)
+    if not client_rate_ok(client):
+        return _frame_error(429, 'rate_limited')
+    declared = request.headers.get('content-length', '')
+    if declared.isascii() and declared.isdigit() and int(declared) > _FRAME_BODY_MAX:
+        return _frame_error(413, 'too_large')
+    raw = b''
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _FRAME_BODY_MAX:
+            return _frame_error(413, 'too_large')
     try:
-        body = json.loads(await request.body())
+        body = json.loads(raw)
     except ValueError:
         return _frame_error(400, 'bad_request')
     app_id = body.get('appId') if isinstance(body, dict) else None
@@ -887,8 +906,7 @@ async def apps_frame(request: Request):
     info = await caller_of(token) if token else None
     if token and info is None:
         return _frame_error(401, 'invalid_token')
-    caller = f'u:{info.userId}' if info is not None else f'ip:{request.client.host if request.client else ""}'
-    if not frame_rate_ok(caller):
+    if not frame_rate_ok(f'u:{info.userId}' if info is not None else f'ip:{client}'):
         return _frame_error(429, 'rate_limited')
 
     grant = await frame_grant(app_id, version, token, info, config)

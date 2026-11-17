@@ -405,3 +405,17 @@ def test_separate_app_domain_starts(isolation_env):
     _validate()
     isolation_env.set(RR_APP_ORIGIN_TEMPLATE=sup.LOCAL_TEMPLATE, RR_SHELL_ORIGINS='http://localhost:5565')
     _validate()
+
+
+@pytest.mark.parametrize('header', ['', 'x real ip', 'x-real-ip:', 'a' * 65, 'X_Real_IP'])
+def test_invalid_trusted_client_ip_header_refuses_start(header, isolation_env):
+    """T8 (G4 S7): RR_TRUSTED_CLIENT_IP_HEADER, when set, is one header name."""
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER=header)
+    _refuses('RR_TRUSTED_CLIENT_IP_HEADER')
+
+
+def test_trusted_client_ip_header_is_optional(isolation_env):
+    """T8 control: unset means the peer address; a header name is lowercased."""
+    assert isolation_env.config().client_ip_header == ''
+    isolation_env.set(RR_TRUSTED_CLIENT_IP_HEADER='X-Real-IP')
+    assert isolation_env.config().client_ip_header == 'x-real-ip'
