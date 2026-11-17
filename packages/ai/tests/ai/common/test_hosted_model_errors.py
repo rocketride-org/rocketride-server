@@ -59,8 +59,8 @@ SENTENCES = {
         "RocketRide-hosted models don't support stop. Add your own OpenAI key in the node settings to run this request."
     ),
     'rate_limited': (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
-        'requests at once, or add your own OpenAI key in the node settings.'
+        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
+        'or add your own OpenAI key in the node settings.'
     ),
     'gateway_unavailable': (
         'RocketRide-hosted models are unavailable right now. Try again shortly, or add your own OpenAI key '

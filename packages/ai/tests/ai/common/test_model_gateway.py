@@ -38,12 +38,13 @@ TOKEN = 'rrmg_' + 'a' * 43
 
 NO_KEY_HOSTED = (
     "llm_openai: no API key is set, and RocketRide-hosted models aren't available for this run. "
-    'Add your OpenAI key in the node settings, or save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY '
-    "and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
+    'Add your OpenAI key in the node settings. To keep the key out of the pipeline, save it in '
+    "Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
 )
 NO_KEY_SELF_HOSTED = (
-    'llm_openai: no API key is set. Add your OpenAI key in the node settings, or save it in Settings > Variables '
-    "as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} as the node's API key."
+    'llm_openai: no API key is set. Add your OpenAI key in the node settings. To keep the key out of the '
+    'pipeline, save it in Settings > Variables as ROCKETRIDE_OPENAI_KEY and enter ${ROCKETRIDE_OPENAI_KEY} '
+    "as the node's API key."
 )
 
 SENTENCES = {
@@ -53,8 +54,8 @@ SENTENCES = {
         'under Account > Billing in RocketRide.'
     ),
     'rate_limited': (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again with fewer '
-        'requests at once, or add your own OpenAI key in the node settings.'
+        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
+        'or add your own OpenAI key in the node settings.'
     ),
     'invalid_gateway_pass': "This run's access to RocketRide-hosted models has ended. Start the pipeline again.",
     'gateway_unavailable': (
@@ -338,7 +339,7 @@ def test_an_unsupported_field_is_named():
     assert friendly_gateway_error(from_backend) == sentence('stored responses')
     # A raw parameter name means nothing to the user; with no words from the backend the sentence stays general
     bare = _refusal(400, 'unsupported_parameter', 'nope', param='previous_response_id')
-    assert friendly_gateway_error(bare) == sentence('part of this request')
+    assert friendly_gateway_error(bare) == sentence('a feature this request uses')
 
 
 def test_any_other_code_reads_as_the_general_sentence():
