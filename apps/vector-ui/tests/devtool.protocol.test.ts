@@ -30,7 +30,7 @@ import type { IDocVersion, VectorOps } from '../src/devtool/protocol';
 import { documentUri } from '../src/vector/addresses';
 import { CODE_SENTENCES } from '../src/vector/wording';
 import { fixture } from './support/fixtures';
-import { account, disposeAll, latestStateMap, mountController, publishedStates, rocketRealm, settle, shellProtocol, signInVsCode, until, vscodeRealm } from './support/devtool';
+import { account, disposeAll, latestStateMap, manualTimers, mountController, publishedStates, rocketRealm, settle, shellProtocol, signInVsCode, until, vscodeRealm } from './support/devtool';
 import type { ToolBehaviour } from './support/vectorWorld';
 
 afterEach(disposeAll);
@@ -425,6 +425,11 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 	/**
 	 * A frame call that reaches a FRESH controller while its discovery is still under way (a remount in the host's
 	 * channel; the engine holds `getTasks` until the test releases it): it waits for the discovery, inside its deadline.
+	 *
+	 * No outcome rides on how fast the runner is: the controller's wait for the discovery runs on timers the test
+	 * advances (never here, so it cannot run out on a slow runner), the time that passes while the call is held is
+	 * moved on the manual clock, and the frame has sent the call (its lane bounded by the full `timeoutMs`) before
+	 * the helper returns.
 	 */
 	async function heldDuringDiscovery(op: 'vector.stats' | 'vector.trash', timeoutMs: number) {
 		const clock = manualNow(2_000_000);
@@ -434,7 +439,8 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 		first.h.setHostConnection(true);
 		await until(() => Object.keys(first.controller.store.getState().probes).length === 1, 'the probe');
 		const key = first.controller.store.getState().endpoints[0].key;
-		const caller = frameCaller(first.h, clock.now);
+		const sent: Array<{ op: string; timeoutMs: number | undefined; deadlineAt: number | undefined }> = [];
+		const caller = frameCaller(first.h, clock.now, sent);
 		await until(() => caller.controllerReady(), 'the readiness');
 		first.controller.dispose();
 		await settle();
@@ -447,12 +453,14 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 		};
 		const before = engine.requests.length;
 		// The fresh controller has discovered nothing: the call waits for its discovery, inside the deadline.
-		const again = mountController(engine.cm, { now: clock.now }, first.h, first);
+		const again = mountController(engine.cm, { now: clock.now, schedule: manualTimers().schedule }, first.h, first);
 		const input = op === OP.trash ? { object_ids: [DOC_ID] } : { mode: 'full' };
 		const call = caller.callReply(op, (op === OP.trash ? { key, input, origin: 'f' } : { key, input }) as never, { timeoutMs });
 		void call.catch(() => undefined);
+		await until(() => sent.length === 1, 'the frame sending the call');
+		assert.equal(sent[0].timeoutMs, timeoutMs, 'the frame sent it with its whole deadline (the clock has not moved yet)');
 		await settle();
-		return { engine, caller, call, again, before, release: () => { engine.before.current = null; release(); } };
+		return { engine, caller, call, again, before, clock, release: () => { engine.before.current = null; release(); } };
 	}
 
 	it('a read: the session is asked for what is left of the deadline (less a margin), never the full wait', async () => {
@@ -478,7 +486,10 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 	});
 
 	it('a write with less than a second of its deadline left is refused before anything is sent', async () => {
-		const run = await heldDuringDiscovery(OP.trash, 1_500);
+		// The deadline is generous on the wall clock (the frame's lane), but the wait for discovery used all of it on the
+		// controller's clock except 1.5 s: less the 1 s margin, under a second is left, so it is refused unsent.
+		const run = await heldDuringDiscovery(OP.trash, 20_000);
+		run.clock.advance(20_000 - 1_500);
 		run.release();
 		await assert.rejects(run.call, (e: unknown) => e instanceof ExplorerToolError && e.kind === 'unavailable' && /Nothing was sent/.test(e.message));
 		assert.ok(!run.engine.world.calls.some((c) => c.tool === 'soft_delete'), 'the write never reached the node');
