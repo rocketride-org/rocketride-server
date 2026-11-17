@@ -80,6 +80,21 @@ def test_pack_names_the_pipeline_after_the_pipe_then_the_manifest_then_the_stem(
     assert pack_pipe_bundle(named).pipeline['name'] == 'From pipe'
 
 
+def test_pack_refuses_a_file_whose_real_location_leaves_the_bundle(tmp_path):
+    """A symlink inside the bundle pointing outside it packs nothing (every read is containment-checked)."""
+    import os
+
+    secret = tmp_path / 'secret.txt'
+    secret.write_text('not yours', encoding='utf-8')
+    folder = _bundle(tmp_path, {'docBrain.pipe': PIPE})
+    try:
+        os.symlink(str(secret), str(tmp_path / 'pipelines' / 'docBrain' / 'readme.md'))
+    except (OSError, NotImplementedError):
+        pytest.skip('symlinks are not available to this process')
+    with pytest.raises(ValueError, match='resolves outside the bundle folder'):
+        pack_pipe_bundle(folder)
+
+
 def test_pack_refuses_a_missing_manifest_icon_and_an_oversized_readme(tmp_path):
     folder = _bundle(tmp_path, {'docBrain.pipe': PIPE, 'docBrain.rrpipe': json.dumps({'icon': 'logo.png'})})
     with pytest.raises(ValueError, match='no such file'):

@@ -83,6 +83,9 @@ export async function packPipeBundle(client: RocketRideClient, pipePath: string)
 	if (!folder || !stem) {
 		throw new Error('This pipeline is not in a bundle folder. Move it to pipelines/<id>/<id>.pipe (beside its readme, icon and assets) to deploy it.');
 	}
+	if (pipePath.endsWith('.pipe.json')) {
+		throw new Error(`A pipeline bundle takes <id>.pipe; rename ${pipePath.slice(slash + 1)} to ${stem}.pipe to deploy it.`);
+	}
 	const view = scopedFileSystem(getWorkspaceVfs(), 'pipelines');
 	const entries = await view.list(folder);
 	const pipes = entries.filter((e) => e.type !== 'dir' && e.name.endsWith('.pipe')).map((e) => e.name);
@@ -90,13 +93,27 @@ export async function packPipeBundle(client: RocketRideClient, pipePath: string)
 		throw new Error(`${folder}/ holds ${pipes.length} .pipe files; a pipeline bundle is one folder with one .pipe. Move this pipeline to its own folder to deploy it.`);
 	}
 
-	// Step 2: the files the bundle carries, nothing else
+	// Step 2: the files the bundle carries, nothing else. The manifest is
+	// read first: its `icon` names the icon file (the server requires that
+	// exact entry); the default names apply only without one.
 	const names = new Set(entries.filter((e) => e.type !== 'dir').map((e) => e.name));
 	const picked: string[] = [`${stem}.pipe`];
-	if (names.has(`${stem}.rrpipe`)) picked.push(`${stem}.rrpipe`);
+	let manifestName = '';
+	let manifestIcon = '';
+	if (names.has(`${stem}.rrpipe`)) {
+		picked.push(`${stem}.rrpipe`);
+		const manifest = JSON.parse(String(await view.read(`${folder}/${stem}.rrpipe`))) as Record<string, unknown>;
+		manifestName = typeof manifest.name === 'string' ? manifest.name : '';
+		manifestIcon = typeof manifest.icon === 'string' ? manifest.icon.replace(/\\/g, '/') : '';
+	}
 	if (names.has('readme.md')) picked.push('readme.md');
-	const icon = ICON_NAMES.find((n) => names.has(n));
-	if (icon) picked.push(icon);
+	const icon = manifestIcon || ICON_NAMES.find((n) => names.has(n));
+	if (icon) {
+		if (manifestIcon && !names.has(manifestIcon) && !manifestIcon.startsWith('assets/')) {
+			throw new Error(`The manifest names icon "${manifestIcon}" but the bundle has no such file.`);
+		}
+		if (!manifestIcon || !manifestIcon.startsWith('assets/')) picked.push(icon);
+	}
 	if (entries.some((e) => e.type === 'dir' && e.name === 'assets')) {
 		const walk = async (rel: string): Promise<void> => {
 			for (const entry of await view.list(`${folder}/${rel}`)) {
@@ -119,11 +136,6 @@ export async function packPipeBundle(client: RocketRideClient, pipePath: string)
 		});
 	}
 	const pipe = JSON.parse(new TextDecoder().decode(tree[`${stem}.pipe`])) as Record<string, unknown>;
-	let manifestName = '';
-	if (tree[`${stem}.rrpipe`]) {
-		const manifest = JSON.parse(new TextDecoder().decode(tree[`${stem}.rrpipe`])) as Record<string, unknown>;
-		manifestName = typeof manifest.name === 'string' ? manifest.name : '';
-	}
 	const pipeline = { ...pipe, name: String(pipe.name || manifestName || stem) } as Record<string, unknown> & { name: string };
 
 	// Step 4: zip + the transport cap BEFORE any upload

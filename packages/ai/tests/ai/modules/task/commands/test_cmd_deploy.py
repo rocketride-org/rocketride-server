@@ -131,6 +131,7 @@ def account_stub(monkeypatch):
         # the ladder to the store, like an app (plan S8).
         review_ladder=True,
         deployments_publish=AsyncMock(return_value={'version': 3, 'sha256': 'abc'}),
+        set_artifact_state=AsyncMock(return_value={'version': 3, 'sha256': 'abc', 'state': 'ready'}),
         deployments_deploy=AsyncMock(return_value=dep),
         deployments_set_state=AsyncMock(return_value={**dep, 'state': 'disabled'}),
         deployments_schedule_set=AsyncMock(return_value=dep),
@@ -175,8 +176,9 @@ class TestPublish:
         assert args[0] == 'org-1' and args[1] == 'proj-1'
         # The audit actor is the denormalized caller identity.
         assert args[3] == {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'}
-        # On a review-ladder server the backend's born state applies ('private', plan S8)
-        assert account_stub.deployments_publish.await_args.kwargs['state'] is None
+        # Every version is born 'private' (plan S8): the door never passes a state
+        assert 'state' not in account_stub.deployments_publish.await_args.kwargs
+        account_stub.set_artifact_state.assert_not_awaited()
         assert resp['body']['artifact']['version'] == 3
         account_stub.audit.assert_awaited()
 
@@ -262,13 +264,63 @@ class TestPublish:
         assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'proj-1', 3, 'failed')
 
     @pytest.mark.asyncio
-    async def test_publish_is_born_ready_without_a_review_ladder(self, account_stub):
-        """Without the ladder (OSS) the developer IS the admin: the pipe is born 'ready', as an app is."""
+    async def test_publish_is_promoted_to_ready_without_a_review_ladder(self, account_stub):
+        """Without the ladder (OSS) the developer IS the admin: the version is born 'private' and promoted once stored."""
         account_stub.review_ladder = False
         conn = _make_conn(_account_info())
-        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE})
 
-        assert account_stub.deployments_publish.await_args.kwargs['state'] == 'ready'
+        assert 'state' not in account_stub.deployments_publish.await_args.kwargs
+        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'proj-1', 3, 'ready')
+        assert resp['body']['artifact']['state'] == 'ready'
+
+    @pytest.mark.asyncio
+    async def test_a_failed_content_write_lands_on_failed_without_a_review_ladder(self, account_stub, monkeypatch):
+        """The real transition table: born 'private' the version can still become 'failed' when its bytes never land."""
+        import io
+        import zipfile
+
+        from ai.account.deployment_backend import _assert_review_transition
+        from ai.modules.task.commands import cmd_deploy
+
+        states = {3: 'private'}
+
+        async def set_state(org_id, project_id, version, new_state, actor):
+            """The backend's own guard over a stored state."""
+            _assert_review_transition(states[version], new_state)
+            states[version] = new_state
+            return {'version': version, 'state': new_state}
+
+        account_stub.review_ladder = False
+        account_stub.set_artifact_state = AsyncMock(side_effect=set_state)
+        monkeypatch.setattr(cmd_deploy, 'write_pipe_content', AsyncMock(side_effect=RuntimeError('store down')))
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as zf:
+            zf.writestr('proj-1.pipe', json.dumps(PIPE))
+            zf.writestr('readme.md', '# x')
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='marked failed'):
+            await conn._deploy_add_pipe({}, {'data': buffer.getvalue()})
+        assert states[3] == 'failed'
+
+    @pytest.mark.asyncio
+    async def test_publish_compares_the_dict_and_the_bundle_as_one_pipeline(self, account_stub, monkeypatch):
+        """A TypeScript client sends 1.0 as 1 and no display name; the server compares canonical values after its own fill."""
+        import io
+        import zipfile
+
+        from ai.modules.task.commands import cmd_deploy
+
+        monkeypatch.setattr(cmd_deploy, 'write_pipe_content', AsyncMock(return_value=[]))
+        on_disk = {**PIPE, 'components': [{'id': 'c1', 'ttl': 1.0}]}
+        on_disk.pop('name', None)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as zf:
+            zf.writestr('proj-1.pipe', json.dumps(on_disk))
+        sent = {**on_disk, 'components': [{'id': 'c1', 'ttl': 1}], 'name': 'proj-1'}
+        conn = _make_conn(_account_info())
+        resp = await conn._deploy_add_pipe({}, {'pipeline': sent, 'data': buffer.getvalue()})
+        assert resp['body']['artifact']['version'] == 3
 
     @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):

@@ -103,6 +103,25 @@ describe('packPipeBundle', () => {
 		expect(Buffer.from(packPipeBundle(folder).data).equals(Buffer.from(packed.data))).toBe(true);
 	});
 
+	it('names a .pipe.json and orders assets by code point', () => {
+		const legacy = bundle({ 'docBrain.pipe.json': PIPE });
+		expect(() => pipeOfBundle(legacy)).toThrow(/rename it to docBrain\.pipe/);
+		const folder = bundle({ 'docBrain.pipe': PIPE, 'assets/b.png': Buffer.from([1]), 'assets/B.png': Buffer.from([2]), 'assets/a.png': Buffer.from([3]) });
+		expect(packPipeBundle(folder).files.slice(1)).toEqual(['assets/B.png', 'assets/a.png', 'assets/b.png']);
+	});
+
+	it('refuses a file whose real location leaves the bundle', () => {
+		const folder = bundle({ 'docBrain.pipe': PIPE });
+		const secret = path.join(ws, 'secret.txt');
+		fs.writeFileSync(secret, 'not yours');
+		try {
+			fs.symlinkSync(secret, path.join(folder, 'readme.md'), 'file');
+		} catch {
+			return; // symlinks are not available to this process
+		}
+		expect(() => packPipeBundle(folder)).toThrow(/resolves outside the bundle folder/);
+	});
+
 	it('names the pipeline after the pipe, then the manifest, then the stem', () => {
 		expect(packPipeBundle(bundle({ 'docBrain.pipe': PIPE })).pipeline.name).toBe('docBrain');
 		expect(packPipeBundle(bundle({ 'docBrain.pipe': JSON.stringify({ name: 'From pipe' }) })).pipeline.name).toBe('From pipe');

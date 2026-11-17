@@ -187,6 +187,12 @@ _REVIEW_TRANSITIONS = {
     ('submit', 'ready'),
     ('submit', 'rejected'),
     ('submit', 'private'),
+    # The ladder-less promotion (OSS, no reviewer exists): a version is born
+    # 'private' so a failed content write can still land on 'failed', and
+    # the deploy door promotes it once its bytes are stored. On a
+    # review-ladder server nothing takes this edge: 'ready' is reached from
+    # 'submit' by an admin.
+    ('private', 'ready'),
     # Content-write compensation: a version whose bytes never fully landed
     # is dead on arrival — 'failed' is terminal (re-deploying allocates a
     # NEW version), so no exit edges exist.

@@ -133,10 +133,34 @@ export function pipeBundleFolderOf(target: string): string | null {
  * @throws Error when the folder holds no pipe or more than one.
  */
 export function pipeOfBundle(folder: string): { file: string; stem: string } {
-	const pipes = fs.readdirSync(folder).filter((name) => name.endsWith('.pipe'));
-	if (pipes.length === 0) throw new Error(`${folder} holds no .pipe file — a pipeline bundle is one folder with one .pipe`);
+	const names = fs.readdirSync(folder);
+	const pipes = names.filter((name) => name.endsWith('.pipe'));
+	if (pipes.length === 0) {
+		const legacy = names.find((name) => name.endsWith('.pipe.json'));
+		if (legacy) throw new Error(`${folder} holds ${legacy}; a pipeline bundle takes <id>.pipe — rename it to ${legacy.slice(0, -'.json'.length)}`);
+		throw new Error(`${folder} holds no .pipe file — a pipeline bundle is one folder with one .pipe`);
+	}
 	if (pipes.length > 1) throw new Error(`${folder} holds ${pipes.length} .pipe files — a pipeline bundle is one folder with one .pipe`);
 	return { file: path.join(folder, pipes[0]), stem: pipes[0].slice(0, -'.pipe'.length) };
+}
+
+/**
+ * Reads one bundle file, refusing a path whose real location leaves the folder.
+ *
+ * `fs.readFileSync` follows symlinks: a link inside the bundle pointing at a
+ * file outside it would pack that file. Every read resolves the real path and
+ * requires it under the real bundle folder.
+ *
+ * @param folder - The bundle folder.
+ * @param rel - The bundle-relative path.
+ * @returns The bytes.
+ * @throws Error when the real path leaves the folder.
+ */
+export function readContained(folder: string, rel: string): Buffer {
+	const root = fs.realpathSync(folder);
+	const real = fs.realpathSync(path.join(folder, rel));
+	if (!real.startsWith(root + path.sep)) throw new Error(`${rel} resolves outside the bundle folder`);
+	return fs.readFileSync(real);
 }
 
 // =============================================================================
@@ -154,7 +178,7 @@ export function pipeOfBundle(folder: string): { file: string; stem: string } {
 export function readPipeManifest(folder: string, stem: string): PipeManifest {
 	const file = path.join(folder, `${stem}.rrpipe`);
 	if (!fs.existsSync(file)) return {};
-	const raw = fs.readFileSync(file);
+	const raw = readContained(folder, `${stem}.rrpipe`);
 	if (raw.byteLength > MAX_PIPE_MANIFEST_BYTES) throw new Error(`${stem}.rrpipe exceeds ${MAX_PIPE_MANIFEST_BYTES} bytes`);
 	let parsed: unknown;
 	try {
@@ -198,9 +222,10 @@ export function readPipeManifest(folder: string, stem: string): PipeManifest {
 export function packPipeBundle(folder: string): PackedPipeBundle {
 	// Step 1: the one pipe, parsed (the artifact the server snapshots)
 	const { file, stem } = pipeOfBundle(folder);
+	const pipeBytes = readContained(folder, path.basename(file));
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+		parsed = JSON.parse(pipeBytes.toString('utf8'));
 	} catch (err) {
 		throw new Error(`${path.basename(file)} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
 	}
@@ -221,12 +246,12 @@ export function packPipeBundle(folder: string): PackedPipeBundle {
 		if (entry) entry.header.time = ZIP_EPOCH;
 		files.push(rel);
 	};
-	add(path.basename(file), fs.readFileSync(file));
+	add(path.basename(file), pipeBytes);
 	const manifestPath = path.join(folder, `${stem}.rrpipe`);
-	if (fs.existsSync(manifestPath)) add(`${stem}.rrpipe`, fs.readFileSync(manifestPath));
+	if (fs.existsSync(manifestPath)) add(`${stem}.rrpipe`, readContained(folder, `${stem}.rrpipe`));
 	const readmePath = path.join(folder, PIPE_README_NAME);
 	if (fs.existsSync(readmePath)) {
-		const readme = fs.readFileSync(readmePath);
+		const readme = readContained(folder, PIPE_README_NAME);
 		if (readme.byteLength > MAX_PIPE_README_BYTES) throw new Error(`${PIPE_README_NAME} exceeds ${MAX_PIPE_README_BYTES} bytes`);
 		add(PIPE_README_NAME, readme);
 	}
@@ -234,18 +259,20 @@ export function packPipeBundle(folder: string): PackedPipeBundle {
 	if (iconRel) {
 		const iconPath = path.join(folder, iconRel);
 		if (!fs.existsSync(iconPath)) throw new Error(`the manifest names icon "${iconRel}" but the bundle has no such file`);
-		const icon = fs.readFileSync(iconPath);
+		const icon = readContained(folder, iconRel);
 		if (icon.byteLength > MAX_ICON_BYTES) throw new Error(`${iconRel} exceeds ${MAX_ICON_BYTES} bytes`);
 		add(iconRel, icon);
 	}
 	const assetsDir = path.join(folder, PIPE_ASSETS_DIR);
 	if (fs.existsSync(assetsDir) && fs.statSync(assetsDir).isDirectory()) {
 		const walk = (dir: string, rel: string): void => {
-			for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+			// Code-point order, the Python packer's `sorted()`: two packs of one
+			// folder hash the same on every machine and in both languages
+			for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
 				const childRel = `${rel}/${entry.name}`;
 				if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
 				else if (entry.isFile()) {
-					const bytes = fs.readFileSync(path.join(dir, entry.name));
+					const bytes = readContained(folder, childRel);
 					if (bytes.byteLength > MAX_README_IMAGE_BYTES) throw new Error(`${childRel} exceeds ${MAX_README_IMAGE_BYTES} bytes`);
 					add(childRel, bytes);
 				}

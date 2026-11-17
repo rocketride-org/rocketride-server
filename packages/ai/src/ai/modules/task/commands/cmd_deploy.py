@@ -51,7 +51,6 @@
 # a team needs task.control on THAT team (cmd_pipe.py).
 # =============================================================================
 
-import json
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from rocketlib import debug
@@ -69,6 +68,22 @@ from ..deploy_events import broadcast_deploy_changed, broadcast_review_state, re
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
     from ..task_server import TaskServer
+
+
+def _canonical_json(value: Any) -> Any:
+    """A pipeline dict with integer-valued floats as ints, for comparing a client's dict with the bundle's text.
+
+    JavaScript has no integer type: a TypeScript client sends ``1.0`` as
+    ``1``, while the bundle's ``.pipe`` text parses to the Python float
+    ``1.0``. Both describe one pipeline; the comparison must say so.
+    """
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _canonical_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_canonical_json(item) for item in value]
+    return value
 
 
 # =============================================================================
@@ -342,9 +357,14 @@ class DeployCommands(_DeployBase):
             bundle = read_pipe_bundle(bytes(data))
         pipeline = args.get('pipeline')
         if bundle is not None:
+            # The packers fill a missing display name (pipe, then manifest,
+            # then stem) with plain truthiness; the server fills the same way
+            # BEFORE the comparison so both sides change together
+            if not bundle.pipeline.get('name'):
+                bundle.pipeline['name'] = str(bundle.manifest.get('name') or bundle.stem)
             if pipeline is None:
                 pipeline = bundle.pipeline
-            elif json.dumps(pipeline, sort_keys=True) != json.dumps(bundle.pipeline, sort_keys=True):
+            elif _canonical_json(pipeline) != _canonical_json(bundle.pipeline):
                 raise ValueError("pipeline differs from the bundle's .pipe - deploy the bundle as it is on disk")
         # Shape first, then content: a missing/empty pipeline must report
         # itself, not a misleading "name is required".
@@ -382,11 +402,12 @@ class DeployCommands(_DeployBase):
         # author wrote in the .rrpipe plus the pipe's own facts; never a
         # publisher or author (derived, plan S7)
         metadata = {**caller_meta, 'manifest': pipe_manifest(pipeline, bundle)}
-        # Born state (plan S8): on a review-ladder server a pipe deploys
-        # 'private' like an app (team and personal rungs serve it; @public
-        # needs 'ready' after review); without the ladder the developer IS
-        # the admin, so it is born 'ready' — the same rule the app door
-        # applies (app_deploy.handle_app_add).
+        # Born state (plan S8): every version is born 'private' (team and
+        # personal rungs serve it; @public needs 'ready' after review). On a
+        # server WITHOUT a review ladder the developer IS the admin, so the
+        # version is promoted to 'ready' below, once its content is stored:
+        # born 'private' first so a failed content write can always land on
+        # 'failed' (there is no edge out of 'ready').
         entry = await account.deployments_publish(
             org_id,
             project_id,
@@ -394,7 +415,6 @@ class DeployCommands(_DeployBase):
             self._actor(),
             comment=str(args.get('comment') or ''),
             metadata=metadata,
-            state=None if account.review_ladder else 'ready',
         )
         if bundle is not None and bundle.content_entries:
             # The content beside the artifact (readme, icon, assets, the
@@ -407,11 +427,17 @@ class DeployCommands(_DeployBase):
             except Exception as exc:
                 try:
                     await account.set_artifact_state(org_id, project_id, entry['version'], 'failed', self._actor())
+                    marked = 'marked failed'
                 except Exception as flip_exc:
                     debug(f'[DEPLOY] could not flip {project_id} v{entry["version"]} to failed: {flip_exc}')
+                    marked = f'could not be marked failed: {flip_exc}'
                 raise ValueError(
-                    f'deploy failed while storing the bundle content (version {entry["version"]} marked failed): {exc}'
+                    f'deploy failed while storing the bundle content (version {entry["version"]} {marked}): {exc}'
                 ) from exc
+        if not account.review_ladder:
+            # No reviewer exists: the deployer's version is approved as it is
+            # stored, the same posture the app door takes on OSS
+            entry = await account.set_artifact_state(org_id, project_id, entry['version'], 'ready', self._actor())
         await self._withdraw_stale_submissions(org_id, project_id, int(entry['version']))
         await account.audit(
             self._account_info.userId,

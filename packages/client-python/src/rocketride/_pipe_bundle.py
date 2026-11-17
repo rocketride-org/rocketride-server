@@ -90,6 +90,36 @@ class PackedPipeBundle:
     """Bundle-relative paths packed, in zip order."""
 
 
+# ==== Reads ===================================================================
+
+
+def _read_inside(folder: str, rel: str) -> bytes:
+    """Read a bundle file, refusing any path whose real location leaves the folder.
+
+    ``open()`` follows symlinks: a link inside the bundle pointing at a file
+    outside it (``assets/key.png -> ~/.ssh/id_rsa``) would pack that file,
+    and a drive path in the manifest's ``icon`` would replace the folder in
+    ``os.path.join``. Every read resolves the real path and requires it under
+    the real bundle folder.
+
+    Args:
+        folder: The bundle folder.
+        rel: The bundle-relative path.
+
+    Returns:
+        The bytes.
+
+    Raises:
+        ValueError: The real path leaves the folder.
+    """
+    root = os.path.realpath(folder)
+    real = os.path.realpath(os.path.join(root, rel))
+    if os.path.commonpath([root, real]) != root or real == root:
+        raise ValueError(f'{rel} resolves outside the bundle folder')
+    with open(real, 'rb') as handle:
+        return handle.read()
+
+
 # ==== Folder ==================================================================
 
 
@@ -156,8 +186,7 @@ def read_pipe_manifest(folder: str, stem: str) -> Dict[str, Any]:
     path = os.path.join(folder, f'{stem}.rrpipe')
     if not os.path.exists(path):
         return {}
-    with open(path, 'rb') as handle:
-        raw = handle.read()
+    raw = _read_inside(folder, f'{stem}.rrpipe')
     if len(raw) > MAX_PIPE_MANIFEST_BYTES:
         raise ValueError(f'{stem}.rrpipe exceeds {MAX_PIPE_MANIFEST_BYTES} bytes')
     try:
@@ -204,8 +233,7 @@ def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
     """
     # Step 1: the one pipe, parsed (the artifact the server snapshots)
     pipe_file, stem = pipe_of_bundle(folder)
-    with open(pipe_file, 'rb') as handle:
-        pipe_bytes = handle.read()
+    pipe_bytes = _read_inside(folder, os.path.basename(pipe_file))
     try:
         pipe = json.loads(pipe_bytes.decode('utf-8'))
     except (ValueError, UnicodeDecodeError) as exc:
@@ -233,12 +261,10 @@ def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
         add(os.path.basename(pipe_file), pipe_bytes)
         manifest_path = os.path.join(folder, f'{stem}.rrpipe')
         if os.path.exists(manifest_path):
-            with open(manifest_path, 'rb') as handle:
-                add(f'{stem}.rrpipe', handle.read())
+            add(f'{stem}.rrpipe', _read_inside(folder, f'{stem}.rrpipe'))
         readme_path = os.path.join(folder, PIPE_README_NAME)
         if os.path.exists(readme_path):
-            with open(readme_path, 'rb') as handle:
-                readme = handle.read()
+            readme = _read_inside(folder, PIPE_README_NAME)
             if len(readme) > MAX_PIPE_README_BYTES:
                 raise ValueError(f'{PIPE_README_NAME} exceeds {MAX_PIPE_README_BYTES} bytes')
             add(PIPE_README_NAME, readme)
@@ -249,8 +275,7 @@ def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
             icon_path = os.path.join(folder, icon_rel)
             if not os.path.exists(icon_path):
                 raise ValueError(f'the manifest names icon "{icon_rel}" but the bundle has no such file')
-            with open(icon_path, 'rb') as handle:
-                icon = handle.read()
+            icon = _read_inside(folder, icon_rel)
             if len(icon) > MAX_ICON_BYTES:
                 raise ValueError(f'{icon_rel} exceeds {MAX_ICON_BYTES} bytes')
             add(icon_rel, icon)
@@ -261,8 +286,7 @@ def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
                 for name in sorted(names):
                     abs_path = os.path.join(root, name)
                     rel = os.path.relpath(abs_path, folder).replace(os.sep, '/')
-                    with open(abs_path, 'rb') as handle:
-                        data = handle.read()
+                    data = _read_inside(folder, rel)
                     if len(data) > MAX_README_IMAGE_BYTES:
                         raise ValueError(f'{rel} exceeds {MAX_README_IMAGE_BYTES} bytes')
                     add(rel, data)
