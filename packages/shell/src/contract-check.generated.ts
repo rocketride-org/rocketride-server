@@ -849,6 +849,14 @@ import type { SdkLike as Frozen_SdkLike } from '../contract/versions/v11';
 import type { SdkLike as Current_SdkLike } from './api';
 import type { SUBMIT_RESULT as Frozen_SUBMIT_RESULT } from '../contract/versions/v12';
 import type { SUBMIT_RESULT as Current_SUBMIT_RESULT } from './api';
+import type { PipeInterfaceNode as Frozen_PipeInterfaceNode } from '../contract/versions/v12';
+import type { PipeInterfaceNode as Current_PipeInterfaceNode } from './api';
+import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/versions/v12';
+import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './api';
+import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v12';
+import type { PipeInterfaces as Current_PipeInterfaces } from './api';
+import type { ConvertResult as Frozen_ConvertResult } from '../contract/versions/v12';
+import type { ConvertResult as Current_ConvertResult } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1703,3 +1711,11 @@ const _t_SdkLike: Frozen_SdkLike = {} as Current_SdkLike;
 void _t_SdkLike;
 const _t_SUBMIT_RESULT: Frozen_SUBMIT_RESULT = {} as Current_SUBMIT_RESULT;
 void _t_SUBMIT_RESULT;
+const _t_PipeInterfaceNode: Frozen_PipeInterfaceNode = {} as Current_PipeInterfaceNode;
+void _t_PipeInterfaceNode;
+const _t_PipeInterfaceMap: Frozen_PipeInterfaceMap = {} as Current_PipeInterfaceMap;
+void _t_PipeInterfaceMap;
+const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
+void _t_PipeInterfaces;
+const _t_ConvertResult: Frozen_ConvertResult = {} as Current_ConvertResult;
+void _t_ConvertResult;

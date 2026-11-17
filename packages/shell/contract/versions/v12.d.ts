@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-16T08:06:54.293Z
-// Source commit: 9f21ae5c75ca3f0c5f1998b6f5880303c152e12d
+// Generated:     2026-11-17T18:49:43.328Z
+// Source commit: 395648816177e237c5b49941569adb8cdb864ae1
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -704,6 +704,12 @@ export interface ApiKeyRecord {
     teamName: string | null;
     /** Array of permission strings granted to this key. */
     permissions: string[];
+    /**
+     * The key's task-address scope: patterns (`developerId.pipelineId.source`
+     * or `developerId.pipelineId.*`) the key may send to; null or absent for
+     * an unscoped key. Frozen at mint, like the team.
+     */
+    endpoints?: string[] | null;
     /** ISO timestamp of when the key was created, or null. */
     createdAt: string | null;
     /** ISO timestamp of when the key expires, or null for no expiry. */
@@ -1249,6 +1255,35 @@ export interface SUBMIT_RESULT {
     warnings?: Array<Record<string, unknown>>;
     /** The close body's fields */
     [key: string]: unknown;
+}
+/** One callable node of an interface: the id to call and a name to show. */
+export interface PipeInterfaceNode {
+    /** The component id — what `tool()` takes as `nodeId`. */
+    nodeId: string;
+    /** The author's display name, else the node id; always present. */
+    name: string;
+}
+/**
+ * The interface map: address → catalog classType → nodes.
+ *
+ * A source component sits under its own address (`acme.docBrain.chat`) with
+ * its classTypes (`source`, `chat`); every other component sits under the
+ * PIPE address (`acme.docBrain`, the default source) under each classType it
+ * carries (`database`, `tool`, `llm`, ...).
+ */
+export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
+/** The `interfaces()` answer: which publication would answer, and what it offers. */
+export interface PipeInterfaces {
+    /** The pipe address (`developerId.pipelineId`). */
+    address: string;
+    /** The rung that answers you: `dev` (your own run, no publication), `me`, `team` or `public`. */
+    rung: "dev" | "me" | "team" | "public";
+    /** The registry version that publication points at; null when your own `dev` run answered (it has none). */
+    version: number | null;
+    /** The answering team on the `team` rung. */
+    teamId?: string;
+    /** The map. */
+    interfaces: PipeInterfaceMap;
 }
 /** Denormalized audit identity — survives account deletion. */
 export interface DeployActor {
@@ -2330,6 +2365,8 @@ export interface DashboardTask {
     id: string;
     /** Display name (pipeline filename, config name, or source ID). */
     name: string;
+    /** The control's address (`developerId.pipelineId.source`) — what `tool()` and `interfaces()` take. */
+    address?: string;
     /** Project identifier. */
     projectId: string;
     /** Source component identifier. */
@@ -2981,8 +3018,29 @@ export interface ValidationResult {
     errors: ValidationError[];
     /** Validation warnings — pipeline may still execute. */
     warnings: ValidationError[];
+    /** The pipeline rewritten to the current config format, present when it was in the old one. */
+    converted?: Record<string, unknown>;
+    /** What the conversion changed or dropped, present when it ran. */
+    conversion?: ValidationError[];
     /** Additional fields from the engine response. */
     [key: string]: unknown;
+}
+/**
+ * Result of `convert()`: a pipeline rewritten from the old node-config format.
+ *
+ * `pipeline` is the text to use (the input when `touched` is false); `errors`
+ * names every component the converter would not guess at, which keeps its
+ * original config.
+ */
+export interface ConvertResult {
+    /** The converted pipeline (the input when nothing changed). */
+    pipeline: Record<string, unknown>;
+    /** What was changed, dropped or filled in, per component. */
+    warnings: ValidationError[];
+    /** Components that could not be converted. */
+    errors: ValidationError[];
+    /** Whether anything changed. */
+    touched: boolean;
 }
 /**
  * Protocol capability flags for service drivers.
@@ -4667,6 +4725,30 @@ declare class DeployApi {
         onProgress?: (line: string) => void;
     }): Promise<PublishResult>;
     /**
+     * Packs a pipeline BUNDLE folder and deploys it as the next immutable
+     * registry version — the call behind the DEPLOY card and the CLI's
+     * `deploy add <folder>` (Node.js only; plan §9, B7).
+     *
+     * The bundle is `pipelines/<pipeId>/`: exactly one `.pipe` (what runs),
+     * beside the store manifest `<stem>.rrpipe`, `readme.md`, an icon and
+     * `assets/` (the readme's images). The pipe rides as the artifact, the
+     * rest as the content zip the server stores beside it. A folder that is
+     * not a bundle (no pipe, several pipes) is refused before any call;
+     * `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a
+     * pipeline dict with no bundle.
+     *
+     * @param bundleDir - The bundle folder, or its `.pipe` when it is the
+     *   folder's only pipe.
+     * @param options.comment - "What changed" note kept in the registry.
+     * @param options.deployTo - Team id to deploy the new version to
+     *   immediately (one-step add+deploy).
+     * @returns The artifact entry, plus the deployment when `deployTo` was given.
+     */
+    addPipe(bundleDir: string, options?: {
+        comment?: string;
+        deployTo?: string;
+    }): Promise<PublishResult>;
+    /**
      * Scaffolds a new app in the workspace — the programmatic twin of the
      * App Builder's New App wizard, rendering the identical templates
      * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace
@@ -5509,6 +5591,33 @@ export declare class RocketRideClient extends DAPClient {
         source?: string;
     }): Promise<ValidationResult>;
     /**
+     * Rewrite a pipeline from the old node-config format to the current one.
+     *
+     * A `.pipe` saved against the old `profile`-based node configuration is
+     * converted by the server from each node's migration data. The server also
+     * converts on its own at validate, start and publish, so this call is for
+     * writing the converted text back to a file. Nothing is stored server-side.
+     *
+     * @param options.pipeline - Pipeline configuration, flat or in the `.pipe` file envelope
+     * @returns The pipeline to use (the input when `touched` is false), what
+     *          changed per component, and the components that could not be
+     *          converted (they keep their original config)
+     * @throws Error if the server refuses the request
+     *
+     * @example
+     * ```typescript
+     * const result = await client.convert({ pipeline });
+     * if (result.touched && result.errors.length === 0) {
+     *   await save(result.pipeline);
+     * }
+     * ```
+     *
+     * `warnings` and `errors` are ALWAYS arrays.
+     */
+    convert(options: {
+        pipeline: PipelineConfig | Record<string, unknown>;
+    }): Promise<ConvertResult>;
+    /**
      * Start an RocketRide pipeline for processing data.
      *
      * This method loads a pipeline configuration and sends the client's configured
@@ -5565,6 +5674,13 @@ export declare class RocketRideClient extends DAPClient {
         name?: string;
         /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
         env?: Record<string, string>;
+        /**
+         * A spec call's answer to a live `@dev` presence running OTHER content
+         * (plan §3.4): 'error' fails with `spec_changed` (the server default),
+         * 'keep' delivers to the running engine, 'auto' repoints the control
+         * to the new content. The IDEs pass their restart-behavior setting.
+         */
+        onChange?: "error" | "keep" | "auto";
     }): Promise<Record<string, unknown> & {
         token: string;
     }>;
@@ -5702,6 +5818,28 @@ export declare class RocketRideClient extends DAPClient {
      * @returns The unresolved pipeline dict, or undefined if the task is not found.
      */
     getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>;
+    /**
+     * What the publication that answers an address offers a front end: its
+     * callable nodes by address and catalog classType.
+     *
+     * One pure read — no engine is started, no hold is taken, nothing is
+     * billed. The address resolves the way `submit()` resolves a name (your
+     * `@me` publication, your teams in team order, the publisher's `@public`
+     * one) and the pinned version's spec is projected server-side, so the spec
+     * never leaves the server. Sources sit under their own address
+     * (`acme.docBrain.chat`), every other node under the pipe address
+     * (`acme.docBrain`, the default source). A front end filters with plain
+     * equality on the classType word: `chat`, `dropper`, `database`.
+     *
+     * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
+     * @param options.team - Resolve the `@team` rung through this one of your teams.
+     * @returns The answering rung and version, and the interface map.
+     * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
+     *         address is outside a scoped key's endpoints.
+     */
+    interfaces(address: string, options?: {
+        team?: string;
+    }): Promise<PipeInterfaces>;
     /**
      * Create a data pipe for streaming operations.
      */
@@ -6544,20 +6682,33 @@ export declare class RocketRideClient extends DAPClient {
      * through the control plane, and returns the result directly — no
      * Question, Answer, or SSE overhead.
      *
-     * @param options.token - Pipeline token for authentication and resource access
+     * A standalone tool call is a binding of its own: it resolves the address
+     * the way `submit()` does and STARTS the publication's engine when it is
+     * dormant, so a front end may call a node of a pipe nobody has used
+     * recently. A node the entry source did not load fails at the engine.
+     *
+     * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
+     *                          or the address a `use()`/`submit()` result returned
+     * @param options.token - Deprecated spelling of `address` (the token slot carries the
+     *                        address); one of the two is required
      * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
      * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
      *                         tool-lane nodes; the first node that owns the tool handles it.
      * @param options.input - Arguments forwarded to the tool function
+     * @param options.team - Resolve the `@team` rung through this one of your teams — the same
+     *                       team an `interfaces()` call was made with, so discovery and execution
+     *                       land on the same publication
      * @param options.timeout - Optional per-request timeout in ms
      * @returns The tool's return value (typically a record/object)
      * @throws Error if the server signals failure or no node handles the requested tool
      */
     tool<T = any>(options: {
-        token: string;
+        address?: string;
+        token?: string;
         tool: string;
         nodeId?: string;
         input?: Record<string, unknown>;
+        team?: string;
         timeout?: number;
     }): Promise<T>;
 }
