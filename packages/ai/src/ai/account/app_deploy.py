@@ -1403,6 +1403,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     # Precedence: sorted so each app id's winner lands LAST and the blind
     # dict-overwrite below keeps it (see _precedence_sorted).
     resolved: Dict[str, Dict[str, Any]] = {}
+    binding_orgs: Dict[str, str] = {}
     for row in _precedence_sorted(rows):
         # The SERVING gate (binding live, deployment serveable for the rung,
         # build 'ok') — shared with the owner's where-list so App Builder
@@ -1476,6 +1477,15 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
+        binding_orgs[app_id] = row_org
+
+    # The isolation stamp (#1022): decided ONCE, here, from the WINNER's
+    # binding org, which never leaves this function. Adds nothing while
+    # RR_APP_ISOLATION is off.
+    from ai.modules.shell.app_origin import resolve_isolation, stamp_isolation
+
+    for app_id, entry in resolved.items():
+        stamp_isolation(entry, await resolve_isolation(app_id, binding_orgs[app_id]))
     return list(resolved.values())
 
 

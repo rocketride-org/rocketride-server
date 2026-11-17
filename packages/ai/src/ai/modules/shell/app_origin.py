@@ -48,7 +48,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, NamedTuple, Optional, Tuple
 
 MODES = ('off', 'optin', 'enforce')
 HOST_SOURCES = ('host', 'edge-header')
@@ -573,3 +573,105 @@ async def entitlement_ok(user_id: str, org_id: str, app_id: str, version: int) -
     if not _is_saas():
         return True
     return version in await token_version_dirs(user_id, org_id, app_id)
+
+
+# =============================================================================
+# THE ISOLATION DECISION — stamped once, where the binding org is known
+# =============================================================================
+# resolve_app_pins stamps each entry it builds with ``firstParty`` and
+# ``isolated`` from the scope-walk WINNER's binding org; the binding org never
+# leaves it, and nothing else writes the two keys. With the mode ``off`` no
+# key is added. ``wire_view`` then shapes the list per client at the points it
+# is serialised (probe, connect, pushes).
+
+# The shellCaps value a shell sends when it can open isolated apps.
+SHELL_CAP = 'appIsolation:1'
+_MAX_SHELL_CAPS = 8
+
+
+class Verdict(NamedTuple):
+    """The isolation decision of one app as bound by one org."""
+
+    isolated: bool
+    firstParty: bool
+
+
+def _isolates(config: IsolationConfig, app_id: str, first_party: bool) -> bool:
+    """``isolated`` for an app: never under off, never first party, every app or the listed ones."""
+    if config.mode == 'off' or first_party:
+        return False
+    return config.mode == 'enforce' or app_id in config.apps
+
+
+async def resolve_isolation(app_id: str, binding_org_id: str) -> Optional[Verdict]:
+    """
+    The isolation decision of ``app_id`` bound by ``binding_org_id``.
+
+    ``firstParty`` is the account's ``is_first_party`` (any error answers
+    False: fail closed). Under ``off`` nothing is asked and the answer is
+    None (no stamp).
+    """
+    config = current_config()
+    if config.mode == 'off':
+        return None
+    from ai.account import account
+
+    try:
+        first_party = (await account.is_first_party(app_id, binding_org_id)) is True
+    except Exception:
+        first_party = False
+    return Verdict(isolated=_isolates(config, app_id, first_party), firstParty=first_party)
+
+
+def stamp_isolation(entry: dict, verdict: Optional[Verdict]) -> dict:
+    """Write the decision onto one manifest entry (the ONLY writer of the keys); None adds nothing."""
+    if verdict is not None:
+        entry.update({'firstParty': verdict.firstParty, 'isolated': verdict.isolated})
+    return entry
+
+
+def sanitize_shell_caps(value: Any) -> Tuple[str, ...]:
+    """A client's ``shellCaps``: a list of strings, at most 8 kept; anything else is no caps."""
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(cap for cap in value if isinstance(cap, str))[:_MAX_SHELL_CAPS]
+
+
+def wire_view(entries: Optional[List[dict]], shell_caps: Any) -> Optional[List[dict]]:
+    """
+    The app list as one client may receive it.
+
+    For a client without ``appIsolation:1`` in its ``shellCaps`` (an old shell,
+    a VS Code realm), an isolated entry loses ``registryVersion`` and
+    ``entry`` so it shows no broken tile; security does not depend on it (the
+    main origin refuses the dist anyway). Works on copies, is idempotent, and
+    returns its input unchanged under ``off``.
+    """
+    if not entries or current_config().mode == 'off':
+        return entries
+    capable = SHELL_CAP in sanitize_shell_caps(shell_caps)
+    out = []
+    for entry in entries:
+        entry = dict(entry) if isinstance(entry, dict) else entry
+        if not capable and isinstance(entry, dict) and entry.get('isolated') is True:
+            entry.pop('registryVersion', None)
+            entry.pop('entry', None)
+        out.append(entry)
+    return out
+
+
+def probe_isolation() -> Optional[dict]:
+    """The probe's ``appIsolation`` block, or None under ``off`` (or without a runtime marker)."""
+    config = current_config()
+    if config.mode == 'off':
+        return None
+    try:
+        marker = read_runtime_marker()
+    except RuntimeError:
+        return None
+    return {
+        'mode': config.mode,
+        'originTemplate': config.origin_template,
+        'protoMin': marker['protoMin'],
+        'protoMax': marker['protoMax'],
+    }

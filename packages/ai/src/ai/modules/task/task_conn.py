@@ -285,6 +285,10 @@ class TaskConn(
         self._last_activity: float = time.time()
         self._client_info: Dict[str, str] = {}
 
+        # shellCaps from the auth arguments (#1022): what this client can
+        # render; set by on_auth, read by every account push.
+        self._shell_caps: tuple = ()
+
         # Brute-force guard: per-connection lifetime count of auth requests.
         # Enforced in on_auth against CONST_AUTH_MAX_ATTEMPTS_PER_CONN so a
         # single WebSocket cannot submit an unbounded stream of credentials.
@@ -360,6 +364,8 @@ class TaskConn(
         the connection is scheduled for disconnect. Successful auth does not reset
         the counter: the cap is a per-connection lifetime limit.
         """
+        from ai.modules.shell.app_origin import sanitize_shell_caps, wire_view
+
         args = request.get('arguments') or {}
 
         # Count every call (including empty/deauth and re-auth) toward the cap.
@@ -406,6 +412,9 @@ class TaskConn(
             self._client_info['name'] = str(args['clientName'])
         if args.get('clientVersion'):
             self._client_info['version'] = str(args['clientVersion'])
+        # What the client can render (#1022): shellCaps decides the wire view
+        # of isolated apps here and on every later account push.
+        self._shell_caps = sanitize_shell_caps(args.get('shellCaps'))
 
         # Notify dashboard subscribers
         await self._server.broadcast_server_event(
@@ -425,8 +434,12 @@ class TaskConn(
         )
 
         # Apps are already populated in AccountInfo by the account service
-        # (desktop apps with full manifest + subscription status).
-        return self.build_response(request, body=result.to_connect_result())
+        # (desktop apps with full manifest + subscription status). The wire
+        # view works on the serialised copy, never on the stored account.
+        body = result.to_connect_result()
+        if 'apps' in body:
+            body['apps'] = wire_view(body['apps'], self._shell_caps)
+        return self.build_response(request, body=body)
 
     async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

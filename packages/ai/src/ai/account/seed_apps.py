@@ -326,7 +326,9 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
         # build.status 'ok': the seed's dist/ is populated by the copy below
         # from an already-built static tree, so seeded versions pass the SAME
         # built gate server builds do (no special-casing anywhere downstream).
-        metadata={'manifest': manifest, 'build': build},
+        # platform: the seeder is the ONE writer of this flag (deploys strip
+        # it from caller metadata); the OSS first-party rule reads it (#1022).
+        metadata={'manifest': manifest, 'build': build, 'platform': True},
         state='ready',
     )
     try:
