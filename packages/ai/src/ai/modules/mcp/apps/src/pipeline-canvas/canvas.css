@@ -78,14 +78,14 @@ body {
 }
 /* A phone-width chat: the buttons get their own row under the title. */
 @media (max-width: 560px) {
-	.rr-canvas-head {
+	.rr-canvas:not(.rr-canvas-coarse) .rr-canvas-head {
 		grid-template-columns: minmax(0, 1fr);
 		grid-template-areas:
 			'heading'
 			'notes'
 			'tools';
 	}
-	.rr-canvas-tools {
+	.rr-canvas:not(.rr-canvas-coarse) .rr-canvas-tools {
 		justify-self: start;
 		margin-top: 8px;
 	}
@@ -160,6 +160,18 @@ body {
 	outline: 2px solid var(--rr-accent);
 	outline-offset: 2px;
 }
+.rr-canvas-flow {
+	display: none;
+	margin-top: 4px;
+	font-size: 12px;
+	color: var(--rr-text-primary);
+}
+/* On a phone the drawing is small: the main flow is also written out. */
+@media (max-width: 560px) {
+	.rr-canvas-flow {
+		display: block;
+	}
+}
 .rr-canvas-howto {
 	margin-top: 6px;
 	font-size: 12px;
@@ -205,6 +217,7 @@ body {
 	position: absolute;
 	display: flex;
 	align-items: center;
+	justify-content: center;
 	gap: 5px;
 	padding: 0 clamp(3px, 8%, 8px);
 	border-radius: 4px 4px 0 0;
@@ -217,7 +230,7 @@ body {
 	white-space: nowrap;
 	overflow: hidden;
 }
-.rr-overview-label span {
+.rr-overview-title {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -225,8 +238,39 @@ body {
 /* A narrow node: the icon first and a smaller font, so the type still reads. */
 .rr-overview-narrow {
 	gap: 3px;
-	font-size: 11px;
+	padding: 0 2px;
+	font-size: 10.5px;
+	letter-spacing: -0.01em;
 }
+.rr-overview-narrow .rr-overview-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	white-space: normal;
+	line-height: 1.15;
+}
+/* The builder's EXPERIMENTAL badge, as a dot. */
+.rr-overview-badge {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--rr-color-warning);
+}
+/* At overview zoom edges keep a 1 px line instead of thinning with the zoom. */
+.react-flow:has(.rr-overview) .react-flow__edge-path {
+	vector-effect: non-scaling-stroke;
+}
+/* A node whose component this engine does not have. */
+.rr-canvas .react-flow__node.rr-node-missing::after {
+	content: '';
+	position: absolute;
+	inset: -5px;
+	border: 1.5px dashed var(--rr-text-secondary);
+	border-radius: 7px;
+	pointer-events: none;
+}
+
 /* The drawing is too small for even an icon per node: say how to read it. */
 .rr-overview-cue {
 	position: absolute;
@@ -253,6 +297,9 @@ body {
 	background: var(--rr-bg-paper);
 }
 .rr-canvas-full .react-flow__minimap svg {
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-full .react-flow__minimap svg {
 	display: block;
 	width: 168px;
 	height: 108px;
@@ -274,6 +321,12 @@ body {
 }
 
 /* --- States ------------------------------------------------------------- */
+/* One border is enough: the chat already frames the widget. */
+.rr-canvas-empty,
+.rr-canvas-error {
+	border: none;
+	margin: 0;
+}
 .rr-canvas-empty {
 	color: var(--rr-text-secondary);
 }

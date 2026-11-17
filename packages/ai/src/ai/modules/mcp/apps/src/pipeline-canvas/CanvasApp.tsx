@@ -26,12 +26,12 @@ import NodeGroup from '@app-shared/tools/pipelines/panels/design/canvas/componen
 import NodeAnnotation from '@app-shared/tools/pipelines/panels/design/canvas/components/node/node-annotation/NodeAnnotation';
 import FlowEdge from '@app-shared/tools/pipelines/panels/design/canvas/components/edge/FlowEdge';
 import { Icon, registerServiceIcons } from '@app-shared/tools/pipelines/panels/design/canvas/util/Icon';
-import { INodeType, type IProject, type INodeData, type IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
+import { INodeType, IServiceCapabilities, type IProject, type INodeData, type IServiceCatalog } from '@app-shared/tools/pipelines/panels/design/canvas/types';
 
 import { ReadOnlyFlowGraphProvider, type FlowNode } from './stand-ins/FlowGraphContext';
 import { ReadOnlyFlowProjectProvider } from './stand-ins/FlowProjectContext';
 import { ReadOnlyFlowPreferencesProvider } from './stand-ins/FlowPreferencesContext';
-import { ESTIMATED_NODE_SIZE, displayPath, placeNodes, type CanvasModel } from './model';
+import { ESTIMATED_NODE_SIZE, displayPath, mainFlow, placeNodes, type CanvasModel } from './model';
 
 /**
  * Canvas height bounds, in px. The height follows the drawing's shape inside
@@ -41,16 +41,27 @@ import { ESTIMATED_NODE_SIZE, displayPath, placeNodes, type CanvasModel } from '
 export const CANVAS_MAX_HEIGHT = 560;
 export const CANVAS_MIN_HEIGHT = 200;
 
-/** Below this zoom the builder's node titles are too small to read, so larger labels are drawn over them. */
-export const OVERVIEW_ZOOM = 0.9;
-/** A node narrower than this on screen gets no label: the label could not hold its icon. */
+/** Below this zoom the builder's node titles (12 px at zoom 1) are under 9 px, so larger labels are drawn over them. */
+export const OVERVIEW_ZOOM = 0.75;
+/** A label narrower than this on screen is not drawn: it could not hold a word. */
 const LABEL_MIN_WIDTH = 40;
-/** Below this on-screen width a label uses a smaller font. */
+/** Below this on-screen width a label uses a smaller font on up to two lines. */
 const LABEL_WIDE = 90;
+/** From this on-screen width a label shows the node's icon (below it the title needs the room). */
+const LABEL_ICON_WIDTH = 64;
+/** The widest a label grows, in px. */
+const LABEL_MAX_WIDTH = 190;
 /** Height of the builder's top cap and header row at zoom 1, used until the header is measured. */
 const NODE_HEADER_HEIGHT = 46;
-/** The smallest label height, in px. */
+/** The smallest label heights, one line and two lines, in px. */
 const LABEL_MIN_HEIGHT = 20;
+const LABEL_MIN_HEIGHT_TWO_LINES = 30;
+/** Full screen fits the whole drawing while nodes stay at least this wide on screen. */
+const FULL_FIT_MIN_NODE_WIDTH = 90;
+/** Otherwise full screen opens at the zoom that draws a typical node this wide. */
+const FULL_READ_NODE_WIDTH = 120;
+/** Under this frame width the full-screen minimap would cover too much of the drawing. */
+const MINIMAP_MIN_FRAME_WIDTH = 480;
 /** The inline canvas of a truncated pipeline stays short: 200 thumbnails are an overview, not a read. */
 const TRUNCATED_MAX_HEIGHT = 320;
 
@@ -194,27 +205,63 @@ function ToolButton({ label, icon, onClick }: { label: string; icon: string; onC
 	);
 }
 
-function Toolbar({ host, moved }: { host: HostView; moved: MutableRefObject<boolean> }): ReactElement {
-	const { zoomIn, zoomOut, fitView } = useReactFlow();
+/**
+ * Zoom by `factor` around the middle of the nodes in view, not the middle of
+ * the frame, which can be the empty space between two rows.
+ */
+function useZoomAroundNodes(): (factor: number) => void {
+	const { getViewport, setViewport, getNodes, getNodesBounds } = useReactFlow();
+	const width = useStore((s) => s.width);
+	const height = useStore((s) => s.height);
+	return useCallback(
+		(factor: number) => {
+			const { x, y, zoom } = getViewport();
+			const inView = getNodes().filter((node) => {
+				const box = getNodesBounds([node]);
+				const left = box.x * zoom + x;
+				const top = box.y * zoom + y;
+				return left + box.width * zoom > 0 && top + box.height * zoom > 0 && left < width && top < height;
+			});
+			const box = getNodesBounds(inView.length ? inView : getNodes());
+			const cx = box.x + box.width / 2;
+			const cy = box.y + box.height / 2;
+			const next = Math.min(2, Math.max(0.02, zoom * factor));
+			// Keep that point where it is on screen.
+			const sx = cx * zoom + x;
+			const sy = cy * zoom + y;
+			setViewport({ x: sx - cx * next, y: sy - cy * next, zoom: next }, { duration: 150 });
+		},
+		[getViewport, setViewport, getNodes, getNodesBounds, width, height]
+	);
+}
+
+function Toolbar({ host, moved, coarse }: { host: HostView; moved: MutableRefObject<boolean>; coarse: boolean }): ReactElement {
+	const { fitView } = useReactFlow();
+	const zoomBy = useZoomAroundNodes();
 	const active = host.mode === 'fullscreen';
 	return (
 		<div className="rr-canvas-tools" role="toolbar" aria-label="View">
-			<ToolButton
-				label="Zoom out"
-				icon={ZOOM_OUT_ICON}
-				onClick={() => {
-					moved.current = true;
-					zoomOut({ duration: 150 });
-				}}
-			/>
-			<ToolButton
-				label="Zoom in"
-				icon={ZOOM_IN_ICON}
-				onClick={() => {
-					moved.current = true;
-					zoomIn({ duration: 150 });
-				}}
-			/>
+			{/* On a touch screen pinch zooms, so the zoom buttons give their room back to the canvas. */}
+			{!coarse && (
+				<ToolButton
+					label="Zoom out"
+					icon={ZOOM_OUT_ICON}
+					onClick={() => {
+						moved.current = true;
+						zoomBy(1 / 1.25);
+					}}
+				/>
+			)}
+			{!coarse && (
+				<ToolButton
+					label="Zoom in"
+					icon={ZOOM_IN_ICON}
+					onClick={() => {
+						moved.current = true;
+						zoomBy(1.25);
+					}}
+				/>
+			)}
 			<ToolButton
 				label="Fit to view"
 				icon={FIT_ICON}
@@ -247,44 +294,85 @@ function headerBottom(id: string): number {
 }
 
 /**
+ * Room for each node's label, in flow units: the node's width plus, on each
+ * side, a bit under half the gap to the nearest node whose header band it
+ * shares.
+ * Positions only change when the widget lays a pipeline out again, so this
+ * is worked out once per placement.
+ */
+function useLabelRoom(): Map<string, number> {
+	const nodes = useStore((s) => s.nodes);
+	const nodeLookup = useStore((s) => s.nodeLookup);
+	return useMemo(() => {
+		const boxes = [...nodeLookup.values()]
+			.filter((node) => node.type === INodeType.Default && node.measured?.width)
+			.map((node) => ({ id: node.id, x: node.internals.positionAbsolute.x, y: node.internals.positionAbsolute.y, w: node.measured!.width!, h: headerBottom(node.id) }));
+		const room = new Map<string, number>();
+		for (const box of boxes) {
+			let gap = 120;
+			for (const other of boxes) {
+				if (other === box || other.y > box.y + box.h || other.y + other.h < box.y) continue;
+				if (other.x >= box.x + box.w) gap = Math.min(gap, other.x - (box.x + box.w));
+				else if (other.x + other.w <= box.x) gap = Math.min(gap, box.x - (other.x + other.w));
+				else gap = 0;
+			}
+			// A bit under half the gap on each side, so two neighbours' labels never meet.
+			room.set(box.id, box.w + 2 * Math.max(0, gap) * 0.42);
+		}
+		return room;
+	}, [nodes, nodeLookup]);
+}
+
+/**
  * Larger titles over the builder's node headers when the drawing is zoomed
  * out too far to read them, in the spirit of React Flow's contextual zoom.
- * Each label sits on the header of its node (same width, the header's
- * colours and font), icon first, so the node keeps its shape and its lanes
- * and only the title grows. When the header is shorter on screen than the
- * label, the label grows upward from the header's bottom edge, so the lanes
- * stay clear. When even the icon would not fit, a cue says how to read the
- * names. Labels ignore the pointer.
+ * Each label is centred on its node's header, in the header's colours and
+ * font, icon first, and may use most of the gap to the next node; a narrow
+ * one wraps to two lines. A label that would overlap another is dropped, as
+ * map labels are. When the header is shorter on screen than the label, the
+ * label grows upward from the header's bottom edge, so the lanes stay clear.
+ * When no label fits, a cue says how to read the names. Labels ignore the
+ * pointer.
  */
 function OverviewLabels({ services, cue }: { services: IServiceCatalog; cue: string }): ReactElement | null {
 	const [tx, ty, zoom] = useStore((s) => s.transform);
 	const nodeLookup = useStore((s) => s.nodeLookup);
+	const room = useLabelRoom();
 	if (zoom >= OVERVIEW_ZOOM) return null;
 	const labels: ReactElement[] = [];
-	let nodes = 0;
-	for (const node of nodeLookup.values()) {
-		if (node.type !== INodeType.Default || !node.measured?.width) continue;
-		nodes += 1;
-		const width = node.measured.width * zoom;
+	const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+	const ordered = [...nodeLookup.values()]
+		.filter((node) => node.type === INodeType.Default && node.measured?.width)
+		.sort((a, b) => a.internals.positionAbsolute.y - b.internals.positionAbsolute.y || a.internals.positionAbsolute.x - b.internals.positionAbsolute.x);
+	for (const node of ordered) {
+		const nodeWidth = node.measured!.width! * zoom;
+		const width = Math.min(LABEL_MAX_WIDTH, Math.max(nodeWidth, (room.get(node.id) ?? node.measured!.width!) * zoom));
 		if (width < LABEL_MIN_WIDTH) continue;
 		const data = node.data as INodeData;
-		const service = services[data.provider] as { title?: string; icon?: string } | undefined;
+		const service = services[data.provider] as { title?: string; icon?: string; capabilities?: number } | undefined;
 		const title = data.name || service?.title || data.provider;
+		const experimental = ((service?.capabilities ?? 0) & IServiceCapabilities.Experimental) === IServiceCapabilities.Experimental;
 		const { x, y } = node.internals.positionAbsolute;
 		const narrow = width < LABEL_WIDE;
 		const header = headerBottom(node.id) * zoom;
-		const height = Math.max(header, LABEL_MIN_HEIGHT);
+		const height = Math.max(header, narrow ? LABEL_MIN_HEIGHT_TWO_LINES : LABEL_MIN_HEIGHT);
+		const left = x * zoom + tx + (nodeWidth - width) / 2;
+		const top = y * zoom + ty + header - height;
+		const box = { left, top, right: left + width, bottom: top + height };
+		if (placed.some((p) => box.left < p.right && p.left < box.right && box.top < p.bottom && p.top < box.bottom)) continue;
+		placed.push(box);
 		labels.push(
-			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : 'rr-overview-label'} style={{ left: x * zoom + tx, top: y * zoom + ty + header - height, width, height }}>
-				{service?.icon && <Icon name={service.icon} width="14" height="14" className="rr-overview-icon" />}
-				<span>{title}</span>
+			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : 'rr-overview-label'} style={{ left, top, width, height }}>
+				{service?.icon && width >= LABEL_ICON_WIDTH && <Icon name={service.icon} width="14" height="14" className="rr-overview-icon" />}
+				<span className="rr-overview-title">{title}</span>
+				{experimental && <i className="rr-overview-badge" />}
 			</div>
 		);
 	}
 	return (
 		<div className="rr-overview" aria-hidden="true">
 			{labels}
-			{nodes > 0 && labels.length === 0 && <div className="rr-overview-cue">{cue}</div>}
+			{ordered.length > 0 && labels.length === 0 && <div className="rr-overview-cue">{cue}</div>}
 		</div>
 	);
 }
@@ -307,7 +395,8 @@ function useWholeDrawingVisible(): boolean {
 
 function FullScreenMiniMap({ safeBottom }: { safeBottom: number }): ReactElement | null {
 	const whole = useWholeDrawingVisible();
-	if (whole) return null;
+	const frameWidth = useStore((s) => s.width);
+	if (whole || frameWidth < MINIMAP_MIN_FRAME_WIDTH) return null;
 	return <MiniMap pannable zoomable position="bottom-right" nodeClassName="rr-minimap-node" ariaLabel="Overview of the whole pipeline" style={{ marginBottom: 16 + safeBottom }} />;
 }
 
@@ -320,11 +409,18 @@ function Flow({ model, host, moved, onBounds, cue }: { model: GraphModel; host: 
 	const active = host.mode === 'fullscreen';
 	const placed = useRef(!model.laidOut);
 	const [ready, setReady] = useState(false);
+	const [placement, setPlacement] = useState(0);
 
 	// A pipeline saved without positions was placed with estimated sizes.
 	// Once the browser has measured every node, place it again with the real
 	// sizes and the real frame, so nothing overlaps and a long flow wraps to
 	// suit the frame.
+	// A layout the widget made suits its frame, so it is made again for full screen and back.
+	const placedFor = useRef(active);
+	if (model.laidOut && placedFor.current !== active) {
+		placedFor.current = active;
+		placed.current = false;
+	}
 	useEffect(() => {
 		if (!initialized || placed.current || !frameWidth) return;
 		placed.current = true;
@@ -332,8 +428,9 @@ function Flow({ model, host, moved, onBounds, cue }: { model: GraphModel; host: 
 			const measured = getInternalNode(id)?.measured;
 			return { width: measured?.width ?? ESTIMATED_NODE_SIZE.width, height: measured?.height ?? ESTIMATED_NODE_SIZE.height };
 		};
-		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf, { width: frameWidth, height: CANVAS_MAX_HEIGHT }) as unknown as FlowNode[]);
-	}, [initialized, model.edges, getInternalNode, setNodes, frameWidth]);
+		setNodes((current) => placeNodes(current as never, model.edges, false, sizeOf, { width: frameWidth, height: active ? frameHeight : CANVAS_MAX_HEIGHT }) as unknown as FlowNode[]);
+		setPlacement((n) => n + 1);
+	}, [initialized, model.edges, getInternalNode, setNodes, frameWidth, frameHeight, active]);
 
 	// Once the final placement is measured, report the drawing's real size,
 	// which sets the frame's height.
@@ -372,21 +469,25 @@ function Flow({ model, host, moved, onBounds, cue }: { model: GraphModel; host: 
 				return;
 			}
 			if (active) {
+				// Fit while nodes stay readable-sized; otherwise open at a reading
+				// zoom on the drawing's top-left corner (where the flow starts).
 				const all = getNodesBounds(getNodes());
-				const fitZoom = Math.min(frameWidth / all.width, frameHeight / all.height);
-				if (fitZoom < 0.8) {
-					const targets = new Set(model.edges.map((edge) => edge.target));
-					const sources = getNodes().filter((node) => !node.parentId && !targets.has(node.id));
-					const box = getNodesBounds(sources.length ? sources : getNodes());
-					const zoom = Math.min(1, (frameHeight - 48) / Math.max(box.height, 1));
-					setViewport({ x: 24 - box.x * zoom, y: frameHeight / 2 - (box.y + box.height / 2) * zoom, zoom });
+				const fitZoom = Math.min(frameWidth / all.width, frameHeight / all.height) * (1 - 2 * FIT_PADDING);
+				const widths = getNodes()
+					.map((node) => getInternalNode(node.id)?.measured?.width ?? 0)
+					.filter((w) => w > 0)
+					.sort((a, b) => a - b);
+				const typical = widths[Math.floor(widths.length / 2)] ?? ESTIMATED_NODE_SIZE.width;
+				if (fitZoom * typical < FULL_FIT_MIN_NODE_WIDTH) {
+					const zoom = Math.min(1.25, FULL_READ_NODE_WIDTH / typical);
+					setViewport({ x: 24 - all.x * zoom, y: 24 - all.y * zoom, zoom });
 					return;
 				}
 			}
 			fitView(FIT_VIEW_OPTIONS);
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [ready, frameWidth, frameHeight, active, fitView, getNodes, getNodesBounds, getViewport, setViewport, model.edges, moved]);
+	}, [ready, frameWidth, frameHeight, active, placement, fitView, getNodes, getNodesBounds, getInternalNode, getViewport, setViewport, moved]);
 
 	const project = useMemo(() => ({ components: [] }) as unknown as IProject, []);
 
@@ -435,7 +536,8 @@ function Flow({ model, host, moved, onBounds, cue }: { model: GraphModel; host: 
 
 /** Keyboard on the focused frame: arrows pan, + and - zoom, 0 fits. Escape is handled once, on the window, in full screen. */
 function useFrameKeys(moved: MutableRefObject<boolean>): (event: KeyboardEvent<HTMLDivElement>) => void {
-	const { getViewport, setViewport, zoomIn, zoomOut, fitView } = useReactFlow();
+	const { getViewport, setViewport, fitView } = useReactFlow();
+	const zoomBy = useZoomAroundNodes();
 	return (event) => {
 		const step: Record<string, [number, number]> = { ArrowLeft: [PAN_STEP, 0], ArrowRight: [-PAN_STEP, 0], ArrowUp: [0, PAN_STEP], ArrowDown: [0, -PAN_STEP] };
 		if (step[event.key]) {
@@ -444,10 +546,10 @@ function useFrameKeys(moved: MutableRefObject<boolean>): (event: KeyboardEvent<H
 			setViewport({ x: x + step[event.key][0], y: y + step[event.key][1], zoom }, { duration: 100 });
 		} else if (event.key === '+' || event.key === '=') {
 			moved.current = true;
-			zoomIn({ duration: 150 });
+			zoomBy(1.25);
 		} else if (event.key === '-') {
 			moved.current = true;
-			zoomOut({ duration: 150 });
+			zoomBy(1 / 1.25);
 		} else if (event.key === '0') {
 			moved.current = false;
 			fitView({ ...FIT_VIEW_OPTIONS, duration: 200 });
@@ -483,7 +585,11 @@ function Header({ summary, count, shown, missing, tools }: { summary: GraphModel
 						</span>
 					)}
 				</div>
-				{summary.description && <div className="rr-canvas-description">{summary.description}</div>}
+				{summary.description && (
+					<div className="rr-canvas-description" title={summary.description}>
+						{summary.description}
+					</div>
+				)}
 			</div>
 			{(summary.truncated || missing.length > 0) && (
 				<div className="rr-canvas-notes" role="status">
@@ -591,12 +697,14 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const hint = active
 		? coarse
 			? 'Drag to move, pinch to zoom.'
-			: 'Drag or scroll to move. Ctrl + scroll zooms. Esc closes.'
+			: 'Drag or scroll to move. Pinch or Ctrl + scroll zooms. Esc closes.'
 		: coarse
 			? host.canFullScreen
 				? 'Tap to expand. Two fingers move or zoom here.'
-				: 'Use two fingers to move or zoom.'
-			: 'Drag to move. Ctrl + scroll or double-click to zoom.';
+				: 'Two fingers move or zoom.'
+			: 'Drag to move. Pinch, Ctrl + scroll or double-click to zoom.';
+	// On a phone the drawing is small: one line says what the pipeline does.
+	const flowLine = useMemo(() => mainFlow(model.summary), [model.summary]);
 
 	return (
 		<div className={`rr-canvas${active ? ' rr-canvas-full' : ''}${coarse ? ' rr-canvas-coarse' : ''}`}>
@@ -606,7 +714,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 					count={model.summary.node_count ?? model.nodes.length}
 					shown={model.summary.nodes?.length ?? model.nodes.length}
 					missing={model.missingProviders}
-					tools={<Toolbar host={host} moved={moved} />}
+					tools={<Toolbar host={host} moved={moved} coarse={coarse} />}
 				/>
 			</div>
 			<div
@@ -623,6 +731,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} cue={cue} />}
 			</div>
 			<div className="rr-canvas-howto">{hint}</div>
+			{flowLine && <div className="rr-canvas-flow">{flowLine}</div>}
 			<TextAlternative summary={model.summary} />
 		</div>
 	);

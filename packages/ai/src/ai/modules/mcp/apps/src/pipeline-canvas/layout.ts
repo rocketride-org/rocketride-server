@@ -54,10 +54,13 @@ function layersOf(ids: string[], edges: LayoutEdge[]): string[][] {
 	const order = new Map(ids.map((id, index) => [id, index]));
 	const outgoing = new Map<string, string[]>(ids.map((id) => [id, []]));
 	const remaining = new Map<string, number>(ids.map((id) => [id, 0]));
-	for (const { source, target } of edges) {
+	const fedByData = new Set<string>();
+	const invoked = new Set<string>();
+	for (const { source, target, control } of edges) {
 		if (!known.has(source) || !known.has(target) || source === target) continue;
 		outgoing.get(source)!.push(target);
 		remaining.set(target, remaining.get(target)! + 1);
+		(control ? invoked : fedByData).add(target);
 	}
 
 	// Kahn's order; a node left over when the queue empties sits on a cycle.
@@ -90,7 +93,10 @@ function layersOf(ids: string[], edges: LayoutEdge[]): string[][] {
 
 	// One left-to-right pass of barycentre ordering: a node moves toward the
 	// average row of the nodes that feed it, which removes most crossings in a
-	// pipeline. Ties, and nodes fed by nothing earlier, keep file order.
+	// pipeline. A node only invoked (a pipeline tool that starts a sub-flow)
+	// goes below the others, so the invoke edge drops down to it from its
+	// agent's bottom edge. Ties, and nodes fed by nothing earlier, keep file
+	// order.
 	const incoming = new Map<string, string[]>(ids.map((id) => [id, []]));
 	for (const [source, targets] of outgoing) for (const target of targets) incoming.get(target)!.push(source);
 	const row = new Map<string, number>();
@@ -102,24 +108,24 @@ function layersOf(ids: string[], edges: LayoutEdge[]): string[][] {
 				return [id, rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : Number.POSITIVE_INFINITY];
 			})
 		);
-		column.sort((a, b) => key.get(a)! - key.get(b)! || order.get(a)! - order.get(b)!);
+		const below = (id: string) => (invoked.has(id) && !fedByData.has(id) ? 1 : 0);
+		column.sort((a, b) => below(a) - below(b) || key.get(a)! - key.get(b)! || order.get(a)! - order.get(b)!);
 		column.forEach((id, index) => row.set(id, index));
 	}
 	return columns;
 }
 
 /**
- * Places `columns` in bands of `perBand` columns. Each band runs left to
+ * Places bands of columns, one band under the other. Each band runs left to
  * right; within a band each column is centred on the band's tallest column.
  * The satellites of a column's nodes (the nodes they invoke) go in a row
  * under that band, starting below their anchor.
  */
-function placeBands(columns: string[][], satellites: Map<string, string[]>, sizeOf: (id: string) => LayoutSize, perBand: number): Positions {
+function placeBands(bands: string[][][], satellites: Map<string, string[]>, sizeOf: (id: string) => LayoutSize): Positions {
 	const positions: Positions = {};
 	const columnHeight = (column: string[]) => column.reduce((sum, id) => sum + sizeOf(id).height, 0) + NODE_GAP * Math.max(column.length - 1, 0);
 	let top = 0;
-	for (let start = 0; start < columns.length; start += perBand) {
-		const band = columns.slice(start, start + perBand);
+	for (const band of bands) {
 		const tallest = Math.max(0, ...band.map(columnHeight));
 		let x = 0;
 		const anchors: string[] = [];
@@ -171,7 +177,7 @@ function bounds(positions: Positions, sizeOf: (id: string) => LayoutSize): Layou
  * tallest one.
  */
 export function layoutLayers(ids: string[], edges: LayoutEdge[], sizeOf: (id: string) => LayoutSize): Positions {
-	return placeBands(layersOf(ids, edges), new Map(), sizeOf, Infinity);
+	return placeBands([layersOf(ids, edges)], new Map(), sizeOf);
 }
 
 /**
@@ -232,7 +238,28 @@ export function layoutPipeline(ids: string[], edges: LayoutEdge[], sizeOf: (id: 
 	// A satellite with no data-flow anchor (a cycle of invokes) gets a column of its own.
 	if (orphans.length) columns.push(orphans);
 
-	if (!frame || columns.length < 2) return placeBands(columns, satellites, sizeOf, Infinity);
+	if (!frame || columns.length < 2) return placeBands([columns], satellites, sizeOf);
+
+	// Where to cut a band: near the even position, at the column boundary the
+	// fewest edges cross, so few connections wrap from one band to the next.
+	const columnOf = new Map<string, number>();
+	columns.forEach((column, index) => column.forEach((id) => columnOf.set(id, index)));
+	const crossing = (cut: number) =>
+		edges.filter((e) => columnOf.has(e.source) && columnOf.has(e.target) && (columnOf.get(e.source)! < cut) !== (columnOf.get(e.target)! < cut)).length;
+	const cutsFor = (bands: number): string[][][] => {
+		const cuts: number[] = [];
+		for (let i = 1; i < bands; i++) {
+			const even = Math.round((i * columns.length) / bands);
+			const low = Math.max((cuts[cuts.length - 1] ?? 0) + 1, even - 1);
+			const high = Math.min(columns.length - (bands - i), even + 1);
+			let best = Math.min(Math.max(even, low), high);
+			for (let cut = low; cut <= high; cut++) if (crossing(cut) < crossing(best)) best = cut;
+			cuts.push(best);
+		}
+		const result: string[][][] = [];
+		[0, ...cuts].forEach((start, i) => result.push(columns.slice(start, [...cuts, columns.length][i])));
+		return result;
+	};
 
 	// Keep one band (the builder's own shape) unless it would be drawn too
 	// small to read in the frame. Then use the fewest bands that reach a
@@ -240,10 +267,8 @@ export function layoutPipeline(ids: string[], edges: LayoutEdge[], sizeOf: (id: 
 	let best: Positions | null = null;
 	let bestZoom = -Infinity;
 	for (let bands = 1; bands <= columns.length; bands++) {
-		// Even bands: 8 columns in two bands are 4 and 4, never 7 and 1.
-		const perBand = Math.ceil(columns.length / bands);
-		if (bands > 1 && Math.ceil(columns.length / (bands - 1)) === perBand) continue;
-		const positions = placeBands(columns, satellites, sizeOf, perBand);
+		// Even bands: 8 columns in two bands are about 4 and 4, never 7 and 1.
+		const positions = placeBands(cutsFor(bands), satellites, sizeOf);
 		const size = bounds(positions, sizeOf);
 		const zoom = Math.min(1, frame.width / Math.max(size.width, 1), frame.height / Math.max(size.height, 1));
 		if (zoom >= WRAP_BELOW_ZOOM) return positions;
