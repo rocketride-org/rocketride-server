@@ -1180,9 +1180,39 @@ class TaskServer(DAPBase):
         today's behaviour otherwise: log on error, replace on success. The
         notice send is bounded by NOTICE_SEND_TIMEOUT.
 
+        Rebuilds of one connection run one at a time (a per-connection lock
+        around the identity read, the rebuild and the install). A rebuild that
+        waited behind another starts from the identity that one installed,
+        when it is still the same full user's: otherwise two overlapping
+        pushes both start from the old identity, the unchanged result installs
+        first, and the narrowed one's revoke is refused because the
+        connection no longer holds the identity it expected.
+
         Returns:
             bool: True when a fresh identity was installed and pushed.
         """
+        lock = getattr(conn, '_rebuild_lock', None)
+        if lock is None:
+            lock = asyncio.Lock()
+            conn._rebuild_lock = lock
+        async with lock:
+            current = conn._account_info
+            if current is not info:
+                # Changed while this push waited: continue only from the same
+                # full user's identity (a rebuild that just installed, or a
+                # re-auth as that user); a deauth or another user wins.
+                if (
+                    current is None
+                    or not getattr(conn, '_authenticated', False)
+                    or current.userId != info.userId
+                    or (getattr(current, 'auth', '') or '').startswith(('pk_', 'tk_'))
+                ):
+                    return False
+                info = current
+            return await self._push_rebuilt_locked(account, conn, info, label)
+
+    async def _push_rebuilt_locked(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """The body of ``_push_rebuilt``, run under the connection's rebuild lock."""
         subject = authority_subject(info)
         try:
             fresh = await account.rebuild_account_info(info)
