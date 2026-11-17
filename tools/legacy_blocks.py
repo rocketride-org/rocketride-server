@@ -398,15 +398,19 @@ def insert_block(text: str, block: Dict[str, Any]) -> str:
     newline = '\n'
     if body.endswith('{'):
         return body + newline + rendered + newline + '}' + (trailing or newline)
-    # The separator goes after the last member's VALUE: before a trailing
-    # `// comment` on that line, and never doubled after a trailing comma
-    head, _, last = body.rpartition('\n')
-    code, comment = _split_comment(last)
+    # The separator goes after the last member's VALUE: on the last line that
+    # holds code (comment-only lines after it stay where they are), before a
+    # trailing `// comment` on that line, and never doubled after a trailing comma
+    lines = body.split('\n')
+    index = len(lines) - 1
+    while index > 0 and not _split_comment(lines[index])[0].strip():
+        index -= 1
+    code, comment = _split_comment(lines[index])
     code = code.rstrip()
     if code.endswith(','):
         code = code[:-1].rstrip()
-    last = code + ',' + ((' ' + comment) if comment else '')
-    body = (head + '\n' + last) if _ else last
+    lines[index] = code + ',' + ((' ' + comment) if comment else '')
+    body = '\n'.join(lines)
     return body + newline + rendered + newline + '}' + (trailing or newline)
 
 
