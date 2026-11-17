@@ -162,3 +162,39 @@ export interface SUBMIT_RESULT {
 	/** The close body's fields */
 	[key: string]: unknown;
 }
+
+// ============================================================================
+// INTERFACES — what a published pipe offers a front end (plan 3.6)
+// ============================================================================
+
+/** One callable node of an interface: the id to call and a name to show. */
+export interface PipeInterfaceNode {
+	/** The component id — what `tool()` takes as `nodeId`. */
+	nodeId: string;
+	/** The author's display name, else the node id; always present. */
+	name: string;
+}
+
+/**
+ * The interface map: address → catalog classType → nodes.
+ *
+ * A source component sits under its own address (`acme.docBrain.chat`) with
+ * its classTypes (`source`, `chat`); every other component sits under the
+ * PIPE address (`acme.docBrain`, the default source) under each classType it
+ * carries (`database`, `tool`, `llm`, ...).
+ */
+export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]>>;
+
+/** The `interfaces()` answer: which publication would answer, and what it offers. */
+export interface PipeInterfaces {
+	/** The pipe address (`developerId.pipelineId`). */
+	address: string;
+	/** The rung that answers you: `dev` (your own run, no publication), `me`, `team` or `public`. */
+	rung: 'dev' | 'me' | 'team' | 'public';
+	/** The registry version that publication points at; null when your own `dev` run answered (it has none). */
+	version: number | null;
+	/** The answering team on the `team` rung. */
+	teamId?: string;
+	/** The map. */
+	interfaces: PipeInterfaceMap;
+}

@@ -576,6 +576,14 @@ def setup_parser() -> argparse.ArgumentParser:
     d_artifact.add_argument('project', help='Project id')
     d_artifact.add_argument('version', type=int, help='Registry version number')
 
+    d_interfaces = deploy_subparsers.add_parser(
+        'interfaces',
+        help='The callable nodes of the publication that answers an address, by classType (no engine started)',
+    )
+    _add_deploy_connection_args(d_interfaces)
+    d_interfaces.add_argument('address', help='Pipe address: developerId.pipelineId[.source]')
+    d_interfaces.add_argument('--team', default='', help='Resolve the @team rung through this one of your teams')
+
     for verb, help_text in (
         ('enable', 'Enable a disabled deployment'),
         ('disable', 'Disable a deployment (whole-deployment kill switch)'),

@@ -1,5 +1,5 @@
-// =============================================================================
 // MIT License
+//
 // Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,16 +19,15 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
 // =============================================================================
-// CONNECT — SESSION (tool invocation bound to one endpoint)
-// =============================================================================
+// SESSION — the database tool surface of one endpoint, by address (plan 3.6)
 //
-// Attach-mechanics live here on purpose (see types.ts). Today a session
-// resolves the owning task's token lazily and drives the node's shared SQL
-// tools (execute / get_schema / refresh_schema / dialect) via client.tool.
-// When the attach path changes, this file changes — the SqlSession contract
-// does not.
+// Every call is a standalone tool borrow on the endpoint's ADDRESS: the
+// server resolves the publication (or the caller's own run) that answers it,
+// starts a dormant engine, runs the one call on the node and releases. There
+// is no token to resolve and nothing to keep alive; a direct connection's
+// temp pipeline is the one thing that can vanish, and its revival is retried
+// once for idempotent calls.
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
@@ -43,147 +42,83 @@ import type {
 } from './types';
 
 // =============================================================================
-// DIALECT MAPPING
+// CONSTANTS
 // =============================================================================
 
-/** Dialect strings this app recognises from the node's `dialect` tool. */
+/** Dialects the editor knows; anything else is `unknown`. */
 const KNOWN_DIALECTS: ReadonlySet<string> = new Set(['mysql', 'postgres', 'clickhouse', 'neo4j']);
 
 /**
- * Map a node-reported dialect string onto the app's SqlDialect union.
+ * Normalise a `dialect` tool answer.
  *
- * @param value - The raw dialect string from the node.
- * @returns The matching SqlDialect, or 'unknown'.
+ * @param value - The tool's `dialect` field.
+ * @returns A known dialect or `unknown`.
  */
 function toDialect(value: unknown): SqlDialect {
 	return typeof value === 'string' && KNOWN_DIALECTS.has(value) ? (value as SqlDialect) : 'unknown';
 }
 
 // =============================================================================
-// SESSION IMPLEMENTATION
+// SESSION
 // =============================================================================
 
 /**
- * SqlSession over the pipeline tool transport: resolves the task token on
- * first use, invokes the node's tools through client.tool, and re-resolves
- * the token once on failure (the task may have restarted since binding).
+ * The tool surface of one endpoint over the SDK's standalone tool call.
  */
 class SqlToolSession implements SqlSession {
-	/** The endpoint this session is bound to. */
 	readonly endpoint: SqlEndpoint;
-
-	/** The shell's RocketRide client (owned by the shell, never by this app). */
 	private readonly client: RocketRideClient;
 
-	/** Cached task token; null until first resolution or after invalidation. */
-	private token: string | null = null;
-
-	/**
-	 * @param client - The shell's RocketRide client.
-	 * @param endpoint - The endpoint to bind to.
-	 */
 	constructor(client: RocketRideClient, endpoint: SqlEndpoint) {
 		this.client = client;
 		this.endpoint = endpoint;
 	}
 
 	/**
-	 * Resolve (and cache) the token of the task owning this endpoint.
+	 * One tool borrow on the endpoint's address.
 	 *
-	 * @returns The task token.
-	 * @throws When no task is currently running for the endpoint's pipeline.
-	 */
-	private async resolveToken(): Promise<string> {
-		if (this.token) return this.token;
-		let token = await this.client.getTaskToken({
-			projectId: this.endpoint.projectId,
-			source: this.endpoint.source,
-		});
-		if (!token) {
-			// Direct-mode temp pipelines idle out on their TTL — when the
-			// resolver registered a revival for this endpoint, re-`use` the
-			// pipeline once and resolve again before giving up.
-			const revive = revivalFor(this.endpoint.key);
-			if (revive) {
-				await revive();
-				token = await this.client.getTaskToken({
-					projectId: this.endpoint.projectId,
-					source: this.endpoint.source,
-				});
-			}
-		}
-		if (!token) {
-			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}'. Start the pipeline and retry.`);
-		}
-		this.token = token;
-		return token;
-	}
-
-	/**
-	 * Invoke one of the node's tools.
-	 *
-	 * The cached task token goes stale whenever the owning task restarts, and
-	 * a stale token fails exactly like a rejected statement — the transport
-	 * gives no way to tell them apart. Retrying is therefore a per-CALL
-	 * decision, not a transport policy: reflection and dialect reads are safe
-	 * to repeat, a write is not. When `retryOnStaleToken` is false the first
-	 * failure is the answer, and the tool is never invoked a second time.
+	 * A failed idempotent call on a direct connection revives its temp
+	 * pipeline once and retries: the 15-minute idle ttl can have ended it
+	 * between two statements. Anything else surfaces as thrown.
 	 *
 	 * @param tool - Tool name (execute / get_schema / refresh_schema / dialect).
-	 * @param input - Tool input arguments.
-	 * @param retryOnStaleToken - Whether ONE re-resolved-token retry is safe.
-	 * @returns The tool's result value.
+	 * @param input - Tool arguments.
+	 * @param retryAfterRevival - Whether a revival retry is safe for this call.
+	 * @returns The tool's answer.
 	 */
-	private async invoke<T>(tool: string, input: Record<string, unknown>, retryOnStaleToken: boolean): Promise<T> {
-		const token = await this.resolveToken();
+	private async invoke<T>(tool: string, input: Record<string, unknown>, retryAfterRevival: boolean): Promise<T> {
+		const call = (): Promise<T> =>
+			this.client.tool<T>({ address: this.endpoint.address, tool, nodeId: this.endpoint.nodeId, input });
 		try {
-			return await this.client.tool<T>({ token, tool, nodeId: this.endpoint.nodeId, input });
+			return await call();
 		} catch (err) {
-			// Drop the cached token either way: it may well be the stale one,
-			// and the next call should resolve a fresh one from scratch.
-			this.token = null;
-			if (!retryOnStaleToken) throw err;
-			const fresh = await this.resolveToken();
-			// Same token back = the task did not restart, so the failure was
-			// real. Only a genuinely different token justifies a second call.
-			if (fresh === token) throw err;
-			return await this.client.tool<T>({ token: fresh, tool, nodeId: this.endpoint.nodeId, input });
+			const revive = retryAfterRevival ? revivalFor(this.endpoint.key) : undefined;
+			if (!revive) throw err;
+			await revive();
+			return await call();
 		}
 	}
 
-	/** @inheritdoc */
 	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult> {
-		// Omit `params` entirely when there is nothing to bind: the node's
-		// placeholder rewriting is skipped for an empty list, so an unbound
-		// statement keeps travelling exactly as it did before.
 		const params = opts?.params;
 		const input = params && params.length > 0 ? { sql, params } : { sql };
-		// Default NO retry: an unmarked statement may well be a write.
 		return this.invoke<SqlExecuteResult>('execute', input, opts?.idempotent === true);
 	}
 
-	/** @inheritdoc */
 	async getSchema(table?: string): Promise<SqlSchemaResponse> {
 		return this.invoke<SqlSchemaResponse>('get_schema', table ? { table } : {}, true);
 	}
 
-	/** @inheritdoc */
 	async refreshSchema(): Promise<SqlSchemaResponse> {
 		try {
 			return await this.invoke<SqlSchemaResponse>('refresh_schema', {}, true);
 		} catch {
-			// ANY failure falls back. A node without the tool and a node that
-			// simply could not answer are indistinguishable at this layer, and
-			// matching the engine's error wording would rot the first time it
-			// changed. Serve the task-start snapshot and flag it, rather than
-			// present it as freshly reflected; when the fallback ALSO fails,
-			// its error is the one the caller sees.
+			// Older nodes without refresh_schema: the cached schema, marked stale
 			const schema = await this.getSchema();
 			return { ...schema, stale: true };
 		}
 	}
 
-	/** @inheritdoc */
 	async dialect(): Promise<SqlDialect> {
 		const result = await this.invoke<{ dialect?: string }>('dialect', {}, true);
 		return toDialect(result?.dialect);
@@ -195,28 +130,27 @@ class SqlToolSession implements SqlSession {
 // =============================================================================
 
 /**
- * Create a live session bound to one database endpoint.
+ * A session for one endpoint.
  *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The endpoint to bind to.
- * @returns The bound session.
+ * @param client - The realm's client.
+ * @param endpoint - The endpoint to talk to.
+ * @returns The session.
  */
 export function createSqlSession(client: RocketRideClient, endpoint: SqlEndpoint): SqlSession {
 	return new SqlToolSession(client, endpoint);
 }
 
 /**
- * Probe an endpoint before binding to it: report dialect and a shallow
- * schema summary. Never throws — failures come back as `ok: false`.
+ * Try the endpoint: dialect and schema in one round. The first call on a
+ * dormant pipe starts its engine, so this is also what warms a connection.
  *
- * @param client - The shell's RocketRide client.
+ * @param client - The realm's client.
  * @param endpoint - The endpoint to probe.
- * @returns The probe result.
+ * @returns The outcome, never thrown.
  */
 export async function probeSqlEndpoint(client: RocketRideClient, endpoint: SqlEndpoint): Promise<SqlProbeResult> {
 	const session = createSqlSession(client, endpoint);
 	try {
-		// Dialect first (cheapest), then a full reflection for the summary.
 		const dialect = await session.dialect();
 		const schema = await session.getSchema();
 		if (schema.error) {

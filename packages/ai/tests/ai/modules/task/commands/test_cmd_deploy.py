@@ -705,3 +705,159 @@ class TestPreview:
         conn = _make_conn(_account_info())
         resp = await conn._deploy_preview({}, {'schedule': 'manual'})
         assert resp['body'] == {'valid': True, 'next': []}
+
+
+# ============================================================================
+# interfaces — the publication that answers an address, by classType (plan 3.6)
+# ============================================================================
+
+
+def _pin(rung='team', team_id='team-1', version=2, org='org-1', project='docBrain'):
+    """One serving pin of docBrain."""
+    from ai.account.pipe_deploy import Pin
+
+    return Pin(rung=rung, deployment=DeploymentRef(org, team_id, project), version=version)
+
+
+def _control(rung='dev', owner_id='user-1', address='acme.docBrain.chat'):
+    """A registered control holding the spec it submitted."""
+    return SimpleNamespace(rung=rung, owner_id=owner_id, address=address, pipeline=ARTIFACT)
+
+
+def _answers(conn, *candidates, address='acme.docBrain'):
+    """THE decision stub: ``resolve_candidates`` answers ``candidates`` in order."""
+    from ai.modules.task.address import parse_address
+
+    conn._server.resolve_candidates = AsyncMock(return_value=(parse_address(address), ['dev', 'me'], list(candidates)))
+    return conn._server.resolve_candidates
+
+
+CATALOG = {
+    'chat': {'classType': ['source', 'chat']},
+    'db_postgres': {'classType': ['database', 'tool']},
+}
+
+ARTIFACT = {
+    'project_id': 'docBrain',
+    'source': 'chat',
+    'components': [
+        {'id': 'chat', 'provider': 'chat', 'config': {'mode': 'Source'}},
+        {'id': 'db_main', 'provider': 'db_postgres', 'name': 'Ops DB'},
+    ],
+}
+
+
+@pytest.fixture
+def interfaces_stub(monkeypatch, account_stub):
+    """The artifact above behind the registry, the catalog above behind the lookup."""
+    import ai.modules.task.services_catalog as services_catalog
+
+    account_stub.deployments_artifact = AsyncMock(return_value=ARTIFACT)
+
+    async def get_service(name):
+        return CATALOG.get(name)
+
+    monkeypatch.setattr(services_catalog, 'get_service', get_service)
+
+
+def _data_account():
+    """A member with task.data on team-1 — what a data request on the team's publication needs."""
+    return _account_info(
+        teams=[{'id': 'team-1', 'name': 'Development', 'permissions': ['task.control', 'task.monitor', 'task.data']}]
+    )
+
+
+class TestInterfaces:
+    @pytest.mark.asyncio
+    async def test_a_pin_answers_with_its_artifact_and_no_engine(self, account_stub, interfaces_stub):
+        conn = _make_conn(_data_account())
+        decide = _answers(conn, _pin())
+        resp = await conn.on_rrext_deploy_pipe(
+            {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain.chat'}}
+        )
+        body = resp['body']
+        # The one decision every name call makes, asked with the caller's account
+        args, kwargs = decide.await_args
+        assert args[0] == 'acme.docBrain.chat' and args[1] is conn._account_info and args[2] == 'task.data'
+        assert kwargs == {'team': None}
+        # The pinned version's artifact, read server-side, for the whole pipe
+        account_stub.deployments_artifact.assert_awaited_once_with('org-1', 'docBrain', 2)
+        assert body['address'] == 'acme.docBrain'
+        assert body['rung'] == 'team' and body['teamId'] == 'team-1' and body['version'] == 2
+        assert body['interfaces'] == {
+            'acme.docBrain.chat': {
+                'source': [{'nodeId': 'chat', 'name': 'chat'}],
+                'chat': [{'nodeId': 'chat', 'name': 'chat'}],
+            },
+            'acme.docBrain': {
+                'database': [{'nodeId': 'db_main', 'name': 'Ops DB'}],
+                'tool': [{'nodeId': 'db_main', 'name': 'Ops DB'}],
+            },
+        }
+        # Nothing was started
+        conn._test_scheduler.try_reserve_run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_the_team_override_rides_the_decision(self, interfaces_stub):
+        conn = _make_conn(_data_account())
+        decide = _answers(conn, _pin())
+        await conn.on_rrext_deploy_pipe(
+            {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': 'team-1'}}
+        )
+        assert decide.await_args.kwargs == {'team': 'team-1'}
+
+    @pytest.mark.asyncio
+    async def test_the_callers_control_answers_with_the_spec_it_submitted(self, account_stub, interfaces_stub):
+        conn = _make_conn(_account_info())
+        _answers(conn, _control(), _pin())
+        resp = await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain'}})
+        body = resp['body']
+        # The first candidate is a control: its own spec, no registry read, no version
+        account_stub.deployments_artifact.assert_not_awaited()
+        assert body['rung'] == 'dev' and body['version'] is None and body['address'] == 'acme.docBrain'
+        assert body['interfaces']['acme.docBrain']['database'] == [{'nodeId': 'db_main', 'name': 'Ops DB'}]
+
+    @pytest.mark.asyncio
+    async def test_a_team_control_first_in_the_order_reports_its_team(self, interfaces_stub):
+        conn = _make_conn(_data_account())
+        _answers(conn, _control(rung='team', owner_id='team-1'))
+        resp = await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain'}})
+        assert resp['body']['rung'] == 'team' and resp['body']['teamId'] == 'team-1' and resp['body']['version'] is None
+
+    @pytest.mark.asyncio
+    async def test_no_candidate_is_not_registered(self, account_stub, interfaces_stub):
+        from ai.modules.task.types import TaskError
+
+        conn = _make_conn(_account_info())
+        _answers(conn)
+        with pytest.raises(TaskError) as excinfo:
+            await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain'}})
+        assert excinfo.value.code == TaskError.NOT_REGISTERED
+        account_stub.deployments_artifact.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_team_pin_needs_task_data_on_that_team(self, account_stub, interfaces_stub):
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
+        _answers(conn, _pin())
+        with pytest.raises(PermissionError):
+            await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain'}})
+        account_stub.deployments_artifact.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_public_pin_reads_the_publishers_artifact(self, account_stub, interfaces_stub):
+        conn = _make_conn(_account_info())
+        _answers(
+            conn,
+            _pin(rung='public', team_id='~public', org='org-9', project='docBrain', version=7),
+            address='zeta.docBrain',
+        )
+        resp = await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'zeta.docBrain'}})
+        account_stub.deployments_artifact.assert_awaited_once_with('org-9', 'docBrain', 7)
+        assert resp['body']['rung'] == 'public' and 'teamId' not in resp['body']
+        assert 'zeta.docBrain.chat' in resp['body']['interfaces']
+
+    @pytest.mark.asyncio
+    async def test_address_is_required(self, interfaces_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError):
+            await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces'}})

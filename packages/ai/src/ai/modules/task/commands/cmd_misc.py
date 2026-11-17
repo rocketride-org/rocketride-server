@@ -947,6 +947,9 @@ class MiscCommands(DAPConn):
                     {
                         'id': control.id,
                         'name': getattr(task_status, 'name', control.source),
+                        # The control's address: what a front end hands to
+                        # tool()/interfaces to reach this run (plan 3.6)
+                        'address': control.address,
                         'projectId': control.project_id,
                         'source': control.source,
                         # Run classification stamp: dashboards and sidebars

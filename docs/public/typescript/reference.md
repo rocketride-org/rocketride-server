@@ -232,6 +232,7 @@ Further public methods, present in both SDKs, in brief:
 | --- | --- |
 | Generic invoke | `call(command, ...)` — any DAP command; `tool(...)` — invoke a pipeline tool function <!-- language-specific --> |
 | Task helpers | `getTaskToken`, `getTaskPipeline`, `restart` |
+| Pipe interfaces | `interfaces(address)` — the callable nodes of the publication that answers an address, by catalog classType; a pure read, no engine started |
 | Identity | `getAccountInfo`, `getOrgId`; static `getServerInfo`, `normalizeUri` |
 | Monitors | `clearAllMonitors`, `identify` (plus `addMonitor`/`removeMonitor` above) |
 | Template storage | `saveTemplate`, `getTemplate`, `deleteTemplate`, `getAllTemplates` |

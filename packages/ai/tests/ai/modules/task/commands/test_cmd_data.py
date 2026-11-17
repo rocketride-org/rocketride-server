@@ -241,6 +241,45 @@ async def test_a_client_sent_caller_never_reaches_the_engine(catalog, engines, e
         assert '_caller' not in forwarded['object']
 
 
+# =============================================================================
+# WHICH FRAMES MAY START A PUBLICATION (plan 3.6: a tool borrow is its own binding)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_standalone_tool_frame_resolves_like_an_open(catalog, engines, engine_log):
+    """A ``tool`` frame naming no pipe opens its own binding, so it may start a dormant publication."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+
+    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={})
+
+    conn.resolve_control_or_start.assert_awaited_once()
+    conn.get_control.assert_not_called()
+    assert engine_log[-1]['subcommand'] == 'tool'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('subcommand', ['write', 'close', 'tool'])
+async def test_a_frame_on_an_open_pipe_attaches_only(catalog, engines, engine_log, subcommand):
+    """A frame naming a pipe lands on the control the open found and never starts anything."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    pipe_id = await _opened(ts, conn)
+    conn.resolve_control_or_start.reset_mock()
+    conn.get_control.reset_mock()
+    arguments: Dict[str, Any] = {'subcommand': subcommand, 'pipeId': pipe_id}
+    if subcommand == 'tool':
+        arguments['tool'] = 'ask'
+
+    await _frame(conn, **arguments)
+
+    conn.resolve_control_or_start.assert_not_awaited()
+    conn.get_control.assert_called_once()
+
+
 @pytest.mark.asyncio
 async def test_the_stamp_names_the_control_and_its_request(catalog, engines, engine_log):
     """The server's _caller: the account, the control's team context, address and rung, the request id."""

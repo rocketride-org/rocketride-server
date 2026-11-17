@@ -66,13 +66,11 @@ interface IFakeClient {
 function endpointFor(key: string): SqlEndpoint {
 	return {
 		key,
-		projectId: 'p1',
+		address: 'acme.p1',
 		pipelineName: 'Pipeline A',
-		source: 's1',
 		nodeId: key,
 		nodeName: 'Orders DB',
 		provider: 'db_postgres',
-		running: true,
 	};
 }
 

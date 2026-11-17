@@ -174,7 +174,7 @@ class DataCommands(DAPConn):
             # NOW: a replacing auth may complete while the engine is awaited,
             # and the binding is billed to the session that dispatched it
             account_info = self._account_info
-            control = await self._control_for(request, subcommand)
+            control = await self._control_for(request, subcommand, pipe_id)
 
             # Step 2: the binding this frame belongs to: a new one, or the one
             # the named pipe was opened on
@@ -228,24 +228,32 @@ class DataCommands(DAPConn):
 
     # ==== The steps ===================================================================
 
-    async def _control_for(self, request: Dict[str, Any], subcommand: Optional[str]) -> 'TaskControl':
+    async def _control_for(
+        self, request: Dict[str, Any], subcommand: Optional[str], pipe_id: Optional[Any] = None
+    ) -> 'TaskControl':
         """
         The caller's control for the request's address.
 
         An OPEN resolves the way submit() does: the live run on the first rung
         that answers, or the publication started from its artifact (plan 3.2,
-        one resolver for every verb). Every other frame ATTACHES only: it must
-        land on the control the open found, never start a publication a
-        colder rung could not.
+        one resolver for every verb). A STANDALONE TOOL CALL (a ``tool`` frame
+        naming no pipe) is a binding of its own — it opens, runs and closes in
+        one frame — so it resolves the same way: a front end exploring a
+        published pipe nobody has called recently must start its engine, not
+        be told nothing is running (plan 3.6). Every other frame ATTACHES
+        only: it must land on the control the open found, never start a
+        publication a colder rung could not.
 
         Args:
             request: The DAP request.
             subcommand: The frame kind.
+            pipe_id: The slot the frame names, None for a frame that opens
+                its own binding.
 
         Returns:
             The resolved control.
         """
-        if subcommand == 'open':
+        if subcommand == 'open' or (subcommand == 'tool' and pipe_id is None):
             return await self.resolve_control_or_start(request, 'task.data')
         return self.get_control(request, 'task.data')
 

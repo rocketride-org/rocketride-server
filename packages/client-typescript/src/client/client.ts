@@ -28,7 +28,7 @@ import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -1895,6 +1895,33 @@ export class RocketRideClient extends DAPClient {
 	async getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined> {
 		const body = await this.call('rrext_get_pipeline', undefined, { token });
 		return body?.pipeline as Record<string, unknown> | undefined;
+	}
+
+	/**
+	 * What the publication that answers an address offers a front end: its
+	 * callable nodes by address and catalog classType.
+	 *
+	 * One pure read — no engine is started, no hold is taken, nothing is
+	 * billed. The address resolves the way `submit()` resolves a name (your
+	 * `@me` publication, your teams in team order, the publisher's `@public`
+	 * one) and the pinned version's spec is projected server-side, so the spec
+	 * never leaves the server. Sources sit under their own address
+	 * (`acme.docBrain.chat`), every other node under the pipe address
+	 * (`acme.docBrain`, the default source). A front end filters with plain
+	 * equality on the classType word: `chat`, `dropper`, `database`.
+	 *
+	 * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
+	 * @param options.team - Resolve the `@team` rung through this one of your teams.
+	 * @returns The answering rung and version, and the interface map.
+	 * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
+	 *         address is outside a scoped key's endpoints.
+	 */
+	async interfaces(address: string, options: { team?: string } = {}): Promise<PipeInterfaces> {
+		return this.call<PipeInterfaces>('rrext_deploy_pipe', {
+			subcommand: 'interfaces',
+			address,
+			...(options.team ? { team: options.team } : {}),
+		});
 	}
 
 	// ============================================================================
@@ -3801,16 +3828,31 @@ export class RocketRideClient extends DAPClient {
 	 * through the control plane, and returns the result directly — no
 	 * Question, Answer, or SSE overhead.
 	 *
-	 * @param options.token - Pipeline token for authentication and resource access
+	 * A standalone tool call is a binding of its own: it resolves the address
+	 * the way `submit()` does and STARTS the publication's engine when it is
+	 * dormant, so a front end may call a node of a pipe nobody has used
+	 * recently. A node the entry source did not load fails at the engine.
+	 *
+	 * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
+	 *                          or the address a `use()`/`submit()` result returned
+	 * @param options.token - Deprecated spelling of `address` (the token slot carries the
+	 *                        address); one of the two is required
 	 * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
 	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
 	 *                         tool-lane nodes; the first node that owns the tool handles it.
 	 * @param options.input - Arguments forwarded to the tool function
+	 * @param options.team - Resolve the `@team` rung through this one of your teams — the same
+	 *                       team an `interfaces()` call was made with, so discovery and execution
+	 *                       land on the same publication
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
 	 * @throws Error if the server signals failure or no node handles the requested tool
 	 */
-	async tool<T = any>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; team?: string; timeout?: number }): Promise<T> {
+		const address = options.address ?? options.token;
+		if (!address) {
+			throw new Error('tool() needs the pipe address (options.address)');
+		}
 		const result = await this.call<{ result: T }>(
 			'rrext_process',
 			{
@@ -3818,9 +3860,10 @@ export class RocketRideClient extends DAPClient {
 				tool: options.tool,
 				nodeId: options.nodeId ?? '',
 				input: options.input ?? {},
+				...(options.team ? { team: options.team } : {}),
 			},
 			{
-				token: options.token,
+				token: address,
 				timeout: options.timeout,
 			}
 		);

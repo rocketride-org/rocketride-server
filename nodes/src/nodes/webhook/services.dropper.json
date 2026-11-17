@@ -13,7 +13,7 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["source"],
+	"classType": ["source", "dropper"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying

@@ -44,8 +44,6 @@ module:ui:
       - all-globs-to-any-file: ["apps/shared/**", "!**/scripts/**", "!**/docs/**"]
   - changed-files:
       - all-globs-to-any-file: ["packages/shell/**", "!**/scripts/**", "!**/docs/**"]
-  - changed-files:
-      - all-globs-to-any-file: ["packages/chat-widget/**", "!**/scripts/**", "!**/docs/**"]
 
 module:vscode:
   - changed-files:

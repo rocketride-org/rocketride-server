@@ -257,6 +257,32 @@ async def run_deploy(args) -> int:
             out.result(artifact)
             return 0
 
+        # deploy interfaces: what the publication that answers an address
+        # offers a front end — its callable nodes by address and catalog
+        # classType (plan 3.6). A pure read on the server; nothing starts.
+        if subcommand == 'interfaces':
+            client = await _connect_deploy(args, out)
+            if client is None:
+                return 1
+            answer = await client.interfaces(args.address, team=args.team or None)
+            if not out.json_requested:
+                rung = answer.get('rung')
+                where = f'@team {answer.get("teamId")}' if rung == 'team' else f'@{rung}'
+                version = answer.get('version')
+                out.line(
+                    f'{answer.get("address")}  {"v" + str(version) if version is not None else "(your run)"}  {where}'
+                )
+                for pipe_address, by_class in (answer.get('interfaces') or {}).items():
+                    out.line(f'  {pipe_address}')
+                    for class_type, nodes in by_class.items():
+                        names = ', '.join(
+                            n['nodeId'] if n.get('name') in (None, '', n['nodeId']) else f'{n["nodeId"]} ({n["name"]})'
+                            for n in nodes
+                        )
+                        out.line(f'    {class_type}: {names}')
+            out.result(answer)
+            return 0
+
         if subcommand in ('enable', 'disable', 'remove'):
             client = await _connect_deploy(args, out)
             if client is None:
