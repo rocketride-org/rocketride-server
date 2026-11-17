@@ -558,14 +558,15 @@ function makeRunDbPytestAction(options = {}) {
 			const reportDir = path.join(BUILD_ROOT, 'nodes-db-tests');
 			await fs.promises.mkdir(reportDir, { recursive: true });
 			const passes = [{ suites: DB_LIVE_SUITES, report: 'junit.xml', env: testEnv, pooled: [] }];
+			// Said after the passes: execCommand replaces task.output with each line pytest prints.
+			const notes = [];
 			for (const lane of DB_LANES) {
 				if (!lane.poolerSuites) continue;
 				const poolerDsn = String(testEnv[lane.poolerEnv] || '').trim();
 				if (!poolerDsn) {
 					if (required) {
 						const fallback = `${lane.poolerEnv} is not set: the ${lane.name} pooler leg is not run`;
-						const note = lane.poolerUnsetNote || fallback;
-						task.output = task.output ? `${task.output}\n${note}` : note;
+						notes.push(lane.poolerUnsetNote || fallback);
 					}
 					continue;
 				}
@@ -582,33 +583,38 @@ function makeRunDbPytestAction(options = {}) {
 			}
 
 			const pytestTokens = splitPytestOpts(options.pytest);
-			for (const pass of passes) {
-				const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
-				const report = path.join(reportDir, pass.report);
-				await fs.promises.rm(report, { force: true });
-				await runPytest({
-					engine: ENGINE,
-					testsDir: suites[0],
-					extraArgs: [
-						...suites.slice(1),
-						'-v',
-						'-rs',
-						'--rootdir',
-						PACKAGE_DIR,
-						'-p',
-						'no:xdist',
-						`--junitxml=${report}`,
-						...withoutXdistArgs(pytestTokens),
-					],
-					execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
-				});
-				if (required) {
-					const xml = await fs.promises.readFile(report, 'utf8');
-					checkRequiredDbResults(xml, pass.suites, pass.report);
-					for (const { lane, suites: pooledSuites } of pass.pooled) {
-						checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+			try {
+				for (const pass of passes) {
+					const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
+					const report = path.join(reportDir, pass.report);
+					await fs.promises.rm(report, { force: true });
+					await runPytest({
+						engine: ENGINE,
+						testsDir: suites[0],
+						extraArgs: [
+							...suites.slice(1),
+							'-v',
+							'-rs',
+							'--rootdir',
+							PACKAGE_DIR,
+							'-p',
+							'no:xdist',
+							`--junitxml=${report}`,
+							...withoutXdistArgs(pytestTokens),
+						],
+						execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
+					});
+					if (required) {
+						const xml = await fs.promises.readFile(report, 'utf8');
+						checkRequiredDbResults(xml, pass.suites, pass.report);
+						for (const { lane, suites: pooledSuites } of pass.pooled) {
+							checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+						}
 					}
 				}
+			} finally {
+				// Kept after pytest's last line, whether the passes succeeded or not.
+				if (notes.length > 0) task.output = [task.output, ...notes].filter(Boolean).join('\n');
 			}
 		},
 	};
