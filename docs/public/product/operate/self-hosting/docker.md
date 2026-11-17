@@ -74,7 +74,7 @@ The engine reads configuration from its environment — pass variables with
   DSNs, …): set them in the engine's environment and reference them from
   node config as `${VAR}` — see
   [Self-hosting](/operate/self-hosting#provider-credentials).
-- **MCP OAuth settings** if AI assistants will connect to `/mcp` on this
+- **MCP OAuth settings** if MCP clients will connect to `/mcp` on this
   engine: `MCP_EXPECTED_AUDIENCE` and friends — see
   [MCP self-hosting](/connect/mcp/http/self-hosting).
 

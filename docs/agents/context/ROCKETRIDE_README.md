@@ -1,7 +1,9 @@
 # RocketRide — Start Here
 
 RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
-A RocketRide solution usually has three layers:
+
+RocketRide is a platform for building **AI solutions**, and a solution usually has
+three layers:
 
 - An **app** — the UI a person actually touches, built with the platform's React
   shell and stock UI components, running in RocketRide Cloud or VS Code.

@@ -16,8 +16,8 @@ installing the Python package puts `rocketride` on your path, and the Node
 package runs with `npx rocketride`.
 
 > Driving the engine over MCP instead of a terminal? The
-> [MCP server](/connect/mcp/http) exposes most pipeline operations as tools. `rocketride diff`
-> and the `profile` commands are CLI-only.
+> [MCP server](/connect/mcp/http) exposes most pipeline operations as tools. Some commands are
+> CLI-only, for example `init`, `login`, `diff`, `otel`, `profile`, `app` and the store write commands.
 
 > **Python vs TypeScript CLI:** Both packages ship a `rocketride` command, but
 > not the same set of commands. [`diff`](#diff) and `otel`, the
@@ -717,8 +717,8 @@ Sub-commands:
 ## Related
 
 - [Run from the CLI](/quickstart/cli): the five-step tutorial.
+- [MCP server](/connect/mcp/http): most of the same operations, as MCP tools.
 - [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   same operations, in code.
-- [MCP server](/connect/mcp/http): most of the same operations, as MCP tools.
 - [WebSocket protocol](/connect/websocket): what the CLI sends to the engine.
 - [Cloud](/operate/cloud) · [Self-hosting](/operate/self-hosting): where the engine runs.

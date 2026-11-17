@@ -6,8 +6,8 @@ sidebar_label: WebSocket
 # WebSocket protocol
 
 The RocketRide [engine](/concepts/runtime-engine) speaks a native **WebSocket**
-protocol. Every consumer (the [TypeScript](/clients/typescript) and
-[Python](/clients/python) SDKs and the [MCP server](/connect/mcp/http)) connects
+protocol. Every consumer (the [MCP server](/connect/mcp/http) and the
+[TypeScript](/clients/typescript) and [Python](/clients/python) SDKs) connects
 over this one socket to start pipelines and stream results. You rarely touch it
 directly; the SDKs frame the messages for you. This page documents what they
 send so you can debug, trace, or build your own client.

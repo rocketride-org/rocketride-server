@@ -33,9 +33,9 @@ const SPINE = [
 		items: [
 			{ id: 'quickstart', label: 'Overview' },
 			{ id: 'quickstart/coding-agents', label: 'Use from a coding agent' },
-			{ id: 'quickstart/cli', label: 'Run from the CLI' },
-			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' },
 			{ id: 'quickstart/ide-walkthrough', label: 'Build in your IDE' },
+			{ id: 'quickstart/sdk-integration', label: 'Integrate with an SDK' },
+			{ id: 'quickstart/cli', label: 'Run from the CLI' },
 		],
 	},
 	{

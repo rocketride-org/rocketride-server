@@ -35,7 +35,7 @@ docker run -d --name rocketride-engine --platform linux/amd64 \
   ghcr.io/rocketride-org/rocketride-engine:latest
 ```
 
-To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port everywhere below that shows `localhost:5565`: the health check, the `ROCKETRIDE_URI` you export in your shell, and the MCP address.
+To run it next to an existing engine, change only `--name` and the host side of `-p` (for example `127.0.0.1:5566:5565`). Leave `-e ROCKETRIDE_URI=ws://127.0.0.1:5565` in the Docker command as it is: that address is inside the container. Then use the new host port everywhere below that shows `localhost:5565`: the health check, the MCP address, and the `ROCKETRIDE_URI` you export in your shell.
 
 - The command is the same on every machine. The image is amd64 only: `--platform linux/amd64` is required on Apple Silicon (Docker runs it under emulation, and the port can take 15 seconds or more to answer there) and has no effect on Intel or AMD machines.
 - `ROCKETRIDE_APIKEY=rr_local` sets the key clients must send. The value can be any string that starts with `rr_`: the built-in MCP server refuses other values, and the CLI and SDK must send the same one.
@@ -217,7 +217,7 @@ Take a pipeline's `provider` values from the MCP `list_components` tool or from 
 
 ## Go deeper
 
-- [Quickstart](/quickstart): pick the IDE, SDK or CLI path.
+- [Quickstart](/quickstart): pick the MCP, CLI, SDK or IDE path.
 - [Pipelines](/concepts/pipelines) and [Nodes](/concepts/nodes): the core concepts.
 - [Agents & Tools](/concepts/agents-tools-skills): how agents are wired.
 - [Pipeline JSON Reference](/reference/pipeline-reference): the `.pipe` format.

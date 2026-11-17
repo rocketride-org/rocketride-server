@@ -1,6 +1,6 @@
 <!-- ROCKETRIDE:BEGIN -->
 
-# RocketRide
+# RocketRide: AI Pipeline & App Platform
 
 RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
 
