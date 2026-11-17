@@ -862,8 +862,9 @@ def test_a_snapshot_fetched_as_a_build_file_is_noindex(engine):
     assert raw.status_code == 200 and '{{assets}}' in raw.text
     assert raw.headers['x-robots-tag'] == 'noindex'
     # Wherever the manifest puts a snapshot: any HTML file of the build is noindex.
-    FILES[f'{DIST}/seo/landing.html'] = b'<!doctype html><h1>{{assets}}</h1>'
-    elsewhere = engine.get('/apps/rocketride.home/v3/seo/landing.html', headers={'User-Agent': GOOGLEBOT})
-    assert elsewhere.status_code == 200 and elsewhere.headers['x-robots-tag'] == 'noindex'
+    for name in ('seo/landing.html', 'seo/landing.htm', 'seo/landing.HTML'):
+        FILES[f'{DIST}/{name}'] = b'<!doctype html><h1>{{assets}}</h1>'
+        elsewhere = engine.get(f'/apps/rocketride.home/v3/{name}', headers={'User-Agent': GOOGLEBOT})
+        assert elsewhere.status_code == 200 and elsewhere.headers['x-robots-tag'] == 'noindex', name
     asset = engine.get('/apps/rocketride.home/v3/seo-assets/logo.svg', headers={'User-Agent': GOOGLEBOT})
     assert asset.status_code == 200 and 'x-robots-tag' not in asset.headers
