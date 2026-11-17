@@ -29,10 +29,44 @@
 // the frame grant gives `entryPrefix` (the frame token, the one N1 exemption,
 // plan section 4.4), `expiresAt` and the identity aliases the server minted;
 // nothing else of the grant (origin, ticket, network) is part of the init.
-// The root never computes an identity alias: it copies the grant's.
+// The root never computes an identity alias: it copies the grant's, and only
+// when it has the alias shapes (`ru_`, `ro_`); anything else gives
+// `identity: null` (DA F7). Every string but `entryPrefix` then passes the
+// backstop patterns (an engine-format credential, a minted `rrapp.` id): a hit
+// throws a `credential` denial, so no init is posted. PR2b must still post
+// the init through the realm's choke point (plan, PR2b notes).
 // =============================================================================
 
+import { deny } from './denial';
 import type { BridgeInit, FrameOk, RealmInfo } from './types';
+
+const USER_ALIAS_RE = /^ru_[A-Za-z0-9_-]+$/;
+const ORG_ALIAS_RE = /^ro_[A-Za-z0-9_-]+$/;
+/** The backstop patterns (scrub.ts): an engine-format credential, a minted project id. */
+const INIT_BACKSTOP_RE = /(?<![A-Za-z0-9])(?:tk|pk)_[0-9a-fA-F]{32}|(?<![A-Za-z0-9.])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
+
+/** Throws when any string (value or key) of `value` hits the backstop patterns. */
+function backstop(value: unknown): void {
+	const stack: unknown[] = [value];
+	while (stack.length > 0) {
+		const v = stack.pop();
+		if (typeof v === 'string') {
+			if (INIT_BACKSTOP_RE.test(v)) throw deny('credential', 'rr:bridge:init');
+		} else if (typeof v === 'object' && v !== null) {
+			for (const [k, x] of Object.entries(v)) {
+				if (INIT_BACKSTOP_RE.test(k)) throw deny('credential', 'rr:bridge:init');
+				stack.push(x);
+			}
+		}
+	}
+}
+
+/** The grant's identity when it carries alias shapes only; otherwise null. */
+function identityOf(identity: FrameOk['identity']): FrameOk['identity'] {
+	if (!identity || typeof identity.userId !== 'string' || !USER_ALIAS_RE.test(identity.userId) || !Array.isArray(identity.organizations)) return null;
+	if (!identity.organizations.every((o) => typeof o?.id === 'string' && ORG_ALIAS_RE.test(o.id))) return null;
+	return identity;
+}
 
 /** Everything `buildBridgeInit` reads. */
 export interface IBridgeInitInput {
@@ -50,13 +84,14 @@ export interface IBridgeInitInput {
  *
  * @param input - The realm, its frame grant and the shell's view of the session.
  * @returns The message, with exactly the `BridgeInit` keys.
+ * @throws A `credential` denial when a string other than `entryPrefix` hits the backstop.
  */
 export function buildBridgeInit(input: IBridgeInitInput): BridgeInit {
 	const { info, frame, props } = input;
-	const identity = frame.identity;
+	const identity = identityOf(frame.identity);
 	const theme: Record<string, string> = {};
 	for (const [k, v] of Object.entries(input.theme)) if (typeof v === 'string') theme[k] = v;
-	return {
+	const init: BridgeInit = {
 		type: 'rr:bridge:init',
 		proto: input.proto,
 		entryPrefix: frame.entryPrefix,
@@ -71,4 +106,7 @@ export function buildBridgeInit(input: IBridgeInitInput): BridgeInit {
 		viewId: info.viewId,
 		engineHttpUrl: input.engineHttpUrl,
 	};
+	// entryPrefix holds the frame token, the one deliberate exemption (plan section 4.4).
+	backstop({ ...init, entryPrefix: '' });
+	return init;
 }
