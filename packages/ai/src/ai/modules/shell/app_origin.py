@@ -851,17 +851,15 @@ async def isolated_for(token: str, app_id: str) -> bool:
     """
     Whether ``app_id`` is isolated for this caller (E8: its dist never serves on the main origin).
 
-    False under ``off`` without asking anything. An app the caller has no
-    entry for is isolated whenever the mode would isolate a third-party app
-    (fail closed).
+    False under ``off`` without asking anything. Otherwise only the caller's
+    own entry for this exact id can say "not isolated": an id the caller has
+    no entry for is isolated in every mode (fail closed; a case variant of a
+    listed id, or a store that ignores case, must not reopen the main origin).
     """
-    config = current_config()
-    if config.mode == 'off':
+    if current_config().mode == 'off':
         return False
     verdict = await version_verdict(token, app_id)
-    if verdict is None:
-        return _isolates(config, app_id, False)
-    return verdict.isolated
+    return verdict is None or verdict.isolated
 
 
 def frame_rate_ok(caller: str) -> bool:

@@ -380,6 +380,26 @@ def test_e8_unlisted_app_under_optin_is_still_served(world):
     assert world.client.get('/apps/acme.net/v1/remoteEntry.js', headers=COOKIE).status_code == 404
 
 
+@pytest.mark.parametrize('mode', ['optin', 'enforce'])
+@pytest.mark.parametrize('variant', ['ACME.thirdparty', 'Acme.ThirdParty', 'acme.THIRDPARTY'])
+def test_e8_case_variant_id_without_an_entry_is_refused(mode, variant, world, monkeypatch):
+    """T35 (G4 S1): an id the caller has no entry for is isolated whenever the mode is not off.
+
+    A store whose lookups ignore case would otherwise serve an isolated app's
+    bundle under a case variant of its id, because no list (``RR_APP_ISOLATION_APPS``
+    included) names the variant.
+    """
+    world.env.set(RR_APP_ISOLATION=mode, RR_APP_ISOLATION_APPS=THIRD if mode == 'optin' else None)
+
+    async def case_blind_dirs(token, app_id, want=None):
+        return {1: world.registry.dist_dir(THIRD, 1)}
+
+    monkeypatch.setattr(shell_mod, '_version_dirs_for', case_blind_dirs)
+    resp = world.client.get(f'/apps/{variant}/v1/remoteEntry.js', headers=COOKIE)
+    assert resp.status_code == 404
+    assert world.reads == []
+
+
 def test_e8_refusal_is_not_an_existence_oracle(world):
     """T35: the refusal adds no oracle: an isolated version and a version that does not exist answer the same."""
     same = world.client.get(f'/apps/{THIRD}/v1/remoteEntry.js', headers=COOKIE)
