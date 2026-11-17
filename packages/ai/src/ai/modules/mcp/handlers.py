@@ -63,8 +63,9 @@ SERVER_INSTRUCTIONS = (
     'then validate_pipeline, then run_pipeline, which returns task_token, projectId and source. '
     'With inputs, run_pipeline also sends them and returns the result in the same call, with no polling '
     'needed. Without inputs, send_data feeds input and monitor waits for completion. '
-    'list_running_pipelines finds tokens; terminate stops a task. Pipeline definitions are always inline '
-    'JSON objects; no tool reads a pipeline from a file path. Store tools take store-relative paths. To '
+    'list_running_pipelines finds tokens; terminate stops a task. Pipeline definitions are inline JSON '
+    'objects; only view_pipeline reads a saved pipeline file, and it shows a read-only diagram of the '
+    'nodes and connections without node settings. Store tools take store-relative paths. To '
     'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url and a '
     "dropper_url; send_files (local engines only) uploads files from the engine host's own disk into a "
     'running task.\n\n'
@@ -193,6 +194,10 @@ def build_mcp_server(
                     # instead of letting v2's catch-all reduce it to "Internal
                     # server error".
                     raise MCPError(types.INTERNAL_ERROR, hard_exc.message) from hard_exc
+        # A handler can return data for its widget alone under `_meta` (a
+        # dict). It leaves the model-visible payload before serialization and
+        # goes out as the result's `_meta`, which hosts hand to the widget.
+        meta = result.pop('_meta', None) if isinstance(result.get('_meta'), dict) else None
         # Round-trip one sanitized payload for both fields: default=str
         # coerces any non-JSON value (datetime/bytes) in the text path, and
         # json.loads of that same text guarantees structured_content can't
@@ -205,6 +210,7 @@ def build_mcp_server(
             # call without parsing the body, while the envelope still carries
             # the message/hint the agent self-corrects from.
             is_error=not result.get('ok', False),
+            meta=json.loads(json.dumps(meta, default=str)) if meta is not None else None,
         )
 
     async def _on_list_resources(ctx, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:

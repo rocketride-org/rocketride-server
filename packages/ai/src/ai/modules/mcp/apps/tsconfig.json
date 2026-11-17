@@ -9,14 +9,16 @@
 		"resolveJsonModule": true,
 		"lib": ["ES2022", "DOM"],
 		"types": ["node", "vite/client"],
+		"resolveJsonModule": true,
 		"baseUrl": ".",
 		"paths": {
-			"shell": ["./src/trace-viewer/shell-shim.ts"],
+			"shell": ["./src/shared/shell-shim.ts"],
 			"shell/src/*": ["../../../../../../../apps/shared/node_modules/shell/src/*"],
-			"rocketride": ["../../../../../../../apps/shared/node_modules/rocketride/dist/types/index.d.ts"],
+			"shell/public/*": ["../../../../../../../apps/shared/node_modules/shell/public/*"],
+			"rocketride": ["../../../../../../../packages/client-typescript/src/client/types/index.ts"],
 			"@app-shared/*": ["../../../../../../../apps/shared/src/*"],
 			"shared/*": ["../../../../../../../apps/shared/src/*"]
 		}
 	},
-	"include": ["src", "vite.config.ts", "vitest.config.ts"]
+	"include": ["src", "resolve.ts", "vite.config.ts", "vitest.config.ts"]
 }

@@ -2,7 +2,7 @@
 
 The tool-name/result-shape contract between these skills and the RocketRide HTTP MCP server.
 Derived from the registrations in `rocketride-server`'s `packages/ai/src/ai/modules/mcp/tools/*.py`
-on `develop` (merged in PR #2315), where `register_all` wires **33 tools** — every
+on `develop` (merged in PR #2315), where `register_all` wires **34 tools** — every
 one of them listed below. Deploy tools are on the deploy-2 SDK API.
 **Maintainer note:** this file is regenerated from the registrations, not pinned to a commit. The
 previous `origin/develop @ eb67ddea` pin was already inaccurate; if a pin is wanted, use the
@@ -66,6 +66,7 @@ chapters/console but **empty traces**.
 | `store_list` | `{path?}` (default `''` = root) → `{ok, path, listing}`. |
 | `store_stat` | `{path}` → `{ok, path, stat}` — exists, type (`file\|dir`), size, modified. |
 | `store_get_url` | `{path, expires_in?, download_name?}` → `{ok, path, url, expires_in}`. Signed URL — artifact-by-reference for large results. |
+| `view_pipeline` | `{path}` (`.projects/<name>.pipe` or `.pipe.json`, read from the active workspace: the development team's `@/Team/=<id>/.projects` when there is one) → `{ok, path, workspace, name, description, node_count, truncated, nodes: [{id, provider, title}], connections: [{from, to, lane\|control}]}`. A read-only diagram for the user: **no node settings** come back, so never use it to read a config — use `store_read`. `workspace` is the folder to `store_list`. |
 | `save_template` | `{template_id, pipeline}` → `{ok, template_id}`. Gate D "save to cloud". |
 | `load_template` | `{template_id}` → `{ok, template_id, pipeline}`. |
 | `deploy_add` | `{pipeline, comment?, deploy_to?}` → `{ok, artifact, deployment?}`. Gate D "publish": registers the pipeline (needs `name` + `project_id`) as the next immutable version → `artifact.version`. Runs nothing by itself; a failed call may still have registered a version — check `deploy_versions` before retrying. |

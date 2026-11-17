@@ -162,6 +162,8 @@ class _FakeUnderlyingClient:
         self.deploy = _FakeDeployApi()
         self.log = _FakeLogApi()
         self.account = _FakeAccountApi()
+        # The sign-in result the real SDK keeps after connect().
+        self.account_info = None
 
     async def connect(self) -> None:
         self.connect_calls += 1
@@ -170,6 +172,9 @@ class _FakeUnderlyingClient:
 
     async def disconnect(self) -> None:
         self.disconnect_calls += 1
+
+    def get_account_info(self):
+        return self.account_info
 
     def build_request(self, command: str) -> dict:
         return {'command': command}
@@ -868,3 +873,53 @@ def _async_value(value):
         return value
 
     return _coro()
+
+
+# -- get_workspace_root -------------------------------------------------------
+# Mirrors the builder's resolveWorkspaceScope
+# (apps/rocket-ui/src/surfaces/workspace/vfs/workspace.ts): a development team
+# roots the workspace only while its id is a plain id and one of the active
+# organization's teams.
+
+
+@pytest.mark.parametrize(
+    'account_info, expected',
+    [
+        # A valid development team that belongs to the organization.
+        (
+            {'devTeam': 'team_A1', 'organization': {'teams': [{'id': 'team_A1'}, {'id': 'team_B'}]}},
+            '@/Team/=team_A1/.projects',
+        ),
+        # No development team.
+        ({'organization': {'teams': [{'id': 'team_A1'}]}}, '.projects'),
+        ({'devTeam': '', 'organization': {'teams': [{'id': ''}]}}, '.projects'),
+        # A team id that is not one of the organization's teams (stale after an org switch).
+        ({'devTeam': 'team_old', 'organization': {'teams': [{'id': 'team_A1'}]}}, '.projects'),
+        ({'devTeam': 'team_A1', 'organization': None}, '.projects'),
+        # A team id that fails the pattern, even when listed.
+        ({'devTeam': '../x', 'organization': {'teams': [{'id': '../x'}]}}, '.projects'),
+        ({'devTeam': '_hidden', 'organization': {'teams': [{'id': '_hidden'}]}}, '.projects'),
+        ({'devTeam': 'a/b', 'organization': {'teams': [{'id': 'a/b'}]}}, '.projects'),
+        # No sign-in result at all.
+        (None, '.projects'),
+    ],
+)
+def test_workspace_root_for_follows_the_builder_rule(account_info, expected):
+    from ai.modules.mcp.engine import workspace_root_for
+
+    assert workspace_root_for(account_info) == expected
+
+
+async def test_get_workspace_root_connects_then_reads_the_sign_in_result():
+    client, fake = _make_client_with_fake()
+    fake.account_info = {'devTeam': 'team_A1', 'organization': {'teams': [{'id': 'team_A1'}]}}
+
+    assert await client.get_workspace_root() == '@/Team/=team_A1/.projects'
+    assert fake.connect_calls == 1
+
+
+async def test_get_workspace_root_is_private_without_a_team():
+    client, fake = _make_client_with_fake()
+    fake.account_info = {'devTeam': None, 'organization': {'teams': []}}
+
+    assert await client.get_workspace_root() == '.projects'

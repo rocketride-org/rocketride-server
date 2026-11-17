@@ -33,15 +33,19 @@ empty rather than duplicating them.
 
 ## Widgets
 
-In hosts that support MCP Apps, three tool results render as interactive
+In hosts that support MCP Apps, four tool results render as interactive
 widgets. Hosts without MCP Apps see the same results as plain JSON — the
-widget is a rendering hint, never a different payload.
+widget is a rendering hint, never a different payload. The one addition is the
+pipeline canvas: its drawing data (nodes without settings, catalog entries and
+icons) rides in the result's `_meta`, which hosts hand to the widget and not
+to the model.
 
 | Widget | Rendered for | What it does |
 | --- | --- | --- |
 | Pipelines table | `list_running_pipelines` | Live table of running pipelines with refresh and terminate actions |
 | File dropper | `run_dropper_pipe` | In-chat drag-and-drop upload into the running pipeline, with progress |
 | Trace viewer | `log_traces`, `log_trace` | Replay a run object-by-object: components entered, lane data, narration |
+| Pipeline canvas | `view_pipeline` | Read-only diagram of a saved pipeline, drawn with the builder's nodes and edges; pan and zoom, nothing to edit or run |
 
 Widgets follow the host's light or dark theme, and use the system setting
 when a host sends none.

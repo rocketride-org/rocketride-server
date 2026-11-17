@@ -8,7 +8,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4] / 'src'))
 import pytest
 
 # The full expected MCP tool surface, in registration order (register_all:
-# introspection, execution, capability, visibility, logs, integrations).
+# introspection, execution, capability, visibility, logs, scaffold, canvas,
+# integrations).
 # Single source of truth for the suite — assert against this instead of
 # copying the list or hard-coding its count in individual test files.
 # This is the LOCAL-engine (loopback-bound) surface; a deployed engine omits
@@ -55,6 +56,8 @@ EXPECTED_TOOL_NAMES = (
     'log_trace',
     # scaffold
     'scaffold_node',
+    # canvas
+    'view_pipeline',
     # integrations
     'list_integrations',
 )
@@ -85,6 +88,7 @@ class FakeEngineClient:
         fs_get_url_result='https://signed.example/f?sig=abc',
         env_keys=None,
         auth=None,
+        workspace_root='.projects',
     ):
         self._tasks = (
             tasks
@@ -180,6 +184,8 @@ class FakeEngineClient:
         # the right ContextVar-carried value (rather than the service config).
         self.auth = auth
         self._env_keys = env_keys if env_keys is not None else []
+        self._workspace_root = workspace_root
+        self.get_workspace_root_calls = 0
         self.get_environment_keys_calls = 0
         self.closed = False
         self.close_calls = 0
@@ -378,6 +384,10 @@ class FakeEngineClient:
         if isinstance(self._env_keys, Exception):
             raise self._env_keys
         return list(self._env_keys)
+
+    async def get_workspace_root(self):
+        self.get_workspace_root_calls += 1
+        return self._workspace_root
 
     async def close(self):
         self.close_calls += 1

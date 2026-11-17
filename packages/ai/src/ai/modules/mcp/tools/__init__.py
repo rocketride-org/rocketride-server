@@ -8,6 +8,7 @@ and calling its ``register(registry)`` from ``register_all``.
 """
 
 from ..tooling import ToolRegistry
+from . import canvas
 from . import capability
 from . import execution
 from . import integrations
@@ -41,4 +42,5 @@ def register_all(registry: ToolRegistry) -> None:
     visibility.register(registry)
     logs.register(registry)
     scaffold.register(registry)
+    canvas.register(registry)
     integrations.register(registry)
