@@ -43,7 +43,10 @@ report keeps flowing on stdout. The two paths that exit 2 before any case
 runs — an unparsable spec, and a server the CLI cannot reach — record the
 shared ``{"error": {"message", "hint"}}`` envelope in place of the report,
 so the destination is always rewritten and an earlier run's green summary
-is never left behind to be read as this run's result. When the destination
+is never left behind to be read as this run's result. ``--junit`` gets the
+same guarantee on those two paths: the XML file is rewritten with an errored
+test per spec that could not run, so a JUnit publisher reads the run as
+failed instead of re-reading an earlier run's green suite. When the destination
 itself cannot be written, the command exits 2 for that reason alone: the
 report is flushed before the exit code is decided, not by the ``finally``
 that runs after it. The command does not
@@ -86,6 +89,47 @@ from ...evals.spec import EvalSpec, EvalSpecError, load_spec
 from ..utils.common import connect_client, disconnect_all, hint_for
 from ..utils.file_utils import expand_file_patterns
 from ..utils.output import Output
+
+
+def _write_junit(path: str, reports: list[EvalReport], spec_errors: list[SpecError]) -> None:
+    """
+    Write a JUnit XML report to ``path``, creating its directory if needed.
+
+    Args:
+        path: Destination file of ``--junit``
+        reports: Eval reports in execution order
+        spec_errors: Specs that could not be run to completion
+
+    Raises:
+        OSError: If the directory or the file cannot be written
+    """
+    junit_dir = os.path.dirname(path)
+    if junit_dir:
+        os.makedirs(junit_dir, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write(render_junit(reports, spec_errors))
+
+
+def _write_junit_error(path: str | None, spec_errors: list[SpecError]) -> None:
+    """
+    Rewrite ``--junit`` on an exit-2 path that returns before any case runs.
+
+    Without this, an unparsable spec or an unreachable server would leave an
+    earlier run's green XML in place, and a JUnit publisher would report this
+    failed run as passing. Each spec that could not run becomes one errored
+    test, so the document can never read as green. The exit code is already
+    2, so a destination that cannot be written is only reported on stderr.
+
+    Args:
+        path: Destination file of ``--junit``, or None when it was not given
+        spec_errors: One record per spec that could not be run
+    """
+    if not path:
+        return
+    try:
+        _write_junit(path, [], spec_errors)
+    except OSError as err:
+        print(f'Error: Cannot write JUnit report to {path}: {err}', file=sys.stderr)
 
 
 async def run_eval(args) -> int:
@@ -137,6 +181,9 @@ async def run_eval(args) -> int:
                 # to fix, and the other commands pass none for a parse or
                 # validation error either.
                 out.fail(str(err))
+                _write_junit_error(
+                    args.junit, [SpecError(spec_path=file_path, message=str(err), error_type=type(err).__name__)]
+                )
                 return 2
 
         # Connect once for all specs. A connection failure is exit code 2 by
@@ -144,7 +191,12 @@ async def run_eval(args) -> int:
         try:
             client = await connect_client(args.uri, args.apikey)
         except Exception as err:  # noqa: BLE001
-            out.fail(f'Unable to connect to server: {err}', hint_for(err, args.uri))
+            message = f'Unable to connect to server: {err}'
+            out.fail(message, hint_for(err, args.uri))
+            _write_junit_error(
+                args.junit,
+                [SpecError(spec_path=spec.path, message=message, error_type=type(err).__name__) for spec in specs],
+            )
             return 2
 
         # Run each spec sequentially, isolating spec-level failures (e.g. a
@@ -185,11 +237,7 @@ async def run_eval(args) -> int:
         # --junit writes the XML report in addition to the output above
         if args.junit:
             try:
-                junit_dir = os.path.dirname(args.junit)
-                if junit_dir:
-                    os.makedirs(junit_dir, exist_ok=True)
-                with open(args.junit, 'w', encoding='utf-8') as handle:
-                    handle.write(render_junit(reports, spec_errors))
+                _write_junit(args.junit, reports, spec_errors)
             except OSError as err:
                 # Replace the recorded report with the error envelope: the
                 # cases passed but this run produced no JUnit report, so

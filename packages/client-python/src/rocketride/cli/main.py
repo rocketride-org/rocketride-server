@@ -259,7 +259,8 @@ def setup_parser() -> argparse.ArgumentParser:
         'run to completion; 2 = usage error, spec parse/validation error, connection failure, '
         'or no case produced a result. A spec, connection, or JUnit-write error writes the shared '
         '{"error": ...} envelope to --json [FILE] in place of the report, so a report file '
-        'from an earlier run is never left behind as the result of this one.',
+        'from an earlier run is never left behind as the result of this one. A spec or '
+        'connection error also rewrites --junit PATH with an errored test per spec.',
     )
     _add_connection_args(eval_parser)
 

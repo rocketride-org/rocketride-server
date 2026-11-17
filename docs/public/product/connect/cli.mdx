@@ -300,7 +300,9 @@ parse or validate, a server the CLI cannot reach, and a `--junit` destination
 that cannot be written — write the shared `{"error": {"message", "hint"}}`
 envelope to the `--json` destination in place of the report, so an earlier
 run's green `report.json` is never left behind to be read as this run's
-result. When the `--json` destination itself cannot be written there is
+result. On the spec and connection paths, `--junit <path>` is rewritten too,
+with one errored `<testcase>` per spec that could not run, so a JUnit
+publisher never re-reads an earlier run's green XML. When the `--json` destination itself cannot be written there is
 nowhere to put that envelope, so the run exits `2` on that ground alone
 rather than exiting `0` over a stale `report.json`.
 

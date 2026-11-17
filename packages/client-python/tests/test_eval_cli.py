@@ -600,6 +600,50 @@ class TestEvalCli:
         assert 'a-broken.eval.json: cannot start pipeline' in captured.out
         assert captured.out.rstrip().endswith('Summary: 2 case(s), 2 passed, 0 failed, 1 spec error(s)')
 
+    async def test_stale_junit_report_is_overwritten_on_a_spec_parse_error(self, monkeypatch, tmp_path, spec_file):
+        # Run 1 passes and writes a green suite; run 2 has a broken spec and
+        # exits 2 before connecting. The XML must not still read as green.
+        junit_path = tmp_path / 'reports' / 'evals.xml'
+        assert await run_cli(monkeypatch, FakeClient(), [spec_file, '--junit', str(junit_path)]) == 0
+        assert ET.fromstring(junit_path.read_text(encoding='utf-8')).get('errors') == '0'
+
+        broken = tmp_path / 'broken.eval.json'
+        broken.write_text('{ not valid json', encoding='utf-8')
+        fake = FakeClient()
+        exit_code = await run_cli(monkeypatch, fake, [str(broken), '--junit', str(junit_path)])
+
+        assert exit_code == 2
+        assert fake.calls == []
+        root = ET.fromstring(junit_path.read_text(encoding='utf-8'))
+        assert root.get('tests') == '1'
+        assert root.get('errors') == '1'
+        suites = root.findall('testsuite')
+        assert [suite.get('name') for suite in suites] == [str(broken)]
+        error = suites[0].find('testcase/error')
+        assert error is not None
+        assert 'Invalid JSON' in error.get('message')
+
+    async def test_stale_junit_report_is_overwritten_on_a_connection_error(
+        self, monkeypatch, capsys, tmp_path, spec_file
+    ):
+        junit_path = tmp_path / 'evals.xml'
+        assert await run_cli(monkeypatch, FakeClient(), [spec_file, '--junit', str(junit_path)]) == 0
+
+        offline = FakeClient(connect_error=ConnectionError('connection refused'))
+        exit_code = await run_cli(monkeypatch, offline, [spec_file, '--junit', str(junit_path)])
+
+        assert exit_code == 2
+        root = ET.fromstring(junit_path.read_text(encoding='utf-8'))
+        assert root.get('errors') == '1'
+        assert root.get('failures') == '0'
+        assert [suite.get('name') for suite in root.findall('testsuite')] == [spec_file]
+        error = root.find('testsuite/testcase/error')
+        assert error is not None
+        assert 'Unable to connect to server' in error.get('message')
+        assert 'connection refused' in error.get('message')
+        # The stderr sentence is still printed exactly once
+        assert capsys.readouterr().err.count('Error:') == 1
+
     async def test_junit_report_written_alongside_human_output(self, monkeypatch, capsys, tmp_path, spec_file):
         junit_path = tmp_path / 'reports' / 'evals.xml'
         fake = FakeClient()
