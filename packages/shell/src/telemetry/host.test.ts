@@ -222,10 +222,20 @@ test('every disabled branch drops the hold an earlier page load of the tab left'
 test("an embedded preview's disabled boot never touches the host tab's hold", async () => {
 	const tab = session(heldEntry());
 	const win: Record<string, unknown> = { location: { search: '?rrdev=1', pathname: '/', hostname: 'cloud.example.test' }, self: {}, top: {} };
-	await withGlobals({ window: win, document: docHidden, sessionStorage: tab.storage }, () => {
-		resetTelemetryHostForTests(); // the preview's queue is memory-only
-		initTelemetryHost({ key: '', host: '', consentSource: 'stored' });
-		assert.deepEqual(tab.removed, [], 'nothing removed from the shared sessionStorage');
-		assert.equal(tab.data.has(HOLD_STORAGE_KEY), true);
-	});
+	// An embedded dev preview is a DEV BUILD framed with rrdev=1: the dev gate
+	// is build-time, so pin the build regardless of the runner's NODE_ENV.
+	const originalNodeEnv = process.env.NODE_ENV;
+	process.env.NODE_ENV = 'development';
+	try {
+		await withGlobals({ window: win, document: docHidden, sessionStorage: tab.storage }, () => {
+			resetTelemetryHostForTests(); // the preview's queue is memory-only
+			initTelemetryHost({ key: '', host: '', consentSource: 'stored' });
+			assert.deepEqual(tab.removed, [], 'nothing removed from the shared sessionStorage');
+			assert.equal(tab.data.has(HOLD_STORAGE_KEY), true);
+		});
+	} finally {
+		if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = originalNodeEnv;
+		resetDevGateForTests();
+	}
 });
