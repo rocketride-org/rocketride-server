@@ -83,6 +83,8 @@ def violations(endpoint: str, body: dict) -> list[str]:
         if tool.get('type') != 'function':
             found.append(f'tool type {tool.get("type")}')
     if endpoint == 'chat':
+        if 'max_tokens' in body and 'max_completion_tokens' in body:
+            found.append('both max_tokens and max_completion_tokens')
         options = body.get('stream_options')
         if options is not None and set(options) - {'include_usage'}:
             found.append(f'stream_options {sorted(options)}')
@@ -402,6 +404,11 @@ def test_the_paths_reach_both_apis_and_replay_reasoning(monkeypatch, recorder):
             ['reasoning item without encrypted_content'],
         ),
         ('chat', {'model': 'm', 'messages': [], 'store': True}, ['field store']),
+        (
+            'chat',
+            {'model': 'm', 'messages': [], 'max_tokens': 1, 'max_completion_tokens': 1},
+            ['both max_tokens and max_completion_tokens'],
+        ),
         (
             'chat',
             {'model': 'm', 'messages': [{'role': 'user', 'content': [{'type': 'file', 'file': {'file_id': 'f'}}]}]},
