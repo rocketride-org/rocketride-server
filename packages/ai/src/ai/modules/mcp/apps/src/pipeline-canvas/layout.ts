@@ -21,6 +21,8 @@ export const LAYER_GAP = 80;
 export const NODE_GAP = 60;
 /** Gap between two bands of a wrapped flow, in px. */
 export const BAND_GAP = 100;
+/** A flow wraps into bands only when one band would be drawn smaller than this zoom. */
+export const WRAP_BELOW_ZOOM = 0.5;
 
 export interface LayoutSize {
 	width: number;
@@ -82,8 +84,28 @@ function layersOf(ids: string[], edges: LayoutEdge[]): string[][] {
 	}
 
 	const columns: string[][] = [];
-	for (const id of ids) (columns[layer.get(id)!] ??= []).push(id);
-	return columns.filter(Boolean).map((column) => column.sort((a, b) => order.get(a)! - order.get(b)!));
+	const byLayer: string[][] = [];
+	for (const id of ids) (byLayer[layer.get(id)!] ??= []).push(id);
+	for (const column of byLayer.filter(Boolean)) columns.push(column.sort((a, b) => order.get(a)! - order.get(b)!));
+
+	// One left-to-right pass of barycentre ordering: a node moves toward the
+	// average row of the nodes that feed it, which removes most crossings in a
+	// pipeline. Ties, and nodes fed by nothing earlier, keep file order.
+	const incoming = new Map<string, string[]>(ids.map((id) => [id, []]));
+	for (const [source, targets] of outgoing) for (const target of targets) incoming.get(target)!.push(source);
+	const row = new Map<string, number>();
+	columns[0]?.forEach((id, index) => row.set(id, index));
+	for (const column of columns.slice(1)) {
+		const key = new Map(
+			column.map((id) => {
+				const rows = incoming.get(id)!.filter((source) => row.has(source)).map((source) => row.get(source)!);
+				return [id, rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : Number.POSITIVE_INFINITY];
+			})
+		);
+		column.sort((a, b) => key.get(a)! - key.get(b)! || order.get(a)! - order.get(b)!);
+		column.forEach((id, index) => row.set(id, index));
+	}
+	return columns;
 }
 
 /**
@@ -157,8 +179,8 @@ export function layoutLayers(ids: string[], edges: LayoutEdge[], sizeOf: (id: st
  * agent only invokes (no data in or out) sit in a row under the agent; a node
  * invoked by another invoked node joins its invoker's row. An invoked node
  * that sends data (a pipeline tool that starts a sub-flow) stays in the flow,
- * one layer after its invoker. With a `frame`, the flow wraps into as many
- * bands as gives the largest drawing when fitted into that frame. Nothing
+ * one layer after its invoker. With a `frame`, a flow too long to read in
+ * one band wraps into the fewest even bands that can be read. Nothing
  * overlaps.
  */
 export function layoutPipeline(ids: string[], edges: LayoutEdge[], sizeOf: (id: string) => LayoutSize, frame?: LayoutFrame): Positions {
@@ -212,15 +234,19 @@ export function layoutPipeline(ids: string[], edges: LayoutEdge[], sizeOf: (id: 
 
 	if (!frame || columns.length < 2) return placeBands(columns, satellites, sizeOf, Infinity);
 
-	// Choose the band width that makes the fitted drawing largest, up to full
-	// size: past zoom 1 nothing gets easier to read. Ties keep fewer bands,
-	// which reads more like the builder.
+	// Keep one band (the builder's own shape) unless it would be drawn too
+	// small to read in the frame. Then use the fewest bands that reach a
+	// readable zoom, or the largest drawing when none does.
 	let best: Positions | null = null;
 	let bestZoom = -Infinity;
-	for (let perBand = columns.length; perBand >= 1; perBand--) {
+	for (let bands = 1; bands <= columns.length; bands++) {
+		// Even bands: 8 columns in two bands are 4 and 4, never 7 and 1.
+		const perBand = Math.ceil(columns.length / bands);
+		if (bands > 1 && Math.ceil(columns.length / (bands - 1)) === perBand) continue;
 		const positions = placeBands(columns, satellites, sizeOf, perBand);
 		const size = bounds(positions, sizeOf);
 		const zoom = Math.min(1, frame.width / Math.max(size.width, 1), frame.height / Math.max(size.height, 1));
+		if (zoom >= WRAP_BELOW_ZOOM) return positions;
 		if (zoom > bestZoom * 1.05) {
 			best = positions;
 			bestZoom = zoom;

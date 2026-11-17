@@ -16,7 +16,7 @@
  * gesture goes to the canvas.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactElement } from 'react';
-import { Background, MiniMap, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow, useStore, type NodeChange } from '@xyflow/react';
+import { Background, MiniMap, ReactFlow, ReactFlowProvider, useNodesInitialized, useNodesState, useReactFlow, useStore, type NodeChange, type Viewport } from '@xyflow/react';
 import type { App } from '@modelcontextprotocol/ext-apps';
 import '@xyflow/react/dist/style.css';
 
@@ -43,10 +43,16 @@ export const CANVAS_MIN_HEIGHT = 200;
 
 /** Below this zoom the builder's node titles are too small to read, so larger labels are drawn over them. */
 export const OVERVIEW_ZOOM = 0.9;
-/** A node narrower than this on screen gets no label: the label could not hold a word. */
+/** A node narrower than this on screen gets no label: the label could not hold its icon. */
 const LABEL_MIN_WIDTH = 40;
-/** Height of the builder's top cap and header row at zoom 1, in px. */
+/** Below this on-screen width a label uses a smaller font. */
+const LABEL_WIDE = 90;
+/** Height of the builder's top cap and header row at zoom 1, used until the header is measured. */
 const NODE_HEADER_HEIGHT = 46;
+/** The smallest label height, in px. */
+const LABEL_MIN_HEIGHT = 20;
+/** The inline canvas of a truncated pipeline stays short: 200 thumbnails are an overview, not a read. */
+const TRUNCATED_MAX_HEIGHT = 320;
 
 const FIT_PADDING = 0.04;
 const FIT_VIEW_OPTIONS = { padding: FIT_PADDING, maxZoom: 1.25 };
@@ -227,29 +233,50 @@ function Toolbar({ host, moved }: { host: HostView; moved: MutableRefObject<bool
 	);
 }
 
+/** Bottom of the builder header of each node, at zoom 1, read once from the DOM. */
+const headerBottoms = new Map<string, number>();
+
+function headerBottom(id: string): number {
+	const known = headerBottoms.get(id);
+	if (known) return known;
+	const header = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"] .rr-node-header`) as HTMLElement | null;
+	if (!header) return NODE_HEADER_HEIGHT;
+	const bottom = header.offsetTop + header.offsetHeight;
+	if (bottom > 0) headerBottoms.set(id, bottom);
+	return bottom || NODE_HEADER_HEIGHT;
+}
+
 /**
  * Larger titles over the builder's node headers when the drawing is zoomed
  * out too far to read them, in the spirit of React Flow's contextual zoom.
- * Each label covers the header of its node exactly (same place and width, the
- * header's colours), so the node keeps its shape and its lanes; only the
- * title grows. Labels ignore the pointer.
+ * Each label sits on the header of its node (same width, the header's
+ * colours and font), icon first, so the node keeps its shape and its lanes
+ * and only the title grows. When the header is shorter on screen than the
+ * label, the label grows upward from the header's bottom edge, so the lanes
+ * stay clear. When even the icon would not fit, a cue says how to read the
+ * names. Labels ignore the pointer.
  */
-function OverviewLabels({ services }: { services: IServiceCatalog }): ReactElement | null {
+function OverviewLabels({ services, cue }: { services: IServiceCatalog; cue: string }): ReactElement | null {
 	const [tx, ty, zoom] = useStore((s) => s.transform);
 	const nodeLookup = useStore((s) => s.nodeLookup);
 	if (zoom >= OVERVIEW_ZOOM) return null;
 	const labels: ReactElement[] = [];
+	let nodes = 0;
 	for (const node of nodeLookup.values()) {
 		if (node.type !== INodeType.Default || !node.measured?.width) continue;
+		nodes += 1;
 		const width = node.measured.width * zoom;
 		if (width < LABEL_MIN_WIDTH) continue;
 		const data = node.data as INodeData;
 		const service = services[data.provider] as { title?: string; icon?: string } | undefined;
 		const title = data.name || service?.title || data.provider;
 		const { x, y } = node.internals.positionAbsolute;
+		const narrow = width < LABEL_WIDE;
+		const header = headerBottom(node.id) * zoom;
+		const height = Math.max(header, LABEL_MIN_HEIGHT);
 		labels.push(
-			<div key={node.id} className="rr-overview-label" style={{ left: x * zoom + tx, top: y * zoom + ty, width, height: Math.max(22, NODE_HEADER_HEIGHT * zoom) }}>
-				{service?.icon && width >= 90 && <Icon name={service.icon} width="14" height="14" className="rr-overview-icon" />}
+			<div key={node.id} className={narrow ? 'rr-overview-label rr-overview-narrow' : 'rr-overview-label'} style={{ left: x * zoom + tx, top: y * zoom + ty + header - height, width, height }}>
+				{service?.icon && <Icon name={service.icon} width="14" height="14" className="rr-overview-icon" />}
 				<span>{title}</span>
 			</div>
 		);
@@ -257,14 +284,37 @@ function OverviewLabels({ services }: { services: IServiceCatalog }): ReactEleme
 	return (
 		<div className="rr-overview" aria-hidden="true">
 			{labels}
+			{nodes > 0 && labels.length === 0 && <div className="rr-overview-cue">{cue}</div>}
 		</div>
 	);
 }
 
-function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostView; moved: MutableRefObject<boolean>; onBounds: (bounds: Bounds) => void }): ReactElement {
+/** True when every node is inside the visible frame. */
+function useWholeDrawingVisible(): boolean {
+	const [tx, ty, zoom] = useStore((s) => s.transform);
+	const width = useStore((s) => s.width);
+	const height = useStore((s) => s.height);
+	const nodeLookup = useStore((s) => s.nodeLookup);
+	for (const node of nodeLookup.values()) {
+		if (node.parentId || !node.measured?.width || !node.measured?.height) continue;
+		const { x, y } = node.internals.positionAbsolute;
+		const left = x * zoom + tx;
+		const top = y * zoom + ty;
+		if (left < 0 || top < 0 || left + node.measured.width * zoom > width || top + node.measured.height * zoom > height) return false;
+	}
+	return true;
+}
+
+function FullScreenMiniMap({ safeBottom }: { safeBottom: number }): ReactElement | null {
+	const whole = useWholeDrawingVisible();
+	if (whole) return null;
+	return <MiniMap pannable zoomable position="bottom-right" nodeClassName="rr-minimap-node" ariaLabel="Overview of the whole pipeline" style={{ marginBottom: 16 + safeBottom }} />;
+}
+
+function Flow({ model, host, moved, onBounds, cue }: { model: GraphModel; host: HostView; moved: MutableRefObject<boolean>; onBounds: (bounds: Bounds) => void; cue: string }): ReactElement {
 	const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>(model.nodes as unknown as FlowNode[]);
 	const initialized = useNodesInitialized();
-	const { fitView, getInternalNode, getNodesBounds, setViewport, getNodes } = useReactFlow();
+	const { fitView, getInternalNode, getNodesBounds, setViewport, getViewport, getNodes } = useReactFlow();
 	const frameWidth = useStore((s) => s.width);
 	const frameHeight = useStore((s) => s.height);
 	const active = host.mode === 'fullscreen';
@@ -297,12 +347,30 @@ function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostV
 		return () => cancelAnimationFrame(frame);
 	}, [initialized, nodes, getNodesBounds, getNodes, onBounds]);
 
-	// Fit the whole drawing whenever the frame changes size, unless the user
-	// has moved the view. Full screen opens on the sources at a readable zoom
-	// when the whole drawing would be too small to read there.
+	// Each mode keeps its own view. Inline fits the whole drawing whenever the
+	// frame changes size, unless the user has moved it. Full screen opens on
+	// the sources at a readable zoom when the whole drawing would be too small
+	// there, and keeps the user's place once they move. Closing full screen
+	// brings back the inline view as it was.
+	const mode = useRef<{ active: boolean; inlineView: Viewport | null; inlineMoved: boolean }>({ active: false, inlineView: null, inlineMoved: false });
 	useEffect(() => {
 		if (!ready || !frameWidth || !frameHeight) return;
+		const state = mode.current;
+		const leaving = !active && state.active;
+		if (active && !state.active) {
+			state.inlineView = getViewport();
+			state.inlineMoved = moved.current;
+			moved.current = false;
+		} else if (leaving) {
+			moved.current = state.inlineMoved;
+		}
+		state.active = active;
 		const frame = requestAnimationFrame(() => {
+			if (moved.current && !leaving) return;
+			if (leaving && state.inlineMoved && state.inlineView) {
+				setViewport(state.inlineView);
+				return;
+			}
 			if (active) {
 				const all = getNodesBounds(getNodes());
 				const fitZoom = Math.min(frameWidth / all.width, frameHeight / all.height);
@@ -314,13 +382,11 @@ function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostV
 					setViewport({ x: 24 - box.x * zoom, y: frameHeight / 2 - (box.y + box.height / 2) * zoom, zoom });
 					return;
 				}
-			} else if (moved.current) {
-				return;
 			}
 			fitView(FIT_VIEW_OPTIONS);
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [ready, frameWidth, frameHeight, active, fitView, getNodes, getNodesBounds, setViewport, model.edges, moved]);
+	}, [ready, frameWidth, frameHeight, active, fitView, getNodes, getNodesBounds, getViewport, setViewport, model.edges, moved]);
 
 	const project = useMemo(() => ({ components: [] }) as unknown as IProject, []);
 
@@ -358,8 +424,8 @@ function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostV
 						proOptions={PRO_OPTIONS}
 					>
 						<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
-						<OverviewLabels services={model.services} />
-						{active && <MiniMap pannable zoomable position="bottom-right" nodeClassName="rr-minimap-node" ariaLabel="Overview of the whole pipeline" style={{ marginBottom: 16 + host.safeBottom }} />}
+						<OverviewLabels services={model.services} cue={cue} />
+						{active && <FullScreenMiniMap safeBottom={host.safeBottom} />}
 					</ReactFlow>
 				</ReadOnlyFlowGraphProvider>
 			</ReadOnlyFlowProjectProvider>
@@ -367,8 +433,8 @@ function Flow({ model, host, moved, onBounds }: { model: GraphModel; host: HostV
 	);
 }
 
-/** Keyboard on the focused frame: arrows pan, + and - zoom, 0 fits, Escape leaves full screen. */
-function useFrameKeys(host: HostView, moved: MutableRefObject<boolean>): (event: KeyboardEvent<HTMLDivElement>) => void {
+/** Keyboard on the focused frame: arrows pan, + and - zoom, 0 fits. Escape is handled once, on the window, in full screen. */
+function useFrameKeys(moved: MutableRefObject<boolean>): (event: KeyboardEvent<HTMLDivElement>) => void {
 	const { getViewport, setViewport, zoomIn, zoomOut, fitView } = useReactFlow();
 	return (event) => {
 		const step: Record<string, [number, number]> = { ArrowLeft: [PAN_STEP, 0], ArrowRight: [-PAN_STEP, 0], ArrowUp: [0, PAN_STEP], ArrowDown: [0, -PAN_STEP] };
@@ -385,8 +451,6 @@ function useFrameKeys(host: HostView, moved: MutableRefObject<boolean>): (event:
 		} else if (event.key === '0') {
 			moved.current = false;
 			fitView({ ...FIT_VIEW_OPTIONS, duration: 200 });
-		} else if (event.key === 'Escape' && host.mode === 'fullscreen') {
-			host.request('inline');
 		} else {
 			return;
 		}
@@ -421,12 +485,11 @@ function Header({ summary, count, shown, missing, tools }: { summary: GraphModel
 				</div>
 				{summary.description && <div className="rr-canvas-description">{summary.description}</div>}
 			</div>
-			{tools}
 			{(summary.truncated || missing.length > 0) && (
 				<div className="rr-canvas-notes" role="status">
 					{summary.truncated && (
 						<div>
-							Showing the first {shown} of {count} nodes. Open the pipeline in the builder to see all of it.
+							Showing the first {shown} of {count} nodes. The builder shows all of it.
 						</div>
 					)}
 					{missing.length > 0 && (
@@ -436,6 +499,7 @@ function Header({ summary, count, shown, missing, tools }: { summary: GraphModel
 					)}
 				</div>
 			)}
+			{tools}
 		</div>
 	);
 }
@@ -474,7 +538,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const [width, setWidth] = useState(0);
 	const [bounds, setBounds] = useState<Bounds>(() => estimatedBounds(model.nodes));
 	const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
-	const onKeyDown = useFrameKeys(host, moved);
+	const onKeyDown = useFrameKeys(moved);
 
 	useLayoutEffect(() => {
 		const box = boxRef.current;
@@ -516,7 +580,13 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 	const onBounds = useCallback((next: Bounds) => setBounds((current) => (Math.abs(current.width - next.width) < 1 && Math.abs(current.height - next.height) < 1 ? current : next)), []);
 
 	const headBottom = headRef.current?.getBoundingClientRect().bottom ?? 90;
-	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 40 - host.safeBottom) : width ? inlineHeight(width, bounds, CANVAS_MAX_HEIGHT) : CANVAS_MIN_HEIGHT;
+	const inlineMax = model.summary.truncated ? TRUNCATED_MAX_HEIGHT : CANVAS_MAX_HEIGHT;
+	const height = active ? Math.max(CANVAS_MIN_HEIGHT, viewportHeight - headBottom - 40 - host.safeBottom) : width ? inlineHeight(width, bounds, inlineMax) : CANVAS_MIN_HEIGHT;
+	const cue = host.canFullScreen ? (coarse ? 'Tap to expand and read the names' : 'Expand or zoom in to read the names') : 'Zoom in to read the names';
+	// On a touch screen a tap on the inline canvas opens full screen, where every gesture works.
+	const onTap = () => {
+		if (coarse && !active && host.canFullScreen) host.request('fullscreen');
+	};
 
 	const hint = active
 		? coarse
@@ -524,7 +594,7 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 			: 'Drag or scroll to move. Ctrl + scroll zooms. Esc closes.'
 		: coarse
 			? host.canFullScreen
-				? 'Use two fingers to move or zoom, or tap Expand.'
+				? 'Tap to expand. Two fingers move or zoom here.'
 				: 'Use two fingers to move or zoom.'
 			: 'Drag to move. Ctrl + scroll or double-click to zoom.';
 
@@ -548,8 +618,9 @@ function Graph({ model, host }: { model: GraphModel; host: HostView }): ReactEle
 				aria-label={`Read-only diagram of ${model.summary.name || 'the pipeline'}. Arrow keys move it, plus and minus zoom.`}
 				aria-describedby="rr-canvas-text"
 				onKeyDown={onKeyDown}
+				onClick={onTap}
 			>
-				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} />}
+				{width > 0 && <Flow model={model} host={host} moved={moved} onBounds={onBounds} cue={cue} />}
 			</div>
 			<div className="rr-canvas-howto">{hint}</div>
 			<TextAlternative summary={model.summary} />
