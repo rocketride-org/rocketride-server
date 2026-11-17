@@ -126,6 +126,12 @@ export interface ILedger {
 	 * last call's types), keyed `<handle>:<pipeId>`.
 	 */
 	directMonitors: Map<string, { handle: string; pipeId?: number; types: string[] }>;
+	/**
+	 * Runs whose execute answer was lost (the engine call threw): minted
+	 * project → source. They may still start, so they count toward the run
+	 * quota until they are found and ended.
+	 */
+	lostRuns: Map<string, string>;
 	/** Real tokens and public tokens held (for the outbound backstop). */
 	secrets(): string[];
 	clear(): void;
@@ -142,6 +148,7 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 	const fsByHandle = new Map<string, IFsEntry>();
 	const monitors = new Map<string, Map<string, number>>();
 	const directMonitors = new Map<string, { handle: string; pipeId?: number; types: string[] }>();
+	const lostRuns = new Map<string, string>();
 	const pending: Record<QuotaKind, number> = { runs: 0, pipes: 0, fsHandles: 0, monitorKeys: 0 };
 
 	const dropRun = (handle: string): void => {
@@ -162,7 +169,7 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 	const liveCount = (kind: QuotaKind): number => {
 		switch (kind) {
 			case 'runs':
-				return liveRuns().length;
+				return liveRuns().length + lostRuns.size;
 			case 'pipes':
 				return liveRuns().reduce((n, e) => n + e.pipeIds.size, 0);
 			case 'fsHandles':
@@ -211,12 +218,14 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 		fsHandles: () => [...fsByHandle.values()],
 		monitors,
 		directMonitors,
+		lostRuns,
 		secrets: () => [...runsByHandle.values()].flatMap((e) => [e.token, e.publicToken]).filter((s) => typeof s === 'string' && s !== ''),
 		clear() {
 			runsByHandle.clear();
 			fsByHandle.clear();
 			monitors.clear();
 			directMonitors.clear();
+			lostRuns.clear();
 		},
 	};
 }

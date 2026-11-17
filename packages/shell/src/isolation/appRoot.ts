@@ -66,6 +66,8 @@ import { isWireBinary, measure } from './walk';
 
 /** The outbound backstop's credential pattern (Appendix L). */
 const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
+/** Later lookups of a lost run (ms): after the engine's own queueing, before teardown. */
+const LOST_RUN_RETRY_MS = [30_000, 150_000];
 /** Root-internal frame refresh retries (ms). */
 const REFRESH_RETRY_MS = [2000, 4000, 8000];
 /** `/apps/frame` answers that end the session instead of being retried. */
@@ -160,6 +162,19 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Bumped by teardown and logout: an answer to a request started earlier is ended, not recorded. */
 	let epoch = 0;
 
+	/**
+	 * Root work still running for realms: engine calls of client.request and
+	 * the ending of what late or unrecorded answers started. teardownAll waits
+	 * for it (within its timeout) so a late run is ended before it resolves.
+	 */
+	const background = new Set<Promise<unknown>>();
+	const track = <T>(p: Promise<T>): Promise<T> => {
+		background.add(p);
+		const forget = (): void => void background.delete(p);
+		p.then(forget, forget);
+		return p;
+	};
+
 	/** One DAP request on the root's own behalf (teardown, recovery). */
 	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
 
@@ -168,10 +183,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
 		if (!body) return;
 		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
-			sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run'));
+			track(sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run')));
 		}
 		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
-			sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined);
+			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined));
 		}
 	};
 
@@ -179,17 +194,39 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	 * An execute whose answer was lost (the engine call threw, e.g. a timeout):
 	 * the run may exist anyway, so look it up by its minted project and end it.
 	 */
-	const recoverLostRun = (req: IGatedRequest): void => {
+	/**
+	 * Looks a lost run up by (minted project, source) and ends it. Resolves
+	 * true once it is found and terminated (it then leaves the lost set).
+	 */
+	const endLostRun = (ledger: ILedger, project: string, source: string): Promise<boolean> =>
+		sendEngine('rrext_get_token', { projectId: project, source })
+			.then(async (r) => {
+				const token = isPlainObject(r) && r.success !== false && isPlainObject(r.body) ? r.body.token : undefined;
+				if (typeof token !== 'string') return false;
+				await sendEngine('terminate', { token });
+				ledger.lostRuns.delete(project);
+				return true;
+			})
+			.catch(() => false);
+	const recoverLostRun = (st: IRealmState, req: IGatedRequest): void => {
 		if (req.command !== 'execute' || !req.mintedProject) return;
 		const pipeline = req.args.pipeline as Record<string, unknown>;
-		const source = req.args.source ?? pipeline.source;
-		sendEngine('rrext_get_token', { projectId: req.mintedProject, ...(typeof source === 'string' ? { source } : {}) })
-			.then((r) => {
-				const token = isPlainObject(r) && r.success !== false && isPlainObject(r.body) ? r.body.token : undefined;
-				if (typeof token === 'string') return sendEngine('terminate', { token });
-				return undefined;
-			})
-			.catch(() => opts.log('warn', '[isolation] could not recover a lost run'));
+		const source = String(req.args.source ?? pipeline.source);
+		const project = req.mintedProject;
+		// Remembered (and counted as a run) until found: the engine may still
+		// start it after its own DAP timeout. Teardown and detach look again,
+		// and so do two later retries.
+		st.ledger.lostRuns.set(project, source);
+		const ledger = st.ledger;
+		const attempt = (retriesLeft: number[]): void => {
+			track(endLostRun(ledger, project, source)).then((found) => {
+				if (found || retriesLeft.length === 0 || !ledger.lostRuns.has(project)) return;
+				const [delay, ...rest] = retriesLeft;
+				const timer = setTimeout(() => attempt(rest), delay);
+				(timer as { unref?: () => void }).unref?.();
+			});
+		};
+		attempt([...LOST_RUN_RETRY_MS]);
 	};
 
 	/** Starts ending one realm's runs, store handles and monitors; returns the work. */
@@ -224,6 +261,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				}
 			}
 		}
+		for (const [project, source] of st.ledger.lostRuns) work.push(endLostRun(st.ledger, project, source));
 		for (const d of st.ledger.directMonitors.values()) {
 			const run = st.ledger.run(d.handle);
 			if (run && d.types.length > 0) work.push(sendEngine('rrext_monitor', { token: run.token, types: [], ...(d.pipeId !== undefined ? { pipeId: d.pipeId } : {}) }).catch(() => undefined));
@@ -413,9 +451,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				try {
 					let response: DAPMessage;
 					try {
-						response = (await client().request(req.message, req.timeout)) as DAPMessage;
+						response = (await track(Promise.resolve().then(() => client().request(req.message, req.timeout)))) as DAPMessage;
 					} catch (err) {
-						recoverLostRun(req);
+						recoverLostRun(st, req);
 						throw err;
 					}
 					// Teardown, logout or detach happened meanwhile: end what the answer started.
@@ -452,6 +490,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const release = st.ledger.reserve('monitorKeys', added);
 			try {
 				await client().addMonitor({ token: run!.token }, types);
+			const startedIn = epoch;
 				for (const t of types) counts.set(t, (counts.get(t) ?? 0) + 1);
 				st.ledger.monitors.set(run!.handle, counts);
 			} finally {
@@ -614,7 +653,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const work: Promise<unknown>[] = [];
 				for (const st of realms.values()) work.push(...teardownRealm(st, tally));
 				let timer: ReturnType<typeof setTimeout> | undefined;
-				const timedOut = await Promise.race([Promise.allSettled(work).then(() => false), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
+				const timedOut = await Promise.race([drain(), new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(true), timeoutMs)))]);
 				if (timer !== undefined) clearTimeout(timer);
 				if (tally.failed > 0 || timedOut) opts.log('warn', `[isolation] teardown: ${tally.failed} terminate request(s) failed${timedOut ? '; timed out' : ''}`);
 				for (const st of realms.values()) st.ledger.clear();
@@ -624,3 +663,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		},
 	};
 }
+				// Then the root's own background work: engine calls started before the
+				// teardown, and the ending of what their late answers started (DA N3).
+				const drain = async (): Promise<boolean> => {
+					await Promise.allSettled(work);
+					while (background.size > 0) await Promise.allSettled([...background]);
+					return false;
+				};
