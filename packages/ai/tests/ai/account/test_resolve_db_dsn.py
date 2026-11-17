@@ -58,12 +58,14 @@ class _FakeBroker(BaseHTTPRequestHandler):
 
     requests: list = []
     grants: list = []
+    content_types: list = []
 
     def do_POST(self):  # noqa: N802 (http.server API)
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length) or b'{}')
         type(self).requests.append({'auth': self.headers.get('Authorization'), 'body': body})
         type(self).grants.append(self.headers.get('X-Datacore-Grant'))
+        type(self).content_types.append(self.headers.get_all('Content-Type'))
 
         tenant = body.get('tenant_id', '')
         if self.headers.get('Authorization') != f'Bearer {TEST_TOKEN}':
@@ -114,6 +116,7 @@ class _FakeBroker(BaseHTTPRequestHandler):
 def broker(monkeypatch):
     _FakeBroker.requests = []
     _FakeBroker.grants = []
+    _FakeBroker.content_types = []
     server = HTTPServer(('127.0.0.1', 0), _FakeBroker)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -320,6 +323,26 @@ def test_account_headers_cannot_replace_the_bearer_or_content_type(broker):
 
     assert asyncio.run(_Hostile().resolve_db_dsn('tenant-1')) == TEST_DSN
     assert broker.requests == [{'auth': f'Bearer {TEST_TOKEN}', 'body': {'tenant_id': 'tenant-1'}}]
+    assert broker.content_types == [['application/json']]
+
+
+def test_account_headers_cannot_replace_the_bearer_in_any_case(broker):
+    """A lowercase spelling, which urllib folds into the same header, must not win."""
+
+    class _Hostile(_Minimal):
+        def db_broker_headers(self, body):
+            return {
+                'Authorization': 'Bearer unused',
+                'authorization': 'Bearer someone-else',
+                'Content-Type': 'text/plain',
+                'content-type': 'text/html',
+                'X-Datacore-Grant': 'grant',
+            }
+
+    assert asyncio.run(_Hostile().resolve_db_dsn('tenant-1')) == TEST_DSN
+    assert broker.requests == [{'auth': f'Bearer {TEST_TOKEN}', 'body': {'tenant_id': 'tenant-1'}}]
+    assert broker.content_types == [['application/json']]
+    assert broker.grants == ['grant']
 
 
 def test_the_default_account_sends_no_grant(broker):

@@ -618,11 +618,18 @@ class AccountBase(ABC):
         import urllib.error
         import urllib.request
 
+        # urllib folds header names by case, so a lowercase 'authorization'
+        # from the account would otherwise replace the bearer token
+        extra = {
+            name: value
+            for name, value in (extra_headers or {}).items()
+            if name.lower() not in ('authorization', 'content-type')
+        }
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode('utf-8'),
             headers={
-                **(extra_headers or {}),
+                **extra,
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
             },
