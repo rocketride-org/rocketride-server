@@ -71,6 +71,7 @@ from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
+from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
 from ai.modules.task.task_channel import (
@@ -928,7 +929,11 @@ class Task(DAPBase):
             if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
                 continue
             try:
-                pair = db_target(Config.getNodeConfig(component['provider'], component.get('config') or {}))
+                pair = db_target(
+                    Config.getNodeConfig(
+                        component['provider'], component.get('config') or {}, node_store.served(component['provider'])
+                    )
+                )
             except ValueError as e:
                 raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
             if pair not in targets:
@@ -1261,8 +1266,12 @@ class Task(DAPBase):
             from rocketlib import getServiceDefinition
             from ai.common.config import Config
 
+            # A node EaaS serves is not in the engine's registry, and the gate must see it too
             problem = saas_pipeline_violation(
-                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+                pipeline,
+                lambda provider: getServiceDefinition(provider) or node_store.served(provider),
+                lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                shared_host=self._shares_host(),
             )
             if problem:
                 raise ValueError(problem)
@@ -3069,6 +3078,12 @@ class Task(DAPBase):
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
+
+            # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
+            try:
+                await asyncio.to_thread(node_store.place, resolved)
+            except Exception as e:
+                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
             del resolved
 
             # Setup the first part of the command line args
