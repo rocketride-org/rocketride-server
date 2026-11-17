@@ -62,6 +62,8 @@ const LABEL_FONT_NARROW = 10.5;
 const LABEL_CHROME = 12 + 5 + 14 + 2;
 const LABEL_CHROME_NARROW = 12 + 3 + 6 + 2;
 const LABEL_ICON = 12 + 3;
+/** A label keeps its icon while this much room is left for text beside it, about six letters. */
+const LABEL_TEXT_MIN = 34;
 /** Two neighbouring labels fill at most twice this share of the gap between their nodes. */
 const LABEL_GAP_SHARE = 0.46;
 /** The widest a label grows, in px. */
@@ -105,17 +107,25 @@ function useFitAll(): (options?: { duration?: number }) => void {
 	const { getNodes, getNodesBounds, setViewport } = useReactFlow();
 	const width = useStore((s) => s.width);
 	const height = useStore((s) => s.height);
+	const edges = useStore((s) => s.edges);
 	return useCallback(
 		(options?: { duration?: number }) => {
-			const box = getNodesBounds(getNodes());
+			const nodes = getNodes();
+			const box = getNodesBounds(nodes);
 			if (!box.width || !width || !height) return;
-			const fit = (top: number) => getViewportForBounds({ x: box.x - LABEL_MARGIN_X, y: box.y - top, width: box.width + 2 * LABEL_MARGIN_X, height: box.height + top }, width, height, 0.02, FIT_MAX_ZOOM, FIT_PADDING);
-			// The headroom depends on the zoom it leads to; two rounds settle it.
-			let view = fit(0);
-			for (let i = 0; i < 2; i++) view = fit(labelHeadroom(view.zoom));
+			// An invoked node's label grows down from its top, past a short node's bottom.
+			const invoked = new Set(edges.filter((edge) => edge.sourceHandle?.startsWith('invoke-source')).map((edge) => edge.target));
+			const footroom = (zoom: number) => (zoom < OVERVIEW_ZOOM ? Math.max(0, ...nodes.filter((node) => invoked.has(node.id) && node.measured?.height).map((node) => node.position.y + Math.max(node.measured!.height!, LABEL_TALLEST / zoom) - (box.y + box.height))) : 0);
+			const fit = (zoom: number) => {
+				const top = labelHeadroom(zoom);
+				return getViewportForBounds({ x: box.x - LABEL_MARGIN_X, y: box.y - top, width: box.width + 2 * LABEL_MARGIN_X, height: box.height + top + footroom(zoom) }, width, height, 0.02, FIT_MAX_ZOOM, FIT_PADDING);
+			};
+			// The room depends on the zoom it leads to; a few rounds settle it.
+			let view = fit(OVERVIEW_ZOOM);
+			for (let i = 0; i < 3; i++) view = fit(view.zoom);
 			setViewport(view, options);
 		},
-		[getNodes, getNodesBounds, setViewport, width, height]
+		[getNodes, getNodesBounds, setViewport, width, height, edges]
 	);
 }
 const PRO_OPTIONS = { hideAttribution: true };
@@ -339,14 +349,18 @@ function Toolbar({ host, moved, coarse }: { host: HostView; moved: MutableRefObj
 					}}
 				/>
 			)}
-			<ToolButton
-				label="Fit to view"
-				icon={FIT_ICON}
+			<button
+				type="button"
+				className="rr-canvas-tool rr-canvas-expand"
+				aria-label="Fit to view"
 				onClick={() => {
 					moved.current = false;
 					fitAll({ duration: motion(200) });
 				}}
-			/>
+			>
+				<Svg path={FIT_ICON} />
+				<span>Fit</span>
+			</button>
 			{host.canFullScreen && (
 				<button type="button" className="rr-canvas-tool rr-canvas-expand" onClick={() => host.request(active ? 'inline' : 'fullscreen')} aria-label={active ? 'Close full screen' : 'Expand to full screen'}>
 					<Svg path={active ? COLLAPSE_ICON : EXPAND_ICON} />
@@ -373,7 +387,7 @@ function headerBottom(id: string): number {
 type Neighbour = { id: string; gap: number } | null;
 
 /** One overview label before the row pass settles its height, font and icon. */
-type Draft = { id: string; row: number; down: boolean; nodeTop: number; service?: { icon?: string }; title: string; experimental: boolean; left: number; width: number; height: number; lines: number; font: number; icon: boolean; short: boolean; headerBottomY: number };
+type Draft = { id: string; row: number; down: boolean; inside: boolean; nodeTop: number; nodeHeader: number; service?: { icon?: string }; title: string; experimental: boolean; left: number; width: number; height: number; lines: number; font: number; icon: boolean; headerBottomY: number };
 
 /**
  * The nearest node on each side of every node whose label band it shares,
@@ -495,73 +509,66 @@ function OverviewLabels({ services, onCue }: { services: IServiceCatalog; onCue:
 		const toRight = Math.min(maxRight, own - toLeft);
 		toLeft = Math.min(maxLeft, own - toRight);
 		const width = nodeWidth + toLeft + toRight;
-		if (width < LABEL_MIN_WIDTH) continue;
-		// A title that does not fit one line takes two, broken between words (or
-		// after a hyphen): in the label font with the icon when its longest word
-		// fits, else in the smaller font, else without the icon. When only the
-		// first word fits, a longer word breaks at the end of line two, which
-		// ends in an ellipsis. When not even the first word fits, the label is
-		// one line cut short (the node's tooltip has the whole title).
-		let lines = needed > width ? 2 : 1;
-		let font = LABEL_FONT;
-		let icon = !!service?.icon;
-		if (lines === 2) {
-			const words = title.split(/\s+|(?<=-)/).filter(Boolean);
-			const room = (withIcon: boolean) => width - LABEL_CHROME_NARROW - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
-			const longest = (size: number) => Math.max(...words.map((word) => textWidth(word, size)));
-			const first = (size: number) => textWidth(words[0] ?? title, size);
-			const choices: Array<[number, boolean, (size: number) => number]> = [
-				[LABEL_FONT, true, longest],
-				[LABEL_FONT_NARROW, true, longest],
-				[LABEL_FONT_NARROW, false, longest],
-				[LABEL_FONT_NARROW, true, first],
-				[LABEL_FONT_NARROW, false, first],
-			];
-			const choice = choices.find(([size, withIcon, measure]) => (width >= LABEL_WIDE || size === LABEL_FONT_NARROW) && (withIcon || icon) && measure(size) <= room(withIcon && icon));
-			if (choice) {
-				font = choice[0];
-				icon = icon && choice[1];
-			} else {
-				lines = 1;
-				font = LABEL_FONT_NARROW;
-				icon = false;
-			}
-		}
-		const short = lines === 1 && needed > width;
-		const headerBottomY = (node.internals.positionAbsolute.y + headerBottom(node.id)) * zoom + ty;
-		const height = Math.max(headerBottom(node.id) * zoom, lines === 2 ? (font === LABEL_FONT ? LABEL_TALLEST : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
-		// Inside the frame: a label wider than its node must not be cut by the edge.
-		const left = Math.max(2, Math.min(nodeLeft - toLeft, frameWidth - width - 2));
-		const down = invoked.has(node.id);
+		const room = (chrome: number, withIcon: boolean) => width - chrome - (experimental ? 9 : 0) + (withIcon ? 0 : LABEL_ICON);
+		// Too narrow to hold a short word: no label (the node's tooltip has the title).
+		if (width < LABEL_MIN_WIDTH || room(LABEL_CHROME_NARROW, false) < textWidth('Data', LABEL_FONT_NARROW)) continue;
 		const nodeTop = node.internals.positionAbsolute.y * zoom + ty;
-		drafts.push({ id: node.id, row: Math.round(down ? nodeTop : headerBottomY), down, service, title, experimental, left, width, height, lines, font, icon, short, headerBottomY, nodeTop });
+		const headerBottomY = nodeTop + headerBottom(node.id) * zoom;
+		const down = invoked.has(node.id);
+		const inside = nodeLeft >= 0 && nodeLeft + nodeWidth <= frameWidth && nodeTop >= 0 && nodeTop + node.measured!.height! * zoom <= frameHeight;
+		// The icon leads, as on the node, when every word of the title still fits
+		// a line beside it (and at least a few letters do).
+		const longest = Math.max(...title.split(/\s+|(?<=-)/).map((word) => textWidth(word, LABEL_FONT_NARROW)));
+		const icon = !!service?.icon && room(LABEL_CHROME_NARROW, true) >= Math.max(LABEL_TEXT_MIN, longest);
+		drafts.push({ id: node.id, row: Math.round(down ? nodeTop : headerBottomY), down, inside, service, title, experimental, left: nodeLeft - toLeft, width, height: 0, lines: 1, font: LABEL_FONT, icon, headerBottomY, nodeTop, nodeHeader: headerBottom(node.id) * zoom });
 	}
-	// One row reads as one: the same height, font and icon choice for every
-	// label whose node header ends on the same line.
+	// One row reads as one: every label whose node header ends on the same
+	// line has an icon, or none does, and they share one height and font.
 	const rows = new Map<number, Draft[]>();
 	for (const draft of drafts) rows.set(draft.row, [...(rows.get(draft.row) ?? []), draft]);
 	for (const row of rows.values()) {
+		const icons = row.every((d) => d.icon || !d.service?.icon);
+		for (const draft of row) {
+			draft.icon = icons && !!draft.service?.icon;
+			const room = (chrome: number) => draft.width - chrome - (draft.experimental ? 9 : 0) + (draft.icon ? 0 : LABEL_ICON);
+			// One line in the label font when the title fits, else one line in the
+			// smaller font, else two lines, broken between words (never inside one;
+			// the second line ends in an ellipsis when the title runs past it).
+			// A word too long for a line leaves the title on one line, cut short
+			// with an ellipsis.
+			if (textWidth(draft.title, LABEL_FONT) > room(LABEL_CHROME)) {
+				draft.font = LABEL_FONT_NARROW;
+				const words = draft.title.split(/\s+|(?<=-)/);
+				const longest = (size: number) => Math.max(...words.map((word) => textWidth(word, size)));
+				if (textWidth(draft.title, LABEL_FONT_NARROW) > room(LABEL_CHROME_NARROW) && longest(LABEL_FONT_NARROW) <= room(LABEL_CHROME_NARROW)) {
+					draft.lines = 2;
+					if (draft.width >= LABEL_WIDE && longest(LABEL_FONT) <= room(LABEL_CHROME_NARROW)) draft.font = LABEL_FONT;
+				}
+			}
+			draft.height = Math.max(draft.nodeHeader, draft.lines === 2 ? (draft.font === LABEL_FONT ? LABEL_TALLEST : LABEL_MIN_HEIGHT_TWO_LINES) : LABEL_MIN_HEIGHT);
+		}
 		const height = Math.max(...row.map((d) => d.height));
 		const font = Math.min(...row.map((d) => d.font));
-		const icons = row.every((d) => d.icon || !d.service?.icon);
 		for (const draft of row) {
 			draft.height = height;
 			draft.font = font;
-			draft.icon = draft.icon && icons;
 		}
 	}
-	for (const draft of drafts) {
+	// A label stays on its node: one whose node the frame cuts is cut the same
+	// way, as map labels are. When two would overlap, the one whose node is
+	// wholly in view wins.
+	for (const draft of [...drafts].sort((a, b) => Number(b.inside) - Number(a.inside))) {
 		// The label's bottom sits on its node's header bottom: it covers the
 		// header and grows up, so the lanes and their connections stay in view.
 		// An invoked node's invoke connection comes in from above, so its label
 		// starts at the node's top and grows down over its own lanes instead.
-		const top = Math.max(2, Math.min(draft.down ? draft.nodeTop : draft.headerBottomY - draft.height, frameHeight - draft.height - 2));
+		const top = draft.down ? draft.nodeTop : draft.headerBottomY - draft.height;
 		const box = { left: draft.left, top, right: draft.left + draft.width, bottom: top + draft.height };
 		if (placed.some((p) => box.left < p.right && p.left < box.right && box.top < p.bottom && p.top < box.bottom)) continue;
 		placed.push(box);
-		const kind = draft.lines === 2 ? ' rr-overview-narrow' : draft.short ? ' rr-overview-short' : '';
+		const kind = draft.lines === 2 ? ' rr-overview-narrow' : draft.font === LABEL_FONT_NARROW ? ' rr-overview-short' : '';
 		labels.push(
-			<div key={draft.id} className={`rr-overview-label${kind}`} style={{ left: draft.left, top, width: draft.width, height: draft.height, fontSize: draft.font }}>
+			<div key={draft.id} data-node={draft.id} className={`rr-overview-label${kind}`} style={{ left: draft.left, top, width: draft.width, height: draft.height, fontSize: draft.font }}>
 				{draft.icon && draft.service?.icon && <Icon name={draft.service.icon} width="12" height="12" className="rr-overview-icon" />}
 				<span className="rr-overview-title">{draft.title}</span>
 				{draft.experimental && <i className="rr-overview-badge" title="Experimental" />}
