@@ -150,7 +150,13 @@ both('done after a change is refused until a check passes in a later wave', asyn
 	const result = await loop(model, [stub('edit_file'), checkTool(checks)], { finish: checks, meter });
 	assert.deepEqual({ answer: result.answer, stopReason: result.stopReason }, { answer: 'checked', stopReason: 'done' });
 	assert.match(notesIn(model.asked[2]).join('\n'), /^Not finished: call check_app on a-ui/m, "the refusal went back as the user's text");
-	assert.equal(meter.snapshot().estimated, !native, "a native turn is metered at the provider's tokens, a text turn at an estimate");
+	const used = meter.snapshot();
+	if (native) assert.deepEqual({ uncounted: used.uncounted, spent: meter.spentUsd }, { uncounted: 0, spent: used.usd }, "a native turn is priced at the provider's counts");
+	else {
+		assert.equal(used.uncounted, used.requests, 'the scripted text model reports no counts, so every request is uncounted');
+		assert.equal(used.usd, 0, 'no dollar figure comes from characters');
+		assert.ok(meter.spentUsd > 0, 'the limit still counts each uncounted request at its reservation');
+	}
 });
 
 both('a call whose memory reference names nothing did not run, so it is no change and done needs no check', async (native) => {

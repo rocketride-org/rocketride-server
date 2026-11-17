@@ -312,7 +312,7 @@ export interface AgentHost {
 export interface AgentLimits {
 	/** The most steps (waves) a turn takes; then it pauses with Continue. */
 	readonly steps: number;
-	/** The most a turn's estimated model cost may reach, in USD; then it pauses with Continue. The approval mode never raises it. */
+	/** The most a turn's model cost may reach, in USD; then it pauses with Continue. The approval mode never raises it. */
 	readonly costUsd: number;
 }
 

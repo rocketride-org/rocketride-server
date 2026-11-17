@@ -257,6 +257,11 @@ function missingKey(row: ProviderRow): ModelFailure {
 function failureOfError(error: AnswerError, row: ProviderRow, tokens: Tokens | undefined): ModelFailure {
 	// step: invalid_request means our own turn broke a rule, so asking again repeats it
 	const failure = error.code === 'invalid_request' ? new ModelFailure(`The engine refused the agent's turn: ${error.message}`, { retryable: false, billed: false }) : failureOfText(error.message, row, 'answer');
+	return billedWith(failure, tokens);
+}
+
+/** A failure with what the provider billed for it, when the engine reported that. */
+function billedWith(failure: ModelFailure, tokens: Tokens | undefined): ModelFailure {
 	return tokens ? new ModelFailure(failure.message, { retryable: failure.retryable, billed: failure.billed, key: failure.key, tokens }) : failure;
 }
 
@@ -264,21 +269,23 @@ function failureOfError(error: AnswerError, row: ProviderRow, tokens: Tokens | u
  * Reads what a pipeline answered into what the session acts on, or throws the failure it stands
  * for. A turn answers with the model's message, or an error; a node without native tool calling
  * refuses before any provider call. A text answer to a turn comes from an engine that predates
- * turn mode, so that model is asked in text too.
+ * turn mode, so that model is asked in text too. The counts are the turn answer's own, or for a
+ * text answer the result's `tokens` key, where the response node sums them; every billed failure
+ * read here carries them, the `**LLM error**` answer and an empty one included.
  */
 function readAnswer(result: PIPELINE_RESULT, asked: ModelRequest['kind'], row: ProviderRow): ModelResponse {
 	const entries: unknown = result.answers;
 	if (!Array.isArray(entries) || entries.length === 0) throw new ModelFailure('The model returned no answer.', { retryable: false, billed: true });
 	const answer = Answer.fromResult(result);
-	const tokens = readTokens(answer.tokens);
+	const tokens = readTokens(answer.tokens ?? result.tokens);
 	if (answer.error?.code === 'tools_unsupported') return { kind: 'unsupported' };
 	if (answer.error) throw failureOfError(answer.error, row, tokens);
 	if (asked === 'turn' && answer.message) return { kind: 'turn', message: answer.message, stop: answer.stopReason ?? 'end_turn', ...(tokens ? { tokens } : {}) };
 	const text = answer.getText();
-	if (text.startsWith(LLM_ERROR_PREFIX)) throw failureOfText(text.slice(LLM_ERROR_PREFIX.length), row, 'answer');
+	if (text.startsWith(LLM_ERROR_PREFIX)) throw billedWith(failureOfText(text.slice(LLM_ERROR_PREFIX.length), row, 'answer'), tokens);
 	if (asked === 'turn') return { kind: 'unsupported' };
-	if (text.trim() === '') throw new ModelFailure('The model returned no answer.', { retryable: false, billed: true });
-	return { kind: 'text', text };
+	if (text.trim() === '') throw billedWith(new ModelFailure('The model returned no answer.', { retryable: false, billed: true }), tokens);
+	return { kind: 'text', text, ...(tokens ? { tokens } : {}) };
 }
 
 // =============================================================================

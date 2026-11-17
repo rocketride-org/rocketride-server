@@ -37,7 +37,7 @@
  */
 
 import { ModelFailure, type ChatModel, type KeyTrouble, type ModelRequest, type ModelResponse } from '../../model';
-import { CostLimitError, type Meter, type RequestSize, type Used } from '../../usage';
+import { CostLimitError, type Meter, type RequestSize } from '../../usage';
 import type { HistoryTurn, PromptPrefix, ResultEntry, ToolCall } from '../plan';
 import { nativeConversation } from './native';
 import { textConversation } from './text';
@@ -135,7 +135,7 @@ export interface SessionOptions {
 	request: string;
 	/** Aborted when the user stops the run: a send that fails after it does not retry, so it cannot restart the task the next turn is about to use. */
 	signal: AbortSignal;
-	/** Reserves each send before it goes, the retry included, and settles it with what it used. */
+	/** Reserves each send before it goes, the retry included, and ends it with what the provider counted. */
 	meter?: Meter;
 	/** Hears a send's final failure when a key is the cause. The loop swallows failures once it has gathered something, so it cannot tell the run. */
 	onKeyTrouble?: (trouble: KeyTrouble) => void;
@@ -347,19 +347,20 @@ class Session implements ModelSession {
 	}
 
 	/**
-	 * One send, reserved just before it goes. Real tokens settle it, from an answer or from a failed
-	 * turn the provider billed; a failure the provider cannot have billed releases it, and any other
-	 * keeps it.
+	 * One send, reserved just before it goes. Real counts settle it, from an answer or from a failure
+	 * the provider billed; a failure the provider cannot have billed releases it; an answer with no
+	 * counts, a timeout, a thrown chat and a stop keep it.
 	 */
 	private async attempt(out: Outgoing, fresh: boolean): Promise<ModelResponse> {
 		const held = this.o.meter?.reserve(out.size);
 		try {
 			const response = await answerOrStop(this.o.model.send(out.request, fresh ? { fresh } : undefined), this.o.limitMs ?? MODEL_CALL_LIMIT_MS, this.o.signal);
 			if (response.kind === 'unsupported') held?.release();
-			else held?.settle(usedBy(response));
+			else if (response.tokens) held?.settle(response.tokens);
+			else held?.keep();
 			return response;
 		} catch (error) {
-			if (error instanceof ModelFailure && error.tokens) held?.settle({ tokens: error.tokens });
+			if (error instanceof ModelFailure && error.tokens) held?.settle(error.tokens);
 			else if (error instanceof ModelFailure && !error.billed) held?.release();
 			else held?.keep();
 			throw error;
@@ -399,10 +400,4 @@ function answerOrStop(sending: Promise<ModelResponse>, ms: number, signal: Abort
 			}
 		);
 	});
-}
-
-/** What an answer used: the provider's tokens when the engine gave them, else its length. */
-function usedBy(response: Exclude<ModelResponse, { kind: 'unsupported' }>): Used {
-	if (response.kind === 'text') return { replyChars: response.text.length };
-	return response.tokens ? { tokens: response.tokens } : { replyChars: JSON.stringify(response.message.content).length };
 }

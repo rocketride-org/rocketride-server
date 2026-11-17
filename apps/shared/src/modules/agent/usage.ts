@@ -25,17 +25,17 @@
 // =============================================================================
 
 /**
- * A native turn's answer carries the provider's real token counts, and the meter prices those.
- * A text answer carries none, so its request is estimated at 4 characters a token, input and
- * output apart; that estimate leaves out thinking, which the provider bills as output the browser
- * never sees, so it is a lower bound. Prices come from one dated table. Before each request the
- * meter reserves its input estimate plus an output allowance, and refuses a request that would
- * pass the limit (CostLimitError). Real tokens replace the whole reservation; a text reply
- * replaces only the allowance. A failed request keeps its whole reservation, since what the
- * provider billed is unknown, unless it cannot have been billed at all. The cacheable start gets
- * cache rates only when its row says the provider caches it: the first request writes it, later
- * ones read it until 5 idle minutes. The limit applies to every model: one the table does not
- * list is counted at ASSUMED_PRICE, for the limit only, so no dollar figure is ever shown from it.
+ * Every answer carries the provider's real token counts (a native turn in its answer, a text answer
+ * in the response node's `tokens` key), and the meter prices those, input, output, cache reads and
+ * cache writes apart. Prices come from one dated table. Before each request the meter reserves its
+ * input, sized at CHARS_PER_TOKEN, plus an output allowance, and refuses a request that would pass
+ * the limit (CostLimitError). That reservation is the only number made from characters, and it never
+ * shows: real counts replace it; a request that ends with no counts (an older engine, an uncounted
+ * stream, a timeout, a thrown chat, a stop) keeps it whole, for the limit only, and counts as
+ * uncounted. A request that cannot have been billed is released. The cacheable start gets cache
+ * rates only when its row says the provider caches it: the first request writes it, later ones read
+ * it until 5 idle minutes. The limit applies to every model: one the table does not list is counted
+ * at ASSUMED_PRICE, for the limit only, so no dollar figure is ever shown from it.
  */
 
 // =============================================================================
@@ -87,7 +87,7 @@ export const PRICES: readonly PriceRow[] = [
  */
 export const ASSUMED_PRICE: Omit<PriceRow, 'model'> = { input: 5, cacheWrite: 5, cacheRead: 5, output: 25, cachesPrefix: false };
 
-/** Characters per estimated token. */
+/** Characters per token, for sizing a reservation before the request is sent. Nothing shown or reported comes from it. */
 export const CHARS_PER_TOKEN = 4;
 
 /** The output a request reserves when the model's configuration sets no maximum, in tokens. */
@@ -101,20 +101,21 @@ export const CACHE_LIFE_MS = 5 * 60_000;
 // =============================================================================
 
 /**
- * A model request the cost limit refused before it was sent: the turn's
- * estimate so far plus this request's reservation would pass the limit.
+ * A model request the cost limit refused before it was sent: the turn's requests so far, those
+ * without counts held at their reservation, plus this request's reservation would pass the limit.
  */
 export class CostLimitError extends Error {
 	/**
-	 * @param spentUsd - The turn's cost before this request; unset for a model with no known price, whose cost is not shown.
-	 * @param estimated - Whether any of that cost comes from character counts rather than the provider.
+	 * @param spentUsd - The turn's cost from real counts before this request; unset for a model with no known price, whose cost is not shown.
+	 * @param uncounted - Requests so far with no counts, which the limit held at their reservation.
 	 */
 	constructor(
 		readonly spentUsd: number | undefined,
 		readonly limitUsd: number,
-		estimated = true
+		readonly uncounted = 0
 	) {
-		super(`the next model request could pass this turn's cost limit of ${dollars(limitUsd)}${spentUsd === undefined ? '' : ` (${costText(spentUsd, estimated)} so far)`}`);
+		const so = [...(spentUsd === undefined ? [] : [`${costText(spentUsd)} so far`]), ...(uncounted ? [uncountedText(uncounted)] : [])];
+		super(`the next model request could pass this turn's cost limit of ${dollars(limitUsd)}${so.length ? ` (${so.join(', ')})` : ''}`);
 		this.name = 'CostLimitError';
 	}
 }
@@ -135,10 +136,10 @@ export function dollars(usd: number): string {
 /**
  * A cost as the chat shows it.
  *
- * @param estimated - Whether any of it comes from character counts rather than the provider.
+ * @param estimated - Only for a turn saved before real counts, whose cost came from characters.
  * @returns "~$0.42 est." or "<$0.01 est." when estimated, else "$0.42" or "<$0.01".
  */
-export function costText(usd: number, estimated: boolean): string {
+export function costText(usd: number, estimated = false): string {
 	const text = usd < 0.005 ? '<$0.01' : estimated ? `~${dollars(usd)}` : dollars(usd);
 	return estimated ? `${text} est.` : text;
 }
@@ -146,12 +147,21 @@ export function costText(usd: number, estimated: boolean): string {
 /**
  * Tokens as the chat shows them.
  *
- * @param estimated - Whether any of them come from character counts rather than the provider.
+ * @param estimated - Only for a turn saved before real counts, whose tokens came from characters.
  * @returns "~12,345 tokens est." when estimated, else "12,345 tokens".
  */
 export function tokensText(tokens: number, estimated: boolean): string {
 	const count = `${tokens.toLocaleString('en-US')} tokens`;
 	return estimated ? `~${count} est.` : count;
+}
+
+/**
+ * Requests that came back without the provider's counts, as the chat shows them.
+ *
+ * @returns "1 request not counted" or "2 requests not counted".
+ */
+export function uncountedText(requests: number): string {
+	return `${requests} ${requests === 1 ? 'request' : 'requests'} not counted`;
 }
 
 // =============================================================================
@@ -172,7 +182,7 @@ export interface Tokens {
 /**
  * Reads the engine's `tokens` dict (`input`, `output`, `cache_read`, `cache_creation`).
  *
- * @returns The counts, or undefined when the dict is missing or counts nothing, so the request is estimated instead.
+ * @returns The counts, or undefined when the dict is missing or counts nothing, so the request counts as uncounted.
  */
 export function readTokens(raw: unknown): Tokens | undefined {
 	if (typeof raw !== 'object' || raw === null) return undefined;
@@ -204,16 +214,17 @@ export interface RequestSize {
 	readonly cacheable: boolean;
 }
 
-/** What a request used: the provider's tokens, or the reply's length when there are none. */
-export type Used = { readonly tokens: Tokens } | { readonly replyChars: number };
-
-/** A request's reservation, until it ends. */
+/** A request's reservation, until it ends. Exactly one of the three ends it; a second does nothing. */
 export interface Reservation {
-	/** The reply came. Real tokens replace the whole reservation; a reply's length replaces only the output allowance. */
-	settle(used: Used): void;
-	/** The request failed, and what it was billed is unknown: the reservation stays. */
+	/**
+	 * The provider's counts came, with an answer or with a failure it billed: they replace the whole reservation.
+	 *
+	 * @returns What the request cost at the model's price; undefined for a model the table does not list.
+	 */
+	settle(tokens: Tokens): number | undefined;
+	/** It ended with no counts and may have been billed: the reservation stays whole, for the limit, and the request counts as uncounted. */
 	keep(): void;
-	/** The request cannot have been billed (no key, a refused key, a task that never started): it counts for nothing. */
+	/** It cannot have been billed (no key, a refused key, a task that never started, a refusal of tools): it counts for nothing. */
 	release(): void;
 }
 
@@ -225,15 +236,14 @@ export interface Meter {
 
 /** What a turn's model requests used so far. */
 export interface UsageSnapshot {
+	/** Requests that count: every one reserved but those released. */
 	requests: number;
-	/** Input tokens, cached ones included. */
-	inputTokens: number;
-	/** Output tokens: each reply's, or the allowance of a request that failed or is still on its way. */
-	outputTokens: number;
-	/** The cost in USD; unset for a model the price table does not list. */
+	/** The provider's counts, summed over the requests that had them; all zero when none had. */
+	tokens: Tokens;
+	/** Their cost at the model's price; unset for a model the table does not list. A reservation never shows here. */
 	usd?: number;
-	/** Whether any request counts at an estimate: a text reply, a failed request kept at its reservation, or one still on its way. */
-	estimated: boolean;
+	/** Requests with no counts: kept, or still on their way. The limit holds each at its reservation. */
+	uncounted: number;
 }
 
 /** What a meter is built with. */
@@ -254,12 +264,12 @@ function tokensIn(chars: number): number {
 	return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-/** One request as the meter counts it: settled at the provider's tokens, at its reply's estimate, or still at its reservation. */
+/** One request as the meter counts it: its reservation, until real counts replace it. */
 interface Counted {
-	input: number;
-	output: number;
+	/** What the limit counts it at: its price at real counts once settled, else its reservation. */
 	usd: number;
-	estimated: boolean;
+	/** The provider's counts, apart; unset while it is reserved, or once it was kept. */
+	tokens?: Tokens;
 }
 
 /** One turn's model requests: what they used, and the cost limit. */
@@ -273,7 +283,7 @@ export class UsageMeter implements Meter {
 	/** The output each request reserves, in tokens. */
 	private readonly allowance: number;
 	private readonly now: () => number;
-	/** When the last request that wrote or read the cached start began; unset until one got a reply. */
+	/** When the last request that wrote or read the cached start began; unset until one settled with counts. */
 	private cachedAt: number | undefined;
 	/** Each request sent, as it counts now. */
 	private readonly requests: Counted[] = [];
@@ -286,16 +296,16 @@ export class UsageMeter implements Meter {
 		this.now = o.now ?? Date.now;
 	}
 
-	/** The cost of the requests so far, reservations included, for the limit; a model with no known price counts at ASSUMED_PRICE. */
+	/** The cost of the requests so far for the limit: real counts where they came, reservations elsewhere; a model with no known price counts at ASSUMED_PRICE. */
 	get spentUsd(): number {
 		return this.requests.reduce((sum, r) => sum + r.usd, 0);
 	}
 
 	/**
-	 * Reserves a request before it is sent: its input estimate, priced with
+	 * Reserves a request before it is sent: its input sized at CHARS_PER_TOKEN, priced with
 	 * the cache rates where they apply, and the output allowance.
 	 *
-	 * @returns The reservation, to settle or keep when the request ends.
+	 * @returns The reservation, to settle, keep or release when the request ends.
 	 * @throws CostLimitError when the cost so far plus this reservation passes the limit; nothing is reserved.
 	 */
 	reserve(size: RequestSize): Reservation {
@@ -308,29 +318,21 @@ export class UsageMeter implements Meter {
 		const writes = cached && (this.cachedAt === undefined || at - this.cachedAt > CACHE_LIFE_MS);
 		const startRate = !cached ? rates.input : writes ? rates.cacheWrite : rates.cacheRead;
 		const inputUsd = (start * startRate + rest * rates.input) / 1e6;
-		const outputUsd = (tokens: number): number => (tokens * rates.output) / 1e6;
-		const request: Counted = { input: start + rest, output: this.allowance, usd: inputUsd + outputUsd(this.allowance), estimated: true };
-		const spent = this.spentUsd;
-		if (this.limitUsd > 0 && spent + request.usd > this.limitUsd)
-			throw new CostLimitError(
-				this.row ? spent : undefined,
-				this.limitUsd,
-				this.requests.some((r) => r.estimated)
-			);
+		const request: Counted = { usd: inputUsd + (this.allowance * rates.output) / 1e6 };
+		if (this.limitUsd > 0 && this.spentUsd + request.usd > this.limitUsd) {
+			const used = this.snapshot();
+			throw new CostLimitError(used.usd, this.limitUsd, used.uncounted);
+		}
 		this.requests.push(request);
 		let open = true;
 		return {
-			settle: (used) => {
-				if (!open) return;
+			settle: (tokens) => {
+				if (!open) return undefined;
 				open = false;
-				if ('tokens' in used) {
-					const { tokens } = used;
-					Object.assign(request, { input: tokens.input + tokens.cacheRead + tokens.cacheWrite, output: tokens.output, usd: priceOf(rates, tokens), estimated: false });
-				} else {
-					request.output = tokensIn(used.replyChars);
-					request.usd = inputUsd + outputUsd(request.output);
-				}
+				Object.assign(request, { tokens, usd: priceOf(rates, tokens) });
 				if (cached) this.cachedAt = at;
+				// rates is the row when there is one, so this is the request's price
+				return this.row ? request.usd : undefined;
 			},
 			keep: () => {
 				open = false;
@@ -343,11 +345,11 @@ export class UsageMeter implements Meter {
 		};
 	}
 
-	/**
-	 * What the requests used so far.
-	 */
+	/** What the requests used so far: real counts only, and how many had none. */
 	snapshot(): UsageSnapshot {
-		const sum = (pick: (r: Counted) => number): number => this.requests.reduce((n, r) => n + pick(r), 0);
-		return { requests: this.requests.length, inputTokens: sum((r) => r.input), outputTokens: sum((r) => r.output), ...(this.row ? { usd: this.spentUsd } : {}), estimated: this.requests.some((r) => r.estimated) };
+		const counted = this.requests.filter((r): r is Counted & { tokens: Tokens } => r.tokens !== undefined);
+		const sum = (pick: (t: Tokens) => number): number => counted.reduce((n, r) => n + pick(r.tokens), 0);
+		const tokens: Tokens = { input: sum((t) => t.input), output: sum((t) => t.output), cacheRead: sum((t) => t.cacheRead), cacheWrite: sum((t) => t.cacheWrite) };
+		return { requests: this.requests.length, tokens, ...(this.row ? { usd: counted.reduce((n, r) => n + r.usd, 0) } : {}), uncounted: this.requests.length - counted.length };
 	}
 }

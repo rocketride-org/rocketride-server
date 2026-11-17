@@ -106,7 +106,7 @@ export class ModelFailure extends Error {
 	/** The provider may have charged for it, so the meter keeps the reservation. */
 	readonly billed: boolean;
 	readonly key?: KeyTrouble;
-	/** What a failed native turn still billed, when the engine reported it; the meter settles at that. */
+	/** What a failed request still billed, when the engine reported it; the meter settles at that. */
 	readonly tokens?: Tokens;
 
 	constructor(message: string, o: { retryable: boolean; billed: boolean; key?: KeyTrouble; tokens?: Tokens }) {
@@ -141,8 +141,8 @@ export type ModelRequest =
 export type ModelResponse =
 	/** A native turn: the message to send back as it is, why it stopped, and the provider's tokens when the engine gave them. */
 	| { readonly kind: 'turn'; readonly message: AssistantMessage; readonly stop: StopReason; readonly tokens?: Tokens }
-	/** A text question's answer. */
-	| { readonly kind: 'text'; readonly text: string }
+	/** A text question's answer, and the provider's tokens when the engine gave them (an engine before the response node's `tokens` key gives none). */
+	| { readonly kind: 'text'; readonly text: string; readonly tokens?: Tokens }
 	/** The node has no native tool calling (`tools_unsupported`). The engine decides that before any provider call, so it is never billed. */
 	| { readonly kind: 'unsupported' };
 

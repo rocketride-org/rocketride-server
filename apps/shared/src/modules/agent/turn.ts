@@ -34,7 +34,8 @@ import type { ChatCard } from 'shell/src/components/chat/types';
 
 import type { KeyTrouble } from './model';
 import { redactText } from './toolkits/common';
-import { costText, tokensText } from './usage';
+import { costText, tokensText, uncountedText, type Tokens } from './usage';
+import type { Adapter } from './wave/session';
 
 // =============================================================================
 // TYPES
@@ -72,18 +73,29 @@ export interface TurnCheck {
 	summary: string;
 }
 
-/** What the turn used. The step limit counts waves, and the cost limit the cost; the rest is for diagnostics. */
+/**
+ * What the turn used. The step limit counts waves, and the cost limit the cost; the rest is for diagnostics.
+ * Every number here comes from the provider's counts; none from characters.
+ */
 export interface TurnUsage {
 	/** Waves run, counting the one the turn ended in. */
 	waves: number;
-	/** Model requests sent, retries and the best-effort answer included. */
+	/** Model requests that count toward the cost: every one sent, retries and the best-effort answer included, but those that cannot have been billed. */
 	modelRequests: number;
 	/** Tool calls the model planned. */
 	toolCalls: number;
-	/** The tokens, when something counts them; `estimated` when they come from character counts rather than the provider. */
-	tokens?: { input: number; output: number; estimated: boolean };
-	/** The cost, when the model has a price; `estimated` when it comes from character counts rather than the provider. */
-	cost?: { usd: number; estimated: boolean };
+	/**
+	 * The provider's counts, summed over the requests that had them; unset when none had. Disjoint: `input` is
+	 * fresh input, the cache split stays apart. `estimated` is set only on turns saved before real counts, which
+	 * have no cache counts (their `input` included them); nothing writes it now.
+	 */
+	tokens?: Tokens & { readonly estimated?: boolean };
+	/** Their cost at the model's price; unset for a model with no price or when no request had counts. `estimated`: as above. */
+	cost?: { usd: number; readonly estimated?: boolean };
+	/** Requests that came back with no counts; the cost limit held each at its whole reservation. Unset when none. */
+	uncounted?: number;
+	/** The adapter the turn's session ended on; unset for a turn that ended before it had one. */
+	adapter?: Adapter;
 }
 
 /**
@@ -272,7 +284,8 @@ export function turnCard(turn: TurnResult): ChatCard {
 		}
 		case 'needs_input':
 			if (turn.reason === 'limited' || turn.reason === 'cost_limit') {
-				const spent = turn.reason === 'cost_limit' && turn.usage.cost ? [`${costText(turn.usage.cost.usd, turn.usage.cost.estimated)} so far.`] : [];
+				const { cost, uncounted } = turn.usage;
+				const spent = turn.reason === 'cost_limit' && cost ? [`${costText(cost.usd, cost.estimated)} so far${uncounted ? `, ${uncountedText(uncounted)}` : ''}.`] : [];
 				return withFiles({ tone: 'info', title: turn.request?.question ?? 'Paused', lines: [...spent, FRESH_BUDGET], ...requestParts(turn.request) });
 			}
 			return withFiles({ tone: 'info', title: 'Needs you', ...requestParts(turn.request) });
@@ -282,12 +295,16 @@ export function turnCard(turn: TurnResult): ChatCard {
 /**
  * What a turn shows in its row's meta line: the model that answered first, so a change shows row by row, then what it used.
  *
- * @returns "claude-sonnet-5-5 · $0.42" from the provider's counts, which include thinking, or "· ~$0.42 est., not counting thinking"
- *   from character counts; the tokens for a model with no price; '' when nothing was counted.
+ * @returns "claude-sonnet-5-5 · $0.42" from the provider's counts, which include thinking; "· $0.42 + 1 request not counted"
+ *   when some came back without counts; "· 2 requests not counted" when none had counts; the tokens for a model with no
+ *   price; a turn saved before real counts as it was, "· ~$0.42 est., not counting thinking"; '' when nothing was counted.
  */
 export function usageMeta({ model, usage }: TurnResult): string {
-	const { cost, tokens } = usage;
-	const used = cost ? `${costText(cost.usd, cost.estimated)}${cost.estimated ? ', not counting thinking' : ''}` : tokens ? tokensText(tokens.input + tokens.output, tokens.estimated) : '';
+	const { cost, tokens, uncounted } = usage;
+	// a turn saved before the cache split has no cache counts
+	const counted = tokens ? tokens.input + tokens.output + (tokens.cacheRead ?? 0) + (tokens.cacheWrite ?? 0) : 0;
+	const shown = cost ? `${costText(cost.usd, cost.estimated)}${cost.estimated ? ', not counting thinking' : ''}` : tokens ? tokensText(counted, !!tokens.estimated) : '';
+	const used = uncounted ? [shown, uncountedText(uncounted)].filter(Boolean).join(' + ') : shown;
 	return used && model ? `${model} · ${used}` : used;
 }
 

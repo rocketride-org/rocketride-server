@@ -47,7 +47,7 @@ import { PRICES } from './usage';
 import type { AgentSessionFile } from './sessions';
 import { FilesystemTools } from './toolkits/filesystem';
 import type { UndoRecord } from './toolkits/undo';
-import { CONTINUE, CONTINUE_TEXT, OPEN_VARIABLES, UNDO } from './turn';
+import { CONTINUE, CONTINUE_TEXT, OPEN_VARIABLES, UNDO, usageMeta } from './turn';
 
 // =============================================================================
 // HELPERS
@@ -471,7 +471,8 @@ test('a model that refuses tools is asked in text, and its next turn skips the n
 	const { turn: second } = await session.execute('And again.', undefined, turn());
 	assert.deepEqual([first.finalText, second.finalText], ['First.', 'Second.']);
 	assert.deepEqual(asked, ['turn', 'text', 'text'], 'one turn question, refused, then only text, in the next turn too');
-	assert.equal(first.usage.cost?.estimated, true, "a text turn's cost is an estimate");
+	assert.deepEqual({ cost: first.usage.cost, uncounted: first.usage.uncounted }, { cost: undefined, uncounted: 1 }, 'a reply with no counts shows no dollar figure and is counted as uncounted');
+	assert.match(usageMeta(first), /1 request not counted/);
 });
 
 test('every model the picker offers is a profile of its node, with a price', async () => {

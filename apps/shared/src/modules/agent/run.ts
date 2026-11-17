@@ -566,12 +566,15 @@ export async function runAgent(request: string, callback: (type: string, content
 	let paused: NeedsInputRequest | undefined;
 	const usageOf = (waves: number, toolCalls: number): TurnUsage => {
 		const used = meter.snapshot();
+		const counted = used.requests - used.uncounted;
 		return {
 			waves,
 			modelRequests: used.requests,
 			toolCalls,
-			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: used.estimated } } : {}),
-			...(used.requests > 0 && used.usd !== undefined ? { cost: { usd: used.usd, estimated: used.estimated } } : {}),
+			adapter: session.adapter,
+			...(counted > 0 ? { tokens: used.tokens } : {}),
+			...(counted > 0 && used.usd !== undefined ? { cost: { usd: used.usd } } : {}),
+			...(used.uncounted > 0 ? { uncounted: used.uncounted } : {}),
 		};
 	};
 	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
