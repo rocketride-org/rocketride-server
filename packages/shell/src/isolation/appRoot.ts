@@ -109,10 +109,18 @@ function scanStrings(value: unknown, cb: (s: string) => void): void {
 	}
 }
 
+/** A hostname without trailing dots (`example.com.` and `example.com` are one host). */
+const dotless = (host: string): string => host.toLowerCase().replace(/\.+$/, '');
+
+/** A URL's origin with its hostname dotless. */
+function dotlessOrigin(url: URL): string {
+	return `${url.protocol}//${dotless(url.hostname)}${url.port !== '' ? `:${url.port}` : ''}`;
+}
+
 /** `.apps.example.com` for `https://{label}.apps.example.com`. */
 function appSuffixOf(template: string): string {
 	try {
-		const host = new URL(template.replace('{label}', 'x')).hostname;
+		const host = dotless(new URL(template.replace('{label}', 'x')).hostname);
 		return host.slice(1);
 	} catch {
 		return '';
@@ -133,7 +141,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	const shellOrigins = new Set<string>();
 	for (const o of opts.shellOrigins) {
 		try {
-			shellOrigins.add(new URL(o).origin);
+			shellOrigins.add(dotlessOrigin(new URL(o)));
 		} catch {
 			/* an unparsable origin matches nothing */
 		}
@@ -349,8 +357,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			return null;
 		}
 		if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') return null;
-		if (shellOrigins.has(url.origin)) return null;
-		const host = url.hostname.toLowerCase();
+		// Trailing dots are stripped first: `shell.example.com.` is the shell.
+		const host = dotless(url.hostname);
+		if (host === '' || shellOrigins.has(dotlessOrigin(url))) return null;
 		if (appSuffix !== '' && (host.endsWith(appSuffix) || host === appSuffix.slice(1))) return null;
 		return url.href;
 	};
