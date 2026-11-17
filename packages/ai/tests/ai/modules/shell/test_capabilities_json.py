@@ -149,3 +149,56 @@ def test_capabilities_json_never_rows_a_denied_command():
         if command == 'rrext_store':
             assert 'subcommands' in row, 'an rrext_store row must name its fs_* subcommands'
             assert not ({'fs_read_many', 'fs_geturl'} & set(row['subcommands'])), row
+
+
+_COPY_SCRIPT = r"""
+const paths = require(process.argv[1] + '/scripts/lib/paths');
+paths.setOverlayRoot(process.argv[2]);
+const shell = require(process.argv[1] + '/packages/shell/scripts/tasks.js')[0];
+const entry = shell.actions.find((a) => a.name === 'shell:copy');
+const task = {};
+entry.action().run({}, task).then(() => console.log(task.output), (e) => { console.error(e); process.exit(1); });
+"""
+
+
+def _node_with_build_deps():
+    """``node`` when the build scripts' dependencies resolve (an installed workspace), else None."""
+    import shutil
+    import subprocess
+
+    node = shutil.which('node')
+    if node is None:
+        return None
+    probe = subprocess.run(
+        [node, '-e', "for (const m of ['glob', 'listr2', 'adm-zip']) require.resolve(m)"],
+        cwd=REPO,
+        capture_output=True,
+    )
+    return node if probe.returncode == 0 else None
+
+
+def test_copy_step_puts_the_table_beside_the_shell_and_keeps_it(tmp_path):
+    """T42 (G4 NIT): run the real ``shell:copy`` over a temp tree: the table lands in
+    ``static/shell/isolation/``, byte for byte, and the bundle mirror does not delete it on the next run.
+    """
+    import subprocess
+
+    import pytest
+
+    node = _node_with_build_deps()
+    if node is None:
+        pytest.skip('node or the build scripts dependencies are not installed')
+    build = tmp_path / 'build' / 'shell'
+    (build / 'static').mkdir(parents=True)
+    (build / 'index.html').write_text('<!doctype html>')
+    (build / 'static' / 'main.js').write_text('js')
+    dest = tmp_path / 'dist' / 'server' / 'static' / 'shell'
+    (dest / 'isolation').mkdir(parents=True)
+    (dest / 'isolation' / 'capabilities.json').write_text('{"stale": true}\n')
+    (dest / 'old.js').write_text('stale')
+
+    for _ in range(2):
+        run = subprocess.run([node, '-e', _COPY_SCRIPT, str(REPO), str(tmp_path)], capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        assert (dest / 'isolation' / 'capabilities.json').read_bytes() == CAPS.read_bytes()
+        assert (dest / 'index.html').is_file() and not (dest / 'old.js').exists()
