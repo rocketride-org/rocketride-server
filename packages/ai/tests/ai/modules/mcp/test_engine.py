@@ -162,6 +162,7 @@ class _FakeUnderlyingClient:
         self.deploy = _FakeDeployApi()
         self.log = _FakeLogApi()
         self.account = _FakeAccountApi()
+        self.call_calls = []
 
     async def connect(self) -> None:
         self.connect_calls += 1
@@ -173,6 +174,12 @@ class _FakeUnderlyingClient:
 
     def build_request(self, command: str) -> dict:
         return {'command': command}
+
+    async def call(self, command: str, **kwargs) -> dict:
+        self.call_calls.append({'command': command, **kwargs})
+        if command == 'rrext_account_status':
+            return {'edition': 'self-hosted', 'waitlisted': False}
+        return {}
 
     async def request(self, req: dict) -> dict:
         self.request_calls += 1
@@ -332,6 +339,17 @@ async def test_get_environment_keys_calls_sdk():
 
     assert fake.account.get_environment_keys_calls == 1
     assert result == ['ROCKETRIDE_FOO', 'ROCKETRIDE_BAR']
+
+
+async def test_get_account_status_sends_the_command_with_no_arguments():
+    """The caller can't name another account: the command goes out bare."""
+    client, fake = _make_client_with_fake()
+
+    result = await client.get_account_status()
+
+    assert fake.call_calls == [{'command': 'rrext_account_status'}]
+    assert result == {'edition': 'self-hosted', 'waitlisted': False}
+    assert fake.connect_calls == 1
 
 
 async def test_get_service_calls_sdk_with_name():

@@ -267,6 +267,48 @@ async def test_call_tool_soft_error_returns_normalized_result(fake_engine):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('message', 'error_type', 'hint'),
+    [
+        (
+            "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
+            "You'll get an email when the account is activated. You don't need to do anything else.",
+            'AccountWaitlisted',
+            'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+        ),
+        (
+            'No development team is selected, and every pipeline you run needs one. In RocketRide, open Account > Profile and choose your development team. If no team is listed, ask a workspace admin to add you to one.',
+            'NoDevelopmentTeam',
+            'Call account_status, then tell the user its summary and next steps instead of this message. They already include it.',
+        ),
+    ],
+)
+async def test_run_pipeline_refused_for_an_account_reason_gets_a_type_and_a_next_step(message, error_type, hint):
+    """Through the real dispatch: the engine's refusal reaches run_pipeline as a
+    bare RuntimeError (what the SDK raises) and comes back typed, with a hint.
+    """
+    import ai.modules.mcp.handlers as handlers_mod
+
+    from .conftest import FakeEngineClient
+
+    class _Refusing(FakeEngineClient):
+        async def use(self, **kwargs):
+            raise RuntimeError(message)
+
+    server = handlers_mod.build_mcp_server(lambda: _Refusing())
+    async with Client(server) as client:
+        result = await client.call_tool('run_pipeline', {'pipeline': {'components': []}})
+
+    assert result.is_error is True
+    assert json.loads(result.content[0].text) == {
+        'ok': False,
+        'error_type': error_type,
+        'message': message,
+        'hint': hint,
+    }
+
+
+@pytest.mark.asyncio
 async def test_call_tool_normalizer_raised_harderror_still_maps_to_mcp_error(fake_engine):
     """normalize_error itself re-raises HardError from INSIDE the except
     suite — the sibling `except HardError` clause never sees it, so the inner

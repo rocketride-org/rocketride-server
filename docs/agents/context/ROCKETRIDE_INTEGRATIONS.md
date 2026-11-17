@@ -26,7 +26,7 @@ code.
 ## MCP: the built-in MCP server
 
 RocketRide has a built-in MCP server. It uses Streamable HTTP, is stateless, and serves
-33 tools (32 on an engine that is not bound to localhost, because `send_files` is only
+34 tools (33 on an engine that is not bound to localhost, because `send_files` is only
 offered on a local engine). Any MCP client that supports Streamable HTTP can connect.
 
 | Where | Address |

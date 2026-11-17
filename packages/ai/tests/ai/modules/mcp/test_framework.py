@@ -103,6 +103,56 @@ def test_normalize_error_uses_dap_failure_message_when_present():
     assert result['hint'] is None
 
 
+_WAITLISTED = (
+    "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
+    "You'll get an email when the account is activated. You don't need to do anything else."
+)
+_NO_DEV_TEAM = 'No development team is selected, and every pipeline you run needs one. In RocketRide, open Account > Profile and choose your development team. If no team is listed, ask a workspace admin to add you to one.'
+
+
+@pytest.mark.parametrize(
+    ('message', 'error_type', 'hint'),
+    [
+        (
+            _WAITLISTED,
+            'AccountWaitlisted',
+            'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+        ),
+        (
+            _NO_DEV_TEAM,
+            'NoDevelopmentTeam',
+            'Call account_status, then tell the user its summary and next steps instead of this message. They already include it.',
+        ),
+    ],
+)
+def test_normalize_error_types_the_account_refusals_with_a_next_step(message, error_type, hint):
+    """The SDK raises a refused run as a bare RuntimeError; the exact engine
+    text is what gives it a type and a next step.
+    """
+    result = normalize_error(RuntimeError(message))
+
+    assert result == {
+        'ok': False,
+        'error_type': error_type,
+        'message': message,
+        'hint': hint,
+    }
+
+
+def test_account_refusal_texts_match_the_engine():
+    from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_NO_DEV_TEAM
+
+    assert CONST_ACCOUNT_WAITLISTED == _WAITLISTED
+    assert CONST_NO_DEV_TEAM == _NO_DEV_TEAM
+
+
+def test_normalize_error_leaves_other_permission_errors_alone():
+    result = normalize_error(RuntimeError("Permission 'task.control' denied for team 'team-1'"))
+
+    assert result['error_type'] == 'RuntimeError'
+    assert result['hint'] is None
+
+
 def test_bad_shape():
     result = _bad('name is required', 'pass a name')
 

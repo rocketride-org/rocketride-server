@@ -103,6 +103,7 @@ class EngineClient(Protocol):
         self, project_id: str, source: str, team_id: str = '', *, begin_seq: int = 0
     ) -> Dict[str, Any]: ...
     async def get_environment_keys(self) -> List[str]: ...
+    async def get_account_status(self) -> Dict[str, Any]: ...
     async def close(self) -> None: ...
 
 
@@ -431,6 +432,10 @@ class WsEngineClient:
 
     async def get_environment_keys(self) -> List[str]:
         return await self._guarded(lambda: self._client.account.get_environment_keys())
+
+    async def get_account_status(self) -> Dict[str, Any]:
+        """Return the engine's ``rrext_account_status`` body for this client's own account."""
+        return await self._guarded(lambda: self._client.call('rrext_account_status'))
 
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:
