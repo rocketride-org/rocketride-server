@@ -11,7 +11,7 @@
 import posthog, { type CaptureOptions, type PostHogConfig } from 'posthog-js';
 import { EV } from './events';
 import { SCROLL_ROOT, telemetryHost, telemetryKey } from './config';
-import { CONSENT_VERSION, parseConsent, type ConsentOrigin, type ConsentState } from './consent';
+import { CONSENT_VERSION, attributionGate, parseConsent, type ConsentOrigin, type ConsentState } from './consent';
 import { consentStore as consent, isWithdrawing } from './consentState';
 import { quietly, type CaptureMode, type SdkLike } from './mode';
 import { maskReplayAttribute, reduceRecordedRequest, reduceStoredProps, sanitizeEvent, type CaptureLike } from './sanitize';
@@ -153,8 +153,22 @@ function hookSession(sdk: SdkLike): void {
 	});
 }
 
-/** The consented instance's before_send: rich events only from a signed-out surface, everything sanitised. */
-const consentedBeforeSend = richEventGate(signedOut, consentedNext);
+/**
+ * Whether an experiment-attributed event may go out on the consented instance NOW: consent still reads accepted
+ * (storage read live, so another tab's withdrawal counts before its storage event arrives), this instance is still
+ * the active one, and no browser privacy signal is on. Checked at send time (attributionGate), not only at report.
+ */
+function attributionAllowed(): boolean {
+	return consentedInstance() !== null && !host?.privacySignal();
+}
+
+/**
+ * The consented instance's before_send: rich events only from a signed-out surface, an attributed event
+ * (tagged ATTRIBUTED_TAG by getConsentedCapture's report) only while consent still holds at send time, everything
+ * sanitised with the tag removed.
+ * Exported for tests only (posthog-js calls it; nothing else should).
+ */
+export const consentedBeforeSend = richEventGate(signedOut, attributionGate(attributionAllowed, consentedNext));
 
 /**
  * Whether the consented instance may measure web vitals in this page load: not on a shell screen, which is not a

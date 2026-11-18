@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 // (reload: another tab's storage write)
 import assert from 'node:assert/strict';
-import { ConsentStore, parseConsent, CONSENT_KEY, CONSENT_TTL_MS, CONSENT_VERSION, MAX_TIMER_MS, type ConsentTimers } from './consent.ts';
+import { ATTRIBUTED_TAG, ConsentStore, attributionGate, carriesAttribution, parseConsent, stripAttribution, CONSENT_KEY, CONSENT_TTL_MS, CONSENT_VERSION, MAX_TIMER_MS, type ConsentTimers } from './consent.ts';
 
 function fakeStorage() {
 	const data = new Map<string, string>();
@@ -205,4 +205,43 @@ test('hasUnsavedDecision: only a decision storage does not hold', () => {
 	assert.equal(none.hasUnsavedDecision(), false, 'no decision yet');
 	none.decide('rejected');
 	assert.equal(none.hasUnsavedDecision(), true, 'no storage to hold it');
+});
+
+test('carriesAttribution reads only the explicit tag, never property names', () => {
+	assert.equal(carriesAttribution({ properties: { [ATTRIBUTED_TAG]: true } }), true);
+	assert.equal(carriesAttribution({ properties: { [ATTRIBUTED_TAG]: 'true' } }), false);
+	assert.equal(carriesAttribution({ properties: { assignment_id: 'a' } }), false);
+	assert.equal(carriesAttribution({ properties: { exposure_id: 'e' } }), false);
+	assert.equal(carriesAttribution({ properties: { roulette_assignment_id: 'a', roulette_variant: 'v' } }), false);
+	assert.equal(carriesAttribution({}), false);
+	assert.equal(carriesAttribution(null), false);
+});
+
+test('stripAttribution removes the tag in place and leaves the rest', () => {
+	const e = { properties: { [ATTRIBUTED_TAG]: true, assignment_id: 'a' } };
+	assert.equal(stripAttribution(e), e);
+	assert.deepEqual(e.properties, { assignment_id: 'a' });
+	assert.equal(stripAttribution(null), null);
+});
+
+test('attributionGate drops an attributed event unless consent holds at send time (fail closed), and passes the rest to next', () => {
+	let allowed: () => boolean = () => true;
+	const seen: string[] = [];
+	type Ev = { event: string; properties?: Record<string, unknown> } | null;
+	const gate = attributionGate<Ev>(() => allowed(), (e) => {
+		if (e) seen.push(e.event);
+		return e;
+	});
+	const exposure = () => ({ event: 'homepage_roulette_viewed', properties: { [ATTRIBUTED_TAG]: true, assignment_id: 'a', exposure_id: 'e' } as Record<string, unknown> });
+	assert.deepEqual(gate(exposure()), { event: 'homepage_roulette_viewed', properties: { assignment_id: 'a', exposure_id: 'e' } }, 'passed on without the tag');
+	allowed = () => false;
+	assert.equal(gate(exposure()), null);
+	assert.deepEqual(gate({ event: 'task:assigned', properties: { assignment_id: 't1' } }), { event: 'task:assigned', properties: { assignment_id: 't1' } }, 'an untagged assignment_id is not gated');
+	allowed = () => {
+		throw new Error('unreadable');
+	};
+	assert.equal(gate(exposure()), null);
+	assert.deepEqual(gate({ event: '$pageview' }), { event: '$pageview' }, 'an unattributed event is not gated');
+	assert.equal(gate(null), null);
+	assert.deepEqual(seen, ['homepage_roulette_viewed', 'task:assigned', '$pageview']);
 });

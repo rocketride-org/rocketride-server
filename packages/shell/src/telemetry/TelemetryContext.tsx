@@ -22,11 +22,12 @@
 
 // =============================================================================
 // The React seams apps reach telemetry through. The shell wraps the app outlet
-// in <TelemetryProvider reporter={getReporter(activeAppId)}>; components call
-// useReport() for the bound reporter, module-level code calls getReporter()
-// (host.ts). Reporters are closed over the DESCRIPTOR's app id — nothing
-// re-initialises on app switch, and a late event from a backgrounded app
-// stamps its true emitter. useConsent() is the read-only consent surface plus
+// in <TelemetryProvider reporter={appReporter(activeAppId, descriptor, ids)}>
+// (host.ts), which binds the reporter to the descriptor's stamp: its id, or a
+// first-party telemetryId alias. Components call useReport() for that bound
+// reporter. Reporters are cached by stamp and fixed for the app's lifetime, so
+// nothing re-initialises on app switch, and a late event from a backgrounded
+// app stamps its true emitter. useConsent() is the read-only consent surface plus
 // the one affordance to change it (the Settings Privacy section).
 // =============================================================================
 
@@ -44,7 +45,7 @@ const TelemetryContext = createContext<Reporter>(NOOP_REPORTER);
 
 /** Props for the provider the shell wraps the app outlet in. */
 export type TelemetryProviderProps = {
-	/** The active app's bound reporter (host.ts getReporter). */
+	/** The active app's bound reporter (host.ts appReporter). */
 	reporter: Reporter;
 	children?: React.ReactNode;
 };

@@ -74,8 +74,14 @@ export const MAX_PENDING = 200;
 export const HOLD_MAX = 32;
 /** A held capture older than this is discarded at drain: it no longer belongs to the visit. */
 export const HOLD_TTL_MS = 30 * 60 * 1000;
-/** sessionStorage key of the hold (per tab; survives the OAuth round trip). */
-export const HOLD_STORAGE_KEY = 'rr:shell:capture-hold';
+/**
+ * sessionStorage key of the hold (per tab; survives the OAuth round trip). Versioned: bump it when the
+ * meaning of a held entry changes, so a hold written by an earlier build is never replayed under rules
+ * it was not written for. v2: an attributed capture carries the internal ATTRIBUTED_TAG (consent.ts).
+ */
+export const HOLD_STORAGE_KEY = 'rr:shell:capture-hold:v2';
+/** Keys of earlier hold formats: discarded unread at construction (a deploy mid-session must not replay them). */
+export const LEGACY_HOLD_STORAGE_KEYS: readonly string[] = ['rr:shell:capture-hold'];
 
 /** A capture waiting for the start; `id` is the uuid its mirrored twin (Held) carries. */
 type Pending = { event: string; props: Record<string, unknown>; options?: CaptureOptions; id: string };
@@ -179,6 +185,7 @@ export class SdkQueue {
 		this.deps = deps;
 		this.storage = 'storage' in deps ? deps.storage || null : defaultStorage();
 		this.now = deps.now ?? (() => Date.now());
+		this.dropLegacyMirrors();
 		const { entries, normalized } = this.readMirror();
 		this.inherited = entries;
 		if (normalized) {
@@ -389,6 +396,18 @@ export class SdkQueue {
 			return { entries: out, normalized };
 		} catch {
 			return empty; // unreadable or corrupt mirror: nothing to replay
+		}
+	}
+
+	/** Remove holds an earlier build wrote in an older format, without reading them. Never throws. */
+	private dropLegacyMirrors(): void {
+		if (!this.storage) return;
+		for (const key of LEGACY_HOLD_STORAGE_KEYS) {
+			try {
+				this.storage.removeItem(key);
+			} catch {
+				/* unavailable */
+			}
 		}
 	}
 
