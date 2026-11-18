@@ -96,7 +96,8 @@ export const GROUP_LENGTHS = PREFIX;
 interface IGroup<T> {
 	prefix: string;
 	lengths: Array<ILengthEntry<T>>;
-	next: Map<string, IGroup<T>> | null;
+	/** Deeper nodes by the hash of their next 8-character block (already among a scan's window hashes); the block confirms. */
+	next: Map<number, Array<{ block: string; node: IGroup<T> }>> | null;
 }
 
 /** A set of needles, each with a value. */
@@ -150,9 +151,12 @@ function addTo<T>(index: Map<number, Array<IGroup<T>>>, key: number, prefix: str
 	while (needle.length >= group.prefix.length + PREFIX) {
 		const end: number = group.prefix.length + PREFIX;
 		const block = needle.slice(group.prefix.length, end);
-		const next: Map<string, IGroup<T>> = (group.next ??= new Map());
-		let child = next.get(block);
-		if (!child) next.set(block, (child = { prefix: needle.slice(0, end), lengths: [], next: null }));
+		const next: Map<number, Array<{ block: string; node: IGroup<T> }>> = (group.next ??= new Map());
+		const h = hashAt(block, 0);
+		let slot = next.get(h);
+		if (!slot) next.set(h, (slot = []));
+		let child = slot.find((c) => c.block === block)?.node;
+		if (!child) slot.push({ block, node: (child = { prefix: needle.slice(0, end), lengths: [], next: null }) });
 		group = child;
 	}
 	let entry = group.lengths.find((e) => e.len === needle.length);
@@ -269,7 +273,7 @@ function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<
 			if (!s.startsWith(root.prefix, p)) continue;
 			// Down the trie: at most GROUP_LENGTHS exact lookups per node, one block lookup per level.
 			for (let node: IGroup<T> | undefined = root; node !== undefined; ) {
-				const width = node.prefix.length;
+				const width: number = node.prefix.length;
 				for (const entry of node.lengths) {
 					if (entry.len <= best.len) break;
 					if (p + entry.len > n) continue;
@@ -283,7 +287,9 @@ function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<
 					}
 				}
 				if (node.next === null || p + width + PREFIX > n) break;
-				node = node.next.get(s.slice(p + width, p + width + PREFIX));
+				const slot = node.next.get(H[p + width]);
+				const at: number = p + width;
+				node = slot?.find((c) => s.startsWith(c.block, at))?.node;
 			}
 		}
 	};
@@ -368,7 +374,7 @@ export function matcherShape(m: IMatcher<unknown>): { needles: number; maxLength
 	const walk = (g: IGroup<unknown>, d: number): void => {
 		max = Math.max(max, g.lengths.length);
 		depth = Math.max(depth, d);
-		if (g.next) for (const child of g.next.values()) walk(child, d + 1);
+		if (g.next) for (const slot of g.next.values()) for (const child of slot) walk(child.node, d + 1);
 	};
 	for (const index of [m.long, m.short]) for (const slot of index.values()) for (const group of slot) walk(group, 0);
 	return { needles: m.size, maxLengthsPerGroup: max, lengthBound: Math.min(GROUP_LENGTHS, m.lengths), maxDepth: depth };
