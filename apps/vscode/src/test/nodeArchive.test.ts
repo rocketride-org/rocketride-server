@@ -28,7 +28,7 @@ test('a server without an index, or whose index names no archive, needs none', (
 });
 
 test('an archive that is not a plain file name is refused', () => {
-	for (const archive of ['../rocketride-nodes-v1.zip', 'sub/rocketride-nodes-v1.zip', '', 7]) {
+	for (const archive of ['../rocketride-nodes-v1.zip', 'sub/rocketride-nodes-v1.zip', 'sub\\rocketride-nodes-v1.zip', '..', '.', '', 7]) {
 		assert.throws(() => nodeArchiveOf(engineWith({ archive })), /invalid node archive/);
 	}
 });

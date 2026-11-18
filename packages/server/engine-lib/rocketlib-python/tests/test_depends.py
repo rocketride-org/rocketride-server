@@ -59,7 +59,12 @@ class TestFindRequirementFiles:
     def test_a_node_unpacked_at_run_time_leaves_the_lock_hash_as_it_was(self, exe_dir):
         _write(exe_dir / 'nodes' / 'node-requirements' / 'llm_x' / 'requirements.txt')
         _write(exe_dir / 'nodes' / 'node-requirements' / 'llm_x' / 'overrides.txt')
-        before = depends._compute_hash(depends._find_requirement_files() + depends._find_override_files())
+        shipped = depends._find_requirement_files() + depends._find_override_files()
+        assert sorted(os.path.relpath(f, exe_dir) for f in shipped) == [
+            os.path.join('nodes', 'node-requirements', 'llm_x', 'overrides.txt'),
+            os.path.join('nodes', 'node-requirements', 'llm_x', 'requirements.txt'),
+        ]
+        before = depends._compute_hash(shipped)
 
         _write(exe_dir / 'nodes' / 'llm_x' / '.rrnode.sha256', 'abc')
         _write(exe_dir / 'nodes' / 'llm_x' / 'requirements.txt')

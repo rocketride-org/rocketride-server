@@ -22,8 +22,8 @@ export function nodeArchiveOf(engineDir: string): string | null {
 	if (!fs.existsSync(indexPath)) return null;
 	const archive: unknown = JSON.parse(fs.readFileSync(indexPath, 'utf8')).archive;
 	if (archive === undefined) return null;
-	// A file name only: it is joined to the nodes/ folder
-	if (typeof archive !== 'string' || !archive || path.basename(archive) !== archive) {
+	// The release's file name only: it is joined to the nodes/ folder, so '..' must not pass
+	if (typeof archive !== 'string' || !/^rocketride-nodes-v[^/\\]+\.zip$/.test(archive)) {
 		throw new Error(`The server's node index names an invalid node archive: ${JSON.stringify(archive)}`);
 	}
 	return archive;

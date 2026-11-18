@@ -92,8 +92,9 @@ def _served(index: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str], Dict
     for name, entry in index['nodes'].items():
         services = {file: json.loads(text) for file, text in entry['services'].items()}
         protocols = [service['protocol'].split(':')[0] for service in services.values() if 'protocol' in service]
-        # A node found on disk (a development tree, or the server still carries it) is the engine's own
-        if all(getServiceDefinition(provider) is not None for provider in protocols):
+        # A node found on disk (a development tree, or the server still carries it) is the engine's own;
+        # one with no service, a library others import, is placed only through their `requires`
+        if protocols and all(getServiceDefinition(provider) is not None for provider in protocols):
             continue
         for provider in protocols:
             if providers.setdefault(provider.lower(), name) != name:
@@ -197,17 +198,32 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
     return found
 
 
+def _with_requires(names: Iterable[str]) -> List[str]:
+    """The names with the served nodes they import (the index's `requires`), each after the nodes it imports.
+
+    A node is unpacked only once what it imports is, so a failed unpack never leaves one on disk without them:
+    after a restart the engine loads it as its own and nothing would place them.
+    """
+    order: List[str] = []
+    seen: Set[str] = set()
+
+    def visit(name: str) -> None:
+        if name in seen:
+            return
+        seen.add(name)
+        for other in sorted(_nodes[name].get('requires', [])):
+            if other in _nodes:
+                visit(other)
+        order.append(name)
+
+    for name in sorted(names):
+        visit(name)
+    return order
+
+
 def place(pipeline: Dict[str, Any]) -> List[str]:
     """Unpack into nodes/ each node the pipeline names that the server does not carry; the nodes placed."""
-    names = {_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers}
-    # With the served nodes they import (the index's `requires`), and those nodes' own
-    pending = list(names)
-    while pending:
-        for other in _nodes[pending.pop()].get('requires', []):
-            if other in _nodes and other not in names:
-                names.add(other)
-                pending.append(other)
-    names = sorted(names)
+    names = _with_requires({_providers[p] for p in _providers_of(pipeline.get('components', [])) if p in _providers})
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']

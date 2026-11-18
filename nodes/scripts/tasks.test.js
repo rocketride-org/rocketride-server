@@ -49,6 +49,9 @@ test('the digest is the one EaaS computes over the same files', () => {
 	// The vector test_node_packages.py checks against content_digest
 	const files = { 'b.py': Buffer.from('b'), 'a/c.json': Buffer.from('c') };
 	assert.strictEqual(contentDigest(files), 'cbd358a9e4e48458634a275f10ca7085f3576d2eba9f9a3d28f224f8d477c200');
+	// Paths sort by code point, as Python sorts them: the default sort puts the emoji first
+	const unicode = { '\u{1F600}.txt': Buffer.from('a'), '\uFF21.txt': Buffer.from('b') };
+	assert.strictEqual(contentDigest(unicode), '306af2aa83b510e1390ea95c959bf150bd7a6ee619097c8e84ee5e17035ad997');
 });
 
 test('a node packaged on Windows gives the digest built on Linux', async () => {
@@ -104,6 +107,7 @@ function makeTree() {
 	write('dist/server/nodes/node-requirements/gone/requirements.txt');
 	write('dist/server/nodes/node-requirements/llm_x/requirements_gpu.txt');
 	const names = ['core', 'autopipe', 'cpp_x', 'llm_x', 'embed_y', '__init__.py'];
+	const forgotten = [];
 	const copy = (src, dest) => fs.cpSync(src, dest, { recursive: true });
 	return {
 		root,
@@ -115,8 +119,9 @@ function makeTree() {
 			libraryOf: async (name) => (name === 'cpp_x' ? 'cpp_x.so' : null),
 			copyFile: async (src, dest) => copy(src, dest),
 			copyNode: async (name, src) => copy(src, path.join(root, 'dist', 'server', 'nodes', name)),
-			forget: async () => {},
+			forget: async (src) => forgotten.push(src),
 		},
+		forgotten,
 	};
 }
 
@@ -145,6 +150,14 @@ test('the server keeps core, autopipe and the C++ nodes; every other node goes i
 	]);
 	assert.deepStrictEqual(listed('dist/server/nodes/node-requirements'), ['llm_x']);
 	assert.deepStrictEqual(listed('dist/server/nodes/node-requirements/llm_x'), ['requirements.txt']);
+});
+
+test('a requirement file a node no longer has leaves the server package', async () => {
+	const { root, sync, forgotten } = makeTree();
+	await syncNodes({}, sync);
+
+	assert.ok(forgotten.includes(path.join(root, 'src', 'llm_x', 'requirements_gpu.txt')));
+	assert.ok(forgotten.some((src) => src.endsWith(path.join('gone', 'requirements.txt'))));
 });
 
 test('the index names the archive and lists only the packaged nodes, with the digest of their files', async () => {

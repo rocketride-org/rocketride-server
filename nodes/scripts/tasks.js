@@ -201,6 +201,8 @@ async function syncNodes(stats, sync = SYNC) {
 		for (const file of await readDirSafe(path.join(requirementsDir, name))) {
 			if (name in packages && fs.existsSync(path.join(sources[name], file))) continue;
 			await fs.promises.rm(path.join(requirementsDir, name, file), { force: true });
+			// Or server:package still lists the copy
+			await forget(path.join(sources[name] ?? path.join(PACKAGE_DIR, 'src', 'nodes', name), file));
 		}
 		if (!(name in packages)) {
 			await fs.promises.rm(path.join(requirementsDir, name), { recursive: true, force: true });
@@ -217,10 +219,10 @@ async function syncNodes(stats, sync = SYNC) {
 }
 
 // The digest of a node's files ({path inside the node: bytes}), as ai.common.node_packages.content_digest:
-// the sha256 of '<path>\0<sha256 hex of the file>\n' for each file in path order
+// the sha256 of '<path>\0<sha256 hex of the file>\n' for each file in path order (code point, as Python sorts)
 function contentDigest(files) {
 	const digest = crypto.createHash('sha256');
-	for (const file of Object.keys(files).sort()) {
+	for (const file of Object.keys(files).sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)))) {
 		digest.update(`${file}\0${crypto.createHash('sha256').update(files[file]).digest('hex')}\n`);
 	}
 	return digest.digest('hex');

@@ -38,7 +38,8 @@ The archive carries the engine and the nodes it needs itself. The other nodes
 are in `rocketride-nodes-<version>.zip` on the same release. Download it too and
 put it in a `nodes/` folder beside the runtime directory
 (`rocketride-engine/../nodes/`): a run gets the nodes its pipeline names from
-there, and nothing is downloaded at run time.
+there, so no node code is downloaded at run time. A node's Python packages and
+models still install on first use; provision them in advance for an offline host.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine

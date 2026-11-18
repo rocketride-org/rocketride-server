@@ -177,7 +177,44 @@ def test_a_served_node_comes_with_the_served_nodes_it_imports(server, monkeypatc
     monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
     node_store.start()
 
-    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_y', 'embed_z', 'llm_x']
+    # Each after the nodes it imports
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_z', 'embed_y', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['embed_z', 'embed_y', 'llm_x']
+
+
+def test_a_node_whose_import_fails_to_unpack_is_not_unpacked(server, monkeypatch):
+    # Named to sort after llm_x, so path order alone would unpack llm_x first
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['zeta_y']
+    index['nodes']['zeta_y'] = {
+        'sha256': 'z',
+        'services': {'services.json': json.dumps({'protocol': 'zeta_y_p://'})},
+        'icons': {},
+    }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    def unpack(*args):
+        server['unpacked'].append(args)
+        if args[0] == 'zeta_y':
+            raise OSError('disk full')
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+
+    with pytest.raises(OSError):
+        node_store.place({'components': [{'provider': 'provider_x'}]})
+    assert [args[0] for args in server['unpacked']] == ['zeta_y']
+
+
+def test_a_served_library_with_no_service_is_placed_with_the_node_that_imports_it(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['helper_x']
+    index['nodes']['helper_x'] = {'sha256': 'h', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['helper_x', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['helper_x', 'llm_x']
 
 
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
