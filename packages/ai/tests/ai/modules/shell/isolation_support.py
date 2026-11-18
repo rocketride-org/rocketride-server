@@ -294,6 +294,7 @@ class FakeRegistry:
             self.approved[(app_id, version)] = approved
         artifact_path = f'orgs/{org}/files/.deployments/{app_id}/v{version:06d}-fake.json'
         entry = {
+            'kind': 'app',
             'version': version,
             'state': deploy_state,
             'metadata': metadata,
@@ -326,11 +327,11 @@ class FakeRegistry:
 
     def dist_dir(self, app_id: str, version: int = 1, org: str = 'acme-org') -> str:
         """The store dist dir the real resolvers hand back for one seeded version."""
-        from ai.account.app_deploy import _dist_dir_of
+        from ai.account.app_rows import dist_dir_of
 
         for entry in self.versions[(org, app_id)]:
             if entry['version'] == version:
-                return _dist_dir_of(entry['artifactPath'])
+                return dist_dir_of(entry['artifactPath'])
         raise KeyError((org, app_id, version))
 
     # -- identities ---------------------------------------------------------
@@ -421,9 +422,15 @@ class FakeServer:
 
     def __init__(self):
         self.routes: List[tuple] = []
+        self.app = FastAPI()
+        self.public_predicates = []
 
     def add_route(self, path, routeHandler, methods=None, public=False, **kwargs):
         self.routes.append((path, routeHandler, list(methods or ['GET'])))
+        self.app.add_api_route(path, routeHandler, methods=methods or ['GET'])
+
+    def add_public_predicate(self, predicate):
+        self.public_predicates.append(predicate)
 
 
 def shell_inner_app(hits: Optional[list] = None):
@@ -446,9 +453,7 @@ def shell_inner_app(hits: Optional[list] = None):
         shell_pkg.initModule(server, {})
     finally:
         account.capabilities = edition
-    app = FastAPI()
-    for path, handler, methods in server.routes:
-        app.add_api_route(path, handler, methods=methods)
+    app = server.app
 
     @app.get('/auth')
     async def _auth():
@@ -461,6 +466,16 @@ def shell_inner_app(hits: Optional[list] = None):
         await ws.accept()
         await ws.send_text('hello from inner')
         await ws.close()
+
+    # Startup registers this after every real route. The page-map fixture
+    # already supplies its aggregate; no asynchronous account/store rebuild
+    # is needed for this route-table harness.
+    from starlette.routing import Route
+    from ai.modules.shell.pages import FALLBACK_PATH, public_page
+
+    catch_all = Route(FALLBACK_PATH, public_page, include_in_schema=False)
+    catch_all.methods = None
+    app.router.routes.append(catch_all)
 
     if hits is None:
         return app

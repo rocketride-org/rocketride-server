@@ -41,6 +41,8 @@ SRC = Path(__file__).resolve().parents[4] / 'src' / 'ai'  # packages/ai/src/ai
 # the two serving surfaces that ask for the caller's winning entry).
 RESOLVE_ALLOWLIST = {
     'account/app_deploy.py',
+    'account/app_rows.py',  # shared row helpers document the resolver contract
+    'modules/shell/data_sources.py',  # public-page data bindings resolve app pins
     'account/oss/__init__.py',
     'modules/shell/shell.py',
     'modules/shell/app_origin.py',

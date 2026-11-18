@@ -35,23 +35,28 @@ Directory layout:
   - ``static/apps/<app>/``                   — MF remote app bundles
 
 Routes:
-  GET /                    — shell SPA entry point
-  GET /pricing             — shell SPA deep link (see PUBLIC_ROUTES)
   GET /shell/{file_path}   — shell assets (JS, CSS, themes)
   GET /apps/{file_path}    — MF remote app bundles
-  GET /sitemap.xml         — sitemap generated from PUBLIC_ROUTES (hosted SaaS only)
+  GET /sitemap.xml         — sitemap of the listed public pages (hosted SaaS only)
   GET /robots.txt          — robots policy (+ sitemap pointer on hosted SaaS)
   GET /llms.txt            — llmstxt.org page index (hosted SaaS only)
 
+Public pages themselves (``/`` and every path the page aggregate claims)
+are served by ``pages.public_page``; their list comes from published app
+manifests (``public_pages``), never from constants here.
+
 The three crawler files key off ``RR_APP_URL`` — the env var that pins the
 public base URL of the hosted SaaS deployment. When it is unset (OSS,
-self-hosted, desktop engines) /sitemap.xml and /llms.txt return 404 and
-/robots.txt disallows all crawling; absolute URLs are never derived from
-request headers.
+self-hosted, desktop and staging engines) /sitemap.xml and /llms.txt return
+404 and /robots.txt disallows all crawling, as before public pages (plan
+sections 4 and 8); an engine that serves published pages without it warns
+once (``warn_published_pages_without_app_url``). Absolute URLs are never
+derived from request headers.
 """
 
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import posixpath
@@ -59,13 +64,21 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 
 from ai.web import Request
+from ai.web.middleware import route_path
+
+from rocketlib import warning
+
+from . import public_pages
+from .contract import Page, own_title, page_instant
+from .settings import app_url
 
 # Script and stylesheet types pinned for every platform. mimetypes.guess_type
 # reads the OS registry on Windows, where '.js' maps to application/javascript
@@ -97,201 +110,9 @@ _shell_root = os.path.join(_root_dir, 'static', 'shell')
 # Apps root: dist/server/static/apps/ — MF remote app bundles.
 _apps_root = os.path.join(_root_dir, 'static', 'apps')
 
-# Public (unauthenticated) SPA paths served by the shell. Each entry gets:
-#   - a server-side GET route serving index.html, so hard reloads and
-#     shared deep links (e.g. /pricing) don't 404 before the client-side
-#     router can take over;
-#   - a <url> entry in the generated /sitemap.xml;
-#   - a bullet in the generated /llms.txt.
-#
-# Titles and descriptions mirror the client route manifest in
-# apps/home-ui/src/routes.ts (rocketride-saas) verbatim — keep them in
-# sync. To expose another home-ui page, add a (path, title, description)
-# entry here — no other code changes needed. This list will eventually be
-# fed from a shared manifest of deployed apps.
-PUBLIC_ROUTE_MANIFEST = [
-    (
-        '/',
-        'Home',
-        'Build, run, and harness AI at rocket speed. From prototype to production. '
-        'Fully managed, predictable costs, true portability.',
-    ),
-    (
-        '/pricing',
-        'Pricing',
-        'Predictable pricing that scales with you. Subscription plans and '
-        'metered billing, with no hard caps, no surprise bills, and no vendor '
-        'lock-in.',
-    ),
-    (
-        '/marketplace',
-        'Marketplace',
-        'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
-        'instantly, and deploy them on managed infrastructure.',
-    ),
-    (
-        # Legacy alias for /marketplace (the pre-rename App Store URL). Kept so
-        # old links and bookmarks survive a hard reload; the client route
-        # manifest (routes.ts) canonicalizes the address bar to /marketplace.
-        '/store',
-        'Marketplace',
-        'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
-        'instantly, and deploy them on managed infrastructure.',
-    ),
-    (
-        '/build-publish-earn',
-        'Build, Publish, Earn',
-        'Build AI apps on RocketRide, publish them to the Marketplace, and earn '
-        'from every run. Bring your own pipeline, reach customers, get paid.',
-    ),
-    (
-        '/oss',
-        'Open Source',
-        'Design, run, and deploy AI pipelines visually. Open source, self-hostable, and free to run anywhere.',
-    ),
-    (
-        '/cloud',
-        'Cloud',
-        'Run and scale your AI pipelines on managed cloud infrastructure. No servers '
-        'to run, no capacity to plan, no lock-in.',
-    ),
-    (
-        # NOT /mcp: /mcp and /mcp/* are reserved for the MCP API (see
-        # ai.modules.mcp). A page there would shadow the bare endpoint and
-        # mark it public to the auth middleware; add_route's duplicate check
-        # cannot catch the clash because MCP registers a raw ASGI route and
-        # Mount, so ai.modules.mcp refuses to start over any claimant instead.
-        '/mcp-server',
-        'MCP',
-        'Connect tools and data to your AI with the Model Context Protocol. Bring '
-        'your own servers or use the ones RocketRide ships with.',
-    ),
-    (
-        '/extension',
-        'Extension',
-        'Build and run RocketRide pipelines inside your editor with the IDE extension.',
-    ),
-    (
-        '/sdk',
-        'SDK',
-        'Client SDKs for Python and TypeScript. Execute pipelines, move data, and monitor runs from your own code.',
-    ),
-    (
-        '/blog',
-        'Blog',
-        'Product updates, engineering deep dives, and stories from the RocketRide team.',
-    ),
-    (
-        '/events',
-        'Events',
-        'Meet the RocketRide team at conferences, webinars, and community events.',
-    ),
-    (
-        '/about',
-        'About Us',
-        'Who we are and why we are building RocketRide — AI infrastructure from prototype to production.',
-    ),
-    (
-        '/careers',
-        'Careers',
-        'Join the team building RocketRide. Open roles across engineering, product, and go-to-market.',
-    ),
-    (
-        '/contact',
-        'Contact',
-        'Get in touch with the RocketRide team — sales, support, and partnership inquiries.',
-    ),
-    (
-        '/superfans',
-        'Superfans',
-        'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
-        'roadmap, and artifacts you can only be given.',
-    ),
-    # The legal pages: the index (routes.ts) and one entry per published
-    # document, mirroring the title and description in the document's front
-    # matter (apps/home-ui/content/legal/<slug>.md). Exact paths only, like every
-    # entry here: a /legal/{path} pattern would make every legal sub-path public
-    # to the auth middleware, including slugs that are not documents. A new
-    # document adds its path here.
-    (
-        '/legal',
-        'Legal',
-        'The policies and terms that govern RocketRide Cloud - each document with its version, '
-        'effective date, and latest change.',
-    ),
-    (
-        '/legal/terms',
-        'RocketRide Cloud Terms of Service',
-        'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable service use.',
-    ),
-    (
-        '/legal/privacy-policy',
-        'Privacy Policy',
-        'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
-    ),
-    (
-        '/legal/dpa',
-        'Data Processing Agreement',
-        'The data processing terms that apply when RocketRide processes personal data on behalf of business customers.',
-    ),
-    (
-        '/legal/acceptable-use',
-        'Acceptable Use Policy',
-        'The rules for what may and may not be done with RocketRide Cloud and its services.',
-    ),
-    (
-        '/legal/subprocessors',
-        'RocketRide Cloud Sub-processors',
-        'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
-    ),
-    (
-        '/legal/trademark-policy',
-        'Trademark & Brand Usage Policy',
-        'How the RocketRide name, logo, and brand assets may and may not be used.',
-    ),
-    (
-        '/legal/cookie-policy',
-        'Cookie Policy',
-        'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
-        'RocketRide Cloud, and the choices you have.',
-    ),
-    (
-        '/legal/marketplace-terms',
-        'Marketplace Publisher Terms',
-        'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
-        'payouts, and taxes.',
-    ),
-]
-
-# Bare route list — kept as the module's public surface for route
-# registration and the sitemap.
-PUBLIC_ROUTES = [route for route, _, _ in PUBLIC_ROUTE_MANIFEST]
-
-# Served but not advertised. These stay registered above (typing the URL or
-# hard-reloading must keep working) while being excluded from /sitemap.xml and
-# /llms.txt: /oss and /mcp-server are `unlisted` in the client route manifest
-# (routes.ts stamps them noindex — listing them here would hand crawlers the
-# very URLs the client tells them to drop), and /store is the legacy alias the
-# client canonicalizes to /marketplace, so listing it publishes a duplicate of
-# its own canonical.
-#
-# HIDDEN FOR NOW: /marketplace and /build-publish-earn are `unlisted` in
-# routes.ts as well (the Marketplace pair is pulled from nav, footers and the
-# index until it relaunches). They keep serving the SPA on a hard reload — only
-# the sitemap/llms.txt listing goes. To re-launch, remove them (and /store stays
-# unlisted regardless, as the alias) alongside dropping `unlisted` in routes.ts.
-UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store', '/marketplace', '/build-publish-earn'})
-
-# The advertised subset — what /sitemap.xml and /llms.txt enumerate.
-LISTED_ROUTE_MANIFEST = [entry for entry in PUBLIC_ROUTE_MANIFEST if entry[0] not in UNLISTED_ROUTES]
-LISTED_ROUTES = [route for route, _, _ in LISTED_ROUTE_MANIFEST]
-
-# Canonical docs site, linked from /llms.txt.
-DOCS_URL = 'https://docs.rocketride.org/'
-
 # Crawler files are cheap to regenerate but change rarely — let shared
 # caches hold them for an hour (same max-age convention as task/fetch.py).
-_CACHE_CONTROL = 'public, max-age=3600'
+CACHE_CONTROL = 'public, max-age=3600'
 
 # Frame ancestors every shell document allows: its own origin, and the VS Code
 # App Builder preview, whose webview iframe (vscode-webview://<id>) sits inside
@@ -378,6 +199,11 @@ def _document_headers() -> dict:
     }
 
 
+def shell_document_headers(headers: Optional[dict] = None) -> dict:
+    """Apply shell policy, including the active origin report policy, to HTML."""
+    return {**(headers or {}), **_document_headers()}
+
+
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
     """
     Resolve a requested path within a base directory, guarding against
@@ -404,6 +230,64 @@ def _resolve_safe(base_dir: str, requested_path: str) -> Path:
         return Path(base_dir) / 'index.html'
 
 
+def capture_candidate(request: Request) -> Optional[Path]:
+    """Where the prerendered capture for a navigation request is, whether or not the build carries it.
+
+    ``<shell>/_prerender/index.html`` for '/', ``<shell>/_prerender/<route>/index.html``
+    otherwise (the layout the CDN's router used). Never for /shell/* paths,
+    and never with a query string: an OAuth callback lands on '/' with
+    ?code/?state/?error, and invite or verification links carry a token the
+    app must read. Crawlers fetch the canonical URL, which has none.
+
+    Args:
+        request: The navigation request.
+
+    Returns:
+        The capture's path inside ``_prerender``, or None when no capture may
+        serve this request.
+    """
+    path = route_path(request.scope)
+    if path.startswith('/shell/') or request.url.query:
+        return None
+    route = path.strip('/')
+    prerender_root = (Path(_shell_root) / '_prerender').resolve()
+    relative = '_prerender/index.html'
+    if route:
+        relative = f'_prerender/{route}/index.html'
+    capture = _resolve_safe(_shell_root, relative)
+    if capture.is_relative_to(prerender_root):
+        return capture
+    return None
+
+
+def _capture_for(request: Request) -> Optional[Path]:
+    """The prerendered capture for a navigation request when the build carries it, else None (see ``capture_candidate``)."""
+    capture = capture_candidate(request)
+    if capture is not None and capture.is_file():
+        return capture
+    return None
+
+
+def shell_document_path(request: Request, *, capture: bool = True) -> Path:
+    """The HTML document a browser navigating to this path boots from.
+
+    The route's prerendered capture when the shell build carries one (see
+    ``_capture_for``) and ``capture`` allows it, else the SPA ``index.html``:
+    what ``shell_static`` serves for the same navigation.
+
+    Raises:
+        HTTPException: 503 when the shell has not been built.
+    """
+    index_path = Path(_shell_root) / 'index.html'
+    if not index_path.is_file():
+        raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
+    if capture:
+        capture_path = _capture_for(request)
+        if capture_path:
+            return capture_path
+    return index_path
+
+
 async def shell_static(request: Request):
     """
     Serve static files for the shell SPA with client-side routing fallback.
@@ -427,11 +311,12 @@ async def shell_static(request: Request):
     if not (Path(_shell_root) / 'index.html').is_file():
         raise HTTPException(status_code=503, detail='Shell UI not built. Run: ./builder shell:build')
 
-    # Map the URL path into the shell directory.
+    # Map the path the router matched (root_path stripped: the one the auth
+    # middleware decided on) into the shell directory.
     # "/" → index.html
     # "/shell/static/js/main.js" → static/js/main.js
     # "/shell/themes/dark.json" → themes/dark.json
-    raw_path = request.url.path.lstrip('/')
+    raw_path = route_path(request.scope).lstrip('/')
 
     # Strip the "shell/" prefix for shell-specific routes
     if raw_path.startswith('shell/'):
@@ -445,19 +330,11 @@ async def shell_static(request: Request):
     file_path = _resolve_safe(_shell_root, raw_path)
 
     # Prerendered marketing page, when the shell build carries a capture for
-    # this route: <shell>/_prerender/index.html for '/', and
-    # <shell>/_prerender/<route>/index.html otherwise (the layout the CDN's
-    # router used). Only public routes reach here with a non-/shell/ path, and a
-    # capture is served only if it exists, so no route list is mirrored. Any
-    # query string gets the app instead: an OAuth callback lands on '/' with
-    # ?code/?state/?error, and invite or verification links carry a token the
-    # app must read. Crawlers fetch the canonical URL, which has none.
-    if not request.url.path.startswith('/shell/') and not request.url.query:
-        route = request.url.path.strip('/')
-        prerender_root = (Path(_shell_root) / '_prerender').resolve()
-        capture = _resolve_safe(_shell_root, f'_prerender/{route}/index.html' if route else '_prerender/index.html')
-        if capture.is_relative_to(prerender_root) and capture.is_file():
-            return FileResponse(capture, headers=_document_headers())
+    # this route (see _capture_for). Every capture is a shell document and
+    # receives both the PR0 policy and the active app-origin report policy.
+    capture = _capture_for(request)
+    if capture is not None:
+        return FileResponse(capture, headers=_document_headers())
 
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
@@ -971,7 +848,7 @@ async def apps_static(request: Request):
         HTTPException: 404 if file not found, 503 if apps dir missing.
     """
     # "/apps/rocketride.pipeBuilder/remoteEntry.js" → rocketride.pipeBuilder/remoteEntry.js
-    raw_path = request.url.path.lstrip('/')
+    raw_path = route_path(request.scope).lstrip('/')
     if raw_path.startswith('apps/'):
         raw_path = raw_path[len('apps/') :]
 
@@ -1035,30 +912,73 @@ async def apps_static(request: Request):
     raise HTTPException(status_code=404, detail='Not found')
 
 
-def _app_url() -> str:
-    """
-    Return the public base URL of the hosted SaaS deployment, if configured.
+_warned_unindexed = False
 
-    ``RR_APP_URL`` (also honored by ``ai.web.endpoints.auth_callback``) pins
-    the externally visible origin and doubles as the "this is the hosted
-    SaaS" signal. It is deliberately the ONLY source of absolute URLs here:
-    deriving them from ``X-Forwarded-Proto`` / ``X-Forwarded-Host`` would
-    let any client poison sitemap URLs through shared caches.
 
-    Returns:
-        Base URL without a trailing slash (e.g. ``https://app.example.com``),
-        or an empty string when unset.
+def warn_published_pages_without_app_url(old: public_pages.Aggregate, new: public_pages.Aggregate) -> None:
+    """Swap listener: warn once that published pages go unindexed for lack of ``RR_APP_URL``.
+
+    Without it robots.txt disallows all crawling and the sitemap and llms.txt
+    answer 404, which is right for OSS, desktop and staging engines and a
+    silent deindexing for a production engine that lost the setting.
+
+    Args:
+        old: The aggregate swapped out (unused).
+        new: The aggregate swapped in; the legacy list and an empty map publish nothing.
     """
-    return os.environ.get('RR_APP_URL', '').rstrip('/')
+    global _warned_unindexed
+    if _warned_unindexed or not new.serves_published_pages():
+        return
+    _warned_unindexed = True
+    warning(
+        '[shell] RR_APP_URL is not set but public pages are published: robots.txt disallows all '
+        'crawling and /sitemap.xml and /llms.txt answer 404, so search engines will not index them; '
+        'set RR_APP_URL to the public origin on an engine that serves the public site'
+    )
+
+
+def _md(text: str) -> str:
+    """One line of llms.txt markdown: whitespace collapsed, link syntax escaped.
+
+    Titles and descriptions are manifest text: collapsing newlines stops an
+    injected heading or bullet, escaping brackets stops an injected link.
+    """
+    text = re.sub(r'\s+', ' ', text or '').strip()
+    return text.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
+
+
+def sitemap_entries() -> list:
+    """``(path, page)`` for every listed public page, sorted by path.
+
+    Unlisted pages (``listed: false``) are served but never advertised.
+    """
+    from .public_pages import current
+
+    return [(page.path, page) for page in current().pages() if page.listed]
+
+
+def _lastmod(page: Page) -> str:
+    """``<lastmod>``: the UTC date of the page's ``modified``, else ``published``; '' when it declares neither.
+
+    A deploy is not a content change. Falling back to when the app's version
+    went live would move every undated page's date on each deploy, and search
+    engines stop trusting ``lastmod`` site-wide when it is not accurate.
+    """
+    declared = page.modified or page.published
+    if not declared:
+        return ''
+    return f'<lastmod>{page_instant(declared).date().isoformat()}</lastmod>'
 
 
 async def sitemap_xml(request: Request):
     """
-    Serve ``/sitemap.xml`` — one ``<url>`` per entry in ``PUBLIC_ROUTES``.
+    Serve ``/sitemap.xml`` — one ``<url>`` per listed public page.
 
-    Absolute URLs come exclusively from ``RR_APP_URL``. Deployments without
-    it (OSS, self-hosted, desktop) have no public marketing site to index,
-    so the endpoint 404s.
+    Pages come from the page aggregate (published manifests, or the legacy
+    list until one declares pages), sorted by path, each with its
+    ``<lastmod>`` when known. Absolute URLs come exclusively from
+    ``RR_APP_URL``. Deployments without it (OSS, self-hosted, desktop) have
+    no public marketing site to index, so the endpoint 404s.
 
     Args:
         request: Incoming HTTP request.
@@ -1069,12 +989,17 @@ async def sitemap_xml(request: Request):
     Raises:
         HTTPException: 404 when ``RR_APP_URL`` is not configured.
     """
-    base_url = _app_url()
+    from .public_pages import maybe_refresh
+
+    maybe_refresh()
+    base_url = app_url()
     if not base_url:
         raise HTTPException(status_code=404, detail='Not found')
 
     # escape() guards against XML metacharacters in the configured URL.
-    entries = ''.join(f'  <url><loc>{escape(base_url + route)}</loc></url>\n' for route in LISTED_ROUTES)
+    entries = ''.join(
+        f'  <url><loc>{escape(base_url + path)}</loc>{_lastmod(page)}</url>\n' for path, page in sitemap_entries()
+    )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -1085,7 +1010,7 @@ async def sitemap_xml(request: Request):
     return Response(
         content=xml,
         media_type='application/xml',
-        headers={'Cache-Control': _CACHE_CONTROL},
+        headers={'Cache-Control': CACHE_CONTROL},
     )
 
 
@@ -1094,8 +1019,11 @@ async def robots_txt(request: Request):
     Serve ``/robots.txt`` — policy depends on the deployment mode.
 
     Hosted SaaS (``RR_APP_URL`` set): allow all crawlers and point at the
-    sitemap. Otherwise (OSS, self-hosted, desktop): a customer engine is
-    not a marketing site — tell crawlers to stay out entirely.
+    sitemap, with one named group per rostered crawler (the roster that
+    also classifies requesters) plus ``*``; every group carries the same
+    rule (RFC 9309), so the policy equals ``*`` alone. Any other engine
+    (OSS, self-hosted, desktop, staging) is not the public site: all
+    crawling is disallowed, published pages or not (plan section 4).
 
     Args:
         request: Incoming HTTP request.
@@ -1103,23 +1031,39 @@ async def robots_txt(request: Request):
     Returns:
         PlainTextResponse with the robots policy.
     """
-    base_url = _app_url()
+    from .crawlers import robots_groups
+
+    base_url = app_url()
 
     if base_url:
-        content = f'User-agent: *\nAllow: /\n\nSitemap: {base_url}/sitemap.xml\n'
+        content = f'{robots_groups("Allow: /")}Sitemap: {base_url}/sitemap.xml\n'
     else:
         content = 'User-agent: *\nDisallow: /\n'
 
-    return PlainTextResponse(content, headers={'Cache-Control': _CACHE_CONTROL})
+    return PlainTextResponse(content, headers={'Cache-Control': CACHE_CONTROL})
+
+
+def _newest_first(page: Page) -> float:
+    """Sort key of an llms.txt section: dated pages newest first, then the undated ones."""
+    if page.published:
+        return -page_instant(page.published).timestamp()
+    return math.inf
 
 
 async def llms_txt(request: Request):
     """
     Serve ``/llms.txt`` — an llmstxt.org index of the public pages.
 
-    One bullet per ``LISTED_ROUTE_MANIFEST`` entry plus a pointer at the
-    docs site. Same gating as the sitemap: absolute URLs come exclusively
-    from ``RR_APP_URL``, and the endpoint 404s when it is unset.
+    The header from the root owner's ``site`` block (the heading falls back
+    to the origin's host: llms.txt requires one), one bullet per listed page
+    (title and description from the aggregate), and a final link to
+    ``site.docsUrl``. A listed page whose parent path (``/blog`` for
+    ``/blog/x``) is a listed page goes in that parent's section, headed by
+    its title without the trailing `` | <site.title>``; every other page is
+    under ``## Pages``, by path. Sections follow by parent path, each with its
+    dated pages newest first, then the rest by path. Same gating as the
+    sitemap: absolute URLs come exclusively from ``RR_APP_URL``, and the
+    endpoint 404s when it is unset.
 
     Args:
         request: Incoming HTTP request.
@@ -1130,30 +1074,46 @@ async def llms_txt(request: Request):
     Raises:
         HTTPException: 404 when ``RR_APP_URL`` is not configured.
     """
-    base_url = _app_url()
+    from .public_pages import current, maybe_refresh
+
+    maybe_refresh()
+    base_url = app_url()
     if not base_url:
         raise HTTPException(status_code=404, detail='Not found')
 
-    pages = ''.join(
-        f'- [{title}]({base_url}{route}): {description}\n' for route, title, description in LISTED_ROUTE_MANIFEST
-    )
-
-    content = (
-        '# RocketRide\n'
-        '\n'
-        '> Build, run, and harness AI at rocket speed. From prototype to production. '
-        'Fully managed, predictable costs, true portability.\n'
-        '\n'
-        '## Pages\n'
-        '\n'
-        f'{pages}'
-        '\n'
-        '## Documentation\n'
-        '\n'
-        f'- [Docs]({DOCS_URL}): Product and API documentation.\n'
-    )
+    site = current().site or {}
+    heading = _md(site.get('title', ''))
+    if not heading:
+        heading = urlsplit(base_url).netloc
+    lines = [f'# {heading}', '']
+    if site.get('blurb'):
+        lines += [f'> {_md(site["blurb"])}', '']
+    listed = dict(sitemap_entries())
+    sections: Dict[str, List[Page]] = {'': []}
+    for path, page in listed.items():
+        parent = path.rpartition('/')[0]
+        section = ''
+        if parent in listed:
+            section = parent
+        sections.setdefault(section, []).append(page)
+    for parent in sorted(sections):
+        pages = sections[parent]
+        if parent:
+            lines += ['', f'## {_md(own_title(listed[parent].title, site.get("title", "")))}', '']
+            # The stable sort keeps path order among pages with the same key.
+            pages.sort(key=_newest_first)
+        else:
+            lines += ['## Pages', '']
+        for page in pages:
+            bullet = f'- [{_md(page.title)}]({base_url}{page.path})'
+            description = _md(page.description)
+            if description:
+                bullet = f'{bullet}: {description}'
+            lines.append(bullet)
+    if site.get('docsUrl'):
+        lines += ['', '## Documentation', '', f'- [Docs]({_md(site["docsUrl"])})']
     return PlainTextResponse(
-        content,
+        '\n'.join(lines) + '\n',
         media_type='text/plain; charset=utf-8',
-        headers={'Cache-Control': _CACHE_CONTROL},
+        headers={'Cache-Control': CACHE_CONTROL},
     )

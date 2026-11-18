@@ -340,11 +340,14 @@ class DeployCommands(_DeployBase):
         project_id = pipeline.get('project_id')
         if not project_id:
             raise ValueError('pipeline.project_id is required')
+        # App ids (<developerId>[.<name>]) are not pipe project ids: the app
+        # door enforces the namespace on its side, this is the mirror image.
+        from ai.account.app_deploy import assert_pipe_id_outside_app_namespace
 
         org_id = self._org_id()
+        await assert_pipe_id_outside_app_namespace(self, account, org_id, str(project_id))
         # Server-owned keys (platform, approvedCapabilities, build) are never
-        # the caller's: a pipe shares its rail with an app of the same id, and
-        # says explicitly that it is not the seeder's (#1022).
+        # the caller's. A pipe says explicitly that it is not the seeder's.
         metadata = {**caller_metadata(args.get('metadata')), 'platform': False}
         entry = await account.deployments_publish(
             org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata

@@ -98,6 +98,7 @@ through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
 server push is involved.
 
 **Framing (#1022).** The engine serves shell documents (the SPA page,
+rendered public pages for browsers and crawlers, public HTML error pages,
 prerendered pages and any other HTML under the shell root) with
 `Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
 and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. `/apps/`,
