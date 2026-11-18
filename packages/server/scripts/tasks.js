@@ -235,6 +235,18 @@ async function isConfigured(cmakeConfig) {
 	return true;
 }
 
+/**
+ * The build type of the engine in dist/server. A downloaded engine is Release,
+ * since server:package packs nothing else; a compiled one has the type the
+ * tree was configured for, Release when the state predates that field.
+ * @returns {Promise<string>} e.g. 'Release' or 'Sanitize'
+ */
+async function distEngineType() {
+	const buildHash = await getState('server.buildHash');
+	if (buildHash && (await getState('server.downloadHash')) === buildHash) return 'Release';
+	return (await getState('server.buildType')) || 'Release';
+}
+
 // Static copy helpers removed - now using existence checks instead of state
 
 async function updateServerState(updates) {
@@ -531,16 +543,12 @@ function makeDownloadAction(options = {}) {
 				(await getState('server.buildHash')) === localHash &&
 				(await getState('vcpkg.version')) === localVcpkgVersion
 			) {
-				// A downloaded engine is Release; a compiled one has the type the
-				// tree was configured for
-				const builtType =
-					(await getState('server.downloadHash')) === localHash
-						? 'Release'
-						: (await getState('server.buildType')) || 'Release';
+				const builtType = await distEngineType();
 				if (builtType !== cmakeConfig) {
 					throw new Error(
-						`dist/server holds a ${builtType} engine built from these sources; ` +
-							`rerun with --force to rebuild it as ${cmakeConfig}`
+						`dist/server holds a ${builtType} engine built from these sources: ` +
+							`pass --cmake-config=${builtType} to use it, ` +
+							`or rerun with --force to rebuild it as ${cmakeConfig}`
 					);
 				}
 				task.output = 'Server already built';
@@ -1372,7 +1380,16 @@ function makePackageAction(options = {}) {
 			const packageHash = await getState('server.packageHash');
 			if (!sourceHash) {
 				throw new Error('Content hash not found — build server first');
-			} else if (!options.force && sourceHash === packageHash && (await exists(distFile))) {
+			}
+			// A download takes every published engine to be Release
+			const engineType = await distEngineType();
+			if (engineType !== 'Release') {
+				throw new Error(
+					`server:package packs only Release engines; dist/server holds a ${engineType} engine ` +
+						'(build with --cmake-config=Release, add --force if needed)'
+				);
+			}
+			if (!options.force && sourceHash === packageHash && (await exists(distFile))) {
 				_task.output = `Server package ${distFilename} is up to date`;
 				return;
 			}

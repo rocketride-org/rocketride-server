@@ -180,12 +180,15 @@ engine, its test programs (`aptest`, `engtest`, `nodetest`) and the C++ nodes.
   rebuilds parts of the tree as `Release`.
 - The engine's "already built" check compares the sources **and** the type.
   When `dist/server` holds an engine built from the same sources as another
-  type, builder stops and says to rerun with `--force`, which rebuilds it as
+  type, builder stops and names both ways out: pass that type with
+  `--cmake-config` to use the engine, or rerun with `--force` to rebuild it as
   the requested type. After a source change the build call rebuilds the engine
   as the requested type by itself.
 - Only a `Release` build looks up and downloads the published engines: they
   are all `Release`, so any other type compiles. CI passes `--nodownload` as
   well, so the job makes no network lookup even without this rule.
+- `server:package` packs only a `Release` engine and stops on any other type,
+  so a `Sanitize` engine is never packaged.
 
 #### Sanitizer build (`Sanitize`)
 

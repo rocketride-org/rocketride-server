@@ -97,8 +97,9 @@ jobs:
             # allowlist that keeps the sanitizer options in task processes.
             cpp:
               - 'packages/server/**'
-              - 'nodes/**/*.{cpp,hpp,h,c}'
+              - 'nodes/**/*.{cpp,cc,cxx,c,hpp,hh,hxx,h,inl,ipp}'
               - 'nodes/**/CMakeLists.txt'
+              - 'nodes/**/*.cmake'
               - 'packages/vcpkg/**'
               - 'scripts/build.js'
               - 'scripts/compiler.js'
