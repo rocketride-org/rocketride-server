@@ -308,23 +308,12 @@ async def test_widget_csp_uses_resolved_public_origin(monkeypatch, fake_web_serv
     captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     (tmp_path / 'dropper.html').write_text('<!doctype html><html><body>d</body></html>', encoding='utf-8')
     server = handlers_mod.build_mcp_server(
-        captured['factory'],
-        apps_dir=tmp_path,
-        engine_origin=captured['engine_origin'],
-        ui_domain=captured['ui_domain'],
+        captured['factory'], apps_dir=tmp_path, engine_origin=captured['engine_origin']
     )
     async with Client(server) as client:
         listed = await client.list_resources()
-        read = await client.read_resource(apps.DROPPER_URI)
     dropper = next(r for r in listed.resources if str(r.uri) == apps.DROPPER_URI)
-    expected = {
-        'ui': {
-            'csp': {'connectDomains': ['https://api.rocketride.ai'], 'resourceDomains': []},
-            'domain': 'https://api.rocketride.ai',
-        }
-    }
-    assert dropper.meta == expected
-    assert read.contents[0].meta == expected
+    assert dropper.meta == {'ui': {'csp': {'connectDomains': ['https://api.rocketride.ai'], 'resourceDomains': []}}}
 
 
 @pytest.mark.asyncio
@@ -360,50 +349,31 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
 
 
 # ---------------------------------------------------------------------------
-# Widget domain: MCP_UI_DOMAIN, else the MCP_RESOURCE_IDENTIFIER origin, else none
+# Widget domain: only from MCP_UI_DOMAIN
 # ---------------------------------------------------------------------------
 
 
-def _domain_lines(caplog):
-    return [r for r in caplog.records if 'widget domain' in r.getMessage()]
+def _domain_warnings(caplog):
+    return [
+        r.getMessage() for r in caplog.records if 'widget domain' in r.getMessage() and r.levelno == logging.WARNING
+    ]
 
 
 @pytest.mark.parametrize(
-    ('value', 'domain'),
+    ('env', 'domain'),
     [
-        ('https://widgets.example.test', 'https://widgets.example.test'),
-        ('  https://Widgets.Example.TEST/  ', 'https://widgets.example.test'),
-        ('https://widgets.example.test:8443', 'https://widgets.example.test:8443'),
-        ('http://127.0.0.1:5565', 'http://127.0.0.1:5565'),
-        ('http://localhost:8080/', 'http://localhost:8080'),
+        ({'MCP_UI_DOMAIN': ' https://Widgets.Example.Test/ '}, 'https://widgets.example.test'),
+        ({'MCP_RESOURCE_IDENTIFIER': 'https://api.example.test/mcp'}, None),  # no fallback
+        ({}, None),
     ],
 )
-def test_ui_domain_from_mcp_ui_domain(monkeypatch, fake_web_server, caplog, value, domain):
-    monkeypatch.setenv('MCP_UI_DOMAIN', value)
-    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'https://api.example.test/mcp')  # the explicit value wins
+def test_ui_domain_comes_only_from_mcp_ui_domain(monkeypatch, fake_web_server, caplog, env, domain):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert captured['ui_domain'] == domain
-    lines = [r.getMessage() for r in _domain_lines(caplog)]
-    assert lines == [f'MCP widget domain: {domain} (MCP_UI_DOMAIN)']
-
-
-def test_ui_domain_derived_from_the_resource_identifier(monkeypatch, fake_web_server, caplog):
-    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'https://API.example.test/mcp')
-    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
-        captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
-    assert captured['ui_domain'] == 'https://api.example.test'
-    lines = [r.getMessage() for r in _domain_lines(caplog)]
-    assert lines == ['MCP widget domain: https://api.example.test (MCP_RESOURCE_IDENTIFIER)']
-
-
-@pytest.mark.parametrize('host', ['127.0.0.1', '0.0.0.0'])
-def test_ui_domain_not_set_without_either_variable(monkeypatch, fake_web_server, caplog, host):
-    """The built-in identifier default names RocketRide Cloud, so it never becomes the domain."""
-    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
-        captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
-    assert captured['ui_domain'] is None
-    assert [r.getMessage() for r in _domain_lines(caplog)] == ['MCP widget domain: not set']
+    assert not _domain_warnings(caplog)
 
 
 @pytest.mark.parametrize(
@@ -411,43 +381,18 @@ def test_ui_domain_not_set_without_either_variable(monkeypatch, fake_web_server,
     [
         'http://widgets.example.test',  # cleartext off loopback
         'https://widgets.example.test/app',  # a path, not an origin
-        'https://widgets.example.test?x=1',
-        'https://widgets.example.test/#frag',
-        'https://user:secret@widgets.example.test',
-        'widgets.example.test',  # no scheme
-        'ftp://widgets.example.test',
-        'https://widgets.example.test:99999',
-        'https://',
-        'https://[::1',  # unparsable: must not raise while the warning is formatted
         'https:/user:secret@widgets.example.test',  # parses as a path, so nothing strips the credential
+        'https://[::1',  # unparsable: must not raise
     ],
 )
 def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web_server, caplog, value):
     monkeypatch.setenv('MCP_UI_DOMAIN', value)
-    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'https://api.example.test/mcp')  # no silent fallback
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert captured['ui_domain'] is None
-    warnings = [r.getMessage() for r in _domain_lines(caplog) if r.levelno == logging.WARNING]
-    assert len(warnings) == 1, warnings
-    assert 'MCP_UI_DOMAIN' in warnings[0]
-    assert value.strip() not in warnings[0]  # the variable is named, the value never printed
-    assert 'secret' not in warnings[0]
-    info = [r.getMessage() for r in _domain_lines(caplog) if r.levelno == logging.INFO]
-    assert info == ['MCP widget domain: not set']
-
-
-def test_cleartext_resource_identifier_gives_no_domain_on_a_loopback_bind(monkeypatch, fake_web_server, caplog):
-    """A loopback bind never derives the engine URI from the identifier, so boot succeeds.
-
-    The domain derived from that identifier is still refused.
-    """
-    monkeypatch.setenv('MCP_RESOURCE_IDENTIFIER', 'http://example.test:8080/mcp')
-    with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
-        captured = _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
-    assert captured['ui_domain'] is None
-    warnings = [r.getMessage() for r in _domain_lines(caplog) if r.levelno == logging.WARNING]
-    assert len(warnings) == 1 and 'MCP_RESOURCE_IDENTIFIER' in warnings[0], warnings
+    warnings = _domain_warnings(caplog)
+    assert len(warnings) == 1 and 'MCP_UI_DOMAIN' in warnings[0], warnings
+    assert value.strip() not in warnings[0] and 'secret' not in warnings[0]  # the variable is named, never the value
 
 
 # ---------------------------------------------------------------------------

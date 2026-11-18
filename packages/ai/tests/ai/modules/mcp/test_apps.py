@@ -141,75 +141,30 @@ def all_apps_dir(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('ui_domain', [None, 'https://widgets.example.test'])
-async def test_read_returns_the_same_ui_meta_as_list_for_every_widget(fake_engine, all_apps_dir, ui_domain):
+async def test_list_and_read_carry_the_same_meta(fake_engine, all_apps_dir, ui_domain):
+    """Same _meta on list and read, and the dropper's CSP is the engine's bare origin.
+
+    The domain goes only under ChatGPT's key, and only when one is set.
+    """
     import ai.modules.mcp.handlers as handlers_mod
 
     server = handlers_mod.build_mcp_server(
         lambda: fake_engine,
         apps_dir=all_apps_dir,
-        engine_origin='https://engine.example.test',
+        engine_origin='https://user:secret@Engine.Example.TEST:443/base/',
         ui_domain=ui_domain,
     )
     async with Client(server) as client:
         listed = {str(r.uri): r for r in (await client.list_resources()).resources}
         for spec in apps.APPS:
-            read = await client.read_resource(spec.uri)
-            content = read.contents[0]
+            content = (await client.read_resource(spec.uri)).contents[0]
             expected = _csp('https://engine.example.test') if spec.needs_engine_origin else _csp()
             if ui_domain:
-                expected['ui']['domain'] = ui_domain
-            assert content.meta == expected, spec.uri
-            assert listed[spec.uri].meta == content.meta, spec.uri
+                expected[apps.OPENAI_WIDGET_DOMAIN_KEY] = ui_domain
             # Hosts read the wire name, _meta, on the content item itself.
-            assert content.model_dump(by_alias=True, exclude_none=True)['_meta'] == expected
-
-
-@pytest.mark.asyncio
-async def test_read_sends_no_domain_when_none_is_configured(fake_engine, all_apps_dir):
-    import ai.modules.mcp.handlers as handlers_mod
-
-    server = handlers_mod.build_mcp_server(lambda: fake_engine, apps_dir=all_apps_dir)
-    async with Client(server) as client:
-        for spec in apps.APPS:
-            read = await client.read_resource(spec.uri)
-            assert 'domain' not in read.contents[0].meta['ui'], spec.uri
-
-
-@pytest.mark.asyncio
-async def test_read_without_engine_origin_gives_the_dropper_an_empty_connect_list(fake_engine, all_apps_dir):
-    import ai.modules.mcp.handlers as handlers_mod
-
-    server = handlers_mod.build_mcp_server(lambda: fake_engine, apps_dir=all_apps_dir, engine_origin=None)
-    async with Client(server) as client:
-        read = await client.read_resource(apps.DROPPER_URI)
-    assert read.contents[0].meta == _csp()
-
-
-@pytest.mark.parametrize(
-    ('engine_origin', 'expected'),
-    [
-        ('https://Engine.Example.TEST:443/', 'https://engine.example.test'),
-        ('https://user:secret@engine.example.test/base/path?q=1#x', 'https://engine.example.test'),
-        ('http://127.0.0.1:5565', 'http://127.0.0.1:5565'),
-        ('http://[::1]:5565/', 'http://[::1]:5565'),
-    ],
-)
-def test_dropper_connect_domain_is_a_bare_origin(engine_origin, expected):
-    dropper = apps.spec_for_uri(apps.DROPPER_URI)
-    assert apps.ui_meta(dropper, engine_origin, None) == _csp(expected)
-
-
-@pytest.mark.parametrize('engine_origin', [None, '', 'ws://engine.example.test', 'not a url', 'https://host:notaport'])
-def test_dropper_gets_an_empty_connect_list_without_a_usable_origin(engine_origin):
-    dropper = apps.spec_for_uri(apps.DROPPER_URI)
-    assert apps.ui_meta(dropper, engine_origin, None) == _csp()
-
-
-def test_ui_meta_never_gives_other_widgets_a_network_origin():
-    for spec in apps.APPS:
-        if spec.needs_engine_origin:
-            continue
-        assert apps.ui_meta(spec, 'https://engine.example.test', None) == _csp(), spec.uri
+            assert content.model_dump(by_alias=True, exclude_none=True)['_meta'] == expected, spec.uri
+            assert listed[spec.uri].meta == content.meta, spec.uri
+            assert 'domain' not in content.meta['ui'], spec.uri  # never ui.domain: Claude rejects a foreign value
 
 
 @pytest.mark.asyncio

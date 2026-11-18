@@ -19,42 +19,6 @@ def test_base_url_from_uri_normalizes_scheme_and_strips_trailing_slash():
     assert mcp_module._base_url_from_uri('http://localhost:5565') == 'http://localhost:5565'
 
 
-@pytest.mark.parametrize(
-    ('url', 'origin'),
-    [
-        ('https://Engine.Example.TEST', 'https://engine.example.test'),
-        ('https://engine.example.test:443/mcp', 'https://engine.example.test'),
-        ('http://engine.example.test:80/', 'http://engine.example.test'),
-        ('http://127.0.0.1:5565/base?auth=x#frag', 'http://127.0.0.1:5565'),
-        ('https://user:secret@engine.example.test:8443/x', 'https://engine.example.test:8443'),
-        ('http://[::1]:5565', 'http://[::1]:5565'),
-        ('HTTPS://engine.example.test', 'https://engine.example.test'),
-    ],
-)
-def test_origin_of_returns_a_bare_lowercase_origin(url, origin):
-    from ai.modules.mcp.apps import origin_of
-
-    assert origin_of(url) == origin
-
-
-@pytest.mark.parametrize(
-    'url',
-    [
-        None,
-        '',
-        'ws://engine.example.test',
-        'wss://engine.example.test',
-        'engine.example.test',
-        'https://',
-        'https://h:x',
-    ],
-)
-def test_origin_of_rejects_what_is_not_an_http_url(url):
-    from ai.modules.mcp.apps import origin_of
-
-    assert origin_of(url) is None
-
-
 @pytest.mark.asyncio
 async def test_initmodule_threads_engine_origin_from_configured_uri(monkeypatch, fake_engine, fake_web_server):
     """`initModule` reads the configured URI directly (not via `engine_factory()

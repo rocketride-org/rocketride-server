@@ -497,20 +497,18 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
 ENV_UI_DOMAIN = 'MCP_UI_DOMAIN'
 
 
-def _widget_domain(value: str, bare: bool) -> Optional[str]:
-    """Normalize a widget domain candidate to an origin, or None if it is not usable.
+def _widget_domain(value: str) -> Optional[str]:
+    """Return ``value`` as an origin, or None if it is not a usable widget domain.
 
-    The domain must be https, or http on a loopback host (a local engine). With
-    ``bare`` the value must already be an origin: no path, query, fragment or
-    user info. Without it (a value derived from the resource identifier) the
-    path is expected and dropped.
+    It must be a bare https origin (http only on a loopback host, a local
+    engine): no path, query, fragment or user info.
     """
     try:
         parts = urlsplit(value)
         _ = parts.port  # raises ValueError for a bad port
     except ValueError:
         return None
-    if bare and (parts.path not in ('', '/') or parts.query or parts.fragment or '@' in parts.netloc):
+    if parts.path not in ('', '/') or parts.query or parts.fragment or '@' in parts.netloc:
         return None
     origin = origin_of(value)
     if origin is None:
@@ -520,47 +518,29 @@ def _widget_domain(value: str, bare: bool) -> Optional[str]:
     return origin
 
 
-def _resolve_ui_domain() -> Tuple[Optional[str], str]:
-    """Resolve the widget domain sent as ``_meta.ui.domain`` on every widget.
+def _resolve_ui_domain() -> Optional[str]:
+    """Resolve the ChatGPT widget domain from ``MCP_UI_DOMAIN``, or None.
 
-    A host such as ChatGPT gives each app's widgets a sandbox origin keyed by
-    this value, and an app that ships widgets must declare one. Rules, first
-    match wins:
-
-    1. ``MCP_UI_DOMAIN``: the domain for this environment, as an origin.
-    2. ``MCP_RESOURCE_IDENTIFIER`` set explicitly: the origin of that
-       identifier. Each hosted environment already sets it, so each gets its
-       own domain without a new setting. The built-in default identifier
-       names RocketRide Cloud, so it is never used here.
-    3. Neither: no domain. A self-hosted engine sends none and the host uses
-       its default.
-
-    A value that is not an https origin (or http on loopback) is ignored with
-    one warning, and no domain is sent. It never stops the engine.
-
-    Returns:
-        Tuple[Optional[str], str]: The domain, or None, and where it came from.
+    Each host has its own format for a widget domain, and Claude shows an error
+    instead of the app when the value is not the one it derives from the
+    connector URL. So the domain is only ever sent as ChatGPT's own key,
+    ``openai/widgetDomain`` (see ``apps.ui_meta``), and only when the operator
+    sets it. A value that is not an https origin (or http on loopback) is
+    ignored with one warning; it never stops the engine.
     """
-    explicit = (os.environ.get(ENV_UI_DOMAIN) or '').strip()
-    if explicit:
-        source, value, bare = ENV_UI_DOMAIN, explicit, True
-    else:
-        value = (os.environ.get(oauth_resource.ENV_RESOURCE) or '').strip()
-        if not value:
-            return None, 'not set'
-        source, bare = oauth_resource.ENV_RESOURCE, False
-    domain = _widget_domain(value, bare)
+    value = (os.environ.get(ENV_UI_DOMAIN) or '').strip()
+    if not value:
+        return None
+    domain = _widget_domain(value)
     if domain is None:
         # Name the variable, never the value: a malformed value can carry a credential
         # where a parser would not find user info to strip.
         logger.warning(
-            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback)%s. '
-            'No widget domain is sent.',
-            source,
-            ', with no path, query or user info' if bare else '',
+            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback), '
+            'with no path, query or user info. No widget domain is sent.',
+            ENV_UI_DOMAIN,
         )
-        return None, f'{source} ignored'
-    return domain, source
+    return domain
 
 
 def _log_bind_mode(bind_host: str, local_engine: bool, host_configured: bool) -> None:
@@ -683,11 +663,8 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # EngineClient just to read a string. See handlers.py's docstring.
     # ------------------------------------------------------------------
     engine_origin = _base_url_from_uri(engine_uri)
-    ui_domain, ui_domain_source = _resolve_ui_domain()
-    if ui_domain:
-        logger.info('MCP widget domain: %s (%s)', ui_domain, ui_domain_source)
-    else:
-        logger.info('MCP widget domain: not set')
+    ui_domain = _resolve_ui_domain()
+    logger.info('MCP widget domain for ChatGPT: %s', ui_domain or 'not set')
     mcp_server = build_mcp_server(
         engine_factory,
         task_registry,

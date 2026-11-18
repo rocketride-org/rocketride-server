@@ -19,6 +19,8 @@ import mcp.types as types
 
 UI_MIME_TYPE = 'text/html;profile=mcp-app'
 UI_EXTENSION_ID = 'io.modelcontextprotocol/ui'
+# ChatGPT's alias for the widget domain (its docs: a compatibility alias for _meta.ui.domain).
+OPENAI_WIDGET_DOMAIN_KEY = 'openai/widgetDomain'
 
 PIPELINES_TABLE_URI = 'ui://rocketride/pipelines-table.html'
 DROPPER_URI = 'ui://rocketride/dropper.html'
@@ -109,17 +111,22 @@ def ui_meta(spec: AppSpec, engine_origin: Optional[str], ui_domain: Optional[str
     ``frameDomains`` and ``baseUriDomains`` are left out so the host's default
     of none applies. Only the dropper talks to the network: it uploads to the
     engine, so its ``connectDomains`` holds the engine origin when there is one.
-    ``domain`` is added only when a widget domain is configured.
+
+    ``ui_domain`` (``MCP_UI_DOMAIN``) goes only under ChatGPT's own key,
+    ``openai/widgetDomain``, never as ``ui.domain``: each host has its own
+    domain format, and Claude shows an error instead of the app when
+    ``ui.domain`` is not its hash of the connector URL. Hosts other than
+    ChatGPT get no domain and use their default sandbox origin.
     """
     connect: List[str] = []
     if spec.needs_engine_origin:
         origin = origin_of(engine_origin)
         if origin:
             connect.append(origin)
-    ui: dict = {'csp': {'connectDomains': connect, 'resourceDomains': []}}
+    meta: dict = {'ui': {'csp': {'connectDomains': connect, 'resourceDomains': []}}}
     if ui_domain:
-        ui['domain'] = ui_domain
-    return {'ui': ui}
+        meta[OPENAI_WIDGET_DOMAIN_KEY] = ui_domain
+    return meta
 
 
 def list_ui_resources(

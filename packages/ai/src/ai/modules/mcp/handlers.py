@@ -137,10 +137,10 @@ def build_mcp_server(
             in ``__init__.initModule``). Only then are ``local_engine_only``
             tools such as ``send_files`` listed and dispatched; the default is
             the deployed surface. Ignored when ``registry`` is passed.
-        ui_domain: The widget domain (an origin) sent as ``_meta.ui.domain``
-            on every widget resource, resolved once by ``__init__.initModule``
-            from ``MCP_UI_DOMAIN`` or ``MCP_RESOURCE_IDENTIFIER``. None sends
-            no domain, and the host uses its default.
+        ui_domain: ChatGPT's widget domain (an origin) from ``MCP_UI_DOMAIN``,
+            resolved once by ``__init__.initModule`` and sent on every widget
+            resource as ``openai/widgetDomain`` (see ``apps.ui_meta``). None
+            sends no domain, and every host uses its default.
 
     Returns:
         A configured mcp.server.lowlevel.Server ready to run.

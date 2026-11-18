@@ -48,7 +48,7 @@ when a host sends none.
 
 ### Widget security metadata
 
-Every widget resource carries the same `_meta.ui` on its `resources/list`
+Every widget resource carries the same `_meta` on its `resources/list`
 entry and on its `resources/read` content item. Hosts that follow the MCP Apps
 spec, ChatGPT among them, read it from the `resources/read` result.
 
@@ -58,9 +58,11 @@ spec, ChatGPT among them, read it from the `resources/read` result.
   `connectDomains` holds the engine's origin, where it uploads files. The
   pipelines table and the trace viewer call tools through the host and
   declare no origins.
-- `domain`: the widget domain, from `MCP_UI_DOMAIN` or the origin of
-  `MCP_RESOURCE_IDENTIFIER` (see [Self-hosting](/connect/mcp/http/self-hosting)).
-  It is left out when neither is set.
+- `openai/widgetDomain` (next to `ui`, not inside it): ChatGPT's widget
+  domain, from `MCP_UI_DOMAIN` (see [Self-hosting](/connect/mcp/http/self-hosting)).
+  It is left out when that is unset. The server never sends `ui.domain`:
+  each host has its own format for it, so other hosts get no domain and use
+  their default sandbox origin.
 
 ```json
 {
@@ -69,9 +71,9 @@ spec, ChatGPT among them, read it from the `resources/read` result.
   "text": "<!doctype html>...",
   "_meta": {
     "ui": {
-      "csp": { "connectDomains": ["https://engine.example.com"], "resourceDomains": [] },
-      "domain": "https://engine.example.com"
-    }
+      "csp": { "connectDomains": ["https://engine.example.com"], "resourceDomains": [] }
+    },
+    "openai/widgetDomain": "https://widgets.example.com"
   }
 }
 ```
