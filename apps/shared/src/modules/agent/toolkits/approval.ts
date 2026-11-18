@@ -666,8 +666,8 @@ export class Approvals {
 		if (target && this.prefs().mode === 'auto') return refuseForeign();
 		if (!this.o.ask) throw new Error(noChat(card.title));
 
-		// without settings an Always click would save nothing
-		const asking = this.o.ask(rule.grant && this.o.settings ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
+		// without settings an Always click would save nothing; on a run this conversation did not start the grant would not cover the next one
+		const asking = this.o.ask(rule.grant && this.o.settings && (!target || own()) ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
 		// a switch to Auto, or the grant turned on, decides again: it approves the card, except for a run this conversation did not start, whose card waits for the user
 		let viaSettings: RunRecord | null = null;
 		const off = this.o.settings?.subscribe(() => {

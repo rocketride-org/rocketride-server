@@ -1093,6 +1093,7 @@ test('with runStops on in Ask mode, terminate stops its own run with no card aft
 
 	await assert.rejects(tool.execute({ method: 'terminate', params: [OTHER] }), /declined/);
 	assert.equal(asked.cards.length, 1, 'a run it did not start shows a card, not a refusal');
+	assert.equal(asked.cards[0]?.alwaysLabel, undefined, 'that card offers no Always allow: the grant would not cover the next such run');
 
 	await assert.rejects(toolIn('auto').execute({ method: 'terminate', params: [OTHER] }), /did not start the pipeline run Daily digest .*Call ask_user/);
 	assert.equal(asked.cards.length, 1, 'Auto refused it with no card');
