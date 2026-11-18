@@ -63,7 +63,11 @@ test('T56 handleLogout awaits a FINAL appRoot.teardownAll(3000, { final: true })
 	const teardowns = [...body.matchAll(/teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)/g)].map((m) => m.index!);
 	assert.ok(teardowns.length >= 1, 'handleLogout calls teardownAll(3000)');
 	assert.match(body, /await[^;]*teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)|teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)\s*\.then|teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)\s*\.finally/, 'and waits for it');
-	for (const at of logouts) assert.ok(teardowns.some((t) => t < at), `a teardownAll(3000) precedes the cm.logout() at ${at}`);
+	for (const at of logouts)
+		assert.ok(
+			teardowns.some((t) => t < at),
+			`a teardownAll(3000) precedes the cm.logout() at ${at}`
+		);
 });
 
 test('T56 handleBackToHome is async and awaits a FINAL teardownAll(1500, { final: true }) before cm.logout(), and only then navigates', () => {
