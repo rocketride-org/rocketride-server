@@ -43,6 +43,7 @@ import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deplo
 import type { DeploySnapshot } from './panels/deploy';
 import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
+import { registryIdOf } from 'rocketride';
 
 // =============================================================================
 // CONSTANTS
@@ -409,7 +410,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 			const open = openDeploymentRef.current;
 			const ev = raw as { event?: string; body?: { projectId?: string; teamId?: string; action?: string; runKind?: string } };
 			if (open) {
-				if (ev.event === 'apaevt_deploy' && ev.body?.projectId === pid && (ev.body.teamId === open.teamId || ev.body.action === 'publish')) {
+				if (ev.event === 'apaevt_deploy' && ev.body && ev.body.projectId === registryIdOf(pid, developerId) && (ev.body.teamId === open.teamId || ev.body.action === 'publish')) {
 					scheduleDeploymentRefetch();
 				} else if (ev.event === 'apaevt_task' && ev.body?.runKind === 'deploy' && ev.body.teamId === open.teamId) {
 					scheduleDeploymentRefetch();
@@ -422,7 +423,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				}
 			}
 		});
-	}, [scheduleDeploymentRefetch]);
+	}, [scheduleDeploymentRefetch, developerId]);
 
 	// --- Engine calls on the realm client --------------------------------------
 

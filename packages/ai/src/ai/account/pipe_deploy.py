@@ -83,7 +83,7 @@ class PublishRow:
     Attributes:
         kind: The kind of the artifact the row points at (``pipe``, ``app``).
         org_id: The publisher's org.
-        project_id: The short id.
+        project_id: The registry name ``developerId.pipeId`` the row is keyed by.
         slot: The audience slot: ``user~{uid}``, a team id, or ``~public``.
         version: The registry version the row points at.
         state: The binding lifecycle state (``enabled``/``disabled``/...).
@@ -110,7 +110,7 @@ class Pin:
         rung: ``'me'``, ``'team'`` or ``'public'``.
         deployment: Where the publication lives: the publisher's org, the
             audience slot (``user~{uid}``, a team id, or ``~public``) and the
-            short id. Stamped on the control; disable/remove of this
+            registry name ``developerId.pipeId``. Stamped on the control; disable/remove of this
             publication releases the control's hold. On ``@team`` its
             ``team_id`` is the ANSWERING team.
         version: The registry version the publication points at.
@@ -270,7 +270,7 @@ async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequen
     Args:
         account: The account singleton.
         org_id: The publisher's org.
-        project_id: The short id.
+        project_id: The registry name ``developerId.pipeId`` (the deploy door stores it).
         slots: The audience slots to read, in order.
 
     Returns:
@@ -356,7 +356,7 @@ async def resolve_pins(
             the key's ``endpoints`` scope excludes the address.
     """
     from ai.account import account
-    from ai.modules.task.address import parse_address
+    from ai.modules.task.address import build_address, parse_address
 
     # Step 1: who asks, for what, and whether the key may ask for it
     if account_info is None:
@@ -366,7 +366,10 @@ async def resolve_pins(
     probe = teams_to_probe(account_info, team)
     org_id, developer_id = _org_of(account_info)
     user_id = getattr(account_info, 'userId', '') or ''
-    pipe_id = parsed.pipe_id
+    # The registry name every publish row is keyed by: the pipe id inside
+    # the publisher's developer namespace, exactly as the deploy door stored
+    # it (plan 2.3). The rows are scoped by it, never by the bare pipe id.
+    pipe_name = build_address(parsed.developer_id, parsed.pipe_id)
     own_namespace = bool(developer_id) and parsed.developer_id == developer_id and bool(org_id)
     pins: List[Pin] = []
 
@@ -374,7 +377,7 @@ async def resolve_pins(
     if own_namespace:
         me_slot = f'user~{user_id}' if user_id else ''
         slots = ([me_slot] if me_slot else []) + probe
-        rows = await publish_rows(account, org_id, pipe_id, slots)
+        rows = await publish_rows(account, org_id, pipe_name, slots)
         if me_slot:
             pin = _serving_pin(rows, kind, 'me', me_slot)
             if pin is not None:
@@ -388,7 +391,7 @@ async def resolve_pins(
     # Step 3: @public, the publisher's store publication
     publisher_org = org_id if own_namespace else await account.get_org_of_developer_id(parsed.developer_id)
     if publisher_org:
-        rows = await publish_rows(account, publisher_org, pipe_id, [PUBLIC_AUDIENCE_KEY])
+        rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE_KEY])
         pin = _serving_pin(rows, kind, 'public', PUBLIC_AUDIENCE_KEY)
         if pin is not None:
             pins.append(pin)

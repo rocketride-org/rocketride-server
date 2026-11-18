@@ -69,17 +69,17 @@ export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefD
  * resolved by the shared ProjectView against the pipeline it holds.
  *
  * @param deployments - `client.deploy.list()` rows (all projects).
- * @param projectId - The project whose deployments to keep.
+ * @param registryId - The pipe's registry name (`registryIdOf`), the id every row carries.
  * @param teams - The resolved team refs (name lookup).
  * @param ownUserId - The caller's user id (personal-row labeling).
  * @returns The "where live" rows for the lifecycle panel.
  */
-export function mapTeamDeploymentRows(deployments: Deployment[], projectId: string, teams: DeployTeamRefDTO[], ownUserId = ''): TeamDeploymentRowDTO[] {
+export function mapTeamDeploymentRows(deployments: Deployment[], registryId: string, teams: DeployTeamRefDTO[], ownUserId = ''): TeamDeploymentRowDTO[] {
 	return (
 		deployments
 			// A row without a teamId has no identity to key or address in the
 			// where-live panel — drop it (same guard resolveDeployTeams applies).
-			.filter((dep) => dep.projectId === projectId && dep.state !== 'removed' && Boolean(dep.teamId))
+			.filter((dep) => dep.projectId === registryId && dep.state !== 'removed' && Boolean(dep.teamId))
 			.map((dep) => {
 				// Normalize the schedule records (cron string, enabled default).
 				const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;

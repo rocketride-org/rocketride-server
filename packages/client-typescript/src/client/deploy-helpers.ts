@@ -133,6 +133,50 @@ export function resolveDeployTeams(client: { getAccountInfo(): ConnectResult | u
 	return [...me, ...seen.values()];
 }
 
+// =============================================================================
+// REGISTRY NAMES
+// =============================================================================
+
+/**
+ * The slug an app manifest names: the id with anything up to and including
+ * its LAST dot discarded.
+ *
+ * An app's files carry only the slug (`appManifest.id`, the `.rrapp`
+ * trigger, the descriptor literal); the developer namespace is attached by
+ * the organization that deploys it, never read from the file. A manifest
+ * written before this rule may still carry `<developerId>.<slug>`: the
+ * prefix is ignored as if it had never been specified. Pipes are stricter
+ * (a dotted `project_id` is refused), so this is for apps only.
+ *
+ * @param manifestId - `appManifest.id` as written.
+ * @returns The slug ('' when the id is missing).
+ */
+export function appSlugOf(manifestId: string | null | undefined): string {
+	const id = typeof manifestId === 'string' ? manifestId.trim() : '';
+	if (!id) return '';
+	const dot = id.lastIndexOf('.');
+	return dot >= 0 ? id.slice(dot + 1) : id;
+}
+
+/**
+ * The registry name an app or pipe is deployed, published and resolved under.
+ *
+ * Every registry row (`deployment_projects`, `deployment_artifacts`,
+ * `published_artifacts`, `deployment_history`), every deploy-change event
+ * and every `apaevt_build*` event carries `<developerId>.<slug>`. Clients
+ * SEND the slug (the server composes the name from the deploying
+ * organization); this is the value to MATCH rows and events against.
+ *
+ * @param slug - The short id the file carries.
+ * @param developerId - The caller organization's developer id, if known.
+ * @returns The registry name, or '' when the developer id is unknown (no
+ *          row can match: nothing deploys without one).
+ */
+export function registryIdOf(slug: string, developerId: string | null | undefined): string {
+	if (!slug || !developerId) return '';
+	return slug.includes('.') ? slug : `${developerId}.${slug}`;
+}
+
 /**
  * Resolves a team id to its display name, falling back to the id. Personal
  * (`user~`) owner keys render as "Me" for the caller's own space and

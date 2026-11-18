@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from rocketlib import debug
 
 from ai.account import account
-from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of
+from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required
 from ai.account.models import resolve_team_permissions
 from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, write_pipe_content
 from ai.common.dap import DAPConn, TransportBase
@@ -127,6 +127,47 @@ class _DeployBase(DAPConn):
             'display': getattr(self._account_info, 'displayName', '') or '',
             'email': getattr(self._account_info, 'email', '') or '',
         }
+
+    def _registry_id(self, project_id: Any) -> str:
+        """
+        The registry name a client's ``projectId`` argument addresses.
+
+        A ``.pipe`` file carries only the SHORT pipe id; the name a pipe is
+        registered, published and resolved under is ``developerId.pipeId``,
+        the developer id being the one the PUBLISHING organization holds
+        (plan 2.3, B37: one namespace per developer id across apps, pipes
+        and nodes). Clients therefore send the short id and this door
+        composes the stored name from the caller's organization; an id that
+        already carries its namespace (an app id, or a pipe name a client
+        read back from a registry row) is checked against the caller's
+        namespace and passed through.
+
+        Args:
+            project_id: The client's ``projectId`` argument.
+
+        Returns:
+            The two-segment registry name.
+
+        Raises:
+            ValueError: No ``projectId``, or the organization has no developer
+                id yet (``developer_id_required`` names the ways to claim one),
+                or the name is outside the caller's namespace.
+            TaskError: ``TASK_INVALID_ARGUMENT`` when a segment breaks the
+                address grammar.
+        """
+        if not project_id:
+            raise ValueError('projectId is required')
+        # No organization, no namespace: the membership refusal comes first
+        self._org_id()
+        developer_id = _developer_id_of(self)
+        if '.' in str(project_id):
+            full_name = str(project_id)
+        else:
+            if not developer_id:
+                raise ValueError(developer_id_required('Deploying or publishing a pipeline'))
+            full_name = f'{developer_id}.{validate_segment(project_id, "projectId")}'
+        _assert_owns_namespace(self, full_name)
+        return full_name
 
     def _teams_with(self, perm: str) -> List[str]:
         """Ids of the caller's teams that grant ``perm`` (resolver-expanded)."""
@@ -391,15 +432,16 @@ class DeployCommands(_DeployBase):
         if not project_id:
             raise ValueError('pipeline.project_id is required')
 
-        # The file carries only the SHORT id; the full name is DERIVED from
-        # the actor's developer namespace, never read from the file, so no
-        # org can produce another's namespace (plan S7). The namespace
+        # The file carries only the SHORT id; the registry name is DERIVED
+        # from the actor's developer namespace, never read from the file, so
+        # no org can produce another's namespace (plan S7). The namespace
         # guarantee is the same one apps pass; the grammar (dot-free short
-        # id, dot-free component ids) is the address grammar.
+        # id, dot-free component ids) is the address grammar. Every registry
+        # row below is keyed by the full name; the artifact keeps the short id.
         validate_segment(project_id, 'project_id')
         validate_component_ids(pipeline)
-        full_name = f'{_developer_id_of(self) or ""}.{project_id}'
-        _assert_owns_namespace(self, full_name)
+        full_name = self._registry_id(project_id)
+        project_id = full_name
 
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
@@ -513,9 +555,7 @@ class DeployCommands(_DeployBase):
 
     async def _deploy_versions(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """The org-registry versions of a project (the version strip)."""
-        project_id = args.get('projectId')
-        if not project_id:
-            raise ValueError('projectId is required')
+        project_id = self._registry_id(args.get('projectId'))
 
         # Registry reads need org membership only (_org_id raises without
         # one) — any user in the org can see what is deployed.
@@ -537,10 +577,8 @@ class DeployCommands(_DeployBase):
         built from this: the registry is the source of truth for what a
         deployed version IS — never a local file, never a running task.
         """
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         version = args.get('version')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not isinstance(version, int):
             raise ValueError('version is required and must be an integer')
 
@@ -559,9 +597,7 @@ class DeployCommands(_DeployBase):
 
     async def _deploy_history(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """The immutable audit trail for a project (optionally one team's)."""
-        project_id = args.get('projectId')
-        if not project_id:
-            raise ValueError('projectId is required')
+        project_id = self._registry_id(args.get('projectId'))
         # Unscoped history needs org membership only; a team-scoped trail
         # goes through the visibility model (admin: any scope; user: own
         # personal space + member teams).
