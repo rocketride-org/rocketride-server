@@ -49,7 +49,7 @@ Error IPythonInstanceBase::getPermissions(Entry &entry) noexcept {
         auto pythonObject = py::cast(&entry);
 
         // Call it
-        m_pyInstance.attr("getPermissions")(pythonObject);
+        boundInstance().attr("getPermissions")(pythonObject);
         return {};
     };
 
@@ -84,7 +84,7 @@ ErrorOr<size_t> IPythonInstanceBase::getPermissions(
         auto pythonObject = py::cast(&entries);
 
         // Call it
-        auto res = m_pyInstance.attr("getPermissionsBulk")(pythonObject);
+        auto res = boundInstance().attr("getPermissionsBulk")(pythonObject);
         if (res == py::none()) return {};
         value = res.cast<size_t>();
         return {};

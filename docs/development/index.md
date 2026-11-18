@@ -168,6 +168,8 @@ is unpublished — it never reaches docs.rocketride.org.
   minidump
 - [MCP Module](engine/mcp-module.md) -- the built-in HTTP MCP server: engine-client
   seam, credentials catalog gates, widget workspace
+- [Python Call Lifetime](engine/python-call-lifetime.md) -- the handle behind
+  `self.instance`, the call gate, late returns and the teardown drain
 
 ### Nodes
 

@@ -38,7 +38,7 @@ Error IPythonInstanceBase::writeQuestions(
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
         // Call it
-        m_pyInstance.attr("writeQuestions")(question);
+        boundInstance().attr("writeQuestions")(question);
         return {};
     };
 
@@ -66,7 +66,7 @@ Error IPythonInstanceBase::writeAnswers(
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
         // Call it
-        m_pyInstance.attr("writeAnswers")(answers);
+        boundInstance().attr("writeAnswers")(answers);
         return {};
     };
 

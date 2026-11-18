@@ -202,11 +202,11 @@ Error IPythonEndpointBase::endEndpoint() noexcept {
         return ccode;
     };
 
-    // Call it
-    if (auto ccode = callPython(python)) return ccode;
-
-    // And call the parent
-    return Parent::endEndpoint();
+    // The engine's teardown runs even when the hook raises; the hook's
+    // error is the one returned when both fail
+    const auto ccode = callPython(python);
+    const auto parentCcode = Parent::endEndpoint();
+    return ccode || parentCcode;
 };
 
 }  // namespace engine::store::pythonBase

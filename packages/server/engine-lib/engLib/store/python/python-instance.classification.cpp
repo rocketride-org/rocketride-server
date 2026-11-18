@@ -49,7 +49,7 @@ Error IPythonInstanceBase::writeClassifications(
             engine::python::pyjson::jsonToDict(classificationRules);
 
         // Call it
-        m_pyInstance.attr("writeClassifications")(
+        boundInstance().attr("writeClassifications")(
             pyClassifications, pyClassificationsPolicy, pyClassificationsRules);
         return {};
     };
@@ -82,7 +82,7 @@ Error IPythonInstanceBase::writeClassificationContext(
             engine::python::pyjson::jsonToDict(classifications);
 
         // Call it
-        m_pyInstance.attr("writeClassificationContext")(pyClassifications);
+        boundInstance().attr("writeClassificationContext")(pyClassifications);
         return {};
     };
 

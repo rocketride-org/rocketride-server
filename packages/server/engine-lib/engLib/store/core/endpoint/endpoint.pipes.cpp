@@ -319,6 +319,20 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
     // Create the pipe ptr
     ServicePipe pipe = nullptr;
 
+    // Ends the filters built here when the stack is not published. The gates
+    // close first and then the calls drain: a node may have started a thread
+    // in beginInstance that already calls its filter.
+    // A stack that was not bound has no down links, so the head's deferred
+    // release covers the head only and every other filter releases its
+    // links when it is freed. A stack whose bind failed is already linked
+    // and is released as a whole.
+    const auto endUnpublished = localfcn() {
+        for (const auto &filter : instanceStack) filter->closeGate();
+        auto budget = drainDeadline().load();
+        const bool drained = drainInFlightCalls(instanceStack, budget);
+        endInstanceStack(instanceStack, drained);
+    };
+
     // Create all the instance filters - call the begin as we go along
     // to allow them to add new drivers along the way
     for (size_t i = 0; i < pipeStack.size(); ++i) {
@@ -361,8 +375,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
         // Save it into the pipe
         instance->pipe = pipe;
 
-        // Begin the filter
+        // Begin the filter. One that fails is not in the stack that is ended
+        // below, so its gate is closed here
         if (ccode = instance->beginFilterInstance()) {
+            instance->closeGate();
             instance = {};
             break;
         }
@@ -376,10 +392,7 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
     // the parser which hangs on the thread.join if we don't do this
     if (ccode) {
         // Tell the filters to cleanup
-        for (auto &filter : instanceStack) {
-            // If we have a filter, end it
-            if (filter) filter->endFilterInstance();
-        }
+        endUnpublished();
 
         // And done
         return ccode;
@@ -390,11 +403,24 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
 
+        // Teardown has taken its snapshot: a stack published now would be
+        // neither drained nor ended, so it is ended here, outside the lock
+        if (m_ending) {
+            stackGuard.exec();
+            endUnpublished();
+            return APERR(Ec::PipelineEnded, PipelineEndedMessage);
+        }
+
         // Get the index before pushing
         pipeId = m_instanceStacks.size();
 
-        // Bind the filters
-        if (ccode = bindFilters(pipeId, instanceStack)) return ccode;
+        // Bind the filters. A stack that fails to bind is not published, so
+        // it is ended here, outside the lock
+        if (ccode = bindFilters(pipeId, instanceStack)) {
+            stackGuard.exec();
+            endUnpublished();
+            return ccode;
+        }
 
         // Get a reference to the head - should be "pipe"
         ServiceInstance &filter = instanceStack[0];
@@ -449,6 +475,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
         // Lock the pipes - we are manipulating the pipe stacks
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
+
+        // No pipe, idle or new, is handed out once teardown has started
+        if (m_ending)
+            return APERR(Ec::PipelineEnded, PipelineEndedMessage);
 
         // Loop through them
         for (int i = 0; i < m_instanceStacks.size(); i++) {

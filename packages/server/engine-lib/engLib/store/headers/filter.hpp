@@ -39,6 +39,15 @@ using WordVector = std::vector<StackText>;
 
 //-------------------------------------------------------------------------
 /// @details
+///		The message of the Ec::PipelineEnded error, which refuses an engine
+///		call once its pipeline has ended. Node code compares exc.message
+///		with it, together with the code, so the text is part of the
+///		contract: do not change it.
+//-------------------------------------------------------------------------
+_const auto PipelineEndedMessage = "The pipeline has ended"_tv;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This is the filter driver which all filters/targets/sources must
 ///		implement
 //-------------------------------------------------------------------------
@@ -460,7 +469,157 @@ public:
     //-------------------------------------------------------------
     Debugger debugger;
 
+    //-------------------------------------------------------------
+    /// @details
+    ///		Python-call gate.
+    ///
+    ///		Invariant: the links (endpoint, pipe, global, pDown) and
+    ///		the buffers of a stack's filters are released only when no
+    ///		Python call that passed the gate runs on any filter of that
+    ///		stack: right after a full drain, or by the deferred release
+    ///		below. In a stack whose filters were never linked to each
+    ///		other (a pipe build that failed before its bind) this holds
+    ///		per filter: the head is released when no call runs on the
+    ///		head, and every other filter keeps its links until it is
+    ///		freed. Once a filter's gate is closed, every new Python
+    ///		call on it is refused. No filter object is freed while a
+    ///		Python call into the engine runs on it.
+    ///
+    ///		A Python call enters a callback (cb_*) through forwardTo()
+    ///		(filter-handle.hpp), which creates a CallGuard on the
+    ///		filter before it calls the callback; the callbacks do not
+    ///		create one. The handle members that read a link (next,
+    ///		pipe, currentObject) and putPipe() create a guard of their
+    ///		own. The guard refuses the call when the
+    ///		filter's gate is closed; otherwise it counts the call as in
+    ///		flight. The callback and the code below it read the link
+    ///		members (Binder::callMethods reads endpoint, pipe and
+    ///		pDown); the invariant keeps them valid while the call is
+    ///		counted, also after the stack was ended with its links
+    ///		retained. The guard raises the count and then checks the
+    ///		flag; teardown sets the flag (closeGate()) and then reads
+    ///		the count. Both are seq_cst, so either the guard sees the
+    ///		flag and refuses, or the teardown sees the count. Teardown
+    ///		(endEndpoint()) waits for the calls in flight, closes every
+    ///		gate, reads the count again and waits for the calls still
+    ///		in flight (also one that got in just before its gate
+    ///		closed), and then ends the filters: with no call left it
+    ///		resets their links at once, otherwise it keeps them and
+    ///		arms the deferred release. The link mutex is held only to
+    ///		copy or reset the links, never across a call into Python
+    ///		or a wait.
+    ///
+    ///		A stack ended with its links retained (a call was still
+    ///		running) is released when it becomes idle. The head filter
+    ///		(index 0) carries m_releaseOnIdle, set by
+    ///		armDeferredRelease() after the stack's filters were ended.
+    ///		Every guard that raised the count leaves through leave(),
+    ///		a refused one too: it drops the count and then reads the
+    ///		flag; the teardown sets the flag and then reads the counts.
+    ///		Both are seq_cst, so at least one of them sees the other's
+    ///		write and releases the stack; the flag's exchange makes
+    ///		that happen exactly once. Normally the flag is false and
+    ///		the guard pays one atomic load. The guard holds the filter
+    ///		and the head for that step: once the count has dropped,
+    ///		another thread may release the stack and reset the
+    ///		filter's own link to the head. It lets go of the head, the
+    ///		filter and the endpoint in that order, so on the thread that
+    ///		runs the release the stack's filters are freed before their
+    ///		endpoint.
+    //-------------------------------------------------------------
+    class CallGuard {
+    public:
+        explicit CallGuard(ServiceInstance filter) noexcept(false);
+        ~CallGuard() noexcept;
+
+        CallGuard(const CallGuard &) = delete;
+        CallGuard &operator=(const CallGuard &) = delete;
+
+        /// The filter the call runs on and the head of its stack, both
+        /// held until the guard has left
+        ServiceInstance self;
+        ServicePipe pipe;
+
+    private:
+        /// Drops the count, then releases the stack if it waits for this
+        /// call
+        void leave() noexcept;
+    };
+
+    /// True once the gate is closed: by closeGate() (teardown, or a pipe
+    /// build that is not published), or by endFilterInstance(). The links
+    /// may still be valid then.
+    bool hasEnded() const noexcept {
+        return m_ended.load(std::memory_order_seq_cst);
+    }
+
+    /// Refuses every new Python callback from now on. endFilterInstance()
+    /// sets the same flag; setting it twice is harmless.
+    void closeGate() noexcept {
+        m_ended.store(true, std::memory_order_seq_cst);
+    }
+
+    /// Number of Python callbacks currently running on this filter
+    uint32_t callsInFlight() const noexcept {
+        return m_inFlight.load(std::memory_order_seq_cst);
+    }
+
+    /// Makes the next endFilterInstance() run the filter's end hooks but keep
+    /// endpoint, global, pipe and pDown (and the buffers) intact, because a
+    /// Python call may still be running on this filter or on the binder
+    /// chain below it. The links are released by releaseStackIfIdle() once
+    /// no call runs on the stack, or by the destructor; the flag is consumed
+    /// by the first call that sees it.
+    void retainLinksOnEnd() noexcept {
+        m_retainLinks.store(true, std::memory_order_release);
+    }
+
+    /// Arms the head filter for release on idle and releases the stack at once
+    /// if it is already idle. Call after the stack's filters were ended.
+    void armDeferredRelease() noexcept;
+
+    /// Returns the next filter down the chain, copied under the link lock;
+    /// empty if there is none or the links were released
+    ServiceInstance downLink() const noexcept;
+
+private:
+    /// Drops endpoint, global, pipe and pDown and frees the buffers. Safe to
+    /// call more than once.
+    void releaseLinks() noexcept;
+
+    /// On the head filter of a stack that was ended with its links retained:
+    /// once no Python call runs on any filter of the stack, releases the links
+    /// of every filter in it, exactly once. Does nothing when the stack was
+    /// not armed or a call is still running. Returns the endpoint when it
+    /// released the stack: the caller lets it go after the filters, so they
+    /// are freed before their endpoint.
+    ServiceEndpoint releaseStackIfIdle() noexcept;
+
+    /// Returns the filter at the given index of this pipe's instance stack,
+    /// read under the endpoint's stack lock; throws Ec::PipelineEnded if it
+    /// no longer exists
+    ServiceInstance stackFilter(size_t filterId) const noexcept(false);
+
+    /// The gate is closed: set by closeGate() or endFilterInstance(), never
+    /// cleared
+    std::atomic<bool> m_ended{false};
+
+    /// One-shot request that endFilterInstance() keeps the links
+    std::atomic<bool> m_retainLinks{false};
+
+    /// Set on the head filter (index 0) only: the stack is released by
+    /// releaseStackIfIdle() when it becomes idle
+    std::atomic<bool> m_releaseOnIdle{false};
+
+    /// Python callbacks that passed the gate and have not returned yet
+    std::atomic<uint32_t> m_inFlight{0};
+
+    /// Held while the links (endpoint, global, pipe and pDown) are copied
+    /// or reset
+    mutable std::mutex m_linkLock;
+
 protected:
+
     //-----------------------------------------------------------------
     /// @details
     ///		Built in tag buffer allocated only when needed via the

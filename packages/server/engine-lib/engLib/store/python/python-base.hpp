@@ -320,6 +320,20 @@ public:
     //-----------------------------------------------------------------
     // Public API	: Utilities
     //-----------------------------------------------------------------
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The node's IInstance, as a reference that the caller owns.
+    ///		Every engine call into a node handler (write*, open,
+    ///		close, control, ...) goes through it; beginInstance and
+    ///		endInstance read m_pyInstance directly, as both run before
+    ///		m_pyEnded is set. Throws Ec::PipelineEnded once
+    ///		endFilterInstance() has ended the node, and
+    ///		Ec::InvalidCommand when the node has no instance.
+    ///		Must be called with the GIL held, inside a callPython
+    ///		lambda, which returns the thrown Error
+    //-----------------------------------------------------------------
+    py::object boundInstance();
+
     py::object getPythonInstance() const noexcept { return m_pyInstance; }
     const Url &getTargetObjectUrl() const noexcept { return m_targetObjectUrl; }
     const Text &getTargetObjectPath() const noexcept {
@@ -342,6 +356,22 @@ private:
     ///		Handle to our python IInstance object
     //-------------------------------------------------------------
     py::object m_pyInstance;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Set by endFilterInstance() just before it releases
+    ///		m_pyInstance; boundInstance() refuses from then on.
+    ///		Only touched under the GIL, which orders it: no atomic
+    //-------------------------------------------------------------
+    bool m_pyEnded = false;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		The handle Python sees as self.instance. It holds a weak
+    ///		link to this filter, so the Python object never owns or
+    ///		outlives the filter.
+    //-------------------------------------------------------------
+    std::shared_ptr<NodeHandle> m_handle;
 
     //-------------------------------------------------------------
     /// @details

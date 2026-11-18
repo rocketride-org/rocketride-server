@@ -43,7 +43,7 @@ Error IPythonInstanceBase::writeAudio(
 
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
-        m_pyInstance.attr("writeAudio")(action, mimeType, streamData);
+        boundInstance().attr("writeAudio")(action, mimeType, streamData);
         return {};
     };
 
@@ -75,7 +75,7 @@ Error IPythonInstanceBase::writeVideo(
 
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
-        m_pyInstance.attr("writeVideo")(action, mimeType, streamData);
+        boundInstance().attr("writeVideo")(action, mimeType, streamData);
         return {};
     };
 
@@ -108,7 +108,7 @@ Error IPythonInstanceBase::writeImage(
     // Define the Python lambda that needs to be called
     auto python = localfcn()->Error {
         // Call it
-        m_pyInstance.attr("writeImage")(action, mimeType, streamData);
+        boundInstance().attr("writeImage")(action, mimeType, streamData);
         return {};
     };
 

@@ -813,7 +813,29 @@ class IInstanceBase:
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
     IGlobal: IGlobalBase = None  #: Global instance for shared data.
-    instance: IFilterInstance = None  #: Instance data reference.
+    instance: IFilterInstance = None
+    """Handle to the engine filter of this node.
+
+    It is not the filter itself: it holds only a weak link to it, so the node
+    never keeps the filter alive. Once the pipeline has ended (the end of the
+    endpoint, at the end of the task, not the end of one request), every engine
+    call through it (every method except ``sendSSE``) and the properties
+    ``next``, ``pipe`` and ``currentObject`` raise ``Exception`` whose ``code``
+    is the value of ``Ec.PipelineEnded`` and whose ``message`` is
+    ``'The pipeline has ended'``. ``pipeId``, ``pipeType``, ``targetObjectUrl``,
+    ``targetObjectPath`` and ``sendSSE`` (which reads only ``pipeId``) keep
+    answering while the engine's filter object exists, and raise the same error
+    once it is freed. Read ``targetObjectUrl`` and ``targetObjectPath`` only
+    inside a handler. ``pyInstance`` is ``None`` once the node has ended, and
+    raises once the filter object is freed.
+
+    The engine sets ``instance`` after ``__init__`` returns and binds the
+    handle to the filter just before ``beginInstance`` runs. Inside ``__init__``
+    it is still ``None``: make no engine call there. A call made between the
+    two (from a thread started in ``__init__``) raises the same error. A thread
+    started in ``beginInstance`` makes no engine call before the engine's first
+    call to one of the node's handlers: until then the pipe is not wired yet.
+    """
 
     """
     These are all the overrides to provide

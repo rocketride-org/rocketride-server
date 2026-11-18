@@ -278,6 +278,13 @@ packages/server/
 
 When extending the engine with Python (custom nodes, filter callbacks), Pydantic models (`Question`, `Answer`, `IInvokeLLM`, `IInvokeTool`, etc.) must be converted to plain dicts via `.model_dump()` before passing to C++ JSON utilities, passing raw `BaseModel` instances causes crashes. See `ROCKETRIDE_PIPELINES.md` for details.
 
+A node's `self.instance` is a handle with a weak link to its C++ filter, and
+every Python call into a filter callback passes a call gate. The gate refuses
+calls once the filter has ended, and the filter's links stay valid while a call
+it let in runs. Teardown waits a bounded time for calls still in flight. The
+mechanism, its invariant, the constants and the warning lines are in
+[Python call lifetime](python-call-lifetime.md).
+
 ---
 
 ## Dependencies

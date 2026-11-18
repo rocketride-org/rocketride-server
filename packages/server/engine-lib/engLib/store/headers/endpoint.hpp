@@ -328,6 +328,17 @@ public:
 
     mutable async::Mutex m_stackLock;
 
+    // Set under m_stackLock when endEndpoint() takes its snapshot. From then
+    // on no pipe is handed out and no new stack is published. Never cleared:
+    // no code opens an ended endpoint again (getEndpoint() makes another).
+    bool m_ending = false;
+
+    // Deadline of the wait for Python calls at teardown; a wait is checked
+    // every 50 ms and can run one check over it. Production code never
+    // writes it; tests set it, shorter for the deadline cases and longer
+    // where a case must not reach it.
+    static Atomic<time::Duration> &drainDeadline() noexcept;
+
     //-----------------------------------------------------------------
     // These are valid to be called during beginFilterGlobal and
     // can insert a filters into the pipe stack as it is being
@@ -460,6 +471,12 @@ private:
     Error buildConnections() noexcept;
     Error generatePipelineStack() noexcept;
     ErrorOr<ServicePipe> buildInstancePipe() noexcept;
+    Error endInstanceStack(ServiceInstanceStack &stack, bool drained) noexcept;
+
+    // Waits (bounded, cancel-aware) until no Python call runs on the given
+    // filters; the time spent is taken off the budget
+    bool drainInFlightCalls(const std::vector<ServiceInstance> &filters,
+                            time::Duration &budget) noexcept;
 
 protected:
     //-----------------------------------------------------------------

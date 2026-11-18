@@ -66,6 +66,7 @@
 #include "./headers/scan.hpp"
 #include "./headers/loader.hpp"
 #include "./filters/pipe/pipe.hpp"
+#include "./python/filter-handle.hpp"
 #include "./python/python-base.hpp"
 
 #include "./endpoints/filesys/filesys/filesys.hpp"

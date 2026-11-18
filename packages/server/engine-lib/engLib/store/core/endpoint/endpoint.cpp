@@ -97,7 +97,141 @@ Error IServiceEndpoint::signal(const Text &signal,
 
 //-------------------------------------------------------------------------
 /// @details
-///		Destructs or ends the endpoint access
+///		The deadline of the wait of endEndpoint(), or of a pipe build that
+///		is not published, for Python calls that are still running on its
+///		filters. A wait is checked every 50 ms, so it can run one check
+///		over the deadline. It equals the value of the engine's
+///		cancel fail-safe, async::globalCancelFailsafe(), and is deliberately
+///		a separate constant: a fail-safe of 0 means "exit at once" and must
+///		not turn the drain into a zero wait.
+//-------------------------------------------------------------------------
+Atomic<time::Duration> &IServiceEndpoint::drainDeadline() noexcept {
+    static Atomic<time::Duration> deadline{10s};
+    return deadline;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Waits until no Python call is running on any of the given filters,
+///		for the given budget; the time spent is taken off the budget. It
+///		checks every 50 ms, so it can end one check after the budget ran
+///		out. Whether the call gates are open or closed is up to the
+///		caller. The wait ends early on a cancel.
+///		Neither the stack lock nor a filter link lock is held while waiting.
+///		The GIL is released for the wait when this thread holds it, so the
+///		calls being waited for can finish. Nothing sleeps and the GIL is
+///		not touched when no call is in flight.
+///	@param[in]	filters
+///		The filters to watch
+///	@param[in,out]	budget
+///		The time left to wait; reduced by the time this call waited
+///	@returns
+///		true when no call is in flight any more, false when the budget ran
+///		out or the wait was cancelled with calls still running
+//-------------------------------------------------------------------------
+bool IServiceEndpoint::drainInFlightCalls(
+    const std::vector<ServiceInstance> &filters,
+    time::Duration &budget) noexcept {
+    const auto inFlight = [&]() noexcept {
+        uint32_t total = 0;
+        for (const auto &filter : filters) total += filter->callsInFlight();
+        return total;
+    };
+
+    // Normal case: nothing running, no wait
+    if (!inFlight())
+        return true;
+
+    const auto start = time::now();
+    {
+        // The calls we wait for need the GIL to finish. Python is up when a
+        // call is in flight; release the GIL only if this thread holds it.
+        std::optional<engine::python::UnlockPython> unlock;
+        if (Py_IsInitialized() && PyGILState_Check())
+            unlock.emplace();
+
+        while (inFlight()) {
+            if (time::now() - start >= budget)
+                break;
+            if (async::cancelled())
+                break;
+            async::sleep(50ms);
+        }
+    }
+
+    // Charge the waiting time to the budget
+    const auto spent = time::now() - start;
+    budget = spent >= budget ? time::Duration{0s}
+                             : time::Duration{budget - spent};
+
+    return !inFlight();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Ends the filters of one instance stack, the last filter first, and
+///		empties the stack. When a Python call may still run on the stack,
+///		every filter keeps its links and the head is armed, so the last
+///		call to leave the stack releases it.
+///	@param[in,out]	stack
+///		The filters to end; empty on return
+///	@param[in]	drained
+///		True when no Python call is in flight on the stack
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IServiceEndpoint::endInstanceStack(ServiceInstanceStack &stack,
+                                         bool drained) noexcept {
+    Error ccode;
+
+    // The head filter, kept to arm the deferred release below
+    ServiceInstance head = stack.empty() ? ServiceInstance{} : stack.front();
+
+    // For each filter in this instance stack
+    while (!stack.empty()) {
+        // Get the last filter
+        auto filter = _mv(stack.back());
+        stack.pop_back();
+
+        // A call that outlived the drain keeps working on its filter and
+        // on the binder chain below it, so the links stay until the
+        // last holder of the filter lets go
+        if (!drained)
+            filter->retainLinksOnEnd();
+
+        // Tell the filter to end
+        ccode = filter->endFilterInstance() || ccode;
+    }
+
+    // All filters of this stack are ended; release the stack when idle
+    if (!drained && head)
+        head->armDeferredRelease();
+    return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Destructs or ends the endpoint access.
+///
+///		Python calls into the engine are drained in phases so that a filter's
+///		links are reset only when no call can still use them:
+///		  1. Under the stack lock, stop handing out pipes and snapshot the
+///		     filters. No stack is published after this, so the snapshot
+///		     holds every stack that step 5 ends.
+///		  2. Wait, gates open, until no call is in flight or half of the
+///		     deadline has passed.
+///		  3. Close the gate of every filter. A new call is refused from here
+///		     on; a call that counted itself before its gate closed is seen by
+///		     the next read (the call raises the count and then checks the
+///		     flag, teardown sets the flag and then reads the count).
+///		  4. Read the count again and wait, for the rest of the deadline, for
+///		     the calls still in flight: one that ran through step 2, or one
+///		     that got in just before its gate closed.
+///		  5. Take the stacks out under the stack lock and end the filters.
+///		     If a call is still running, the filters are ended with their
+///		     links retained and then the head of each stack is armed; the
+///		     last call to leave a stack releases it (at once if it is
+///		     already idle).
 ///	@returns
 ///		Error
 //-------------------------------------------------------------------------
@@ -112,22 +246,84 @@ Error IServiceEndpoint::endEndpoint() noexcept {
     // Clear the target (if any)
     target = {};
 
+    // Stop handing out pipes, and copy the filters as they are now, in one
+    // hold of the stack lock
+    std::vector<ServiceInstance> filters;
+    {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        m_ending = true;
+        for (const auto &stack : m_instanceStacks)
+            for (const auto &filter : stack)
+                if (filter)
+                    filters.push_back(filter);
+    }
+
+    // Let the calls that are running return, gates open. The deadline is read
+    // once for the whole teardown. This wait gets half of it (it checks every
+    // 50 ms, so it can run one check over): new calls keep coming in while
+    // the gates are open, and the wait with the gates closed must always
+    // have time left for the calls already inside.
+    const auto deadline = drainDeadline().load();
+    const time::Duration openShare{deadline.asNanoseconds() / 2};
+    auto openBudget = openShare;
+    drainInFlightCalls(filters, openBudget);
+
+    // Refuse new calls, then wait for the calls still in flight: a call that
+    // got in before its gate closed is already counted and holds valid links
+    // until it returns. This wait gets the other half and what the first
+    // wait did not use.
+    for (const auto &filter : filters) filter->closeGate();
+    auto budget = deadline - openShare + openBudget;
+    const bool drained = drainInFlightCalls(filters, budget);
+
+    if (!drained) {
+        // Name the filters whose calls did not return
+        Text names;
+        uint32_t total = 0;
+        for (const auto &filter : filters) {
+            const auto count = filter->callsInFlight();
+            if (!count)
+                continue;
+            total += count;
+            names += _ts(" ", filter->pipeType.id, "(pipe ", filter->pipeId,
+                         ", ", count, ")");
+        }
+        // A cancel cuts the drain short; otherwise the whole deadline was
+        // waited
+        if (async::cancelled()) {
+            LOG(Always, "Warning: teardown:", total,
+                "Python call(s) still in flight (cancel requested, the drain",
+                "was cut short); ending the filters without releasing their",
+                "links:", names);
+        } else {
+            LOG(Always, "Warning: teardown:", total,
+                "Python call(s) still in flight after", deadline,
+                "; ending the filters without releasing their links:", names);
+        }
+    }
+
+    // Drop the snapshot's references, so the last holder of a stack frees it
+    filters.clear();
+
+    // Take the stacks out under the stack lock. Ending a filter calls into
+    // Python, so the filters are ended after the lock is released.
+    ServiceInstanceStacks stacks;
+    {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        stacks = _mv(m_instanceStacks);
+        m_instanceStacks.clear();
+    }
+
     // Destroy all the instance pipes and their filters we created,
     // even if we are not open
-    while (!m_instanceStacks.empty()) {
+    while (!stacks.empty()) {
         // Get the last stack
-        auto instanceStack = _mv(m_instanceStacks.back());
-        m_instanceStacks.pop_back();
+        auto instanceStack = _mv(stacks.back());
+        stacks.pop_back();
 
-        // For each filter in this instance stack
-        while (!instanceStack.empty()) {
-            // Get the last filter
-            auto filter = _mv(instanceStack.back());
-            instanceStack.pop_back();
-
-            // Tell the filter to end
-            ccode = filter->endFilterInstance() || ccode;
-        }
+        ccode = endInstanceStack(instanceStack, drained) || ccode;
     }
 
     // Destroy all the globals, even if we are not open
