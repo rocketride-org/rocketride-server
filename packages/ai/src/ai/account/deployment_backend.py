@@ -225,6 +225,21 @@ def artifact_sha256(data: str) -> str:
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
 
+# The kinds a binding can serve; a pipe is deployed to a team, not published
+PUBLISH_KINDS = ('app', 'node')
+
+
+def _check_publish_kind(method: str, kind: str) -> None:
+    """Refuse a publish call for a kind that is not published."""
+    if kind not in PUBLISH_KINDS:
+        raise ValueError(f'{method}: unsupported kind {kind!r}')
+
+
+def _kind_of(version: Dict[str, Any]) -> str:
+    """A registry version's kind; one without it is a pipe."""
+    return str(version.get('kind') or 'pipe')
+
+
 def artifact_content_dir(artifact_path: str) -> str:
     """The store home of one registry version's CONTENT, from its artifact path.
 
@@ -335,6 +350,10 @@ class FileDeploymentBackend:
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Allocate the next version and append the registry entry."""
+            # One kind per project: a binding is read as its version's kind
+            kinds = {_kind_of(v) for v in meta['versions']}
+            if kinds and kinds != {kind}:
+                raise StorageError(f'{project_id} holds {kinds.pop()} versions, not {kind}')
             version = 1 + max((v['version'] for v in meta['versions']), default=0)
             entry = {
                 'version': version,
@@ -692,8 +711,8 @@ class FileDeploymentBackend:
     #
     # meta['publishes'] = {audience_key: row}; audience_key is the file-format
     # encoding 'user~<id>' | 'team~<id>' | '~public' (never on the wire — the
-    # contract carries {'type','id'} audience dicts). Only kind='app' exists
-    # today; published_pipes joins in its own phase.
+    # contract carries {'type','id'} audience dicts). Apps and nodes publish;
+    # a project holds one kind, and each row is read as its version's kind.
 
     @staticmethod
     def _audience_key(audience: Dict[str, str]) -> str:
@@ -796,8 +815,7 @@ class FileDeploymentBackend:
         """
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
-            raise ValueError(f'publish_set: unsupported kind {kind!r}')
+        _check_publish_kind('publish_set', kind)
         who = _actor_record(actor)
         key = self._audience_key(audience)
 
@@ -805,6 +823,8 @@ class FileDeploymentBackend:
             """Verify the version exists, then upsert the audience row."""
             if not any(int(v.get('version', 0)) == version for v in meta['versions']):
                 raise StorageError(f'{app_id} v{version}: not in the registry')
+            if _kind_of(self._artifact_entry_of(meta, version)) != kind:
+                raise StorageError(f'{app_id} v{version}: not a {kind} version')
             publishes = meta.setdefault('publishes', {})
             existing = publishes.get(key) or {}
             now = time.time()
@@ -856,8 +876,7 @@ class FileDeploymentBackend:
         """One audience's publish row of one app, or None (removed = None)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
-            raise ValueError(f'publish_get: unsupported kind {kind!r}')
+        _check_publish_kind('publish_get', kind)
         meta = await self._read_meta(org_id, app_id)
         if meta is None:
             return None
@@ -880,8 +899,7 @@ class FileDeploymentBackend:
         """Every live publish row of one app (the where/reverse index feed)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
-            raise ValueError(f'publish_of_app: unsupported kind {kind!r}')
+        _check_publish_kind('publish_of_app', kind)
         meta = await self._read_meta(org_id, app_id)
         if meta is None:
             return []
@@ -911,8 +929,7 @@ class FileDeploymentBackend:
         one indexed query instead.
         """
         _safe_id(org_id, 'org_id')
-        if kind != 'app':
-            raise ValueError(f'publish_list: unsupported kind {kind!r}')
+        _check_publish_kind('publish_list', kind)
         keys = {self._audience_key(a) for a in audiences}
         out: List[Dict[str, Any]] = []
         for project_id in await self._project_ids(org_id):
@@ -920,8 +937,8 @@ class FileDeploymentBackend:
             if meta is None:
                 continue
             for key, row in self._publishes_of(meta).items():
-                if key in keys and row.get('state') != 'removed':
-                    ver = self._artifact_entry_of(meta, row.get('version', 0))
+                ver = self._artifact_entry_of(meta, row.get('version', 0))
+                if key in keys and row.get('state') != 'removed' and _kind_of(ver) == kind:
                     out.append(
                         self._publish_row(
                             key,
@@ -941,8 +958,7 @@ class FileDeploymentBackend:
         """Flip one binding's lifecycle state (disable/remove/re-enable)."""
         _safe_id(org_id, 'org_id')
         _safe_id(app_id, 'app_id')
-        if kind != 'app':
-            raise ValueError(f'publish_set_state: unsupported kind {kind!r}')
+        _check_publish_kind('publish_set_state', kind)
         if state not in ('enabled', 'disabled', 'removed'):
             raise ValueError(f'Unknown binding state: {state!r}')
         who = _actor_record(actor)
@@ -952,8 +968,8 @@ class FileDeploymentBackend:
             """Update the binding's state in place."""
             publishes = self._publishes_of(meta)
             row = publishes.get(key)
-            if not row:
-                raise StorageError(f'{app_id}: no publish for that audience')
+            if not row or _kind_of(self._artifact_entry_of(meta, row.get('version', 0))) != kind:
+                raise StorageError(f'{app_id}: no {kind} publish for that audience')
             now = time.time()
             row['state'] = state
             row['updatedAt'] = now
