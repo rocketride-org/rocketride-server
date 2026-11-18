@@ -182,14 +182,33 @@ const isolatedModules = new Set<string>();
 /**
  * Marks an app isolated for the rest of this document.
  *
+ * The module name in a manifest entry is the publisher's claim, so the
+ * isolated set takes only the container the shell itself mapped for this
+ * app id, or the claimed name when no other app id owns it. An isolated
+ * entry claiming a first-party container can then neither ask for a reload
+ * nor block that container's repoint, reset or dev registration (G4, DA
+ * must-fix 2).
+ *
  * @param entry - The server entry stamped isolated.
- * @returns True when its container had already loaded (or is loading) in
+ * @returns True when ITS container had already loaded (or is loading) in
  *   this realm: the shell must unmount it and ask for a reload.
  */
 export function markIsolated(entry: ServerAppEntry): boolean {
 	isolatedIds.add(entry.id);
-	isolatedModules.add(entry.moduleId);
-	return loadedModules.has(entry.moduleId) || isRemotePending(entry.moduleId);
+	const mapped = serverAppModules.get(entry.id);
+	if (mapped !== undefined) {
+		isolatedModules.add(mapped);
+		return loadedModules.has(mapped) || isRemotePending(mapped);
+	}
+	if (!moduleOwnedByOther(entry.moduleId, entry.id)) isolatedModules.add(entry.moduleId);
+	return false;
+}
+
+/** Whether another app id owns this container (a mapped server app or a local registration). */
+function moduleOwnedByOther(moduleId: string, appId: string): boolean {
+	for (const [id, m] of serverAppModules) if (m === moduleId && id !== appId) return true;
+	for (const [id, meta] of localAppMetas) if (meta.moduleId === moduleId && id !== appId) return true;
+	return false;
 }
 
 /** Whether an app id is isolated in this document (checked at call time). */
@@ -856,11 +875,18 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	// The stamp rule (#1022, plan 4.6): first-party stamps are noted, and an
 	// isolated entry joins the sticky set. Isolated entries are never MF
 	// registered, recorded or mapped to a container (E1).
+	const isolatedNow: ServerAppEntry[] = [];
 	for (const { app } of resolved) {
 		if (app.firstParty === true) noteFirstParty(app.id);
-		if (isIsolatedEntry(app)) markIsolated(app);
+		if (isIsolatedEntry(app) || isolatedIds.has(app.id)) {
+			isolatedIds.add(app.id);
+			isolatedNow.push(app);
+		}
 	}
 	const inRealm = resolved.filter(({ app }) => !isolatedIds.has(app.id));
+	// The in-realm containers are owned first, so a claim in the same batch cannot take one.
+	for (const { app } of inRealm) serverAppModules.set(app.id, app.moduleId);
+	for (const app of isolatedNow) markIsolated(app);
 
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
@@ -888,7 +914,6 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
-	for (const { app } of inRealm) serverAppModules.set(app.id, app.moduleId);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return resolved.map(({ app: a }) => ({
