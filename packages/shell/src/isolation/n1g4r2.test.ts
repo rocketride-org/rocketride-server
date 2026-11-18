@@ -116,7 +116,8 @@ test('T126 shared-prefix needles cost nothing extra: lookup is per distinct leng
 			expectOk(await status(A, run.token), '8 MiB shared-prefix status');
 		});
 		tt.diagnostic(`T126(b) outbound 8 MiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 200, `outbound took ${ms.toFixed(1)} ms`);
+		// Widened 5x for loaded CI hosts (margin was under 3x: up to 137 ms seen).
+		assert.ok(ms < 1000, `outbound took ${ms.toFixed(1)} ms`);
 	});
 
 	await tt.test('(c) structural: 4096 needles sharing a 32-char prefix leave no group with more than one entry per length', () => {
