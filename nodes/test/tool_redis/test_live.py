@@ -233,11 +233,14 @@ def test_real_auth_and_tls(monkeypatch, url_var):
         client.close()
         pool.disconnect()
     if cfg['use_tls']:
+        cfg['password'] = unquote(parts.password or '')
         cfg['host'] = '127.0.0.1'  # test certificate has only DNS:localhost
         client, pool = create_client(Settings.from_config(cfg))
         try:
-            with pytest.raises(RedisNodeError):
+            with pytest.raises(RedisNodeError) as err:
                 redis_call(client.ping)
+            assert err.value.code == 'connection_error'
+            assert 'CERTIFICATE_VERIFY_FAILED' in str(err.value.__context__)
         finally:
             client.close()
             pool.disconnect()
@@ -245,8 +248,10 @@ def test_real_auth_and_tls(monkeypatch, url_var):
         monkeypatch.setenv('SSL_CERT_FILE', '/nonexistent/redis-test-ca')
         client, pool = create_client(Settings.from_config(cfg))
         try:
-            with pytest.raises(RedisNodeError):
+            with pytest.raises(RedisNodeError) as err:
                 redis_call(client.ping)
+            assert err.value.code == 'connection_error'
+            assert 'CERTIFICATE_VERIFY_FAILED' in str(err.value.__context__)
         finally:
             client.close()
             pool.disconnect()

@@ -68,7 +68,7 @@ A single owned connection pool is reused per node/pipeline: connect timeout 3 se
 
 Supply an optional Redis ACL username and the password in the secure configuration field, optionally using `${ROCKETRIDE_REDIS_PASSWORD}` as a RocketRide secret reference. The node does not read credential environment variables directly. Resolve secrets through the platform. Test harness environment variables are separate from runtime credential handling.
 
-Grant PING for startup; GETRANGE, TTL, MULTI and EXEC for GET; SCAN for discovery; SET, EXPIRE, INCRBY and DEL only for the mutations the account needs. Restrict key access to the intended namespace and avoid broad administrator permissions. SCAN visibility is not a replacement for server-level access policy. Passwords are excluded from settings repr and sanitized errors.
+Grant PING for startup; SELECT (`+select`) when Database is not 0, since redis-py selects that database on every new connection; GETRANGE, TTL, MULTI and EXEC for GET; SCAN for discovery; SET, EXPIRE, INCRBY and DEL only for the mutations the account needs. Restrict key access to the intended namespace and avoid broad administrator permissions. SCAN visibility is not a replacement for server-level access policy. Passwords are excluded from settings repr and sanitized errors.
 
 ## Notes
 

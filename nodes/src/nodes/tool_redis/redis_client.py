@@ -227,7 +227,10 @@ class RedisStore:
         if condition is not None and condition not in ('NX', 'XX'):
             raise RedisNodeError('invalid_input', 'condition must be NX or XX when supplied.')
         # Leave enough room to read the value back even if its expiry changes.
-        bounded_result({'success': True, **_found_value(key, value, _MAX_REDIS_INTEGER)})
+        bounded_result(
+            {'success': True, **_found_value(key, value, _MAX_REDIS_INTEGER)},
+            error_message='value would be too large to read back within the 128 KiB result limit.',
+        )
         stored = redis_call(
             lambda: self.client.set(scoped, encoded, ex=ttl or None, nx=condition == 'NX', xx=condition == 'XX'),
             mutation=True,
@@ -298,11 +301,13 @@ def _found_value(key: str, value: str, ttl: int) -> dict:
     return {'key': key, 'found': True, 'value': value, 'ttl_seconds': ttl}
 
 
-def bounded_result(result: dict) -> dict:
+def bounded_result(
+    result: dict,
+    *,
+    error_message: str = 'Serialized result exceeds 128 KiB; narrow the data or reduce the SCAN count hint.',
+) -> dict:
     # Use ASCII escaping: the cap also covers JSON transports that escape every
     # non-ASCII character, including UTF-16 surrogate pairs.
     if len(json.dumps(result, ensure_ascii=True).encode('utf-8')) > MAX_RESULT_BYTES:
-        raise RedisNodeError(
-            'result_too_large', 'Serialized result exceeds 128 KiB; narrow the data or reduce the SCAN count hint.'
-        )
+        raise RedisNodeError('result_too_large', error_message)
     return result

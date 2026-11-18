@@ -142,7 +142,9 @@ def test_ascii_escaped_result_limit(store):
     value = 'é' * (MAX_VALUE_BYTES // 2)
     tool = IInstance.__new__(IInstance)
     tool.IGlobal = type('Global', (), {'store': store})()
-    assert tool.redis_set({'key': 'k', 'value': value})['error_code'] == 'result_too_large'
+    result = tool.redis_set({'key': 'k', 'value': value})
+    assert result['error_code'] == 'result_too_large'
+    assert 'read back' in result['error'] and 'SCAN' not in result['error']
     assert not tool.redis_get({'key': 'k'})['found']
     store.client.set('rr:test:k', value)
     assert tool.redis_get({'key': 'k'})['error_code'] == 'result_too_large'
@@ -156,6 +158,16 @@ def test_counter_overflow_and_wrong_type_do_not_change_value(store):
     store.client.hset('rr:test:hash', mapping={'a': 'b'})
     with pytest.raises(RedisNodeError):
         store.incr('hash')
+
+
+@pytest.mark.parametrize('value,amount', [(str(2**63), '-1'), (str(-(2**63) - 1), '1')])
+def test_counter_rejects_out_of_range_stored_value_before_addition(store, value, amount):
+    store.set('k', value)
+    with pytest.raises(RedisNodeError) as err:
+        store.incr('k', amount)
+    assert err.value.code == 'invalid_operation'
+    assert err.value.outcome == 'not_applied'
+    assert store.get('k')['value'] == value
 
 
 def test_scan_one_call_empty_page_and_full_cursor(store):
@@ -203,14 +215,22 @@ def test_new_writes_report_unknown_and_are_not_retried(store, operation, args):
         '224.0.0.1',
         '::1',
         'fc00::1',
+        'fec0::1',
+        '::a9fe:a9fe',
+        '::7f00:1',
         '::ffff:127.0.0.1',
         '64:ff9b::a9fe:a9fe',
+        '64:ff9b:1::808:808',
+        '2002:7f00:1::',
+        '2001:0:808:808:0:0:80ff:fffe',
+        '2001:0:7f00:1:0:0:f7f7:f7f7',
     ],
 )
 def test_host_rejects_non_global_dns(monkeypatch, address):
     monkeypatch.setattr('socket.getaddrinfo', lambda *_a, **_k: [(0, 0, 0, '', (address, 6379))])
-    with pytest.raises(RedisNodeError):
+    with pytest.raises(RedisNodeError, match='must resolve exclusively to public') as err:
         validate_public_host('test', 6379)
+    assert err.value.code == 'invalid_host'
 
 
 def test_host_unwraps_nat64_without_rejecting_the_prefix(monkeypatch):

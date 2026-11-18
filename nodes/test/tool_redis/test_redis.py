@@ -365,6 +365,38 @@ def test_pool_configuration(monkeypatch):
     assert kwargs['decode_responses'] is False
 
 
+@pytest.mark.parametrize('host_mode', ['is_hosted', 'is_shared_host'])
+def test_hosted_pool_uses_guarded_tls_connection(monkeypatch, host_mode):
+    import redis
+
+    monkeypatch.setattr(global_module, 'is_hosted', lambda: host_mode == 'is_hosted')
+    monkeypatch.setattr(global_module, 'is_shared_host', lambda: host_mode == 'is_shared_host')
+    dns = MagicMock(return_value=[(0, 0, 0, '', ('8.8.8.8', 6379))])
+    monkeypatch.setattr('socket.getaddrinfo', dns)
+    guard = MagicMock(wraps=global_module.public_connection)
+    monkeypatch.setattr(global_module, 'public_connection', guard)
+    client, pool = global_module.create_client(Settings(host='redis.example', use_tls=True))
+    try:
+        guard.assert_called_once_with(redis.SSLConnection)
+        assert pool.connection_class is not redis.SSLConnection
+        assert issubclass(pool.connection_class, redis.SSLConnection)
+        assert pool.connection_kwargs['ssl_cert_reqs'] == 'required'
+        assert pool.connection_kwargs['ssl_check_hostname'] is True
+        dns.assert_called_once()
+        # Exercise the class selected by create_client, not a separately
+        # constructed guard: a new connection must re-check DNS before TCP/TLS.
+        dns.return_value = [(0, 0, 0, '', ('127.0.0.1', 6379))]
+        tcp = MagicMock()
+        monkeypatch.setattr(redis.Connection, '_connect', tcp)
+        with pytest.raises(RedisNodeError, match='exclusively to public'):
+            pool.connection_class(**pool.connection_kwargs)._connect()
+        assert dns.call_count == 2
+        tcp.assert_not_called()
+    finally:
+        client.close()
+        pool.disconnect()
+
+
 def test_password_precedence(monkeypatch):
     node = make_global()
     node.glb = SimpleNamespace(logicalType='tool_redis', connConfig={})

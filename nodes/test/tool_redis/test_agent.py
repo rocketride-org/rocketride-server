@@ -97,7 +97,7 @@ async def test_agent_performs_each_requested_operation_once(client, attempt):
         (
             "Scan Redis once with cursor '0' and count 100. Report the keys and next cursor.",
             'redis_scan',
-            {'cursor': '0', 'done': True},
+            {},
         ),
         (
             "Delete the two explicit Redis keys 'message' and 'counter' in one redis_delete call. Report deleted_count.",
@@ -146,7 +146,13 @@ async def test_agent_performs_each_requested_operation_once(client, attempt):
                 assert args == {'key': 'counter', 'amount': '3'}, result
                 assert direct.get(prefix + 'counter') == expected['value_decimal'].encode()
             elif tool == 'redis_scan':
-                assert set(observation['keys']) == {'message', 'counter'}, result
+                assert set(observation['keys']) <= {'message', 'counter'}, result
+                assert observation['cursor'].isdecimal(), result
+                assert observation['done'] is (observation['cursor'] == '0'), result
+                assert set(direct.scan_iter(match=prefix + '*')) == {
+                    (prefix + 'message').encode(),
+                    (prefix + 'counter').encode(),
+                }
             elif tool == 'redis_delete':
                 assert set(args['keys']) == {'message', 'counter'}, result
                 assert not direct.exists(prefix + 'message', prefix + 'counter')

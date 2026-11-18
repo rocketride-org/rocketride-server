@@ -118,7 +118,10 @@ class FakeRedis:
         text = raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
         if not re.fullmatch(r'-?(0|[1-9][0-9]*)', text):
             raise ResponseError('value is not an integer')
-        new = int(text) + amount
+        current = int(text)
+        if not -(2**63) <= current <= 2**63 - 1:
+            raise ResponseError('value is not an integer or out of range')
+        new = current + amount
         if not -(2**63) <= new <= 2**63 - 1:
             raise ResponseError('increment would overflow')
         self._kv[key] = str(new)
