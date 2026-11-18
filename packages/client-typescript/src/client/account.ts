@@ -399,9 +399,10 @@ export class AccountApi {
 	 *
 	 * A name with a value is set, a name with `null` is deleted, and a name
 	 * whose value is the mask from `getEnv` keeps its stored value. Names not
-	 * in `env` are left as they are. A name outside `ROCKETRIDE_*`, or with
-	 * whitespace, `=`, `#`, a quote or NUL in it, rejects the whole write, and
-	 * so does a server too old to merge.
+	 * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
+	 * whole write, and so does a name given a new value with whitespace, `=`,
+	 * `#`, a quote or NUL in it; a stored name can always be kept or deleted.
+	 * A server too old to merge rejects the write too.
 	 *
 	 * @param scope   - One of 'org', 'team', 'user'.
 	 * @param env     - Names to set, delete (`null`) or keep (mask).
