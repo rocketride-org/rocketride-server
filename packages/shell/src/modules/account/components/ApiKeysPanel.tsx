@@ -45,6 +45,7 @@ import type { GridColumnDefinition } from '../../../components/data-grid/default
 import { commonStyles } from '../../../themes/styles';
 import type { ApiKeyRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, ExpiryOpts, parseWireDate, relativeTime } from './shared';
+import { revealedKeyExpiry } from '../keyExpiry';
 
 // =============================================================================
 // STYLES
@@ -181,7 +182,7 @@ export interface ApiKeysPanelProps {
 	/** Teams available for the create form's scope select. */
 	teams: TeamRecord[];
 	/** Creates a key; resolves with the one-time raw key value. */
-	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string; expiresAt?: string | null }>;
 	/** Revokes a key by id. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 }
@@ -275,7 +276,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	// One-time secret returned by a successful create (reveal presentation).
-	const [revealed, setRevealed] = useState<{ key: string; expiresAt: string | null } | null>(null);
+	const [revealed, setRevealed] = useState<{ key: string; expiresAt: string | null; bounded: boolean } | null>(null);
 	const [copied, setCopied] = useState(false);
 	// Revoke confirmation gate (stacks over the panel via the overlay stack).
 	const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -417,8 +418,9 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 			};
 			if (formTeamId) params.teamId = formTeamId;
 			const body = await onCreateKey(params);
-			// Step 3: show the one-time secret in place — the panel stays open.
-			setRevealed({ key: body.key, expiresAt: expiresAt ?? null });
+			// Step 3: show the one-time secret in place — the panel stays open —
+			// with the expiry the server GRANTED (it may cap the requested one).
+			setRevealed({ key: body.key, ...revealedKeyExpiry(expiresAt, body.expiresAt) });
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Failed to create key');
 		} finally {
@@ -578,7 +580,9 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 								<div style={styles.revealWarn}>Warning: store safely. It cannot be retrieved after closing.</div>
 							</div>
 							<Section label="Details">
-								<LabelValue label="Expires">{revealed.expiresAt ? new Date(revealed.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+								<LabelValue label="Expires">
+									{revealed.expiresAt ? `${parseWireDate(revealed.expiresAt).toLocaleDateString()}${revealed.bounded ? ' (bounded by your sign-in session)' : ''}` : 'No expiry'}
+								</LabelValue>
 							</Section>
 						</>
 					) : (
