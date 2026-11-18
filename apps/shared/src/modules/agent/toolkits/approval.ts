@@ -213,7 +213,7 @@ function verbOf(name: string): string {
 
 /** Auto met a terminate or restart on a run this conversation did not start. */
 function notOwned(name: string, run: string): string {
-	return `Not done: this conversation did not start the pipeline run ${run}, and in Auto mode the agent only stops or restarts its own runs. Call ask_user to ask the user whether to ${verbOf(name)} it: they can do it themselves, or switch to Ask first and approve it.`;
+	return `Not done: this conversation did not start the pipeline run ${run}, and in Don't ask mode the agent only stops or restarts its own runs. Call ask_user to ask the user whether to ${verbOf(name)} it: they can do it themselves, or switch to Ask first and approve it.`;
 }
 
 /** The recheck before an unasked terminate or restart found the run is no longer the one this conversation started. */
@@ -449,7 +449,8 @@ const USE_APP_CARD: CardBuilder = async ([appId], n) => ({ title: USE_APP_TEXT.t
 
 /** The tool acts: tools rated by their own name, not by a client method (delete_file skips the client; deploy_app's deploy.add is free). Their params are their target. */
 const TOOL_LIST: Readonly<Record<string, Rule>> = {
-	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' }), { grant: 'fileDeletes' }),
+	// the turn's Undo puts a deleted file back, but a turn that deletes a folder can't be undone (undo.ts)
+	delete_file: ask(async ([path, type]) => (type === 'dir' ? { title: `Delete the folder ${text(path)} and everything in it`, detail: 'There is no undo.' } : { title: `Delete ${text(path)}`, detail: "The turn's Undo can put it back." }), { grant: 'fileDeletes' }),
 	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' }), { grant: 'appDeploys' }),
 	// a read, or only waiting for text, changes nothing on the page, so it is free; a click, type, select or press asks
 	use_app: ask(USE_APP_CARD, { grant: 'appUse', freeWhen: ([, ...kinds]) => kinds.every((kind) => kind === 'wait_for') }),

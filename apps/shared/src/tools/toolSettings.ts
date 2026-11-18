@@ -201,11 +201,11 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 		[APPROVAL_SETTING_KEYS.mode]: {
 			type: 'string',
 			enum: ['ask', 'auto'],
-			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes, submits for review, changes a deployment or a schedule, deletes a file, or clicks or types in your app.', "Don't ask: the agent does those without asking. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
+			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes or deploys, submits for review, changes a deployment or a schedule, stops or restarts a pipeline run, saves or deletes a template or a run log, runs SQL, profiles the server, changes your dev team, deletes a file, or clicks or types in your app.', "Don't ask: the agent does those without asking, except that it won't stop or restart a pipeline run its chat didn't start. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
 			default: 'ask',
 			order: 8,
 			shells: ['saas', 'oss'],
-			description: 'Whether the agent asks before outward actions, deletes, and clicks or types in your apps, in every agent chat. Account, team, member and billing changes are refused in both modes.',
+			description: 'Whether the agent asks before outward actions, deletes, and clicks or types in your apps, in every agent chat. In Ask first, each Always allow switch below turns off one kind of card. Account, team, member and billing changes are refused in both modes.',
 		},
 		'rocketride.pipeBuilder.agentStepLimit': {
 			type: 'number',
