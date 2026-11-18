@@ -147,6 +147,7 @@ private:
                   const std::vector<uint8_t> &binaryData) noexcept;
     Error onDocumentComplete() noexcept;
     uint32_t tikaFlags(uint32_t entryFlags) noexcept;
+    void completeObject() noexcept;
     Error tikaThreadProc() noexcept;
     Error pumpTikaCallbacks() noexcept;
 
@@ -181,9 +182,20 @@ private:
     /// 	The instance thread signals to the tika thread to process
     /// 	the current entry. The tika thread signals to the instance
     /// 	thread when the current entry is processed.
+    /// 	endFilterInstance() also sets the begin event, to stop the
+    /// 	thread; the thread sets the end event when it leaves.
     //-----------------------------------------------------------------
     async::Event m_tikaBeginObjectEvent;
     async::Event m_tikaEndObjectEvent;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Set by endFilterInstance() before it wakes the tika thread.
+    ///		The thread then leaves its loop even when an object is still
+    ///		open: a request can outlive the pipeline, so the object it
+    ///		opened may never be closed.
+    //-----------------------------------------------------------------
+    std::atomic<bool> m_tikaStop{false};
 
     class TableData {
     public:

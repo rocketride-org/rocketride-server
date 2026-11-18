@@ -76,15 +76,23 @@ Error IFilterInstance::beginFilterInstance() noexcept {
 Error IFilterInstance::endFilterInstance() noexcept {
     LOGPIPE();
 
-    auto ccode = Parent::endFilterInstance();
+    // Stop the tika thread before the base class releases the links: the
+    // thread reads them while it works. The flag is stored before the event
+    // is set, so the wake-up this end causes always sees it.
+    m_tikaStop = true;
 
-    // Notify tika thread to complete
+    // An object may still be open, with its data incomplete: a request can
+    // outlive the pipeline. Complete the buffer, so a parse that waits for
+    // more data returns.
+    Error ccode = m_buffer.setComplete();
+
+    // Wake the tika thread: it sees the flag and leaves its loop
     ccode = ccode || m_tikaBeginObjectEvent.set();
 
     // And wait for tika thread completed
     ccode = ccode || m_tikaThread.join();
 
-    return ccode;
+    return Parent::endFilterInstance() || ccode;
 }
 
 //-------------------------------------------------------------------------
@@ -287,8 +295,18 @@ uint32_t IFilterInstance::tikaFlags(uint32_t entryFlags) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Completes the buffer and sets the end event, so an instance thread
+///		that waits, or will wait, for the current object goes on
+//-------------------------------------------------------------------------
+void IFilterInstance::completeObject() noexcept {
+    if (auto ccode = m_buffer.setComplete() || m_tikaEndObjectEvent.set())
+        LOG(Error, ccode);
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Tika thread procedure. Starts tika, sends incoming enties to tika,
-/// 	ends tika when pipe completed.
+/// 	ends tika when endFilterInstance() sets m_tikaStop.
 //-------------------------------------------------------------------------
 Error IFilterInstance::tikaThreadProc() noexcept {
     // Start tika
@@ -298,17 +316,22 @@ Error IFilterInstance::tikaThreadProc() noexcept {
         LOGT("TIKA waiting for the object to process ...");
         if (auto ccode = m_tikaBeginObjectEvent.wait()) return ccode;
 
+        // The filter is ending. An object may still be open: leave anyway,
+        // and release an instance thread that waits, or will wait, for it.
+        if (m_tikaStop) {
+            completeObject();
+
+            LOGT("TIKA ended");
+            break;
+        }
+
         // ATTENTION:
         //     Non-thread safe currentEntry is accessed in this tika thread:
         //     * access to the pointer itself is safe since it synchronized by
         //     the object events;
         //     * flags() refer int value which is assumed to be safe.
         if (currentEntry != nullptr) {
-            util::Guard guard{[this] {
-                if (auto ccode =
-                        m_buffer.setComplete() || m_tikaEndObjectEvent.set())
-                    LOG(Error, ccode);
-            }};
+            util::Guard guard{[this] { completeObject(); }};
 
             // Now, we can't get the full path, because there may not actually
             // be one, but pass it the terminal object/filename to give tika
@@ -663,6 +686,12 @@ Error IFilterInstance::open(Entry &object) noexcept {
         // We can parse it - it is enabled, the size is ok and no error
         m_canParse = true;
     }
+
+    // Once the filter has ended, its tika thread is gone and nothing parses
+    // this object. The flag is read after the buffer was cleared above, so
+    // an end that comes later completes the buffer after that clear.
+    if (m_tikaStop)
+        m_canParse = false;
 
     // Call the parent
     if (auto ccode = Parent::open(object)) return ccode;

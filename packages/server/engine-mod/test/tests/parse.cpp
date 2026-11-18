@@ -223,6 +223,31 @@ TEST_CASE("store::parse") {
         REQUIRE(!table.empty());
         REQUIRE(table.contains("TableFallbackTest"));
     }
+
+    //-----------------------------------------------------------------
+    // Ends the filters while an object is still open and its data is
+    // incomplete: the end stops the tika thread and returns
+    //-----------------------------------------------------------------
+    SECTION("end with an object open") {
+        ParseFilterTest filter;
+
+        // Build and connect the endpoint
+        REQUIRE_NO_ERROR(filter.connect());
+
+        // Get a source pipe, open a dummy object on it
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Begin a stream and leave it open, so the tika thread waits for
+        // more data
+        const char *pText = "This object is never closed";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+
+        // The end returns although the object was never closed
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
 }
 
 /*------------------------------------------------------------------
