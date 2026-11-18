@@ -866,39 +866,44 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		// Isolated apps end their runs while the session token is still valid,
 		// then their origins' storage is cleared (#1022, plan 4.7). The final
 		// teardown keeps the root sealed through the clear: nothing new starts.
-		await appRootRef.current?.teardownAll(3000, { final: true });
-		if (appRootRef.current) await runLogoutClear();
-		setIdentity(null);
-		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
-		// the auth transition screen when it mounts after logout.
-		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
-		if (sessionAppId || tabSession().dev) {
-			// SESSION-LOCKED tab (deployed ?appId= deep link or dev preview):
-			// stay exactly where you are. The signed-out state has honest
-			// surfaces of its own — ShellLayout renders the shared
-			// SignedOutScreen ("You are signed out of <app>" + the app's
-			// icon) for an auth-required app, and a public app simply renders
-			// signed out. The retired 'goodbye' phase showed a bespoke
-			// RocketRide-chromed page here instead — off-brand for a deep-app
-			// tab and a THIRD signed-out surface to keep consistent.
-			cm.logout().finally(() => {
-				loggingOutRef.current = false;
-				if (mountedRef.current) setRenderPhase('shell');
-			});
-		} else {
-			// Return to the home app before the auth gate re-runs. Otherwise
-			// ShellLayout still sees an auth-required app (e.g. Pipeline Builder)
-			// active with identity===null and emits shell:loginRequest →
-			// startOAuth, bouncing the signing-out user to the Zitadel login
-			// screen instead of the logged-out home. switchApp updates the live
-			// workspace (and clears the persisted rr:appId via persistActiveApp);
-			// setActiveAppId keeps the startup seed in sync for any later remount.
-			setActiveAppId(defaultAppId);
-			cm.emit('shell:switchApp', { appId: defaultAppId });
-			cm.logout().finally(() => {
-				loggingOutRef.current = false;
-				if (mountedRef.current) setRenderPhase('shell');
-			});
+		// try/finally: a failing teardown or clear never skips the logout or
+		// leaves the logout flag set.
+		try {
+			await appRootRef.current?.teardownAll(3000, { final: true });
+			if (appRootRef.current) await runLogoutClear();
+		} finally {
+			setIdentity(null);
+			// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
+			// the auth transition screen when it mounts after logout.
+			try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+			if (sessionAppId || tabSession().dev) {
+				// SESSION-LOCKED tab (deployed ?appId= deep link or dev preview):
+				// stay exactly where you are. The signed-out state has honest
+				// surfaces of its own — ShellLayout renders the shared
+				// SignedOutScreen ("You are signed out of <app>" + the app's
+				// icon) for an auth-required app, and a public app simply renders
+				// signed out. The retired 'goodbye' phase showed a bespoke
+				// RocketRide-chromed page here instead — off-brand for a deep-app
+				// tab and a THIRD signed-out surface to keep consistent.
+				cm.logout().finally(() => {
+					loggingOutRef.current = false;
+					if (mountedRef.current) setRenderPhase('shell');
+				});
+			} else {
+				// Return to the home app before the auth gate re-runs. Otherwise
+				// ShellLayout still sees an auth-required app (e.g. Pipeline Builder)
+				// active with identity===null and emits shell:loginRequest →
+				// startOAuth, bouncing the signing-out user to the Zitadel login
+				// screen instead of the logged-out home. switchApp updates the live
+				// workspace (and clears the persisted rr:appId via persistActiveApp);
+				// setActiveAppId keeps the startup seed in sync for any later remount.
+				setActiveAppId(defaultAppId);
+				cm.emit('shell:switchApp', { appId: defaultAppId });
+				cm.logout().finally(() => {
+					loggingOutRef.current = false;
+					if (mountedRef.current) setRenderPhase('shell');
+				});
+			}
 		}
 	}, [cm, sessionAppId, defaultAppId]);
 
@@ -921,9 +926,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		// Isolated apps end their runs first (#1022); their storage is cleared
 		// by the boot-time sweep of the next load (plan 4.7, missed sweeps).
-		await appRootRef.current?.teardownAll(1500, { final: true });
-		cm.logout();
-		window.location.href = window.location.origin + window.location.pathname;
+		try {
+			await appRootRef.current?.teardownAll(1500, { final: true });
+		} finally {
+			// try/finally: a failing teardown never skips the logout or leaves the flag set.
+			void cm.logout().finally(() => {
+				loggingOutRef.current = false;
+			});
+			window.location.href = window.location.origin + window.location.pathname;
+		}
 	}, [cm]);
 
 	// =====================================================================
