@@ -4,6 +4,25 @@ The unit tests use redis-py and the shared `test.mocks.redis_fake` fixture. Live
 Valkey and model tests are opt-in. The generic node runner has one connectivity
 case. The dedicated SDK tests assert all seven Redis operations against the engine.
 
+For a quick check without a Redis server or model key, run the unit and regression
+tests from `nodes/` with a built engine containing the current node sources:
+
+```sh
+../dist/server/engine -m pytest test/tool_redis/test_redis.py test/tool_redis/test_v1.py -q --rootdir .
+```
+
+The regression suite covers optional null arguments, serialized read-back limits,
+malformed SCAN keys, literal DELETE keys, pool-exhaustion outcomes, and counter
+overflow. Hosted and shared-host tests check that the client selects the guarded
+TLS connection and rejects DNS changes to private destinations before connecting.
+
+The live tests below additionally check real expiry, authentication, ACLs and TLS.
+Certificate-rejection cases restore valid credentials and assert a certificate
+verification failure, so a bad password cannot make a broken TLS check pass.
+Without fixture URLs, live tests skip; engine dispatch and model tests also need
+their corresponding server and model configuration. Report those skips separately
+from passing tests.
+
 From the repository root, with Docker and the engine built:
 
 ```sh
