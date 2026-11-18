@@ -388,6 +388,10 @@ function cleanPath(value: unknown): string[] {
  * use_app writes no file but holds its app's folder, because it holds the app's page: it waits
  * for an earlier edit of the app in the wave, a later edit waits for it instead of rebuilding
  * the page under it, and two calls on one app run in planned order, before either one's clock starts.
+ * check_app holds its app's folder for the same reason: it builds the app's preview, maybe the one
+ * the user has open, which a show_view of the app can move and restart.
+ * show_view holds the app folder or pipeline file it shows: an edit planned before it is in place
+ * when the view opens, and one planned after it lands while the user watches.
  */
 function writePaths(call: ToolCall): string[] {
 	const { args } = call;
@@ -401,9 +405,15 @@ function writePaths(call: ToolCall): string[] {
 			return [...cleanPath(args.oldPath), ...cleanPath(args.newPath)];
 		case 'create_app':
 			return typeof args.appName === 'string' ? cleanPath(`apps/${args.appName}-ui`) : [];
-		// matched raw: use_app refuses anything but the app's folder, so the key always matches
+		// matched raw: use_app refuses anything but the app's folder, so its key always matches. check_app
+		// also takes a manifest id or a name; that key (apps/local.daybook) holds no real path, so such a
+		// call orders against nothing, as it did before
 		case 'use_app':
+		case 'check_app':
 			return typeof args.app === 'string' ? cleanPath(`apps/${args.app}`) : [];
+		// show_view refuses any path but apps/<folder> or a pipelines/ .pipe file, spelled as here, so the key is the view's own
+		case 'show_view':
+			return cleanPath(args.path);
 		default:
 			return [];
 	}

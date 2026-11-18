@@ -292,6 +292,22 @@ export interface AgentHost {
 	 */
 	watchFor?(conversationId: string): AgentWatchPlace;
 	/**
+	 * Puts the user's own view beside a chat, so the user watches it while the chat explains:
+	 * - a view already showing in a group other than the chat's comes to the front where it is;
+	 * - otherwise it opens in the group next to the chat's, splitting the chat's group to the right when
+	 *   it is the only one; a view that sits only in the chat's own group moves out to that group;
+	 * - then the chat is shown in its group and that group is the active one again.
+	 * An app's builder is switched to Design first; an open builder follows. It never closes anything.
+	 * A split draws the chat's group again; the turn goes on (onChatClosed tells that from a close).
+	 * Hosts without editors leave it out, and the run offers no show_view.
+	 *
+	 * @param opts.conversationId - The chat to place the view beside. When no tab shows that chat, the view
+	 *   opens where any open would (the active group).
+	 * @throws When another team's workspace is current, the editor area is gone or closes during the open,
+	 *   or the view did not open.
+	 */
+	showView?(view: UserView, opts: { conversationId: string }): Promise<void>;
+	/**
 	 * Calls `closed` once, when a conversation's chat is really gone: the last tab of it closed (by the
 	 * user, or by deleting the conversation), or this team's editor area was torn down (a team switch,
 	 * signing out). A tab drawn again by a layout change, a moved tab, or a second tab of the same
