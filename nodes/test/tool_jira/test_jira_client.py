@@ -224,6 +224,13 @@ def test_non_json_success_is_an_error(fake_requests):
         jc.request('GET', '/myself', auth=AUTH)
 
 
+@pytest.mark.parametrize('body', [[], ['x'], 'text', 3])
+def test_non_object_json_success_is_an_error(fake_requests, body):
+    fake_requests.request.return_value = _resp(200, json_data=body)
+    with pytest.raises(jc.JiraAPIError, match='expected a JSON object'):
+        jc.request('GET', '/myself', auth=AUTH)
+
+
 # ---------------------------------------------------------------------------
 # project allowlist and JQL wrapping
 # ---------------------------------------------------------------------------
