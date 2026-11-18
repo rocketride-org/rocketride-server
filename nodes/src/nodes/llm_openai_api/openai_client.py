@@ -182,7 +182,10 @@ class Chat(ChatBase):
         base_url = credentials.base_url or None
         self._hosted_models = credentials.hosted
         if credentials.hosted:
-            self._modelOutputTokens = hosted_output_tokens(provider, self._modelOutputTokens, credentials.gateway)
+            requested = self._modelOutputTokens
+            self._modelOutputTokens = hosted_output_tokens(provider, requested, credentials.gateway)
+            if self._modelOutputTokens != requested:
+                self._hosted_output_cap = self._modelOutputTokens
 
         # Build kwargs for ChatOpenAI
         kwargs = {
