@@ -44,10 +44,20 @@ inherit the engine's full environment, only an allowlist:
   holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
-  `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
+  `RR_STORE_SECRET_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
   `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
   the API-key fallbacks individual node pages document (such as
   `OPENAI_API_KEY`)
+
+`RR_SIGNING_KEY`, `RR_MODEL_SERVER_ADMIN_TOKEN`, `RR_DATACORE_GRANT_KEY`, and
+`ROCKETRIDE_DB_BROKER_TOKEN` are never in a task's environment, even through
+`RR_SUBPROCESS_ENV`: the engine signs the download URLs a task asks for. A
+configured `RR_SIGNING_KEY` needs at least 32 UTF-8 bytes; a shorter value
+refuses task-module startup. Tasks
+run as the engine's OS user, so on a shared or multi-user engine set the key in
+the engine's process environment rather than in the `.env` next to the binary,
+and set `RR_PROC_PRIVATE=1` (Linux only) so tasks cannot read the engine's
+environment from `/proc`.
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
@@ -57,8 +67,11 @@ in the engine.
 | `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except `RR_TASK_TOKEN_KEY`, which tasks never get, and the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
 | `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                                                                              |
 
-Set both in the engine's own environment or its `.env` file. Pipelines cannot
-change `RR_` variables.
+Set these in the engine's own environment. Local OSS engines also support an
+install `.env` file. Hosted engines (`--saas` or `--hosted`) refuse a populated
+install `.env` before startup: tasks share the engine's file permissions, so
+configuration must be injected through the process environment and the file
+removed. Pipelines cannot change `RR_` variables.
 
 Limits of `RR_PROC_PRIVATE`:
 

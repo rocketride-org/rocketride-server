@@ -110,6 +110,10 @@ engine:
 
   # -- Extra environment variables for engine pods (key-value pairs added to ConfigMap)
   env:
+    # -- Keep Linux engine/task environments private from same-UID processes.
+    # Explicit operator opt-out is possible for local debugging; never disable
+    # this on a host that executes another user's pipeline code.
+    RR_PROC_PRIVATE: '1'
     # -- Log level (debug, info, warn, error)
     LOG_LEVEL: 'info'
     # -- Number of worker threads
@@ -154,7 +158,7 @@ engine:
     #
     # Signing secret for /task/fetch download URLs. Only read on the
     # filesystem backend — cloud backends presign natively and ignore it.
-    # Set it explicitly there: with it unset the engine mints an ephemeral
+    # Set it explicitly there (at least 32 UTF-8 bytes): with it unset the engine mints an ephemeral
     # per-process key, so every previously issued download URL stops
     # verifying the moment the pod restarts.
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"

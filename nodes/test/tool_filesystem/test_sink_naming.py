@@ -520,6 +520,16 @@ class TestSinkWrite:
         _, kwargs = fs.get_url.await_args
         assert kwargs.get('expires_in') == 120
 
+    @pytest.mark.parametrize('error', ['store.url: timeout', 'store.url: not allowed', 'the engine disconnected'])
+    def test_an_unsigned_url_does_not_fail_a_written_file(self, error):
+        # #1070: the engine signs the URL over the task channel; the file is already written
+        fs = _fs()
+        fs.get_url = AsyncMock(side_effect=RuntimeError(error))
+        inst = _sink_instance(fs, emit_url=True)
+        ref = inst._sink_write(b'd', 'report.pdf')
+        assert ref['storePath'] == 'output/report.pdf' and ref['url'] is None
+        fs.write.assert_awaited_once()
+
     def test_no_url_when_emit_disabled(self):
         fs = _fs()
         inst = _sink_instance(fs, emit_url=False)
