@@ -307,7 +307,10 @@ async def test_a_node_that_exits_stops_its_task(server):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('restart', [False, True], ids=['first-run', 'after-restart'])
 async def test_a_stop_by_the_server_is_no_error(server, restart):
-    """On Linux and macOS the engine reports its cancel; on Windows it is ended and reports nothing.
+    """A stop the server asked for keeps exit code 0 whatever the engine reports.
+
+    On Linux and macOS the engine reports its cancel, which the server does not read for such a stop; on
+    Windows it is ended and reports nothing. What the engine reports is checked by the cancel from outside.
 
     A restart before the stop starts the run again from exit code 0, as a new task does.
     """

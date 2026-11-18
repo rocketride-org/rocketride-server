@@ -2463,6 +2463,17 @@ async def test_exit_event_marks_the_run_as_reported():
     assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
 
 
+def test_a_new_run_starts_from_exit_code_zero():
+    """A run started again after an error: a stop by the server, which keeps the code, must not read the old one."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    t._status.exitCode = 3
+    t._status.exitMessage = 'boom'
+    Task._reset_status(t)
+    assert (t._status.exitCode, t._status.exitMessage) == (0, '')
+
+
 class _ExitingProcess:
     """A subprocess whose output has closed but which is not reaped until wait()."""
 
