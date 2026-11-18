@@ -89,6 +89,16 @@ export interface PreviewApp {
 }
 
 /**
+ * A view of the user's own work, as show_view resolved it from a path. Never the agent's copy of an app:
+ * that is AppPage, use_app's.
+ */
+export type UserView =
+	/** The user's App Builder for the app, switched to its Design stage. */
+	| { readonly kind: 'app'; readonly app: PreviewApp }
+	/** The user's canvas for the pipeline file at `path`, a workspace path under pipelines/ (pipelines/support.pipe). */
+	| { readonly kind: 'pipeline'; readonly path: string };
+
+/**
  * An element of the agent's copy of an app, as the page outline names it: `e1`, `e2`, ...
  * A ref names the same element for the rest of the turn while that element stays on the page.
  * The tool parses the model's strings into this type; nothing else makes one.
