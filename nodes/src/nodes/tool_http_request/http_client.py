@@ -33,12 +33,18 @@ from __future__ import annotations
 import re
 import time
 from typing import Any, Dict, Optional
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, urlsplit
 
 import requests
 from requests.auth import HTTPBasicAuth
 
-from ai.common.utils import HostResolutionError, pinned_session, resolve_public_addresses
+from ai.common.utils import (
+    HostResolutionError,
+    canonicalize_url,
+    pinned_session,
+    resolve_public_addresses,
+    url_has_dot_segments,
+)
 
 DEFAULT_TIMEOUT_SECONDS = 30
 MAX_TIMEOUT_SECONDS = 300
@@ -137,7 +143,7 @@ def _validate_public_url(url: str) -> tuple[ResolvedAddress, ...]:
     if not parsed.hostname:
         raise ValueError('URL must include a hostname')
 
-    if _url_has_dot_segments(url):
+    if url_has_dot_segments(url):
         raise ValueError('URL path must not contain dot segments')
 
     try:
@@ -152,37 +158,6 @@ def _validate_public_url(url: str) -> tuple[ResolvedAddress, ...]:
     except HostResolutionError as error:
         # A DNS failure is a transport error, not a policy rejection.
         raise requests.ConnectionError(str(error)) from None
-
-
-def _url_has_dot_segments(url: str) -> bool:
-    """Detect traversal segments; fail closed on excessive encoding layers."""
-    path = urlsplit(url).path
-    for _decode_attempt in range(5):
-        normalized_separators = path.replace('\\', '/')
-        if any(segment in {'.', '..'} for segment in normalized_separators.split('/')):
-            return True
-        decoded = unquote(path)
-        if decoded == path:
-            return False
-        path = decoded
-    return True
-
-
-def _canonicalize_url(url: str) -> str:
-    """Return the stable URL form Requests will put on the wire."""
-    # Fragments are client-side only and HTTPAdapter removes them from the
-    # request target, so they must not influence whitelist matching.
-    parsed = urlsplit(url)
-    _reject_url_userinfo(parsed)
-    prepared_url = parsed._replace(fragment='').geturl()
-    for _attempt in range(3):
-        if _url_has_dot_segments(prepared_url):
-            raise ValueError('URL path must not contain dot segments')
-        normalized_url = requests.Request('GET', prepared_url).prepare().url
-        if normalized_url == prepared_url:
-            return normalized_url
-        prepared_url = normalized_url
-    raise ValueError('URL normalization did not stabilize')
 
 
 def _reject_url_userinfo(parsed) -> None:
@@ -218,13 +193,13 @@ def _build_final_url(
     auth: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Return the canonical URL after every URL-affecting request option."""
-    resolved_url = _canonicalize_url(_resolve_path_params(url, path_params))
+    resolved_url = canonicalize_url(_resolve_path_params(url, path_params))
     merged_params = dict(query_params or {})
     merged_params.update(_api_key_query_params(auth))
     if not merged_params:
         return resolved_url
     prepared_url = requests.Request('GET', resolved_url, params=merged_params).prepare().url
-    return _canonicalize_url(prepared_url)
+    return canonicalize_url(prepared_url)
 
 
 def _api_key_query_params(auth: Optional[Dict[str, Any]]) -> Dict[str, str]:

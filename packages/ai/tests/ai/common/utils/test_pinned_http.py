@@ -25,11 +25,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import ipaddress
 import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -286,49 +288,134 @@ def test_pinned_session_ignores_environment_proxies(local_port, monkeypatch):
         assert session.get(f'http://127.0.0.1:{local_port}/', timeout=5).status_code == 200
 
 
-class _SlowHeaders(BaseHTTPRequestHandler):
+_TLS_HELPER = Path(__file__).with_name('tls_test_server.py')
+_spec = importlib.util.spec_from_file_location('pinned_http_tls_test_server', _TLS_HELPER)
+tls_test_server = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(tls_test_server)
+
+
+def _loopback(url):
+    return resolve_addresses(url, is_allowed=lambda address: address.is_loopback)
+
+
+def _get_until_aborted(session, url, abort_after=0.5):
+    """GET ``url`` while ``session.abort()`` fires after ``abort_after`` s; returns the seconds it took.
+
+    Whether the aborted request raises or returns a cut-off response depends
+    on the platform (Linux reads EOF, Windows raises); what matters is that
+    it ends.
+    """
+    threading.Timer(abort_after, session.abort).start()
+    start = time.monotonic()
+    try:
+        response = session.get(url, timeout=5)
+        response.content  # noqa: B018 - read the body, which a slow-body server holds open
+    except (requests.RequestException, OSError):
+        pass
+    return time.monotonic() - start
+
+
+@pytest.fixture(scope='module')
+def http_trickle():
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), tls_test_server.TrickleHandler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f'http://127.0.0.1:{httpd.server_address[1]}'
+    httpd.shutdown()
+
+
+@pytest.fixture(scope='module')
+def https_trickle(tmp_path_factory):
+    cert, key = tls_test_server.make_cert(tmp_path_factory.mktemp('tls'))
+    httpd, port = tls_test_server.serve_https(cert, key)
+    yield f'https://127.0.0.1:{port}', cert
+    httpd.shutdown()
+
+
+@pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
+def test_abort_ends_a_slow_http_request(http_trickle, path):
+    with pinned_session(_loopback(http_trickle + '/')) as session:
+        assert _get_until_aborted(session, http_trickle + path) < 3
+
+
+@pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
+def test_abort_ends_a_slow_https_request(https_trickle, path):
+    """TLS wrapping detaches the raw socket; abort must reach the live SSLSocket."""
+    base, cert = https_trickle
+    with pinned_session(_loopback(base + '/')) as session:
+        session.verify = cert
+        assert _get_until_aborted(session, base + path) < 3
+
+
+def test_abort_ends_a_slow_tls_handshake():
+    """During the handshake neither socket object is reachable; abort must still end it."""
+    listener, port = tls_test_server.serve_slow_handshake()
+    try:
+        with pinned_session(_loopback(f'https://127.0.0.1:{port}/')) as session:
+            assert _get_until_aborted(session, f'https://127.0.0.1:{port}/') < 3
+    finally:
+        listener.close()
+
+
+def test_a_session_aborted_before_it_connects_never_connects():
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(('127.0.0.1', 0))
+    listener.listen()
+    listener.settimeout(0.5)
+    port = listener.getsockname()[1]
+    try:
+        with pinned_session(_loopback(f'http://127.0.0.1:{port}/')) as session:
+            session.abort()
+            with pytest.raises(requests.ConnectionError, match='aborted before it connected'):
+                session.get(f'http://127.0.0.1:{port}/', timeout=2)
+        with pytest.raises(socket.timeout):
+            listener.accept()  # no connection was attempted
+    finally:
+        listener.close()
+
+
+def test_track_socket_reports_an_abort():
+    adapter = pinned_http.PinnedAddressAdapter(_ADDRESS)
+    connection = Mock(sock=None, pinned_live_sock=None, pinned_connecting=False)
+    first, second = socket.socket(), socket.socket()
+    try:
+        assert adapter._track_socket(connection, first) is False
+        adapter.abort()
+        assert adapter._track_socket(connection, second) is True
+    finally:
+        first.close()
+        second.close()
+
+
+class _BigRedirect(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
     def do_GET(self):
+        body = b'x' * (2 * 1024 * 1024)
+        self.send_response(302)
+        self.send_header('Location', '/elsewhere')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
         try:
-            self.wfile.write(b'HTTP/1.1 200 OK\r\nX-Pad: ')
-            for _ in range(100):
-                self.wfile.write(b'a')
-                self.wfile.flush()
-                time.sleep(0.1)
+            self.wfile.write(body)
         except OSError:
             pass
-        self.close_connection = True
 
 
-def test_abort_ends_a_request_blocked_on_slow_headers():
-    httpd = ThreadingHTTPServer(('127.0.0.1', 0), _SlowHeaders)
+def test_a_redirect_body_is_not_read_by_requests():
+    """Session.send would read a 3xx body to prepare Response.next; a pinned session never does."""
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), _BigRedirect)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    port = httpd.server_address[1]
+    url = f'http://127.0.0.1:{httpd.server_address[1]}/'
     try:
-        addresses = resolve_addresses(f'http://127.0.0.1:{port}/', is_allowed=lambda address: address.is_loopback)
-        with pinned_session(addresses) as session:
-            threading.Timer(0.5, session.abort).start()
-            start = time.monotonic()
-            with pytest.raises((requests.RequestException, OSError)):
-                session.get(f'http://127.0.0.1:{port}/', timeout=5)
-            assert time.monotonic() - start < 3
+        with pinned_session(_loopback(url)) as session:
+            response = session.get(url, allow_redirects=False, stream=True, timeout=5)
+            assert response.status_code == 302
+            assert response._content_consumed is False
+            assert response.next is None
+            response.close()
     finally:
         httpd.shutdown()
-
-
-def test_a_socket_opened_after_abort_is_shut_down_at_once():
-    adapter = pinned_http.PinnedAddressAdapter(_ADDRESS)
-    adapter.abort()
-    left, right = socket.socketpair()
-    try:
-        adapter._track_socket(left)
-        right.settimeout(2)
-        assert right.recv(1) == b''  # the peer sees the shutdown at once
-    finally:
-        left.close()
-        right.close()
 
 
 def test_pinned_session_requires_addresses():

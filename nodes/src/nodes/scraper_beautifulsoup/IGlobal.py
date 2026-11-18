@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 
 from ai.common.config import Config
 from ai.common.utils import (
+    canonicalize_url,
     check_allow_pattern,
     config_int,
     pinned_session,
@@ -53,6 +54,10 @@ DEFAULT_TIMEOUT_S = 20
 DEFAULT_MAX_BYTES_KB = 5 * 1024
 DEFAULT_INTERVAL_MS = 250
 DEFAULT_MAX_BODY_CHARS = 20000
+DEFAULT_MAX_TOOL_CHARS = 20000
+# Fixed bounds for the operator's ceiling on one tool result (about 50k tokens at most).
+MIN_TOOL_CHARS = 1000
+MAX_TOOL_CHARS = 200_000
 
 
 def allow_patterns(cfg: Dict[str, Any]) -> List[re.Pattern]:
@@ -88,6 +93,7 @@ def build_fetcher(cfg: Dict[str, Any]) -> Fetcher:
         user_agent=str(cfg.get('userAgent') or '').strip() or DEFAULT_USER_AGENT,
         allow_patterns=allow_patterns(cfg),
         allow_match=url_matches_pattern,
+        canonicalize=canonicalize_url,
     )
 
 
@@ -96,6 +102,8 @@ class IGlobal(IGlobalBase):
 
     fetcher: Optional[Fetcher] = None
     max_body_chars: int = DEFAULT_MAX_BODY_CHARS
+    # Ceiling on the characters one tool call returns; the agent's max_chars can only lower it.
+    max_tool_chars: int = DEFAULT_MAX_TOOL_CHARS
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -103,6 +111,9 @@ class IGlobal(IGlobalBase):
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.fetcher = build_fetcher(cfg)
         self.max_body_chars = config_int(cfg, 'maxBodyChars', DEFAULT_MAX_BODY_CHARS, min_value=200)
+        self.max_tool_chars = config_int(
+            cfg, 'maxToolChars', DEFAULT_MAX_TOOL_CHARS, min_value=MIN_TOOL_CHARS, max_value=MAX_TOOL_CHARS
+        )
 
     def validateConfig(self) -> None:
         try:

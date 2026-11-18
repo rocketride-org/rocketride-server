@@ -41,7 +41,7 @@ Source variant: ``renderObject`` delegates to
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from ai.common.utils import int_arg, normalize_tool_input, register_debugger_thread
 from rocketlib import IInstanceBase, tool_function
@@ -67,9 +67,20 @@ from .scrape_sources import normalize_row
 PAGE_CONTENT_TYPES = frozenset({'text/html', 'application/xhtml+xml', 'text/plain', ''})
 
 DEFAULT_MAX_CHARS = 20000
-MAX_CHARS = 1_000_000
 DEFAULT_LIMIT = 50
 MAX_ITEMS = 500
+
+
+def _fit_items(items: List[Any], max_chars: int) -> Tuple[List[Any], bool]:
+    """The longest prefix of ``items`` whose JSON fits in ``max_chars``; True when items were dropped."""
+    kept: List[Any] = []
+    size = 2  # the enclosing []
+    for item in items:
+        size += len(json.dumps(item)) + (2 if kept else 0)  # ", " between items
+        if size > max_chars:
+            return kept, True
+        kept.append(item)
+    return kept, False
 
 
 def _clip(text: str, max_chars: int) -> Tuple[str, bool]:
@@ -98,6 +109,13 @@ class IInstance(IInstanceBase):
         return self.preventDefault()
 
     # -- tools --------------------------------------------------------------
+
+    def _max_chars(self, args: Dict[str, Any]) -> int:
+        """The agent's ``max_chars``, bounded by the operator's ``maxToolChars`` ceiling."""
+        ceiling = self.IGlobal.max_tool_chars
+        return int_arg(
+            args, 'max_chars', default=min(DEFAULT_MAX_CHARS, ceiling), lo=1, hi=ceiling, tool_name='scraper'
+        )
 
     def _fetch(self, url: Any, **kwargs):
         if not isinstance(url, str) or not url.strip():
@@ -134,7 +152,7 @@ class IInstance(IInstanceBase):
                 },
                 'max_chars': {
                     'type': 'integer',
-                    'description': 'Maximum characters of content to return (default 20000).',
+                    'description': 'Maximum characters of content (or of the links list) to return (default 20000, capped by the node setting).',
                 },
             },
         },
@@ -157,12 +175,13 @@ class IInstance(IInstanceBase):
         fmt = str(args.get('format') or 'markdown').lower()
         if fmt not in ('markdown', 'text', 'html', 'links'):
             raise ValueError('`format` must be markdown, text, html or links')
-        max_chars = int_arg(args, 'max_chars', default=DEFAULT_MAX_CHARS, lo=1, hi=MAX_CHARS, tool_name='scraper')
+        max_chars = self._max_chars(args)
         result = self._fetch_page(args.get('url'))
         out: Dict[str, Any] = {'url': result.url, 'status': result.status, 'truncated': result.truncated}
 
         if fmt == 'links':
-            out['links'] = page_links(result.content, result.url)
+            links, cut = _fit_items(page_links(result.content, result.url), max_chars)
+            out.update(links=links, truncated=result.truncated or cut)
             return out
         if fmt == 'html':
             content, clipped = _clip(result.text(), max_chars)
@@ -200,11 +219,19 @@ class IInstance(IInstanceBase):
                     'additionalProperties': {'type': 'string'},
                 },
                 'limit': {'type': 'integer', 'description': 'Maximum items to return (default 50).'},
+                'max_chars': {
+                    'type': 'integer',
+                    'description': 'Maximum characters of items to return (default 20000, capped by the node setting). Items past it are dropped and the result is marked truncated.',
+                },
             },
         },
         output_schema={
             'type': 'object',
-            'properties': {'url': {'type': 'string'}, 'items': {'type': 'array', 'items': {'type': 'object'}}},
+            'properties': {
+                'url': {'type': 'string'},
+                'items': {'type': 'array', 'items': {'type': 'object'}},
+                'truncated': {'type': 'boolean'},
+            },
         },
         description='Extract repeated items (listings, search results, link lists) from a web page using CSS selectors.',
     )
@@ -214,9 +241,11 @@ class IInstance(IInstanceBase):
         if not isinstance(fields, dict) or not fields:
             raise ValueError('`fields` must be a non-empty object of name -> selector')
         limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
+        max_chars = self._max_chars(args)
         result = self._fetch_page(args.get('url'))
         items = extract_html_items(result.content, result.url, str(args.get('item_selector') or ''), fields)
-        return {'url': result.url, 'items': items[:limit]}
+        items, cut = _fit_items(items[:limit], max_chars)
+        return {'url': result.url, 'items': items, 'truncated': cut or result.truncated}
 
     @tool_function(
         input_schema={
@@ -225,20 +254,29 @@ class IInstance(IInstanceBase):
             'properties': {
                 'url': {'type': 'string', 'description': 'Absolute http(s) URL of an RSS or Atom feed.'},
                 'limit': {'type': 'integer', 'description': 'Maximum items to return (default 50).'},
+                'max_chars': {
+                    'type': 'integer',
+                    'description': 'Maximum characters of items to return (default 20000, capped by the node setting). Items past it are dropped and the result is marked truncated.',
+                },
             },
         },
         output_schema={
             'type': 'object',
-            'properties': {'url': {'type': 'string'}, 'items': {'type': 'array', 'items': {'type': 'object'}}},
+            'properties': {
+                'url': {'type': 'string'},
+                'items': {'type': 'array', 'items': {'type': 'object'}},
+                'truncated': {'type': 'boolean'},
+            },
         },
         description='Read an RSS or Atom feed and return its items (title, url, author, published_at, body).',
     )
     def fetch_feed(self, args):
         args = normalize_tool_input(args, tool_name='scraper')
         limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
+        max_chars = self._max_chars(args)
         result = self._fetch(args.get('url'))
         try:
-            raw_items = parse_feed(result.content)
+            raw_items = parse_feed(result.content, result.url)
         except ValueError as e:
             raise ValueError(f'{redact_url(result.url)}: {e}') from e
         items = []
@@ -256,7 +294,8 @@ class IInstance(IInstanceBase):
                 items.append({k: row[k] for k in ('title', 'url', 'author', 'published_at', 'body')})
             if len(items) >= limit:
                 break
-        return {'url': result.url, 'items': items}
+        items, cut = _fit_items(items, max_chars)
+        return {'url': result.url, 'items': items, 'truncated': cut or result.truncated}
 
     @tool_function(
         input_schema={
@@ -279,7 +318,7 @@ class IInstance(IInstanceBase):
                 'limit': {'type': 'integer', 'description': 'Maximum items to return (default 50).'},
                 'max_chars': {
                     'type': 'integer',
-                    'description': 'Maximum size of the raw JSON returned when items_path is omitted (default 20000).',
+                    'description': 'Maximum characters returned: the raw JSON when items_path is omitted, else the items (default 20000, capped by the node setting).',
                 },
             },
         },
@@ -298,7 +337,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='scraper')
         method = str(args.get('method') or 'GET').upper()
         limit = int_arg(args, 'limit', default=DEFAULT_LIMIT, lo=1, hi=MAX_ITEMS, tool_name='scraper')
-        max_chars = int_arg(args, 'max_chars', default=DEFAULT_MAX_CHARS, lo=1, hi=MAX_CHARS, tool_name='scraper')
+        max_chars = self._max_chars(args)
         headers = args.get('headers') if isinstance(args.get('headers'), dict) else {}
         headers = {'Accept': 'application/json', **headers}
         result = self._fetch(args.get('url'), method=method, headers=headers, json_body=args.get('body_json'))
@@ -315,7 +354,8 @@ class IInstance(IInstanceBase):
             else:
                 found = get_path(data, items_path)
                 items = found if isinstance(found, list) else ([found] if found is not None else [])
-            return {'url': result.url, 'items': items[:limit]}
+            items, cut = _fit_items(items[:limit], max_chars)
+            return {'url': result.url, 'items': items, 'truncated': cut or result.truncated}
 
         text = json.dumps(data)
         if len(text) <= max_chars:

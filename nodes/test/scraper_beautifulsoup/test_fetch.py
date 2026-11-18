@@ -47,7 +47,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
 
-from scrape_fetch import Fetcher, FetchError, compile_patterns  # noqa: E402
+from scrape_fetch import SAFE_REDIRECT_HEADERS, Fetcher, FetchError, _redirect_step, compile_patterns  # noqa: E402
 
 _PINNED_PATH = (
     Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'pinned_http.py'
@@ -84,7 +84,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(dict(self.headers.items())).encode(), {'Content-Type': 'application/json'})
         elif self.path == '/ok':
             self._send(200, b'hello', {'Content-Type': 'text/plain; charset=utf-8'})
-        elif self.path == '/json':
+        elif urlparse(self.path).path == '/json':
             self._send(
                 200, json.dumps({'ua': self.headers.get('User-Agent')}).encode(), {'Content-Type': 'application/json'}
             )
@@ -102,6 +102,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
         elif self.path.startswith('/404'):
             self._send(404, b'nope')
+        elif self.path == '/redirect-big':
+            # A redirect whose body is far larger than any cap the tests set.
+            body = b'x' * (2 * 1024 * 1024)
+            self.send_response(302)
+            self.send_header('Location', '/ok')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except OSError:
+                pass
         elif self.path == '/slow-headers':
             # Status line, then one header byte every 100 ms (10 s): each byte
             # restarts a per-read socket timeout.
@@ -185,6 +196,7 @@ class Validator:
 
 def make(validator=None, **kw):
     kw.setdefault('allow_match', url_policy.url_matches_pattern)
+    kw.setdefault('canonicalize', url_policy.canonicalize_url)
     kw.setdefault('timeout', 5)
     return Fetcher(resolve_url=validator or Validator(), open_session=pinned_http.pinned_session, **kw)
 
@@ -350,6 +362,41 @@ def test_timeout_bounds_slow_response_headers(server):
     assert time.monotonic() - start < 3
 
 
+@pytest.mark.parametrize('suffix', ['/ok/../headers', '/ok/%2e%2e/headers', '/ok/%252e%252e/headers'])
+def test_dot_segments_cannot_walk_out_of_a_path_scoped_pattern(server, suffix):
+    fetcher = make(allow_patterns=compile_patterns(['^' + re.escape(server) + '/ok']))
+    with pytest.raises(FetchError, match='dot segments'):
+        fetcher.fetch(server + suffix)
+
+
+def test_allow_list_is_matched_against_the_url_that_is_sent(server):
+    # requests folds query params into the URL; the folded URL is what the pattern sees.
+    fetcher = make(allow_patterns=compile_patterns([pinned(server, '/json?a=1')]))
+    assert fetcher.fetch(f'{server}/json', params={'a': '1'}).json()['ua']
+
+
+def test_allow_list_without_canonicalizer_fails_closed(server):
+    fetcher = make(allow_patterns=compile_patterns(['^' + pinned(server, '/ok')]), canonicalize=None)
+    with pytest.raises(FetchError, match='matcher'):
+        fetcher.fetch(f'{server}/ok')
+
+
+def test_redirect_body_does_not_count_against_or_bypass_the_size_cap(server):
+    result = make(max_bytes=1000).fetch(f'{server}/redirect-big')
+    assert result.text() == 'hello'
+
+
+def test_dns_lookup_is_bounded_by_the_timeout(server):
+    def slow_resolver(url):
+        time.sleep(5)
+        return Validator()(url)
+
+    start = time.monotonic()
+    with pytest.raises(FetchError, match='timed out'):
+        make(validator=slow_resolver, timeout=1).fetch(f'{server}/ok')
+    assert time.monotonic() - start < 3
+
+
 def test_resolver_error_omits_query_string():
     # An out-of-range port passes the scheme and host checks and fails in the resolver.
     fetcher = Fetcher(resolve_url=pinned_http.resolve_public_addresses, open_session=pinned_http.pinned_session)
@@ -424,3 +471,78 @@ def test_compile_patterns_forms():
     with pytest.raises(ValueError, match='Invalid'):
         compile_patterns(['('])
     assert isinstance(compile_patterns(['x'])[0], re.Pattern)
+
+
+# -- redirect rules, without a socket ---------------------------------------
+
+_HEADERS = {'User-Agent': 'ua', 'Accept': '*/*', 'Authorization': 'Bearer k', 'X-Api-Key': 'k'}
+
+
+def test_redirect_step_same_origin_keeps_everything():
+    target, method, body, headers = _redirect_step(307, 'https://a.example/x', '/y', 'POST', {'q': 1}, _HEADERS)
+    assert (target, method, body, headers) == ('https://a.example/y', 'POST', {'q': 1}, _HEADERS)
+
+
+def test_redirect_step_other_origin_keeps_only_safe_headers():
+    _target, _method, _body, headers = _redirect_step(
+        302, 'https://a.example/x', 'https://b.example/y', 'GET', None, _HEADERS
+    )
+    assert {k.lower() for k in headers} <= SAFE_REDIRECT_HEADERS
+    assert 'Authorization' not in headers and 'X-Api-Key' not in headers
+
+
+@pytest.mark.parametrize('origin', ['https://b.example/y', 'http://a.example/y', 'https://a.example:8443/y'])
+@pytest.mark.parametrize('status', [307, 308])
+def test_redirect_step_refuses_a_body_to_another_origin(status, origin):
+    with pytest.raises(FetchError, match='different origin'):
+        _redirect_step(status, 'https://a.example/x', origin, 'POST', {'key': 'secret'}, _HEADERS)
+
+
+@pytest.mark.parametrize(
+    'status,method,expected',
+    [
+        (303, 'POST', 'GET'),
+        (303, 'GET', 'GET'),
+        (301, 'POST', 'GET'),
+        (302, 'POST', 'GET'),
+        (301, 'GET', 'GET'),
+        (307, 'POST', 'POST'),
+    ],
+)
+def test_redirect_step_method_rules(status, method, expected):
+    _target, new_method, body, _headers = _redirect_step(
+        status, 'https://a.example/x', '/y', method, {'q': 1}, _HEADERS
+    )
+    assert new_method == expected
+    assert (body is None) == (expected == 'GET' and method == 'POST' or status == 303)
+
+
+def test_redirect_step_invalid_location():
+    with pytest.raises(FetchError, match='invalid Location'):
+        _redirect_step(302, 'https://a.example/?key=secret', 'https://[', 'GET', None, _HEADERS)
+
+
+# -- TLS: the watchdog reaches the live SSLSocket ----------------------------
+
+_TLS_HELPER = _PINNED_PATH.parents[3].parent / 'tests' / 'ai' / 'common' / 'utils' / 'tls_test_server.py'
+_spec = importlib.util.spec_from_file_location('scraper_test_tls_server', _TLS_HELPER)
+tls_test_server = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(tls_test_server)
+
+
+@pytest.fixture(scope='module')
+def https_server(tmp_path_factory):
+    cert, key = tls_test_server.make_cert(tmp_path_factory.mktemp('tls'))
+    httpd, port = tls_test_server.serve_https(cert, key)
+    yield f'https://127.0.0.1:{port}', cert
+    httpd.shutdown()
+
+
+@pytest.mark.parametrize('path', ['/slow-headers', '/slow-body'])
+def test_timeout_bounds_slow_https(https_server, monkeypatch, path):
+    base, cert = https_server
+    monkeypatch.setenv('REQUESTS_CA_BUNDLE', cert)
+    start = time.monotonic()
+    with pytest.raises(FetchError, match='timed out'):
+        make(timeout=1).fetch(base + path)
+    assert time.monotonic() - start < 3

@@ -53,7 +53,10 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
     utils_module.config_int = Mock(side_effect=lambda _cfg, _key, default, **_kwargs: default)
-    utils_module.url_matches_pattern = load_shared_util('url_policy').url_matches_pattern
+    url_policy = load_shared_util('url_policy')
+    utils_module.url_matches_pattern = url_policy.url_matches_pattern
+    utils_module.canonicalize_url = url_policy.canonicalize_url
+    utils_module.url_has_dot_segments = url_policy.url_has_dot_segments
     pinned_http = load_shared_util('pinned_http')
     utils_module.HostResolutionError = pinned_http.HostResolutionError
     utils_module.pinned_session = pinned_http.pinned_session

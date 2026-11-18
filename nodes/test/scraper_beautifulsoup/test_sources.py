@@ -392,6 +392,24 @@ def test_normalize_row_rejects_an_unparseable_url():
     assert row is None
 
 
+def test_html_source_keeps_rows_around_a_malformed_link():
+    html = b'<div class="r"><a href="/one">One</a></div><div class="r"><a href="https://[">Bad</a></div><div class="r"><a href="/two">Two</a></div>'
+    (spec,) = parse_sources(
+        [
+            {
+                'name': 'Blog',
+                'kind': 'html',
+                'url': 'https://blog.dev/',
+                'itemSelector': '.r',
+                'fields': {'title': 'a', 'url': 'a@href'},
+            }
+        ]
+    )
+    result = run_source(spec, StubFetcher({'https://blog.dev/': html}), now=NOW)
+    assert [r['url'] for r in result.rows] == ['https://blog.dev/one', 'https://blog.dev/two']
+    assert result.errors == []
+
+
 def test_html_source():
     html = b'<div class="r"><a href="/one">One</a></div><div class="r"><a href="/two">Two</a></div>'
     (spec,) = parse_sources(

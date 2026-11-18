@@ -30,7 +30,7 @@ stable column set so they can be loaded straight into a SQL table:
     source, platform, url, url_hash, title, author, published_at,
     score, comments, body, fetched_at  (+ any ``extra`` static fields)
 
-``url_hash`` is ``sha256(url.strip().lower())`` and is the dedup key.
+``url_hash`` is the sha256 of the trimmed URL with only the scheme and host lower-cased (see :func:`hash_url`), and is the dedup key.
 
 No engine imports: unit-testable standalone.
 """
@@ -442,7 +442,7 @@ def _fetch_items(
 
     result = fetcher.fetch(url, headers=headers)
     if spec.kind == 'feed':
-        items = parse_feed(result.content)
+        items = parse_feed(result.content, result.url)
         if spec.fields:
             # Allow renaming / dropping feed fields, e.g. {"url": "url", "body": "title"}.
             items = [{k: it.get(v) if isinstance(v, str) else None for k, v in spec.fields.items()} for it in items]

@@ -48,7 +48,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse, urlsplit
 
 import requests
@@ -123,6 +123,11 @@ class Fetcher:
     user_agent: str = DEFAULT_USER_AGENT
     allow_patterns: List[re.Pattern] = field(default_factory=list)
     allow_match: Optional[Callable[[re.Pattern, str], bool]] = None
+    # Returns the exact URL ``requests`` will send (in the engine
+    # ``ai.common.utils.canonicalize_url``, which refuses dot segments). The
+    # allow-list is matched against that form and that same string is sent,
+    # because ``requests`` removes ``.`` / ``..`` before sending.
+    canonicalize: Optional[Callable[[str], str]] = None
 
     def __post_init__(self) -> None:
         self._lock = threading.Lock()
@@ -130,21 +135,42 @@ class Fetcher:
 
     # -- policy -----------------------------------------------------------
 
-    def check_url(self, url: str) -> Any:
-        """Validate one URL (scheme, allow-list, public host); returns the resolved addresses."""
+    def check_url(self, url: str, deadline: Optional[float] = None) -> Any:
+        """Validate one canonical URL (scheme, allow-list, public host); returns the resolved addresses.
+
+        With ``deadline``, the DNS lookup is bounded by it too: ``getaddrinfo``
+        cannot be interrupted, so it runs on a worker thread that is
+        abandoned when time runs out.
+        """
         parsed = urlparse(url)
         if parsed.scheme not in ('http', 'https') or not parsed.hostname:
             raise FetchError(f'Only absolute http(s) URLs are allowed: {redact_url(url)!r}')
         if self.allow_patterns:
-            if self.allow_match is None:
-                # Fail closed: a plain re.search would accept the pattern anywhere in the URL.
+            if self.allow_match is None or self.canonicalize is None:
+                # Fail closed: a plain re.search would accept the pattern anywhere
+                # in the URL, and an uncanonicalized URL can walk out with "/../".
                 raise FetchError('URL allow-list is set but no allow-list matcher is configured')
             if not any(self.allow_match(p, url) for p in self.allow_patterns):
                 raise FetchError(f'URL is not in the allow-list: {redact_url(url)}')
         try:
-            return self.resolve_url(url)
+            if deadline is None:
+                return self.resolve_url(url)
+            return _call_within(self.resolve_url, url, self._remaining(deadline, url))
+        except TimeoutError as e:
+            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s') from e
         except ValueError as e:
             raise FetchError(str(e)) from e
+
+    def canonical_url(self, url: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """The exact URL to check and send, with ``params`` folded into its query."""
+        try:
+            if params:
+                url = requests.Request('GET', url, params=params).prepare().url
+            if self.canonicalize is not None:
+                url = self.canonicalize(url)
+        except (requests.RequestException, ValueError) as e:
+            raise FetchError(f'Invalid URL {redact_url(url)}: {e}') from e
+        return url
 
     def _pace(self, url: str) -> float:
         """Sleep out the per-host interval; returns the seconds slept."""
@@ -195,10 +221,11 @@ class Fetcher:
             raise FetchError('The Host header is derived from the validated URL and cannot be overridden')
 
         deadline = time.monotonic() + self.timeout
-        current = url
+        # Query params are folded in once, so the checked URL is the sent URL.
+        current = self.canonical_url(url, params)
         for _hop in range(self.max_redirects + 1):
             self._remaining(deadline, current)
-            addresses = self.check_url(current)
+            addresses = self.check_url(current, deadline)
             deadline += self._pace(current)
             timeout = self._remaining(deadline, current)
             session = self.open_session(addresses)
@@ -210,7 +237,6 @@ class Fetcher:
                         method,
                         current,
                         headers=send_headers,
-                        params=params,
                         json=json_body if method == 'POST' else None,
                         timeout=timeout,
                         allow_redirects=False,
@@ -222,21 +248,18 @@ class Fetcher:
                     # The exception text repeats the URL (query included): report its type only.
                     raise FetchError(f'{method} {redact_url(current)} failed: {type(e).__name__}') from e
 
+                if timed_out.is_set():
+                    # The watchdog cut the response short (some platforms then
+                    # return a truncated response instead of raising).
+                    resp.close()
+                    raise FetchError(f'Fetching {redact_url(current)} timed out after {self.timeout:g}s')
+
                 try:
                     if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
-                        target = urljoin(current, resp.headers['location'])
-                        if _origin(target) != _origin(current):
-                            if json_body is not None and resp.status_code in (307, 308):
-                                # 307/308 resend the body, which can carry a key: never to another origin.
-                                raise FetchError('Refusing to forward a request body to a different origin')
-                            # Caller headers may carry credentials (Authorization,
-                            # API keys): never forward them to another origin.
-                            send_headers = {k: v for k, v in send_headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}
-                        current = target
-                        # Query params were already applied to the first URL.
-                        params = None
-                        if resp.status_code == 303 or (resp.status_code in (301, 302) and method == 'POST'):
-                            method, json_body = 'GET', None
+                        current, method, json_body, send_headers = _redirect_step(
+                            resp.status_code, current, resp.headers['location'], method, json_body, send_headers
+                        )
+                        current = self.canonical_url(current)
                         continue
 
                     content, truncated = self._read_capped(resp, deadline, current, timed_out)
@@ -290,6 +313,56 @@ class Fetcher:
             # A body without Content-Length ends "normally" when the socket shuts down.
             raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
         return b''.join(chunks), False
+
+
+def _redirect_step(
+    status: int, current: str, location: str, method: str, json_body: Any, headers: Dict[str, str]
+) -> Tuple[str, str, Any, Dict[str, str]]:
+    """Apply the redirect rules to one 3xx answer.
+
+    Returns ``(target, method, json_body, headers)`` for the next hop (the
+    caller canonicalizes and re-validates ``target``):
+
+    * a redirect to another origin keeps only :data:`SAFE_REDIRECT_HEADERS`,
+      so caller credentials (``Authorization``, API keys) never leave their host;
+    * a 307 / 308 to another origin with a body is refused, because it would
+      resend the body (which can carry a key) there;
+    * 303, and 301 / 302 after a POST, continue as a GET without a body.
+
+    Raises :class:`FetchError` for a body redirect to another origin or a
+    ``Location`` that does not parse.
+    """
+    try:
+        target = urljoin(current, location)
+    except ValueError as e:
+        raise FetchError(f'Redirect from {redact_url(current)} has an invalid Location') from e
+    if _origin(target) != _origin(current):
+        if json_body is not None and status in (307, 308):
+            raise FetchError('Refusing to forward a request body to a different origin')
+        headers = {k: v for k, v in headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}
+    if status == 303 or (status in (301, 302) and method == 'POST'):
+        method, json_body = 'GET', None
+    return target, method, json_body, headers
+
+
+def _call_within(function: Callable[[str], Any], argument: str, seconds: float) -> Any:
+    """Run ``function(argument)`` on a daemon thread; raise ``TimeoutError`` if it takes longer than ``seconds``."""
+    outcome: Dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome['value'] = function(argument)
+        except BaseException as e:  # re-raised on the calling thread
+            outcome['error'] = e
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError
+    if 'error' in outcome:
+        raise outcome['error']
+    return outcome['value']
 
 
 def _arm_watchdog(session: Any, seconds: float, timed_out: threading.Event) -> Optional[threading.Timer]:

@@ -143,24 +143,33 @@ def _with_base(base: Optional[str], element: ET.Element) -> Optional[str]:
     return _resolve(base, value)
 
 
+def join_url(base: str, ref: str) -> Optional[str]:
+    """``ref`` resolved against ``base``, or None when it does not parse.
+
+    ``urljoin`` raises ``ValueError`` for some malformed URLs (``https://[``);
+    one such link must cost only that link, never the page or the source.
+    """
+    try:
+        return urljoin(base, ref)
+    except ValueError:
+        return None
+
+
 def _resolve(base: Optional[str], ref: str) -> str:
     """``ref`` resolved against ``base``; a ref that does not parse is left for the row check to drop."""
     if not base:
         return ref
-    try:
-        return urljoin(base, ref)
-    except ValueError:
-        return ref
+    return join_url(base, ref) or ref
 
 
-def _feed_entries(root: ET.Element) -> List[Tuple[ET.Element, Optional[str]]]:
+def _feed_entries(root: ET.Element, base_url: Optional[str] = None) -> List[Tuple[ET.Element, Optional[str]]]:
     """Every item / entry in document order, with the ``xml:base`` in effect there (RFC 4287).
 
     ElementTree keeps no parent links, so the base is carried down an explicit
     stack while walking the tree.
     """
     found: List[Tuple[ET.Element, Optional[str]]] = []
-    stack = [(root, _with_base(None, root))]
+    stack = [(root, _with_base(base_url, root))]
     while stack:
         element, base = stack.pop()
         if _local(element.tag) in ('item', 'entry'):
@@ -221,11 +230,13 @@ def _refuse_entity_declarations(content: bytes) -> None:
         pass  # malformed documents are reported by the real parse below
 
 
-def parse_feed(content: Union[bytes, str]) -> List[Dict[str, Any]]:
+def parse_feed(content: Union[bytes, str], base_url: Optional[str] = None) -> List[Dict[str, Any]]:
     """Parse an RSS or Atom document into normalized raw items.
 
     Each item has ``title``, ``url``, ``author``, ``published``, ``body``
-    (HTML stripped to text) and ``categories``.
+    (HTML stripped to text) and ``categories``. ``base_url`` is the URL the
+    feed was fetched from: a relative ``xml:base`` (``../``) resolves against
+    it, as RFC 4287 requires.
     """
     if isinstance(content, str):
         content = content.encode('utf-8')
@@ -236,7 +247,7 @@ def parse_feed(content: Union[bytes, str]) -> List[Dict[str, Any]]:
         raise ValueError(f'Not a valid RSS/Atom document: {e}') from e
 
     items: List[Dict[str, Any]] = []
-    for entry, base in _feed_entries(root):
+    for entry, base in _feed_entries(root, base_url):
         link = _atom_link(entry, base) or _child_text(entry, 'guid')
         body_raw = _child_text(entry, 'content', 'encoded', 'summary', 'description')
         categories = []
@@ -341,7 +352,7 @@ def _select_value(scope: Tag, spec: str, base_url: str) -> Optional[str]:
         if isinstance(value, list):
             value = ' '.join(value)
         if value and attr.strip() in ('href', 'src'):
-            value = urljoin(base_url, value)
+            value = join_url(base_url, value)
         return value.strip() if isinstance(value, str) else value
     text = _WS.sub(' ', el.get_text(' ')).strip()
     return text or None
@@ -411,8 +422,8 @@ def page_links(content: Union[bytes, str], base_url: str, limit: int = 200) -> L
     seen = set()
     links = []
     for a in soup.find_all('a', href=True):
-        href = urljoin(base_url, a['href'])
-        if not href.startswith(('http://', 'https://')) or href in seen:
+        href = join_url(base_url, a['href'])
+        if not href or not href.startswith(('http://', 'https://')) or href in seen:
             continue
         seen.add(href)
         links.append({'url': href, 'text': _WS.sub(' ', a.get_text(' ')).strip()})
@@ -442,7 +453,10 @@ def _md_inline(node: Any, base_url: str, depth: int = 0) -> str:
     name = node.name
     if name == 'a' and node.get('href'):
         text = inner.strip()
-        return f'[{text}]({urljoin(base_url, node["href"])})' if text else ''
+        href = join_url(base_url, node['href'])
+        if not text or not href:
+            return text  # a link that does not parse keeps its text
+        return f'[{text}]({href})'
     if name in ('strong', 'b'):
         return f'**{inner.strip()}**' if inner.strip() else ''
     if name in ('em', 'i'):
@@ -453,8 +467,12 @@ def _md_inline(node: Any, base_url: str, depth: int = 0) -> str:
         return '\n'
     if name == 'img':
         alt = node.get('alt', '')
-        src = node.get('src')
-        return f'![{alt}]({urljoin(base_url, src)})' if src else ''
+        if not node.get('src'):
+            return ''
+        src = join_url(base_url, node['src'])
+        if not src:
+            return alt  # an image URL that does not parse keeps its alt text
+        return f'![{alt}]({src})'
     return inner
 
 

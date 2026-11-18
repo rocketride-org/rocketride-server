@@ -35,7 +35,11 @@ and ``https://news.ycombinator.com.evil.example/``.
 * :func:`url_matches_pattern` — match a canonical URL and prove the policy;
 * :func:`check_allow_pattern` — config-time check that a pattern follows the
   grammar at all (raises ``ValueError``), so a bad pattern fails loudly
-  instead of silently matching nothing.
+  instead of silently matching nothing;
+* :func:`canonicalize_url` — the exact URL ``requests`` will send, refusing
+  dot segments. Match patterns against this form and send this same
+  string: ``requests`` removes ``.`` / ``..`` before sending, so a pattern
+  checked against the URL as given could be walked out of with ``/../``.
 
 Moved from ``tool_http_request``. No engine imports: safe to load standalone
 in node unit tests.
@@ -44,7 +48,9 @@ in node unit tests.
 from __future__ import annotations
 
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+
+import requests
 
 
 def _match(pattern, url):
@@ -390,3 +396,42 @@ def check_allow_pattern(pattern: re.Pattern) -> None:
             r'and an exact host (or [^/]+), followed by "/", "\?", "(?=/|$)" or "$", e.g. '
             r'^https://news\.ycombinator\.com/'
         )
+
+
+def url_has_dot_segments(url: str) -> bool:
+    """Whether the URL path has a ``.`` / ``..`` segment, however many times it is percent-encoded.
+
+    Backslashes count as separators. More than five encoding layers fail
+    closed (counted as a dot segment).
+    """
+    path = urlsplit(url).path
+    for _decode_attempt in range(5):
+        normalized_separators = path.replace('\\', '/')
+        if any(segment in {'.', '..'} for segment in normalized_separators.split('/')):
+            return True
+        decoded = unquote(path)
+        if decoded == path:
+            return False
+        path = decoded
+    return True
+
+
+def canonicalize_url(url: str) -> str:
+    """Return the stable URL form ``requests`` will put on the wire.
+
+    The fragment is dropped (it never reaches the server). Raises
+    ``ValueError`` for userinfo in the URL, a dot segment, or a URL whose
+    normalization does not settle.
+    """
+    parsed = urlsplit(url)
+    if parsed.username is not None:
+        raise ValueError('URL must not include userinfo')
+    prepared_url = parsed._replace(fragment='').geturl()
+    for _attempt in range(3):
+        if url_has_dot_segments(prepared_url):
+            raise ValueError('URL path must not contain dot segments')
+        normalized_url = requests.Request('GET', prepared_url).prepare().url
+        if normalized_url == prepared_url:
+            return normalized_url
+        prepared_url = normalized_url
+    raise ValueError('URL normalization did not stabilize')

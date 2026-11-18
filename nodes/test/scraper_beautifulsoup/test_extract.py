@@ -159,6 +159,12 @@ class TestFeeds:
             'https://abs.example/four',
         ]
 
+    def test_relative_xml_base_resolves_against_the_feed_url(self):
+        atom = b"""<feed xmlns="http://www.w3.org/2005/Atom" xml:base="../">
+          <entry><link href="one"/></entry>
+        </feed>"""
+        assert parse_feed(atom, 'https://e.example/feeds/current/feed.xml')[0]['url'] == 'https://e.example/feeds/one'
+
     def test_feed_without_xml_base_keeps_relative_links(self):
         atom = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><link href="/p/1"/></entry></feed>'
         assert parse_feed(atom)[0]['url'] == '/p/1'
@@ -228,6 +234,16 @@ class TestHtml:
     def test_at_sign_inside_an_attribute_selector_without_attr_reads_text(self):
         page = b'<a href="mailto:x@y.z">Mail</a>'
         assert extract_html_items(page, 'https://e.com/', '', {'title': 'a[href*="@"]'}) == [{'title': 'Mail'}]
+
+    def test_a_malformed_link_costs_only_that_link(self):
+        page = b'<main><p><a href="https://[">Bad</a> and <a href="/good">Good</a> <img src="https://[" alt="pic"></p></main>'
+        assert [link['url'] for link in page_links(page, 'https://e.com/')] == ['https://e.com/good']
+        markdown = page_to_markdown(page, 'https://e.com/')['content']
+        assert '[Good](https://e.com/good)' in markdown
+        assert 'Bad' in markdown and 'https://[' not in markdown
+        assert 'pic' in markdown
+        items = extract_html_items(page, 'https://e.com/', 'a', {'title': '', 'url': '@href'})
+        assert items == [{'title': 'Bad', 'url': None}, {'title': 'Good', 'url': 'https://e.com/good'}]
 
     def test_invalid_selector_is_value_error(self):
         with pytest.raises(ValueError, match='Invalid CSS selector'):

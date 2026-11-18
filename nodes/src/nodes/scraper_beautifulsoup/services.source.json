@@ -39,7 +39,7 @@
 		"scraper.timeout": {
 			"type": "number",
 			"title": "Timeout (seconds)",
-			"description": "Time limit for one whole fetch, including redirects and reading the response, 1-120 seconds.",
+			"description": "Time limit for one whole fetch, 1-120 seconds: DNS lookup, connecting, the TLS handshake, response headers, redirects and the body all count toward it.",
 			"default": 20
 		},
 		"scraper.maxResponseKB": {

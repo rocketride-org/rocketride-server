@@ -216,10 +216,12 @@ def test_validate_config_rejects_an_unpinned_allow_list():
 # -- tools through IInstance ----------------------------------------------
 
 
-def make_instance(responses, max_body_chars=20000):
+def make_instance(responses, max_body_chars=20000, max_tool_chars=20000):
     """An IInstance whose IGlobal holds a stub fetcher."""
     instance = IInstance.__new__(IInstance)
-    instance.IGlobal = SimpleNamespace(fetcher=StubFetcher(responses), max_body_chars=max_body_chars)
+    instance.IGlobal = SimpleNamespace(
+        fetcher=StubFetcher(responses), max_body_chars=max_body_chars, max_tool_chars=max_tool_chars
+    )
     return instance
 
 
@@ -300,9 +302,78 @@ def test_tool_rejects_an_out_of_range_limit():
         instance.fetch_feed({'url': 'https://news.example/feed', 'limit': '3'})
 
 
+# -- tool output ceiling (scraper.maxToolChars) ------------------------------
+
+_BIG_ITEMS = [{'title': f'Item {n}', 'url': f'https://news.example/{n}', 'body': 'x' * 400} for n in range(40)]
+
+
+def _assert_cut(items, max_chars):
+    assert items, 'some items fit'
+    assert len(items) < len(_BIG_ITEMS)
+    assert len(json.dumps(items)) <= max_chars
+
+
+def test_fetch_json_items_are_cut_to_max_chars():
+    url = 'https://api.example/q'
+    instance = make_instance({url: ('application/json', json.dumps({'hits': _BIG_ITEMS}).encode())})
+    out = instance.fetch_json({'url': url, 'items_path': 'hits', 'max_chars': 2000, 'limit': 500})
+    _assert_cut(out['items'], 2000)
+    assert out['truncated'] is True
+
+
+def test_extract_items_are_cut_to_max_chars():
+    page = ''.join(f'<div class="r"><a href="/{n}">{"T" * 400}</a></div>' for n in range(40)).encode()
+    instance = make_instance({'https://site.example/': page})
+    out = instance.extract(
+        {
+            'url': 'https://site.example/',
+            'item_selector': '.r',
+            'fields': {'title': 'a', 'url': 'a@href'},
+            'max_chars': 2000,
+            'limit': 500,
+        }
+    )
+    assert out['items'] and len(json.dumps(out['items'])) <= 2000
+    assert out['truncated'] is True
+
+
+def test_fetch_feed_items_are_cut_to_max_chars():
+    items = ''.join(
+        f'<item><title>Item {n}</title><link>https://news.example/{n}</link><description>{"x" * 400}</description></item>'
+        for n in range(40)
+    )
+    feed = f'<rss version="2.0"><channel>{items}</channel></rss>'.encode()
+    instance = make_instance({'https://news.example/feed': ('application/rss+xml', feed)})
+    out = instance.fetch_feed({'url': 'https://news.example/feed', 'max_chars': 2000, 'limit': 500})
+    assert out['items'] and len(json.dumps(out['items'])) <= 2000
+    assert out['truncated'] is True
+
+
+def test_fetch_page_links_are_cut_to_max_chars():
+    page = ''.join(f'<a href="/page/{n}">{"L" * 100}</a>' for n in range(100)).encode()
+    instance = make_instance({'https://site.example/': page})
+    out = instance.fetch_page({'url': 'https://site.example/', 'format': 'links', 'max_chars': 1500})
+    assert out['links'] and len(json.dumps(out['links'])) <= 1500
+    assert out['truncated'] is True
+
+
+def test_max_chars_cannot_exceed_the_operator_ceiling():
+    page = b'<main>' + b'word ' * 10000 + b'</main>'
+    instance = make_instance({'https://site.example/': page}, max_tool_chars=3000)
+    out = instance.fetch_page({'url': 'https://site.example/', 'format': 'text', 'max_chars': 1_000_000})
+    assert len(out['content']) == 3000
+    assert out['truncated'] is True
+
+
+def test_default_max_chars_follows_a_lower_ceiling():
+    page = b'<main>' + b'word ' * 10000 + b'</main>'
+    instance = make_instance({'https://site.example/': page}, max_tool_chars=1500)
+    assert len(instance.fetch_page({'url': 'https://site.example/', 'format': 'text'})['content']) == 1500
+
+
 def test_tool_without_a_fetcher_reports_it():
     instance = IInstance.__new__(IInstance)
-    instance.IGlobal = SimpleNamespace(fetcher=None, max_body_chars=20000)
+    instance.IGlobal = SimpleNamespace(fetcher=None, max_body_chars=20000, max_tool_chars=20000)
     with pytest.raises(RuntimeError, match='not initialised'):
         instance.fetch_page({'url': 'https://site.example/'})
 
@@ -326,6 +397,7 @@ def test_build_fetcher_maps_units():
     assert fetcher.user_agent == 'my-agent/2'
     assert [p.pattern for p in fetcher.allow_patterns] == ['^https://news\\.example/']
     assert fetcher.allow_match is not None
+    assert fetcher.canonicalize is not None
 
 
 def test_build_fetcher_defaults():

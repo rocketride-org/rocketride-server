@@ -24,7 +24,7 @@
 		"scraper.timeout": {
 			"type": "number",
 			"title": "Timeout (seconds)",
-			"description": "Time limit for one whole fetch, including redirects and reading the response, 1-120 seconds.",
+			"description": "Time limit for one whole fetch, 1-120 seconds: DNS lookup, connecting, the TLS handshake, response headers, redirects and the body all count toward it.",
 			"default": 20
 		},
 		"scraper.maxResponseKB": {
@@ -43,6 +43,12 @@
 			"type": "number",
 			"title": "Max item body characters",
 			"description": "Feed item bodies are trimmed to this many characters.",
+			"default": 20000
+		},
+		"scraper.maxToolChars": {
+			"type": "number",
+			"title": "Max characters per tool result",
+			"description": "Ceiling on what one tool call returns to the agent, 1000-200000 characters. The agent's max_chars can only lower it; longer content and item lists are cut and marked truncated.",
 			"default": 20000
 		},
 		"scraper.userAgent": {
@@ -74,7 +80,7 @@
 		{
 			"section": "Pipe",
 			"title": "Web Scraper",
-			"properties": ["type", "scraper.timeout", "scraper.maxResponseKB", "scraper.requestIntervalMs", "scraper.maxBodyChars", "scraper.userAgent", "scraper.urlAllowList"]
+			"properties": ["type", "scraper.timeout", "scraper.maxResponseKB", "scraper.requestIntervalMs", "scraper.maxBodyChars", "scraper.maxToolChars", "scraper.userAgent", "scraper.urlAllowList"]
 		}
 	]
 }

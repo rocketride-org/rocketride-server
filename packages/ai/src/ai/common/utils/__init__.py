@@ -30,7 +30,9 @@ Public surface:
   public hosts only (no rebinding gap); ``HostResolutionError`` marks a host
   that did not resolve.
 - ``url_matches_pattern``, ``check_allow_pattern`` — fail-closed URL
-  allow-list regexes that must pin the scheme and host.
+  allow-list regexes that must pin the scheme and host;
+  ``canonicalize_url``, ``url_has_dot_segments`` — the URL form to match
+  them against (and send).
 - ``register_debugger_thread`` — register an engine render thread with pydevd.
 
 Implementations live in submodules (``string_utils``, ``content_blocks``,
@@ -73,11 +75,12 @@ from .tool_args import (
     require_str_list,
     validate_tool_input_schema,
 )
-from .url_policy import check_allow_pattern, url_matches_pattern
+from .url_policy import canonicalize_url, check_allow_pattern, url_has_dot_segments, url_matches_pattern
 from .url_utils import validate_public_url
 
 __all__ = [
     'HostResolutionError',
+    'canonicalize_url',
     'check_allow_pattern',
     'colorize_depth',
     'check_hardware',
@@ -115,6 +118,7 @@ __all__ = [
     'resolve_public_addresses',
     'safe_str',
     'source_quality',
+    'url_has_dot_segments',
     'url_matches_pattern',
     'validate_public_url',
     'validate_tool_input_schema',
