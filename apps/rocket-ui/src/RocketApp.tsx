@@ -33,7 +33,7 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
 import { commonStyles , parseToolDocUri } from 'shell';
-import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout, ConfirmDialog } from 'shell';
+import { useShellConnection, useAuthUser, useWorkspace, useReport, DocTabs, DocSplitLayout, AppLayout, ConfirmDialog } from 'shell';
 import { AgentIcon } from 'shared/tools/agent/AgentIcon';
 import type { SidebarViewContainer } from 'shell';
 import { CodiconFiles, CodiconSourceControl, CodiconCircuitBoard, CodiconTypeHierarchy } from 'shared/components/icons/Codicon';
@@ -150,6 +150,8 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	const { client } = useShellConnection();
 	const authUser = useAuthUser();
 	const { loaded, appState, updateAppState, flushWorkspaceNow, activeAppId, settings, updateSetting } = useWorkspace();
+	// The agent's reporter: real here, inside the shell's TelemetryProvider, and stable for the page's life
+	const report = useReport();
 	const [ready, setReady] = useState(false);
 	// Bootstrap failure (createWorkspace / Documents init) — renders in place
 	// of the "Initialising..." placeholder instead of hanging it forever.
@@ -278,7 +280,7 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		const ws = await createWorkspace({ hostAppId: activeAppId, autoCommit: autoCommitRef.current, scope: workspaceScope });
 		if (cancelled) return;
 		// step: hand the agent this workspace's view, guides, scaffold, packer and dev sessions
-		setAgentHost(createRocketAgentHost(client, ws));
+		setAgentHost(createRocketAgentHost(client, ws, report));
 		// step: restored pending changes refuse auto mode — prompt the user
 		if (ws.pendingBlocksAuto) setModeSwitchBlocked(true);
 
@@ -332,7 +334,7 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// workspaceScopeKey (not the scope object) keys the rebuild: the
 		// bootstrap must re-run only when the scope MATERIALLY changes.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [client, loaded, activeAppId, workspaceScopeKey]);
+	}, [client, loaded, activeAppId, workspaceScopeKey, report]);
 
 	// --- Setting changes flow to the policy (the single mode owner) -----------
 

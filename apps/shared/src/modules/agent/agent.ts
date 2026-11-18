@@ -48,7 +48,7 @@ import { configureSessions, deleteSession as deleteStoredSession, getAgentSessio
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
 import { looksLikeCredential, redactDeep, redactText } from './toolkits/common';
 import type { UndoOutcome, UndoRecord } from './toolkits/undo';
-import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, TurnError, turnCard, UNDO, undoParts, usageMeta, type RunRecord, type TurnRecord, type TurnResult } from './turn';
+import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, TurnError, turnCard, turnEvent, turnReport, UNDO, undoParts, usageMeta, type RunRecord, type TurnRecord, type TurnReport, type TurnResult } from './turn';
 import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
@@ -77,6 +77,8 @@ export interface AgentOptions {
 	runs?: RunRecord[];
 	/** Takes the request's Undo record when its run ends. */
 	undo?: (record: UndoRecord) => void;
+	/** Where the turn's model requests and tool calls are reported, bound to the turn (default: nothing). */
+	report?: TurnReport;
 }
 
 /**
@@ -88,9 +90,9 @@ export interface AgentOptions {
  * @throws A TurnError when the model fails before the run gathered anything.
  */
 export async function agent(request: string, callback: AgentCallback, options: AgentOptions): Promise<TurnResult> {
-	const { turn, prompts = BUILDER_PROMPTS, model: choice = DEFAULT_MODEL, conversationId = crypto.randomUUID(), turnId, runs, undo } = options;
+	const { turn, prompts = BUILDER_PROMPTS, model: choice = DEFAULT_MODEL, conversationId = crypto.randomUUID(), turnId, runs, undo, report } = options;
 	const chatModel = openChatModel(choice, conversationId, getClient);
-	return runAgent(request, callback, { history: [...turn.history], prompts, chatModel, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs, undo }, { host: getAgentHost(), client: getClient });
+	return runAgent(request, callback, { history: [...turn.history], prompts, chatModel, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs, undo, report }, { host: getAgentHost(), client: getClient });
 }
 
 // =============================================================================
@@ -350,8 +352,12 @@ export class AgentSession {
 	async execute(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<{ results: TextResult[]; turn: TurnResult }> {
 		// queued turns can chain with no idle save between them, so this.messages may miss the turn before; the turn's history never does
 		if (!turn) throw new Error('AgentSession.execute runs inside a chat turn: pass the turn useChatMessages hands its request.');
-		// step: one terminal path: whatever happens below, the turn ends here once, refused, failed, stopped or answered
+		// step: one terminal path: whatever happens below, the turn ends here once, refused, failed, stopped or answered, and reports its end
+		const began = performance.now();
 		const turnId = crypto.randomUUID();
+		// the turn holds its model, so a pick during it changes neither what it asks nor what it reports
+		const choice = this.chosen;
+		const report = turnReport(findAgentHost()?.report, { turnId, conversationId: this.sessionId, model: choice.model });
 		const opening = turn.history.length;
 		let result: TurnResult | undefined;
 		let started = false;
@@ -363,6 +369,8 @@ export class AgentSession {
 				onStatus,
 				turn,
 				turnId,
+				choice,
+				report,
 				() => {
 					started = true;
 					// step: only the latest turn can be undone, so one that starts ends the earlier turn's Undo; a refused message starts none
@@ -380,7 +388,10 @@ export class AgentSession {
 		} finally {
 			this.running--;
 			this.keepUndo(turnId, record);
-			if (result) this.ended(result, opening);
+			if (result) {
+				const recorded = this.ended(result, opening);
+				report('agent_turn:end', turnEvent(recorded, { ms: performance.now() - began, mode: findAgentHost()?.approvals?.run.read().mode ?? 'ask' }));
+			}
 		}
 	}
 
@@ -399,8 +410,8 @@ export class AgentSession {
 		});
 	}
 
-	/** The body of execute: scope rule, title, key check, then the run (`starting` fires just before it). */
-	private async run(text: string, onStatus: AgentCallback | undefined, turn: ChatTurn, turnId: string, starting: () => void, undo: (record: UndoRecord) => void): Promise<{ results: TextResult[]; turn: TurnResult }> {
+	/** The body of execute: scope rule, title, key check, then the run (`starting` fires just before it) on the turn's model, reporting to `report`. */
+	private async run(text: string, onStatus: AgentCallback | undefined, turn: ChatTurn, turnId: string, choice: ModelChoice, report: TurnReport, starting: () => void, undo: (record: UndoRecord) => void): Promise<{ results: TextResult[]; turn: TurnResult }> {
 		// step: a conversation runs in the scope it started in; the chat shows the refusal as an error
 		const host = getAgentHost();
 		const scopeKey = host.scopeKey;
@@ -431,7 +442,7 @@ export class AgentSession {
 		const answering = this.takeRequest(turnId);
 		starting();
 		const { callback, results } = routeChunks(onStatus);
-		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, model: this.chosen, conversationId: this.sessionId, turnId, runs: this.runsStarted, undo });
+		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, model: choice, conversationId: this.sessionId, turnId, runs: this.runsStarted, undo, report });
 		return { results, turn: ended };
 	}
 
@@ -453,8 +464,10 @@ export class AgentSession {
 	/**
 	 * A turn ended; it waits for its closing row. When the chat already wrote it (Stop's grace ran
 	 * out first) or the Agent tab is gone, nothing else saves the conversation, so this does.
+	 *
+	 * @returns The turn as recorded: a stopped turn whose tab is gone ends 'unmounted'.
 	 */
-	private ended(turn: TurnResult, opening: number): void {
+	private ended(turn: TurnResult, opening: number): TurnResult {
 		const result: TurnResult = this.detached && turn.outcome === 'stopped' ? { ...turn, reason: 'unmounted' } : turn;
 		this.pending.push({ turn: result, opening });
 		if (this.detached) this.closeDetached();
@@ -463,6 +476,7 @@ export class AgentSession {
 				console.log('[AgentSession] could not save the ended turn', err);
 			});
 		}
+		return result;
 	}
 
 	/**

@@ -36,6 +36,7 @@ import { isJsonObject, redactText } from '../toolkits/common';
 import { PIPELINE_METHODS } from '../toolkits/rocketrideClient';
 import type { SecretMarkers } from '../toolkits/secretMarkers';
 import { RefusedError, type AgentTool, type ToolAct, type ToolStep, type UserTime } from '../tools';
+import { ownName, type AgentEvents, type TurnReport } from '../turn';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
 import type { ResultEntry, StopReason, ToolCall } from './plan';
 import { NO_ROUND, type CallResult, type ModelSession, type PlannedCall, type Round } from './session';
@@ -123,6 +124,8 @@ export interface LoopOptions {
 	 * 'limited'. 0 or unset means no limit.
 	 */
 	maxWaves?: number;
+	/** Hears each tool call the model planned, as `agent_tool:call`, bound to the turn (default: nothing). */
+	report?: TurnReport;
 }
 
 /** How a run ended. */
@@ -132,8 +135,6 @@ export interface LoopResult {
 	stopReason: StopReason;
 	/** How many waves ran, counting the one the run stopped in. */
 	waves: number;
-	/** How long each ask of the session took, in milliseconds, in order, its retries and continuations inside. */
-	modelMs: number[];
 	/** How many tool calls the model planned, memory.peek and skipped calls included. */
 	toolCalls: number;
 }
@@ -344,6 +345,15 @@ export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false
  * here before anything reads it, so no credential reaches the stored result, the model, a
  * thinking line or the finish rule.
  */
+/**
+ * A ran call's outcome as its event says it. `unstarted` covers a refusal at approval, a held-back
+ * call, a stop before start and a RefusedError alike; the loop cannot tell them apart.
+ */
+function toolOutcome(outcome: CallOutcome): AgentEvents['agent_tool:call']['outcome'] {
+	if (outcome.ok) return 'ok';
+	return outcome.timedOut ? 'timeout' : outcome.unstarted ? 'not_run' : 'error';
+}
+
 function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
 	return outcome.ok ? { ...outcome, result: hideSecrets(outcome.result, secrets) } : { ...outcome, error: hideSecrets(outcome.error, secrets) };
 }
@@ -632,8 +642,6 @@ async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (
 class WaveRun {
 	/** Every stored tool result. */
 	readonly memory = new RunMemory();
-	/** How long each ask of the session took. */
-	readonly modelMs: number[] = [];
 	/** How many tool calls the model planned. */
 	toolCalls = 0;
 	/** What every call left behind, oldest first, for the partial report. */
@@ -669,21 +677,12 @@ class WaveRun {
 		return { results: [], notes: [...heardNotes(this.hear()), ...(this.o.notes?.() ?? [])] };
 	}
 
-	/** Asks the session, timing the ask. */
-	async timed<T>(asking: Promise<T>): Promise<T> {
-		const began = performance.now();
-		try {
-			return await asking;
-		} finally {
-			this.modelMs.push(Math.round(performance.now() - began));
-		}
-	}
-
 	/**
 	 * Runs a wave's calls and returns a result for each, by its id, in call order. A call missing a
 	 * required argument is skipped with an error, and a call whose reference names nothing does not
 	 * run. memory.peek reads memory before this wave's results are stored. Calls that ran (not peek,
-	 * skipped or unstarted) are also returned as the finish rule hears them.
+	 * skipped or unstarted) are also returned as the finish rule hears them. Each planned call is
+	 * reported, in call order, by its tool's name only when the run offers that tool.
 	 */
 	async act(wave: number, calls: readonly PlannedCall[]): Promise<Acted> {
 		const prepared = calls.map((call, i): Prepared => {
@@ -705,13 +704,17 @@ class WaveRun {
 
 		let next = 0;
 		const ran: RanCall[] = [];
+		const offered = (name: string): boolean => this.tools.has(name) || name === PEEK_TOOL;
 		const entries = prepared.map((p, i) => {
+			const tool = ownName(p.call.tool, offered);
 			if ('entry' in p) {
 				if (!('skipped' in p) && p.call.tool !== PEEK_TOOL) ran.push({ tool: p.call.tool, args: p.call.args, error: p.entry.error });
+				this.o.report?.('agent_tool:call', { tool, outcome: 'skipped' in p ? 'skipped' : p.entry.error ? 'error' : 'ok', ms: 0, wave });
 				return this.withCall(p.entry, p.call);
 			}
 			const key = resultKey(wave, i);
 			const outcome = outcomes[next++];
+			this.o.report?.('agent_tool:call', { tool, outcome: toolOutcome(outcome), ms: outcome.ms, wave });
 			// a refused or unstarted call changed nothing, so a denied delete_file needs no check_app
 			if (outcome.ok) ran.push({ tool: p.call.tool, args: p.args, result: outcome.result });
 			else if (!outcome.unstarted) ran.push({ tool: p.call.tool, args: p.args, error: outcome.error });
@@ -866,7 +869,7 @@ class WaveRun {
 	}
 
 	finish(stopReason: StopReason, answer: string, waves: number): LoopResult {
-		return { answer, stopReason, waves, modelMs: this.modelMs, toolCalls: this.toolCalls };
+		return { answer, stopReason, waves, toolCalls: this.toolCalls };
 	}
 
 	/**
@@ -889,7 +892,7 @@ class WaveRun {
 	 */
 	async conclude(reason: StopReason, round: Round, waves: number): Promise<LoopResult> {
 		const heard = pauses(reason) ? heardNotes(this.hear()) : [];
-		const concluded = await this.timed(this.o.session.conclude({ results: round.results, notes: [...round.notes, ...heard] }));
+		const concluded = await this.o.session.conclude({ results: round.results, notes: [...round.notes, ...heard] });
 		// step: the user stopped the run while the model answered
 		if (this.o.signal.aborted || concluded.kind === 'stopped') return this.stopped(waves);
 		const lines = this.entries.map(gatheredLine);
@@ -935,7 +938,7 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		// step: the step limit: no next reply; the answer is asked of the conversation
 		if (o.maxWaves !== undefined && o.maxWaves > 0 && wave >= o.maxWaves) return run.conclude('limited', round, wave);
 		o.finish.beginWave(wave);
-		const reply = await run.timed(o.session.next(round));
+		const reply = await o.session.next(round);
 		round = NO_ROUND;
 
 		switch (reply.kind) {

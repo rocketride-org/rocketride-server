@@ -169,7 +169,7 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			default: 2,
 			order: 10,
 			shells: ['saas', 'oss'],
-			description: "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price is counted at an assumed rate.",
+			description: "The most one agent turn's model cost may reach, in US dollars, from the provider's token counts. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. A request that comes back without counts is held at its likely size, so a turn can pass the limit by at most part of one request. 0 means no limit, and a model with no known price is counted at an assumed rate.",
 		},
 		...Object.fromEntries(Object.values(GRANT_SETTINGS).map(({ key, order, description }): [string, SettingSchema] => [key, { type: 'boolean', default: false, order, shells: ['saas', 'oss'], description }])),
 		'rocketride.pipeBuilder.agentDefaultModel': {

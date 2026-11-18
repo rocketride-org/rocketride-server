@@ -21,20 +21,29 @@
 // SOFTWARE.
 
 // =============================================================================
-// TURN — how one agent turn ended, and the card the chat shows for it
+// TURN — how one agent turn ended, the card the chat shows for it, and what it reports
 // =============================================================================
 
 /**
  * Every turn ends with one TurnResult. The session file keeps it linked to the turn's bot row, and the chat
  * shows it as the card under that row (`turnCard`), so a reload shows the same card. Its text has passed
  * through `redactDeep`.
+ *
+ * A turn also reports to its host: one `agent_turn:end`, one `agent_model:request` per request sent and one
+ * `agent_tool:call` per tool call planned. AgentEvents is the only list of them. An event carries counts,
+ * durations, flags, closed kinds and OwnNames, never free text, and the compile check under it fails the build
+ * the moment a prop could hold a prompt, a reply, a path, an argument, an error message or a URL. The shell's
+ * sanitizer checks none of that.
  */
 
+import type { StopReason } from 'rocketride';
 import type { ChatCard } from 'shell/src/components/chat/types';
 
+import type { ApprovalMode } from './host';
 import type { KeyTrouble } from './model';
 import { redactText } from './toolkits/common';
-import { costText, tokensText } from './usage';
+import { costText, PRICES, tokensText, uncountedText, type Tokens } from './usage';
+import type { Adapter } from './wave/session';
 
 // =============================================================================
 // TYPES
@@ -72,18 +81,29 @@ export interface TurnCheck {
 	summary: string;
 }
 
-/** What the turn used. The step limit counts waves, and the cost limit the cost; the rest is for diagnostics. */
+/**
+ * What the turn used. The step limit counts waves, and the cost limit the cost; the rest is for diagnostics.
+ * Every number here comes from the provider's counts; none from characters.
+ */
 export interface TurnUsage {
 	/** Waves run, counting the one the turn ended in. */
 	waves: number;
-	/** Model requests sent, retries and the best-effort answer included. */
+	/** Model requests that count toward the cost: every one sent, retries and the best-effort answer included, but those that cannot have been billed. */
 	modelRequests: number;
 	/** Tool calls the model planned. */
 	toolCalls: number;
-	/** The tokens, when something counts them; `estimated` when they come from character counts rather than the provider. */
-	tokens?: { input: number; output: number; estimated: boolean };
-	/** The cost, when the model has a price; `estimated` when it comes from character counts rather than the provider. */
-	cost?: { usd: number; estimated: boolean };
+	/**
+	 * The provider's counts, summed over the requests that had them; unset when none had. Disjoint: `input` is
+	 * fresh input, the cache split stays apart. `estimated` is set only on turns saved before real counts, which
+	 * have no cache counts (their `input` included them); nothing writes it now.
+	 */
+	tokens?: Tokens & { readonly estimated?: boolean };
+	/** Their cost at the model's price; unset for a model with no price or when no request had counts. `estimated`: as above. */
+	cost?: { usd: number; readonly estimated?: boolean };
+	/** Requests that came back with no counts; the cost limit held each at its whole reservation. Unset when none. */
+	uncounted?: number;
+	/** The adapter the turn's session ended on; unset for a turn that ended before it had one. */
+	adapter?: Adapter;
 }
 
 /**
@@ -154,6 +174,197 @@ export interface TurnResult {
 
 /** A turn as the session file keeps it: always linked to its row. */
 export type TurnRecord = TurnResult & { messageId: number };
+
+// =============================================================================
+// EVENTS — the one list of what the agent reports
+// =============================================================================
+
+/**
+ * A name or id an event may carry: one of our own ids, or a name on one of our own lists. Only
+ * `ownName` makes one, so free text cannot reach an event without a visible cast.
+ */
+export type OwnName = string & { readonly __ownName: unique symbol };
+
+/**
+ * The one way a name or id enters an event.
+ *
+ * @returns `value` when `known` holds for it, else 'other'.
+ */
+export function ownName(value: string, known: (value: string) => boolean): OwnName {
+	return (known(value) ? value : 'other') as OwnName;
+}
+
+/** The keys every event carries. turnReport adds them, so no call site passes them. */
+type TurnKeys = {
+	/** This turn; joins its requests and calls to its end. */
+	turn_id: OwnName;
+	/** The conversation (session id). */
+	conversation_id: OwnName;
+	/** The model the turn asks, as the price table names it; 'other' for a model the table does not list. */
+	model: OwnName;
+};
+
+/** Real token counts, apart. On an event only when the provider gave them. */
+type TokenProps = { input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number };
+
+/**
+ * Every event the agent reports, with its props. `type`s, not interfaces, so the shell's reporter
+ * (props: Record<string, unknown>) assigns to AgentReport with no cast.
+ */
+export type AgentEvents = {
+	/**
+	 * One per turn, however it ended: refused, failed, stopped, unmounted, paused or done. Fired by
+	 * AgentSession.execute, the one terminal path.
+	 */
+	'agent_turn:end': TurnKeys &
+		Partial<TokenProps> & {
+			outcome: TurnOutcome;
+			reason: TurnReason;
+			/** Wall time from execute's start to its end, in ms: what the user waited, approval cards included. */
+			ms: number;
+			/** The approval mode when the turn ended. */
+			mode: ApprovalMode;
+			adapter: Adapter | 'none';
+			waves: number;
+			model_requests: number;
+			tool_calls: number;
+			files_changed: number;
+			checks_failed: number;
+			/** What a needs_input turn asks of the user; 'none' otherwise. */
+			asks: NeedsInputRequest['kind'] | 'none';
+			/** USD from real counts at the model's price; absent for a model with no price or a turn with no counted request. */
+			usd?: number;
+			/** Requests with no counts. */
+			uncounted: number;
+		};
+	/**
+	 * One per model request sent, which is one meter reservation: a fresh retry, a resend of an
+	 * unusable reply, a continuation and the final answer each send their own. A request the cost
+	 * limit refused was never sent and has none (the turn end says cost_limit).
+	 */
+	'agent_model:request': TurnKeys &
+		Partial<TokenProps> & {
+			adapter: Adapter;
+			/** Why it was sent: the loop's ask, the one resend of an unusable reply, a continuation after the output limit, or the final answer. */
+			purpose: 'next' | 'resend' | 'continue' | 'conclude';
+			/** The retry on a fresh task after a retryable failure. */
+			fresh: boolean;
+			outcome: 'answered' | 'unsupported' | 'failed' | 'timeout' | 'stopped';
+			/** Why the provider stopped writing, on an answered native turn (a refusal and max_tokens show here); 'none' otherwise. */
+			stop: StopReason | 'none';
+			/** For failed and timeout: whether one fresh try may fix it. */
+			retryable?: boolean;
+			/** Whether it counts toward the turn's cost: false only for a request that cannot have been billed. */
+			billed: boolean;
+			key: KeyTrouble['state'] | 'none';
+			/** One attempt, from just after its reservation to its answer or failure. */
+			ms: number;
+			/** Whether the provider's counts came back. */
+			counted: boolean;
+			/** Its cost from real counts; absent when uncounted or for a model with no price. */
+			usd?: number;
+		};
+	/** One per tool call the model planned, memory.peek and skipped calls included, so the count equals TurnUsage.toolCalls. */
+	'agent_tool:call': TurnKeys & {
+		/** The tool, when the run offers one by that name; 'other' for a name the model made up. */
+		tool: OwnName;
+		/** not_run: refused at approval, held back, or stopped before it started. skipped: a missing argument or a reference that names nothing. */
+		outcome: 'ok' | 'error' | 'timeout' | 'not_run' | 'skipped';
+		/** Prepare and run, never the approval wait or an open tool question; 0 for skipped and peek. */
+		ms: number;
+		/** The wave that planned it, counting from 0. */
+		wave: number;
+	};
+};
+
+export type AgentEvent = keyof AgentEvents;
+
+/** Every prop typed so it could hold free text, as `event.prop`; never while each prop is a number, a flag, a closed kind or an OwnName. */
+type FreeTextProps = {
+	[E in AgentEvent]: { [P in keyof AgentEvents[E]]-?: string extends NonNullable<AgentEvents[E][P]> ? `${E}.${P & string}` : never }[keyof AgentEvents[E]];
+}[AgentEvent];
+
+/** Fails to compile, naming the prop, once any event could carry user content. */
+const contentFree: [FreeTextProps] extends [never] ? true : FreeTextProps = true;
+void contentFree;
+
+/** How the agent reports to its host. The shell's useReport() is one. */
+export type AgentReport = <E extends AgentEvent>(event: E, props: AgentEvents[E]) => void;
+
+/** The host's report bound to one turn: a caller passes an event's own props, and the turn's keys are added. */
+export type TurnReport = <E extends AgentEvent>(event: E, props: Omit<AgentEvents[E], keyof TurnKeys>) => void;
+
+/** What a string prop may look like: a closed kind, a model id, a tool name or one of our UUIDs. */
+const PLAIN_NAME = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+/** Our own ids are crypto.randomUUID()s. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Binds the host's report to one turn. Ids pass only in UUID shape, and the model only when the
+ * price table lists it. Each event also prints as one console line, `[agent] <event> <props>`, for
+ * local stacks (no PostHog key) and the browser eval's trace analyzer. Nothing it does can throw
+ * into the turn.
+ *
+ * The build check above stops a free-text prop being declared; this stops one arriving through a
+ * cast or `any`. A value that is not a number, a flag or a plain name drops the whole event, with a
+ * warning that names only the prop key. It can't catch a plain name that is itself private (a bare
+ * file name passes the pattern), which is why ownName's lists stay the main guard.
+ *
+ * @param report - The host's report; unset (tests, a host without telemetry) gives a report that does nothing.
+ */
+export function turnReport(report: AgentReport | undefined, turn: { turnId: string; conversationId: string; model: string }): TurnReport {
+	if (!report) return () => undefined;
+	const keys: TurnKeys = {
+		turn_id: ownName(turn.turnId, (id) => UUID.test(id)),
+		conversation_id: ownName(turn.conversationId, (id) => UUID.test(id)),
+		model: ownName(turn.model, (model) => PRICES.some((row) => row.model === model)),
+	};
+	return (event, props) => {
+		try {
+			// the one cast: Omit<T, keyof TurnKeys> plus TurnKeys is T, which TypeScript can't see through the generic
+			const full = { ...props, ...keys } as AgentEvents[typeof event];
+			const bad = Object.entries(full).find(([, value]) => !(typeof value === 'number' || typeof value === 'boolean' || (typeof value === 'string' && PLAIN_NAME.test(value))));
+			if (bad) {
+				console.warn(`[agent] dropped ${event}: ${bad[0]} is not a plain name`);
+				return;
+			}
+			console.info(`[agent] ${event} ${JSON.stringify(full)}`);
+			report(event, full);
+		} catch {
+			// telemetry never breaks a turn
+		}
+	};
+}
+
+/** Real counts as event props. */
+export function tokenProps(t: Tokens): TokenProps {
+	return { input_tokens: t.input, output_tokens: t.output, cache_read_tokens: t.cacheRead, cache_write_tokens: t.cacheWrite };
+}
+
+/**
+ * The turn's end as its event: counts and kinds read off the TurnResult, so the card and the event
+ * can never disagree on cost. It reads nothing that holds text (the answer, the error, paths, checks' summaries, the request).
+ */
+export function turnEvent(turn: TurnResult, at: { ms: number; mode: ApprovalMode }): Omit<AgentEvents['agent_turn:end'], keyof TurnKeys> {
+	const { usage } = turn;
+	return {
+		outcome: turn.outcome,
+		reason: turn.reason,
+		ms: Math.round(at.ms),
+		mode: at.mode,
+		adapter: usage.adapter ?? 'none',
+		waves: usage.waves,
+		model_requests: usage.modelRequests,
+		tool_calls: usage.toolCalls,
+		files_changed: turn.files.length,
+		checks_failed: turn.checks.filter((c) => c.status === 'fail').length,
+		asks: turn.request?.kind ?? 'none',
+		...(usage.tokens ? tokenProps(usage.tokens) : {}),
+		...(usage.cost ? { usd: usage.cost.usd } : {}),
+		uncounted: usage.uncounted ?? 0,
+	};
+}
 
 // =============================================================================
 // OUTCOMES
@@ -272,7 +483,8 @@ export function turnCard(turn: TurnResult): ChatCard {
 		}
 		case 'needs_input':
 			if (turn.reason === 'limited' || turn.reason === 'cost_limit') {
-				const spent = turn.reason === 'cost_limit' && turn.usage.cost ? [`${costText(turn.usage.cost.usd, turn.usage.cost.estimated)} so far.`] : [];
+				const { cost, uncounted } = turn.usage;
+				const spent = turn.reason === 'cost_limit' && cost ? [`${costText(cost.usd, cost.estimated)} so far${uncounted ? `, ${uncountedText(uncounted)}` : ''}.`] : [];
 				return withFiles({ tone: 'info', title: turn.request?.question ?? 'Paused', lines: [...spent, FRESH_BUDGET], ...requestParts(turn.request) });
 			}
 			return withFiles({ tone: 'info', title: 'Needs you', ...requestParts(turn.request) });
@@ -282,12 +494,16 @@ export function turnCard(turn: TurnResult): ChatCard {
 /**
  * What a turn shows in its row's meta line: the model that answered first, so a change shows row by row, then what it used.
  *
- * @returns "claude-sonnet-5-5 · $0.42" from the provider's counts, which include thinking, or "· ~$0.42 est., not counting thinking"
- *   from character counts; the tokens for a model with no price; '' when nothing was counted.
+ * @returns "claude-sonnet-5-5 · $0.42" from the provider's counts, which include thinking; "· $0.42 + 1 request not counted"
+ *   when some came back without counts; "· 2 requests not counted" when none had counts; the tokens for a model with no
+ *   price; a turn saved before real counts as it was, "· ~$0.42 est., not counting thinking"; '' when nothing was counted.
  */
 export function usageMeta({ model, usage }: TurnResult): string {
-	const { cost, tokens } = usage;
-	const used = cost ? `${costText(cost.usd, cost.estimated)}${cost.estimated ? ', not counting thinking' : ''}` : tokens ? tokensText(tokens.input + tokens.output, tokens.estimated) : '';
+	const { cost, tokens, uncounted } = usage;
+	// a turn saved before the cache split has no cache counts
+	const counted = tokens ? tokens.input + tokens.output + (tokens.cacheRead ?? 0) + (tokens.cacheWrite ?? 0) : 0;
+	const shown = cost ? `${costText(cost.usd, cost.estimated)}${cost.estimated ? ', not counting thinking' : ''}` : tokens ? tokensText(counted, !!tokens.estimated) : '';
+	const used = uncounted ? [shown, uncountedText(uncounted)].filter(Boolean).join(' + ') : shown;
 	return used && model ? `${model} · ${used}` : used;
 }
 

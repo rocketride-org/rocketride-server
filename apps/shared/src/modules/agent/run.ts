@@ -38,7 +38,6 @@
 import type { ChatMessage } from 'shell';
 import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
-import { isReferencePath } from '../vfs/referenceTree';
 import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
 import type { ChatModel, KeyTrouble } from './model';
 import { CORE_PROMPT } from './prompts';
@@ -54,7 +53,7 @@ import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit, RunLedger } from './toolkits/rocketrideClient';
 import { UNDO_ROW, type UndoRecord } from './toolkits/undo';
 import { composeToolkits, UserTime } from './tools';
-import { keyRequest, outcomeOf, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult, type TurnUsage } from './turn';
+import { keyRequest, outcomeOf, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnReport, type TurnResult, type TurnUsage } from './turn';
 import { dollars, UsageMeter } from './usage';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
@@ -117,6 +116,8 @@ export interface AgentRunOptions {
 	runs?: RunRecord[];
 	/** Takes the run's Undo record when the run ends, however it ends. It holds file content, so it stays in memory. */
 	undo?: (record: UndoRecord) => void;
+	/** Where the turn's model requests and tool calls are reported, already bound to the turn (default: nothing). */
+	report?: TurnReport;
 }
 
 /** What one run needs from its host. The optional parts have browser defaults; tests always pass them. */
@@ -474,13 +475,6 @@ function changedFilesNote(tracker: FileTracker, vfs: { version(path: string): nu
 	};
 }
 
-function median(values: number[]): number {
-	if (values.length === 0) return 0;
-	const sorted = [...values].sort((a, b) => a - b);
-	const mid = Math.floor(sorted.length / 2);
-	return Math.round(sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2);
-}
-
 // =============================================================================
 // RUN
 // =============================================================================
@@ -566,12 +560,15 @@ export async function runAgent(request: string, callback: (type: string, content
 	let paused: NeedsInputRequest | undefined;
 	const usageOf = (waves: number, toolCalls: number): TurnUsage => {
 		const used = meter.snapshot();
+		const counted = used.requests - used.uncounted;
 		return {
 			waves,
 			modelRequests: used.requests,
 			toolCalls,
-			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: used.estimated } } : {}),
-			...(used.requests > 0 && used.usd !== undefined ? { cost: { usd: used.usd, estimated: used.estimated } } : {}),
+			adapter: session.adapter,
+			...(counted > 0 ? { tokens: used.tokens } : {}),
+			...(counted > 0 && used.usd !== undefined ? { cost: { usd: used.usd } } : {}),
+			...(used.uncounted > 0 ? { uncounted: used.uncounted } : {}),
 		};
 	};
 	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
@@ -610,6 +607,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		signal: options.signal,
 		meter,
 		onKeyTrouble: (trouble) => (keyTrouble = trouble),
+		report: options.report,
 	});
 
 	let result: LoopResult;
@@ -631,6 +629,7 @@ export async function runAgent(request: string, callback: (type: string, content
 				askUser.request = null;
 			},
 			maxWaves: limits.steps,
+			report: options.report,
 		});
 	} catch (error) {
 		if (keyTrouble) return endForKey(keyTrouble, '', 1, 0);
@@ -655,6 +654,5 @@ export async function runAgent(request: string, callback: (type: string, content
 	const text = result.stopReason === 'stopped' ? '' : finalText(result, checks, shown);
 	if (result.stopReason !== 'stopped') callback('content', text);
 	else if (checks.changed) callback('thinking', NOT_CHECKED);
-	console.log(`[agent] stop=${result.stopReason} adapter=${session.adapter} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
 	return turnOf({ outcome: outcomeOf(result.stopReason), reason: result.stopReason, finalText: text }, result.waves, result.toolCalls);
 }
