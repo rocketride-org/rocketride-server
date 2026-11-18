@@ -417,7 +417,7 @@ async def test_job_builds_end_to_end(monkeypatch, build_store, toolchain):
     # Install argv contract: non-frozen EXPLICIT, scripts ignored, filtered
     # to the packed importer; devDependencies NOT excluded (no --prod).
     install = next(c for c in fake.calls if 'install' in c['argv'])
-    for flag in ('--no-frozen-lockfile', '--ignore-scripts', '--prefer-offline'):
+    for flag in ('--no-frozen-lockfile', '--ignore-scripts', '--package-import-method=copy', '--prefer-offline'):
         assert flag in install['argv']
     assert '--prod' not in install['argv']
     assert install['argv'][install['argv'].index('--filter') + 1] == './apps/brandy-ui'
@@ -719,6 +719,7 @@ async def test_toolchain_bootstrap_is_workspace_proof(monkeypatch, tmp_path):
         await app_build._ensure_toolchain_env()
     assert 'no node_modules' in str(exc.value)
     assert '--ignore-workspace' in calls[0]
+    assert '--package-import-method=copy' in calls[0]
 
     # A bootstrap that actually materializes the env succeeds and records
     # its pins; the next call short-circuits without another install.

@@ -574,7 +574,7 @@ async def _ensure_toolchain_env_locked(on_line: Any = None) -> str:
     # finds the REPO's workspace, "successfully" installs THAT, and leaves
     # this env with no node_modules at all (exit 0, nothing here).
     code, out = await _exec(
-        [pnpm, 'install', '--ignore-workspace', '--ignore-scripts', '--prefer-offline'],
+        [pnpm, 'install', '--ignore-workspace', '--ignore-scripts', '--package-import-method=copy', '--prefer-offline'],
         env_dir,
         _PHASE_TIMEOUTS['install'],
         on_line=on_line,
@@ -1912,6 +1912,9 @@ class AppBuildWorker:
             '--no-frozen-lockfile',
             '--ignore-scripts',
             '--ignore-pnpmfile',
+            # A job must never share an inode with the pnpm store/toolchain.
+            # A writable alias would bypass a read-only sandbox bind.
+            '--package-import-method=copy',
             '--config.manage-package-manager-versions=false',
             '--prefer-offline',
         ]
