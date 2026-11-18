@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai.account.base import AccountBase
+from ai.account.models import AccountInfo
 from ai.modules.task.authz_recheck import AuthzRecheck, THRESHOLD, validate_credential_provider
 from ai.modules.task.task_server import TaskServer
 
@@ -90,6 +91,29 @@ async def test_ordinary_socket_stops_at_known_expiry_before_the_next_sweep(monke
     await conn.send({'type': 'event', 'event': 'future-notification', 'body': {'private': 'value'}})
     assert conn.sent == []
     assert account.reads == []  # a plain user did not need sys-authority reads
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('action', ['revoke', 'deauth'])
+async def test_prepared_account_event_is_denied_after_authority_is_dropped(monkeypatch, action):
+    account, server, _ = setup(monkeypatch)
+    conn = connection(server)
+    info = conn._account_info
+    account.keys[digest(info.auth)] = ('member', None)
+    await _sweep(server)
+    prepared = info.to_push_result()
+    queued = asyncio.create_task(conn.send_event('apaext_account', body=prepared))
+    if action == 'revoke':
+        assert conn.revoke_authority(info, 'test credential revoked')
+    else:
+        conn._drop_authority()
+    await queued
+    assert conn.sent == []
+    if action == 'revoke':
+        await conn.send_revoke_notice(pushed=info)
+        assert len(conn.sent) == 1
+        assert conn.sent[0]['body'] == AccountInfo(waitlisted=True).to_push_result()
+        conn._transport.disconnect.assert_called_once()
 
 
 @pytest.mark.asyncio
