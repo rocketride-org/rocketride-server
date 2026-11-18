@@ -109,6 +109,7 @@ class IGlobal(IGlobalBase):
             self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
 
     def endGlobal(self):
-        if self._chat is not None and hasattr(self._chat, 'close'):
-            self._chat.close()
+        chat = getattr(self, '_chat', None)
+        if chat is not None and hasattr(chat, 'close'):
+            chat.close()
         self._chat = None

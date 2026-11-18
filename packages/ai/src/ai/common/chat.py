@@ -318,6 +318,14 @@ class ChatBase:
             raise error
         raise terminal from error
 
+    def _output_budget_error(self) -> EmptyResponseError:
+        """The error for a model that wrote no text because its output budget ran out."""
+        return EmptyResponseError(
+            'model returned no text; it most likely used its whole output budget before '
+            f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '
+            'reasoning for this call'
+        )
+
     def _no_second_hosted_request(self, error: Optional[Exception]) -> None:
         """On hosted models, end the call instead of a fallback request after a failed stream.
 
@@ -520,9 +528,12 @@ class ChatBase:
                 # The model spent its whole output budget (usually on reasoning) before
                 # writing anything. The fallback below would send the same request with
                 # the same budget and fail the same way, at the price of a second call.
-                # For a JSON call, chat() turns this empty reply into EmptyResponseError.
+                # For a JSON call, chat() turns this empty reply into EmptyResponseError;
+                # a hosted call raises it here, since it is not sent again.
                 if on_finish is not None:
                     on_finish(adapter.finish_reason)
+                if not _EXPECT_JSON_VAR.get():
+                    raise self._output_budget_error()
                 return ''
             if not text:
                 # No text (e.g. response.failed) → route to the fallback below, like the Anthropic path.
@@ -530,6 +541,8 @@ class ChatBase:
             if on_finish is not None:
                 on_finish(adapter.finish_reason)
             return text
+        except EmptyResponseError:
+            raise
         except Exception as e:
             self._raise_if_terminal(e)
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
@@ -813,11 +826,7 @@ class ChatBase:
                     # Nothing to repair: the model wrote no text at all. A reasoning
                     # model does this when its output budget runs out mid-thought, and
                     # resending the same prompt cannot fit a budget that overflowed.
-                    raise EmptyResponseError(
-                        'model returned no text; it most likely used its whole output budget before '
-                        f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '
-                        'reasoning for this call'
-                    )
+                    raise self._output_budget_error()
                 try:
                     # Parse (and strip any markdown fences) — reuse the result below
                     parsed_response = parseJson(response)

@@ -366,6 +366,14 @@ def test_groups_are_followed_to_a_depth_of_8(decoder):
     assert wants_hosted_openai(_pipe(_group(inner))) is False
 
 
+def test_a_node_the_engine_serves_but_has_not_unpacked_is_read_from_its_served_definition(decoder, monkeypatch):
+    monkeypatch.setattr(config_module, 'getServiceDefinition', lambda name: None)
+    served = {'llm_openai': copy.deepcopy(_SERVICES['llm_openai'])}
+
+    assert wants_hosted_openai(_pipe(_node()), served.get) is True
+    assert wants_hosted_openai(_pipe(_node())) is False
+
+
 def test_a_failed_decode_asks_for_no_pass(monkeypatch):
     def broken(_pipeline):
         raise RuntimeError('cannot decode')
@@ -612,6 +620,31 @@ def test_a_failed_stream_is_not_sent_again(monkeypatch, backend, hosted, path, f
     _result, error = _ask(_driver(monkeypatch, node, config), question(), True)
 
     assert isinstance(error, HostedModelError) and str(error) == OTHER, repr(error)
+    assert len(gateway.requests) == 1
+
+
+def responses_out_of_budget(_request, _body):
+    """A Responses stream that ends incomplete, its output budget spent before any text."""
+    events = _response_events('')
+    events[-1] = {
+        'type': 'response.incomplete',
+        'sequence_number': 2,
+        'response': {
+            **events[-1]['response'],
+            'status': 'incomplete',
+            'incomplete_details': {'reason': 'max_output_tokens'},
+        },
+    }
+    return httpx.Response(200, headers={'content-type': 'text/event-stream'}, content=_sse(events))
+
+
+def test_a_reply_that_ran_out_of_output_budget_says_what_to_change(monkeypatch, backend, hosted):
+    _with_pass(monkeypatch)
+    gateway = backend(responses_out_of_budget, answer)
+
+    _result, error = _ask(_driver(monkeypatch, 'llm_openai', REASONING), _prompt(), True)
+
+    assert 'Raise modelOutputTokens' in str(error), repr(error)
     assert len(gateway.requests) == 1
 
 
