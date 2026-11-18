@@ -1,4 +1,4 @@
-"""Tests for the thread-start stuck marker and the WMI query line of rr_test_stack_dumps."""
+"""Tests for the thread-start stuck marker, the WMI query line and the install.lock journal of rr_test_stack_dumps."""
 
 import importlib.util
 import os
@@ -370,3 +370,285 @@ def test_wmi_skip_mode_real_platform_falls_back(tmp_path, monkeypatch):
     dumper.close()
     assert isinstance(machine, str) and machine
     assert _WMI_SKIPPED.search(path.read_text(encoding='utf-8'))
+
+
+# ---------------------------------------------------------------------------
+# install.lock journal
+# ---------------------------------------------------------------------------
+
+_FAKE_DEPENDS = """
+import threading
+
+FP = lambda: 'fp-a'
+GATE = None
+EXIT_RESULT = None
+ENTER_ERROR = None
+
+
+class FileLock:
+    def __init__(self, lock_path='install.lock'):
+        self.lock_path = lock_path
+
+    def __enter__(self):
+        if GATE is not None:
+            GATE.wait(10)
+        if ENTER_ERROR is not None:
+            raise ENTER_ERROR
+        return self
+
+    def __exit__(self, *args):
+        return EXIT_RESULT
+
+
+def _installed_fingerprint():
+    return FP()
+
+
+def _verdict_cached(requirements_path, constraints_path):
+    return requirements_path == 'hit'
+
+
+def depends(requirements=None, body=None):
+    with FileLock('install.lock'):
+        if body is not None:
+            body()
+
+
+def lock_without_requirements(body=None):
+    with FileLock('install.lock'):
+        if body is not None:
+            body()
+"""
+
+_TAKE = re.compile(
+    r'=== lock take req=(?P<req>\S+) wait_start=(?P<ws>\d+\.\d{3}) acquired=(?P<acq>\d+\.\d{3}) '
+    r'released=(?P<rel>\d+\.\d{3}) waited=(?P<waited>\d+\.\d{3}) held=(?P<held>\d+\.\d{3}) '
+    r'cache=(?P<cache>hit|miss|none) installed=(?P<installed>yes|no|unknown)\n\n'
+)
+
+
+def _fake_depends(monkeypatch, tmp_path):
+    """
+    Build a fake ``depends`` module from source, so its methods have real frames and a ``requirements`` local.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): Unused here; kept so every fixture user restores state the same way.
+        tmp_path (pathlib.Path): Directory used for the compile file name.
+
+    Returns:
+        types.ModuleType: The module, not yet wrapped.
+    """
+    module = types.ModuleType('depends')
+    exec(compile(_FAKE_DEPENDS, str(tmp_path / 'depends.py'), 'exec'), module.__dict__)
+    return module
+
+
+def _journal(tmp_path, monkeypatch, patch=True):
+    """
+    Build a dumper, a journal and a wrapped fake ``depends``.
+
+    Args:
+        tmp_path (pathlib.Path): Directory for the dump file.
+        monkeypatch (pytest.MonkeyPatch): Fixture passed to ``_fake_depends``.
+        patch (bool): Wrap the module when true.
+
+    Returns:
+        tuple: The dumper, the file path, the journal and the module.
+    """
+    dumper, path = _dumper(tmp_path)
+    module = _fake_depends(monkeypatch, tmp_path)
+    journal = dumps._LockJournal(dumper)
+    dumper._journal = journal
+    if patch:
+        assert journal.patch(module) is True
+    return dumper, path, journal, module
+
+
+def _takes(dumper, path) -> list:
+    """
+    Close the dumper and parse every ``=== lock take`` line of its file.
+
+    Args:
+        dumper (_Dumper): The dumper to close.
+        path (pathlib.Path): Its file.
+
+    Returns:
+        list[dict]: One dict of named groups per line; the file must hold nothing else.
+    """
+    dumper.close()
+    text = path.read_text(encoding='utf-8')
+    found = [m.groupdict() for m in _TAKE.finditer(text)]
+    assert text.count('=== lock take') == len(found)
+    return found
+
+
+@pytest.mark.parametrize(
+    'req, cache',
+    [('hit', 'hit'), ('miss', 'miss'), (None, 'none')],
+)
+def test_lock_take_cache_field(tmp_path, monkeypatch, req, cache):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    body = (lambda: module._verdict_cached(req, 'c')) if req else None
+    module.depends('/abs/req.txt', body)
+    (take,) = _takes(dumper, path)
+    assert take['cache'] == cache and take['installed'] == 'no'
+
+
+def test_lock_take_cache_hit_wins_over_miss(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    module.depends('/abs/req.txt', lambda: (module._verdict_cached('hit', 'c'), module._verdict_cached('x', 'c')))
+    assert _takes(dumper, path)[0]['cache'] == 'hit'
+
+
+def test_lock_take_installed_yes_no_unknown(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    module.depends('/r', None)
+
+    values = iter(['a', 'b'])
+    module.FP = lambda: next(values)
+    module.depends('/r', None)
+
+    def boom():
+        raise OSError('no site-packages')
+
+    module.FP = boom
+    module.depends('/r', None)
+
+    values = iter(['a', None])
+    module.FP = lambda: next(values)
+    module.depends('/r', None)
+    assert [t['installed'] for t in _takes(dumper, path)] == ['no', 'yes', 'unknown', 'unknown']
+
+
+def test_lock_take_times_and_req_from_caller_frame(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    before = time.time()
+    module.depends('/abs/req.txt', lambda: time.sleep(0.2))
+    module.lock_without_requirements()
+    module.depends(None)
+    first, second, third = _takes(dumper, path)
+    assert first['req'] == '/abs/req.txt'
+    assert second['req'] == '-' and third['req'] == '-'
+    assert float(first['held']) >= 0.2 and float(first['waited']) < 0.2
+    assert before - 1 <= float(first['ws']) <= float(first['acq']) <= float(first['rel']) <= time.time() + 1
+
+
+def test_lock_take_waited_covers_a_blocked_enter(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    module.GATE = threading.Event()
+    worker = threading.Thread(target=module.depends, args=('/r', None))
+    worker.start()
+    time.sleep(0.25)
+    module.GATE.set()
+    worker.join(5)
+    (take,) = _takes(dumper, path)
+    assert float(take['waited']) >= 0.2 and float(take['held']) < 0.2
+
+
+def test_lock_state_lines_while_waiting_and_holding(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+    module.GATE = threading.Event()
+    states = {}
+
+    def body():
+        states['holding'] = dumper._lock_state_block()
+
+    worker = threading.Thread(target=module.depends, args=('/abs/r.txt', body))
+    worker.start()
+    assert _wait_until(lambda: 'waiting_since=' in dumper._lock_state_block())
+    states['waiting'] = dumper._lock_state_block()
+    module.GATE.set()
+    worker.join(5)
+    assert re.fullmatch(r'=== lock state waiting_since=\d+\.\d{3} req=/abs/r\.txt\n\n', states['waiting'])
+    assert re.fullmatch(r'=== lock state holding_since=\d+\.\d{3} req=/abs/r\.txt\n\n', states['holding'])
+    assert dumper._lock_state_block() == ''
+    dumper.close()
+
+
+def test_lock_wrappers_pass_exceptions_and_results_through(tmp_path, monkeypatch):
+    dumper, path, _, module = _journal(tmp_path, monkeypatch)
+
+    class Marker(Exception):
+        pass
+
+    marker = Marker('body')
+
+    def body():
+        raise marker
+
+    with pytest.raises(Marker) as raised:
+        module.depends('/r', body)
+    assert raised.value is marker
+    assert module.FileLock.__enter__.__name__ == '__enter__'
+
+    enter_error = OSError('enter failed')
+    module.ENTER_ERROR = enter_error
+    with pytest.raises(OSError) as raised:
+        module.depends('/r', None)
+    assert raised.value is enter_error
+    module.ENTER_ERROR = None
+
+    module.EXIT_RESULT = 'suppress'
+    lock = module.FileLock()
+    with lock:
+        pass
+    assert lock.__exit__(None, None, None) == 'suppress'
+    with pytest.raises(TypeError):
+        module._verdict_cached()
+    assert module._verdict_cached('hit', 'c') is True
+    assert module._verdict_cached('x', 'c') is False
+    # The body that raised still wrote its take; the failed enter wrote none.
+    assert len(_takes(dumper, path)) == 2
+    assert dumper._journal._active == {}
+
+
+def test_lock_wrapper_internal_failures_do_not_break_the_original(tmp_path, monkeypatch):
+    dumper, path, journal, module = _journal(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(dumps, '_caller_requirements', lambda frame: 1 / 0)
+    monkeypatch.setattr(journal, '_takes', lambda: 1 / 0)
+    monkeypatch.setattr(dumper, '_append', lambda text: 1 / 0)
+    module.depends('/r', lambda: calls.append(module._verdict_cached('hit', 'c')))
+    assert calls == [True]
+    dumper.close()
+    assert path.read_text(encoding='utf-8') == ''
+
+
+def test_lock_journal_patches_once_and_skips_a_module_without_filelock(tmp_path, monkeypatch):
+    dumper, _, journal, module = _journal(tmp_path, monkeypatch)
+    assert journal.patch(module) is False
+    assert journal.patch(types.ModuleType('depends')) is False
+    dumper.close()
+
+
+def test_lock_journal_patches_depends_imported_after_the_hook(tmp_path, monkeypatch):
+    source_dir = tmp_path / 'lib'
+    source_dir.mkdir()
+    (source_dir / 'depends.py').write_text(_FAKE_DEPENDS, encoding='utf-8')
+    monkeypatch.syspath_prepend(str(source_dir))
+    monkeypatch.delitem(sys.modules, 'depends', raising=False)
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    dumper, path = _dumper(tmp_path)
+
+    dumps._watch_depends(dumper)
+    assert 'depends' not in sys.modules
+    import depends
+
+    try:
+        assert depends.__file__.startswith(str(source_dir))
+        depends.depends('/abs/late.txt', lambda: depends._verdict_cached('hit', 'c'))
+        (take,) = _takes(dumper, path)
+        assert take['req'] == '/abs/late.txt' and take['cache'] == 'hit'
+    finally:
+        sys.modules.pop('depends', None)
+
+
+def test_lock_journal_patches_depends_that_is_already_imported(tmp_path, monkeypatch):
+    module = _fake_depends(monkeypatch, tmp_path)
+    monkeypatch.setitem(sys.modules, 'depends', module)
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    dumper, path = _dumper(tmp_path)
+    dumps._watch_depends(dumper)
+    assert getattr(module.FileLock, '_rr_lock_journal', False) is True
+    module.depends('/r', None)
+    assert len(_takes(dumper, path)) == 1

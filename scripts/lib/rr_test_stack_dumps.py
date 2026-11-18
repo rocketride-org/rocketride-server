@@ -70,12 +70,35 @@ as "WMI unavailable" and answers from ``sys.getwindowsversion()``, the ``ver`` c
 
 Nothing the wrapper logs can raise.
 
+The hook also journals every take of ``install.lock``. Once ``depends`` (the engine's
+``depends.py``) is imported, ``FileLock.__enter__``, ``FileLock.__exit__`` and
+``_verdict_cached`` are wrapped; if ``depends`` is not imported yet when the hook starts, a
+``sys.meta_path`` finder wraps it right after its first import, before any lock is taken.
+When the lock is released, the process appends one line (``req`` is the ``requirements``
+argument of the calling ``depends()`` frame, ``-`` when there is none; the epochs are wall
+clock, ``waited`` and ``held`` are monotonic seconds)::
+
+    === lock take req=<abs path or -> wait_start=<epoch> acquired=<epoch> released=<epoch> waited=<s> held=<s> cache=hit|miss|none installed=yes|no|unknown
+
+followed by a blank line. ``cache`` is the result of ``_verdict_cached`` during the hold
+(``hit`` if any call returned true, ``miss`` if all returned false, ``none`` if it was not
+called). ``installed`` compares ``_installed_fingerprint()`` at acquire and at release
+(``unknown`` when it cannot be computed). Each periodic dump also appends one line for every
+take of this process that is waiting for or holding the lock::
+
+    === lock state waiting_since=<epoch> req=<abs path or ->
+    === lock state holding_since=<epoch> req=<abs path or ->
+
+followed by a blank line. The wrappers pass return values and exceptions through unchanged
+and swallow every error of their own.
+
 A child that exits normally removes a file that holds no dump, so what is left
 belongs to children that ran long or were killed.
 """
 
 import atexit
 import functools
+import importlib.abc
 import os
 import sys
 import threading
@@ -382,6 +405,7 @@ class _Dumper:
         self._probed = False
         self._recheck = _START_RECHECK_S
         self._reported = {}
+        self._journal = None
         self._thread = threading.Thread(target=self._run, name='rr-stack-dumper', daemon=True)
 
     def start(self) -> None:
@@ -458,6 +482,18 @@ class _Dumper:
         test = os.environ.get('PYTEST_CURRENT_TEST', '-')[:_TEST_MAX]
         return f'info: worker={worker} current_test={test}\n\n'
 
+    def _lock_state_block(self) -> str:
+        """
+        Describe the lock takes of this process that are waiting or holding, read at dump time.
+
+        Returns:
+            str: The ``=== lock state`` lines, or ``''`` when there are none or no journal is set.
+        """
+        try:
+            return self._journal.state_text() if self._journal is not None else ''
+        except Exception:
+            return ''
+
     def _dump(self) -> None:
         """
         Write one dump, then flush and fsync the file.
@@ -473,6 +509,7 @@ class _Dumper:
             text = _format_stacks(frames, threading.get_ident(), time.monotonic() - self._started, main_ident)
             text += self._info_line()
             text += self._probe_block(frames.get(threading.main_thread().ident))
+            text += self._lock_state_block()
         finally:
             del frames
         self._append(text)
@@ -654,6 +691,321 @@ def _log_wmi(dumper: '_Dumper', begin: float, args: tuple, kwargs: dict, outcome
         pass
 
 
+def _clean_field(value) -> str:
+    """
+    Make a value safe for a one-line field.
+
+    Args:
+        value (object): The value to print.
+
+    Returns:
+        str: The text with line breaks replaced by spaces.
+    """
+    return str(value).replace('\r', ' ').replace('\n', ' ')
+
+
+def _caller_requirements(frame) -> str:
+    """
+    Read the ``requirements`` local of the frame that entered a lock.
+
+    Args:
+        frame (frame | None): The frame that runs the ``with FileLock(...)`` statement.
+
+    Returns:
+        str: The path, or ``-`` when the frame has no non-empty ``requirements`` local.
+    """
+    try:
+        value = frame.f_locals.get('requirements') if frame is not None else None
+        return _clean_field(value) if value else '-'
+    except Exception:
+        return '-'
+
+
+class _LockJournal:
+    """Wraps ``FileLock`` and ``_verdict_cached`` of ``depends`` and journals every take of the lock."""
+
+    def __init__(self, dumper: '_Dumper') -> None:
+        """
+        Create the journal.
+
+        Args:
+            dumper (_Dumper): The dumper whose file receives the lines.
+        """
+        self._dumper = dumper
+        self._local = threading.local()
+        self._guard = threading.Lock()
+        self._active = {}
+
+    def _takes(self) -> list:
+        """
+        Return the calling thread's stack of takes that hold the lock.
+
+        Returns:
+            list[dict]: The takes, innermost last.
+        """
+        takes = getattr(self._local, 'takes', None)
+        if takes is None:
+            takes = self._local.takes = []
+        return takes
+
+    @staticmethod
+    def _fingerprint(module):
+        """
+        Read the installed-set digest of ``depends``.
+
+        Args:
+            module (types.ModuleType): The ``depends`` module.
+
+        Returns:
+            str | None: The digest, or None when it cannot be computed.
+        """
+        try:
+            return module._installed_fingerprint()
+        except Exception:
+            return None
+
+    def state_text(self) -> str:
+        """
+        Describe every take of this process that is waiting for or holding the lock.
+
+        Returns:
+            str: One ``=== lock state`` line plus a blank line per take, or ``''``.
+        """
+        with self._guard:
+            takes = list(self._active.values())
+        lines = []
+        for take in takes:
+            since = take.get('acquired') or take['wait_start']
+            kind = 'holding_since' if take.get('acquired') else 'waiting_since'
+            lines.append(f'=== lock state {kind}={since:.3f} req={take["req"]}\n\n')
+        return ''.join(lines)
+
+    def _log_take(self, take: dict, released: float, held: float, installed: str) -> None:
+        """
+        Append the ``=== lock take`` line; never raises.
+
+        Args:
+            take (dict): The take's record.
+            released (float): Wall-clock release time.
+            held (float): Monotonic seconds between acquire and release.
+            installed (str): ``yes``, ``no`` or ``unknown``.
+
+        Returns:
+            None
+        """
+        try:
+            self._dumper._append(
+                f'=== lock take req={take["req"]} wait_start={take["wait_start"]:.3f} '
+                f'acquired={take["acquired"]:.3f} released={released:.3f} '
+                f'waited={take["waited"]:.3f} held={held:.3f} cache={take["cache"]} installed={installed}\n\n'
+            )
+        except Exception:
+            # A diagnostic must never stop the process it observes.
+            pass
+
+    def patch(self, module) -> bool:
+        """
+        Wrap ``FileLock.__enter__``, ``FileLock.__exit__`` and ``_verdict_cached`` of a ``depends`` module.
+
+        Args:
+            module (types.ModuleType): The ``depends`` module.
+
+        Returns:
+            bool: True when the wrappers were installed, False when the module lacks
+                ``FileLock`` or ``_verdict_cached``, or is already wrapped.
+        """
+        lock_class = getattr(module, 'FileLock', None)
+        verdict = getattr(module, '_verdict_cached', None)
+        if lock_class is None or verdict is None or getattr(lock_class, '_rr_lock_journal', False):
+            return False
+        original_enter = lock_class.__enter__
+        original_exit = lock_class.__exit__
+        journal = self
+
+        @functools.wraps(original_enter)
+        def __enter__(self):
+            """
+            Time the wait, call the original and record the acquire.
+
+            Returns:
+                object: What the original returns.
+            """
+            take = None
+            try:
+                take = {
+                    'req': _caller_requirements(sys._getframe(1)),
+                    'wait_start': time.time(),
+                    'wait_mono': time.monotonic(),
+                    'cache': 'none',
+                }
+                with journal._guard:
+                    journal._active[id(take)] = take
+            except Exception:
+                take = None
+            try:
+                result = original_enter(self)
+            except BaseException:
+                if take is not None:
+                    with journal._guard:
+                        journal._active.pop(id(take), None)
+                raise
+            try:
+                if take is not None:
+                    take['acquired'] = time.time()
+                    take['acquired_mono'] = time.monotonic()
+                    take['waited'] = take['acquired_mono'] - take['wait_mono']
+                    take['fingerprint'] = journal._fingerprint(module)
+                    self._rr_take = take
+                    journal._takes().append(take)
+            except Exception:
+                pass
+            return result
+
+        @functools.wraps(original_exit)
+        def __exit__(self, *args):
+            """
+            Record the release, call the original and append the take line.
+
+            Args:
+                *args: Exception information, passed on unchanged.
+
+            Returns:
+                object: What the original returns.
+            """
+            take = None
+            released = held = 0.0
+            installed = 'unknown'
+            try:
+                take = getattr(self, '_rr_take', None)
+                if take is not None:
+                    self._rr_take = None
+                    released = time.time()
+                    held = time.monotonic() - take['acquired_mono']
+                    before, after = take.get('fingerprint'), journal._fingerprint(module)
+                    if before is not None and after is not None:
+                        installed = 'no' if before == after else 'yes'
+                    takes = journal._takes()
+                    if take in takes:
+                        takes.remove(take)
+                    with journal._guard:
+                        journal._active.pop(id(take), None)
+            except Exception:
+                pass
+            try:
+                return original_exit(self, *args)
+            finally:
+                if take is not None:
+                    journal._log_take(take, released, held, installed)
+
+        @functools.wraps(verdict)
+        def _verdict_cached(*args, **kwargs):
+            """
+            Call the original and note its answer on the take the calling thread holds.
+
+            Args:
+                *args: Positional arguments, passed on unchanged.
+                **kwargs: Keyword arguments, passed on unchanged.
+
+            Returns:
+                bool: What the original returns.
+            """
+            result = verdict(*args, **kwargs)
+            try:
+                takes = journal._takes()
+                if takes and takes[-1]['cache'] != 'hit':
+                    takes[-1]['cache'] = 'hit' if result else 'miss'
+            except Exception:
+                pass
+            return result
+
+        lock_class.__enter__ = __enter__
+        lock_class.__exit__ = __exit__
+        lock_class._rr_lock_journal = True
+        module._verdict_cached = _verdict_cached
+        return True
+
+
+class _DependsFinder(importlib.abc.MetaPathFinder):
+    """Meta-path finder that wraps ``depends`` right after its first import."""
+
+    def __init__(self, journal: '_LockJournal') -> None:
+        """
+        Create the finder.
+
+        Args:
+            journal (_LockJournal): The journal that patches the module.
+        """
+        self._journal = journal
+
+    def find_spec(self, fullname, path=None, target=None):
+        """
+        Find the spec of ``depends`` with the other finders and wrap its loader's ``exec_module``.
+
+        Args:
+            fullname (str): The module name.
+            path (list[str] | None): The package path.
+            target (types.ModuleType | None): The module being reloaded.
+
+        Returns:
+            importlib.machinery.ModuleSpec | None: The spec, or None to let the other finders answer.
+        """
+        if fullname != 'depends':
+            return None
+        try:
+            spec = None
+            for finder in list(sys.meta_path):
+                find = getattr(finder, 'find_spec', None)
+                if finder is self or find is None:
+                    continue
+                spec = find(fullname, path, target)
+                if spec is not None:
+                    break
+            loader = getattr(spec, 'loader', None)
+            original = getattr(loader, 'exec_module', None)
+            if original is None:
+                return spec
+            journal = self._journal
+
+            def exec_module(module):
+                """
+                Run the original ``exec_module``, then wrap the module; the wrapping never raises.
+
+                Args:
+                    module (types.ModuleType): The module that was just created.
+
+                Returns:
+                    None
+                """
+                original(module)
+                try:
+                    journal.patch(module)
+                except Exception:
+                    pass
+
+            loader.exec_module = exec_module
+            return spec
+        except Exception:
+            return None
+
+
+def _watch_depends(dumper: '_Dumper') -> None:
+    """
+    Journal the lock takes of ``depends``, now when it is imported, else right after its import.
+
+    Args:
+        dumper (_Dumper): The dumper that receives the lines and the periodic ``lock state`` lines.
+
+    Returns:
+        None
+    """
+    journal = _LockJournal(dumper)
+    dumper._journal = journal
+    module = sys.modules.get('depends')
+    if module is not None and journal.patch(module):
+        return
+    sys.meta_path.insert(0, _DependsFinder(journal))
+
+
 def _start() -> None:
     """
     Open the per-pid dump file and start the dumper thread.
@@ -694,6 +1046,12 @@ def _start() -> None:
         except Exception:
             # A diagnostic must never stop the process it observes.
             pass
+
+    try:
+        _watch_depends(dumper)
+    except Exception:
+        # A diagnostic must never stop the process it observes.
+        pass
 
     def _finish() -> None:
         """
