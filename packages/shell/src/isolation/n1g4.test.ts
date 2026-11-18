@@ -236,7 +236,7 @@ async function best(n: number, run: () => Promise<void>): Promise<number> {
 }
 
 test('T118 scrub cost is linear in the message, not in the needle sets (sets full)', async (tt) => {
-	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 50 ms', async () => {
+	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 250 ms', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A, caps: ['core', 'pipelines.run', 'fs.app'] });
@@ -252,7 +252,7 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 		assert.ok(ms < 250, `inbound gate took ${ms.toFixed(1)} ms`);
 	});
 
-	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 200 ms', async () => {
+	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 1000 ms', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
