@@ -429,9 +429,76 @@ jobs:
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
   #  Aggregates all CI results so skipped builds don't block PRs.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  #  Shell isolation e2e (#1022): Playwright against the engine's web stack
+  # ---------------------------------------------------------------------------
+  # Chromium drives the built shell and guest runtime against `ai.eaas` (the
+  # engine's Python server with its native modules stubbed, see
+  # packages/shell/e2e/server) with a third-party fixture app on a separate
+  # origin. A pull request runs the PR subset of plan section 5.4 (T86-T89, T92,
+  # T94-T98, T103); the weekly schedule and manual runs run everything, and again
+  # with RR_APP_ISOLATION=optin. T95, T97 and T103 need the packaged engine and the
+  # SaaS extension and are `fixme` until a job that has them exists.
+  shell-isolation-e2e:
+    name: Shell isolation e2e
+    needs: [changes]
+    permissions:
+      contents: read
+    if: >-
+      !cancelled() &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - name: Install the e2e server's Python packages
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r packages/shell/e2e/server/requirements.txt
+      - name: Build the shell, the guest runtime and the fixture apps
+        run: |
+          ./builder shell:bundle shell:copy shell:guest-build shell:guest-copy
+          pnpm --filter shell e2e:fixtures
+      - name: Install Chromium
+        run: pnpm --filter shell exec playwright install --with-deps chromium
+      - name: Run the PR subset
+        if: github.event_name == 'pull_request'
+        working-directory: packages/shell
+        run: pnpm exec playwright test --config e2e/playwright.config.ts --grep 'T(86|87|88|89|92|94|95|96|97|98|103) '
+      - name: Run every spec
+        if: github.event_name != 'pull_request'
+        working-directory: packages/shell
+        run: pnpm exec playwright test --config e2e/playwright.config.ts
+      - name: Run every spec with RR_APP_ISOLATION=optin
+        if: github.event_name != 'pull_request'
+        working-directory: packages/shell
+        env:
+          E2E_MODE: optin
+        run: pnpm exec playwright test --config e2e/playwright.config.ts
+      - name: Keep the report and traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shell-isolation-e2e-results
+          path: packages/shell/e2e/.results
+          retention-days: 7
+
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, eslint-scripts, gitleaks, shell-contract, shell-isolation-e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -445,7 +512,7 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, shell-isolation-e2e=${{ needs['shell-isolation-e2e'].result }}"
             exit 1
           fi
           # A stacked pull request builds without tests, so CI OK stays red and it
@@ -455,7 +522,7 @@ jobs:
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, eslint-scripts=${{ needs['eslint-scripts'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}, shell-isolation-e2e=${{ needs['shell-isolation-e2e'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.

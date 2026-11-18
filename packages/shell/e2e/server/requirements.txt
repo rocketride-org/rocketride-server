@@ -1,0 +1,20 @@
+# Python packages the e2e server needs (the engine's web stack without the native engine).
+# Installed by the shell-isolation-e2e job and by anyone running the suite locally:
+#   python3 -m venv .venv && .venv/bin/pip install -r packages/shell/e2e/server/requirements.txt
+#   E2E_PYTHON=$PWD/.venv/bin/python pnpm --filter shell e2e
+fastapi
+uvicorn
+starlette>=1.5.0
+python-multipart
+aiofiles
+websockets
+python-dotenv
+json5
+cryptography
+tenacity
+requests
+yappi
+croniter
+psutil
+PyJWT
+mcp

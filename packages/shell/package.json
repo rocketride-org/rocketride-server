@@ -14,7 +14,9 @@
 	"scripts": {
 		"start": "pnpm rsbuild dev --env-mode development",
 		"build": "pnpm rsbuild build --env-mode development",
-		"build:prod": "pnpm rsbuild build --env-mode production"
+		"build:prod": "pnpm rsbuild build --env-mode production",
+		"e2e:fixtures": "node e2e/build-fixtures.mjs",
+		"e2e": "playwright test --config e2e/playwright.config.ts"
 	},
 	"browserslist": [
 		"chrome >= 81",
@@ -51,6 +53,7 @@
 	},
 	"devDependencies": {
 		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@playwright/test": "1.65.1",
 		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-basic-ssl": "^1.2.3",
 		"@rsbuild/plugin-react": "~2.0.1",

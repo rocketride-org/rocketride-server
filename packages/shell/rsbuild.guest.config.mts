@@ -58,7 +58,7 @@ export default defineConfig({
 				// 'rocketride' and 'shell' (prettier unquotes the first key).
 				react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-				'react/jsx-runtime': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
+				'react/jsx-runtime': { singleton: true, eager: true, version: '18.3.1', requiredVersion: false, import: require.resolve('react/jsx-runtime') },
 				// The app's 'rocketride' is the same SDK; its client INSTANCE is the guest's brokered one.
 				rocketride: { singleton: true, version: sdkVersion, requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 				// The app's 'shell' is the guest shell module: the public surface with the Appendix A names denied.
@@ -76,7 +76,7 @@ export default defineConfig({
 	},
 	source: {
 		entry: { boot: './src/guest/boot.ts' },
-		define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+		define: { 'process.env.NODE_ENV': JSON.stringify('production'), 'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify('') },
 	},
 	// The shell's public/ (favicon, themes) is not part of the guest: nothing is copied.
 	server: {
