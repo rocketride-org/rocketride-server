@@ -36,6 +36,8 @@ import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../compo
 // so the import cycle carries no module-evaluation (TDZ) risk.
 import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
 import { devBootConfig, tabSession } from './devGate';
+import { isFirstPartyId, isIsolatedEntry, isolationMode, noteFirstParty } from '../isolation/config';
+import { isolatedDescriptor } from '../isolation/IsolatedAppFrame';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -64,6 +66,10 @@ export interface ServerAppEntry {
 	public?: boolean;
 	/** Resolved app version (semver) — built-in package version, marketplace active version, or deployed pin. */
 	version?: string;
+	/** The app runs in its own origin, in a frame (#1022): never a Module Federation remote here. */
+	isolated?: boolean;
+	/** First party: may run in the shell realm under `enforce` and be dev-registered (#1022). */
+	firstParty?: boolean;
 	// (entry / dev / devEntries are RETIRED: the server carries no dev rows —
 	// dev previews are LOCAL-FIRST, registered client-side in the preview
 	// page. Published versions resolve by registryVersion alone.)
@@ -152,6 +158,7 @@ export function isRemoteLoaded(moduleId: string): boolean {
  *          (dev-owned, or already loaded — reload the page instead).
  */
 export function repointRemote(moduleId: string, entry: string): boolean {
+	if (isolatedModules.has(moduleId)) return false;
 	if (devRemoteModules.has(moduleId)) return false;
 	// A loaded container is committed to its version for the document's
 	// lifetime — force-repointing it corrupts its shared getters.
@@ -159,6 +166,45 @@ export function repointRemote(moduleId: string, entry: string): boolean {
 	registerRemotes([{ name: moduleId, entry }], { force: true });
 	registeredEntries.set(moduleId, entry);
 	return true;
+}
+
+// =============================================================================
+// ISOLATED APPS (#1022) — the sticky set, checked at call time
+// =============================================================================
+
+// App ids and MF container names stamped isolated in any list of this
+// document. They only ever grow (M2): an id stamped isolated after it was
+// mapped in-realm (mixed fleet) is redirected at load() time, and no later
+// unstamped list brings it back.
+const isolatedIds = new Set<string>();
+const isolatedModules = new Set<string>();
+
+/**
+ * Marks an app isolated for the rest of this document.
+ *
+ * @param entry - The server entry stamped isolated.
+ * @returns True when its container had already loaded (or is loading) in
+ *   this realm: the shell must unmount it and ask for a reload.
+ */
+export function markIsolated(entry: ServerAppEntry): boolean {
+	isolatedIds.add(entry.id);
+	isolatedModules.add(entry.moduleId);
+	return loadedModules.has(entry.moduleId) || isRemotePending(entry.moduleId);
+}
+
+/** Whether an app id is isolated in this document (checked at call time). */
+export function isIsolatedId(appId: string): boolean {
+	return isolatedIds.has(appId);
+}
+
+/**
+ * Whether an app id may be registered from local code (dev remotes, local
+ * overrides): never an isolated id, and while isolation is installed only an
+ * id the server stamped first party.
+ */
+function mayRegisterLocally(appId: string): boolean {
+	if (isolatedIds.has(appId)) return false;
+	return isolationMode() === null || isFirstPartyId(appId);
 }
 
 // =============================================================================
@@ -373,6 +419,10 @@ export function getLocalAppEntries(): AppManifestEntry[] {
  *   registry row while the registration lives (dev = files are the truth).
  */
 export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>, meta?: LocalAppMeta): void {
+	if (!mayRegisterLocally(id)) {
+		console.warn(`[appLoader] local registration refused for "${id}": not a first-party app while app isolation is on`);
+		return;
+	}
 	localOverrides.set(id, load);
 	if (meta) {
 		localAppMetas.set(id, {
@@ -428,6 +478,12 @@ export function unregisterLocalApp(id: string): void {
  *               in dev the workspace is the truth, not the server registry.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string, meta?: LocalAppMeta): void {
+	// E5 (#1022): no dev remote for an isolated id, nor, while isolation is
+	// installed, for an id without a first-party stamp (a brand-new id has none).
+	if (!mayRegisterLocally(appId) || isolatedModules.has(moduleId)) {
+		console.warn(`[appLoader] dev registration refused for "${appId}": not a first-party app while app isolation is on`);
+		return;
+	}
 	// The wrong-id signal: an embedded preview receives ONE registration, for
 	// the app its URL is locked to. A registration for any other id means the
 	// two disagree, and the locked app will never register — say so instead
@@ -526,6 +582,7 @@ const skippedManifestEntries = new Map<string, { moduleId: string; url: string }
  * @returns True when the manifest fallback was registered.
  */
 export function fallbackSkippedRemote(appId: string): boolean {
+	if (isolatedIds.has(appId)) return false;
 	if (devRegisteredApps.has(appId)) return false;
 	const stash = skippedManifestEntries.get(appId);
 	if (!stash) return false;
@@ -657,6 +714,8 @@ function dumpShareScope(): void {
  * @returns The module namespace, or null.
  */
 export async function loadAppModule<T = unknown>(appId: string, modulePath: string): Promise<T | null> {
+	// An isolated app's code never runs in this realm (E2), checked at call time (M2).
+	if (isolatedIds.has(appId)) return null;
 	const moduleId = serverAppModules.get(appId) ?? localAppMetas.get(appId)?.moduleId;
 	if (!moduleId) return null;
 	markPending(moduleId);
@@ -729,6 +788,7 @@ export function invalidateAppDescriptor(appId: string): void {
  * @param moduleId - The MF container name (AppManifestEntry.moduleId).
  */
 export function resetRemote(moduleId: string): void {
+	if (isolatedModules.has(moduleId)) return;
 	const entry = registeredEntries.get(moduleId);
 	if (!entry) return;
 	registerRemotes([{ name: moduleId, entry }], { force: true });
@@ -793,6 +853,15 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		if (url !== null) resolved.push({ app: a, url });
 	}
 
+	// The stamp rule (#1022, plan 4.6): first-party stamps are noted, and an
+	// isolated entry joins the sticky set. Isolated entries are never MF
+	// registered, recorded or mapped to a container (E1).
+	for (const { app } of resolved) {
+		if (app.firstParty === true) noteFirstParty(app.id);
+		if (isIsolatedEntry(app)) markIsolated(app);
+	}
+	const inRealm = resolved.filter(({ app }) => !isolatedIds.has(app.id));
+
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
 	// the pre-auth probe) with the post-auth set. Dev-owned containers are
@@ -806,8 +875,8 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 	// preview. The skipped entry is stashed for the dev-remote wait's
 	// manifest fallback (fallbackSkippedRemote).
 	const lockedAppId = isDevPreviewPage() ? previewLockedAppId() : '';
-	const registrable = resolved.filter(({ app }) => !devRemoteModules.has(app.moduleId) && app.id !== lockedAppId);
-	for (const { app, url } of resolved) {
+	const registrable = inRealm.filter(({ app }) => !devRemoteModules.has(app.moduleId) && app.id !== lockedAppId);
+	for (const { app, url } of inRealm) {
 		if (app.id === lockedAppId && !devRemoteModules.has(app.moduleId)) {
 			skippedManifestEntries.set(app.id, { moduleId: app.moduleId, url });
 		}
@@ -819,7 +888,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
-	for (const { app } of resolved) serverAppModules.set(app.id, app.moduleId);
+	for (const { app } of inRealm) serverAppModules.set(app.id, app.moduleId);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return resolved.map(({ app: a }) => ({
@@ -837,6 +906,9 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		version:       overrideOf(a)?.appVersion ?? a.version,
 		registryVersion: overrideOf(a)?.version ?? a.registryVersion,
 		load: () => {
+			// Isolated (now or since mapping, M2): the frame descriptor, never
+			// a local override or loadRemote. Checked per CALL.
+			if (isolatedIds.has(a.id)) return Promise.resolve(isolatedDescriptor(a));
 			// Local override wins over the MF remote — checked per CALL so a
 			// dev registration made after mapping still takes effect (and its
 			// removal restores the remote) without re-mapping the manifest.

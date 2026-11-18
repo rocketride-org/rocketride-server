@@ -38,7 +38,8 @@ import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail
 import type { DataGridLayout } from '../data-grid/persistence';
 import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
-import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
+import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS, isIsolatedId } from '../../util/appLoader';
+import { isolatedDescriptor } from '../../isolation/IsolatedAppFrame';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
 import { sessionScopedStore } from '../../util/devGate';
 import { SHELL_API_VERSION } from '../../apiver';
@@ -475,7 +476,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// never-registering dev server fails into the normal error path
 			// (which clears loadingMapRef) instead of holding the loading flag
 			// forever.
-			if (isDevPreviewPage() && previewLockedAppId() === appId) {
+			if (isDevPreviewPage() && previewLockedAppId() === appId && !isIsolatedId(appId)) {
 				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
 				try {
 					await Promise.race([
@@ -495,7 +496,8 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
 			const descriptor = await Promise.race([
-				entry.load(),
+				// An isolated app is checked at CALL time (#1022, M2): the frame, never its code.
+				isIsolatedId(appId) ? Promise.resolve(isolatedDescriptor(entry)) : entry.load(),
 				new Promise<never>((_, reject) =>
 					setTimeout(() => reject(new Error(`App "${appId}" failed to load within ${APP_LOAD_TIMEOUT / 1000}s`)), APP_LOAD_TIMEOUT),
 				),
@@ -523,7 +525,8 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			// ONCE — boot then resolves the manifest default; with no override
 			// left, a second failure cannot loop. Dev-owned containers are
 			// exempt (overrides never apply to them).
-			const dropped = isDevRemote(entry.moduleId) ? null : getAppVersionOverride(appId);
+			// (An isolated app is exempt too: its retry reloads the frame, #1022.)
+			const dropped = isDevRemote(entry.moduleId) || isIsolatedId(appId) ? null : getAppVersionOverride(appId);
 			if (dropped) {
 				clearAppVersionOverride(appId);
 				// The clear swallows storage errors: a write that fails while

@@ -59,7 +59,11 @@ import { subscribeConsent } from '../../telemetry/consentState';
 import { isInVSCode } from '../../themes/vscode';
 import { SignedOutScreen } from './SignedOutScreen';
 import { getHomeAppId } from '../../constants';
-import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote, markIsolated, isIsolatedId } from '../../util/appLoader';
+import { createAppRoot } from '../../isolation/appRoot';
+import { getIsolation, isIsolatedEntry, noteFirstParty } from '../../isolation/config';
+import { frameUi, requireReload, runLogoutClear, setFrameHost, sweepAtBoot, useReloadRequired } from '../../isolation/IsolatedAppFrame';
+import type { FrameOk, IAppRoot, IAppRootCm } from '../../isolation/types';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
@@ -177,6 +181,35 @@ function releaseReload(key: string): void {
 export interface ShellProps {
 	/** Full shell configuration assembled by the host (bootstrap.tsx). */
 	config: ShellConfig;
+}
+
+
+// =============================================================================
+// ISOLATED APP FRAMES (#1022) — the grant and the engine URL for the init
+// =============================================================================
+
+/** The engine's HTTP base as the guest may see it: an origin plus path, no query or fragment. */
+function engineHttpUrlOf(raw: string): string {
+	try {
+		const u = new URL(raw || window.location.origin);
+		return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+	} catch {
+		return window.location.origin;
+	}
+}
+
+/** `POST /apps/frame {appId, version}` with the session token when signed in; a non-200 rejects with `{status}`. */
+async function fetchFrameGrant(cm: ConnectionManager, appId: string, version: number): Promise<FrameOk> {
+	const token = cm.loadToken();
+	const response = await fetch(`${engineHttpUrlOf(cm.getHttpUrl())}/apps/frame`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+		body: JSON.stringify({ appId, version }),
+		credentials: 'omit',
+		cache: 'no-store',
+	});
+	if (response.status !== 200) throw Object.assign(new Error(`/apps/frame answered ${response.status}`), { status: response.status });
+	return (await response.json()) as FrameOk;
 }
 
 /**
@@ -309,6 +342,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
 
+	// ── Separate-origin app isolation (#1022) ─────────────────────────────
+	// The root of every isolated app frame: created beside registerClientOps
+	// only when the probe installed isolation (never under `off` or unknown).
+	const appRootRef = useRef<IAppRoot | null>(null);
+	const themeTokensRef = useRef<Record<string, string>>({});
+	const sweepGateRef = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
+	if (!sweepGateRef.current) {
+		let resolve = (): void => {};
+		const promise = new Promise<void>((r) => (resolve = r));
+		sweepGateRef.current = { promise, resolve };
+	}
+	const mustReload = useReloadRequired();
+	// The boot-time sweep (plan 4.7): once auth resolved, before any frame mounts.
+	useEffect(() => {
+		if (!authResolved || !appRootRef.current) return;
+		void sweepAtBoot(identity?.userId ?? null).finally(() => sweepGateRef.current?.resolve());
+	}, [authResolved, identity?.userId]);
+	useEffect(() => cm.on('shell:themeChange', ({ tokens }) => void (themeTokensRef.current = { ...tokens })), [cm]);
+
 	// ── In-process workspace rescope ──────────────────────────────────────
 	// True while the shell is switching workspaces: the workspace subtree is
 	// unmounted (a loading screen holds its place) between the teardown and
@@ -367,10 +419,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
 		const identityById = new Map(identityApps.map((a) => [a.id, a]));
 
-		// Overlay desktop metadata onto probe entries
+		// The stamp rule (#1022, plan 4.6), before anything is merged: the
+		// connect's stamps join the sticky set; an id that already ran in this
+		// realm and is now isolated needs the blocking reload overlay.
+		let reloadDue = false;
+		for (const a of identityApps) {
+			if (a.firstParty === true) noteFirstParty(a.id);
+			if (isIsolatedEntry(a) && !isIsolatedId(a.id) && markIsolated(a)) reloadDue = true;
+		}
+		if (reloadDue) queueMicrotask(requireReload);
+
+		// Overlay desktop metadata onto probe entries. A probe entry whose
+		// counterpart is stamped isolated is REPLACED by the isolated mapping.
 		const probeIds = new Set(config.apps.map((a) => a.id));
 		const merged = config.apps.map((a) => {
 			const da = identityById.get(a.id);
+			if (da && isIsolatedId(a.id)) {
+				const [isolated] = registerAndMapApps([da]);
+				return { ...(isolated ?? a), appStatus: da.appStatus, onDesktop: da.onDesktop };
+			}
 			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
 		});
 
@@ -425,6 +492,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// resolves in-process for this realm and for any attached spokes.
 			// Idempotent across remounts (already-registered ops are kept).
 			registerClientOps(cm.ops(), cm);
+			// Separate-origin app isolation (#1022): one app root per shell,
+			// beside the client ops. It owns the shell:logout and shell:login
+			// listeners that detach realms for logouts that bypass the handlers below.
+			const isolation = getIsolation();
+			if (isolation?.originTemplate && !appRootRef.current) {
+				const root = createAppRoot(cm as unknown as IAppRootCm, {
+					now: () => Date.now(),
+					random: (n) => crypto.getRandomValues(new Uint8Array(n)),
+					fetchFrame: (appId, version) => fetchFrameGrant(cm, appId, version),
+					shellOrigins: [window.location.origin],
+					originTemplate: isolation.originTemplate,
+					...frameUi,
+					openWindow: (url, target, features) => void window.open(url, target, features),
+					log: (level, line) => console[level](line),
+				});
+				appRootRef.current = root;
+				setFrameHost({
+					root,
+					fetchFrame: (appId, version) => fetchFrameGrant(cm, appId, version),
+					shellOrigins: [window.location.origin],
+					originTemplate: isolation.originTemplate,
+					session: () => ({ theme: themeTokensRef.current, engineHttpUrl: engineHttpUrlOf(cm.getHttpUrl()), themeName: document.documentElement.getAttribute('data-theme') ?? '' }),
+					ready: sweepGateRef.current!.promise,
+				});
+			}
 			// The SHELL's own host.* ops — those whose capability belongs to
 			// the shell and whose hooks are contract surface, so they cannot
 			// depend on each host remembering to register them. The ops the
@@ -757,7 +849,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// LOGOUT
 	// =====================================================================
 
-	const handleLogout = useCallback(() => {
+	const handleLogout = useCallback(async () => {
+		// Isolated apps end their runs while the session token is still valid,
+		// then their origins' storage is cleared (#1022, plan 4.7).
+		await appRootRef.current?.teardownAll(3000);
+		if (appRootRef.current) await runLogoutClear();
 		setIdentity(null);
 		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
 		// the auth transition screen when it mounts after logout.
@@ -804,8 +900,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// gone and the next load starts fresh on the home experience. logout() clears
 	// the token + session app ids synchronously before its async disconnect, so
 	// those are wiped before the navigation unloads the page.
-	const handleBackToHome = useCallback(() => {
+	const handleBackToHome = useCallback(async () => {
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+		// Isolated apps end their runs first (#1022); their storage is cleared
+		// by the boot-time sweep of the next load (plan 4.7, missed sweeps).
+		await appRootRef.current?.teardownAll(1500);
 		cm.logout();
 		window.location.href = window.location.origin + window.location.pathname;
 	}, [cm]);
@@ -993,6 +1092,16 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 			{/* Checkout overlay — renders outside the shell layout */}
 			<CheckoutFlow stripeKey={stripeKey} orgId={orgId} />
+
+			{/* An app that ran in this page is now isolated (#1022): reload, never automatically. */}
+			{mustReload && (
+				<div role="alertdialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, background: 'var(--rr-bg-overlay, rgba(0, 0, 0, 0.7))', color: 'var(--rr-text-primary)' }}>
+					<div>Reload required: an app on this page now runs in its own isolated frame.</div>
+					<button type="button" onClick={() => window.location.reload()} style={styles.elevatedButton}>
+						Reload
+					</button>
+				</div>
+			)}
 		</ShellIdentityContext.Provider>
 	);
 };
