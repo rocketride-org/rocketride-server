@@ -34,12 +34,11 @@
 // Identity fields are rewritten by key (case-insensitive), never by blanket
 // replacement of short values (plan section 2): user fields take the grant's
 // alias (the server minted it under `RR_APP_ALIAS_KEY`; the root only copies
-// it, and only in the `ru_` shape); team, run-kind, owner-kind and org
-// fields are removed. Real
-// high-entropy user, team and org ids are also replaced inside free text
-// (`identityIds`, DA F1). They are learnt from the SDK's account info only:
-// an engine body can carry stamps a pipeline authored (security N1, G4
-// round 2).
+// it, and only in the `ru_` shape); team, run-kind, owner-kind and org fields
+// are removed. Real high-entropy user, team and org ids are also replaced
+// inside free text (`identityIds`, DA F1). They are learnt from the SDK's
+// account info only: an engine body can carry stamps a pipeline authored
+// (security N1, G4 round 2).
 // =============================================================================
 
 import type { IRealmGrant } from './types';
