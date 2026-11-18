@@ -165,3 +165,14 @@ def test_rendered_public_pages_keep_shell_document_protection(world, ua):
     assert missing.status_code == 404
     assert missing.headers['content-security-policy'] == "frame-ancestors 'self' vscode-webview: vscode-file:"
     assert missing.headers['cross-origin-opener-policy'] == 'same-origin-allow-popups'
+
+
+def test_rendered_public_pages_keep_the_active_app_origin_report_policy(world, isolation_env):
+    """The page renderer carries the same active-origin report policy as shell_static."""
+    _, client = world
+    expected = f"frame-src 'self' {isolation_env.config().frame_src_wildcard()}"
+    for ua in (GOOGLEBOT, BROWSER):
+        for _ in range(2):
+            response = client.get('/pricing', headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert response.headers['content-security-policy-report-only'] == expected

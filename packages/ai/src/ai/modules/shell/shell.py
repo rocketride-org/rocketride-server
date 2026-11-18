@@ -579,33 +579,49 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     stays conservative both ways: the refresh can only ADD what the DB now
     grants, and revocation still converges on the hard expiry as before.
     """
+    from ai.account import account
+    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
+
+    info = None
+    auth_failed = False
+    if _is_saas():
+        if token:
+            try:
+                info = await account.authenticate(token)
+            except Exception:
+                auth_failed = True
+                info = None
+        if info is not None and not hasattr(info, 'userId'):
+            info = None
+        # A cached publish/version map is not a cached paid seat. Re-check
+        # live membership and seat allocation even on a warm asset request.
+        if want is not None and not await account.authorize_app_use(info, app_id, want):
+            return {}
+
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     now = time.time()
     hit = _version_dir_cache.get(key)
-    if hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
+    if not auth_failed and hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
         # A hit only answers when it can satisfy the caller: an absent
         # ``want`` on a map old enough to re-resolve falls through to a
         # fresh DB walk below (the miss-refresh); a map younger than the
         # key's current floor answers stale to keep the miss path from
         # becoming a per-request walk.
         if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
+            if _is_saas() and want is None:
+                return {
+                    version: path
+                    for version, path in hit['dirs'].items()
+                    if await account.authorize_app_use(info, app_id, version)
+                }
             return hit['dirs']
 
-    from ai.account import account
-    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
-
     if _is_saas():
-        info = None
-        if token:
-            try:
-                info = await account.authenticate(token)
-            except Exception:
-                info = None
-        if info is not None and not hasattr(info, 'userId'):
-            info = None  # authenticate() returns an error tuple on failure
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
+    if auth_failed:
+        return dirs
 
     # The key's NEXT floor: a miss-forced walk that still lacks the wanted
     # version was fruitless — double the floor (capped at the TTL) so a
