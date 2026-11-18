@@ -62,6 +62,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       container: ${{ steps.filter.outputs.container }}
+      cpp: ${{ steps.filter.outputs.cpp }}
       tests: ${{ steps.scope.outputs.tests }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -90,6 +91,19 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
+            # What the sanitizer job builds and how it builds it. The node
+            # patterns go by file type, so a new C++ node needs no edit here.
+            cpp:
+              - 'packages/server/**'
+              - 'nodes/**/*.{cpp,hpp,h,c}'
+              - 'nodes/**/CMakeLists.txt'
+              - 'scripts/build.js'
+              - 'scripts/lib/cmake.js'
+              - 'scripts/compiler-unix.sh'
+              - 'packages/vcpkg/**'
+              - 'nodes/scripts/node-build.js'
+              - '.github/workflows/_sanitize.yaml'
+              - 'scripts/ci/sanitizer-report.mjs'
       # A file counts as `outside` unless it sits in a TypeScript-only area:
       # with predicate-quantifier 'every' it must match all patterns, so it
       # must match '**' and none of the exclusions. No Python or C++ suite
@@ -213,6 +227,33 @@ jobs:
           - label: macOS (ARM64)
     steps:
       - run: echo "Build skipped — no code changes detected"
+
+  # ---------------------------------------------------------------------------
+  #  Sanitizers — the engine, its C++ test programs and the C++ nodes built
+  #  with ASan and UBSan, then server:test and nodes:test against them. Runs
+  #  on pull requests that change C++ code (`cpp` above) and on manual runs,
+  #  never on push: a red CI on develop would hold back the prerelease.
+  #  Pull requests qualify on the same bases where the build job runs its
+  #  tests (the middle of a stack does not, unless labelled ci:test).
+  #  Not in CI OK's needs: it reports sanitizer errors without blocking
+  #  merges yet.
+  # ---------------------------------------------------------------------------
+  sanitize:
+    name: Sanitizers (ASan + UBSan)
+    needs: [init, changes]
+    if: >-
+      !cancelled() &&
+      needs.init.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.cpp == 'true' &&
+      (contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref) ||
+      startsWith(github.event.pull_request.base.ref, 'release/') ||
+      contains(github.event.pull_request.labels.*.name, 'ci:test'))))
+    uses: ./.github/workflows/_sanitize.yaml
+    permissions:
+      contents: read
+      packages: read
+    secrets: inherit
 
   # CodeQL: replaced by GitHub's "Default setup" — managed in repo Settings →
   # Code security. Scans Python, JavaScript/TypeScript (and C/C++ via

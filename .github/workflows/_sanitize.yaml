@@ -1,0 +1,139 @@
+name: Sanitizers
+
+# Builds the engine, its C++ test programs and the C++ nodes with ASan and
+# UBSan (`--cmake-config=Sanitize`, Linux only) and runs server:test and
+# nodes:test against them. Every builder call repeats
+# `--cmake-config=Sanitize --nodownload`: builder does not remember the build
+# type between calls, and a download would bring a Release engine and skip the
+# C++ tests. Nothing is packaged or uploaded besides the report files, so this
+# build never reaches the engine cache.
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+
+jobs:
+  sanitize:
+    name: Ubuntu 22.04
+    timeout-minutes: 150
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VCPKG_NUGET_USER: ${{ github.repository_owner }}
+      NUGET_FEED_URL: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+      # The vcpkg dependencies do not depend on the engine's build type, so the
+      # binary cache that the regular build fills serves this job too. Read only.
+      VCPKG_BINARY_SOURCES: clear;nuget,https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json,read
+      # The engine runs each task in its own engine process and passes it only an
+      # allowlist of variables; these prefixes keep the sanitizer options there.
+      RR_SUBPROCESS_ENV: 'ASAN_* UBSAN_*'
+    steps:
+      # The sanitized engine already runs during the build (pip setup, test
+      # dependencies), so the options are in place before any builder call.
+      # halt_on_error=0 keeps a program running after a report, so one run shows
+      # every error. Each process that reports writes <log_path>.<pid>.
+      - name: Set sanitizer options
+        run: |
+          log_dir="$RUNNER_TEMP/sanitizer-logs"
+          mkdir -p "$log_dir"
+          {
+            echo "SANITIZER_LOG_DIR=$log_dir"
+            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:log_path=$log_dir/asan"
+            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$log_dir/ub"
+          } >> "$GITHUB_ENV"
+
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10.33.0
+      - name: Set up vcpkg
+        run: ./builder vcpkg:submodule-build
+      # Reading the feed needs the credentials too. No API key: nothing is pushed.
+      - name: Set up vcpkg nuget
+        run: |
+          NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
+          mono $NUGET_EXE sources add \
+            -Source "${{ env.NUGET_FEED_URL }}" \
+            -StorePasswordInClearText \
+            -Name GitHubPackages \
+            -UserName "${{ env.VCPKG_NUGET_USER }}" \
+            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+
+      # The clang-18 that the regular Linux build installs (so the vcpkg binary
+      # cache matches), plus llvm-symbolizer for file and line in the reports and
+      # the sanitizer runtime. The test program proves that clang links a
+      # sanitized program and that it runs on this runner.
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          bash scripts/compiler-unix.sh --autoinstall --system-compiler
+          sudo apt-get update -o Acquire::Retries=5
+          sudo apt-get install -y -o Acquire::Retries=5 llvm-18 libclang-rt-18-dev
+          clang++ --version | head -n1
+          symbolizer=/usr/lib/llvm-18/bin/llvm-symbolizer
+          if [ ! -x "$symbolizer" ]; then
+            echo "::error::$symbolizer is missing after installing llvm-18"
+            exit 1
+          fi
+          smoke="$RUNNER_TEMP/sanitizer-smoke"
+          printf 'int main() { return 0; }\n' > "$smoke.cpp"
+          if ! clang++ -fsanitize=address,undefined "$smoke.cpp" -o "$smoke"; then
+            echo "::error::clang++ cannot link a program with -fsanitize=address,undefined (sanitizer runtime missing?)"
+            exit 1
+          fi
+          "$smoke"
+          echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./builder server:build nodes:build --cmake-config=Sanitize --nodownload --verbose --autoinstall --system-compiler
+
+      # ROCKETRIDE_APIKEY and UV_LINK_MODE as in the Test step of _build.yaml.
+      # No database, S3 or Azure services: those suites skip without them.
+      - name: Test
+        env:
+          ROCKETRIDE_APIKEY: MYAPIKEY
+          UV_LINK_MODE: copy
+        run: ./builder server:test nodes:test --cmake-config=Sanitize --nodownload --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall --system-compiler
+
+      # The test servers' side of a build or test failure, as in _build.yaml.
+      # Workflow commands are stopped around each file so log lines stay inert.
+      - name: Show test server logs
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          stop="stop-$(date +%s%N)-$$"
+          for log in dist/server/test-logs/*.log; do
+            echo "::group::$log"
+            echo "::stop-commands::$stop"
+            cat "$log"
+            echo
+            echo "::$stop::"
+            echo "::endgroup::"
+          done
+
+      # Under halt_on_error=0 the programs exit 0 after a report, so this step is
+      # what fails the job: it exits 1 when any report was written.
+      - name: Sanitizer reports
+        if: always()
+        run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_LOG_DIR"
+
+      # storage-cleanup.yml deletes artifacts older than 3 days; the job summary
+      # keeps the grouped reports for as long as the run.
+      - name: Upload sanitizer reports
+        if: always() && env.SANITIZER_LOG_DIR != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sanitizer-reports
+          path: ${{ env.SANITIZER_LOG_DIR }}
+          if-no-files-found: ignore
+          retention-days: 3

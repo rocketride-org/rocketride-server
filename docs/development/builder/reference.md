@@ -163,6 +163,58 @@ only.
 ./builder my-package:test --list-deps
 ```
 
+### C++ build type: `--cmake-config`
+
+`--cmake-config=<type>` sets the CMake build type (`CMAKE_BUILD_TYPE`) of the
+engine, its test programs (`aptest`, `engtest`, `nodetest`) and the C++ nodes.
+
+| Value | What it builds |
+| ----- | -------------- |
+| `Release` | Default. Optimized, with symbols |
+| `RelWithDebInfo` | For C++ debugging on Windows: unoptimized, full PDBs |
+| `Sanitize` | **Linux only.** ASan and UBSan in one build; builder rejects it on other platforms |
+
+- builder does not remember the type between calls. Every call that builds or
+  tests C++ code repeats it — the build call **and** the test call — or parts of
+  the tree are rebuilt as `Release`.
+- The engine's "already built" check compares the sources **and** the type.
+  When the engine in `dist/server` was built as another type, the build call
+  builds it again as the requested type; `--force` is not needed.
+- builder downloads only an engine of the requested type. The published
+  engines are all `Release`, so any other type always compiles. `--nodownload`
+  is optional there: it skips looking up the published engines, which cannot
+  match, so a network or GitHub error during that lookup cannot fail the
+  build. Pass it in CI for that reason.
+
+#### Sanitizer build (`Sanitize`)
+
+A `Sanitize` build needs these variables in **every** call, the build call too
+(the build already runs the new engine, for example to set up pip). The report
+directory must exist and its path must be absolute:
+
+```bash
+mkdir -p "$PWD/sanitizer-reports"
+export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:log_path=$PWD/sanitizer-reports/asan"
+export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$PWD/sanitizer-reports/ub"
+export RR_SUBPROCESS_ENV="ASAN_* UBSAN_*"
+
+./builder server:build --cmake-config=Sanitize --nodownload
+./builder server:test --cmake-config=Sanitize --nodownload
+./builder nodes:test --cmake-config=Sanitize --nodownload
+```
+
+- `halt_on_error=0`: a program keeps running after a report, so one run shows
+  every error. Each report goes to `<log_path>.<pid>`.
+- `RR_SUBPROCESS_ENV`: the engine runs each task in its own engine process and
+  passes it only an allowlist of variables. A trailing `*` passes every variable
+  with that prefix, so these processes keep the sanitizer options.
+- The exit code stays `0` after a report under `halt_on_error=0`. Count the
+  files in the report directory: any file there is a report.
+- Reports show file and line only when `llvm-symbolizer` is on `PATH`.
+
+CI runs this build and both test calls in a separate job, on pull requests that
+change C++ code and on manual runs; the job fails when any report file appears.
+
 ---
 
 ## Compiler toolchain (C++ engine)
