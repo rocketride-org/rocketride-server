@@ -340,10 +340,10 @@ export type ApprovalMode = 'ask' | 'auto';
 
 /**
  * The routine kinds a card can offer "Always allow" for, as data, so code that reads or compares every
- * grant loops over this list and a new kind needs no edit there. Publishing, submitting, removing a
- * deployment and deleting a file are never among them.
+ * grant loops over this list and a new kind needs no edit there. Publishing, submitting and removing
+ * a deployment are never among them.
  */
-export const GRANTS = ['schedules', 'deploymentToggles', 'appUse'] as const;
+export const GRANTS = ['schedules', 'deploymentToggles', 'appUse', 'fileDeletes', 'appDeploys', 'runStops', 'runRestarts', 'profilingStarts', 'profilingStops', 'templateSaves', 'templateDeletes', 'logSaves', 'sqlQueries'] as const;
 
 /** One of GRANTS. */
 export type Grant = (typeof GRANTS)[number];

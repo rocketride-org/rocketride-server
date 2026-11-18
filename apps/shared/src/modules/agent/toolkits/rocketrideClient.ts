@@ -341,11 +341,11 @@ export class RocketRideClientToolkit extends AgentToolkit {
 
 /**
  * Says which runs this conversation started, so terminate and restart act on them without asking in
- * Auto mode (approval.ts).
+ * Auto mode or with their grant on (approval.ts).
  * - A `use` the engine answers with `reused: false` started a run; its status is read at once and
  *   recorded (token, project_id, source, startTime, scope, conversation). A `deploy.run` is never
  *   recorded: a token and a later start time don't prove who started it.
- * - Right before an Auto terminate or restart, `recheck` reads the status again; start time,
+ * - Right before an unasked terminate or restart, `recheck` reads the status again; start time,
  *   project_id, source and scope must match, since the engine reuses a token for a project and source.
  * Records live in the session file, so a reloaded conversation still owns its runs. The run can still
  * change between the recheck and the call; that window is a known limit.
@@ -372,7 +372,7 @@ export interface RunOwnership {
 	 */
 	owned(target: RunTarget): RunRecord | undefined;
 	/**
-	 * Reads the run's status again, right before an Auto terminate or restart.
+	 * Reads the run's status again, right before an unasked terminate or restart.
 	 *
 	 * @param record - The record approve() found.
 	 * @returns null when the run is still the one recorded, else why not.
