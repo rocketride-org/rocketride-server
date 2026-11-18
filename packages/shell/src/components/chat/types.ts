@@ -8,6 +8,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type { TurnController } from './turns/turnController';
 
 // =============================================================================
 // MESSAGE
@@ -104,6 +105,14 @@ export interface UseChatMessagesOptions {
 	 * ({@link ChatStatusSink}) and the running turn; both are typed optional only because v0 is frozen.
 	 */
 	request?: (text: string, onStatus?: ChatStatusSink, turn?: ChatTurn) => Promise<TextResult[]>;
+	/**
+	 * A chat that outlives the component showing it: one conversation drawn again by a layout change,
+	 * or shown in two tabs. The hook shows and drives it, makes no controller of its own, and never stops
+	 * it; its owner does. Leave it out and the hook makes one (returned as `controller`), which it stops on
+	 * unmount unless the caller has passed it back by then. When given, `initialMessages` and `request` are
+	 * the controller's own business. Pass the same controller on every render.
+	 */
+	controller?: TurnController;
 }
 
 /**
@@ -163,7 +172,7 @@ export interface ChatAskView {
 export interface ChatTurn {
 	/** The rows before this turn's opening user row: the conversation the turn answers in. */
 	readonly history: readonly ChatMessage[];
-	/** Aborted when the user stops the turn or the chat unmounts. */
+	/** Aborted when the user stops the turn, or the chat stops it: a chat the hook made stops when its component unmounts, and a passed-in controller when its owner stops it. */
 	readonly signal: AbortSignal;
 	/**
 	 * Takes the messages the user sent since the turn began (or since the last
@@ -196,6 +205,8 @@ export interface ChatTurnView {
 	readonly asks: readonly ChatAskView[];
 	/** Answers a waiting card (its buttons). An id that no longer waits does nothing, so a click after Stop is ignored. */
 	answerAsk(id: number, answer: Exclude<ChatAskAnswer, 'stopped'>): void;
+	/** The composer's unsent text, held by the chat, so a composer drawn again by a layout change starts from it. Without it the composer keeps its own. */
+	readonly draft?: { get(): string; set(text: string): void };
 }
 
 // =============================================================================

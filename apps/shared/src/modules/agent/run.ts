@@ -51,6 +51,7 @@ import { redactDeep, redactText, shellChoice, type ChoiceFn, type ClientGetter }
 import { FilesystemTools, normalizePath, type FileTracker } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit, RunLedger } from './toolkits/rocketrideClient';
+import { ShowViewToolkit } from './toolkits/showView';
 import { UNDO_ROW, type UndoRecord } from './toolkits/undo';
 import { composeToolkits, UserTime } from './tools';
 import { keyRequest, outcomeOf, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnReport, type TurnResult, type TurnUsage } from './turn';
@@ -537,10 +538,12 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
 	// so each one, and the save hook above, hides the values the file tools hid before it cuts
 	const hide = (text: string): string => files.secrets.hideKnown(text);
-	// step: use_app's pages live for this turn: each closes when runEnded aborts (finish, Stop, or a
-	// team switch, which unmounts the chat and stops the turn), so the finally below closes them all
+	// step: use_app's pages live for this turn: each closes when runEnded aborts (finish, Stop, or the
+	// chat closing: its last tab, or a team switch), so the finally below closes them all
 	const appUse = new AppUseToolkit(host, { ended: runEnded.signal, conversationId: options.conversationId ?? '', hide });
 	const askUser = new AskUserToolkit(approvals.client);
+	// step: show_view only where the host has an editor area, each view beside this turn's chat
+	const showView = host.showView?.bind(host);
 	const composed = composeToolkits([
 		files,
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
@@ -550,6 +553,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		// a check borrows this turn's use_app page of the app when the user has no preview open
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide, lease: appUse.leaseForCheck }),
 		appUse,
+		...(showView ? [new ShowViewToolkit(vfs, (view) => showView(view, { conversationId: options.conversationId ?? '' }))] : []),
 		askUser,
 	]);
 	// step: cards and the answer hold text the loop never saw (a server's names, check_app's summaries),

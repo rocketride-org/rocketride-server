@@ -162,15 +162,24 @@ export async function readApps(vfs: IWorkspaceFileSystem, isOpen: (appId: string
 }
 
 /**
+ * An app reference with one leading `apps/` dropped, so the folder's workspace path (the form
+ * show_view and list_workspace use) names the folder. The loop keys app tools on the same spelling.
+ */
+export function stripAppsPrefix(ref: string): string {
+	return ref.replace(/^apps\//, '');
+}
+
+/**
  * Finds the app a tool call names.
  *
  * @param apps - The apps from `readApps`.
- * @param ref - A folder name, a manifest id or a manifest name.
+ * @param ref - A folder name (bare or as `apps/<folder>`), a manifest id or a manifest name.
  * @returns The matching app; a folder match wins over an id, and an id over a name.
  * @throws When no app matches; the message lists the apps that exist.
  */
 export function findApp(apps: AppEntry[], ref: string): AppEntry {
-	const found = apps.find((a) => a.folder === ref) ?? apps.find((a) => a.id === ref) ?? apps.find((a) => a.name === ref);
+	const folder = stripAppsPrefix(ref);
+	const found = apps.find((a) => a.folder === folder) ?? apps.find((a) => a.id === ref) ?? apps.find((a) => a.name === ref);
 	if (found) return found;
 	const known = apps.map((a) => (a.id ? `${a.folder} (${a.id})` : a.folder)).join(', ');
 	throw new Error(`No app '${ref}'. Apps: ${known || 'none'}`);

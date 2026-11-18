@@ -29,13 +29,16 @@
  * here and installs it right after the workspace is created.
  */
 
-import type { RocketRideClient } from 'shell';
+import { scopedPrefs, type PrefsStore, type RocketRideClient } from 'shell';
 import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
 import { DEFAULT_LIMITS, GRANTS, grantsFrom, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings } from 'shared/modules/agent/host';
 import { messageOf } from 'shared/modules/agent/toolkits/common';
 import type { AgentReport } from 'shared/modules/agent/turn';
-import type { FrameOptions } from 'shared/tools/appdev';
+import type { AppBuilderStage, FrameOptions } from 'shared/tools/appdev';
+import { STAGE_PREF_KEY } from 'shared/tools/appdev/views/builder/AppBuilderScreen';
 import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
+import { getDocs } from '../docs';
+import { appPrefsStore } from '../surfaces/devtools/devToolPins';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
@@ -44,6 +47,7 @@ import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspac
 import { openAppPage } from './appPage';
 import { editorControl } from './editorControls';
 import { bootHiddenPreview } from './hiddenPreview';
+import { showBeside } from './userView';
 import { watchPlace } from './watch';
 
 // =============================================================================
@@ -55,6 +59,18 @@ const WIZARD_FRAME: FrameOptions = { sidebar: false, statusFooter: false, docTab
 
 /** Why an app page does not open once another team's workspace is current. */
 const PAGE_TEAM_CHANGED = 'the team changed while the preview was starting';
+
+/** Why a view does not open once another team's workspace is current. */
+const VIEW_TEAM_CHANGED = 'the team changed before the view opened';
+
+/**
+ * The App Builder's UI prefs for one app, as AppBuilderProvider scopes them: the app's own partition,
+ * under `appdev`. Through the realm's hub, so the write reaches the manager, which republishes it to the
+ * builder's own mirror.
+ */
+function builderPrefs(appId: string): PrefsStore {
+	return scopedPrefs(appPrefsStore(appId), 'appdev');
+}
 
 // =============================================================================
 // DEV SESSIONS
@@ -243,6 +259,36 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace, r
 		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
 		// step: the chat's live view of those copies; UI only, a run never reads it
 		watchFor: (conversationId) => watchPlace({ kind: 'chat', conversationId }),
+		// step: the user's own builder or canvas beside this turn's chat, in this host's team only. A builder
+		// goes to Design first through its stage pref: one opening reads it, an open one follows it live
+		showView: async (view, { conversationId }) => {
+			if (!current()) throw new Error(VIEW_TEAM_CHANGED);
+			const docs = getDocs();
+			if (!docs) throw new Error('the editor area is not open');
+			if (view.kind === 'app') builderPrefs(view.app.id).set(STAGE_PREF_KEY, 'design' satisfies AppBuilderStage);
+			await showBeside(docs, view, conversationId);
+		},
+		// step: a conversation's chat is gone when its last tab closes or this team's editor area goes. A tab a
+		// layout change draws again keeps its document in Documents, so that is no close (the canvas tells the
+		// same apart, canvasDocument.ts). Documents notifies on destroy() before it drops its listeners
+		onChatClosed: (conversationId, closed) => {
+			const docs = getDocs();
+			if (!docs) {
+				closed();
+				return () => undefined;
+			}
+			const uri = `tool:agent/${conversationId}`;
+			let stop = (): void => undefined;
+			const check = (): void => {
+				if (docs.destroyed !== true && docs.getState().documents[uri]) return;
+				stop();
+				closed();
+			};
+			stop = docs.subscribe(check);
+			// the tab closed while the session loaded
+			check();
+			return stop;
+		},
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
 		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },

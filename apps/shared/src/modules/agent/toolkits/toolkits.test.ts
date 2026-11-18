@@ -45,7 +45,7 @@ import { isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { grantsFrom, PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease } from '../host';
+import { grantsFrom, PageGoneError, setAgentHost, type AgentDevSession, type AgentHost, type AppPage, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant, type OutlineLine, type PageAction, type PageUse, type PreviewApp, type PreviewLease, type UserView } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
@@ -60,6 +60,7 @@ import { AppUseToolkit, USE_APP_TOOL } from './appUse';
 import { isJsonObject, redactText, type ChoiceFn, type JsonObject } from './common';
 import { FilesystemTools } from './filesystem';
 import { RocketRideClientToolkit, RunLedger } from './rocketrideClient';
+import { ShowViewToolkit } from './showView';
 
 /** An in-memory IWorkspaceFileSystem. Each write or delete counts one version of its path, as the staged view's do; a test that sets `files` directly changes content without a version, the way another browser tab would. */
 class MemoryWorkspace implements IWorkspaceFileSystem {
@@ -457,6 +458,7 @@ test('publish_app and delete_file name their exact act, and only an approved one
 	const free = new AppToolkit(() => client, hostFor(new MemoryWorkspace(ALPHA)));
 	const step = await toolOf(free, 'publish_app').tool.prepare(publish);
 	assert.deepEqual(step.act, { name: 'publishApp', params: ['acme.a', 4, '@public'] });
+	assert.deepEqual((await toolOf(free, 'publish_app').tool.prepare({ ...publish, app: 'apps/a-ui' })).act, step.act, 'the apps/<folder> spelling names the same app');
 
 	// through a run's approvals the publish reaches the client only by the checked view, so its act must match its call
 	const publishWith = (answer: ChatAskAnswer) => {
@@ -962,6 +964,7 @@ test('check_app cuts a long error list at 32,000 characters', async () => {
 	);
 	const result = await toolOf(toolkit, 'check_app').execute({ app: 'daybook-ui' });
 	assert.match(result, /\n {2}\[TRUNCATED: showing first 32000 of \d+ chars — fix the first errors and check again to see the rest\]/);
+	assert.match(await toolOf(toolkit, 'check_app').execute({ app: 'apps/daybook-ui' }), /^CHECK FAILED: daybook\n/, 'the apps/<folder> spelling show_view teaches names the same app');
 });
 
 test('a check whose types or build step did not run is not checked, and a failed step still fails it', () => {
@@ -1125,7 +1128,7 @@ test('use_app opens one page per app for the turn: racing calls share one open, 
 	assert.equal(opened.length, 3, 'nothing opens once the turn ended');
 });
 
-test('use_app refuses before any card on a host with no app preview, and takes the app by its folder only', async () => {
+test('use_app refuses before any card on a host with no app preview, and takes the app by its folder only, bare or as apps/<folder>', async () => {
 	const ws = new MemoryWorkspace({ ...DAYBOOK, 'apps/plain-ui/package.json': JSON.stringify({ name: 'plain' }) });
 	const asked = fakeAsk([]);
 	const approvals = approvalsFor(null, asked.ask);
@@ -1140,6 +1143,8 @@ test('use_app refuses before any card on a host with no app preview, and takes t
 	assert.equal(opened.length, 0);
 	await use.execute({ app: 'daybook-ui' });
 	assert.equal(opened.length, 1, 'the folder opens the page');
+	await use.execute({ app: 'apps/daybook-ui' });
+	assert.equal(opened.length, 1, 'apps/daybook-ui names the same app, so the turn keeps its one page');
 	assert.equal(asked.cards.length, 0);
 });
 
@@ -1346,4 +1351,38 @@ test("check_app borrows this turn's use_app page when the user has no preview op
 	const fallback = await check(gone, { used: true });
 	assert.match(fallback.text, /^CHECK PASSED: daybook\n/);
 	assert.deepEqual([gone.lends, fallback.hostLeases], [1, 1], 'a page that cannot lend leaves the check to the host');
+});
+
+// =============================================================================
+// SHOW_VIEW — the user's own App Builder or canvas, named by the path list_workspace gives
+// =============================================================================
+
+test('show_view hands the host the app or pipeline a path names, says what the user now sees, and refuses every other spelling with its fix', async () => {
+	const ws = new MemoryWorkspace({ ...DAYBOOK, 'apps/blank-ui/package.json': JSON.stringify({ name: 'blank' }), 'pipelines/support.pipe': '{}' });
+	const seen: UserView[] = [];
+	const show = toolOf(new ShowViewToolkit(ws, async (view) => void seen.push(view)), 'show_view');
+	const daybook: UserView = { kind: 'app', app: { id: 'daybook', folder: 'daybook-ui', name: 'Daybook' } };
+	// step: an app's folder and a pipeline's file, as list_workspace gives them; free, so nothing asks
+	assert.equal((await show.tool.prepare({ path: 'apps/daybook-ui' })).act, undefined);
+	assert.match(await show.execute({ path: 'apps/daybook-ui' }), /App Builder for Daybook \(apps\/daybook-ui\) is open beside the chat on Design/);
+	assert.match(await show.execute({ path: 'pipelines/support.pipe' }), /canvas for pipelines\/support\.pipe is open beside the chat/);
+	// step: spelled as the file tools spell it, so the loop's ordering key and the view agree
+	assert.match(await show.execute({ path: 'apps//daybook-ui/' }), /\(apps\/daybook-ui\)/);
+	assert.deepEqual(seen, [daybook, { kind: 'pipeline', path: 'pipelines/support.pipe' }, daybook]);
+	// step: every other spelling is refused with its fix, and none reaches the host
+	const refusals: Array<[Record<string, unknown>, RegExp]> = [
+		[{ path: 'apps/home' }, /No app 'home'\. Apps: .*daybook-ui \(daybook\).*Pass the app as apps\/<folder>/],
+		[{ path: 'apps/daybook' }, /Pass the app's folder, apps\/daybook-ui\./],
+		[{ path: 'apps/Daybook' }, /Pass the app's folder, apps\/daybook-ui\./],
+		[{ path: 'apps/daybook-ui/src/App.tsx' }, /Pass the app's folder, apps\/daybook-ui\./],
+		[{ path: 'apps/blank-ui' }, /blank-ui has no manifest id.*apps\/blank-ui\/package\.json/],
+		[{ path: 'pipelines/gone.pipe' }, /No pipeline file at pipelines\/gone\.pipe/],
+		[{ path: 'daybook-ui' }, /daybook-ui is not an app or a pipeline/],
+		[{}, /path is required/],
+	];
+	for (const [args, refusal] of refusals) await assert.rejects(show.execute(args), refusal, JSON.stringify(args));
+	assert.equal(seen.length, 3, 'a refused path reached the host');
+	// step: a host that could not show it says why, and the model carries on
+	const failing = toolOf(new ShowViewToolkit(ws, () => Promise.reject(new Error('the team changed before the view opened'))), 'show_view');
+	await assert.rejects(failing.execute({ path: 'apps/daybook-ui' }), /Couldn't show apps\/daybook-ui: the team changed before the view opened\. Carry on/);
 });

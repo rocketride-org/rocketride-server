@@ -46,7 +46,7 @@ import { PageGoneError, type ActionOutcome, type AgentHost, type AppPage, type E
 import { AgentTool, AgentToolkit, type ToolAct, type ToolStep } from '../tools';
 import { SUMMARY_BUDGET, SUMMARY_HARD_CAP } from '../wave/summary';
 import { brief, isJsonObject, numberArg, textArg } from './common';
-import { findApp, readApps } from './inventory';
+import { findApp, readApps, stripAppsPrefix } from './inventory';
 
 // =============================================================================
 // CONSTANTS
@@ -240,8 +240,8 @@ export class AppUseToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * The app a call names. Only its folder is taken: the loop orders the call against same-wave edits by
-	 * `apps/<app>` (writePaths), which an id or a display name would silently miss.
+	 * The app a call names. Only its folder is taken, bare or as `apps/<folder>`: the loop orders the call
+	 * against same-wave edits by `apps/<folder>` (writePaths), which an id or a display name would silently miss.
 	 *
 	 * @throws When `app` is missing, names no app, names one by id or name, or the app has no manifest id.
 	 */
@@ -250,7 +250,7 @@ export class AppUseToolkit extends AgentToolkit {
 		const ref = typeof args.app === 'string' ? args.app : '';
 		if (!ref) throw new Error(WORDS.appMissing);
 		const entry = findApp(await readApps(this.host.vfs, () => false), ref);
-		if (entry.folder !== ref) throw new Error(WORDS.appByFolder(entry.folder, entry.id === ref ? 'id' : 'name'));
+		if (entry.folder !== stripAppsPrefix(ref)) throw new Error(WORDS.appByFolder(entry.folder, entry.id === ref ? 'id' : 'name'));
 		if (!entry.id) throw new Error(WORDS.appNoId(entry.folder, entry.path));
 		return { id: entry.id, folder: entry.folder, name: entry.name ?? entry.folder };
 	}

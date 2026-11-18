@@ -33,11 +33,13 @@
  *
  * Hosts touch exactly one thing here: the AgentSession class. Configure it
  * once with the controlling app id, list sessions for the sidebar, open one
- * per conversation tab, and drive it through execute()/save().
+ * per conversation (every tab of it gets the same instance), and drive its
+ * chat through request.
  */
 
 import { getClient } from 'shell';
 import type { ChatMessage, TextResult } from 'shell';
+import type { TurnController } from 'shell/src/components/chat/turns/turnController';
 import type { ChatCard, ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
 import { findAgentHost, getAgentHost } from './host';
 import { DEFAULT_MODEL, parseModelChoice, type ModelChoice } from './model';
@@ -150,6 +152,16 @@ const CLOSED_TAB = 'Stopped by you: the Agent tab closed.';
 /** Each conversation's running Undo, by session id, until its note row is added. Every instance of the conversation sees it, so one reopened while Undo runs waits for it. */
 const undoing = new Map<string, Promise<void>>();
 
+/** Each closed conversation's last saves, by session id, until they land, so one reopened meanwhile reads them. */
+const closing = new Map<string, Promise<void>>();
+
+/**
+ * Each open conversation's one session, by id. Every tab of the conversation, and a tab a layout change
+ * draws again, gets this instance, so they all show one chat and one running turn. An entry leaves when
+ * its chat closes for real (close()), or when its load fails so a later tab can try again.
+ */
+const open = new Map<string, { session: AgentSession | null; loading: Promise<AgentSession> }>();
+
 /** What a card press may do outside the session: open a file, open Variables, send a message, or add a note. */
 export interface CardActionHandlers {
 	/** Opens a workspace file in its editor. */
@@ -162,11 +174,10 @@ export interface CardActionHandlers {
 }
 
 /**
- * One agent conversation. The mounted tab provider owns its instance:
- * Documents keeps open tabs mounted, so switching tabs never unmounts a
- * conversation, and reopening a closed tab reloads from disk via
- * getSession(). (No instance registry — revisit when real agent runs can
- * outlive their tab. Only a running Undo is shared, by session id.)
+ * One agent conversation. An open conversation has one instance, from getSession(), shared by all its
+ * tabs. The instance holds the chat, so a running turn outlives a tab drawn again and goes on in every
+ * tab of it. Closing its last tab or switching teams stops the turn and drops the instance; reopening
+ * reads the file again.
  */
 export class AgentSession {
 	/** The session's GUID. */
@@ -192,8 +203,16 @@ export class AgentSession {
 	/** Turns that ended and have no row linked yet, each with the index of its opening user row. */
 	private readonly pending: Array<{ turn: TurnResult; opening: number }> = [];
 	private running = 0;
-	/** Set once the Agent tab unmounted: from then on a turn that ends saves itself. */
-	private detached = false;
+	/** Set once the conversation's chat closed for real: from then on a turn that ends writes its own closing row and saves. */
+	private closed = false;
+	/** The conversation's chat, from its first tab (adopt). */
+	private controller: TurnController | null = null;
+	/** How many rows the last idle save wrote, so a chat that only drew again is not saved. */
+	private savedCount = 0;
+	/** Stops the session hearing its chat. */
+	private unlisten: (() => void) | null = null;
+	/** Stops the host's onChatClosed watch. */
+	private unwatch: (() => void) | null = null;
 	/** The request a card button answered, while its reply is on the way. */
 	private claimed: string | null = null;
 	/** The conversation's model, which only setModel changes. */
@@ -202,8 +221,6 @@ export class AgentSession {
 	private saving: Promise<void> = Promise.resolve();
 	/** The latest turn that ran, with its Undo record. In memory only: a reload starts with none. */
 	private latest: { turnId: string; record: UndoRecord } | null = null;
-	/** Counts the Agent tab's mounts and unmounts, so a send held for an Undo goes only to the tab that held it, and an Undo whose tab closed keeps its note itself. */
-	private mounts = 0;
 	/** Called when what the cards show changes outside the chat's rows (Undo became ready, or ran). */
 	private readonly listeners = new Set<() => void>();
 
@@ -254,18 +271,45 @@ export class AgentSession {
 	}
 
 	/**
-	 * Opens one session fully loaded. A missing file (a fresh id whose first
-	 * message was never sent) yields an empty conversation. Every OTHER
-	 * failure (transport drop, store timeout, corrupt JSON) propagates: an
-	 * empty session under the same id would get saved over the stored
-	 * history on the next send. A conversation whose Undo runs loads once
-	 * Undo has added its note.
+	 * The open conversation's session, shared by every tab of it: the live instance when the
+	 * conversation is open, else loaded once and kept until its chat closes (the host's onChatClosed).
+	 * A missing file (a fresh id whose first message was never sent) yields an empty conversation.
+	 * Every OTHER failure (transport drop, store timeout, corrupt JSON) propagates: an empty session
+	 * under the same id would get saved over the stored history on the next send.
 	 *
 	 * @param sessionId - The session GUID.
 	 * @returns The hydrated session.
 	 */
-	static async getSession(sessionId: string): Promise<AgentSession> {
+	static getSession(sessionId: string): Promise<AgentSession> {
+		const entry = open.get(sessionId);
+		if (entry) return entry.loading;
+		const made: { session: AgentSession | null; loading: Promise<AgentSession> } = { session: null, loading: AgentSession.load(sessionId) };
+		open.set(sessionId, made);
+		made.loading.then(
+			(session) => {
+				made.session = session;
+				// step: the host says when the chat is really gone; it checks once at once, which catches a tab closed during the load
+				session.unwatch = findAgentHost()?.onChatClosed?.(sessionId, () => session.close()) ?? null;
+			},
+			() => {
+				if (open.get(sessionId) === made) open.delete(sessionId);
+			}
+		);
+		return made.loading;
+	}
+
+	/**
+	 * The open conversation's session when it is already loaded, else null: a tab drawn again by a
+	 * layout change shows its chat in the same commit, with no "Loading session…" in between.
+	 */
+	static loaded(sessionId: string): AgentSession | null {
+		return open.get(sessionId)?.session ?? null;
+	}
+
+	/** Reads a conversation from its file, once its running Undo has added its note and a closed instance's last saves have landed. */
+	private static async load(sessionId: string): Promise<AgentSession> {
 		await undoing.get(sessionId)?.catch(() => undefined);
+		await closing.get(sessionId);
 		let raw: string;
 		try {
 			raw = await getContext(sessionId);
@@ -303,6 +347,88 @@ export class AgentSession {
 	}
 
 	// ── Instance — one conversation ──────────────────────────────────────
+
+	/** The request every tab's chat runs (useChatMessages `request`): execute, bound to this session. */
+	readonly request = (text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> => this.execute(text, onStatus, turn).then(({ results }) => results);
+
+	/** The conversation's chat, once a tab made it; every tab passes it to useChatMessages as `controller`. */
+	get chat(): TurnController | undefined {
+		return this.controller ?? undefined;
+	}
+
+	/**
+	 * Keeps the chat the conversation's first tab made, so every later tab, and a tab drawn again,
+	 * runs on it. The first one wins; later calls, and calls after the close, do nothing. From then on
+	 * the session saves the chat's rows each time it goes idle with new rows.
+	 *
+	 * @param chat - useChatMessages' returned `controller`.
+	 */
+	adopt(chat: TurnController): void {
+		if (this.controller || this.closed) return;
+		this.controller = chat;
+		// a restored conversation that is idle is not saved on mount
+		this.savedCount = chat.snapshot().messages.length;
+		this.unlisten = chat.subscribe(() => this.saveIdle());
+		// step: the first tab draws again and passes the chat back, so its unmount no longer stops it
+		this.changed();
+	}
+
+	/** Persists after each completed exchange. */
+	private saveIdle(): void {
+		const { phase, messages } = this.controller!.snapshot();
+		if (phase !== 'idle' || messages.length === this.savedCount) return;
+		this.savedCount = messages.length;
+		this.persist(messages).catch((err) => {
+			console.log('[AgentSession] session save failed', err);
+		});
+	}
+
+	/**
+	 * The conversation's chat closed for real (the host's onChatClosed): its last tab closed, or a team
+	 * switch. Stops a running turn, saves the rows the chat holds after the stop, and lets the
+	 * conversation go, so reopening it reads the file once these saves land.
+	 */
+	private close(): void {
+		if (this.closed) return;
+		this.closed = true;
+		if (open.get(this.sessionId)?.session === this) open.delete(this.sessionId);
+		this.unwatch?.();
+		this.unwatch = null;
+		const saved = this.lastSave();
+		closing.set(this.sessionId, saved);
+		void saved.then(() => {
+			if (closing.get(this.sessionId) === saved) closing.delete(this.sessionId);
+		});
+		const chat = this.controller;
+		if (!chat) return;
+		// step: from here the session writes its own rows (ended, closeDetached)
+		this.unlisten?.();
+		this.unlisten = null;
+		// step: read after the stop, so no row is saved still queued; queued rows go back to a composer that is gone
+		chat.stop();
+		const rows = chat.snapshot().messages;
+		const last = this.messages.at(-1);
+		const unchanged = rows.length === this.messages.length && rows.at(-1)?.id === last?.id;
+		if (this.running === 0 && this.pending.length === 0 && unchanged) return;
+		this.messages = rows;
+		this.closeDetached();
+		this.persist(this.messages).catch((err) => {
+			console.log('[AgentSession] could not save the conversation on close', err);
+		});
+	}
+
+	/** Resolves once no turn of this conversation runs and every save asked so far has landed. */
+	private lastSave(): Promise<void> {
+		return new Promise<void>((resolve) => {
+			const check = (): void => {
+				if (this.running > 0) return;
+				stop();
+				resolve();
+			};
+			const stop = this.subscribe(check);
+			check();
+		}).then(() => this.saving);
+	}
 
 	/** The conversation's model. The same object until setModel, so the picker can read it directly. */
 	get model(): ModelChoice {
@@ -392,6 +518,8 @@ export class AgentSession {
 				const recorded = this.ended(result, opening);
 				report('agent_turn:end', turnEvent(recorded, { ms: performance.now() - began, mode: findAgentHost()?.approvals?.run.read().mode ?? 'ask' }));
 			}
+			// step: a turn's card shows once it ends, which can come after the chat closed the turn (Stop's grace), so every tab redraws
+			this.changed();
 		}
 	}
 
@@ -463,15 +591,15 @@ export class AgentSession {
 
 	/**
 	 * A turn ended; it waits for its closing row. When the chat already wrote it (Stop's grace ran
-	 * out first) or the Agent tab is gone, nothing else saves the conversation, so this does.
+	 * out first) or the chat closed, nothing else saves the conversation, so this does.
 	 *
-	 * @returns The turn as recorded: a stopped turn whose tab is gone ends 'unmounted'.
+	 * @returns The turn as recorded: a stopped turn whose chat closed ends 'unmounted'.
 	 */
 	private ended(turn: TurnResult, opening: number): TurnResult {
-		const result: TurnResult = this.detached && turn.outcome === 'stopped' ? { ...turn, reason: 'unmounted' } : turn;
+		const result: TurnResult = this.closed && turn.outcome === 'stopped' ? { ...turn, reason: 'unmounted' } : turn;
 		this.pending.push({ turn: result, opening });
-		if (this.detached) this.closeDetached();
-		if (this.detached || this.link(this.messages)) {
+		if (this.closed) this.closeDetached();
+		if (this.closed || this.link(this.messages)) {
 			this.persist(this.messages).catch((err) => {
 				console.log('[AgentSession] could not save the ended turn', err);
 			});
@@ -498,7 +626,7 @@ export class AgentSession {
 
 	/**
 	 * Writes the closing row the chat can no longer write, for each ended turn
-	 * of a tab that unmounted: the turn's answer, or for a stopped turn a stop
+	 * of a chat that closed: the turn's answer, or for a stopped turn a stop
 	 * row with the progress the chat showed, as the chat's own stop row has.
 	 */
 	private closeDetached(): void {
@@ -512,34 +640,6 @@ export class AgentSession {
 			this.messages = at < 0 ? [...rows, row] : [...rows.slice(0, at), row, ...rows.slice(at)];
 		}
 		this.link(this.messages);
-	}
-
-	/**
-	 * The Agent tab mounted. A tab mounted again after detach (React's dev
-	 * double mount runs the unmount once at start) shows the turns again, so
-	 * a turn that ends waits for the chat's rows.
-	 */
-	attach(): void {
-		this.detached = false;
-		this.mounts++;
-	}
-
-	/**
-	 * The Agent tab is unmounting (closed, or a team switch): saves the rows it showed last, in the
-	 * conversation's own scope. A running turn stops with the tab and saves again when it ends.
-	 */
-	detach(messages: ChatMessage[]): void {
-		if (this.detached) return;
-		this.detached = true;
-		this.mounts++;
-		const last = this.messages.at(-1);
-		const unchanged = messages.length === this.messages.length && messages.at(-1)?.id === last?.id;
-		if (this.running === 0 && this.pending.length === 0 && unchanged) return;
-		this.messages = messages;
-		this.closeDetached();
-		this.persist(this.messages).catch((err) => {
-			console.log('[AgentSession] could not save the conversation on unmount', err);
-		});
 	}
 
 	/**
@@ -609,14 +709,13 @@ export class AgentSession {
 		const latest = this.latest;
 		const state = this.undoState();
 		if (!latest || state?.state !== 'ready' || this.turns.find((t) => t.messageId === messageId)?.turnId !== latest.turnId) return false;
-		const mount = this.mounts;
 		const running = latest.record
 			.undo()
 			.catch((error: unknown): UndoOutcome => ({ kind: 'refused', text: `Undo refused, nothing was changed: ${error instanceof Error ? error.message : String(error)}.` }))
 			.then(async (outcome) => {
 				if (outcome.kind !== 'refused' && this.latest === latest) this.latest = null;
-				// step: the tab closed while Undo ran and its chat went with it, so the note goes in the session's own rows, saved for a reopened tab and the next turn
-				if (this.detached || this.mounts !== mount) {
+				// step: the chat closed while Undo ran and went with it, so the note goes in the session's own rows, saved for a reopened tab and the next turn
+				if (this.closed) {
 					const row: ChatMessage = { id: this.messages.reduce((max, m) => Math.max(max, m.id), 0) + 1, text: outcome.text, sender: 'system', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
 					await this.persist([...this.messages, row]).catch((err) => {
 						console.log('[AgentSession] could not save the Undo note', err);
@@ -633,15 +732,15 @@ export class AgentSession {
 
 	/**
 	 * Sends a message once no Undo of this conversation runs, so the turn it opens starts after Undo's
-	 * note row and reads it. A message held by a tab that closed first is dropped.
+	 * note row and reads it. A message held by a conversation that closed first is dropped.
 	 */
 	afterUndo(send: () => void): void {
 		const running = undoing.get(this.sessionId);
 		if (!running) return send();
-		// step: a tab closed while Undo ran took its chat with it, so the held message goes nowhere
-		const mount = this.mounts;
+		// step: a conversation closed while Undo ran took its chat with it, so the held message goes nowhere;
+		// a tab drawn again in the meantime still sends it, to the same chat
 		const go = (): void => {
-			if (!this.detached && this.mounts === mount) send();
+			if (!this.closed) send();
 		};
 		void running.then(go, go);
 	}
@@ -672,8 +771,8 @@ export class AgentSession {
 	}
 
 	/**
-	 * Persists the conversation (session file + catalog row). Called by the
-	 * provider after each completed exchange with the hook's message list.
+	 * Persists the conversation (session file + catalog row). The session saves
+	 * its chat itself after each completed exchange.
 	 * Every row, card, record and the title pass through redactText, so a pasted key is stored
 	 * only as `[redacted]` (the history a turn sends is redacted in run.ts).
 	 *

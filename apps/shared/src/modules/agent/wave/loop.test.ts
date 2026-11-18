@@ -260,6 +260,41 @@ both('use_app waits for an earlier edit of its app in the wave, and a later edit
 	assert.ok(at('write 3') < at('write 0'), 'the edit of another app ran alongside');
 });
 
+both('show_view and check_app hold their app like use_app: each waits for an earlier edit of the app, a later edit waits for show_view, a check listed after a show_view waits for it, a check by apps/<folder> holds the same app, and an edit of another app and a check by id run alongside', async (native) => {
+	const events: string[] = [];
+	const edit = loggedEdit(events, (n) => sleep(n === 0 ? 20 : 0));
+	const held = (name: string, label: (args: Record<string, unknown>) => string): AgentTool =>
+		stub(name, async (args) => {
+			events.push(`${label(args)} start`);
+			await sleep(20);
+			events.push(`${label(args)} end`);
+			return 'ok';
+		});
+	const show = held('show_view', () => 'show');
+	const check = held('check_app', ({ app }) => `check ${app}`);
+	const wave = plan(
+		['edit_file', { path: 'apps/daybook-ui/src/App.tsx', n: 0 }],
+		['show_view', { path: 'apps/daybook-ui' }],
+		['edit_file', { path: 'apps/daybook-ui/src/List.tsx', n: 2 }],
+		['check_app', { app: 'daybook-ui' }],
+		['edit_file', { path: 'apps/other-ui/src/App.tsx', n: 4 }],
+		['check_app', { app: 'local.other' }],
+		['check_app', { app: 'apps/daybook-ui' }]
+	);
+	await loop(scripted([wave, new Error('stop'), done('stopped')], native), [edit, show, check]);
+	const at = (event: string): number => {
+		assert.ok(events.includes(event), `${event} happened`);
+		return events.indexOf(event);
+	};
+	assert.ok(at('write 0') < at('show start'), 'show_view opened the view after the earlier edit');
+	assert.ok(at('show end') < at('start 2'), 'the later edit waited for show_view');
+	assert.ok(at('write 2') < at('check daybook-ui start'), 'check_app waited for the edit before it');
+	assert.ok(at('show end') < at('check daybook-ui start'), 'the check listed after show_view waited for it');
+	assert.ok(at('check daybook-ui end') < at('check apps/daybook-ui start'), 'a check by apps/<folder> waited for the earlier check of that app');
+	assert.ok(at('start 4') < at('show end'), 'the edit of another app ran alongside');
+	assert.ok(at('check local.other start') < at('show end'), 'a check by id holds nothing and ran alongside');
+});
+
 both('two use_app calls on one app run in planned order, even when the first waits on a card, and calls on two apps overlap', async (native) => {
 	const events: string[] = [];
 	const use = prepared('use_app', async ({ app, n }) => ({

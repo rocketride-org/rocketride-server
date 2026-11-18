@@ -574,16 +574,21 @@ function PipelineChat({ pipeline }: { pipeline: object }) {
 ```
 
 `useChatMessages(options?)` — options `{ welcomeMessage?, initialMessages?,
-request? }` (`initialMessages` restores a saved conversation).
+request?, controller? }` (`initialMessages` restores a saved conversation).
 `request(text, onStatus, turn)` replaces the built-in chat call.
 `onStatus(type, text)` adds a live status row. `turn` carries `history` (the
 rows before this turn), `signal` (aborted when the user stops the turn or the
-chat unmounts) and `takeQueued()` (takes the messages sent since the turn
+chat stops it) and `takeQueued()` (takes the messages sent since the turn
 began, so they never open a turn of their own). Returns `{ messages,
 isTyping, sendMessage(text, client, authToken), clearMessages,
-addSystemMessage, turn }`. One turn runs at a time: `sendMessage` during a
+addSystemMessage, turn, controller }`. One turn runs at a time: `sendMessage` during a
 turn adds a queued message, which the running request may take and which
 otherwise runs next. Pass `turn` to ChatView's `turn` prop.
+Unmounting stops a running turn of the chat the hook made. To keep a chat,
+its running turn and its unsent draft past an unmount (a layout change
+drawing the component again, or one conversation in two tabs), keep the
+returned `controller` and pass it back as `controller` on every render; the
+hook then never stops it, and its owner does.
 `clearMessages()` resets the thread to the welcome
 message; `addSystemMessage(text)` appends a system note. Persist only
 `user`/`bot` messages; `system`/`status` are ephemeral.

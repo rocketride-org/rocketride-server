@@ -63,7 +63,7 @@ export interface ChatInputFieldProps {
 	placeholder?: string;
 	/** Optional node rendered before the input field (reserved for attachments). */
 	leadingInputSlot?: ReactNode;
-	/** Turn controls: a Stop button and Esc while a turn runs, and text handed back by Stop or Edit lands in the box. */
+	/** Turn controls: a Stop button and Esc while a turn runs, text handed back by Stop or Edit lands in the box, and the box keeps its text in `turn.draft` when it has one. */
 	turn?: ChatTurnView;
 }
 
@@ -74,7 +74,9 @@ export interface ChatInputFieldProps {
  * @returns The composer element.
  */
 export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled = false, placeholder = 'Ask anything…', leadingInputSlot, turn }) => {
-	const [value, setValue] = useState('');
+	const draft = turn?.draft;
+	// Starts from the chat's held draft, so a composer drawn again keeps a half-typed message.
+	const [value, setValue] = useState(() => draft?.get() ?? '');
 	const [focused, setFocused] = useState(false);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	// Starts at the current hand-back, so a remount doesn't paste it again.
@@ -88,6 +90,8 @@ export const ChatInputField: React.FC<ChatInputFieldProps> = ({ onSend, disabled
 		el.style.height = 'auto';
 		el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
 	}, [value]);
+
+	useEffect(() => draft?.set(value), [draft, value]);
 
 	useEffect(() => {
 		if (!returned || returned.id === applied.current) return;

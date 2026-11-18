@@ -375,6 +375,8 @@ export class WebDevSession {
 	 * session; never again.
 	 */
 	async open(): Promise<void> {
+		// step: what the bus says while the tree loads; null once the models exist and changes go straight through
+		let held: Array<{ uri: string; origin: string }> | null = [];
 		try {
 			console.log('[appdev] session open: loading editor...');
 			const monaco = await loadMonaco();
@@ -394,6 +396,15 @@ export class WebDevSession {
 				.catch((err) => {
 					this.pushConsole('warn', `[types] platform types unavailable: ${err instanceof Error ? err.message : String(err)}`);
 				});
+
+			// step: join the notification bus BEFORE the tree is read, holding each
+			// change until the models exist: a write landing mid-read is then either
+			// in the read or adopted after it, never lost
+			this.unsubscribeNotify = ConnectionManager.getInstance().on('shell:notify', (n: ShellNotification) => {
+				if (n.kind !== 'onFsChange') return;
+				if (held) held.push({ uri: n.uri, origin: n.origin });
+				else this.onFsChange(n.uri, n.origin);
+			});
 
 			// step: inventory the whole tree (ALL files — binaries included),
 			// then bulk-load just the TEXT files into models
@@ -417,12 +428,15 @@ export class WebDevSession {
 			this.vfs.notify();
 			this.setWatch({ state: 'idle' });
 
-			// step: join the notification bus AFTER the tree is loaded — an
-			// onFsChange landing mid-load would race the model sweep above
-			this.unsubscribeNotify = ConnectionManager.getInstance().on('shell:notify', (n: ShellNotification) => {
-				if (n.kind === 'onFsChange') this.onFsChange(n.uri, n.origin);
-			});
+			// step: adopt what landed during the load. Adopting re-reads the file and
+			// leaves a model that already matches alone, so a change the read saw costs a read
+			const early = held;
+			held = null;
+			for (const n of early) this.onFsChange(n.uri, n.origin);
 		} catch (err) {
+			// a failed open keeps no subscription
+			this.unsubscribeNotify?.();
+			this.unsubscribeNotify = null;
 			const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
 			console.error('[appdev] session open FAILED:', stack);
 			const message = err instanceof Error ? err.message : String(err);

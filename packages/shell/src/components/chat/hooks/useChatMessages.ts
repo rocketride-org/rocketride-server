@@ -3,7 +3,7 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { Question, QuestionType, type PIPELINE_RESULT } from 'rocketride';
 import type { ChatMessage, ChatTurnView, TextResult, UseChatMessagesOptions } from '../types';
 import { TurnController, type ChatRequest } from '../turns/turnController';
@@ -86,23 +86,38 @@ export interface UseChatMessagesReturn {
 	addSystemMessage: (text: string) => void;
 	/** Turn controls for ChatView's `turn` prop: Stop, Edit and Remove on queued messages, and the running turn's waiting cards. */
 	turn: ChatTurnView;
+	/**
+	 * The chat this hook drives: the `controller` passed in, or the one the hook made. A caller that
+	 * keeps it and passes it back as `controller` keeps the chat, and its running turn, past this
+	 * component's unmount.
+	 */
+	controller: TurnController;
 }
 
 /**
  * Manages one chat's transcript and its single turn, over a TurnController.
  * One turn runs at a time: a send during a turn adds a queued message, which
  * the running request may take and which otherwise runs next. Unmounting
- * stops a running turn.
+ * stops a running turn of a controller the hook made; a controller the
+ * caller passes in (`controller`) is the caller's, and only the caller stops it.
  */
 export function useChatMessages(options: UseChatMessagesOptions = {}): UseChatMessagesReturn {
 	const latest = useRef(options);
 	latest.current = options;
 	const transport = useRef<Transport>({ client: null, authToken: '' });
-	const [controller] = useState(() => new TurnController({ initialMessages: options.initialMessages, request: () => latest.current.request ?? builtInRequest(transport) }));
+	const own = useRef<TurnController | null>(null);
+	const controller = options.controller ?? (own.current ??= new TurnController({ initialMessages: options.initialMessages, request: () => latest.current.request ?? builtInRequest(transport) }));
 	const snap = useSyncExternalStore(controller.subscribe, controller.snapshot);
 
-	// step: unmounting stops a running turn (closing the agent tab), so no run goes on that nobody sees
-	useEffect(() => () => controller.stop(), [controller]);
+	// step: unmounting stops a running turn (closing a plain chat's tab), so no run goes on that nobody sees.
+	// Not when the latest render passed a controller, even the one the hook made: that chat outlives this
+	// component. StrictMode's dev unmount runs this too, so it must never stop a passed one.
+	useEffect(
+		() => () => {
+			if (!latest.current.controller) own.current?.stop();
+		},
+		[]
+	);
 
 	const sendMessage = useCallback(
 		async (text: string, client: any, authToken: string) => {
@@ -122,8 +137,9 @@ export function useChatMessages(options: UseChatMessagesOptions = {}): UseChatMe
 			removeQueued: (id) => controller.removeQueued(id),
 			asks: snap.asks,
 			answerAsk: (id, answer) => controller.answerAsk(id, answer),
+			draft: controller.draft,
 		}),
 		[controller, snap.phase, snap.returned, snap.asks]
 	);
-	return { messages: snap.messages, isTyping: snap.phase !== 'idle', sendMessage, clearMessages, addSystemMessage, turn };
+	return { messages: snap.messages, isTyping: snap.phase !== 'idle', sendMessage, clearMessages, addSystemMessage, turn, controller };
 }

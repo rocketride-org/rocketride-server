@@ -250,7 +250,7 @@ const CALL_KEYS = new Set(['tool', 'name', 'function', 'args', 'arguments', 'inp
 /**
  * An entry's non-call keys are its arguments, values untouched. `name` is an argument whenever
  * `tool` is given, and `input`/`parameters` are when `plainText` says they hold plain text, since
- * tools take arguments by those names (show_view's `name`).
+ * a tool may take arguments by those names.
  */
 function flatArgs(entry: Record<string, unknown>, plainText: boolean): Record<string, unknown> {
 	const named = typeof entry.tool === 'string' && entry.tool !== '';

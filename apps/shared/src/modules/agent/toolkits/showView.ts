@@ -21,177 +21,171 @@
 // SOFTWARE.
 
 // =============================================================================
-// SHOW VIEW — put the app preview, node preview or pipeline canvas in front of the user
+// SHOW VIEW — put the user's own App Builder or pipeline canvas beside the chat
 // =============================================================================
 
 /**
- * The `show_view` tool: the model opens or focuses, pauses, resumes or closes one of three builder views, so
- * the user can watch a visual change happen. It reaches the UI only through `ViewChannel`. The toolkit
- * remembers the views the model paused, and `resumeAll()` resumes them, so a run that ends between a pause
- * and its resume never leaves a frozen view.
+ * `show_view` puts the user's own view of an app or a pipeline beside the chat, so the user watches the
+ * agent's next changes appear: an app's App Builder on its Design stage, or a pipeline's canvas. It only
+ * opens, or brings to the front, a view that is already open; closing views stays the user's job.
+ *
+ * What lives here is what the agent decides:
+ * - the one argument, `path`, as list_workspace gives it, parsed into a UserView: an app folder through
+ *   findApp, a pipeline file through a stat. Only those two spellings pass, so the loop's same-step
+ *   ordering (writePaths keys on `path` as the file tools spell it) always applies
+ * - the text the model reads
+ *
+ * The host does the rest: placement beside the chat, the chat back in front, and the Design stage
+ * (AgentHost.showView). run.ts mounts this toolkit only on a host that has showView, so a host with no
+ * editors never offers the tool and never refuses it.
  */
 
+import type { UserView } from '../host';
+import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit } from '../tools';
-
-// =============================================================================
-// TYPES
-// =============================================================================
-
-/** The three views the model can show. */
-export type ViewKind = 'app_preview' | 'node_preview' | 'pipeline_canvas';
-
-/** What the model can ask of a view. */
-export type ViewAction = 'open' | 'pause' | 'resume' | 'close';
-
-/** One request to the builder UI: do `action` to the view of this kind and name. */
-export interface ViewEvent {
-	action: ViewAction;
-	kind: ViewKind;
-	/** The app, node or pipeline the view shows, as the builder names it. */
-	name: string;
-}
-
-/** How a view event reaches the builder UI. */
-export interface ViewChannel {
-	/**
-	 * Sends one event to the UI.
-	 *
-	 * @returns The UI's reply text, which becomes the tool result.
-	 */
-	send(event: ViewEvent): Promise<string>;
-}
+import { messageOf } from './common';
+import { normalizePath } from './filesystem';
+import { findApp, readApps, type AppEntry } from './inventory';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-const VIEW_KINDS: readonly ViewKind[] = ['app_preview', 'node_preview', 'pipeline_canvas'];
+/** The tool's name. The loop's writePaths keys on the same string. */
+export const SHOW_VIEW_TOOL = 'show_view';
 
-const VIEW_ACTIONS: readonly ViewAction[] = ['open', 'pause', 'resume', 'close'];
+/** Everything show_view says to the model. */
+const WORDS = {
+	instructions: `## Showing your work
 
-/** The group's instructions, joined into the system prompt when the group is mounted. */
-const INSTRUCTIONS = `## Showing the view
+- Before you change something the user can see, an app's screens or a pipeline, call show_view with its path. Their own App Builder (on Design) or pipeline canvas opens beside this chat, and they watch each change appear as you save it.
+- Call it once for each app or pipeline you change in a turn, before its first edit. The view stays open and keeps up with your saves.
+- List show_view before those edits in the same step, because calls on one app or pipeline run in the order you list them.
+- Don't call it when there is nothing to watch (a deploy, a publish, a schedule, a README), or to try the app yourself: use_app does that, on your own copy.`,
 
-- Open the view with show_view before you change something visual (a page, a node, a pipeline), because the user can then watch the change as you make it.
-- Pause a view before a long run of edits that would make it jump or reload, and resume it when they are done, because the user sees one settled result instead of a flicker. A view left paused is resumed when your run ends.
-- Don't open a view for deploy, publish or schedule; say what happened in your answer, because there is nothing for the user to watch.`;
+	description: `Open the user's own view of an app or a pipeline beside this chat, so they can watch your changes appear: the app's App Builder on its Design stage, or the pipeline's canvas. A view that is already open comes to the front where it is. Returns what the user now sees.
 
-/** What the model reads about `show_view`: when to use it, when not to, one example. */
-const SHOW_VIEW_DESCRIPTION = `Show the user a view in the builder: open or focus it, pause it, resume it, or close it. The view is named by kind and name. The result is the builder's reply.
+Use it before your first edit to an app or a pipeline in a turn, for example show_view {"path": "apps/daybook-ui"} before you change that app's heading, so the user sees the new heading appear.
 
-Use it:
-- when you are about to change something the user can see, so they can watch it: open the app_preview for the app you are editing, the node_preview for a node, the pipeline_canvas for a pipeline you are building;
-- with pause before a long run of edits that would make a view jump or reload, and with resume once they are done (a view still paused when your run ends is resumed for you);
-- with close, when a view is no longer what you are working on.
+Don't use it when there is nothing to watch (a deploy, a publish, a schedule, a README), or to try the app yourself: use_app works on your own copy.`,
 
-Don't use it:
-- for deploy, publish or schedule: they switch no view, so say in your answer what you did;
-- for reading files or running checks: the user does not need to watch those, so call the read tools or check_app directly;
-- to ask the user something: put the question in your answer.
+	params: {
+		path: "The app's folder (apps/<folder>) or the pipeline's file (pipelines/<name>.pipe), as list_workspace gives its path.",
+	},
 
-kind is app_preview, node_preview or pipeline_canvas. name is the app, node or pipeline you mean, as it appears in the workspace.
+	pathMissing: "path is required: an app's folder (apps/<folder>) or a pipeline file (pipelines/<name>.pipe), as list_workspace gives them.",
+	notAView: (path: string): string => `${path} is not an app or a pipeline. Pass an app's folder (apps/<folder>) or a pipeline file (pipelines/<name>.pipe), as list_workspace gives them.`,
+	/** findApp's own "No app 'x'. Apps: ..." with the spelling show_view takes. */
+	noApp: (why: string): string => `${why}. Pass the app as apps/<folder>.`,
+	/** The app resolved, but by its id, its name, or a file inside it: the ordering key would miss its edits. */
+	appByFolder: (folder: string): string => `Pass the app's folder, apps/${folder}.`,
+	appNoId: (folder: string, path: string): string => `${folder} has no manifest id, so its App Builder can't open. Fix appManifest.id in ${path}/package.json, then call show_view again.`,
+	noPipeline: (path: string): string => `No pipeline file at ${path}. list_workspace lists the pipelines.`,
+	failed: (path: string, why: string): string => `Couldn't show ${path}: ${why}. Carry on, and say in your answer what you changed.`,
 
-Example: show_view { "action": "open", "kind": "app_preview", "name": "home" } before you change the heading of the home app, so the user sees the new heading appear.`;
+	shown: {
+		app: (name: string, path: string): string => `The App Builder for ${name} (${path}) is open beside the chat on Design. Its preview updates as you save the app's files.`,
+		pipeline: (path: string): string => `The canvas for ${path} is open beside the chat. It reloads as you save the file.`,
+	},
+} as const;
 
-// =============================================================================
-// ARGUMENTS
-// =============================================================================
-
-/** A trimmed text argument; empty when absent or not text. */
-function textArg(args: Record<string, unknown>, key: string): string {
-	const raw = args[key];
-	return typeof raw === 'string' ? raw.trim() : '';
-}
-
-/** An argument that must be one of `allowed`; otherwise throws a message listing the valid values. */
-function choiceArg<T extends string>(args: Record<string, unknown>, key: string, allowed: readonly T[]): T {
-	const value = textArg(args, key);
-	const found = allowed.find((a) => a === value);
-	if (found === undefined) throw new Error(`${key} must be one of: ${allowed.join(', ')}.${value ? ` Got '${value}'.` : ''}`);
-	return found;
-}
+const PARAMETERS = {
+	type: 'object',
+	properties: {
+		path: { type: 'string', description: WORDS.params.path },
+	},
+	required: ['path'],
+	additionalProperties: false,
+};
 
 // =============================================================================
 // TOOLKIT
 // =============================================================================
 
-/** The show-the-view toolkit: one tool that drives the builder's views, and the paused views it remembers. */
+/**
+ * show_view for one run. Built in run.ts only when the host has showView, with that method already bound
+ * to the run's chat, so this toolkit knows nothing of conversations, groups or stages. Free: it changes
+ * only what is on screen, so it has no act and never asks.
+ */
 export class ShowViewToolkit extends AgentToolkit {
 	readonly name = 'view';
-	readonly instructions = INSTRUCTIONS;
+	readonly instructions = WORDS.instructions;
 
-	private readonly channel: ViewChannel;
-	/** The views the model paused and has not resumed or closed, by kind and name, in the order they were paused. */
-	private readonly paused = new Map<string, ViewEvent>();
-
-	/**
-	 * Builds the toolkit.
-	 */
-	constructor(channel: ViewChannel) {
-		super();
-		this.channel = channel;
-	}
+	private readonly vfs: IWorkspaceFileSystem;
+	private readonly show: (view: UserView) => Promise<void>;
 
 	/**
-	 * Sends one event and keeps the paused set in step with it.
+	 * Builds the toolkit for one run.
 	 *
-	 * @throws When an argument is wrong, or when the channel fails; the message says what to do instead.
+	 * @param vfs - The workspace view the paths resolve against (the staged one, so an app created this turn resolves).
+	 * @param show - The host's showView, bound to this turn's chat.
 	 */
-	private async show(args: Record<string, unknown>): Promise<string> {
-		const action = choiceArg(args, 'action', VIEW_ACTIONS);
-		const kind = choiceArg(args, 'kind', VIEW_KINDS);
-		const name = textArg(args, 'name');
-		if (!name) throw new Error(`name is required. Pass the app, node or pipeline the ${kind} shows.`);
-
-		const event: ViewEvent = { action, kind, name };
-		let reply: string;
-		try {
-			reply = await this.channel.send(event);
-		} catch (err) {
-			throw new Error(`Cannot ${action} the ${kind} ${name}: ${err instanceof Error ? err.message : String(err)}. Carry on without the view, and tell the user in text what you changed.`);
-		}
-
-		// Only a pause that went through counts as paused; resume or close ends it.
-		const key = `${kind}\n${name}`;
-		if (action === 'pause') this.paused.set(key, event);
-		else if (action === 'resume' || action === 'close') this.paused.delete(key);
-		return reply;
-	}
-
-	/**
-	 * Resumes every view the model left paused, once each, and forgets them. Best
-	 * effort: a view that cannot be resumed does not stop the others, and nothing
-	 * is thrown, so the run's cleanup can call it from a `finally`.
-	 */
-	async resumeAll(): Promise<void> {
-		const stillPaused = [...this.paused.values()];
-		this.paused.clear();
-		for (const { kind, name } of stillPaused) {
-			try {
-				await this.channel.send({ action: 'resume', kind, name });
-			} catch {
-				// The run is over; there is nobody left to tell, and the next view still needs resuming.
-			}
-		}
+	constructor(vfs: IWorkspaceFileSystem, show: (view: UserView) => Promise<void>) {
+		super();
+		this.vfs = vfs;
+		this.show = show;
 	}
 
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({
-				name: 'show_view',
-				description: SHOW_VIEW_DESCRIPTION,
-				parameters: {
-					type: 'object',
-					properties: {
-						action: { type: 'string', enum: [...VIEW_ACTIONS], description: 'open (also focuses a view that is already open), pause, resume or close' },
-						kind: { type: 'string', enum: [...VIEW_KINDS], description: 'Which view: the app preview, a node preview, or the pipeline canvas' },
-						name: { type: 'string', description: 'The app, node or pipeline the view shows, for example home' },
-					},
-					required: ['action', 'kind', 'name'],
-					additionalProperties: false,
-				},
-				execute: (args) => this.show(args),
+				name: SHOW_VIEW_TOOL,
+				description: WORDS.description,
+				parameters: PARAMETERS,
+				execute: (args) => this.run(args),
 			}),
 		];
 	}
+
+	/**
+	 * Shows the view a call names and says what the user now sees.
+	 *
+	 * @throws With the fix, for a path that names no app folder or pipeline file; with WORDS.failed when the host could not show it.
+	 */
+	private async run(args: Record<string, unknown>): Promise<string> {
+		const raw = typeof args.path === 'string' ? args.path : '';
+		if (!raw.trim()) throw new Error(WORDS.pathMissing);
+		// the same spelling as loop.ts cleanPath, so writePaths keys on the view's own path
+		const path = normalizePath(raw);
+		const view = await viewAt(this.vfs, path);
+		try {
+			await this.show(view);
+		} catch (err) {
+			throw new Error(WORDS.failed(path, messageOf(err)));
+		}
+		return view.kind === 'app' ? WORDS.shown.app(view.app.name, path) : WORDS.shown.pipeline(path);
+	}
+}
+
+// =============================================================================
+// THE PATH
+// =============================================================================
+
+/**
+ * The user's view a normalized path names. Only an exact app folder or a pipeline file passes.
+ *
+ * @param path - Already normalized (normalizePath), so it is the writePaths key as given.
+ * @throws notAView for anything outside apps/<folder> and pipelines/**.pipe; noApp (with the apps that exist)
+ *   for an unknown folder; appByFolder for an app named by id, name or a file inside it; appNoId for an app
+ *   the builder cannot key; noPipeline for a .pipe path with no file.
+ */
+async function viewAt(vfs: IWorkspaceFileSystem, path: string): Promise<UserView> {
+	const [root, folder, ...rest] = path.split('/');
+	if (root === 'apps' && folder) {
+		let entry: AppEntry;
+		try {
+			entry = findApp(await readApps(vfs, () => false), folder);
+		} catch (err) {
+			throw new Error(WORDS.noApp(messageOf(err)));
+		}
+		if (entry.folder !== folder || rest.length > 0) throw new Error(WORDS.appByFolder(entry.folder));
+		if (!entry.id) throw new Error(WORDS.appNoId(entry.folder, entry.path));
+		return { kind: 'app', app: { id: entry.id, folder: entry.folder, name: entry.name ?? entry.folder } };
+	}
+	if (root === 'pipelines' && path.endsWith('.pipe')) {
+		// a stat, not list_workspace: Named Pipes bundles (pipelines/<n>/<n>.pipe) resolve with no change here
+		if ((await vfs.stat(path)) !== 'file') throw new Error(WORDS.noPipeline(path));
+		return { kind: 'pipeline', path };
+	}
+	throw new Error(WORDS.notAView(path));
 }

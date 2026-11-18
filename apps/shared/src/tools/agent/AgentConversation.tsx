@@ -26,17 +26,18 @@
 //
 // The editor surface behind an `agent:<sessionId>` document: the standard
 // shell chat (ChatView + useChatMessages) composed over one AgentSession.
-// The session owns identity and persistence; the chat hook owns the message
-// UI state (typing indicator, ids, timestamps); this provider is the thin
-// seam between them:
+// The conversation owns the live chat: the session holds its TurnController
+// (rows, queue, waiting cards, Stop) and its unsent draft, so every tab of
+// the conversation, and a tab a layout change draws again, shows the same
+// chat and its running turn. This provider is the thin seam:
 //
-//   send  → useChatMessages → session.execute (the injected request
-//           transport, wrapping the agent() stub) → bot rows render
-//   after → session.save(hook messages) persists the conversation and the
-//           catalog row (announced on the shell bus; the sidebar re-lists)
+//   send  → useChatMessages → session.request (execute, wrapping the agent()
+//           transport) → bot rows render
+//   idle  → the session persists the conversation and the catalog row
+//           (announced on the shell bus; the sidebar re-lists)
 //
 // Each turn's bot row carries the card of how it ended (session.decorate); its links and buttons, Undo
-// included, come back through onCardAction. On unmount the session saves the rows it showed last.
+// included, come back through onCardAction.
 //
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
@@ -44,19 +45,18 @@
 // Beside the composer, ApprovalModeSwitch sets the approval mode for every agent chat (the Settings setting),
 // and ModelPicker sets this conversation's model.
 //
-// The session is loaded once per mount; Documents keeps open tabs mounted,
-// so switching tabs never reloads, and reopening a closed tab re-reads disk.
+// An open conversation's session is loaded once and shared by its tabs. Only
+// a real close (its last tab, or a team switch, from the host's onChatClosed)
+// stops a running turn; reopening then re-reads disk.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, ChatView, ConnectionManager, getClient, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
-import type { TextResult } from 'shell';
-import type { ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
+import type { ChatCardAction } from 'shell/src/components/chat/types';
 import { AgentWatchSlot } from '../../components/agent-watch/AgentWatchSlot';
 import { AgentSession } from '../../modules/agent/agent';
-import type { AgentCallback } from '../../modules/agent/agent';
 import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
 import { readModelOffers } from '../../modules/agent/modelEngine';
 import { buttonize } from '../../utils/buttonize';
@@ -233,11 +233,12 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 		AgentSession.configure(activeAppId);
 	}, [activeAppId]);
 
-	// step: load the session once per mount (reopen = re-read from disk)
-	const [session, setSession] = useState<AgentSession | null>(null);
+	// step: a conversation already open (another tab of it, or this tab before a layout change drew it
+	// again) shows at once, on the same session; else it loads once and every tab gets that instance
+	const [session, setSession] = useState<AgentSession | null>(() => (sessionId ? AgentSession.loaded(sessionId) : null));
 	const [loadError, setLoadError] = useState<string | null>(null);
 	useEffect(() => {
-		if (!sessionId) return;
+		if (!sessionId || session) return;
 		let disposed = false;
 		setLoadError(null);
 		AgentSession.getSession(sessionId)
@@ -251,7 +252,7 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 		return () => {
 			disposed = true;
 		};
-	}, [sessionId]);
+	}, [sessionId, session]);
 
 	if (!sessionId) return <div style={styles.root}><div style={styles.loading}>No session selected.</div></div>;
 	if (session) return <AgentConversation session={session} isConnected={isConnected} />;
@@ -288,19 +289,12 @@ const ExampleCard: React.FC<{ heading: string; prompt: string; disabled?: boolea
  * @param props.isConnected - Shell connection state (gates the composer).
  */
 const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean }> = ({ session, isConnected }) => {
-	// step: a turn's card shows once it ends, which can come after the chat closed the turn (Stop's grace), so each end redraws
 	const [ends, setEnds] = useState(0);
-	/** The injected chat transport: one request through the agent session. The hook's status sink carries the thinking rows live. */
-	const request = useCallback(
-		(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> =>
-			session
-				.execute(text, onStatus, turn)
-				.then(({ results }) => results)
-				.finally(() => setEnds((n) => n + 1)),
-		[session]
-	);
-
-	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
+	// step: the conversation's chat, not this tab's: every tab runs session.request on the one controller the
+	// session holds, so a layout change that draws this tab again keeps the turn and the draft
+	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls, controller } = useChatMessages({ controller: session.chat, initialMessages: session.messages, request: session.request });
+	// step: the first tab's chat becomes the conversation's; adopt redraws this tab, which then passes it back
+	useEffect(() => session.adopt(controller), [session, controller]);
 	// a host that serves no approval settings gets no switch
 	const approvals = findAgentHost()?.approvals?.controls;
 	// a host that opens no app pages gives no live view
@@ -310,27 +304,8 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 		void ends;
 		return session.decorate(messages);
 	}, [session, messages, ends]);
-	// step: Undo becoming ready or running changes the cards, not the rows
+	// step: a turn's end, Undo becoming ready or running, and the chat's adoption change the cards, not the rows
 	useEffect(() => session.subscribe(() => setEnds((n) => n + 1)), [session]);
-
-	// step: unmounting (closing the tab, a team switch) stops the turn and takes the chat's rows along, so the session saves the rows it showed last
-	const rowsRef = useRef(messages);
-	rowsRef.current = messages;
-	useEffect(() => {
-		session.attach();
-		return () => session.detach(rowsRef.current);
-	}, [session]);
-
-	// step: persist after each completed exchange (bot reply landed). The
-	// ref dodges saving on mount when a restored conversation ends idle.
-	const lastSavedCount = useRef(messages.length);
-	useEffect(() => {
-		if (isTyping || messages.length === lastSavedCount.current) return;
-		lastSavedCount.current = messages.length;
-		session.save(messages).catch((err) => {
-			console.log('[AgentConversation] session save failed', err);
-		});
-	}, [isTyping, messages, session]);
 
 	/**
 	 * Composer submit. A key is redacted before the row is made; while an Undo runs, the message waits for it,

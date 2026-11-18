@@ -89,6 +89,16 @@ export interface PreviewApp {
 }
 
 /**
+ * A view of the user's own work, as show_view resolved it from a path. Never the agent's copy of an app:
+ * that is AppPage, use_app's.
+ */
+export type UserView =
+	/** The user's App Builder for the app, switched to its Design stage. */
+	| { readonly kind: 'app'; readonly app: PreviewApp }
+	/** The user's canvas for the pipeline file at `path`, a workspace path under pipelines/ (pipelines/support.pipe). */
+	| { readonly kind: 'pipeline'; readonly path: string };
+
+/**
  * An element of the agent's copy of an app, as the page outline names it: `e1`, `e2`, ...
  * A ref names the same element for the rest of the turn while that element stays on the page.
  * The tool parses the model's strings into this type; nothing else makes one.
@@ -281,6 +291,34 @@ export interface AgentHost {
 	 * open no app pages leave it out, and the chat shows no live view.
 	 */
 	watchFor?(conversationId: string): AgentWatchPlace;
+	/**
+	 * Puts the user's own view beside a chat, so the user watches it while the chat explains:
+	 * - a view already showing in a group other than the chat's comes to the front where it is;
+	 * - otherwise it opens in the group next to the chat's, splitting the chat's group to the right when
+	 *   it is the only one; a view that sits only in the chat's own group moves out to that group;
+	 * - then the chat is shown in its group and that group is the active one again.
+	 * An app's builder is switched to Design first; an open builder follows. It never closes anything.
+	 * A split draws the chat's group again; the turn goes on (onChatClosed tells that from a close).
+	 * Hosts without editors leave it out, and the run offers no show_view.
+	 *
+	 * @param opts.conversationId - The chat to place the view beside. When no tab shows that chat, the view
+	 *   opens where any open would (the active group).
+	 * @throws When another team's workspace is current, the editor area is gone or closes during the open,
+	 *   or the view did not open.
+	 */
+	showView?(view: UserView, opts: { conversationId: string }): Promise<void>;
+	/**
+	 * Calls `closed` once, when a conversation's chat is really gone: the last tab of it closed (by the
+	 * user, or by deleting the conversation), or this team's editor area was torn down (a team switch,
+	 * signing out). A tab drawn again by a layout change, a moved tab, or a second tab of the same
+	 * conversation is not a close. The agent's session stops a running turn on it and lets the
+	 * conversation go. Hosts without editors leave it out; a session there lives until the page goes.
+	 *
+	 * @param conversationId - The conversation (its tab is the static doc `tool:agent/<id>`).
+	 * @param closed - Called at most once. Called at once when the chat is already gone.
+	 * @returns Stops listening.
+	 */
+	onChatClosed?(conversationId: string, closed: () => void): () => void;
 	/**
 	 * The user's approval mode and grants, live. Without it a run asks for
 	 * everything the approval list rates as asking, nothing is always allowed,

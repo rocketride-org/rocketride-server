@@ -15,7 +15,7 @@
  * messages while the user is already at/near the bottom.
  */
 
-import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
 import { ChatMessage, CHAT_COLUMN_MAX_WIDTH, type ChatAskAnswer, type ChatAskView, type ChatCard, type ChatCardAction, type ChatTurnView } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
@@ -30,6 +30,9 @@ const styles = {
 	scroll: {
 		flex: 1,
 		overflowY: 'auto' as const,
+		// The list keeps itself pinned to the latest row; the browser's scroll anchoring would
+		// shift it when a resize rewraps the rows, and that shift reads as the user scrolling up.
+		overflowAnchor: 'none' as const,
 		padding: '16px 20px',
 		minHeight: 0,
 		scrollbarWidth: 'thin' as const,
@@ -260,12 +263,16 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 	// Whether the user is pinned to the bottom (within 40px). Starts true so the
 	// first paint scrolls to the latest message.
 	const atBottomRef = useRef(true);
+	const lastTopRef = useRef(0);
 
-	// Recompute the pin state on every user scroll.
+	// Reaching the bottom pins; only a move up unpins. A resize or our own pin also fires a scroll
+	// event, which can arrive after the pane narrowed and read as short of the bottom with nothing moved.
 	const handleScroll = () => {
 		const el = scrollRef.current;
 		if (!el) return;
-		atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
+		if (el.scrollHeight - el.scrollTop - el.clientHeight <= 40) atBottomRef.current = true;
+		else if (el.scrollTop < lastTopRef.current) atBottomRef.current = false;
+		lastTopRef.current = el.scrollTop;
 	};
 
 	// Autoscroll to the newest message only while pinned to the bottom; if the
@@ -273,6 +280,22 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 	useEffect(() => {
 		if (atBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages, isTyping, turn?.asks]);
+
+	// A list drawn again (a split, a moved tab) opens at the latest row at once, and stays there
+	// while pinned when its pane is resized. A new split pane is sized after mount, which left
+	// the smooth scroll above short of the latest row.
+	const empty = messages.length === 0 && !isTyping;
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		const pin = (): void => {
+			if (atBottomRef.current) el.scrollTop = el.scrollHeight;
+		};
+		pin();
+		const observer = new ResizeObserver(pin);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [empty]);
 
 	// Fold consecutive "thinking" status messages into a single collapsible group.
 	// Queued messages are always the last rows; they render apart, below the indicator.
@@ -299,7 +322,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 
 	// A brand-new conversation shows the host's rich empty slot when provided,
 	// else the stock EmptyState — never a blank area.
-	if (messages.length === 0 && !isTyping) {
+	if (empty) {
 		return <div style={styles.emptyWrap}>{emptySlot ?? <EmptyState title={emptyTitle ?? 'No messages yet'} description={emptyDescription ?? 'Start the conversation below.'} />}</div>;
 	}
 

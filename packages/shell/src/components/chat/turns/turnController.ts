@@ -83,6 +83,8 @@ export class TurnController {
 	/** The cards as the snapshot shows them, rebuilt only when the cards change. */
 	private askViews: readonly ChatAskView[] = [];
 	private snap: ChatSnapshot;
+	/** Held, not published: it changes on every keystroke, and only a composer drawn again reads it. */
+	private draftText = '';
 	private nextId: number;
 	private readonly now: () => string;
 	private readonly listeners = new Set<() => void>();
@@ -107,6 +109,14 @@ export class TurnController {
 
 	/** The current rows, phase and hand-back. */
 	readonly snapshot = (): ChatSnapshot => this.snap;
+
+	/** The composer's unsent text (`ChatTurnView.draft`), which outlives a composer drawn again. */
+	readonly draft = {
+		get: (): string => this.draftText,
+		set: (text: string): void => {
+			this.draftText = text;
+		},
+	};
 
 	/** Sends a user message: it opens a turn when the chat is idle, and queues otherwise. */
 	send(text: string): void {
