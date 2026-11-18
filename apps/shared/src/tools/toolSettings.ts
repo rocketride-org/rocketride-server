@@ -47,7 +47,7 @@
 import type { AppConfiguration, SettingSchema } from 'shell/src/components/workspace/types';
 import type { SettingsContribution } from 'shell/src/components/workspace/settingsContributions';
 import { BUILTIN_PIN_PREFIX } from 'shell/src/workspace/devToolPins';
-import type { Grant } from '../modules/agent/host';
+import type { Grant } from '../modules/agent/grants';
 import { DEFAULT_MODEL_SETTING } from '../modules/agent/model';
 
 /** The settings-nav group every DEV TOOL's section folds under. */

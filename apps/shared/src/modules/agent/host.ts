@@ -33,6 +33,7 @@
 
 import type { AgentWatchPlace, AppErrorRow, ConsoleRow, WatchStatus } from '../../tools/appdev/types';
 import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
+import { GRANTS, type Grant } from './grants';
 import type { ModelChoice } from './model';
 import type { AgentReport } from './turn';
 
@@ -338,15 +339,7 @@ export const DEFAULT_LIMITS: AgentLimits = { steps: 60, costUsd: 2 };
  */
 export type ApprovalMode = 'ask' | 'auto';
 
-/**
- * The routine kinds a card can offer "Always allow" for, as data, so code that reads or compares every
- * grant loops over this list and a new kind needs no edit there. Publishing, submitting and removing
- * a deployment are never among them.
- */
-export const GRANTS = ['schedules', 'deploymentToggles', 'appUse', 'fileDeletes', 'appDeploys', 'runStops', 'runRestarts', 'profilingStarts', 'profilingStops', 'templateSaves', 'templateDeletes', 'logSaves', 'sqlQueries'] as const;
-
-/** One of GRANTS. */
-export type Grant = (typeof GRANTS)[number];
+export { GRANTS, type Grant } from './grants';
 
 /**
  * A value for every grant, built over GRANTS: the one place such a record is assembled.
