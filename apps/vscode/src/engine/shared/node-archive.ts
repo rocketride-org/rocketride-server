@@ -28,3 +28,29 @@ export function nodeArchiveOf(engineDir: string): string | null {
 	}
 	return archive;
 }
+
+/**
+ * The node archive the server in engineDir reads and nodesDir does not hold, or null:
+ * without it, the server cannot run the nodes it does not carry.
+ */
+export function missingNodeArchive(engineDir: string, nodesDir: string): string | null {
+	const archive = nodeArchiveOf(engineDir);
+	return archive && !fs.existsSync(path.join(nodesDir, archive)) ? archive : null;
+}
+
+/**
+ * Moves a staged release into place once all of it is downloaded: the server's files into
+ * engineDir, already cleared, and its node archive, if it has one, into a fresh nodesDir.
+ */
+export function commitStagedRelease(stagedEngine: string, engineDir: string, stagedArchive: string | null, nodesDir: string): void {
+	fs.mkdirSync(engineDir, { recursive: true });
+	for (const entry of fs.readdirSync(stagedEngine)) {
+		fs.renameSync(path.join(stagedEngine, entry), path.join(engineDir, entry));
+	}
+	// A prerelease and its release name the same archive, so the old one goes too
+	fs.rmSync(nodesDir, { recursive: true, force: true });
+	if (stagedArchive) {
+		fs.mkdirSync(nodesDir, { recursive: true });
+		fs.renameSync(stagedArchive, path.join(nodesDir, path.basename(stagedArchive)));
+	}
+}
