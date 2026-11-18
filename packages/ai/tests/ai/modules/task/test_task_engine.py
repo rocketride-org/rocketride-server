@@ -783,6 +783,25 @@ def test_db_access_empty_without_db_nodes():
     assert Task._db_access(_task(), pipeline) == ([], True)
 
 
+def test_db_access_resolves_a_db_node_only_eaas_serves(monkeypatch):
+    """A DB node the server does not carry is resolved with the definition EaaS serves."""
+    import ai.modules.task.task_engine as engine
+    from ai.common.config import Config
+
+    served = {'protocol': 'rocketride_sql://'}
+    monkeypatch.setattr(engine.node_store, 'served', lambda provider: served if provider == 'rocketride_sql' else None)
+    seen = []
+    monkeypatch.setattr(
+        Config, 'getNodeConfig', staticmethod(lambda provider, config, service=None: seen.append(service) or {})
+    )
+
+    assert Task._db_access(_task(), {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}) == (
+        [('org', '')],
+        False,
+    )
+    assert seen == [served]
+
+
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
     assert Task._db_access(_task(), {}) == ([], False)
@@ -992,10 +1011,11 @@ def _fake_db_account(monkeypatch, deny=None, owner=None):
     import ai.account
     from ai.account.base import DbDecision
 
-    calls = {'authorize': [], 'resolve': []}
+    calls = {'authorize': [], 'credentials': [], 'resolve': []}
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         calls['authorize'].append((identity, target))
+        calls['credentials'].append(credential)
         reason = deny(target) if deny else None
         if reason:
             return DbDecision(False, reason, True)
@@ -1153,7 +1173,7 @@ async def test_authorize_raising_fails_task_start_and_issues_no_dsn(monkeypatch)
 
     calls = _fake_db_account(monkeypatch)
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         raise RuntimeError('membership lookup failed')
 
     monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
@@ -1308,6 +1328,53 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     ]
     assert options == passed
     assert checked == ([True] if saas else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('available', [True, False])
+async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
+    """The nodes a pipeline names that the server lacks are unpacked before the
+    engine starts, so its start-up scan loads them; one that cannot be had
+    refuses the launch and nothing is spawned. The pipeline placed is the
+    resolved one: ${...} can name the provider.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    order = []
+
+    def place(pipeline):
+        order.append(('place', [c['provider'] for c in pipeline['components']]))
+        if not available:
+            raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+
+    monkeypatch.setattr(engine.node_store, 'place', place)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    async def spawn(*args, **kwargs):
+        order.append(('spawn',))
+        raise Launched()
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+        await Task.start_task(t)
+
+    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
 
 
 # ---------------------------------------------------------------------------
@@ -1768,7 +1835,7 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
     task._reset_status = lambda: None
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.start_task = start
@@ -1946,7 +2013,7 @@ async def test_a_second_restart_while_one_runs_is_refused():
 
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.stop_task = stop
@@ -2312,6 +2379,24 @@ def test_saas_gate_refuses_stdio_mcp(config):
 def test_saas_gate_matches_the_node_not_the_provider_name(component):
     problem = _violation(component)
     assert problem and 'stdio MCP transport' in problem
+
+
+def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; the hosted gate
+    still reads its capabilities and refuses it.
+    """
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(engine.node_store, '_definitions', {'text_output': {'capabilities': ['nosaas']}})
+    t = _task(source='src')
+    t._shares_host = lambda: True
+
+    with pytest.raises(ValueError, match='not available on RocketRide Cloud'):
+        Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
 
 
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
