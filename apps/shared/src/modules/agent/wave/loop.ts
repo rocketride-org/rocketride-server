@@ -33,6 +33,7 @@
  */
 
 import { isJsonObject, redactText } from '../toolkits/common';
+import { stripAppsPrefix } from '../toolkits/inventory';
 import { PIPELINE_METHODS } from '../toolkits/rocketrideClient';
 import type { SecretMarkers } from '../toolkits/secretMarkers';
 import { RefusedError, type AgentTool, type ToolAct, type ToolStep, type UserTime } from '../tools';
@@ -405,12 +406,12 @@ function writePaths(call: ToolCall): string[] {
 			return [...cleanPath(args.oldPath), ...cleanPath(args.newPath)];
 		case 'create_app':
 			return typeof args.appName === 'string' ? cleanPath(`apps/${args.appName}-ui`) : [];
-		// matched raw: use_app refuses anything but the app's folder, so its key always matches. check_app
-		// also takes a manifest id or a name; that key (apps/local.daybook) holds no real path, so such a
-		// call orders against nothing, as it did before
+		// use_app refuses anything but the app's folder, bare or as apps/<folder>, so its key always matches.
+		// check_app also takes a manifest id or a name; that key (apps/local.daybook) holds no real path, so
+		// such a call orders against nothing, as it did before
 		case 'use_app':
 		case 'check_app':
-			return typeof args.app === 'string' ? cleanPath(`apps/${args.app}`) : [];
+			return typeof args.app === 'string' ? cleanPath(`apps/${stripAppsPrefix(args.app)}`) : [];
 		// show_view refuses any path but apps/<folder> or a pipelines/ .pipe file, spelled as here, so the key is the view's own
 		case 'show_view':
 			return cleanPath(args.path);
