@@ -41,17 +41,14 @@ Usage (called once from ``ai.node.run()``)::
 
     install_gpu_guard()
 
-The hook is installed when ``get_model_server_address()`` returns a
-non-None value, and on every task of a hosted engine (``--hosted``), model
-server or not: torch is never installed on RocketRide Cloud. Only a local
-engine without a model server loads GPU libraries normally.
+The hook is installed only when ``get_model_server_address()`` returns a
+non-None value, i.e. ``--modelserver`` was given. An engine without a model
+server, local or hosted, loads GPU libraries normally; a hosted deployment
+that must not carry torch configures a model server.
 """
 
 import sys
 from importlib.machinery import ModuleSpec
-from typing import Optional
-
-from hosting import is_hosted
 
 from .base import get_model_server_address
 
@@ -177,17 +174,9 @@ class _GPUImportBlocker:
 # Track whether the guard has been installed to prevent double-installation
 _installed = False
 
-# Why it was installed: 'modelserver' or 'hosted'. Picks the refusal message.
-_reason: Optional[str] = None
-
 
 def blocked_message(name: str) -> str:
     """The ImportError text for a refused GPU library import or install."""
-    if _reason == 'hosted':
-        return (
-            f'"{name}" is not available on RocketRide Cloud: torch is never installed on a hosted engine. '
-            f'GPU inference runs on the model server via ai.common.models, and this engine has none configured.'
-        )
     return (
         f'Direct import of "{name}" is blocked in model server mode. '
         f'GPU inference runs on the model server via ai.common.models. '
@@ -206,31 +195,26 @@ def is_installed() -> bool:
 
 def install_gpu_guard():
     """
-    Install the GPU import guard in model server mode or under a hosted engine.
+    Install the GPU import guard in model server mode.
 
     Checks ``get_model_server_address()`` to determine if ``--modelserver``
-    was passed on the command line, and ``--hosted`` for a hosted engine's
-    task. If either is set, installs the import hook at the front of
-    ``sys.meta_path`` so it intercepts imports before the default finders.
+    was passed on the command line. If so, installs the import hook at the
+    front of ``sys.meta_path`` so it intercepts imports before the default
+    finders. Nothing else installs it: an engine without a model server
+    loads GPU libraries itself, hosted or not.
 
     Safe to call multiple times — subsequent calls are no-ops.
 
     Called once from ``ai.node.run()`` during subprocess startup.
     """
-    global _installed, _reason
+    global _installed
 
     # Only install once
     if _installed:
         return
 
-    # Model server mode, or a hosted engine, which never installs torch
-    # even when it has no model server configured
-    if get_model_server_address() is not None:
-        _reason = 'modelserver'
-    elif is_hosted():
-        _reason = 'hosted'
-    else:
-        # Local engine without a model server: GPU libraries are needed
+    # No model server: GPU libraries are loaded by this engine
+    if get_model_server_address() is None:
         return
 
     # Install the blocker at the front of sys.meta_path so it runs
