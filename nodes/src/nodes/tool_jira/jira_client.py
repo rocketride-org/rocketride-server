@@ -199,9 +199,14 @@ def request(
             if not resp.content:
                 return {}
             try:
-                return resp.json()
+                body = resp.json()
             except ValueError as exc:
                 raise JiraAPIError(status, ['expected JSON in a successful response']) from exc
+            # Every caller reads the body with .get(), so a list or a bare value must
+            # surface as a JiraAPIError, which the tools turn into their error envelope.
+            if not isinstance(body, dict):
+                raise JiraAPIError(status, ['expected a JSON object in a successful response'])
+            return body
         raise JiraAPIError(status, _error_messages(resp))
 
 
