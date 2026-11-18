@@ -807,8 +807,11 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				return;
 			}
 			eventsDropped++;
-			// Only the root's own engine-event stream feeds the foreign set (security M1), and only
-			// with engine-shaped ids, a UUID or a minted rrapp. id (security N1, round 2).
+			// Only the root's own engine-event stream feeds the foreign set (security M1), and only with
+			// engine-shaped ids, a UUID or a minted rrapp. id (security N1, round 2). The engine accepts any
+			// caller-supplied project_id (task_server.py:1463-1465), so other ids exist; aliasing guessable
+			// ones would make the scrubber a membership oracle. Such ids in free-text engine errors are a
+			// documented residual (PR2_PLAN.md section 8).
 			if (projectId !== undefined && !waiting && isEngineShaped(projectId)) known.add(projectId);
 			return;
 		}
