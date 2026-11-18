@@ -137,8 +137,10 @@ async function probeFolder(fs: WorkspaceFs, folder: string): Promise<IScannedWor
 		const manifest = pkg.appManifest;
 		if (!manifest?.id) return null;
 		// The slug is the app's local identity; a prefix an older manifest
-		// still carries is ignored as if it had never been written.
+		// still carries is ignored as if it had never been written. An id that
+		// is nothing but a prefix ("acme.") names no app.
 		const id = appSlugOf(manifest.id);
+		if (!id) return null;
 		return {
 			id,
 			name: manifest.name || pkg.name || id,

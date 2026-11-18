@@ -144,8 +144,13 @@ export async function scanApps(): Promise<StoredApp[]> {
 				continue;
 			}
 			// The slug is the app's identity; a prefix an older manifest still
-			// carries is ignored as if it had never been written
+			// carries is ignored as if it had never been written. An id that is
+			// nothing but a prefix ("acme.") names no app.
 			const id = appSlugOf(m.id);
+			if (!id) {
+				console.log('[appStore] skipping apps/' + folder + ' — appManifest.id "' + m.id + '" has no slug after its last dot');
+				continue;
+			}
 			apps.push({
 				id,
 				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? id),

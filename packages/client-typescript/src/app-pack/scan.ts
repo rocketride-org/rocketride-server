@@ -96,8 +96,10 @@ export async function probeAppFolder(folder: string): Promise<ScannedApp | null>
 		}
 
 		// The slug is the app's local identity; a prefix an older manifest
-		// still carries is ignored as if it were never written.
+		// still carries is ignored as if it were never written. An id that is
+		// nothing but a prefix ("acme.") names no app.
 		const id = appSlugOf(manifest.id);
+		if (!id) return null;
 		return {
 			id,
 			name: manifest.name || pkg.name || id,
