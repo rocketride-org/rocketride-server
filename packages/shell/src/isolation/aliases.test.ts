@@ -42,7 +42,9 @@ const keyA = refAppKey(ENTRY_A.id);
 const status = (realm: IOpenedRealm, token: string): ReturnType<typeof call> => call(realm, 'rrext_get_task_status', { token });
 
 test('T105 knownProjects: foreign ids are aliased wherever they appear, short ids by key only, and the own ids survive a flood', async (tt) => {
-	await tt.test('(1) a foreign uuid the root saw, quoted in an engine error, is replaced by a realm alias (raw and URL-encoded forms)', async () => {
+	// G4 round 2 (security N1, lead): only engine-shaped ids (UUID, rrapp.) join the root-wide set, so a
+	// non-engine-shaped id from an event is no longer learnt; the uuid is still replaced.
+	await tt.test('(1) a foreign uuid the root saw, quoted in an engine error, is replaced by a realm alias; a non-engine-shaped id is not learnt', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -54,8 +56,8 @@ test('T105 knownProjects: foreign ids are aliased wherever they appear, short id
 		t.cm.engine.failWith('terminate', { message: `project ${foreign} is held by ${encodeURIComponent(odd)}` });
 		const message = engineErrorText(await call(A, 'terminate', { token: run.token }), 'terminate failure naming foreign projects');
 		assert.ok(!message.includes(foreign), `the foreign uuid must not reach the realm, got ${JSON.stringify(message)}`);
-		assert.ok(!message.includes(encodeURIComponent(odd)) && !message.includes(odd), `the URL-encoded foreign id must not reach the realm, got ${JSON.stringify(message)}`);
-		assert.match(message, /^project rp_[A-Za-z0-9_-]{22} is held by rp_[A-Za-z0-9_-]{22}$/, 'both are replaced by realm aliases');
+		assert.match(message, /^project rp_[A-Za-z0-9_-]{22} is held by /, 'the uuid is replaced by a realm alias');
+		assert.ok(message.endsWith(` is held by ${encodeURIComponent(odd)}`), `the non-engine-shaped id is not learnt root-wide, got ${JSON.stringify(message)}`);
 	});
 
 	await tt.test("(2) and (3) short id 'rag-example': aliased in project_id and map keys only; the word and 'local' in free text and file content stay", async () => {

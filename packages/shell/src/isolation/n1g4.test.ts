@@ -116,7 +116,10 @@ test('T116 real user, team and org ids never reach a realm in free text, store e
 		assertNoReal(A, t.cm, [TEAM, TEAM2, ORG]);
 	});
 
-	await tt.test('ids learnt from the engine alone (no account info): a status body stamps them', async () => {
+	// G4 round 2 (security N1, lead): identity ids are learnt from the SDK account info only, never from
+	// engine bodies (a pipeline can author its own stamps). Without account info, key fields are still
+	// rewritten, and free text is not.
+	await tt.test('without account info nothing is learnt from engine bodies: key fields rewritten, free text unchanged', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		t.cm.engine.userId = USER;
@@ -125,8 +128,10 @@ test('T116 real user, team and org ids never reach a realm in free text, store e
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
 		t.cm.engine.setStatus({ notes: [`by ${USER} for ${TEAM}`] });
-		assert.deepEqual(expectOk(await status(A, run.token), 'status').notes, [`by ${ALIAS_A} for [redacted]`]);
-		assertNoReal(A, t.cm, [TEAM]);
+		const body = expectOk(await status(A, run.token), 'status');
+		assert.deepEqual(body.notes, [`by ${USER} for ${TEAM}`]);
+		assert.equal(body.userId, ALIAS_A);
+		assert.ok(!('teamId' in body));
 	});
 
 	await tt.test('a store reply (fs_stat) quoting the user id in a free field', async () => {

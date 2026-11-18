@@ -171,3 +171,16 @@ export function replaceMatches<T>(s: string, matchers: ReadonlyArray<IMatcher<T>
 	});
 	return last === 0 ? s : out + s.slice(last);
 }
+
+/** Most per-group work a match position may cost, as a count of exact lookups (the structural bound T126 checks). */
+export const LENGTH_BOUND = 32;
+
+/**
+ * The matcher's shape, for tests: needles held and the most entries one
+ * group examines one by one at a matching position.
+ */
+export function matcherShape(m: IMatcher<unknown>): { needles: number; maxLengthsPerGroup: number; lengthBound: number } {
+	let max = 0;
+	for (const bucket of m.buckets.values()) max = Math.max(max, bucket.length);
+	return { needles: m.size, maxLengthsPerGroup: max, lengthBound: LENGTH_BOUND };
+}
