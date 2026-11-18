@@ -149,10 +149,18 @@ test('PR2b init: a needle in the grant-derived fields (entry moduleId, viewId) d
 	tt.after(() => t.cleanup());
 	const poisonedEntry = { ...ENTRY_B, moduleId: `acme_${t.cm.sessionToken}` };
 	const B = t.open(poisonedEntry, { grant: GRANT_B });
-	assert.throws(() => bridgeOf(t).bridgeInit(B.realmId, initInput()), (err: unknown) => (err as { name?: string }).name === 'CapabilityDeniedError', 'the session token in moduleId');
+	assert.throws(
+		() => bridgeOf(t).bridgeInit(B.realmId, initInput()),
+		(err: unknown) => (err as { name?: string }).name === 'CapabilityDeniedError',
+		'the session token in moduleId'
+	);
 	const C = t.open(ENTRY_A, { grant: { frame: frameFor(ENTRY_A, GRANT_A.frame!.identity, `ft-${t.cm.apiKey}`) } });
 	// The API key as the frame token: it IS a platform credential, so it is not an exemption the choke point may grant.
-	assert.throws(() => bridgeOf(t).bridgeInit(C.realmId, initInput()), (err: unknown) => (err as { name?: string }).name === 'CapabilityDeniedError', 'the API key inside entryPrefix');
+	assert.throws(
+		() => bridgeOf(t).bridgeInit(C.realmId, initInput()),
+		(err: unknown) => (err as { name?: string }).name === 'CapabilityDeniedError',
+		'the API key inside entryPrefix'
+	);
 });
 
 test('PR2b init: an init for a detached or unknown realm is refused', async (tt) => {
@@ -199,14 +207,19 @@ test('PR2b F8: an execute answer denied at the choke point terminates its run, a
 
 /** How a realm's request ended within 300 ms. */
 async function outcomeOf(promise: Promise<unknown>): Promise<'ok' | 'denied' | 'silent'> {
-	const r = await Promise.race([promise.then((v) => ({ v }), () => ({ v: 'rejected' as const })), new Promise<{ v: 'silent' }>((resolve) => setTimeout(() => resolve({ v: 'silent' }), 300))]);
+	const r = await Promise.race([
+		promise.then(
+			(v) => ({ v }),
+			() => ({ v: 'rejected' as const })
+		),
+		new Promise<{ v: 'silent' }>((resolve) => setTimeout(() => resolve({ v: 'silent' }), 300)),
+	]);
 	if (r.v === 'silent') return 'silent';
 	if (r.v === 'rejected') return 'denied';
 	return denialOf(r.v) ? 'denied' : 'ok';
 }
 
-const shellEvents = (realm: IOpenedRealm, from = 0): string[] =>
-	(realm.received.slice(from) as Array<Record<string, unknown>>).filter((m) => m?.__rrbus === 'emitOp' && String(m.op).startsWith('shell.event.')).map((m) => String(m.op));
+const shellEvents = (realm: IOpenedRealm, from = 0): string[] => (realm.received.slice(from) as Array<Record<string, unknown>>).filter((m) => m?.__rrbus === 'emitOp' && String(m.op).startsWith('shell.event.')).map((m) => String(m.op));
 
 test('PR2b N4: shell:logout (a logout that bypassed both handlers) detaches every realm: handles refused, no shell.event.* delivered', async (tt) => {
 	const t = makeRoot();
@@ -221,15 +234,14 @@ test('PR2b N4: shell:logout (a logout that bypassed both handlers) detaches ever
 	await settle();
 	const marks = [A.received.length, B.received.length];
 
-	for (const [name, realm] of [['A', A], ['B', B]] as const) {
+	for (const [name, realm] of [
+		['A', A],
+		['B', B],
+	] as const) {
 		const result = await outcomeOf(call(realm, 'rrext_get_task_status', { token: String(run.token) }));
 		assert.notEqual(result, 'ok', `realm ${name} must not be served after a logout`);
 	}
-	assert.deepEqual(
-		t.cm.engine.received.slice(engineSeen).filter((m) => m.message.command === 'rrext_get_task_status').length,
-		0,
-		'nothing was forwarded to the engine for a detached realm'
-	);
+	assert.deepEqual(t.cm.engine.received.slice(engineSeen).filter((m) => m.message.command === 'rrext_get_task_status').length, 0, 'nothing was forwarded to the engine for a detached realm');
 	t.cm.emit('shell:connected', {});
 	t.cm.emit('shell:themeChange', { tokens: { '--rr-bg': '#fff' } });
 	await settle();

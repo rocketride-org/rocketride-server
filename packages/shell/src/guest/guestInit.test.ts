@@ -131,25 +131,7 @@ test('T54 an init from another window, an unlisted origin or without exactly one
 
 test('T54 a malformed init is refused whatever its origin: wrong type or proto, bad prefix, a url with userinfo, query or key', async () => {
 	const { createInitAcceptor } = await load();
-	const bad: Array<Record<string, unknown>> = [
-		{ type: 'rr:bridge:init2' },
-		{ proto: 2 },
-		{ proto: '1' },
-		{ entryPrefix: 'https://evil.example/_t/x/v1/' },
-		{ entryPrefix: '/_t/x/v1/../../' },
-		{ entryPrefix: '/other/' },
-		{ entryPrefix: 5 },
-		{ expiresAt: 'soon' },
-		{ appId: '' },
-		{ appId: 5 },
-		{ moduleId: undefined },
-		{ capabilities: 'core' },
-		{ engineHttpUrl: 'https://user:pw@engine.example' },
-		{ engineHttpUrl: 'https://engine.example/?key=abc' },
-		{ engineHttpUrl: 'https://engine.example/#x' },
-		{ engineHttpUrl: 'javascript:alert(1)' },
-		{ engineHttpUrl: '' },
-	];
+	const bad: Array<Record<string, unknown>> = [{ type: 'rr:bridge:init2' }, { proto: 2 }, { proto: '1' }, { entryPrefix: 'https://evil.example/_t/x/v1/' }, { entryPrefix: '/_t/x/v1/../../' }, { entryPrefix: '/other/' }, { entryPrefix: 5 }, { expiresAt: 'soon' }, { appId: '' }, { appId: 5 }, { moduleId: undefined }, { capabilities: 'core' }, { engineHttpUrl: 'https://user:pw@engine.example' }, { engineHttpUrl: 'https://engine.example/?key=abc' }, { engineHttpUrl: 'https://engine.example/#x' }, { engineHttpUrl: 'javascript:alert(1)' }, { engineHttpUrl: '' }];
 	for (const over of bad) {
 		const accept = createInitAcceptor({ origins: [SHELL], parent: PARENT });
 		assert.equal(accept.accept(ev({ data: init(over) })), null, JSON.stringify(over));

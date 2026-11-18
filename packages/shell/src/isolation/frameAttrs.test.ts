@@ -111,21 +111,6 @@ test('T53 the frame src holds the ticket path only: the frame token, an entryPre
 
 test('T53 a framePath that is not the ticket path is refused (null), however it is spelled', async () => {
 	const { frameAttributes } = await load();
-	const bad = [
-		'/_t/sometoken/v1/',
-		'/_rr/frame.html?c=a&token=x',
-		'/_rr/frame.html?token=x',
-		'/_rr/frame.html#c=x',
-		'/_rr/frame.html?c=a b',
-		'/_rr/frame.html?c=%2e%2e',
-		'/_rr/../frame.html?c=x',
-		'//evil.example/_rr/frame.html',
-		'https://evil.example/_rr/frame.html',
-		'_rr/frame.html',
-		'/_rr/frame.html/?c=x',
-		'/_rr/clear',
-		'',
-		'/_rr/frame.html?c=',
-	];
+	const bad = ['/_t/sometoken/v1/', '/_rr/frame.html?c=a&token=x', '/_rr/frame.html?token=x', '/_rr/frame.html#c=x', '/_rr/frame.html?c=a b', '/_rr/frame.html?c=%2e%2e', '/_rr/../frame.html?c=x', '//evil.example/_rr/frame.html', 'https://evil.example/_rr/frame.html', '_rr/frame.html', '/_rr/frame.html/?c=x', '/_rr/clear', '', '/_rr/frame.html?c='];
 	for (const path of bad) assert.equal(frameAttributes(APP, path, SHELLS, 't'), null, JSON.stringify(path));
 });

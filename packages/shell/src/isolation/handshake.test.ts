@@ -116,28 +116,11 @@ test('T51 a ready from the frame window at the app origin attaches once and post
 
 test('T51 a ready from another window, another origin or with a bad shape is ignored and attaches nothing', async () => {
 	const r = await rig();
-	const bad: Array<Partial<{ source: unknown; origin: string; data: unknown }>> = [
-		{ source: { frame: false } },
-		{ source: null },
-		{ origin: 'http://evil.example' },
-		{ origin: 'null' },
-		{ origin: '' },
-		{ origin: `${ORIGIN}.evil.example` },
-		{ origin: ORIGIN.replace('http:', 'https:') },
-		{ origin: `${ORIGIN}/` },
-		{ data: null },
-		{ data: 'rr:frame:ready' },
-		{ data: { type: 'rr:frame:ready' } },
-		{ data: { type: 'rr:frame:ready', protoMin: '1', protoMax: 1 } },
-		{ data: { type: 'rr:frame:ready', protoMin: 0, protoMax: 1 } },
-		{ data: { type: 'rr:frame:ready', protoMin: 2, protoMax: 1 } },
-		{ data: { type: 'rr:frame:ready', protoMin: 1.5, protoMax: 2 } },
-		{ data: { type: 'rr:bridge:init', protoMin: 1, protoMax: 1 } },
-	];
+	const bad: Array<Partial<{ source: unknown; origin: string; data: unknown }>> = [{ source: { frame: false } }, { source: null }, { origin: 'http://evil.example' }, { origin: 'null' }, { origin: '' }, { origin: `${ORIGIN}.evil.example` }, { origin: ORIGIN.replace('http:', 'https:') }, { origin: `${ORIGIN}/` }, { data: null }, { data: 'rr:frame:ready' }, { data: { type: 'rr:frame:ready' } }, { data: { type: 'rr:frame:ready', protoMin: '1', protoMax: 1 } }, { data: { type: 'rr:frame:ready', protoMin: 0, protoMax: 1 } }, { data: { type: 'rr:frame:ready', protoMin: 2, protoMax: 1 } }, { data: { type: 'rr:frame:ready', protoMin: 1.5, protoMax: 2 } }, { data: { type: 'rr:bridge:init', protoMin: 1, protoMax: 1 } }];
 	for (const extra of bad) r.ready(extra);
 	assert.deepEqual(r.admits, [], 'nothing was admitted');
 	assert.deepEqual(r.posts, []);
-	assert.equal(r.hs.state(), 'waiting', 'a stranger cannot spoil the real frame\'s handshake');
+	assert.equal(r.hs.state(), 'waiting', "a stranger cannot spoil the real frame's handshake");
 	// Messages from the right window and origin count against the 5-per-minute budget even when malformed.
 	r.clock.t += 61_000;
 	r.ready();

@@ -197,14 +197,6 @@ test('T70 the guest rehydrates a denied request as CapabilityDeniedError: bus op
 		channel.close();
 	});
 
-	await assert.rejects(
-		cm.request('explorer.list', {}),
-		(err: unknown) => err instanceof CapabilityDeniedError && err.code === 'unknown_op',
-		'a denied bus op is a CapabilityDeniedError, not an "RR_DENIED:" Error'
-	);
-	await assert.rejects(
-		cm.getClient()!.request({ type: 'request', seq: 1, command: 'rrext_services', arguments: {} } as never),
-		(err: unknown) => err instanceof CapabilityDeniedError && typeof err.code === 'string',
-		'a denied client.request is one too (the services call the SDK sends through the proxy is denied)'
-	);
+	await assert.rejects(cm.request('explorer.list', {}), (err: unknown) => err instanceof CapabilityDeniedError && err.code === 'unknown_op', 'a denied bus op is a CapabilityDeniedError, not an "RR_DENIED:" Error');
+	await assert.rejects(cm.getClient()!.request({ type: 'request', seq: 1, command: 'rrext_services', arguments: {} } as never), (err: unknown) => err instanceof CapabilityDeniedError && typeof err.code === 'string', 'a denied client.request is one too (the services call the SDK sends through the proxy is denied)');
 });

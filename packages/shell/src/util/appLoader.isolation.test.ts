@@ -116,7 +116,7 @@ test('T68 no isolation and no stamps: the entry is registered as a remote and it
 	assert.equal(getRegisteredEntry('org_plain') !== undefined, true);
 	const descriptor = (await mapped.load()) as AppDescriptor;
 	assert.deepEqual(spies.loaded, ['org_plain/AppDescriptor']);
-	assert.equal(typeof descriptor, 'object', 'the remote\'s default export is the descriptor');
+	assert.equal(typeof descriptor, 'object', "the remote's default export is the descriptor");
 	assert.equal(isRemotePending('org_plain'), false);
 });
 
@@ -261,7 +261,11 @@ test('T65 E4 resetRemote and fallbackSkippedRemote are refused for an isolated a
 test('T66 E5 registerDevRemote for an id without a firstParty stamp registers nothing (isolated, unstamped, or brand new)', async () => {
 	stubPage();
 	const spies = spyFederation();
-	for (const [appId, moduleId] of [['acme.devnew', 'acme_devnew'], ['acme.e3', 'acme_e3'], ['acme.unstamped', 'acme_unstamped']]) {
+	for (const [appId, moduleId] of [
+		['acme.devnew', 'acme_devnew'],
+		['acme.e3', 'acme_e3'],
+		['acme.unstamped', 'acme_unstamped'],
+	]) {
 		try {
 			registerDevRemote(appId, moduleId, 'Dev', 'http://localhost:3000/remoteEntry.js');
 		} catch {
@@ -271,7 +275,11 @@ test('T66 E5 registerDevRemote for an id without a firstParty stamp registers no
 		assert.equal(getRegisteredEntry(moduleId), undefined, `${appId}: no entry registered`);
 	}
 	assert.ok(!spies.registered.some((n) => ['acme_devnew', 'acme_e3', 'acme_unstamped'].includes(n)));
-	assert.deepEqual(getLocalAppEntries().filter((e) => e.id.startsWith('acme.')), [], 'no synthetic local entry either');
+	assert.deepEqual(
+		getLocalAppEntries().filter((e) => e.id.startsWith('acme.')),
+		[],
+		'no synthetic local entry either'
+	);
 });
 
 test('T66 E5 a first-party id (stamped) can still be dev-registered: the stamp, not the mode, is the gate', async () => {
@@ -301,7 +309,11 @@ test('T66 E5 through the message path of devMode (rrdev:registerRemote from the 
 		const hook = (dom.window as unknown as { __rrShellDev?: { registerLocalApp(id: string, load: () => Promise<unknown>, meta?: object): void } }).__rrShellDev;
 		assert.ok(hook, 'the dev hooks are installed in this page');
 		hook.registerLocalApp('rocketride.evil2', async () => ({ id: 'rocketride.evil2', name: 'evil' }), { name: 'Evil2' });
-		assert.deepEqual(getLocalAppEntries().filter((e) => e.id === 'rocketride.evil2'), [], 'the __rrShellDev route reaches the same refusal');
+		assert.deepEqual(
+			getLocalAppEntries().filter((e) => e.id === 'rocketride.evil2'),
+			[],
+			'the __rrShellDev route reaches the same refusal'
+		);
 	} finally {
 		dom.cleanup();
 	}
@@ -310,11 +322,19 @@ test('T66 E5 through the message path of devMode (rrdev:registerRemote from the 
 test('T67 E13 registerLocalApp is refused for an unstamped id (the id the issue names: rocketride.evil)', async () => {
 	stubPage();
 	let ran = false;
-	registerLocalApp('rocketride.evil', async () => {
-		ran = true;
-		return { id: 'rocketride.evil', name: 'evil' } as never;
-	}, { name: 'Evil' });
-	assert.deepEqual(getLocalAppEntries().filter((e) => e.id === 'rocketride.evil'), [], 'no local entry for an id with no stamp');
+	registerLocalApp(
+		'rocketride.evil',
+		async () => {
+			ran = true;
+			return { id: 'rocketride.evil', name: 'evil' } as never;
+		},
+		{ name: 'Evil' }
+	);
+	assert.deepEqual(
+		getLocalAppEntries().filter((e) => e.id === 'rocketride.evil'),
+		[],
+		'no local entry for an id with no stamp'
+	);
 	const [mapped] = registerAndMapApps([entry('rocketride.evil', { isolated: true })]);
 	await mapped.load();
 	assert.equal(ran, false, 'the refused loader never runs');
