@@ -140,6 +140,7 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_crustdata': {'apikey': 'mock-crustdata-placeholder-for-tests'},
     'tool_deepl': {'apikey': 'mock-deepl-placeholder-for-tests'},
     'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
+    'tool_linear': {'apiKey': 'lin_api_mock-linear-placeholder-for-tests'},
     'tool_notion': {'apikey': 'secret_mock-notion-placeholder-for-tests'},
     'tool_tenki': {'apikey': 'tk_mock-tenki-placeholder-for-tests'},
 }

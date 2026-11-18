@@ -1,0 +1,135 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Linear",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_linear://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready — the request
+	//		and response shapes here are read from Linear's developer docs, but no
+	//		live workspace has exercised it end-to-end.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_linear",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "linear",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "linear.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_linear",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Linear issues as agent tools.", "Search, read, create, comment on and update Linear issues over the GraphQL API using a personal API key. Read-only by default, with an optional team allowlist."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Linear",
+				"apiKey": "",
+				"readOnly": true,
+				"teams": "",
+				"maxResults": 25
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. "secure: true" fields are encrypted at rest.
+	//
+	"fields": {
+		"tool_linear.apiKey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Linear personal API key (Settings > Account > Security & access). Falls back to ROCKETRIDE_LINEAR_API_KEY.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_linear.readOnly": {
+			"type": "boolean",
+			"title": "Read only",
+			"description": "When on, tools that create or change issues and comments refuse to run.",
+			"default": true
+		},
+		"tool_linear.teams": {
+			"type": "string",
+			"title": "Teams",
+			"description": "Comma-separated team keys the node may touch (for example ENG,OPS). Empty means all teams.",
+			"default": ""
+		},
+		"tool_linear.maxResults": {
+			"type": "integer",
+			"title": "Max results",
+			"description": "Default page size for issue searches, 1-100.",
+			"default": 25,
+			"minimum": 1,
+			"maximum": 100
+		}
+	},
+	//
+	//	Test configuration for automated node testing. The API key is a
+	//	placeholder: config validation is tested, not live API calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder key",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Linear",
+			"properties": ["type", "tool_linear.apiKey", "tool_linear.readOnly", "tool_linear.teams", "tool_linear.maxResults"]
+		}
+	]
+}

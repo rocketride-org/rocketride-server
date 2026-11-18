@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-11-04
 
 ### Added
+- **nodes**: add tool_linear — Linear agent-tool node (search, read, create, comment on and update issues over GraphQL; read-only by default, optional team allowlist) (#2803)
 - **shell**: `site.organization` (Organization and WebSite JSON-LD), `site.notFound` (the site's own 404 page), IndexNow submission of changed pages when `RR_INDEXNOW_KEY` and an `https` `RR_APP_URL` are set, eleven more named crawlers, and a warning when an engine serves published pages without `RR_APP_URL` (#3140)
 - **shell**: public pages can carry `image`, `published`, `modified` and `authors`, which add link-preview tags, `BlogPosting` JSON-LD and sitemap `lastmod`. `site.feeds` serves Atom feeds, and llms.txt groups pages under their parent (#3139)
 - **shell**: a public page can bind `plans`, `plans:<appId>` and `app:<appId>` into its crawler snapshot, with `Product`/`Offer` and `SoftwareApplication` JSON-LD. `Account.get_public_plans` supplies the plans, and crawler responses with bound data are sent `public` with a max-age of at most 300 s, when they expire (#3138)
