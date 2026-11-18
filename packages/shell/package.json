@@ -58,6 +58,7 @@
 		"@types/node": "^20.19.41",
 		"dts-bundle-generator": "^9.5.1",
 		"esbuild": "^0.28.1",
+		"happy-dom": "21.0.4",
 		"tsx": "~4.23.1",
 		"@types/react-syntax-highlighter": "^15.5.13"
 	}
