@@ -19,15 +19,19 @@ import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-// The app id is the SERVED identity: the builder keys the build output dir,
-// the served static dir, and the apps.json URL on it, so the rsbuild distPath
-// MUST match (build/apps/<appId>). moduleId is the MF container name.
-const appId = pkg.appManifest?.id;
-if (typeof appId !== 'string' || appId.length === 0) {
+// The served app id is the SERVED identity: the builder keys the build
+// output dir, the served static dir, and the apps.json URL on it, so the
+// rsbuild distPath MUST match (build/apps/<appId>). moduleId is the MF
+// container name.
+const appSlug = pkg.appManifest?.id;
+if (typeof appSlug !== 'string' || appSlug.length === 0) {
 	// A fallback id would publish a malformed app under build/apps/unknown
 	// and break the remote delivery contract — fail the build instead.
 	throw new Error('package.json must define a non-empty appManifest.id');
 }
+// The manifest carries the SLUG; a platform app is served inside the
+// platform namespace, the same name the deploy door would compose for it.
+const appId = `rocketride.${appSlug.split('.').pop()}`;
 const moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 export default defineConfig(() => {

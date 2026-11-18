@@ -11,7 +11,9 @@ import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
 // Module Federation remote: the shell loads ./AppDescriptor at runtime.
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
+// The manifest carries the SLUG; the served id is the platform namespace + slug.
+const appId = `rocketride.${String(pkg.appManifest?.id ?? 'unknown').split('.').pop()}`;
+const moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 export default defineConfig(() => ({
 	plugins: [
@@ -89,7 +91,7 @@ export default defineConfig(() => ({
 		distPath: {
 			// The builder (scripts/lib/appModule.js) registers and copies
 			// build/apps/<appId>; honor its overlay build root when set.
-			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', String(pkg.appManifest?.id ?? 'unknown')),
+			root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', appId),
 		},
 		assetPrefix: 'auto',
 		cleanDistPath: true,

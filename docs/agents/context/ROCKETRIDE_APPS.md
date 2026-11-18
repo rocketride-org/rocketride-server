@@ -149,15 +149,23 @@ your app's `package.json` `appManifest` — files are the truth.
 The version rail and the "Where this app is live" table. Covered in full in
 [Deploy and Publish](#deploy-and-publish).
 
-### The namespace gate
+### The app id and the developer namespace
 
-Every app id is `<developerId>.<name>`. Your organization claims its
-developer id once (self-service, on the Deploy tab: letters and underscores
-only); from then on the org can only deploy apps inside that namespace. If
-an app's id prefix does not match your org's developer id, Deploy and the
-Package tab's Store and Review side tabs render read-only with a banner
-explaining the fix (rename the id in `package.json`). Design and the rest of
-Package stay fully editable — local work is always allowed.
+Your app's files carry only its **slug**: `appManifest.id` in
+`package.json`, the `<slug>.rrapp` trigger and the id literal in
+`src/AppDescriptor.ts` all say `brandy`, never `acme.brandy`. The developer
+namespace is attached by the organization that **deploys** the app: the
+registry name becomes `<developerId>.<slug>`, exactly as a pipeline's
+registry name is `<developerId>.<pipeId>`. Two organizations can deploy the
+same source and each gets its own rail, its own versions and its own
+publications; nothing in the file decides whose it is.
+
+Your organization claims its developer id once (self-service, on the Deploy
+tab: letters and underscores only). Until it has one, Design and Package
+work as usual and Deploy refuses with a message naming the ways to claim
+it. A manifest written under the old rule may still carry
+`<prefix>.<slug>`: everything up to and including the last dot is ignored
+as if it had never been written, and it is never stored or written back.
 
 ---
 
@@ -216,14 +224,13 @@ Two rules before anything else:
   	displayName: 'Reports',
   	statusFooter: true,
   });
-  // created.appId = '<your developer id>.reports', created.folder = 'apps/reports-ui'
+  // created.appId = 'reports', created.folder = 'apps/reports-ui'
   ```
 
-  The scaffold namespaces the id with the connected org's developer id
-  (falling back to `local.<slug>` when the org has not registered one;
-  pass `developerId` to override) and is scaffolding only — nothing
-  deploys until the normal lifecycle (`verifyApp` → `addApp` →
-  `publishApp`) runs.
+  The scaffold writes the slug alone (no developer id, no publisher) and is
+  scaffolding only — nothing deploys until the normal lifecycle
+  (`verifyApp` → `addApp` → `publishApp`) runs; the deploy attaches your
+  organization's developer id.
 
 The New App wizard is the App Builder's empty state: "New app" opens an
 **Untitled** builder document whose body is the wizard (the same pattern as
@@ -362,9 +369,8 @@ by hand.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
+| `id` | `string` | required | The app **slug** (e.g. `brandy`): a letter, then letters, digits, `_` or `-`, no dots. The deploying organization's developer id is attached at deploy (`acme.brandy`); a prefix in the file is ignored. Renaming the slug makes it a different app. |
 | `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
-| `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |
 | `icon` | `string` | — | App-folder-relative icon path (e.g. `./icon.svg`); must live inside the app folder. |
@@ -379,9 +385,9 @@ by hand.
 | `billing.plans` | `object[]` | — | Pricing plans for paid modes: `{ nickname, amountCents, currency, interval, metadata? }` (Stripe-shaped). A *proposal* that rides every deploy and goes live when a version is approved for the store. Edited on the Store tab. |
 | `contributes.configuration` | `object` | — | Settings declaration in the VS Code `contributes.configuration` shape (below). |
 
-The id grammar is enforced at scaffold and at deploy:
-`^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$` — publisher segment first, then a dot,
-then the app name (`acme.s3-explorer`, `acme.app2`).
+The slug grammar is enforced at scaffold and at deploy:
+`^[a-z][a-zA-Z0-9_-]*$` (`s3-explorer`, `app2`). The store derives the
+publisher from the registry name; the manifest never names one.
 
 ### Declaring settings (`contributes.configuration`)
 
@@ -510,7 +516,7 @@ import type { AppDescriptor } from 'shell';
 import App from './App';
 
 const descriptor: AppDescriptor = {
-	id: 'acme.brandy',                       // must match appManifest.id
+	id: 'brandy',                            // the slug, as in appManifest.id
 	name: 'Brand Studio',
 	branding: { appName: 'Brand Studio' },
 	app: App,                                // the ONE mount point
@@ -910,9 +916,9 @@ app id:
   that server's file store; the published `@me` app lives on the deployment
   target. When those are different servers, each copy keeps its own file,
   and edits in one never show up in the other: not data loss, two files.
-- **A working copy under a different app id** than the published app (one
-  scaffolded as `local.<slug>`, or renamed after the org registered its
-  developer id) keeps its own file even on the same server.
+- **A working copy under a different slug** than the published app (one
+  renamed after it was published) keeps its own file even on the same
+  server.
 - **Same server, user and app id** (the deployment target is the
   development server): the preview and the published copy read one file
   but nothing syncs. Each page keeps the copy it loaded and writes it back
@@ -1682,7 +1688,8 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
-// The MF container name derives from appManifest.id (dots → underscores).
+// The local dev container name derives from the appManifest.id slug; the
+// server names a published app's container from its registry name.
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
 
@@ -1776,12 +1783,14 @@ audiences at them.
 
 If your org has no developer id yet, the Deploy tab shows a registration
 banner. Claim a slug (letters and underscores, e.g. `acme_labs`); every app
-you deploy must be named `<developerId>.<name>` — the namespace guarantee:
-nobody outside your org can ever deploy into it.
+you deploy is registered as `<developerId>.<slug>` — the namespace
+guarantee: the name comes from your organization at deploy time, so nobody
+outside your org can ever deploy into it, and nothing in a file can claim
+another org's namespace.
 
 Registering is an org admin's step, happens once, and is permanent: the
 slug is the org's publisher identity, a different one later is refused, and
-`local` (the scaffold's fallback while the org has no id) is reserved. It
+`local` is reserved. It
 exists on RocketRide Cloud only; a self-hosted server publishes under the
 fixed `rocketride` namespace. Without the App Builder, the npm CLI's
 `rocketride app developer status` shows whether it is done and `rocketride

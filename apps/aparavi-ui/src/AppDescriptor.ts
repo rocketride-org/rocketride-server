@@ -41,7 +41,7 @@ import AparaviApp from './AparaviApp';
  * Requires authentication (authenticated: true in manifest).
  */
 const APARAVI_APP: AppDescriptor = {
-	id: 'rocketride.aparavi',
+	id: 'aparavi',
 	name: 'Aparavi AQL',
 	branding: {
 		appName: 'Aparavi AQL',

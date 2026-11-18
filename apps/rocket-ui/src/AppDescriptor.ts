@@ -44,7 +44,7 @@ import IconLight from 'shared/assets/rocketride/rocketride-light.svg';
  * Uses the Documents library for multi-document, multi-editor-group support.
  */
 const ROCKETRIDE_APP: AppDescriptor = {
-	id: 'rocketride.pipeBuilder',
+	id: 'pipeBuilder',
 	name: 'Rocket Builder',
 	branding: {
 		appName: 'Rocket Builder',

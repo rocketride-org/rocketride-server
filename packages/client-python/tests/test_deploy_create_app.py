@@ -47,36 +47,26 @@ class _FakeClient:
 
 @pytest.fixture
 def captured(monkeypatch):
-    """Capture the developer_id create_app hands to the scaffold."""
+    """Capture the keyword arguments create_app hands to the scaffold."""
     calls = {}
 
     def fake_create_app_workspace(workspace_root, slug, **kwargs):
-        calls['developer_id'] = kwargs['developer_id']
-        return {'appId': f'{kwargs["developer_id"] or "local"}.{slug}'}
+        calls['kwargs'] = kwargs
+        return {'appId': slug}
 
     monkeypatch.setattr(_app_scaffold, 'create_app_workspace', fake_create_app_workspace)
     return calls
 
 
-async def test_uses_the_org_developer_id(captured):
-    await DeployApi(_FakeClient({'organization': {'developerId': 'acme'}})).create_app('clock', install=False)
+@pytest.mark.parametrize(
+    'account_info', [None, {}, {'organization': {'developerId': 'acme'}}, {'organization': {'developerId': None}}]
+)
+async def test_create_app_never_hands_a_developer_id_to_the_scaffold(captured, account_info):
+    """The files carry the slug only; the deploying organization attaches its developer id."""
+    created = await DeployApi(_FakeClient(account_info)).create_app('clock', install=False)
 
-    assert captured['developer_id'] == 'acme'
-
-
-async def test_explicit_developer_id_wins(captured):
-    await DeployApi(_FakeClient({'organization': {'developerId': 'acme'}})).create_app(
-        'clock', developer_id='other', install=False
-    )
-
-    assert captured['developer_id'] == 'other'
-
-
-@pytest.mark.parametrize('account_info', [None, {}, {'organization': None}, {'organization': {'developerId': None}}])
-async def test_falls_through_to_the_scaffold_default(captured, account_info):
-    await DeployApi(_FakeClient(account_info)).create_app('clock', install=False)
-
-    assert captured['developer_id'] is None
+    assert 'developer_id' not in captured['kwargs']
+    assert created['appId'] == 'clock'
 
 
 def _write_app(ws, manifest, legacy_marker=None):

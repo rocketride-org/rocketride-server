@@ -31,12 +31,11 @@ import unittest
 from rocketride._app_scaffold import TEMPLATE_NAMES, TemplateVars, create_app_workspace, render_template
 
 VARS = TemplateVars(
-    app_id='acme.brandy',
+    app_id='brandy',
     app_name='Brand Studio',
-    publisher='local',
-    module_id='acme_brandy',
+    module_id='brandy',
     port=3101,
-    preview_url='http://localhost:5565/?appid=acme.brandy&rrdev=1',
+    preview_url='http://localhost:5565/?appid=brandy&rrdev=1',
 )
 
 
@@ -64,7 +63,7 @@ class TestCreateAppWorkspaceFolder(unittest.TestCase):
             created = create_app_workspace(ws, 'clock', install=False)
 
             self.assertEqual(created['folder'], 'apps/clock-ui')
-            self.assertEqual(created['appId'], 'local.clock')
+            self.assertEqual(created['appId'], 'clock')
             self.assertTrue(os.path.isfile(os.path.join(ws, 'apps', 'clock-ui', 'clock.rrapp')))
             self.assertFalse(os.path.exists(os.path.join(ws, 'apps', 'clock')))
 

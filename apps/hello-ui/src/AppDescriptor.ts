@@ -40,7 +40,7 @@ import HomeApp from './HomeApp';
  * Runs without authentication (authenticated: false in manifest).
  */
 const HOME_APP: AppDescriptor = {
-	id: 'rocketride.hello',
+	id: 'hello',
 	name: 'RocketRide',
 	branding: {
 		appName: 'RocketRide',

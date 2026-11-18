@@ -22,9 +22,6 @@ import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import type { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
 
-/** The developer id applied when the org has none or the connection is local/offline. */
-const DEFAULT_DEVELOPER_ID = 'local';
-
 /** What the registrations need from the host. */
 interface IAppDevOpsDeps {
 	context: vscode.ExtensionContext;
@@ -44,18 +41,18 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	const { context, connectionManager, broadcast, closeWizard } = deps;
 
 	/**
-	 * Resolves the developer id from the connected server's account info.
-	 * Falls back to 'local' when there is no connection, no organization, or
-	 * no developer id set — the historical appManifest.publisher default.
+	 * Resolves the developer id from the connected server's account info, for
+	 * the wizard's registry-name preview only: the files carry the slug, and
+	 * the deploy door attaches whatever id the organization holds then.
 	 */
 	const resolveDeveloperId = (): { developerId: string; source: 'organization' | 'default' } => {
 		const client = connectionManager.getClient();
 		if (!client || !connectionManager.isConnected()) {
-			return { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
+			return { developerId: '', source: 'default' };
 		}
 		const accountInfo = client.getAccountInfo() as { organization?: { developerId?: string } } | null;
 		const developerId = accountInfo?.organization?.developerId;
-		return developerId ? { developerId, source: 'organization' } : { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
+		return developerId ? { developerId, source: 'organization' } : { developerId: '', source: 'default' };
 	};
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
@@ -71,12 +68,10 @@ export function registerVscodeAppDevOps(bus: IOpBus, deps: IAppDevOpsDeps): void
 	const impls: OpImplTable<AppDevOpMap> = {
 		'host.appdev.identity': () => buildIdentity(),
 		'host.appdev.scaffold': async (p) => {
-			// Resolve the developer id NOW — the wizard is modeless, so the
-			// form may have been open across a login/logout. scaffoldApp
-			// re-validates the id + folder and opens the App Builder itself.
-			const developerId = resolveDeveloperId().developerId;
+			// The files carry the SLUG only; scaffoldApp re-validates it and
+			// the folder and opens the App Builder itself.
 			await scaffoldApp({
-				appId: `${developerId}.${p.appName}`,
+				appId: p.appName,
 				appName: p.displayName,
 				frame: p.frame,
 			});

@@ -30,12 +30,10 @@
 
 /** Variables substituted into every template file. */
 export interface TemplateVars {
-	/** App id, e.g. 'acme.brandy'. */
+	/** App slug, e.g. 'brandy' — the files never carry a developer namespace. */
 	appId: string;
 	/** Display name, e.g. 'Brand Studio'. */
 	appName: string;
-	/** Publisher slug for appManifest.publisher — the organization developer id, or 'local' when none. */
-	publisher: string;
 	/** MF container name (dots/hyphens → underscores). */
 	moduleId: string;
 	/** Dev-server port for `rsbuild dev`. */
@@ -84,8 +82,8 @@ const TS_HEADER = `// ==========================================================
 function packageJson(v: TemplateVars): string {
 	return `${JSON.stringify(
 		{
-			// npm forbids uppercase in package names; the app id may carry it
-			name: v.appId.replace(/\./g, '-').toLowerCase(),
+			// npm forbids uppercase in package names; the slug may carry it
+			name: `${v.appId.toLowerCase()}-ui`,
 			version: '0.1.0',
 			private: true,
 			// No "type" field: the rsbuild config is .mts (self-declaring ESM),
@@ -93,8 +91,9 @@ function packageJson(v: TemplateVars): string {
 			description: `${v.appName} — a RocketRide app`,
 			license: 'MIT',
 			appManifest: {
+				// The SLUG: the organization that deploys the app attaches its
+				// developer id (the registry name is <developerId>.<slug>)
 				id: v.appId,
-				publisher: v.publisher,
 				name: v.appName,
 				description: `${v.appName} — a RocketRide app`,
 				// Every scaffold ships a real icon + README so the PACKAGE tab's
@@ -158,8 +157,9 @@ function packageJson(v: TemplateVars): string {
 
 /**
  * rsbuild.config.mts — the standalone MF remote shape from
- * .rocketride/docs/ROCKETRIDE_APPS.md: moduleId derived from appManifest.id
- * in-config, the src/index.ts async boundary as the entry, shell shared.
+ * .rocketride/docs/ROCKETRIDE_APPS.md: moduleId derived from the appManifest.id
+ * slug in-config (a local dev container; the server derives a published app's
+ * container from its registry name), the src/index.ts async boundary as the entry, shell shared.
  */
 function rsbuildConfig(v: TemplateVars): string {
 	return `${TS_HEADER}
@@ -319,7 +319,7 @@ import type { AppDescriptor } from 'shell';
 import App from './App';
 
 const descriptor: AppDescriptor = {
-	id: '${v.appId}',
+	id: '${v.appId}', // the slug, as in package.json appManifest.id
 	name: '${v.appName}',
 	branding: { appName: '${v.appName}' },
 	app: App,
@@ -584,7 +584,7 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars, frame: Fr
 		{ path: 'package.json', content: packageJson(vars) },
 		// The app DOCUMENT (.pipe-style): opening this file is opening the
 		// app in the App Builder; it carries the binding id as JSON.
-		{ path: `${vars.appId.split('.').pop()}.rrapp`, content: `${JSON.stringify({ id: vars.appId }, null, 2)}\n` },
+		{ path: `${vars.appId}.rrapp`, content: `${JSON.stringify({ id: vars.appId }, null, 2)}\n` },
 		{ path: 'rsbuild.config.mts', content: rsbuildConfig(vars) },
 		{ path: 'tsconfig.json', content: tsconfigJson() },
 		// App-level ignore: the workspace root carries the full set, but the

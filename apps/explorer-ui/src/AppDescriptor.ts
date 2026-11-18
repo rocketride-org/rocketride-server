@@ -42,7 +42,7 @@ import { ExplorerDevToolSidebar } from './ExplorerSidebar';
  * Requires authentication (authenticated: true in manifest).
  */
 const EXPLORER_APP: AppDescriptor = {
-	id: 'rocketride.explorer',
+	id: 'explorer',
 	name: 'File Explorer',
 	branding: {
 		appName: 'File Explorer',

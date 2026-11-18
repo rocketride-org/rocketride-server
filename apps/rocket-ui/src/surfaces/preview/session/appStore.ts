@@ -272,12 +272,10 @@ export async function appFileExists(folder: string, relPath: string): Promise<bo
 
 /** Inputs for a new-app scaffold into the store VFS. */
 export interface ScaffoldRequest {
-	/** The app-name slug (the half after the dot in the app id). */
+	/** The app slug: the whole appManifest.id (the files carry no namespace). */
 	appName: string;
 	/** Human-readable display name. */
 	displayName: string;
-	/** Publisher slug (the org developer id, or 'local'). */
-	publisher: string;
 	/** Frame options composing the generated App.tsx. */
 	frame: FrameOptions;
 	/** Template to render (defaults to 'Blank'). */
@@ -296,7 +294,7 @@ export interface ScaffoldRequest {
  * @returns The created app's id and folder name.
  */
 export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string; folder: string }> {
-	const appId = `${req.publisher}.${req.appName}`;
+	const appId = req.appName;
 	const folder = `${req.appName}-ui`;
 
 	// step: refuse a live collision (the form checks too, but the scan can
@@ -309,7 +307,6 @@ export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string
 	const files = renderTemplate(req.template ?? 'Blank', {
 		appId,
 		appName: req.displayName,
-		publisher: req.publisher,
 		moduleId: appId.replace(/[^a-zA-Z0-9_$]/g, '_'),
 		port: 3011,
 		previewUrl: `${window.location.origin}/?appid=${encodeURIComponent(appId)}&rrdev=1`,

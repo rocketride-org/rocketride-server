@@ -464,7 +464,8 @@ async def test_add_unpacks_zip_and_returns_rail_entry(registry, content_store):
     call = registry.publish_calls[0]
     assert call['artifact']['kind'] == 'app'
     assert call['artifact']['appVersion'] == '1.0.0'
-    assert call['metadata']['manifest']['id'] == 'acme.brandy'
+    assert call['metadata']['manifest']['id'] == 'brandy'  # the slug; the prefix is never stored
+    assert 'publisher' not in call['metadata']['manifest']
     assert call['metadata']['projectId'] == 'wc-1'  # client working-copy provenance
 
     # The build lifecycle is born WITH the row: queued, attempt 0 — the rail
@@ -530,16 +531,41 @@ async def test_add_rejects_unsafe_zip_entries(registry, content_store):
 
 
 @pytest.mark.asyncio
-async def test_add_rejects_foreign_namespace_app_id(registry, content_store):
-    """Deploy fails fast when the manifest declares an app id outside the
-    caller org's developer namespace — the impersonation ('I am org xyz but
-    declare rocketride.pipeBuilder') dies before any artifact is created.
+async def test_add_ignores_a_manifest_prefix_and_binds_the_deploying_org(registry, content_store):
+    """The manifest carries the SLUG; whatever precedes its last dot is ignored.
+
+    An org declaring 'rocketride.pipeBuilder' in its own manifest does not
+    deploy into the platform namespace: the prefix is dropped as if it had
+    never been written and the app is registered as <its developer id>.<slug>.
     """
     conn = _FakeConn(developer_id='xyz')
     data = _app_zip(manifest={'id': 'rocketride.pipeBuilder', 'name': 'Fake', 'version': '1.0.0'})
     result = await handle_app_add(conn, _add_request(data=data))
+    assert result['success'] is True
+    call = registry.publish_calls[0]
+    assert call['artifact']['appId'] == 'xyz.pipeBuilder'
+    assert call['artifact']['moduleId'] == 'xyz_pipeBuilder'
+    assert call['metadata']['manifest']['id'] == 'pipeBuilder'
+
+
+@pytest.mark.asyncio
+async def test_add_takes_the_slug_from_a_bare_manifest_id(registry):
+    """A manifest written under the slug rule deploys under the org's namespace."""
+    conn = _FakeConn(developer_id='xyz')
+    data = _app_zip(manifest={'id': 'brandy', 'name': 'Brandy', 'version': '1.0.0'})
+    result = await handle_app_add(conn, _add_request(data=data))
+    assert result['success'] is True
+    assert registry.publish_calls[0]['artifact']['appId'] == 'xyz.brandy'
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_a_slug_that_breaks_the_grammar(registry, content_store):
+    """The remainder after the last dot must be an address segment."""
+    conn = _FakeConn(developer_id='xyz')
+    data = _app_zip(manifest={'id': 'acme.bad slug', 'name': 'Bad', 'version': '1.0.0'})
+    result = await handle_app_add(conn, _add_request(data=data))
     assert result['success'] is False
-    assert 'namespace' in result['message']
+    assert 'appManifest.id' in result['message']
     assert registry.publish_calls == []
     assert _written(content_store) == {}
 
@@ -734,7 +760,8 @@ async def test_add_workspace_layout_reads_manifest_at_app_root(registry, content
 
     # The manifest came from the nested package.json, and appRoot persisted
     call = registry.publish_calls[0]
-    assert call['metadata']['manifest']['id'] == 'acme.brandy'
+    assert call['metadata']['manifest']['id'] == 'brandy'  # the slug; the prefix is never stored
+    assert 'publisher' not in call['metadata']['manifest']
     assert call['metadata']['appRoot'] == 'apps/brandy-ui'
 
     # The workspace tree unpacked AS-IS — relative references between the app

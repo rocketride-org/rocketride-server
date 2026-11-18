@@ -5,9 +5,8 @@
 	"description": "RocketRide Chat — the chat front end of a pipeline: a dev tool beside the canvas, a signed-in app by deep link",
 	"license": "MIT",
 	"appManifest": {
-		"id": "rocketride.chat",
+		"id": "chat",
 		"projectId": "358489d3-cbfa-4201-8edb-aef3c86cdde1",
-		"publisher": "RocketRide",
 		"name": "Chat",
 		"description": "Talk to a pipeline through its chat source",
 		"icon": "./icon.svg",

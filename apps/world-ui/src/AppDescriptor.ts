@@ -40,7 +40,7 @@ import HelloApp from './HelloApp';
  */
 const HELLO_APP: AppDescriptor = {
 	// Must match world.rrapp + package.json appManifest.id (workspace types contract).
-	id: 'rocketride.world',
+	id: 'world',
 	name: 'Hello World',
 	branding: {
 		appName: 'Hello World',

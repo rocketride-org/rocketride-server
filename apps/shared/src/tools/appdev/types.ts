@@ -388,21 +388,12 @@ export interface IAppBuilderHost {
 	 * build worker stores beside the version's artifacts ('' = no log).
 	 * The Deploy card's "failed" badge opens it. */
 	loadBuildLog?: (version: number) => Promise<string>;
-	/** The org's registered developer id ('' = not a developer yet). An app can
-	 * only deploy inside a claimed developer namespace (`<developerId>.<name>`). */
+	/** The org's registered developer id ('' = not a developer yet). Deploying
+	 * attaches it to the app's slug: the registry name is `<developerId>.<slug>`. */
 	getDeveloperId?: () => Promise<string>;
 	/** Claim the org's developer id slug (org.admin, self-service — letters and
 	 * underscore only). Returns the assigned slug. */
 	registerDeveloper?: (developerId: string) => Promise<string>;
-	/** Move a `local.<name>` app into the org's developer namespace: rewrite
-	 * its id to `<developerId>.<name>` in the app's files (package.json, the
-	 * .rrapp trigger, src/AppDescriptor.ts). `developerId` is the id the user
-	 * confirmed; the host refuses when the org's id on the server differs or
-	 * the new id is already taken. Resolves once the files are written; the
-	 * host then reopens the App Builder on the new id, which disposes the
-	 * calling panel. Server records are untouched. Absent = the banner keeps
-	 * the hand-edit instruction. */
-	adoptDeveloperId?: (developerId: string) => Promise<void>;
 
 	// ── Dashboard ────────────────────────────────────────────────────────
 	/** Load the app's full deployment history, oldest first — the ONE fetch
@@ -461,9 +452,9 @@ export interface IAppBuilderHost {
  * connection.
  */
 export interface NewAppIdentity {
-	/** The publisher slug applied to new apps — the org developer id, or 'local' when none. */
+	/** The org developer id the deploy will attach ('' when none is registered yet). */
 	developerId: string;
-	/** Where the developer id came from: the organization profile, or the local default. */
+	/** Where the developer id came from: the organization profile, or none yet. */
 	source: 'organization' | 'default';
 	/** Whether a scaffold target exists (a workspace folder / a connected store). */
 	workspaceOpen: boolean;

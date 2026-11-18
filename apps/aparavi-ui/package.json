@@ -5,9 +5,8 @@
   "description": "Aparavi AQL Chat — natural-language query interface for Aparavi data",
   "license": "MIT",
   "appManifest": {
-    "id": "rocketride.aparavi",
+    "id": "aparavi",
     "projectId": "f448d405-a1bc-4490-9eb3-598663ea2473",
-    "publisher": "Aparavi Software AG",
     "name": "Aparavi AQL",
     "description": "Chat with your Aparavi data using natural language",
     "readme": "./README.md",

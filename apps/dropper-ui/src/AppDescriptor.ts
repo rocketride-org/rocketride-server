@@ -25,7 +25,7 @@ import App from './App';
 import { DropperDevTool, DropperDevToolSidebar } from './DevTool';
 
 const DROPPER_APP: AppDescriptor = {
-	id: 'rocketride.dropper',
+	id: 'dropper',
 	name: 'Dropper',
 	branding: { appName: 'Dropper' },
 	app: App,

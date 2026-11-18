@@ -36,11 +36,11 @@ import { getDevSessionManager } from './devSessionManager';
 // VALIDATION
 // =============================================================================
 
-/** App id shape: `<publisher>.<name>` — publisher is letters+underscore
- * (matches the server developerId rule); name starts with a lowercase
- * letter, then any mix of letters, digits, underscores, and hyphens (the
- * server accepts digits in the name — e.g. `acme.s3-explorer`, `acme.app2`). */
-export const APP_ID_RE = /^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$/;
+/** App slug shape: a lowercase letter, then any mix of letters, digits,
+ * underscores, and hyphens (`s3-explorer`, `app2`). The files carry the
+ * slug alone; the deploying organization's developer id is attached at
+ * deploy, so there is no publisher segment to validate here. */
+export const APP_ID_RE = /^[a-z][a-zA-Z0-9_-]*$/;
 
 // =============================================================================
 // TYPES
@@ -48,7 +48,7 @@ export const APP_ID_RE = /^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$/;
 
 /** Everything the wizard collects for one scaffold run. */
 export interface ScaffoldParams {
-	/** Full app id `<publisher>.<name>` — the linkage name. */
+	/** The app slug (appManifest.id). */
 	appId: string;
 	/** Human-readable display name. */
 	appName: string;
@@ -136,7 +136,7 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 
 	// ── 1. Validate identity (submit-time — the form state may be stale) ─
 	if (!APP_ID_RE.test(appId)) {
-		throw new Error(`Invalid app id "${appId}". Use <publisher>.<name>; the name starts with a lowercase letter, then letters, digits, underscores, and hyphens.`);
+		throw new Error(`Invalid app slug "${appId}": a lowercase letter, then letters, digits, underscores, and hyphens.`);
 	}
 	if (!appName.trim()) {
 		throw new Error('Display name is required.');
@@ -151,11 +151,9 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	// node designer's ./nodes. The SDK refuses an existing folder. Its
 	// install and vendoring are left to this host: the WatchManager owns
 	// the single-flight install and ensureShell the session vendor memo.
-	const [developerId, slug] = appId.split('.');
-	const created = await createAppWorkspace(root.uri.fsPath, slug, {
+	const created = await createAppWorkspace(root.uri.fsPath, appId, {
 		template: params.template ?? 'Blank',
 		displayName: appName,
-		developerId,
 		sidebar: frame.sidebar,
 		statusFooter: frame.statusFooter,
 		docTabs: frame.docTabs,

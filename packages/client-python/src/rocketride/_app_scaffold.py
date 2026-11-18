@@ -33,7 +33,7 @@ as the App Builder's New App wizard and ``deploy.createApp()`` do:
 - Templates are code-defined trees (path -> rendered content); the generated
   App.tsx is composed from frame options — sidebar, status footer, and
   document tabs each toggle a chrome region of the scaffolded AppLayout.
-- :func:`create_app_workspace` validates the slug/developer-id grammar,
+- :func:`create_app_workspace` validates the slug grammar,
   writes ``./apps/<slug>-ui``, ensures the pnpm workspace file and ignore
   hygiene, vendors the server-matched shell + client packages when a server
   base URL is given, and runs ``pnpm install`` (non-fatal on failure).
@@ -66,11 +66,9 @@ class TemplateVars:
     """Variables substituted into every template file."""
 
     app_id: str
-    """App id, e.g. 'acme.brandy'."""
+    """App slug, e.g. 'brandy' — the files never carry a developer namespace."""
     app_name: str
     """Display name, e.g. 'Brand Studio'."""
-    publisher: str
-    """Publisher slug for appManifest.publisher — the organization developer id, or 'local' when none."""
     module_id: str
     """MF container name (dots/hyphens -> underscores)."""
     port: int
@@ -98,10 +96,9 @@ class FrameOptions:
 # Available template names (QuickPick order).
 TEMPLATE_NAMES = ('Blank', 'Dashboard')
 
-# Slug grammar: the name part of the app id.
+# Slug grammar: the whole app id (the deploying organization's developer id
+# is attached at deploy, never written into the files).
 _SLUG_RE = re.compile(r'^[a-z][a-zA-Z0-9_-]*$')
-# Developer-id grammar: the namespace part of the app id.
-_DEVELOPER_RE = re.compile(r'^[a-z][a-z_]*$')
 
 # =============================================================================
 # SHARED SNIPPETS
@@ -129,7 +126,7 @@ def _package_json(v: TemplateVars) -> str:
     description = v.app_name + ' — a RocketRide app'
     obj = {
         # npm forbids uppercase in package names; the app id may carry it
-        'name': v.app_id.replace('.', '-').lower(),
+        'name': f'{v.app_id.lower()}-ui',
         'version': '0.1.0',
         'private': True,
         # No "type" field: the rsbuild config is .mts (self-declaring ESM),
@@ -137,8 +134,9 @@ def _package_json(v: TemplateVars) -> str:
         'description': description,
         'license': 'MIT',
         'appManifest': {
+            # The SLUG: the organization that deploys the app attaches its
+            # developer id (the registry name is <developerId>.<slug>)
             'id': v.app_id,
-            'publisher': v.publisher,
             'name': v.app_name,
             'description': description,
             # Every scaffold ships a real icon + README so the PACKAGE tab's
@@ -748,7 +746,7 @@ def render_template(name: str, v: TemplateVars, frame: Optional[FrameOptions] = 
         ('package.json', _package_json(v)),
         # The app DOCUMENT (.pipe-style): opening this file is opening the
         # app in the App Builder; it carries the binding id as JSON.
-        (v.app_id.split('.')[-1] + '.rrapp', json.dumps({'id': v.app_id}, indent=2, ensure_ascii=False) + '\n'),
+        (v.app_id + '.rrapp', json.dumps({'id': v.app_id}, indent=2, ensure_ascii=False) + '\n'),
         ('rsbuild.config.mts', _rsbuild_config(v)),
         ('tsconfig.json', _tsconfig_json()),
         # App-level ignore: the workspace root carries the full set, but the
@@ -843,7 +841,6 @@ def create_app_workspace(
     *,
     template: str = 'Blank',
     display_name: Optional[str] = None,
-    developer_id: Optional[str] = None,
     sidebar: bool = False,
     status_footer: bool = True,
     doc_tabs: bool = False,
@@ -863,9 +860,6 @@ def create_app_workspace(
         slug: The app-name slug (lowercase; digits/-/_ after the first).
         template: Template to render (default 'Blank').
         display_name: Display name (default: the slug, title-cased).
-        developer_id: Developer id for ``<developerId>.<slug>`` (default
-            'local' — publishable beyond the workspace only after a real
-            developer id is registered).
         sidebar: Two-column frame with a navigation sidebar on the left.
         status_footer: Status bar across the bottom of the app.
         doc_tabs: Document tab strip across the content area.
@@ -885,19 +879,17 @@ def create_app_workspace(
         (``{'shell': bool, 'client': bool}``), and ``installed``.
 
     Raises:
-        ValueError: On an invalid slug/developer id/template or an existing
+        ValueError: On an invalid slug/template or an existing
             folder.
     """
     progress = on_progress if on_progress is not None else _noop_progress
     ws_abs = os.path.abspath(workspace_root)
 
-    # step: identity — validate both id halves before touching disk
+    # step: identity — the files carry the SLUG only; the organization that
+    # deploys the app attaches its developer id, so one source deploys anywhere
     if not _SLUG_RE.match(slug):
         raise ValueError(f'App slug "{slug}" is invalid — lowercase letter first, then letters/digits/-/_.')
-    dev_id = developer_id if developer_id is not None else 'local'
-    if not _DEVELOPER_RE.match(dev_id):
-        raise ValueError(f'Developer id "{dev_id}" is invalid — lowercase letters/underscores only.')
-    app_id = f'{dev_id}.{slug}'
+    app_id = slug
     if template not in TEMPLATE_NAMES:
         raise ValueError(f'Unknown template "{template}" — available: {", ".join(TEMPLATE_NAMES)}.')
 
@@ -926,7 +918,6 @@ def create_app_workspace(
         TemplateVars(
             app_id=app_id,
             app_name=name,
-            publisher=dev_id,
             module_id=re.sub(r'[.-]', '_', app_id),
             port=port,
             preview_url=f'{base}/?appid={app_id}&rrdev=1',
