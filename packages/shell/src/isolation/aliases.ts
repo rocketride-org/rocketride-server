@@ -34,7 +34,8 @@
 // Identity fields are rewritten by key (case-insensitive), never by blanket
 // replacement of short values (plan section 2): user fields take the grant's
 // alias (the server minted it under `RR_APP_ALIAS_KEY`; the root only copies
-// it); team, run-kind, owner-kind and org fields are removed. Real
+// it, and only in the `ru_` shape); team, run-kind, owner-kind and org
+// fields are removed. Real
 // high-entropy user, team and org ids are also replaced inside free text
 // (`identityIds`, DA F1). They are learnt from the SDK's account info only:
 // an engine body can carry stamps a pipeline authored (security N1, G4
@@ -52,6 +53,8 @@ export const USER_KEYS: ReadonlySet<string> = new Set(['userid', 'user_id', 'cli
 export const REMOVED_KEYS: ReadonlySet<string> = new Set(['teamid', 'team_id', 'devteam', 'runkind', 'run_kind', 'ownerkind', 'owner_kind', 'orgid', 'org_id']);
 /** Fields whose value is a project id: aliased whatever the id looks like. */
 export const PROJECT_KEYS: ReadonlySet<string> = new Set(['project_id', 'projectId']);
+/** A server-minted per-app user alias (`ru_`, plan section 4.9). */
+const USER_ALIAS_RE = /^ru_[A-Za-z0-9_-]+$/;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A project id the root minted for an app (`rrapp.<appKey>.<uuid4>`). */
@@ -69,6 +72,12 @@ export function isHighEntropy(id: string): boolean {
 /** Whether an id has the engine's own shape (a UUID or a minted `rrapp.` id): only those are refused inbound root-wide. */
 export function isEngineShaped(id: string): boolean {
 	return UUID_RE.test(id) || MINTED_PROJECT_RE.test(id);
+}
+
+/** The grant's user alias, when it has the alias shape; anything else counts as anonymous (DA F7, R2 LOW). */
+export function userAliasOf(grant: IRealmGrant): string | undefined {
+	const id = grant.frame?.identity?.userId;
+	return typeof id === 'string' && USER_ALIAS_RE.test(id) ? id : undefined;
 }
 
 /** Whether a user, team or org id is distinctive enough to replace inside free text (never `local`). */
@@ -202,7 +211,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v ===
  * @returns A rewritten copy.
  */
 export function rewriteIdentity<T>(grant: IRealmGrant, value: T): T {
-	const userAlias = grant.frame?.identity?.userId;
+	const userAlias = userAliasOf(grant);
 	const visit = (v: unknown): unknown => {
 		if (Array.isArray(v)) return v.map(visit);
 		if (!isPlainObject(v)) return v;

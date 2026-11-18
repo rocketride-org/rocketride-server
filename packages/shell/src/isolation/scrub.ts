@@ -53,7 +53,7 @@
 
 import type { DAPMessage } from 'rocketride';
 import type { IBoundedSet, IdentityKind, IIdentityIds, IKnownProjects } from './aliases';
-import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS } from './aliases';
+import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS, userAliasOf } from './aliases';
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
@@ -290,7 +290,7 @@ function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[]): IPass {
 		replace,
 		deny: ctx.root.needleMatcher(),
 		replaces: (needle) => replace.some((m) => m.has(needle)),
-		userAlias: ctx.grant.frame?.identity?.userId,
+		userAlias: userAliasOf(ctx.grant),
 		projectAlias,
 		// Short ids are map keys only when this realm sighted them; root-wide membership counts for high-entropy ids only (security M1).
 		isProjectKey: (key) => ownProject.has(key) || MINTED_PROJECT_RE.test(key) || ctx.sighted.has(key) || (isHighEntropy(key) && known.has(key)),
