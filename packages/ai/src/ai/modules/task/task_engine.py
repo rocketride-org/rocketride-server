@@ -3247,9 +3247,10 @@ class TaskEngine(DAPBase):
             exit_code = body.get('exitCode', 1)
             exit_message = body.get('message', 'Task exited unexpectedly')
 
-            # Save it
-            self._status.exitCode = exit_code
-            self._status.exitMessage = exit_message
+            # Save it; a requested stop (whatever its reason) keeps its existing exit code, as without >EXIT
+            if self._stop_reason is None:
+                self._status.exitCode = exit_code
+                self._status.exitMessage = exit_message
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -3667,7 +3668,7 @@ class TaskEngine(DAPBase):
         self._status.rateSize = 0
         self._status.rateCount = 0
         self._status.serviceUp = False
-        self._status.exitCode = None
+        self._status.exitCode = 0  # as a new task starts; a stop by the server keeps it
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()

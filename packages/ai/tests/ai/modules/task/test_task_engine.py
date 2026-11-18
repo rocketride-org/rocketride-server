@@ -1915,6 +1915,8 @@ def _event_task(run_kind='dev'):
     t._update_status = MagicMock()
     t._forward_task_event = AsyncMock()
     t._send_status_update = AsyncMock()
+    # No stop was requested: an exit the engine reports is the run's own
+    t._stop_reason = None
     return t
 
 
@@ -2294,6 +2296,17 @@ async def test_exit_event_marks_the_run_as_reported():
     assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
 
 
+def test_a_new_run_starts_from_exit_code_zero():
+    """A run started again after an error: a stop by the server, which keeps the code, must not read the old one."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    t._status.exitCode = 3
+    t._status.exitMessage = 'boom'
+    TaskEngine._reset_status(t)
+    assert (t._status.exitCode, t._status.exitMessage) == (0, '')
+
+
 class _ExitingProcess:
     """A subprocess whose output has closed but which is not reaped until wait()."""
 
@@ -2382,14 +2395,14 @@ def _ending_task(process_exit_code, *, was_running=True):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    'stop_reason, status, outcome',
+    'stop_reason, status, exit_code, exit_message, outcome',
     [
-        (None, 'Stopped unexpectedly', 'error'),
+        (None, 'Stopped unexpectedly', 1, 'Stopped unexpectedly', 'error'),
         # A crash during a requested stop is part of the stop
-        ('user', 'Stopped', 'cancelled'),
+        ('user', 'Stopped', 0, '', 'cancelled'),
     ],
 )
-async def test_a_reported_crash_ends_the_task(stop_reason, status, outcome):
+async def test_a_reported_crash_ends_the_task(stop_reason, status, exit_code, exit_message, outcome):
     t = _ending_task(-6)
     t._stop_reason = stop_reason
     run_log = AsyncMock()
@@ -2397,7 +2410,7 @@ async def test_a_reported_crash_ends_the_task(stop_reason, status, outcome):
     t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log, 'dev.user-2.acme.proj-test.src-id': run_log}
     await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
     await TaskEngine._terminated(t)
-    assert t._status.status == status
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     run_log.end_run.assert_awaited_once()
     assert run_log.end_run.await_args.args[0] == outcome
 

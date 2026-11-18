@@ -1,4 +1,4 @@
-"""A real eaas.py runs a pipeline whose Python node crashes its task process.
+"""A real eaas.py runs a pipeline whose Python node ends its task process, or that eaas.py stops on request.
 
 Each server writes the node, under a name of its own, where the builder puts a
 real node, and removes it when it stops. The name starts with `_`, which the
@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -51,7 +52,8 @@ class IGlobal(IGlobalBase):
 
 # A plain read of address 0: ctypes.string_at(0) would only raise OSError on
 # Windows, where ctypes guards its foreign calls. A fast fail and SIGKILL skip
-# every handler in the process; exit(-1) is no crash.
+# every handler in the process; exit(-1) is no crash; a SIGTERM is a cancel
+# the server did not ask for.
 _IINSTANCE = """import ctypes
 import os
 import signal
@@ -71,6 +73,8 @@ class IInstance(IInstanceBase):
             os.kill(os.getpid(), signal.SIGKILL)
         elif text == 'exit':
             os._exit(-1)
+        elif text == 'sigterm':
+            os.kill(os.getpid(), signal.SIGTERM)
 """
 
 
@@ -179,25 +183,57 @@ async def _connect(uri: str, on_event) -> RocketRideClient:
             await asyncio.sleep(1)
 
 
-async def _run(server, text: str):
-    """Send the text to the crash node; return the final status and the console lines."""
+async def _until_running(client, token):
+    deadline = time.monotonic() + 120
+    while (status := await client.get_task_status(token))['state'] != TASK_STATE.RUNNING.value:
+        assert time.monotonic() < deadline, f'the task did not start: {status}'
+        await asyncio.sleep(0.5)
+
+
+async def _run(server, text: Optional[str], restart: bool = False):
+    """Send the text to the crash node (none: stop the running task); return the final status and the console lines."""
     lines = []
+    statuses = []
 
     async def on_event(message):
         if message.get('event') == 'output':
             lines.append(message.get('body', {}).get('output', ''))
+        elif message.get('event') == 'apaevt_status_update':
+            statuses.append(message.get('body') or {})
 
     client = await _connect(server['uri'], on_event)
     try:
         token = (await client.use(pipeline=_pipeline(server['provider'])))['token']
         await client.add_monitor({'token': token}, ['output'])
+        ended = [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
+        deadline = time.monotonic() + 120
+
+        if text is None:
+            await _until_running(client, token)
+            if restart:
+                pipeline = _pipeline(server['provider'])
+                await client.restart(
+                    project_id=pipeline['project_id'], source=pipeline['source'], pipeline=pipeline, token=token
+                )
+                # A restart mints a new control id: the one held before is dead, and so are its monitors
+                token = await client.get_task_token(pipeline['project_id'], pipeline['source'])
+                assert token, 'the restart left no running control'
+                await client.add_monitor({'token': token}, ['output'])
+                await _until_running(client, token)
+            # A terminated control is removed at once and its id is dead, so the run's last status
+            # cannot be asked for afterwards: it is read from the summary events the run sends as it stops
+            await client.add_monitor({'token': token}, ['output', 'summary'])
+            del statuses[:]
+            await client.terminate(token)
+            while not (statuses and statuses[-1].get('state') in ended):
+                assert time.monotonic() < deadline, f'the task did not end: {statuses[-1:]}'
+                await asyncio.sleep(0.5)
+            return token, statuses[-1], lines
 
         # The task dies while it handles the text, so the send itself may fail
         with contextlib.suppress(Exception):
             await asyncio.wait_for(client.send(token, text, {}, 'text/plain'), 60)
 
-        ended = [TASK_STATE.COMPLETED.value, TASK_STATE.CANCELLED.value]
-        deadline = time.monotonic() + 120
         while (status := await client.get_task_status(token))['state'] not in ended:
             assert time.monotonic() < deadline, f'the task did not end: {status}'
             await asyncio.sleep(0.5)
@@ -280,5 +316,37 @@ async def test_a_node_that_exits_stops_its_task(server):
     """exit(-1) is no crash, although on Windows its code 0xffffffff looks like an exception's."""
     token, status, lines = await _run(server, 'exit')
     assert status['status'] == 'Stopped', server['log'].read_text(errors='replace')
+    assert _crash_lines(lines) == []
+    assert _dumps_of(lines) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('restart', [False, True], ids=['first-run', 'after-restart'])
+async def test_a_stop_by_the_server_is_no_error(server, restart):
+    """A stop the server asked for keeps exit code 0 whatever the engine reports.
+
+    On Linux and macOS the engine reports its cancel, which the server does not read for such a stop; on
+    Windows it is ended and reports nothing. What the engine reports is checked by the cancel from outside.
+
+    A restart before the stop starts the run again from exit code 0, as a new task does.
+    """
+    token, status, lines = await _run(server, None, restart)
+    log = server['log'].read_text(errors='replace')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == ('Stopped', 0, ''), log
+    assert _crash_lines(lines) == []
+    assert _dumps_of(lines) == []
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_from_outside_the_server_stops_its_task(server):
+    """A SIGTERM the server did not send.
+
+    On Linux and macOS the engine reports its cancel with no text, so the message is empty, not the
+    place in the code; on Windows os.kill is TerminateProcess, which tells the engine nothing.
+    """
+    token, status, lines = await _run(server, 'sigterm')
+    log = server['log'].read_text(errors='replace')
+    expected = ('Stopped', 15, 'Stopped') if os.name == 'nt' else ('Stopped', 1, '')
+    assert (status['status'], status['exitCode'], status['exitMessage']) == expected, log
     assert _crash_lines(lines) == []
     assert _dumps_of(lines) == []
