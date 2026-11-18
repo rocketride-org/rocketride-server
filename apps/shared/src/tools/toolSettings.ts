@@ -82,6 +82,56 @@ const GRANT_SETTINGS: Readonly<Record<Grant, { readonly key: string; readonly or
 		order: 13,
 		description: 'Let the agent click and type in its own copy of your apps without asking. Always allow on a card turns this on.',
 	},
+	fileDeletes: {
+		key: 'rocketride.pipeBuilder.agentAllowFileDeletes',
+		order: 14,
+		description: 'Let the agent delete files and folders in your workspace without asking. Always allow on a card turns this on.',
+	},
+	appDeploys: {
+		key: 'rocketride.pipeBuilder.agentAllowAppDeploys',
+		order: 15,
+		description: 'Let the agent upload and build new versions of your apps without asking. Always allow on a card turns this on. Publishing an app always asks.',
+	},
+	runStops: {
+		key: 'rocketride.pipeBuilder.agentAllowRunStops',
+		order: 16,
+		description: 'Let the agent stop pipeline runs its chat started without asking. Always allow on a card turns this on. Stopping any other run always asks.',
+	},
+	runRestarts: {
+		key: 'rocketride.pipeBuilder.agentAllowRunRestarts',
+		order: 17,
+		description: 'Let the agent restart pipeline runs its chat started without asking. Always allow on a card turns this on. Restarting any other run always asks.',
+	},
+	profilingStarts: {
+		key: 'rocketride.pipeBuilder.agentAllowProfilingStarts',
+		order: 18,
+		description: 'Let the agent start profiling the server without asking. Always allow on a card turns this on.',
+	},
+	profilingStops: {
+		key: 'rocketride.pipeBuilder.agentAllowProfilingStops',
+		order: 19,
+		description: 'Let the agent stop profiling the server without asking. Always allow on a card turns this on.',
+	},
+	templateSaves: {
+		key: 'rocketride.pipeBuilder.agentAllowTemplateSaves',
+		order: 20,
+		description: 'Let the agent save pipeline templates without asking, replacing any with the same id. Always allow on a card turns this on.',
+	},
+	templateDeletes: {
+		key: 'rocketride.pipeBuilder.agentAllowTemplateDeletes',
+		order: 21,
+		description: 'Let the agent delete pipeline templates without asking. Always allow on a card turns this on.',
+	},
+	logSaves: {
+		key: 'rocketride.pipeBuilder.agentAllowLogSaves',
+		order: 22,
+		description: 'Let the agent save run logs to your store without asking. Always allow on a card turns this on. Deleting a saved log always asks.',
+	},
+	sqlQueries: {
+		key: 'rocketride.pipeBuilder.agentAllowSqlQueries',
+		order: 23,
+		description: 'Let the agent run SQL on the databases of pipelines it runs without asking, including SQL that changes data. Always allow on a card turns this on.',
+	},
 };
 
 /** The keys of the agent's approval settings: the mode, and each grant's. rocket-ui's settings feed reads them by these. */
@@ -175,7 +225,7 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 		'rocketride.pipeBuilder.agentDefaultModel': {
 			type: 'string',
 			default: DEFAULT_MODEL_SETTING,
-			order: 14,
+			order: 24,
 			shells: ['saas', 'oss'],
 			description: 'The model a new agent chat starts with, as provider/model. The picker beside the chat box sets it for that chat and updates this. Existing chats keep their own model.',
 		},

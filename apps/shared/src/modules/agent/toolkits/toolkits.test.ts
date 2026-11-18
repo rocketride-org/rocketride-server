@@ -289,10 +289,10 @@ function fakeAsk(answers: ChatAskAnswer[]): { ask: (card: ChatAskCard) => ChatAs
 	return { ask, cards };
 }
 
-/** Approval settings in `mode`; every grant the run turns on is recorded. */
-function fakeSettings(mode: ApprovalPrefs['mode'] = 'ask'): ApprovalSettings & { granted: Grant[] } {
+/** Approval settings in `mode` with the `on` grants on; every grant the run turns on is recorded. */
+function fakeSettings(mode: ApprovalPrefs['mode'] = 'ask', on: readonly Grant[] = []): ApprovalSettings & { granted: Grant[] } {
 	const granted: Grant[] = [];
-	return { read: () => ({ mode, grants: grantsFrom(() => false) }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
+	return { read: () => ({ mode, grants: grantsFrom((grant) => on.includes(grant)) }), subscribe: () => () => undefined, grant: (kind) => granted.push(kind), granted };
 }
 
 /** One run's approvals over a client, in the ALPHA workspace; with no `ask`, every card is denied. */
@@ -501,6 +501,20 @@ test('Always allow turns the grant on, and the checked client refuses an asked c
 	const checked = approvalsFor(client).client() as unknown as { publishApp(...params: unknown[]): unknown };
 	assert.throws(() => checked.publishApp('acme.a', 4, '@me'), /publishApp needs the user's OK/);
 	assert.equal(calls.length, 1, 'the unannounced publish never reached the client');
+});
+
+test('a method with its own grant runs with no card in Ask mode while the grant is on, and asks, offering that grant, while it is off', async () => {
+	const { client, calls } = scriptedClient({ 'database.query': { rows: [], affected_rows: 1 } });
+	const query = { method: 'database.query', params: [{ token: 'tk_1', sql: 'DELETE FROM notes' }] };
+	const granted = fakeAsk([]);
+	await clientTool(client, granted.ask, fakeSettings('ask', ['sqlQueries'])).execute(query);
+	assert.equal(granted.cards.length, 0, 'the sqlQueries grant skips the card');
+	assert.equal(calls.length, 1);
+
+	const asked = fakeAsk(['deny']);
+	await assert.rejects(clientTool(client, asked.ask, fakeSettings('ask', ['schedules'])).execute(query), /declined/);
+	assert.equal(asked.cards[0]?.alwaysLabel, 'Always allow running SQL on pipeline databases');
+	assert.equal(calls.length, 1, 'another grant does not let the query through');
 });
 
 test('rocketride_client refuses every blocked method without reaching the client', async () => {
@@ -1044,6 +1058,45 @@ test("Auto stops the conversation's own run after a fresh status read, and refus
 		'the status was read again right before the call'
 	);
 	assert.equal(asked.cards.length, 0, 'Auto showed no card');
+});
+
+test('with runStops on in Ask mode, terminate stops its own run with no card after a fresh status read and shows a card for any other; Auto still refuses the other', async () => {
+	const MINE = 'tk_mine0123456789';
+	const OTHER = 'tk_other123456789';
+	const runs = new Map([[OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' }]]);
+	const { client, calls } = scriptedClient({
+		use: () => {
+			runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: 1001, name: 'chat_1' });
+			return { token: MINE, projectId: 'p1', source: 'chat_1', reused: false };
+		},
+		getTaskStatus: (token: string) => ({ ...runs.get(token), completed: false, state: 2 }),
+		terminate: (token: string) => runs.delete(token),
+	});
+	const ledger = new RunLedger([], { client: () => client, scopeKey: '', currentScope: () => '', conversationId: 'conv-1' });
+	const vfs = new MemoryWorkspace({});
+	const asked = fakeAsk([]);
+	const toolIn = (mode: ApprovalPrefs['mode']) => {
+		const approvals = new Approvals({ client: () => client, vfs, ask: asked.ask, settings: fakeSettings(mode, ['runStops']), signal: new AbortController().signal, runs: ledger });
+		return toolOf(new RocketRideClientToolkit(approvals.client, vfs, undefined, ledger), 'rocketride_client', approvals);
+	};
+	const tool = toolIn('ask');
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+
+	calls.length = 0;
+	await tool.execute({ method: 'terminate', params: [MINE] });
+	assert.deepEqual(
+		calls.map(([method]) => method),
+		['getTaskStatus', 'terminate'],
+		'the status was read again right before the call'
+	);
+	assert.equal(asked.cards.length, 0, 'its own run stopped with no card');
+
+	await assert.rejects(tool.execute({ method: 'terminate', params: [OTHER] }), /declined/);
+	assert.equal(asked.cards.length, 1, 'a run it did not start shows a card, not a refusal');
+
+	await assert.rejects(toolIn('auto').execute({ method: 'terminate', params: [OTHER] }), /did not start the pipeline run Daily digest .*Call ask_user/);
+	assert.equal(asked.cards.length, 1, 'Auto refused it with no card');
+	assert.ok(runs.has(OTHER), 'the other run was never stopped');
 });
 
 // =============================================================================

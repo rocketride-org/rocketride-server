@@ -31,8 +31,9 @@
  * name the list lacks asks. The model never rates its own risk, and the list's
  * type comes from the client's type, so tsc refuses a missing or extra method and
  * an ask on a sync method (it can't wait for a card). An ask shows a "Needs your
- * OK" card unless Auto or the entry's grant is on; Auto runs terminate/restart
- * only on a run this conversation started, rechecked right before the call. The
+ * OK" card unless Auto or the entry's grant is on. Either runs terminate/restart
+ * without a card only on a run this conversation started, rechecked right before
+ * the call; on any other run Auto refuses and a grant still shows the card. The
  * checked client (`Approvals.client`) refuses an ask method the running call did
  * not announce, so a tool that forgets stays fail closed. This checks the agent's
  * own calls, not a security boundary: the app preview holds the user's token.
@@ -103,7 +104,7 @@ interface AskRule {
 	readonly grant?: Grant;
 	/** True for arguments that make the call free (deploy.add with no deployTo points no team at the version). */
 	readonly freeWhen?: (params: readonly unknown[]) => boolean;
-	/** The pipeline run the call acts on. Auto lets it through only for a run this conversation started. */
+	/** The pipeline run the call acts on. Auto or the grant lets it through only for a run this conversation started. */
 	readonly target?: (params: readonly unknown[]) => RunTarget;
 }
 
@@ -144,6 +145,16 @@ const ALWAYS_LABELS: Readonly<Record<Grant, string>> = {
 	schedules: 'Always allow schedule changes',
 	deploymentToggles: 'Always allow turning deployments on and off',
 	appUse: 'Always allow using your apps',
+	fileDeletes: 'Always allow deleting files',
+	appDeploys: 'Always allow deploying new app versions',
+	runStops: 'Always allow stopping pipeline runs',
+	runRestarts: 'Always allow restarting pipeline runs',
+	profilingStarts: 'Always allow starting server profiling',
+	profilingStops: 'Always allow stopping server profiling',
+	templateSaves: 'Always allow saving pipeline templates',
+	templateDeletes: 'Always allow deleting pipeline templates',
+	logSaves: 'Always allow saving run logs',
+	sqlQueries: 'Always allow running SQL on pipeline databases',
 };
 
 /** The longest a card waits for one name lookup, in milliseconds. */
@@ -195,7 +206,7 @@ function afterStop(name: string): string {
 	return `Not done: the run was stopped, so ${name} was not called.`;
 }
 
-/** What Auto does to a run, in words, per method. */
+/** What the call does to a run, in words, per method. */
 function verbOf(name: string): string {
 	return name === 'restart' ? 'restart' : 'stop';
 }
@@ -205,9 +216,9 @@ function notOwned(name: string, run: string): string {
 	return `Not done: this conversation did not start the pipeline run ${run}, and in Auto mode the agent only stops or restarts its own runs. Call ask_user to ask the user whether to ${verbOf(name)} it: they can do it themselves, or switch to Ask first and approve it.`;
 }
 
-/** Auto's recheck found the run is no longer the one this conversation started. */
+/** The recheck before an unasked terminate or restart found the run is no longer the one this conversation started. */
 function noLongerOwned(name: string, run: string, why: string): string {
-	return `Not done: the pipeline run ${run} is no longer the one this conversation started (${why}), so Auto mode does not ${verbOf(name)} it. Call ask_user to ask the user whether to ${verbOf(name)} it.`;
+	return `Not done: the pipeline run ${run} is no longer the one this conversation started (${why}), so the agent does not ${verbOf(name)} it without asking. Call ask_user to ask the user whether to ${verbOf(name)} it.`;
 }
 
 // =============================================================================
@@ -279,8 +290,8 @@ const CLIENT_POLICY: ClientPolicy = {
 	getTaskPipeline: FREE,
 	addMonitor: never(MONITORS),
 	setEvents: FREE,
-	terminate: ask(async ([token], n) => ({ title: `Stop the pipeline run ${await n.run({ token: text(token) })}` }), { target: ([token]) => ({ token: typeof token === 'string' ? token : undefined }) }),
-	restart: ask(async ([o], n) => ({ title: `Restart the pipeline run ${await n.run(restartTarget(o))}`, detail: 'It stops and starts again with the pipeline sent.' }), { target: ([o]) => restartTarget(o) }),
+	terminate: ask(async ([token], n) => ({ title: `Stop the pipeline run ${await n.run({ token: text(token) })}` }), { grant: 'runStops', target: ([token]) => ({ token: typeof token === 'string' ? token : undefined }) }),
+	restart: ask(async ([o], n) => ({ title: `Restart the pipeline run ${await n.run(restartTarget(o))}`, detail: 'It stops and starts again with the pipeline sent.' }), { grant: 'runRestarts', target: ([o]) => restartTarget(o) }),
 	removeMonitor: never(MONITORS),
 	clearAllMonitors: never(MONITORS),
 
@@ -294,17 +305,17 @@ const CLIENT_POLICY: ClientPolicy = {
 	cprofileReport: FREE,
 	cprofileReportTree: FREE,
 	cprofileThreads: FREE,
-	cprofileStart: ask(async () => ({ title: 'Start profiling the server' })),
-	cprofileStop: ask(async () => ({ title: 'Stop profiling the server' })),
+	cprofileStart: ask(async () => ({ title: 'Start profiling the server' }), { grant: 'profilingStarts' }),
+	cprofileStop: ask(async () => ({ title: 'Stop profiling the server' }), { grant: 'profilingStops' }),
 
 	// Templates and saved logs, in the user's server-side store
 	getTemplate: FREE,
 	getAllTemplates: FREE,
 	getLog: FREE,
 	listLogs: FREE,
-	saveTemplate: ask(async ([o]) => ({ title: `Save the pipeline template ${field(o, 'templateId')}`, detail: 'A template with that id is overwritten.' })),
-	deleteTemplate: ask(async ([o]) => ({ title: `Delete the pipeline template ${field(o, 'templateId')}` })),
-	saveLog: ask(async () => ({ title: 'Save a run log to your store' })),
+	saveTemplate: ask(async ([o]) => ({ title: `Save the pipeline template ${field(o, 'templateId')}`, detail: 'A template with that id is overwritten.' }), { grant: 'templateSaves' }),
+	deleteTemplate: ask(async ([o]) => ({ title: `Delete the pipeline template ${field(o, 'templateId')}` }), { grant: 'templateDeletes' }),
+	saveLog: ask(async () => ({ title: 'Save a run log to your store' }), { grant: 'logSaves' }),
 	deleteLog: ask(async ([o]) => ({ title: `Delete the saved run log ${field(o, 'name')}` })),
 
 	// The store: every fs method
@@ -389,7 +400,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'billing.upgradeSubscription': never(BILLING),
 
 	// database: SQL on a database node of a pipeline the agent runs
-	'database.query': ask(async ([o]) => ({ title: 'Run SQL on a pipeline database', detail: brief(field(o, 'sql')) })),
+	'database.query': ask(async ([o]) => ({ title: 'Run SQL on a pipeline database', detail: brief(field(o, 'sql')) }), { grant: 'sqlQueries' }),
 	'database.beginTransaction': FREE,
 	'database.commit': FREE,
 	'database.rollback': FREE,
@@ -438,8 +449,8 @@ const USE_APP_CARD: CardBuilder = async ([appId], n) => ({ title: USE_APP_TEXT.t
 
 /** The tool acts: tools rated by their own name, not by a client method (delete_file skips the client; deploy_app's deploy.add is free). Their params are their target. */
 const TOOL_LIST: Readonly<Record<string, Rule>> = {
-	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' })),
-	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' })),
+	delete_file: ask(async ([path, type]) => ({ title: type === 'dir' ? `Delete the folder ${text(path)} and everything in it` : `Delete ${text(path)}`, detail: 'There is no undo.' }), { grant: 'fileDeletes' }),
+	deploy_app: ask(async ([appId], n) => ({ title: `Deploy ${await n.app(appId)} as a new version`, detail: 'The server builds it.' }), { grant: 'appDeploys' }),
 	// a read, or only waiting for text, changes nothing on the page, so it is free; a click, type, select or press asks
 	use_app: ask(USE_APP_CARD, { grant: 'appUse', freeWhen: ([, ...kinds]) => kinds.every((kind) => kind === 'wait_for') }),
 };
@@ -630,7 +641,7 @@ export class Approvals {
 		const rule = rate(act.name, act.params, true);
 		if (rule === FREE) return run;
 		if (rule.tier === 'never') throw new Error(blocked(act.name, rule.why));
-		// step: Auto, or a grant, lets an ask through; on a pipeline run only when this conversation started it
+		// step: Auto, or a grant, lets an ask through; on a pipeline run only when this conversation started it. Auto refuses any other run; a grant asks
 		const target = rule.target?.(act.params);
 		const own = (): RunRecord | undefined => (target ? this.o.runs?.owned(target) : undefined);
 		const unasked = (): (() => Promise<string>) | null => {
@@ -644,7 +655,7 @@ export class Approvals {
 		};
 		const now = unasked();
 		if (now) return now;
-		if (target && allowed(rule, this.prefs())) return refuseForeign();
+		if (target && this.prefs().mode === 'auto') return refuseForeign();
 
 		const built = await rule.card(act.params, this.names);
 		const card = target ? { ...built, detail: [built.detail, await this.startedBy(target)].filter(Boolean).join(' ') } : built;
@@ -652,19 +663,19 @@ export class Approvals {
 		// the settings may have changed while the names were looked up
 		const later = unasked();
 		if (later) return later;
-		if (target && allowed(rule, this.prefs())) return refuseForeign();
+		if (target && this.prefs().mode === 'auto') return refuseForeign();
 		if (!this.o.ask) throw new Error(noChat(card.title));
 
 		// without settings an Always click would save nothing
 		const asking = this.o.ask(rule.grant && this.o.settings ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
-		// a switch to Auto decides again: it approves the card, except for a run this conversation did not start, whose card waits for the user
-		let viaAuto: RunRecord | null = null;
+		// a switch to Auto, or the grant turned on, decides again: it approves the card, except for a run this conversation did not start, whose card waits for the user
+		let viaSettings: RunRecord | null = null;
 		const off = this.o.settings?.subscribe(() => {
 			if (!allowed(rule, this.prefs())) return;
 			if (target) {
 				const record = own();
 				if (!record) return;
-				viaAuto = record;
+				viaSettings = record;
 			}
 			asking.approve();
 		});
@@ -679,14 +690,14 @@ export class Approvals {
 		if (answer === 'deny') throw new Error(declined(card.title));
 		// a click that raced Stop runs nothing
 		if (answer === 'stopped' || this.o.signal.aborted) throw new Error(notAnswered(card.title));
-		// the user's own click runs as asked; Auto's approval rechecks the run first
-		return this.withPass(act, viaAuto && target ? this.rechecked(act.name, target, viaAuto, run) : run);
+		// the user's own click runs as asked; an approval by Auto or the grant rechecks the run first
+		return this.withPass(act, viaSettings && target ? this.rechecked(act.name, target, viaSettings, run) : run);
 	}
 
 	/**
-	 * Wraps an Auto-approved terminate or restart so it reads the run's status
-	 * again right before it calls the client, and refuses when the run is no
-	 * longer the one this conversation started.
+	 * Wraps a terminate or restart that Auto or its grant let through so it
+	 * reads the run's status again right before it calls the client, and refuses
+	 * when the run is no longer the one this conversation started.
 	 */
 	private rechecked(name: string, target: RunTarget, record: RunRecord, run: () => Promise<string>): () => Promise<string> {
 		return async () => {
