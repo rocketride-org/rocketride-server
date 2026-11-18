@@ -36,6 +36,7 @@ import { messageOf } from 'shared/modules/agent/toolkits/common';
 import type { AgentReport } from 'shared/modules/agent/turn';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
+import { getDocs } from '../docs';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
@@ -243,6 +244,27 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace, r
 		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
 		// step: the chat's live view of those copies; UI only, a run never reads it
 		watchFor: (conversationId) => watchPlace({ kind: 'chat', conversationId }),
+		// step: a conversation's chat is gone when its last tab closes or this team's editor area goes. A tab a
+		// layout change draws again keeps its document in Documents, so that is no close (the canvas tells the
+		// same apart, canvasDocument.ts). Documents notifies on destroy() before it drops its listeners
+		onChatClosed: (conversationId, closed) => {
+			const docs = getDocs();
+			if (!docs) {
+				closed();
+				return () => undefined;
+			}
+			const uri = `tool:agent/${conversationId}`;
+			let stop = (): void => undefined;
+			const check = (): void => {
+				if (docs.destroyed !== true && docs.getState().documents[uri]) return;
+				stop();
+				closed();
+			};
+			stop = docs.subscribe(check);
+			// the tab closed while the session loaded
+			check();
+			return stop;
+		},
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
 		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },
