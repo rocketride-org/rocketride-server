@@ -55,7 +55,7 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.models import resolve_run_permissions
-from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_NO_DEV_TEAM
+from ai.constants import CONST_NO_DEV_TEAM
 from rocketride import TASK_STATE
 
 # Only import for type checking to avoid circular import errors
@@ -69,11 +69,6 @@ if TYPE_CHECKING:
 # Profile page has a "Set as development team" button on each team. The exact
 # paths and the SDK alternative are in the troubleshooting error table.
 _NO_DEV_TEAM_MESSAGE = CONST_NO_DEV_TEAM
-
-# Shown when a development run comes from a waitlisted account. The hosted
-# backend gives such an account no development team on purpose, so this is
-# checked first: otherwise the user is told to pick a team they cannot have.
-_WAITLISTED_MESSAGE = CONST_ACCOUNT_WAITLISTED
 
 
 class TaskCommands(DAPConn):
@@ -150,8 +145,7 @@ class TaskCommands(DAPConn):
             # (same doctrine as the org IDOR fixes).
             args = request.get('arguments') or {}
             # A waitlisted account has no dev team either; name the real cause.
-            if getattr(self._account_info, 'waitlisted', False):
-                raise PermissionError(_WAITLISTED_MESSAGE)
+            self.refuse_if_waitlisted()
             team_id = self._account_info.devTeam
             # Billing must never guess: no dev team = no dev run.
             if not team_id:
@@ -270,8 +264,7 @@ class TaskCommands(DAPConn):
             # the run was billed/authorized under.
             args = request.get('arguments') or {}
             # A waitlisted account has no dev team either; name the real cause.
-            if getattr(self._account_info, 'waitlisted', False):
-                raise PermissionError(_WAITLISTED_MESSAGE)
+            self.refuse_if_waitlisted()
             team_id = self._account_info.devTeam
             # Billing must never guess: no dev team = no dev run.
             if not team_id:

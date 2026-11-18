@@ -131,18 +131,26 @@ class AccountCommands(DAPConn):
                 can_run = False
 
         # Compute tokens exist only on the hosted backend. A waitlisted account,
-        # or one with no org, has no balance to read.
+        # or one with no org, has no balance to read; ``reason`` says which, so
+        # the caller knows whether asking again can help. ``tokens`` is the raw
+        # ledger balance. ``canSpend`` is the backend's spend check, which may
+        # answer from a cache a few seconds old.
         if not cloud:
             credits: Dict[str, Any] = {'applies': False}
         else:
             credits = {'applies': True, 'canSpend': None, 'tokens': None}
-            if not waitlisted and org_id:
+            if waitlisted:
+                credits['reason'] = 'waitlisted'
+            elif not org_id:
+                credits['reason'] = 'noOrganization'
+            else:
                 try:
                     refusal = await account.check_spend(org_id)
                     balance = await account.get_credit_balance(org_id)
                     tokens = float(((balance or {}).get('balances') or {}).get('tokens', 0.0))
                     credits = {'applies': True, 'canSpend': refusal is None, 'tokens': tokens}
                 except Exception as exc:  # noqa: BLE001 - unknown, not "empty"
+                    credits['reason'] = 'readFailed'
                     self.debug_message(f'rrext_account_status: credit read failed ({type(exc).__name__})')
 
         # Variable names the caller's runs would see, never their values.

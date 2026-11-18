@@ -271,10 +271,12 @@ async def test_call_tool_soft_error_returns_normalized_result(fake_engine):
     ('message', 'error_type', 'hint'),
     [
         (
-            "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
-            "You'll get an email when the account is activated. You don't need to do anything else.",
+            "This account isn't active, so it can't run pipelines. If you just signed up, you'll get an email "
+            "when it's activated.",
             'AccountWaitlisted',
-            'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+            'Tell the user this message as written. Do not add that they only need to wait. An account that was '
+            'turned off is not activated by waiting. Nothing else about the account can be checked while it is not '
+            'active.',
         ),
         (
             'No development team is selected, and every pipeline you run needs one. In RocketRide, open Account > Profile and choose your development team. If no team is listed, ask a workspace admin to add you to one.',

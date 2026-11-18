@@ -25,7 +25,9 @@ HARD_EXC_NAMES = ('ConnectionError', 'AuthenticationException', 'TimeoutError')
 _ACCOUNT_REFUSALS = {
     CONST_ACCOUNT_WAITLISTED: (
         'AccountWaitlisted',
-        'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+        'Tell the user this message as written. Do not add that they only need to wait. An account that was '
+        'turned off is not activated by waiting. Nothing else about the account can be checked while it is not '
+        'active.',
     ),
     CONST_NO_DEV_TEAM: (
         'NoDevelopmentTeam',
