@@ -499,20 +499,34 @@ ENV_UI_DOMAIN = 'MCP_UI_DOMAIN'
 
 
 _HOST_LABEL = re.compile(r'(?!-)[a-z0-9-]{1,63}(?<!-)')
+# A browser parses a host whose last label is a number as an IPv4 address (the URL
+# standard's "ends in a number" rule), so such a host must be a dotted-quad address.
+_NUMERIC_LABEL = re.compile(r'[0-9]+|0x[0-9a-f]*')
 
 
 def _valid_host(host: str) -> bool:
-    """Whether ``host`` (lowercase, no brackets) is an IP address or a DNS hostname.
+    """Whether ``host`` (lowercase, no brackets) is a host a browser reads as written.
 
     ``urlsplit`` does not validate the host, so a value such as
-    ``https://widgets example.test`` would otherwise pass as an origin.
+    ``https://widgets example.test`` would otherwise pass as an origin. Accepted:
+    an IPv6 address without a scope ID, a dotted-quad IPv4 address, or an ASCII
+    DNS name whose last label is not a number. An internationalized name must be
+    given in its ``xn--`` form: Python's ``idna`` codec follows IDNA 2003, which
+    maps some names differently from browsers.
     """
-    try:
-        ipaddress.ip_address(host)
+    if ':' in host:
+        try:
+            return ipaddress.IPv6Address(host).scope_id is None
+        except ValueError:
+            return False
+    labels = host.split('.')
+    if _NUMERIC_LABEL.fullmatch(labels[-1]):
+        try:
+            ipaddress.IPv4Address(host)
+        except ValueError:
+            return False
         return True
-    except ValueError:
-        pass
-    return len(host) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in host.split('.'))
+    return len(host) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in labels)
 
 
 def _widget_domain(value: str) -> Optional[str]:
@@ -556,8 +570,8 @@ def _resolve_ui_domain() -> Optional[str]:
         # Name the variable, never the value: a malformed value can carry a credential
         # where a parser would not find user info to strip.
         logger.warning(
-            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback), '
-            'with no path, query or user info. No widget domain is sent.',
+            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback) '
+            'with an ASCII host name or IP address, and no path, query or user info. No widget domain is sent.',
             ENV_UI_DOMAIN,
         )
     return domain

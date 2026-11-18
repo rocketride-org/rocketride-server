@@ -363,6 +363,8 @@ def _domain_warnings(caplog):
     ('env', 'domain'),
     [
         ({'MCP_UI_DOMAIN': ' https://Widgets.Example.Test/ '}, 'https://widgets.example.test'),
+        ({'MCP_UI_DOMAIN': 'http://127.0.0.1:8080'}, 'http://127.0.0.1:8080'),  # http on loopback
+        ({'MCP_UI_DOMAIN': 'https://[::1]'}, 'https://[::1]'),
         ({'MCP_RESOURCE_IDENTIFIER': 'https://api.example.test/mcp'}, None),  # no fallback
         ({}, None),
     ],
@@ -384,6 +386,8 @@ def test_ui_domain_comes_only_from_mcp_ui_domain(monkeypatch, fake_web_server, c
         'https:/user:secret@widgets.example.test',  # parses as a path, so nothing strips the credential
         'https://[::1',  # unparsable: must not raise
         'https://widgets example.test',  # urlsplit accepts a space in the host
+        'https://[::1%eth0]',  # a scoped IPv6 address: browsers reject it
+        'https://256.256.256.256',  # ends in a number, so a browser reads it as a bad IPv4 address
     ],
 )
 def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web_server, caplog, value):
