@@ -183,7 +183,7 @@ private:
     /// 	the current entry. The tika thread signals to the instance
     /// 	thread when the current entry is processed.
     /// 	endFilterInstance() also sets the begin event, to stop the
-    /// 	thread; the thread sets the end event when it leaves.
+    /// 	thread; on that stop the thread sets the end event.
     //-----------------------------------------------------------------
     async::Event m_tikaBeginObjectEvent;
     async::Event m_tikaEndObjectEvent;
