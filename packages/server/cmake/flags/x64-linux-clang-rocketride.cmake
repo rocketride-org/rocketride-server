@@ -109,27 +109,26 @@ set(CMAKE_CXX_FLAGS_MSAN
     FORCE)
 
 # UndefinedBehaviour
-# vptr is off: the vcpkg crashpad has no typeinfo for its classes, so the vptr
-# check fails to link (undefined reference to typeinfo for crashpad::Settings).
 set(CMAKE_C_FLAGS_UBSAN
-    "${CMAKE_C_FLAGS_RELEASE} -fsanitize=undefined -fno-sanitize=vptr"
+    "${CMAKE_C_FLAGS_RELEASE} -fsanitize=undefined"
     CACHE STRING "Flags used by the C compiler during UndefinedBehaviourSanitizer builds."
     FORCE)
 set(CMAKE_CXX_FLAGS_UBSAN
-    "${CMAKE_CXX_FLAGS_RELEASE} -fsanitize=undefined -fno-sanitize=vptr"
+    "${CMAKE_CXX_FLAGS_RELEASE} -fsanitize=undefined"
     CACHE STRING "Flags used by the C++ compiler during UndefinedBehaviourSanitizer builds."
     FORCE)
 
-# Sanitize: AddressSanitizer and UndefinedBehaviourSanitizer in one build
-# (builder --cmake-config=Sanitize). vptr is off as in UBSAN. Recover is on for
-# ASan so that, with halt_on_error=0, one run reports every error instead of
-# stopping at the first.
+# Sanitize: the ASAN flags plus UndefinedBehaviourSanitizer, in one build
+# (builder --cmake-config=Sanitize). vptr is off: the vcpkg crashpad has no
+# typeinfo for its classes, so the vptr check fails to link (undefined reference
+# to typeinfo for crashpad::Settings). Recover is on for ASan so that, with
+# halt_on_error=0, one run reports every error instead of stopping at the first.
 set(CMAKE_C_FLAGS_SANITIZE
-    "${CMAKE_C_FLAGS_RELEASE} -fsanitize=address -fno-optimize-sibling-calls -fsanitize-address-use-after-scope -fno-omit-frame-pointer -g -O1 -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
+    "${CMAKE_C_FLAGS_ASAN} -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
     CACHE STRING "Flags used by the C compiler during Sanitize (ASan + UBSan) builds."
     FORCE)
 set(CMAKE_CXX_FLAGS_SANITIZE
-    "${CMAKE_CXX_FLAGS_RELEASE} -fsanitize=address -fno-optimize-sibling-calls -fsanitize-address-use-after-scope -fno-omit-frame-pointer -g -O1 -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
+    "${CMAKE_CXX_FLAGS_ASAN} -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
     CACHE STRING "Flags used by the C++ compiler during Sanitize (ASan + UBSan) builds."
     FORCE)
 

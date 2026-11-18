@@ -181,37 +181,15 @@ async function getDownloadSources(localHash, options = {}) {
 }
 
 /**
- * The build type of the engine a `server` block of state.json (or of a
- * manifest, its copy) describes.
- *
- * `engineBuildType` is written together with `buildHash`, when an engine
- * lands in the dist. `buildType` is the type the CMake tree is configured for;
- * it stands in when the first is missing. Neither one means Release, the
- * default type.
- *
- * @param {Object|undefined} server - The `server` block
- * @returns {string} The CMake build type, e.g. 'Release' or 'Sanitize'
- */
-function engineBuildType(server) {
-	return server?.engineBuildType || server?.buildType || 'Release';
-}
-
-/**
- * The first source whose manifest was built from this source and vcpkg, as
- * the requested build type.
+ * The first source whose manifest was built from this source and vcpkg.
  *
  * The cache's names carry only part of the hash, so the whole one is compared
  * here like any release's.
  *
- * @param {Array<Object>} sources - From getDownloadSources
- * @param {string} localHash - Content hash of the local server source
- * @param {string} localVcpkgVersion - The local vcpkg version
- * @param {string} cmakeConfig - The requested CMake build type
- * @param {Object} task - The running task, for its output
  * @returns {Promise<{available: boolean, match: Object|null}>} available: any
  *   source had a manifest; match: the source that fits, with its manifest
  */
-async function findPrebuilt(sources, localHash, localVcpkgVersion, cmakeConfig, task) {
+async function findPrebuilt(sources, localHash, localVcpkgVersion, task) {
 	let available = false;
 
 	for (const source of sources) {
@@ -227,15 +205,9 @@ async function findPrebuilt(sources, localHash, localVcpkgVersion, cmakeConfig, 
 		task.output = `${source.label} available`;
 		available = true;
 
-		if (manifest.server?.buildHash !== localHash || manifest.vcpkg?.version !== localVcpkgVersion) continue;
-
-		const releaseType = engineBuildType(manifest.server);
-		if (releaseType !== cmakeConfig) {
-			task.output = `${source.label} is a ${releaseType} engine, not ${cmakeConfig}`;
-			continue;
+		if (manifest.server?.buildHash === localHash && manifest.vcpkg?.version === localVcpkgVersion) {
+			return { available, match: { ...source, manifest } };
 		}
-
-		return { available, match: { ...source, manifest } };
 	}
 
 	return { available, match: null };
@@ -555,19 +527,25 @@ function makeDownloadAction(options = {}) {
 			const localVcpkgVersion = await vcpkg.getVcpkgVersion();
 			const cmakeConfig = options.cmakeConfig || 'Release';
 
-			// The engine in the dist is kept only when it is of the requested
-			// type too; any other type is compiled or downloaded below
 			if (
 				(await getState('server.buildHash')) === localHash &&
 				(await getState('vcpkg.version')) === localVcpkgVersion
 			) {
-				const builtType = engineBuildType(await getState('server'));
-				if (builtType === cmakeConfig) {
-					task.output = 'Server already built';
-					ctx.serverReady = true;
-					return;
+				// A downloaded engine is Release; a compiled one has the type the
+				// tree was configured for
+				const builtType =
+					(await getState('server.downloadHash')) === localHash
+						? 'Release'
+						: (await getState('server.buildType')) || 'Release';
+				if (builtType !== cmakeConfig) {
+					throw new Error(
+						`dist/server holds a ${builtType} engine built from these sources; ` +
+							`rerun with --force to rebuild it as ${cmakeConfig}`
+					);
 				}
-				task.output = `Build type changed (${builtType} -> ${cmakeConfig})`;
+				task.output = 'Server already built';
+				ctx.serverReady = true;
+				return;
 			}
 
 			if (options.nodownload) {
@@ -576,8 +554,14 @@ function makeDownloadAction(options = {}) {
 				return;
 			}
 
+			if (cmakeConfig !== 'Release') {
+				task.output = `Cached engines are Release builds; compiling ${cmakeConfig}`;
+				await setState('server.downloadHash', null);
+				return;
+			}
+
 			const sources = await getDownloadSources(localHash, options);
-			const { available, match } = await findPrebuilt(sources, localHash, localVcpkgVersion, cmakeConfig, task);
+			const { available, match } = await findPrebuilt(sources, localHash, localVcpkgVersion, task);
 
 			if (!available) {
 				task.output = 'No releases available - will compile';
@@ -596,7 +580,6 @@ function makeDownloadAction(options = {}) {
 
 			if ((await getState('server.downloadHash')) === releaseHash) {
 				task.output = 'Server already downloaded';
-				await setState('server.engineBuildType', cmakeConfig);
 				ctx.serverReady = true;
 				ctx.serverDownloaded = true;
 				return;
@@ -628,7 +611,6 @@ function makeDownloadAction(options = {}) {
 
 			task.output = `Downloaded server from ${matchedTag}`;
 			await setState('server.buildHash', releaseHash);
-			await setState('server.engineBuildType', cmakeConfig);
 			await setState('server.downloadHash', releaseHash);
 			// TEMPORARY: what the nodes shipped here were built from, which
 			// only the manifest says. Goes when the nodes get a distribution
@@ -668,6 +650,13 @@ function makeConfigureServerAction(options = {}) {
 			if (!options.force && (await isConfigured(cmakeConfig))) {
 				task.output = 'Already configured';
 				return;
+			}
+
+			// dist/server keeps the old type's engine until a compile replaces
+			// it, so a failed compile must not leave it marked as built
+			if (((await getState('server.buildType')) || 'Release') !== cmakeConfig) {
+				await setState('server.buildHash', null);
+				await setState('server.downloadHash', null);
 			}
 
 			await mkdir(BUILD_ROOT);
@@ -907,7 +896,6 @@ function makeCompileEngineAction(options = {}) {
 
 			// Save content hash after successful compilation
 			await setState('server.buildHash', ctx.serverSourceHash);
-			await setState('server.engineBuildType', cmakeConfig);
 			// A local compile supersedes any prior downloaded-engine marker;
 			// clear it so `server:test` doesn't read a stale `downloadHash` and
 			// wrongly skip the test block for a freshly-compiled engine.

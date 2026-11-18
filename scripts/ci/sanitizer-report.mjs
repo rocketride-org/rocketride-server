@@ -14,33 +14,67 @@
  * groups equal reports, and writes a Markdown summary to $GITHUB_STEP_SUMMARY
  * (to stdout when it is not set).
  *
+ * Reports of the same kind at the same location form one group. The location
+ * is the one the report names itself (its summary line) when that is in our
+ * code (OWN_CODE_DIRS); else the first frame in our code of the stack where
+ * the error happened; else the named one unless it is in the sanitizer
+ * runtime; else the first frame of that stack outside the runtime. The
+ * binary's name is never part of it, so one defect in code that several
+ * programs link (engtest, nodetest) is one group.
+ *
  * Usage: node scripts/ci/sanitizer-report.mjs <log dir>
  *
- * Exits 0 when there is no report, 1 when there is at least one, and 2 when the
- * directory does not exist. A file with output but no recognizable report
- * counts as one report of kind `other-output`, so a truncated report or a
- * sanitizer's own failure is never dropped.
+ * Exits 0 when there is no report, 1 when there is at least one, and 2 on a
+ * usage error or when the directory does not exist. A file that holds only
+ * sanitizer warnings gives reports of kind `warning`. A file with any other
+ * output but no recognizable report counts as one report of kind
+ * `other-output`, so a truncated report or a sanitizer's own failure is never
+ * dropped. Both kinds count like errors.
  */
 
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
-/** GitHub refuses a step summary over 1 MiB; this leaves room for the notes. */
-export const SUMMARY_LIMIT = 900 * 1024;
+/** GitHub does not show a step summary over 1 MiB (the limit is per step); this keeps a margin below it. */
+const SUMMARY_LIMIT = 900 * 1024;
+/** Bytes of the summary kept free for the closing note on what did not fit. */
+const NOTE_ROOM = 512;
 const EXAMPLE_LINES = 12;
 const MAX_LINE_LENGTH = 300;
+/** Where our own sources live, relative to the checkout root. */
+const OWN_CODE_DIRS = ['packages/server/', 'nodes/src/'];
+/**
+ * Allocator and interceptor functions of the sanitizer runtime. Without line
+ * tables their frames have no compiler-rt path, only the name.
+ */
+const RUNTIME_FUNCTIONS = (
+	'malloc calloc realloc reallocarray free aligned_alloc posix_memalign memalign valloc pvalloc malloc_usable_size ' +
+	'memmove memcpy memset memcmp memchr bcmp bzero ' +
+	'strlen strnlen wcslen strcpy strncpy stpcpy strcat strncat strcmp strncmp strcasecmp strncasecmp ' +
+	'strchr strrchr strstr strspn strcspn strpbrk strdup strndup'
+).split(' ');
 
 const ERROR_RE = /^==\d+==ERROR: (\w*Sanitizer): (.*)$/;
+const WARNING_RE = /^==\d+==WARNING: (.*)$/;
+const PID_LINE_RE = /^==\d+==/;
 const UBSAN_RE = /^(?:(.*?): )?runtime error: (.*)$/;
 const SUMMARY_RE = /^SUMMARY: (\w*Sanitizer): (\S+)(.*)$/;
 const FRAME_RE = /^\s*#\d+ 0x[0-9a-f]+ (.*)$/;
-// Frames in the sanitizer runtime itself: malloc, operator delete, interceptors
-const RUNTIME_FRAME_RE = /compiler-rt\/|libclang_rt\.|\bin __(?:interceptor|asan|ubsan|sanitizer)_/;
+// The binary a frame is in, with the offset into it: ` (/x/dist/server/engtest+0x2701032)`
+const MODULE_RE = /\s*\([^()]*\+0x[0-9a-f]+\)/g;
+// `in <function> <file:line>`, the order of a frame; the file is optional
+const FRAME_PLACE_RE = /^in (.+?)(?: (\S+:\d+(?::\d+)?))?$/;
+// Frames in the sanitizer runtime, by its path or its internal function names
+const RUNTIME_PATH_RE = /compiler-rt\/|libclang_rt\.|\bin _{2,3}(?:interceptor|asan|lsan|ubsan|sanitizer)(?:_|::)/;
+const RUNTIME_NAME_RE = new RegExp(
+	`(?:^|\\s)in (?:operator (?:new|delete)(?:\\[\\])?\\(|(?:${RUNTIME_FUNCTIONS.join('|')})(?:\\s|$))`
+);
 
 /**
  * Remove what differs between two runs of the same error: pids, addresses,
- * offsets into a binary, build ids, and the checkout root.
+ * offsets into a binary, build ids, `./` and `dir/../` in paths, and the
+ * checkout root.
  */
 export function normalize(text, root = '') {
 	let result = text
@@ -49,9 +83,64 @@ export function normalize(text, root = '') {
 		.replace(/==\d+==/g, '')
 		.replace(/0x[0-9a-f]+/g, '<addr>')
 		.replace(/\s+/g, ' ')
+		.replace(/\/(?:\.\/)+/g, '/')
 		.trim();
+	// Drop `dir/../` until none is left, so `a/b/../../c` becomes `c`
+	let previous;
+	do {
+		previous = result;
+		result = result.replace(/(^|[\s(/])(?!\.\.\/)[^\s()/]+\/\.\.\//g, '$1');
+	} while (result !== previous);
 	if (root) result = result.replaceAll(`${root.replace(/\/+$/, '')}/`, '');
 	return result;
+}
+
+/**
+ * A frame or summary location as `<file:line> in <function>`, normalized and
+ * without the binary's name; '' when it names neither a file nor a function.
+ */
+function place(text, root) {
+	const clean = normalize(text.replace(MODULE_RE, ''), root);
+	const frame = clean.match(FRAME_PLACE_RE);
+	return frame?.[2] ? `${frame[2]} in ${frame[1]}` : clean;
+}
+
+/** True when the file of a location is in our own code. */
+function isOwnCode(location) {
+	const file = location.startsWith('in ') ? '' : location.split(' ')[0];
+	return OWN_CODE_DIRS.some((dir) => file.startsWith(dir) || file.includes(`/${dir}`));
+}
+
+function isRuntime(text) {
+	return RUNTIME_PATH_RE.test(text) || RUNTIME_NAME_RE.test(text);
+}
+
+/** The frames of the first stack in a report: the stack where the error happened. */
+function firstStack(lines) {
+	const start = lines.findIndex((line) => FRAME_RE.test(line));
+	if (start < 0) return [];
+	const frames = [];
+	for (const line of lines.slice(start)) {
+		const frame = line.match(FRAME_RE);
+		if (!frame) break;
+		frames.push(frame[1]);
+	}
+	return frames;
+}
+
+/**
+ * The location of a report. `named` is the location the report names itself
+ * (its summary line, or a UBSan error's first line); `stack` holds the frames
+ * where the error happened.
+ */
+function locate(named, stack, root) {
+	const namedPlace = place(named, root);
+	if (isOwnCode(namedPlace)) return namedPlace;
+	const frames = stack.map((frame) => ({ frame, location: place(frame, root) }));
+	const own = frames.find(({ location }) => isOwnCode(location));
+	if (own) return own.location;
+	if (namedPlace && !isRuntime(named)) return namedPlace;
+	return frames.find(({ frame, location }) => location && !isRuntime(frame))?.location ?? namedPlace;
 }
 
 /** The first lines of a report, for the example in the summary. */
@@ -64,39 +153,49 @@ function excerpt(lines) {
 	return head;
 }
 
-/** The first stack frame outside the sanitizer runtime, normalized; '' when there is none. */
-function firstOwnFrame(lines, root) {
-	for (const line of lines) {
-		const frame = line.match(FRAME_RE);
-		if (frame && !RUNTIME_FRAME_RE.test(frame[1])) return normalize(frame[1], root);
-	}
-	return '';
-}
-
 /** Turn the lines of one report into its sanitizer, kind and location. */
 function toReport({ error, lines }, file, root) {
 	const summary = lines.map((line) => line.match(SUMMARY_RE)).find(Boolean);
 	const report = { file, lines: excerpt(lines) };
+	const stack = firstStack(lines);
 	if (!error) {
-		const ubsan = lines[0].match(UBSAN_RE);
+		const named = summary ? summary[3] : (lines[0].match(UBSAN_RE)[1] ?? '');
 		return {
 			...report,
 			sanitizer: 'UndefinedBehaviorSanitizer',
 			kind: summary ? summary[2] : 'runtime-error',
-			location: normalize(summary ? summary[3] : (ubsan[1] ?? ''), root),
+			location: locate(named, stack, root),
 		};
 	}
 	const sanitizer = error[1];
 	// A leak summary only counts bytes, so the allocating frame tells leaks apart
 	if (sanitizer === 'LeakSanitizer') {
-		return { ...report, sanitizer, kind: 'memory-leak', location: firstOwnFrame(lines, root) };
+		return { ...report, sanitizer, kind: 'memory-leak', location: locate('', stack, root) };
 	}
 	const kind = summary ? summary[2] : error[2].split(' ')[0];
-	let location = summary ? normalize(summary[3], root) : '';
-	// A summary that points into the runtime (operator delete, malloc) would put
-	// every report of that kind in one group: use the caller's frame instead.
-	if (!location || RUNTIME_FRAME_RE.test(location)) location = firstOwnFrame(lines, root) || location;
-	return { ...report, sanitizer, kind, location };
+	return { ...report, sanitizer, kind, location: locate(summary ? summary[3] : '', stack, root) };
+}
+
+/**
+ * The reports in output that holds sanitizer warnings and nothing else, one
+ * per `==PID==WARNING:` line with the lines after it; null for any other output.
+ */
+function warningReports(lines, file, root) {
+	if (!WARNING_RE.test(lines[0] ?? '')) return null;
+	if (lines.some((line) => PID_LINE_RE.test(line) && !WARNING_RE.test(line))) return null;
+	const blocks = [];
+	for (const line of lines) {
+		if (WARNING_RE.test(line)) blocks.push([line]);
+		else blocks.at(-1).push(line);
+	}
+	return blocks.map((block) => ({
+		file,
+		lines: excerpt(block),
+		sanitizer: 'unknown',
+		kind: 'warning',
+		// Sizes and descriptors in a warning differ between processes
+		location: normalize(block[0].match(WARNING_RE)[1], root).replace(/\b\d+\b/g, '<n>'),
+	}));
 }
 
 /**
@@ -114,17 +213,19 @@ export function parseLog(text, file, root = '') {
 		else if (blocks.length) blocks.at(-1).lines.push(line);
 	}
 	const reports = blocks.map((block) => toReport(block, file, root));
-	if (!reports.length && text.trim()) {
-		const meaningful = lines.filter((line) => line.trim() && !/^=+$/.test(line.trim()));
-		reports.push({
-			file,
-			lines: excerpt(meaningful),
-			sanitizer: 'unknown',
-			kind: 'other-output',
-			location: normalize(meaningful[0] ?? '', root),
-		});
-	}
-	return reports;
+	if (reports.length || !text.trim()) return reports;
+	const meaningful = lines.filter((line) => line.trim() && !/^=+$/.test(line.trim()));
+	return (
+		warningReports(meaningful, file, root) ?? [
+			{
+				file,
+				lines: excerpt(meaningful),
+				sanitizer: 'unknown',
+				kind: 'other-output',
+				location: normalize(meaningful[0] ?? '', root),
+			},
+		]
+	);
 }
 
 /** Group reports by sanitizer, kind and location; the largest groups come first. */
@@ -179,16 +280,20 @@ function exampleBlock(number, group) {
 export function renderSummary(groups, { limit = SUMMARY_LIMIT } = {}) {
 	if (!groups.length) return '## Sanitizer reports\n\nNo sanitizer reports.\n';
 	const total = groups.reduce((sum, group) => sum + group.count, 0);
+	const warnings = groups.filter((group) => group.kind === 'warning').reduce((sum, group) => sum + group.count, 0);
 	const fileCount = new Set(groups.flatMap((group) => [...group.files])).size;
 	const parts = [
 		'## Sanitizer reports\n\n',
 		`${total} report(s) in ${groups.length} group(s), from ${fileCount} file(s). ` +
 			'Reports of the same kind at the same location form one group.\n\n',
+		warnings
+			? `${warnings} report(s) are sanitizer warnings (kind \`warning\`), not errors; ` +
+				'they still fail this step.\n\n'
+			: '',
 		'| # | Reports | Sanitizer | Kind | Location | Files | Example file |\n',
 		'| ---: | ---: | --- | --- | --- | ---: | --- |\n',
 	];
-	// Room for the note on what did not fit
-	const budget = limit - 512;
+	const budget = limit - NOTE_ROOM;
 	let size = byteLength(parts.join(''));
 	const add = (text) => {
 		if (size + byteLength(text) > budget) return false;
@@ -222,7 +327,7 @@ export function renderSummary(groups, { limit = SUMMARY_LIMIT } = {}) {
 }
 
 /** Read every file in `dir` (sorted by name) and return their reports. */
-export async function collectReports(dir, root = '') {
+async function collectReports(dir, root = '') {
 	const entries = await fs.readdir(dir, { withFileTypes: true });
 	const names = entries
 		.filter((entry) => entry.isFile())
@@ -265,10 +370,30 @@ export async function main(args, { env = process.env, stdout = process.stdout, s
 		stdout.write(markdown);
 	}
 	if (!reports.length) return 0;
-	stderr.write(`${reports.length} sanitizer report(s) in ${groups.length} group(s) in ${dir}.\n`);
+	const warnings = reports.filter((report) => report.kind === 'warning').length;
+	const counted =
+		`${reports.length} sanitizer report(s)${warnings ? ` (${warnings} warning(s))` : ''} ` +
+		`in ${groups.length} group(s)`;
+	if (env.GITHUB_STEP_SUMMARY) {
+		// _sanitize.yaml uploads the log directory as the `sanitizer-reports` artifact
+		stderr.write(`::error::${counted}: see the job summary; the sanitizer-reports artifact has the files.\n`);
+	} else {
+		stderr.write(`${counted} in ${dir}.\n`);
+	}
 	return 1;
 }
 
-if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+/** True when Node started this file as the script, also through a symlink or junction. */
+function startedAsScript() {
+	if (!process.argv[1]) return false;
+	// import.meta.url holds the real path; argv[1] keeps the path as typed
+	try {
+		return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+	} catch {
+		return false;
+	}
+}
+
+if (startedAsScript()) {
 	process.exitCode = await main(process.argv.slice(2));
 }

@@ -2,11 +2,12 @@ name: Sanitizers
 
 # Builds the engine, its C++ test programs and the C++ nodes with ASan and
 # UBSan (`--cmake-config=Sanitize`, Linux only) and runs server:test and
-# nodes:test against them. Every builder call repeats
+# nodes:test against them. The build and test calls both carry
 # `--cmake-config=Sanitize --nodownload`: builder does not remember the build
-# type between calls, and a download would bring a Release engine and skip the
-# C++ tests. Nothing is packaged or uploaded besides the report files, so this
-# build never reaches the engine cache.
+# type between calls, and `--nodownload` skips the lookup of published engines
+# (all Release) so no network error can fail the build.
+# Nothing is packaged or uploaded besides the report files, so this build
+# never reaches the engine cache.
 
 permissions:
   contents: read
@@ -17,7 +18,8 @@ on:
 jobs:
   sanitize:
     name: Ubuntu 22.04
-    timeout-minutes: 150
+    # About 3x the 59 min of a local Sanitize build + tests (32 cores); a compiling Release run takes 42 min here (4 cores).
+    timeout-minutes: 180
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -36,21 +38,29 @@ jobs:
       # The sanitized engine already runs during the build (pip setup, test
       # dependencies), so the options are in place before any builder call.
       # halt_on_error=0 keeps a program running after a report, so one run shows
-      # every error. Each process that reports writes <log_path>.<pid>.
+      # every error. Leaks are not checked yet (detect_leaks=0): the embedded
+      # CPython and the JVM leave memory allocated at exit by design.
+      # ASan and UBSan share one runtime and one log_path, taken from the
+      # options read last (UBSAN_OPTIONS), so both options name the same path.
+      # Each process that reports writes all its reports to <log_path>.<pid>.
       - name: Set sanitizer options
         run: |
-          log_dir="$RUNNER_TEMP/sanitizer-logs"
-          mkdir -p "$log_dir"
+          report_dir="$RUNNER_TEMP/sanitizer-reports"
+          mkdir -p "$report_dir"
           {
-            echo "SANITIZER_LOG_DIR=$log_dir"
-            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:log_path=$log_dir/asan"
-            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$log_dir/ub"
+            echo "SANITIZER_REPORT_DIR=$report_dir"
+            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:log_path=$report_dir/report"
+            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$report_dir/report"
           } >> "$GITHUB_ENV"
 
+      # No git credentials are kept: every later git call reads a public repository.
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          persist-credentials: false
+      - name: Test the sanitizer report script
+        run: node --test scripts/ci/sanitizer-report.test.mjs
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
@@ -59,14 +69,16 @@ jobs:
         run: ./builder vcpkg:submodule-build
       # Reading the feed needs the credentials too. No API key: nothing is pushed.
       - name: Set up vcpkg nuget
+        env:
+          NUGET_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NUGET_EXE=$(./build/vcpkg/vcpkg fetch nuget | tail -n1)
           mono $NUGET_EXE sources add \
-            -Source "${{ env.NUGET_FEED_URL }}" \
+            -Source "$NUGET_FEED_URL" \
             -StorePasswordInClearText \
             -Name GitHubPackages \
-            -UserName "${{ env.VCPKG_NUGET_USER }}" \
-            -Password "${{ secrets.GITHUB_TOKEN }}" || true
+            -UserName "$VCPKG_NUGET_USER" \
+            -Password "$NUGET_PASSWORD" || true
 
       # The clang-18 that the regular Linux build installs (so the vcpkg binary
       # cache matches), plus llvm-symbolizer for file and line in the reports and
@@ -96,12 +108,11 @@ jobs:
       - name: Build
         run: ./builder server:build nodes:build --cmake-config=Sanitize --nodownload --verbose --autoinstall --system-compiler
 
-      # ROCKETRIDE_APIKEY and UV_LINK_MODE as in the Test step of _build.yaml.
+      # ROCKETRIDE_APIKEY as in the Test step of _build.yaml.
       # No database, S3 or Azure services: those suites skip without them.
       - name: Test
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
-          UV_LINK_MODE: copy
         run: ./builder server:test nodes:test --cmake-config=Sanitize --nodownload --verbose ${{ vars.CI_TEST_SEQUENTIAL == 'true' && '--sequential' || '' }} --autoinstall --system-compiler
 
       # The test servers' side of a build or test failure, as in _build.yaml.
@@ -123,17 +134,17 @@ jobs:
 
       # Under halt_on_error=0 the programs exit 0 after a report, so this step is
       # what fails the job: it exits 1 when any report was written.
-      - name: Sanitizer reports
-        if: always()
-        run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_LOG_DIR"
+      - name: Fail on sanitizer reports
+        if: always() && env.SANITIZER_REPORT_DIR != ''
+        run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_REPORT_DIR"
 
       # storage-cleanup.yml deletes artifacts older than 3 days; the job summary
       # keeps the grouped reports for as long as the run.
       - name: Upload sanitizer reports
-        if: always() && env.SANITIZER_LOG_DIR != ''
+        if: always() && env.SANITIZER_REPORT_DIR != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sanitizer-reports
-          path: ${{ env.SANITIZER_LOG_DIR }}
+          path: ${{ env.SANITIZER_REPORT_DIR }}
           if-no-files-found: ignore
           retention-days: 3

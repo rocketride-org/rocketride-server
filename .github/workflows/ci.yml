@@ -91,19 +91,26 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
-            # What the sanitizer job builds and how it builds it. The node
-            # patterns go by file type, so a new C++ node needs no edit here.
+            # What the sanitizer job builds, how it builds and runs it, and
+            # how it reports. The node patterns go by file type, so a new C++
+            # node needs no edit here. task_engine.py holds the environment
+            # allowlist that keeps the sanitizer options in task processes.
             cpp:
               - 'packages/server/**'
               - 'nodes/**/*.{cpp,hpp,h,c}'
               - 'nodes/**/CMakeLists.txt'
-              - 'scripts/build.js'
-              - 'scripts/lib/cmake.js'
-              - 'scripts/compiler-unix.sh'
               - 'packages/vcpkg/**'
+              - 'scripts/build.js'
+              - 'scripts/compiler.js'
+              - 'scripts/compiler-unix.js'
+              - 'scripts/compiler-unix.sh'
+              - 'scripts/lib/cmake.js'
+              - 'scripts/lib/toolchain.js'
               - 'nodes/scripts/node-build.js'
+              - 'nodes/scripts/tasks.js'
+              - 'packages/ai/src/ai/modules/task/task_engine.py'
               - '.github/workflows/_sanitize.yaml'
-              - 'scripts/ci/sanitizer-report.mjs'
+              - 'scripts/ci/**'
       # A file counts as `outside` unless it sits in a TypeScript-only area:
       # with predicate-quantifier 'every' it must match all patterns, so it
       # must match '**' and none of the exclusions. No Python or C++ suite
@@ -230,13 +237,14 @@ jobs:
 
   # ---------------------------------------------------------------------------
   #  Sanitizers — the engine, its C++ test programs and the C++ nodes built
-  #  with ASan and UBSan, then server:test and nodes:test against them. Runs
-  #  on pull requests that change C++ code (`cpp` above) and on manual runs,
-  #  never on push: a red CI on develop would hold back the prerelease.
-  #  Pull requests qualify on the same bases where the build job runs its
-  #  tests (the middle of a stack does not, unless labelled ci:test).
-  #  Not in CI OK's needs: it reports sanitizer errors without blocking
-  #  merges yet.
+  #  with ASan and UBSan, then server:test and nodes:test against them.
+  #  Opt-in while the engine still has known sanitizer reports: a pull request
+  #  that changes C++ code (`cpp` above) runs it only with the ci:sanitize
+  #  label. Like ci:test, the label is read when the pull request is opened or
+  #  pushed to, so add the label, then push. Manual runs always run it; push,
+  #  schedule and the merge queue never do (a red CI on develop would hold
+  #  back the prerelease). Not in CI OK's needs: it reports sanitizer errors
+  #  without blocking merges.
   # ---------------------------------------------------------------------------
   sanitize:
     name: Sanitizers (ASan + UBSan)
@@ -246,14 +254,11 @@ jobs:
       needs.init.result == 'success' &&
       (github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && needs.changes.outputs.cpp == 'true' &&
-      (contains(fromJSON('["develop", "stage", "main"]'), github.event.pull_request.base.ref) ||
-      startsWith(github.event.pull_request.base.ref, 'release/') ||
-      contains(github.event.pull_request.labels.*.name, 'ci:test'))))
+      contains(github.event.pull_request.labels.*.name, 'ci:sanitize')))
     uses: ./.github/workflows/_sanitize.yaml
     permissions:
       contents: read
       packages: read
-    secrets: inherit
 
   # CodeQL: replaced by GitHub's "Default setup" — managed in repo Settings →
   # Code security. Scans Python, JavaScript/TypeScript (and C/C++ via

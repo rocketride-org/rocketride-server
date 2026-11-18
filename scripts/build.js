@@ -284,8 +284,8 @@ Options:
   --arch=arm|intel    Target architecture (macOS cross-compile)
   --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
-  --cmake-config=Release|RelWithDebInfo|Sanitize  C++ build type (default: Release); repeat it on every call.
-                      Sanitize = ASan + UBSan, Linux only; use with --nodownload
+  --cmake-config=TYPE C++ build type (default: Release); repeat it on every call
+                      (TYPE: Release|RelWithDebInfo|Sanitize; Sanitize = ASan + UBSan, Linux only)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message

@@ -175,18 +175,22 @@ engine, its test programs (`aptest`, `engtest`, `nodetest`) and the C++ nodes.
 | `Sanitize` | **Linux only.** ASan and UBSan in one build; builder rejects it on other platforms |
 
 - builder does not remember the type between calls. Every call that builds or
-  tests C++ code repeats it — the build call **and** the test call — or parts of
-  the tree are rebuilt as `Release`.
+  tests C++ code repeats it — the build call **and** the test call. A call
+  without it asks for `Release`: it stops at the engine check below, or
+  rebuilds parts of the tree as `Release`.
 - The engine's "already built" check compares the sources **and** the type.
-  When the engine in `dist/server` was built as another type, the build call
-  builds it again as the requested type; `--force` is not needed.
-- builder downloads only an engine of the requested type. The published
-  engines are all `Release`, so any other type always compiles. `--nodownload`
-  is optional there: it skips looking up the published engines, which cannot
-  match, so a network or GitHub error during that lookup cannot fail the
-  build. Pass it in CI for that reason.
+  When `dist/server` holds an engine built from the same sources as another
+  type, builder stops and says to rerun with `--force`, which rebuilds it as
+  the requested type. After a source change the build call rebuilds the engine
+  as the requested type by itself.
+- Only a `Release` build looks up and downloads the published engines: they
+  are all `Release`, so any other type compiles. CI passes `--nodownload` as
+  well, so the job makes no network lookup even without this rule.
 
 #### Sanitizer build (`Sanitize`)
+
+A `Sanitize` engine is for tests only: never deploy it, and never run untrusted
+pipelines on it.
 
 A `Sanitize` build needs these variables in **every** call, the build call too
 (the build already runs the new engine, for example to set up pip). The report
@@ -194,26 +198,36 @@ directory must exist and its path must be absolute:
 
 ```bash
 mkdir -p "$PWD/sanitizer-reports"
-export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:log_path=$PWD/sanitizer-reports/asan"
-export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$PWD/sanitizer-reports/ub"
+export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:log_path=$PWD/sanitizer-reports/report"
+export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$PWD/sanitizer-reports/report"
+export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
 export RR_SUBPROCESS_ENV="ASAN_* UBSAN_*"
 
 ./builder server:build --cmake-config=Sanitize --nodownload
 ./builder server:test --cmake-config=Sanitize --nodownload
 ./builder nodes:test --cmake-config=Sanitize --nodownload
+
+node scripts/ci/sanitizer-report.mjs "$PWD/sanitizer-reports"
 ```
 
 - `halt_on_error=0`: a program keeps running after a report, so one run shows
-  every error. Each report goes to `<log_path>.<pid>`.
+  every error.
+- `log_path`: ASan and UBSan share one runtime, so both options name the same
+  prefix, and each process that reports writes all its reports to
+  `<log_path>.<pid>`.
+- `ASAN_SYMBOLIZER_PATH`: the path to `llvm-symbolizer`, which adds file and
+  line to the reports. The apt `llvm-18` package puts no unversioned
+  `llvm-symbolizer` on `PATH`.
 - `RR_SUBPROCESS_ENV`: the engine runs each task in its own engine process and
   passes it only an allowlist of variables. A trailing `*` passes every variable
   with that prefix, so these processes keep the sanitizer options.
-- The exit code stays `0` after a report under `halt_on_error=0`. Count the
-  files in the report directory: any file there is a report.
-- Reports show file and line only when `llvm-symbolizer` is on `PATH`.
+- The exit code stays `0` after a report under `halt_on_error=0`.
+  `node scripts/ci/sanitizer-report.mjs <dir>` counts and groups the reports in
+  the directory and exits `1` when there is any.
 
-CI runs this build and both test calls in a separate job, on pull requests that
-change C++ code and on manual runs; the job fails when any report file appears.
+CI runs this build and these tests in a separate job, on pull requests that
+change C++ files and carry the `ci:sanitize` label (add the label, then push),
+and on manual runs. The job is not part of `CI OK` yet.
 
 ---
 
