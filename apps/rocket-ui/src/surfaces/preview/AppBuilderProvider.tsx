@@ -48,8 +48,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs } from 'shell';
-import { appPartition } from 'shell/src/workspace/workspaceStore';
+import { useShellConnection, ConnectionManager, scopedPrefs } from 'shell';
 import { AppBuilderScreen } from 'shared/tools/appdev/views';
 import type { AppSummary } from 'shared/tools/appdev';
 import { readAppPackage, scanApps } from './session/appStore';
@@ -59,6 +58,7 @@ import { createWebAppBuilderHost } from './session/webHost';
 import { createDevPreviewPage } from './session/devPreviewPage';
 import { WebDevSession } from './session/devSession';
 import { answerPreviewMessage } from './session/previewHandshake';
+import { appPrefsStore } from '../devtools/devToolPins';
 
 // =============================================================================
 // STYLES
@@ -321,10 +321,9 @@ const AppBuilderProvider: React.FC<{
 	// The app's OWN partition, `appdev`-namespaced so these cannot collide
 	// with the app's runtime prefs. Same mechanism as every other pref —
 	// this host used to keep its own localStorage bag while VS Code kept a
-	// Memento one.
-	const prefsMirror = useMemo(() => createMirroredPrefsStore(ConnectionManager.getInstance(), appPartition(appId)), [appId]);
-	useEffect(() => prefsMirror.dispose, [prefsMirror]);
-	const appdevPrefs = useMemo(() => scopedPrefs(prefsMirror.store, 'appdev'), [prefsMirror]);
+	// Memento one. The realm hub's mirror, not one per mount: StrictMode's
+	// effect replay disposed a per-mount mirror before it ever hydrated.
+	const appdevPrefs = useMemo(() => scopedPrefs(appPrefsStore(appId), 'appdev'), [appId]);
 
 	// ── The host adapter ─────────────────────────────────────────────────
 	const host = useMemo(() => {
