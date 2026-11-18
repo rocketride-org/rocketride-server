@@ -129,6 +129,14 @@ class AccountCommands(DAPConn):
                 can_run = True
             except PermissionError:
                 can_run = False
+            # A run is billed to the org that owns the dev team, which execute
+            # resolves the same way; for an identity whose dev team sits outside
+            # its own org (sys.admin), that is not the identity's org.
+            if not waitlisted:
+                try:
+                    org_id = await self.resolve_org_for_team(team_id) or org_id
+                except PermissionError:
+                    pass
 
         # Compute tokens exist only on the hosted backend. A waitlisted account,
         # or one with no org, has no balance to read; ``reason`` says which, so

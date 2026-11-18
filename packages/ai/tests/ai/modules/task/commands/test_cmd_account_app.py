@@ -134,6 +134,7 @@ def _status_conn(monkeypatch, *, can_run=True, credit_error=False, **identity):
     conn.build_response = MagicMock(side_effect=lambda req, body=None: {'body': body})
     conn.debug_message = MagicMock()
     conn.verify_team_permission = MagicMock(side_effect=None if can_run else PermissionError('denied'))
+    conn.resolve_org_for_team = AsyncMock(return_value=fields['organization']['id'] if fields['organization'] else '')
     # The account commands' waitlist gate must not apply to this one.
     conn.require_zitadel_auth = MagicMock(side_effect=PermissionError('not active'))
     return conn, reads
@@ -172,6 +173,19 @@ async def test_account_status_answers_for_the_caller_only(monkeypatch, edition):
         'sk-canary',
     ):
         assert leaked not in text
+
+
+@pytest.mark.asyncio
+async def test_account_status_reads_the_org_that_owns_the_dev_team(monkeypatch):
+    """Credits and variables come from the org a run would bill, as execute resolves it."""
+    conn, reads = _status_conn(monkeypatch)
+    conn.resolve_org_for_team = AsyncMock(return_value='org-9')
+
+    await AccountCommands.on_rrext_account_status(conn, {'arguments': {}})
+
+    conn.resolve_org_for_team.assert_awaited_once_with('team-1')
+    reads.check_spend.assert_awaited_once_with('org-9')
+    reads.get_merged_env.assert_awaited_once_with(user_id='user-1', org_id='org-9', team_id='team-1')
 
 
 @pytest.mark.asyncio
