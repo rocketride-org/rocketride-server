@@ -56,20 +56,20 @@ function handler(name: string): string {
 	return SOURCE.slice(start, next < 0 ? undefined : start + 1 + next);
 }
 
-test('T56 handleLogout awaits appRoot.teardownAll(3000) before EVERY cm.logout() (the session-locked branch and the home branch)', () => {
+test('T56 handleLogout awaits a FINAL appRoot.teardownAll(3000, { final: true }) before EVERY cm.logout() (G4: the root stays closed through the logout clear) (the session-locked branch and the home branch)', () => {
 	const body = handler('handleLogout');
 	const logouts = [...body.matchAll(/cm\.logout\(\)/g)].map((m) => m.index!);
 	assert.equal(logouts.length, 2, 'the two cm.logout() calls');
-	const teardowns = [...body.matchAll(/teardownAll\(\s*3000\s*\)/g)].map((m) => m.index!);
+	const teardowns = [...body.matchAll(/teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)/g)].map((m) => m.index!);
 	assert.ok(teardowns.length >= 1, 'handleLogout calls teardownAll(3000)');
-	assert.match(body, /await[^;]*teardownAll\(\s*3000\s*\)|teardownAll\(\s*3000\s*\)\s*\.then|teardownAll\(\s*3000\s*\)\s*\.finally/, 'and waits for it');
+	assert.match(body, /await[^;]*teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)|teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)\s*\.then|teardownAll\(\s*3000\s*,\s*\{\s*final:\s*true\s*\}\s*\)\s*\.finally/, 'and waits for it');
 	for (const at of logouts) assert.ok(teardowns.some((t) => t < at), `a teardownAll(3000) precedes the cm.logout() at ${at}`);
 });
 
-test('T56 handleBackToHome is async and awaits teardownAll(1500) before cm.logout(), and only then navigates', () => {
+test('T56 handleBackToHome is async and awaits a FINAL teardownAll(1500, { final: true }) before cm.logout(), and only then navigates', () => {
 	const body = handler('handleBackToHome');
 	assert.match(body, /async/, 'handleBackToHome is async');
-	const teardown = body.search(/await[^;]*teardownAll\(\s*1500\s*\)/);
+	const teardown = body.search(/await[^;]*teardownAll\(\s*1500\s*,\s*\{\s*final:\s*true\s*\}\s*\)/);
 	const logout = body.indexOf('cm.logout()');
 	const navigate = body.indexOf('window.location.href');
 	assert.ok(teardown >= 0, 'awaits teardownAll(1500)');

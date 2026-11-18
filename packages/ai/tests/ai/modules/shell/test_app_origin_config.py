@@ -40,7 +40,7 @@ import pytest
 import ai.modules.shell as shell_pkg
 
 from . import isolation_support as sup
-from .isolation_support import b64u, need, new_key
+from .isolation_support import b64u, key_entry, need, new_key
 
 
 def _ao():
@@ -712,13 +712,28 @@ def test_t106_a_valid_alias_key_starts_and_is_never_printed(isolation_env):
     assert repr(key)[2:20] not in repr(cfg)
 
 
+@pytest.mark.parametrize('position', ['first', 'second'])
+def test_g4_an_alias_key_equal_to_a_frame_token_key_refuses_start(position, isolation_env):
+    """G4 (security LOW): the alias key must not be any of the frame-token keys (one secret, two purposes)."""
+    shared, other = new_key(), new_key()
+    keys = (
+        [key_entry('k1', shared), key_entry('k2', other)]
+        if position == 'first'
+        else [key_entry('k1', other), key_entry('k2', shared)]
+    )
+    isolation_env.set(RR_APP_FRAME_TOKEN_KEYS=','.join(keys), RR_APP_ALIAS_KEY=b64u(shared))
+    _refuses('RR_APP_ALIAS_KEY')
+
+
 @pytest.mark.parametrize('value', [None, '', 'short', '***'], ids=['missing', 'empty', 'short', 'garbage'])
 def test_t106_under_off_the_alias_key_is_ignored(value, monkeypatch, tmp_path, clean_caches):
     """T106: under ``off`` nothing else is read, so a bad or absent alias key never stops startup (the golden stays)."""
     sup.apply_env(monkeypatch, {})
     if value is not None:
         monkeypatch.setenv('RR_APP_ALIAS_KEY', value)
-    cfg = need(_ao(), 'load_isolation_config')({'RR_APP_ISOLATION': 'off', **({'RR_APP_ALIAS_KEY': value} if value is not None else {})})
+    cfg = need(_ao(), 'load_isolation_config')(
+        {'RR_APP_ISOLATION': 'off', **({'RR_APP_ALIAS_KEY': value} if value is not None else {})}
+    )
     assert cfg.mode == 'off'
     assert not getattr(cfg, 'alias_key', b'')
     _validate()  # a no-op under off
@@ -771,7 +786,9 @@ def test_t104_a_complete_marker_starts(isolation_env):
         {'publicPath': 'https://cdn.example/_rr/'},
         {'publicPath': 7},
     ],
-    ids=lambda c: next(iter(c)) + '=' + (str(next(iter(c.values())))[:24] if next(iter(c.values())) is not None else 'absent'),
+    ids=lambda c: (
+        next(iter(c)) + '=' + (str(next(iter(c.values())))[:24] if next(iter(c.values())) is not None else 'absent')
+    ),
 )
 def test_t104_an_invalid_chunk_list_or_public_path_refuses_start(changes, isolation_env):
     """T104: ``chunks`` is a list of at most 512 unique ``_GUEST_ASSET`` names, none equal to ``guest``; ``publicPath`` is ``/_rr/``."""
