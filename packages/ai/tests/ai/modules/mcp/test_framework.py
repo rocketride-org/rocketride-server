@@ -104,8 +104,8 @@ def test_normalize_error_uses_dap_failure_message_when_present():
 
 
 _WAITLISTED = (
-    "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
-    "You'll get an email when the account is activated. You don't need to do anything else."
+    "This account isn't active, so it can't run pipelines. If you just signed up, you'll get an email when "
+    "it's activated."
 )
 _NO_DEV_TEAM = 'No development team is selected, and every pipeline you run needs one. In RocketRide, open Account > Profile and choose your development team. If no team is listed, ask a workspace admin to add you to one.'
 
@@ -116,7 +116,9 @@ _NO_DEV_TEAM = 'No development team is selected, and every pipeline you run need
         (
             _WAITLISTED,
             'AccountWaitlisted',
-            'Tell the user this message as written. Nothing else about the account can be checked until it is activated.',
+            'Tell the user this message as written. Do not add that they only need to wait. An account that was '
+            'turned off is not activated by waiting. Nothing else about the account can be checked while it is not '
+            'active.',
         ),
         (
             _NO_DEV_TEAM,

@@ -62,6 +62,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     from ai.modules.task.task_conn import TaskConn
 
     conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
+    conn.refuse_if_waitlisted = MethodType(TaskConn.refuse_if_waitlisted, conn)
     # Identity context builder (TaskConn.request_context) — the file store is
     # mocked in these tests, so a stub ctx suffices.
     conn.request_context = MagicMock(return_value=SimpleNamespace(account_info=account_info))
@@ -157,33 +158,33 @@ async def test_on_execute_refuses_without_a_dev_team():
     server.start_task.assert_not_awaited()
 
 
-_WAITLISTED = (
-    "This RocketRide account is on the waitlist, so it can't run pipelines yet. "
-    "You'll get an email when the account is activated. You don't need to do anything else."
-)
-
-
-def _waitlisted_account(dev_team):
-    account = _account_info(dev_team=dev_team)
-    account.waitlisted = True
-    return account
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize('dev_team', ['', 'team-1'])
-async def test_on_execute_refuses_a_waitlisted_account_before_the_team_check(dev_team):
-    """A waitlisted account is told it is waitlisted, not that it lacks a team
-    (the hosted backend gives it no team on purpose), before any permission
-    check, plan check or task start.
+@pytest.mark.parametrize(
+    ('handler', 'request_'),
+    [
+        (TaskCommands.on_execute, {'arguments': {'pipeline': {'components': []}}}),
+        (TaskCommands.on_launch, {'arguments': {}}),
+    ],
+)
+async def test_a_waitlisted_account_is_refused_before_the_team_check(handler, request_, dev_team):
+    """Both run commands name the real cause (the hosted backend gives a
+    waitlisted account no team on purpose), before any permission check,
+    plan check or task start.
     """
     server = MagicMock()
     server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_waitlisted_account(dev_team), server=server)
+    account = _account_info(dev_team=dev_team)
+    account.waitlisted = True
+    conn = _make_conn(account_info=account, server=server)
 
     with pytest.raises(PermissionError) as excinfo:
-        await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+        await handler(conn, request_)
 
-    assert str(excinfo.value) == _WAITLISTED
+    assert str(excinfo.value) == (
+        "This account isn't active, so it can't run pipelines. If you just signed up, you'll get an email when "
+        "it's activated."
+    )
     conn.verify_team_permission.assert_not_called()
     conn.verify_plans.assert_not_called()
     server.start_task.assert_not_awaited()
@@ -449,22 +450,6 @@ async def test_on_launch_refuses_without_a_dev_team():
         await TaskCommands.on_launch(conn, {'arguments': {}})
 
     _assert_says_how_to_set_a_dev_team(str(excinfo.value))
-    conn.verify_team_permission.assert_not_called()
-    server.start_task.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize('dev_team', ['', 'team-1'])
-async def test_on_launch_refuses_a_waitlisted_account_before_the_team_check(dev_team):
-    """The launch path names the waitlist too, before the team and permission checks."""
-    server = MagicMock()
-    server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_waitlisted_account(dev_team), server=server)
-
-    with pytest.raises(PermissionError) as excinfo:
-        await TaskCommands.on_launch(conn, {'arguments': {}})
-
-    assert str(excinfo.value) == _WAITLISTED
     conn.verify_team_permission.assert_not_called()
     server.start_task.assert_not_awaited()
 

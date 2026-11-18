@@ -21,10 +21,13 @@ is not offered (see its entry). This page is the full reference; the
   `BadRequest` (bad or missing arguments), `Timeout` (one engine call ran past
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
-  `UnknownTool`, and `AccountWaitlisted` or `NoDevelopmentTeam` when a run is
-  refused for an account reason. Retrying does not help those two: for a
-  waitlisted account the hint says to relay the message, and for a missing
-  team it says to call [`account_status`](#account_status). Hard failures (lost engine connection, auth) surface
+  `UnknownTool`, and `AccountWaitlisted` or `NoDevelopmentTeam` when a run, a
+  deployment or an account command is refused for an account reason.
+  `AccountWaitlisted` means the account isn't active: a new sign-up still on
+  the waitlist, an account that was turned off, or a revoked key. Retrying
+  does not help those two: for an inactive account the hint says to relay the
+  message, and for a missing team it says to call
+  [`account_status`](#account_status). Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
@@ -119,21 +122,26 @@ node on the connected engine are listed.
 
 Say whether the caller's account can run pipelines right now and, if it can't,
 what is missing and what the user should do. Use it when the user asks whether
-their account can run pipelines, or about its waitlist status, development team,
-compute credits or saved model keys; before their first run in a conversation;
-and when a run is refused with `NoDevelopmentTeam`, for compute credits or for a
-denied permission. After a run refused with `AccountWaitlisted`, relay that
-message instead. It already says everything that can be known.
+their account can run pipelines, or whether it is active, or about its
+development team, compute credits or saved model keys; before their first run
+in a conversation; and when `run_pipeline` or `run_dropper_pipe` is refused with
+`NoDevelopmentTeam`, with "Out of credits" or with a denied `task.control`
+permission. After a refusal with `AccountWaitlisted`, relay that message
+instead. It already says everything that can be known.
 
 - **Parameters:** none.
 - **Returns:** `{ok, ready, edition, summary, checks}`. `edition` is `cloud` or
-  `self-hosted`. `checks` holds four rows in this order, `access` (the
-  waitlist), `team` (the development team runs are billed to), `credits`
+  `self-hosted`. `checks` holds four rows in this order, `access` (whether
+  the account is active), `team` (the development team runs are billed to), `credits`
   (compute credits, cloud only) and `model_key` (saved AI model keys),
   each `{id, ok, detail, next_step?}`. `ok` is `null` when a check could not
-  run because a read failed. For a waitlisted account, the `access` row is
-  `ok: false` and the other three rows are `ok: null`. `credits` adds `tokens`,
-  the balance, when it is above zero. `ready` is true when `access`, `team`
+  run because a read failed, and then the row says to ask again. For an
+  inactive account, the `access` row is `ok: false` and the other three rows
+  are `ok: null`. A cloud account that isn't part of a workspace has a
+  `credits` row with `ok: null` and no retry step. `credits` adds `tokens`, the
+  raw balance, when it is above zero; the detail rounds it for display. A
+  refusal from the spend check next to a positive balance is reported as
+  `ok: null`, since the spend check can answer from a cache a few seconds old. `ready` is true when `access`, `team`
   and `credits` are all `true`. `model_key` is advice and carries
   `blocking: false`, because a pipeline without a model node needs no key.
   A provider counts as saved when any variable name the catalog suggests
@@ -148,7 +156,7 @@ message instead. It already says everything that can be known.
   if no key is saved, and its detail says so. `summary` names everything that
   stops a run, or says the account is ready.
 - **Notable:** it answers only for the account behind the credential and takes
-  no arguments, and it answers a waitlisted account too. It reads variable
+  no arguments, and it answers an inactive account too. It reads variable
   names to find saved model keys, and its result holds no variable name, key
   value or id. `summary`, `detail` and `next_step` are written for the user
   and can be relayed as they are. The tool's description asks the agent to
