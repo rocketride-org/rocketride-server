@@ -332,15 +332,32 @@ def _busy_delay(attempt: int) -> float:
     return delay * (0.5 + random.random() / 2)
 
 
+def _acquire_by(gate: threading.BoundedSemaphore, deadline: float) -> bool:
+    """Take a slot before ``deadline`` (a monotonic time), or none: a slot that comes late is given back."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or not gate.acquire(timeout=remaining):
+        return False
+    if time.monotonic() >= deadline:
+        gate.release()
+        return False
+    return True
+
+
 async def _acquire_async(gate: threading.BoundedSemaphore, deadline: Optional[float]) -> bool:
-    """Take a slot without blocking the event loop, by ``deadline`` (a monotonic time) or
-    with no limit. Polls, so a cancelled wait holds nothing.
+    """Take a slot without blocking the event loop, before ``deadline`` (a monotonic
+    time) or with no limit. Polls, so a cancelled wait holds nothing, and a slot that
+    comes late is given back.
     """
-    while not gate.acquire(blocking=False):
+    while True:
         if deadline is not None and time.monotonic() >= deadline:
             return False
-        await asyncio.sleep(0.05)
-    return True
+        if gate.acquire(blocking=False):
+            if deadline is not None and time.monotonic() >= deadline:
+                gate.release()
+                return False
+            return True
+        pause = 0.05 if deadline is None else min(0.05, max(0.0, deadline - time.monotonic()))
+        await asyncio.sleep(pause)
 
 
 def _gated_transport_types():
@@ -407,7 +424,7 @@ def _gated_transport_types():
                     self._gate.release()
                     time.sleep(delay)
                     attempt += 1
-                    if self._gate.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                    if _acquire_by(self._gate, deadline):
                         continue
                     # No slot before the deadline: the last busy answer, already read, holds none
                     return response

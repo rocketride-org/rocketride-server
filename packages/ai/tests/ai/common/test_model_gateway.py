@@ -756,6 +756,19 @@ def test_a_busy_retry_never_waits_for_a_slot_past_the_deadline(monkeypatch, back
     assert taken.is_set() and gate._value == 1
 
 
+async def test_a_slot_that_comes_after_the_deadline_is_given_back():
+    """A busy retry may take a slot only before its deadline, on both paths."""
+    gate = model_gateway._run_gate(1)
+    gate.acquire()
+    threading.Timer(0.04, gate.release).start()
+
+    assert await model_gateway._acquire_async(gate, time.monotonic() + 0.03) is False
+    await asyncio.sleep(0.05)
+    assert gate._value == 1
+    assert model_gateway._acquire_by(gate, time.monotonic() - 0.01) is False
+    assert gate._value == 1
+
+
 async def test_a_cancelled_async_wait_for_a_slot_keeps_none(monkeypatch):
     gate, _, transport = _transports(1, 600.0)
     gate.acquire()
