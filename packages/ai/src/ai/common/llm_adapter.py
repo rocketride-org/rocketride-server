@@ -16,6 +16,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
+from ai.common.model_gateway import HOSTED_REFUSAL_TYPE
 from ai.common.utils import flatten_content_blocks
 
 # Per-turn LLM usage collector. Every model call appends one entry to the open turn's
@@ -226,11 +227,6 @@ def flatten_content(content: Any) -> str:
     Non-streaming callers (agents, expectJson) must get a string, never a block list.
     """
     return flatten_content_parts(content)[0]
-
-
-# The error type a hosted model backend puts on its own refusals. Such a refusal
-# is final: sending the request again, with or without a flag, cannot change it.
-HOSTED_REFUSAL_TYPE = 'rocketride_gateway_error'
 
 
 def hosted_refusal_body(e: BaseException) -> Optional[dict]:

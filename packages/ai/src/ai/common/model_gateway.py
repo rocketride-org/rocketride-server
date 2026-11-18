@@ -7,9 +7,10 @@
 
 A hosted engine asks its backend for a per-run pass when the pipeline has an
 OpenAI node with no key, and hands it to the task as ``ROCKETRIDE_MODEL_GATEWAY``
-(a JSON object: ``provider``, ``base_url``, ``token``, ``expires_at``). The two
-OpenAI nodes then build their clients with the pass token as the key and the
-pass URL as the base URL. A node with its own key never uses the pass.
+(a JSON object: ``provider``, ``base_url``, ``token``, ``expires_at``, and the
+run's limits ``max_concurrent_calls`` and ``max_output_tokens``). The two OpenAI
+nodes then build their clients with the pass token as the key and the pass URL
+as the base URL. A node with its own key never uses the pass.
 
 It imports nothing heavy at load: the task engine imports it in the server
 process. This module holds the pieces both sides share:
@@ -24,26 +25,48 @@ process. This module holds the pieces both sides share:
 No message here contains ``*``: the engine splits error text on it.
 """
 
+import asyncio
 import copy
 import json
 import os
+import random
 import re
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping, NamedTuple, Optional
+from typing import Any, Callable, Mapping, NamedTuple, Optional
 from urllib.parse import urlsplit
 
 # What the engine puts in a task's environment, and nothing else sets.
 GATEWAY_ENV = 'ROCKETRIDE_MODEL_GATEWAY'
 
+# The error type a hosted model backend puts on its own refusals. Such a refusal
+# is final: sending the request again, with or without a flag, cannot change it.
+HOSTED_REFUSAL_TYPE = 'rocketride_gateway_error'
+
 # The only host a pass may point at: the backend serves hosted models on
 # loopback in the engine's own process. Not 'localhost', which can resolve to ::1.
 GATEWAY_HOST = '127.0.0.1'
 
-# The nodes that can run on hosted models, and the field that names their key.
+# The node types that can run on hosted models. Presets built on the same drivers
+# (llm_nebius runs on llm_openai_api) are not among them and keep their own settings.
 OPENAI_PROVIDERS = ('llm_openai', 'llm_openai_api')
 _COMPATIBLE_PROVIDER = 'llm_openai_api'
+
+# How often the engine renews a running task's pass.
+PASS_RENEW_INTERVAL_S = 6 * 3600
+
+# The backend's code for a run it gives no pass because it is a team deployment.
+TEAM_DEPLOYMENT_CODE = 'team_deployment_not_supported'
+
+# A run's calls at once on hosted models when the pass does not say.
+DEFAULT_MAX_CONCURRENT_CALLS = 4
+
+# How long a call keeps retrying a busy answer (rate_limited) the backend did not charge.
+RATE_LIMIT_DEADLINE_S = 600.0
+_RATE_LIMIT_FIRST_DELAY_S = 1.0
+_RATE_LIMIT_MAX_DELAY_S = 30.0
 
 # How deep the keyless check follows groups (a component's config.pipeline.components).
 _MAX_DEPTH = 8
@@ -78,8 +101,8 @@ REFUSAL_SENTENCES = {
         'under Account > Billing in RocketRide.'
     ),
     'rate_limited': (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
-        'or add your own OpenAI key in the node settings.'
+        'This run has too many requests running at once on RocketRide-hosted models. '
+        'Try again with fewer requests at once, or add your own OpenAI key in the node settings.'
     ),
     'model_not_available': (
         "The model {model} isn't offered as a RocketRide-hosted model. Choose another model in the node "
@@ -99,6 +122,7 @@ REFUSAL_SENTENCES = {
     'invalid_request': (
         "RocketRide-hosted models couldn't accept this request. Check the node settings, then run the pipeline again."
     ),
+    TEAM_DEPLOYMENT_CODE: "Hosted models aren't available for team deployments yet. Add your own OpenAI key to the node.",
 }
 # Any other refusal. Its code stays out of the sentence (a code can name internals); it is in the log.
 _OTHER_REFUSAL = (
@@ -134,6 +158,9 @@ class GatewayPass:
     base_url: str
     token: str = field(repr=False)
     expires_at: float
+    # The run's limits on hosted models. None: the backend sets no output limit.
+    max_concurrent_calls: int = DEFAULT_MAX_CONCURRENT_CALLS
+    max_output_tokens: Optional[int] = None
 
 
 class OpenAICredentials(NamedTuple):
@@ -142,6 +169,8 @@ class OpenAICredentials(NamedTuple):
     apikey: Any
     base_url: Any
     hosted: bool
+    # The pass, when the node runs on it
+    gateway: Optional[GatewayPass] = None
 
 
 def _is_hosted() -> bool:
@@ -176,7 +205,8 @@ def read_pass(environ: Optional[Mapping[str, str]] = None) -> Optional[GatewayPa
 
     None unless ``ROCKETRIDE_MODEL_GATEWAY`` holds a JSON object with provider
     ``openai``, a ``base_url`` that is ``http`` on ``127.0.0.1`` with a port, a
-    non-empty token and an ``expires_at`` in the future.
+    non-empty token and a numeric ``expires_at``. A past ``expires_at`` is not
+    checked here: the engine renews the pass with the backend, which decides.
     """
     raw = (environ if environ is not None else os.environ).get(GATEWAY_ENV, '').strip()
     if not raw:
@@ -192,9 +222,42 @@ def read_pass(environ: Optional[Mapping[str, str]] = None) -> Optional[GatewayPa
         return None
     if not isinstance(token, str) or not token or any(c.isspace() for c in token):
         return None
-    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)) or expires_at <= time.time():
+    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)):
         return None
-    return GatewayPass(provider='openai', base_url=base_url, token=token, expires_at=float(expires_at))
+    calls, output = _positive_int(data.get('max_concurrent_calls')), _positive_int(data.get('max_output_tokens'))
+    return GatewayPass(
+        provider='openai',
+        base_url=base_url,
+        token=token,
+        expires_at=float(expires_at),
+        max_concurrent_calls=calls or DEFAULT_MAX_CONCURRENT_CALLS,
+        max_output_tokens=output,
+    )
+
+
+def no_pass_marker(refusal: Any) -> dict:
+    """What the engine puts in a task the backend refused a pass: the refusal's type and code only."""
+    error = refusal.get('error') if isinstance(refusal, dict) else None
+    code = error.get('code') if isinstance(error, dict) else None
+    return {'error': {'type': HOSTED_REFUSAL_TYPE, 'code': code if isinstance(code, str) else ''}}
+
+
+def _no_pass_reason(environ: Optional[Mapping[str, str]] = None) -> str:
+    """The backend's code for refusing this task a pass ('' when it gave none)."""
+    try:
+        data = json.loads((environ if environ is not None else os.environ).get(GATEWAY_ENV, '') or '{}')
+    except ValueError:
+        return ''
+    error = data.get('error') if isinstance(data, dict) else None
+    code = error.get('code') if isinstance(error, dict) and error.get('type') == HOSTED_REFUSAL_TYPE else None
+    return code if isinstance(code, str) else ''
+
+
+def _positive_int(value: Any) -> Optional[int]:
+    """``value`` when it is a whole number above 0, else None."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
 
 
 def _is_empty(value: Any) -> bool:
@@ -214,10 +277,13 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
     - On a self-hosted engine, ``llm_openai`` with no key and no
       ``OPENAI_API_KEY`` fails with a message. Every other case is unchanged.
 
+    Any other node type on these drivers (a preset such as ``llm_nebius``) gets
+    its own settings back unchanged.
+
     Raises:
         MissingModelKeyError: no key, and nothing else can serve this node.
     """
-    if not _is_empty(apikey):
+    if logical_type not in OPENAI_PROVIDERS or not _is_empty(apikey):
         return OpenAICredentials(apikey, base_url, False)
 
     if _is_hosted():
@@ -225,7 +291,9 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
         if logical_type == _COMPATIBLE_PROVIDER and not _is_empty(base_url):
             raise MissingModelKeyError(_NO_KEY_OWN_ENDPOINT.format(node=logical_type))
         if gateway is not None:
-            return OpenAICredentials(gateway.token, gateway.base_url, True)
+            return OpenAICredentials(gateway.token, gateway.base_url, True, gateway)
+        if _no_pass_reason() == TEAM_DEPLOYMENT_CODE:
+            raise MissingModelKeyError(REFUSAL_SENTENCES[TEAM_DEPLOYMENT_CODE])
         raise MissingModelKeyError(_NO_KEY_HOSTED.format(node=logical_type))
 
     if logical_type != _COMPATIBLE_PROVIDER and _is_empty(os.environ.get('OPENAI_API_KEY')):
@@ -233,15 +301,222 @@ def resolve_openai_credentials(logical_type: str, apikey: Any, base_url: Any = '
     return OpenAICredentials(apikey, base_url, False)
 
 
-def hosted_http_clients() -> dict:
-    """HTTP clients for calls on the run's pass, as ``http_client`` and ``http_async_client``.
+# One limit for every hosted call this process makes: a task runs one run, so one pass.
+_gate_lock = threading.Lock()
+_gate: Optional[threading.BoundedSemaphore] = None
 
-    They ignore proxy variables from the environment, so the pass goes straight
-    to the hosted backend on loopback and never to a proxy.
-    """
+
+def _run_gate(limit: int) -> threading.BoundedSemaphore:
+    """The process's semaphore for hosted calls, sized by the first pass that asks."""
+    global _gate
+    with _gate_lock:
+        if _gate is None:
+            _gate = threading.BoundedSemaphore(limit)
+        return _gate
+
+
+def _retry_busy(response: Any) -> bool:
+    """True for a busy answer the backend did not charge: rate_limited without ``x-should-retry: false``."""
+    if response.status_code != 429 or response.headers.get('x-should-retry', '').lower() == 'false':
+        return False
+    try:
+        error = response.json().get('error')
+    except Exception:
+        return False
+    return isinstance(error, dict) and error.get('type') == HOSTED_REFUSAL_TYPE and error.get('code') == 'rate_limited'
+
+
+def _busy_delay(attempt: int) -> float:
+    """Exponential backoff with jitter for the next try after a busy answer."""
+    delay = min(_RATE_LIMIT_FIRST_DELAY_S * (2**attempt), _RATE_LIMIT_MAX_DELAY_S)
+    return delay * (0.5 + random.random() / 2)
+
+
+def _gated_transport_types():
+    """The two transports, built on first use so loading this module never imports httpx."""
     import httpx
 
-    return {'http_client': httpx.Client(trust_env=False), 'http_async_client': httpx.AsyncClient(trust_env=False)}
+    class ReleaseOnClose(httpx.SyncByteStream, httpx.AsyncByteStream):
+        """A response body that frees the call's slot once: when it is read to the end, or closed."""
+
+        def __init__(self, stream: Any, release: Callable[[], None]):
+            self._stream, self._release, self._done = stream, release, False
+
+        def _free(self) -> None:
+            if not self._done:
+                self._done = True
+                self._release()
+
+        def __iter__(self):
+            try:
+                yield from self._stream
+            finally:
+                self._free()
+
+        async def __aiter__(self):
+            try:
+                async for chunk in self._stream:
+                    yield chunk
+            finally:
+                self._free()
+
+        def close(self) -> None:
+            try:
+                self._stream.close()
+            finally:
+                self._free()
+
+        async def aclose(self) -> None:
+            try:
+                await self._stream.aclose()
+            finally:
+                self._free()
+
+    class GatedTransport(httpx.BaseTransport):
+        """Holds one of the run's slots from a request until its body is closed, and
+        retries an uncharged busy answer with backoff until the deadline.
+        """
+
+        def __init__(self, gate: threading.BoundedSemaphore, deadline_s: float):
+            self._inner, self._gate, self._deadline_s = httpx.HTTPTransport(), gate, deadline_s
+
+        def handle_request(self, request):
+            deadline, attempt = time.monotonic() + self._deadline_s, 0
+            while True:
+                self._gate.acquire()
+                try:
+                    response = self._inner.handle_request(request)
+                    if response.status_code == 429:
+                        response.read()
+                except BaseException:
+                    self._gate.release()
+                    raise
+                delay = _busy_delay(attempt)
+                if _retry_busy(response) and time.monotonic() + delay < deadline:
+                    response.close()
+                    self._gate.release()
+                    time.sleep(delay)
+                    attempt += 1
+                    continue
+                if response.is_closed:
+                    # Already read (a refusal's body): the call is over
+                    self._gate.release()
+                else:
+                    response.stream = ReleaseOnClose(response.stream, self._gate.release)
+                return response
+
+        def close(self) -> None:
+            self._inner.close()
+
+    class AsyncGatedTransport(httpx.AsyncBaseTransport):
+        """The same for an async client. The slot is the same threading semaphore,
+        taken in a worker thread so the event loop never blocks.
+        """
+
+        def __init__(self, gate: threading.BoundedSemaphore, deadline_s: float):
+            self._inner, self._gate, self._deadline_s = httpx.AsyncHTTPTransport(), gate, deadline_s
+
+        async def handle_async_request(self, request):
+            deadline, attempt = time.monotonic() + self._deadline_s, 0
+            while True:
+                await asyncio.to_thread(self._gate.acquire)
+                try:
+                    response = await self._inner.handle_async_request(request)
+                    if response.status_code == 429:
+                        await response.aread()
+                except BaseException:
+                    self._gate.release()
+                    raise
+                delay = _busy_delay(attempt)
+                if _retry_busy(response) and time.monotonic() + delay < deadline:
+                    await response.aclose()
+                    self._gate.release()
+                    await asyncio.sleep(delay)
+                    attempt += 1
+                    continue
+                if response.is_closed:
+                    # Already read (a refusal's body): the call is over
+                    self._gate.release()
+                else:
+                    response.stream = ReleaseOnClose(response.stream, self._gate.release)
+                return response
+
+        async def aclose(self) -> None:
+            await self._inner.aclose()
+
+    return GatedTransport, AsyncGatedTransport
+
+
+def hosted_http_clients(gateway: GatewayPass) -> dict:
+    """HTTP clients for calls on the run's pass, as ``http_client`` and ``http_async_client``.
+
+    They keep the OpenAI SDK's own defaults and ignore proxy variables from the
+    environment, so the pass goes straight to the hosted backend on loopback and
+    never to a proxy. Every call holds one of the run's slots
+    (``gateway.max_concurrent_calls``, shared by every client in this process)
+    until its response is closed, and a busy answer the backend did not charge
+    is tried again with backoff for up to ``RATE_LIMIT_DEADLINE_S``. Close them
+    with ``close_http_clients``.
+    """
+    import openai
+
+    gate = _run_gate(gateway.max_concurrent_calls)
+    gated, async_gated = _gated_transport_types()
+    return {
+        'http_client': openai.DefaultHttpxClient(trust_env=False, transport=gated(gate, RATE_LIMIT_DEADLINE_S)),
+        'http_async_client': openai.DefaultAsyncHttpxClient(
+            trust_env=False, transport=async_gated(gate, RATE_LIMIT_DEADLINE_S)
+        ),
+    }
+
+
+def close_http_clients(clients: dict) -> None:
+    """Close the clients ``hosted_http_clients`` built. Errors are ignored."""
+    sync, async_client = clients.get('http_client'), clients.get('http_async_client')
+    if sync is not None:
+        try:
+            sync.close()
+        except Exception:
+            pass
+    if async_client is not None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        try:
+            if loop is None:
+                asyncio.run(async_client.aclose())
+            else:
+                loop.create_task(async_client.aclose())
+        except Exception:
+            pass
+
+
+def hosted_output_tokens(node: str, requested: int, gateway: Optional[GatewayPass]) -> int:
+    """The output limit a node asks hosted models for: its own, or the pass's
+    ``max_output_tokens`` when that is lower (logged once per node).
+    """
+    limit = gateway.max_output_tokens if gateway is not None else None
+    if limit is None or not isinstance(requested, int) or requested <= limit:
+        return requested
+    from rocketlib import debug
+
+    debug(f'{node}: output limit lowered from {requested} to {limit} tokens, the most RocketRide-hosted models allow')
+    return limit
+
+
+def stream_lost_error() -> 'HostedModelError':
+    """The error for a hosted call whose stream failed after the backend took it: no second request follows."""
+    return HostedModelError(_OTHER_REFUSAL)
+
+
+def hosted_engine() -> bool:
+    """True in a hosted engine's server process or one of its tasks.
+
+    A save-time check can run in the server process itself, which carries the
+    server's ``--saas`` flag rather than a task's ``--hosted``.
+    """
+    return _is_hosted() or _SERVER_HOSTED_FLAG in sys.argv
 
 
 def missing_key_message(logical_type: str) -> Optional[str]:
@@ -249,10 +524,8 @@ def missing_key_message(logical_type: str) -> Optional[str]:
 
     Only a self-hosted ``llm_openai`` with no ``OPENAI_API_KEY`` gets one. A
     hosted engine has no pass while a node is checked, so it says nothing there.
-    A check can run in the server process itself, which carries the server's
-    ``--saas`` flag rather than a task's ``--hosted``.
     """
-    if logical_type == _COMPATIBLE_PROVIDER or _is_hosted() or _SERVER_HOSTED_FLAG in sys.argv:
+    if logical_type == _COMPATIBLE_PROVIDER or hosted_engine():
         return None
     if _is_empty(os.environ.get('OPENAI_API_KEY')):
         return _NO_KEY_SELF_HOSTED.format(node=logical_type)

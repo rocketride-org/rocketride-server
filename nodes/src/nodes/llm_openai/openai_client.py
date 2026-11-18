@@ -29,9 +29,9 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.model_gateway import (
-    HostedModelError,
-    friendly_gateway_error,
+    close_http_clients,
     hosted_http_clients,
+    hosted_output_tokens,
     resolve_openai_credentials,
 )
 from langchain_openai import ChatOpenAI
@@ -60,8 +60,7 @@ class Chat(ChatBase):
     SUPPORTS_REASONING_STREAMING = True
     SUPPORTS_NATIVE_TOOLS = True
     _responses_llm = None
-    # True when the clients run on the run's hosted models pass (no key of our own)
-    _hosted_models = False
+    _http_clients: Dict[str, Any] = {}
 
     _llm: ChatOpenAI
 
@@ -76,7 +75,9 @@ class Chat(ChatBase):
         config = Config.getNodeConfig(provider, connConfig)
 
         # The node's own key, or on a hosted engine with no key, the run's hosted
-        # models pass. Every client below gets the same key and base URL.
+        # models pass. Every client below gets the same key and base URL. On the
+        # pass, the clients keep to the run's limits, and the SDK sends a call
+        # once: the backend charges each request it takes.
         credentials = resolve_openai_credentials(provider, config.get('apikey'))
         apikey = credentials.apikey
         self._apikey = apikey
@@ -84,7 +85,10 @@ class Chat(ChatBase):
         self._client_kwargs = {'api_key': apikey}
         if credentials.base_url:
             self._client_kwargs['base_url'] = credentials.base_url
-        self._http_clients = hosted_http_clients() if credentials.hosted else {}
+        if credentials.hosted:
+            self._modelOutputTokens = hosted_output_tokens(provider, self._modelOutputTokens, credentials.gateway)
+            self._http_clients = hosted_http_clients(credentials.gateway)
+            self._client_kwargs['max_retries'] = 0
 
         # Reasoning models stream via the Responses API + max_completion_tokens.
         if self._is_reasoning:
@@ -127,14 +131,12 @@ class Chat(ChatBase):
             )
         return self._responses_llm
 
-    def terminal_error(self, error):
+    def close(self) -> None:
         """
-        A refusal from the hosted models backend ends the call with its sentence.
+        Close the HTTP clients built for the hosted models pass.
         """
-        if not self._hosted_models:
-            return None
-        sentence = friendly_gateway_error(error, self._model)
-        return HostedModelError(sentence) if sentence else None
+        close_http_clients(self._http_clients)
+        self._http_clients = {}
 
     def is_retryable_error(self, error):
         """

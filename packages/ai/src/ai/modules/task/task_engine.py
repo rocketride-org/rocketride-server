@@ -44,7 +44,7 @@ import shutil
 import signal
 import uuid
 from collections import deque
-from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, Mapping, Optional, Tuple, Union
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
@@ -71,7 +71,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
-from ai.common.model_gateway import GATEWAY_ENV, wants_hosted_openai
+from ai.common.model_gateway import GATEWAY_ENV, PASS_RENEW_INTERVAL_S, no_pass_marker, wants_hosted_openai
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
@@ -542,6 +542,8 @@ class Task(DAPBase):
 
     # The run ID this run's hosted models pass was issued for; None when it has none
     _model_run_id: Optional[str] = None
+    # Renews that pass while the task runs; cancelled with the pass
+    _model_pass_renewal: Optional[asyncio.Task] = None
 
     class TaskDbgStdio(DbgStdio):
         """DAP client for stdio communication with subprocess."""
@@ -782,6 +784,7 @@ class Task(DAPBase):
         self._data_token: Optional[str] = None
         self._reset_channel_state()
         self._model_run_id = None
+        self._model_pass_renewal = None
 
         # Status broadcasting
         self._status_update_task: Optional[asyncio.Task] = None
@@ -1221,8 +1224,14 @@ class Task(DAPBase):
 
         if wants_hosted_openai and model_run_id and _is_saas_engine():
             gateway = await self._issue_model_pass(model_run_id)
-            if gateway is not None:
+            if isinstance(gateway, dict):
+                # The backend refused this run a pass (a team deployment, for one):
+                # the task learns why, so a node with no key can say so
+                self._model_run_id = None
+                subprocess_env[GATEWAY_ENV] = json.dumps(gateway)
+            elif gateway is not None:
                 subprocess_env[GATEWAY_ENV] = gateway
+                self._model_pass_renewal = asyncio.create_task(self._renew_model_pass(model_run_id))
 
         # Authorize and resolve every database the DB nodes use, server-side
         # (the SaaS account context exists only in this process), and hand
@@ -1267,11 +1276,12 @@ class Task(DAPBase):
             self.debug_message(f'Hosted models check failed: {type(e).__name__}')
             return False
 
-    async def _issue_model_pass(self, model_run_id: str) -> Optional[str]:
-        """Ask the account for this run's hosted models pass; its JSON, or None.
+    async def _issue_model_pass(self, model_run_id: str) -> Union[str, Dict[str, Any], None]:
+        """Ask the account for this run's hosted models pass: its JSON; or, when the
+        backend refuses with a code, ``no_pass_marker`` of that code; or None.
 
         A refusal or a failure is not an error: the task starts without a pass,
-        and a node with no key says that hosted models are not available.
+        and a node with no key says that hosted models are not available (or why).
         """
         from ai.account import account
 
@@ -1284,6 +1294,10 @@ class Task(DAPBase):
         }
         try:
             gateway = await account.issue_model_pass(identity)
+            if isinstance(gateway, dict) and 'error' in gateway:
+                marker = no_pass_marker(gateway)
+                self.debug_message(f'No hosted models pass for this run: {marker["error"]["code"] or "refused"}')
+                return marker
             if isinstance(gateway, dict):
                 return json.dumps(gateway)
             self.debug_message('No hosted models pass for this run')
@@ -1291,8 +1305,32 @@ class Task(DAPBase):
             self.debug_message(f'Hosted models pass not issued: {type(e).__name__}')
         return None
 
+    async def _renew_model_pass(self, run_id: str) -> None:
+        """Renew this run's pass every PASS_RENEW_INTERVAL_S while the run keeps it.
+
+        Cancelled by ``_drop_model_pass``, so renewing stops wherever the pass is revoked.
+        """
+        from ai.account import account
+
+        while True:
+            await asyncio.sleep(PASS_RENEW_INTERVAL_S)
+            if self._model_run_id != run_id:
+                return
+            try:
+                renewed = await account.renew_model_pass(run_id)
+            except Exception as e:
+                self.debug_message(f'Hosted models pass not renewed: {type(e).__name__}')
+                continue
+            if renewed is None:
+                # The pass has ended for good; a later renewal cannot bring it back
+                self.debug_message('Hosted models pass not renewed: it has ended')
+                return
+
     async def _drop_model_pass(self) -> None:
         """End this run's hosted models pass, if it has one. Errors are ignored."""
+        renewal, self._model_pass_renewal = self._model_pass_renewal, None
+        if renewal is not None and not renewal.done() and renewal is not asyncio.current_task():
+            renewal.cancel()
         run_id, self._model_run_id = self._model_run_id, None
         if not run_id:
             return

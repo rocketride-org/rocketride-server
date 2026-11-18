@@ -104,6 +104,7 @@ class EngineClient(Protocol):
     ) -> Dict[str, Any]: ...
     async def get_environment_keys(self) -> List[str]: ...
     async def get_capabilities(self) -> List[str]: ...
+    async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]: ...
     async def close(self) -> None: ...
 
 
@@ -310,6 +311,10 @@ class WsEngineClient:
         return await self._guarded(
             lambda: self._client.deploy.deploy(project_id=project_id, version=version, team_id=team_id)
         )
+
+    async def deploy_artifact(self, project_id: str, version: int) -> Dict[str, Any]:
+        """The pipeline a registered version holds."""
+        return await self._guarded(lambda: self._client.deploy.artifact(project_id=project_id, version=version))
 
     async def deploy_set_schedule(
         self, project_id: str, source_id: str, schedule: Optional[str], team_id: str, *, ttl: Optional[int] = None

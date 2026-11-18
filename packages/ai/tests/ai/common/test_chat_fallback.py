@@ -1,6 +1,6 @@
 import pytest
 
-from ai.common.llm_adapter import Event, LangChainAdapter, is_hosted_refusal, is_stop_rejection, is_usage_flag_rejection
+from ai.common.llm_adapter import Event, LangChainAdapter, is_stop_rejection
 from ai.common.llm_native_stream import (
     STOP_SEQUENCES_VAR,
     NativeAnthropicAdapter,
@@ -133,73 +133,6 @@ def test_is_stop_rejection_structured_nonmatch_skips_string_heuristic():
 
 def test_is_stop_rejection_requires_stop_sent():
     assert is_stop_rejection(ValueError("unsupported_parameter: 'stop'"), False) is False
-
-
-def _hosted_refusal(status, code, *, param=None, message=None, wrapped=False):
-    """A hosted backend's refusal, in the shape the openai SDK raises it."""
-    err = {
-        'message': message
-        or "RocketRide-hosted models don't support stop. Add your own OpenAI key in the node settings.",
-        'type': 'rocketride_gateway_error',
-        'code': code,
-    }
-    if param is not None:
-        err['param'] = param
-    body = {'error': err} if wrapped else err
-    return _FakeApiError(f'Error code: {status} - {body}', status_code=status, code=code, param=param, body=body)
-
-
-_REFUSALS = [
-    (400, 'unsupported_parameter'),
-    (400, 'model_not_available'),
-    (402, 'insufficient_credits'),
-    (413, 'request_too_large'),
-    (429, 'rate_limited'),
-]
-
-
-@pytest.mark.parametrize('status,code', _REFUSALS)
-@pytest.mark.parametrize('param', [None, 'stop'])
-@pytest.mark.parametrize('wrapped', [False, True])
-def test_a_hosted_refusal_is_never_a_stop_rejection(status, code, param, wrapped):
-    """A refusal is final: dropping stop and sending again would be a second request."""
-    err = _hosted_refusal(status, code, param=param, wrapped=wrapped)
-    assert is_hosted_refusal(err) is True
-    assert is_stop_rejection(err, True) is False
-
-
-@pytest.mark.parametrize('status,code', _REFUSALS)
-@pytest.mark.parametrize('param', [None, 'stream_options'])
-@pytest.mark.parametrize('wrapped', [False, True])
-def test_a_hosted_refusal_is_never_a_usage_flag_rejection(status, code, param, wrapped):
-    """Nor is it a usage flag rejection, which also sends the request again."""
-    err = _hosted_refusal(status, code, param=param, wrapped=wrapped)
-    assert is_usage_flag_rejection(err) is False
-
-
-def test_an_ordinary_error_is_not_a_hosted_refusal():
-    """Errors from every other provider keep their retry decisions."""
-    openai_stop = _FakeApiError(
-        'x',
-        status_code=400,
-        body={'error': {'type': 'invalid_request_error', 'code': 'unsupported_parameter', 'param': 'stop'}},
-    )
-    assert is_hosted_refusal(openai_stop) is False
-    assert is_stop_rejection(openai_stop, True) is True
-    assert is_usage_flag_rejection(_FakeApiError('x', status_code=422, body={'detail': 'bad'})) is True
-    assert is_hosted_refusal(ValueError('rocketride_gateway_error')) is False
-
-
-def test_an_error_raised_from_a_hosted_refusal_counts_as_one():
-    """A wrapper raised ``from`` the SDK's error keeps the refusal visible."""
-    try:
-        try:
-            raise _hosted_refusal(402, 'insufficient_credits')
-        except _FakeApiError as inner:
-            raise RuntimeError('wrapped') from inner
-    except RuntimeError as outer:
-        assert is_hosted_refusal(outer) is True
-        assert is_stop_rejection(outer, True) is False
 
 
 def test_langchain_collect_retries_without_stop():

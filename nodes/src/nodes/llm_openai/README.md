@@ -132,6 +132,17 @@ with it to the hosted models instead of to your own OpenAI account. A key you en
 wins. A pipeline can mix the two: a node with a key uses it, and a node without one uses
 the hosted models.
 
+On hosted models a run keeps to the limits its pass carries: a number of requests at once
+(4 unless the pass says otherwise), and an output limit. A request waits for a free slot
+before it is sent, so a batch of documents never has more requests open than the run allows.
+When the node's own output limit is higher than the pass allows, the node lowers it to the
+pass's limit and logs it. The engine renews the pass every 6 hours while the run lasts.
+
+Hosted models don't cover team deployments yet. A pipeline deployed to a team needs its own
+key in this node; with an empty `apikey` the run stops with `Hosted models aren't available for
+team deployments yet. Add your own OpenAI key to the node.` Other OpenAI nodes, such as
+`embedding_openai` and `llm_vision_openai`, still need a key on every engine.
+
 With an empty `apikey` and nothing else to use, the node stops before it sends a request:
 
 - On a hosted engine that offers no hosted models for the run: `llm_openai: no API key is
@@ -155,13 +166,14 @@ reasoning models ignore it, because OpenAI's Responses API controls sampling sep
 
 ### Validation and errors
 
-Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. With an empty `apikey` it makes no call. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
+Pipeline validation makes a small live call to verify the API key and model name. Models whose names begin with `gpt-5` are probed with `max_completion_tokens`; older models use `max_tokens`. With an empty `apikey` it makes no call on a hosted engine, and on a self-hosted engine with no `OPENAI_API_KEY` it warns how to add a key. Rate-limit and connection errors are retryable, while authentication and other API errors fail immediately with a provider-specific message.
 
 When the hosted models refuse a request, for example because the workspace doesn't have
 enough compute credits left, the run fails with a sentence that says what happened and what
-to do. The engine doesn't retry the request and doesn't try another request in its place.
-When the hosted models are busy or unavailable, the OpenAI client may still retry the request
-on its own, as it does for those answers from OpenAI.
+to do. On hosted models each request is sent once: the OpenAI client doesn't retry it, and a
+stream that breaks is not sent again. The one exception is an answer that the run has too many
+requests open, which the hosted models don't charge for: the request waits and is tried again,
+for up to 10 minutes.
 
 ### Testing
 

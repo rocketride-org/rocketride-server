@@ -118,6 +118,7 @@ class FakeEngineClient:
             'get': dict(FAKE_DEPLOYMENT),
             'versions': {'rows': [dict(FAKE_ARTIFACT), {'version': 2}], 'total': 2, 'page': 1, 'pageSize': 50},
             'deploy': dict(FAKE_DEPLOYMENT),
+            'artifact': {'components': []},
             'set_schedule': dict(FAKE_DEPLOYMENT),
             'enable': dict(FAKE_DEPLOYMENT),
             'disable': {**FAKE_DEPLOYMENT, 'state': 'disabled'},
@@ -282,6 +283,9 @@ class FakeEngineClient:
 
     async def deploy_deploy(self, project_id, version, team_id):
         return self._deploy('deploy', project_id=project_id, version=version, team_id=team_id)
+
+    async def deploy_artifact(self, project_id, version):
+        return self._deploy('artifact', project_id=project_id, version=version)
 
     async def deploy_set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None):
         return self._deploy(

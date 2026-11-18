@@ -716,14 +716,26 @@ class AccountBase(ABC):
                 strings. ``run_id`` is new at every task start.
 
         Returns:
-            None, or ``{provider, base_url, token, expires_at}``: an
+            None; or a pass, ``{provider, base_url, token, expires_at}``: an
             OpenAI-style root on ``127.0.0.1`` that ends in ``/v1``, an opaque
-            bearer token, and the pass's end as a Unix time.
+            bearer token, and the pass's end as a Unix time, plus the run's
+            limits ``max_concurrent_calls`` and ``max_output_tokens``; or a
+            refusal, ``{error: {type, code, message}}``, such as the code
+            ``team_deployment_not_supported`` for a run with no user. The
+            engine renews a pass every 6 hours while the run lasts
+            (``renew_model_pass``) and revokes it when the run ends.
         """
         return None
 
     async def revoke_model_pass(self, run_id: str) -> None:
         """End a run's pass. Safe to call for an unknown run."""
+        return None
+
+    async def renew_model_pass(self, run_id: str) -> dict | None:
+        """Extend a running run's pass: ``{expires_at}``, or None when the run has no live pass.
+
+        A revoked or expired pass is never brought back. Safe to call for an unknown run.
+        """
         return None
 
     # =========================================================================

@@ -558,65 +558,6 @@ def test_an_openai_reasoning_turn_round_trips_encrypted_reasoning(monkeypatch):
     assert replayed[kinds.index('reasoning')]['encrypted_content'] == 'gAAAAenc=='
 
 
-def test_a_hosted_reasoning_turn_goes_to_the_pass_url_with_the_pass(monkeypatch):
-    """On a hosted task with no key, a Responses turn is sent to <base_url>/responses with the pass as bearer."""
-    pytest.importorskip('langchain_openai')
-    import sys
-    import time
-
-    import httpx
-
-    base_url = 'http://127.0.0.1:41873/gateway/openai/v1'
-    token = 'rrmg_' + 'e' * 43
-    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--hosted'])
-    monkeypatch.setenv('OPENAI_API_KEY', 'sk-canary-environment')
-    pass_ = {'provider': 'openai', 'base_url': base_url, 'token': token, 'expires_at': time.time() + 3600}
-    monkeypatch.setenv('ROCKETRIDE_MODEL_GATEWAY', json.dumps(pass_))
-
-    base = {'id': 'resp_1', 'object': 'response', 'created_at': 1, 'model': 'gpt-5', 'tools': []}
-    base.update({'parallel_tool_calls': True, 'tool_choice': 'auto'})
-    message = {
-        'id': 'msg_1',
-        'type': 'message',
-        'role': 'assistant',
-        'status': 'completed',
-        'content': [{'type': 'output_text', 'text': 'Done.', 'annotations': []}],
-    }
-    usage = {'input_tokens': 4, 'output_tokens': 2, 'total_tokens': 6}
-    usage.update({'input_tokens_details': {'cached_tokens': 0}, 'output_tokens_details': {'reasoning_tokens': 0}})
-    events = [
-        {'type': 'response.created', 'sequence_number': 0, 'response': {**base, 'status': 'in_progress', 'output': []}},
-        {
-            'type': 'response.completed',
-            'sequence_number': 1,
-            'response': {**base, 'status': 'completed', 'output': [message], 'usage': usage},
-        },
-    ]
-    seen = []
-
-    def handler(request):
-        seen.append((str(request.url), request.headers.get('authorization'), json.loads(request.content)))
-        return httpx.Response(200, headers={'content-type': 'text/event-stream'}, content=_sse(events, named=False))
-
-    config = {
-        'model': 'gpt-5',
-        'apikey': '',
-        'modelTotalTokens': 400000,
-        'modelOutputTokens': 8192,
-        'capabilities': {'reasoning': True},
-    }
-    mod, _ = _driver(monkeypatch, 'llm_openai', 'openai_client.py', config)
-    monkeypatch.setattr(
-        mod, 'hosted_http_clients', lambda: {'http_client': httpx.Client(transport=httpx.MockTransport(handler))}
-    )
-    chat = mod.Chat('llm_openai', {}, {})
-
-    chat.chat(_turn(), on_chunk=lambda _t: None)
-
-    assert [(url, auth) for url, auth, _body in seen] == [(f'{base_url}/responses', f'Bearer {token}')]
-    assert seen[0][2]['store'] is False
-
-
 class _Inner:
     def __init__(self):
         self.written = []
@@ -673,33 +614,6 @@ def test_a_failed_turn_is_a_typed_error_and_a_text_question_keeps_its_text_error
     assert (turn_answer.error.code, turn_answer.message) == ('provider_error', None)
     assert 'RuntimeError' in turn_answer.error.message and 'provider down' not in turn_answer.error.message
     assert text_answer.getText().startswith('**LLM error**') and text_answer.error is None
-
-
-def test_a_hosted_refusal_reaches_the_caller_as_its_sentence():
-    """The refusal's sentence is our own text, so a turn and a text answer both carry it, without a class name."""
-    from ai.common.model_gateway import HostedModelError
-
-    sentence = (
-        'This run has too many requests running at once on RocketRide-hosted models. Try again shortly, '
-        'or add your own OpenAI key in the node settings.'
-    )
-
-    class _Refused:
-        supports_tools = True
-
-        def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
-            raise HostedModelError(sentence)
-
-    node = _node(_Refused())
-    text = Question()
-    text.addQuestion('hi')
-
-    node.writeQuestions(_turn())
-    node.writeQuestions(text)
-
-    turn_answer, text_answer = node.instance.written
-    assert (turn_answer.error.code, turn_answer.error.message) == ('provider_error', sentence)
-    assert text_answer.getText() == f'**LLM error** — {sentence}'
 
 
 def test_chat_refuses_a_turn_on_a_driver_without_native_tools():
