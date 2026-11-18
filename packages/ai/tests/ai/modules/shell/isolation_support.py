@@ -646,6 +646,9 @@ async def connect(apps: list, auth_args: Optional[dict] = None):
 
     info = AccountInfo(userId='u1', auth='rr_secret', userToken='rr_secret', apps=apps)
     server = MagicMock()
+    # This harness isolates wire projection; credential verification is
+    # exercised with a real provider by the task/liveness suites.
+    server._authz = None
     server._server = MagicMock()
     server._server.authenticate_credential = AsyncMock(return_value=info)
     server.release_unauthed_slot = MagicMock()
