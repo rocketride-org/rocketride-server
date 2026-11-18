@@ -108,31 +108,37 @@ jobs:
       - name: Build
         run: ./builder server:build nodes:build --cmake-config=Sanitize --nodownload --verbose --autoinstall --system-compiler
 
-      # A build without the sanitizer flags would pass with no reports. A program
-      # links the sanitizer runtime in; a shared library calls into it (undefined).
-      # ASan's runtime carries the UBSan handlers too, so only a library proves UBSan.
+      # A build without the sanitizer flags would pass with no reports, so the
+      # engine and every C++ node library are checked (the script says how; in
+      # a program the UBSan handlers come with the ASan runtime, so only the
+      # libraries prove UBSan). A C++ node is a node directory with a
+      # CMakeLists.txt, and nodes:build stages its one library as
+      # dist/server/nodes/<node>/lib<library>.so.
       - name: Check that the binaries are instrumented
         run: |
           set -euo pipefail
-          syms="$RUNNER_TEMP/symbols.txt"
-          check() { # <file> [nm options]
-            local file=$1
-            shift
-            if [ ! -f "$file" ]; then
-              echo "::error::$file is missing after the build"
-              return 1
-            fi
-            nm "$@" "$file" > "$syms" || { echo "::error::nm cannot read $file"; return 1; }
-            if ! grep -q __asan_ "$syms" || ! grep -q __ubsan_handle_ "$syms"; then
-              echo "::error::$file has no ASan or UBSan symbols: it was built without the sanitizer flags"
-              return 1
-            fi
-            echo "$file: ASan and UBSan symbols found"
-          }
+          shopt -s nullglob
           failed=0
-          check dist/server/engine || failed=1
-          check dist/server/libengine.so -D --undefined-only || failed=1
-          check dist/server/nodes/indexer/libindexer.so -D --undefined-only || failed=1
+          nodes=0
+          for cmakelists in nodes/src/nodes/*/CMakeLists.txt; do
+            node=$(basename "$(dirname "$cmakelists")")
+            nodes=$((nodes + 1))
+            found=(dist/server/nodes/"$node"/lib*.so)
+            if [ "${#found[@]}" -ne 1 ]; then
+              echo "::error::the C++ node $node has ${#found[@]} libraries in dist/server/nodes/$node, not 1"
+              failed=1
+            fi
+          done
+          if [ "$nodes" -eq 0 ]; then
+            echo "::error::no C++ node (nodes/src/nodes/*/CMakeLists.txt) found"
+            failed=1
+          fi
+          libs=(dist/server/nodes/*/lib*.so)
+          if [ "${#libs[@]}" -ne "$nodes" ]; then
+            echo "::error::dist/server/nodes holds ${#libs[@]} node libraries, the C++ nodes build $nodes"
+            failed=1
+          fi
+          bash scripts/ci/check-sanitizer-symbols.sh dist/server/engine dist/server/libengine.so "${libs[@]}" || failed=1
           exit "$failed"
 
       # ROCKETRIDE_APIKEY as in the Test step of _build.yaml.
@@ -159,23 +165,10 @@ jobs:
             echo "::endgroup::"
           done
 
-      # server:test builds the test programs, so engtest is checked after it,
-      # the same way as the engine.
-      - name: Check that engtest is instrumented
-        run: |
-          set -euo pipefail
-          file=dist/server/engtest
-          syms="$RUNNER_TEMP/symbols.txt"
-          if [ ! -f "$file" ]; then
-            echo "::error::$file is missing after the tests"
-            exit 1
-          fi
-          nm "$file" > "$syms"
-          if ! grep -q __asan_ "$syms" || ! grep -q __ubsan_handle_ "$syms"; then
-            echo "::error::$file has no ASan or UBSan symbols: it was built without the sanitizer flags"
-            exit 1
-          fi
-          echo "$file: ASan and UBSan symbols found"
+      # server:test builds the three test programs it runs and copies them into
+      # dist/server, so they are checked after it, the same way as the engine.
+      - name: Check that the test programs are instrumented
+        run: bash scripts/ci/check-sanitizer-symbols.sh dist/server/aptest dist/server/engtest dist/server/nodetest
 
       # Under halt_on_error=0 the programs exit 0 after a report, so this step is
       # what fails the job: it exits 1 when any report was written.

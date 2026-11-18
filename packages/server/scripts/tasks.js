@@ -660,8 +660,8 @@ function makeConfigureServerAction(options = {}) {
 				return;
 			}
 
-			// dist/server keeps the old type's engine until a compile replaces
-			// it, so a failed compile must not leave it marked as built
+			// distEngineType() reads a compiled engine's type from buildType, so a
+			// type change unmarks dist/server's engine even when no compile follows
 			if (((await getState('server.buildType')) || 'Release') !== cmakeConfig) {
 				await setState('server.buildHash', null);
 				await setState('server.downloadHash', null);
@@ -839,6 +839,9 @@ function makeCompileEngineAction(options = {}) {
 			}
 
 			const cmakeConfig = options.cmakeConfig || 'Release';
+			// A compile that fails or is stopped leaves no engine marked as built
+			await setState('server.buildHash', null);
+			await setState('server.downloadHash', null);
 			await execCommand('cmake', cmake.getBuildArgs(BUILD_ROOT, cmakeConfig, { target: 'engine' }), {
 				task,
 				env,
