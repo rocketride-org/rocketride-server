@@ -82,6 +82,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.client_id = 'user-1'
     t.team_id = 'team-1'
     t.org_id = 'org-1'
+    t.node_versions = {}
     t.source = source
     # Real tasks always carry their project id; _forward_task_event stamps
     # it into every forwarded body (identity safety net).
@@ -1309,7 +1310,7 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('available', [True, False])
+@pytest.mark.parametrize('available', [True, False, 'in use'])
 async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
     """The nodes a pipeline names that the server lacks are unpacked before the
     engine starts, so its start-up scan loads them; one that cannot be had
@@ -1322,12 +1323,18 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
     order = []
 
-    def place(pipeline):
-        order.append(('place', [c['provider'] for c in pipeline['components']]))
+    def place(pipeline, published, run):
+        order.append(('place', [c['provider'] for c in pipeline['components']], published, run))
+        if available == 'in use':
+            raise engine.node_store.node_packages.NodeVersionInUse('Another run uses another version of acme.echo')
         if not available:
             raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
 
+    async def published_packages(org_id, user_id, rows):
+        return {row['snapshot']['module']: (row['snapshot']['sha256'], b'zip') for row in rows.values()}
+
     monkeypatch.setattr(engine.node_store, 'place', place)
+    monkeypatch.setattr(engine.node_store, 'published_packages', published_packages)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
     t.source = 'src'
     t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
@@ -1342,6 +1349,8 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     t._terminated = AsyncMock()
     t._launcher = SubprocessLauncher(t._server)
     monkeypatch.setattr(SubprocessLauncher, 'task_data_path', tempfile.gettempdir())
+    t.org_id, t.client_id, t.token = 'org1', 'u1', 'tk_run'
+    t.node_versions = {'acme.echo': {'snapshot': {'module': 'acme__echo', 'sha256': 'v1'}}}
 
     class Launched(Exception):
         pass
@@ -1351,10 +1360,15 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
         raise Launched()
 
     monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
-    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+    with pytest.raises(Launched if available is True else RuntimeError) as raised:
         await Task.start_task(t)
 
-    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+    placed = ('place', ['llm_x'], {'acme__echo': ('v1', b'zip')}, 'tk_run')
+    assert order == ([placed, ('spawn',)] if available is True else [placed])
+    if available is not True:
+        assert "pipeline's nodes" in str(raised.value)
+    # A node error keeps its code for the caller
+    assert getattr(raised.value, 'code', None) == ('NODE_VERSION_IN_USE' if available == 'in use' else None)
 
 
 # ---------------------------------------------------------------------------
@@ -2628,6 +2642,22 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     await Task._terminated(t)
     assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     assert run_log.end_run.await_args.args[0] == outcome
+
+
+@pytest.mark.asyncio
+async def test_an_ended_run_releases_its_published_nodes(monkeypatch):
+    import ai.modules.task.task_engine as engine
+
+    released = []
+    monkeypatch.setattr(engine.node_store, 'release', released.append)
+    t = _ending_task(0)
+    t._stop_requested = True
+    t._run_log = AsyncMock()
+    t.token = 'tk_run'
+
+    await Task._terminated(t)
+
+    assert released == ['tk_run']
 
 
 # ---------------------------------------------------------------------------
