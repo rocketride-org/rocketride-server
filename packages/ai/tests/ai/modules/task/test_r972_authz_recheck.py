@@ -330,10 +330,16 @@ async def test_r972_1b_oss_has_no_recheck(monkeypatch):
         async def authenticate(self, credential):
             return (401, 'no')
 
+    class _ReadySaas(FakeAccount):
+        supports_live_credentials = True
+
+        async def live_credentials(self, key_hashes):
+            return {}
+
     monkeypatch.delenv('RR_TASK_TOKEN_KEY', raising=False)
     import ai.account
 
-    for account, expected in ((_Oss(), False), (FakeAccount({'admin': (True, ADMIN)}), True)):
+    for account, expected in ((_Oss(), False), (_ReadySaas({'admin': (True, ADMIN)}), True)):
         monkeypatch.setattr(ai.account, 'account', account)
         web = MagicMock()
         web.config = {}

@@ -97,7 +97,7 @@ from ai.web import WebServer
 from ai.account.models import AccountInfo, public_key_reaches, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import NOTICE_SEND_TIMEOUT, TaskConn, authority_narrowed, authority_subject
-from .authz_recheck import AuthzRecheck
+from .authz_recheck import AuthzRecheck, validate_credential_provider
 from .task_engine import Task
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
@@ -318,6 +318,12 @@ class TaskServer(DAPBase):
         4. Start background task cleanup process
         5. Configure DAP base class for protocol handling
         """
+        # A hosted overlay must not silently omit presenting-key liveness.
+        # Validate before starting background tasks, so failed startup leaks none.
+        from ai.account import account
+
+        validate_credential_provider(account)
+
         # Resolve the task-token key now (the web server has loaded .env by
         # this point), so a misconfigured RR_TASK_TOKEN_KEY stops the engine at
         # startup instead of failing every task start.
@@ -356,7 +362,12 @@ class TaskServer(DAPBase):
         # edition can read it; otherwise every authority gate is off.
         from ai.account import account
 
-        self._authz = AuthzRecheck(self, account) if getattr(account, 'supports_live_authority', False) else None
+        self._authz = (
+            AuthzRecheck(self, account)
+            if getattr(account, 'supports_live_authority', False)
+            or getattr(account, 'supports_live_credentials', False)
+            else None
+        )
         if self._authz is not None:
             self._bg_tasks.append(asyncio.create_task(self._authz.run()))
 
