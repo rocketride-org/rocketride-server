@@ -127,6 +127,18 @@ export class LoginAttemptCancelledError extends Error {
 }
 
 /**
+ * A command the server refused, such as starting or validating a pipeline.
+ *
+ * `code` says why, e.g. `NODE_NOT_ENTITLED`.
+ */
+export class CommandException extends RocketRideException {
+	constructor(dapResult: Record<string, unknown>) {
+		super(dapResult);
+		this.name = 'CommandException';
+	}
+}
+
+/**
  * Exception raised for data pipe operations.
  * 
  * Raised when there are problems with data pipes used for sending

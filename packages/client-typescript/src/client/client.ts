@@ -36,7 +36,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
+import { AuthenticationException, CommandException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
 // Exact text the server sends when it receives an empty credential.
 const NO_AUTH_MESSAGE = 'No authorization provided';
@@ -3536,7 +3536,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param args    - Key/value arguments forwarded in the request.
 	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
 	 * @returns The `body` field of a successful DAP response.
-	 * @throws Error if the server signals failure.
+	 * @throws CommandException if the server signals failure; `code` says why.
 	 */
 	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
 		// Build the raw DAP request
@@ -3553,7 +3553,7 @@ export class RocketRideClient extends DAPClient {
 		// Throw on server-reported failure
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
-			throw new Error(response.message ?? `${command} failed`);
+			throw new CommandException({ ...response, message: response.message || `${command} failed` });
 		}
 
 		// Trace: success response

@@ -31,7 +31,7 @@
  */
 
 import { DataPipe, RocketRideClient } from '../src/client/client';
-import { DAPException, PipeException } from '../src/client/exceptions';
+import { CommandException, DAPException, PipeException } from '../src/client/exceptions';
 import { Question } from '../src/client/schema/Question';
 
 /** A client stub: enough surface for DataPipe.open(), no transport. */
@@ -160,5 +160,20 @@ describe('RocketRideClient.chat() failure', () => {
 		const caught = await chatAndCatch(client, question);
 
 		expect((caught as Error).message).toBe('the last message must be a user message');
+	});
+});
+
+describe('RocketRideClient.call() failure', () => {
+	it('throws a CommandException that keeps the server code', async () => {
+		const client = new RocketRideClient({ env: {} });
+		const stub = client as unknown as Record<string, unknown>;
+		stub.request = async () => ({ success: false, message: 'acme.echo is not published to you', code: 'NODE_NOT_ENTITLED' });
+
+		const caught = await client.call('execute', { pipeline: {} }).catch((e: unknown) => e);
+
+		expect(caught).toBeInstanceOf(CommandException);
+		expect(caught).toBeInstanceOf(Error);
+		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
+		expect((caught as CommandException).message).toBe('acme.echo is not published to you');
 	});
 });

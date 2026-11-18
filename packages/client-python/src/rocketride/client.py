@@ -43,7 +43,7 @@ Basic Usage:
 
 import os
 from functools import cached_property
-from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, CommandException, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
@@ -300,7 +300,7 @@ class RocketRideClient(
             The ``body`` field of a successful DAP response.
 
         Raises:
-            RuntimeError: If the server signals failure.
+            CommandException: If the server signals failure; ``code`` says why.
         """
         # Build the raw DAP request
         message = self.build_request(command=command, token=token, arguments=kwargs)
@@ -314,7 +314,7 @@ class RocketRideClient(
         if self.did_fail(response):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
-            raise RuntimeError(response.get('message', f'{command} failed'))
+            raise CommandException({**response, 'message': response.get('message') or f'{command} failed'})
 
         # Trace: success response
         if self._on_trace:
