@@ -71,7 +71,7 @@ export const ENGINE_CREDENTIAL_RE = /(?<![A-Za-z0-9])(?:tk|pk)_[0-9a-fA-F]{32}/;
 const ENGINE_CREDENTIAL_G = new RegExp(ENGINE_CREDENTIAL_RE.source, 'g');
 const ENGINE_CREDENTIAL_HEAD = /^(?:tk|pk)_[0-9a-fA-F]{32}/;
 /** A minted project id: another app's, or one no realm holds any more. A hit. */
-const MINTED_RE = /(?<![A-Za-z0-9.])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
+const MINTED_RE = /(?<![A-Za-z0-9])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
 const MINTED_G = new RegExp(MINTED_RE.source, 'g');
 /** The broad credential shape (Appendix L): redacted in place, never a reason to refuse (DA F4). */
 const BROAD_G = /(?<![A-Za-z0-9])(?:tk|pk)_[A-Za-z0-9_-]{16,}/g;

@@ -43,7 +43,7 @@ import type { BridgeInit, FrameOk, RealmInfo } from './types';
 const USER_ALIAS_RE = /^ru_[A-Za-z0-9_-]+$/;
 const ORG_ALIAS_RE = /^ro_[A-Za-z0-9_-]+$/;
 /** The backstop patterns (scrub.ts): an engine-format credential, a minted project id. */
-const INIT_BACKSTOP_RE = /(?<![A-Za-z0-9])(?:tk|pk)_[0-9a-fA-F]{32}|(?<![A-Za-z0-9.])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
+const INIT_BACKSTOP_RE = /(?<![A-Za-z0-9])(?:tk|pk)_[0-9a-fA-F]{32}|(?<![A-Za-z0-9])rrapp\.[a-z2-7]{25}\.[0-9a-f-]{36}/;
 
 /** Throws when any string (value or key) of `value` hits the backstop patterns. */
 function backstop(value: unknown): void {
