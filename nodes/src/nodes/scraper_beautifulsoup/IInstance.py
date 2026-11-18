@@ -71,16 +71,55 @@ DEFAULT_LIMIT = 50
 MAX_ITEMS = 500
 
 
+def _json_chars(value: Any) -> int:
+    """Characters of ``value`` as JSON; non-ASCII text counts once, not as a ``\\uXXXX`` escape."""
+    return len(json.dumps(value, ensure_ascii=False))
+
+
 def _fit_items(items: List[Any], max_chars: int) -> Tuple[List[Any], bool]:
-    """The longest prefix of ``items`` whose JSON fits in ``max_chars``; True when items were dropped."""
+    """The longest prefix of ``items`` whose JSON fits in ``max_chars``; True when anything was cut.
+
+    When not even the first item fits, it is kept with its longest string
+    shortened (see :func:`_shrink_item`), so one long entry is never lost.
+    """
     kept: List[Any] = []
     size = 2  # the enclosing []
     for item in items:
-        size += len(json.dumps(item)) + (2 if kept else 0)  # ", " between items
+        size += _json_chars(item) + (2 if kept else 0)  # ", " between items
         if size > max_chars:
+            if not kept:
+                first = _shrink_item(item, max_chars - 2)
+                return ([first] if first is not None else []), True
             return kept, True
         kept.append(item)
     return kept, False
+
+
+def _shrink_item(item: Any, max_chars: int) -> Any:
+    """``item`` with its longest string shortened until its JSON fits ``max_chars``; None when it cannot fit.
+
+    For a string item that is the item itself; for an object (a feed entry,
+    an extracted row) its longest top-level string value, such as ``body``.
+    """
+    if isinstance(item, str):
+        key, text = None, item
+    elif isinstance(item, dict):
+        strings = [(k, v) for k, v in item.items() if isinstance(v, str)]
+        if not strings:
+            return None
+        key, text = max(strings, key=lambda kv: len(kv[1]))
+    else:
+        return None
+
+    def with_text(value: str) -> Any:
+        return value if key is None else {**item, key: value}
+
+    if _json_chars(with_text('')) > max_chars:
+        return None
+    # Trim by the overflow; escapes (quotes, newlines) can make a second pass necessary.
+    while _json_chars(with_text(text)) > max_chars:
+        text = text[: len(text) - max(1, _json_chars(with_text(text)) - max_chars)]
+    return with_text(text)
 
 
 def _clip(text: str, max_chars: int) -> Tuple[str, bool]:
@@ -357,7 +396,7 @@ class IInstance(IInstanceBase):
             items, cut = _fit_items(items[:limit], max_chars)
             return {'url': result.url, 'items': items, 'truncated': cut or result.truncated}
 
-        text = json.dumps(data)
+        text = json.dumps(data, ensure_ascii=False)
         if len(text) <= max_chars:
             return {'url': result.url, 'data': data, 'truncated': result.truncated}
         return {'url': result.url, 'data': text[:max_chars], 'truncated': True}

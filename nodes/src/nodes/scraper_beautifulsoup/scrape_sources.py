@@ -144,39 +144,15 @@ def _parse_one(item: Any, index: int, default_max_items: int) -> SourceSpec:
     if kind not in KINDS:
         raise ValueError(f'{where}: kind must be one of {", ".join(KINDS)}')
 
-    raw_urls = item.get('urls', item.get('url'))
-    if isinstance(raw_urls, (str, dict)):
-        raw_urls = [raw_urls]
-    if not raw_urls or not isinstance(raw_urls, list):
-        raise ValueError(f'{where}: url or urls is required')
-    urls = []
-    for u in raw_urls:
-        if isinstance(u, str):
-            urls.append(UrlEntry(url=u))
-        elif isinstance(u, dict) and u.get('url'):
-            urls.append(UrlEntry(url=str(u['url']), name=u.get('name'), extra=dict(u.get('extra') or {})))
-        else:
-            raise ValueError(f'{where}: each url must be a string or an object with "url"')
+    urls = _parse_urls(item.get('urls', item.get('url')), where)
 
     method = str(item.get('method') or 'GET').upper()
     if method not in ('GET', 'POST'):
         raise ValueError(f'{where}: method must be GET or POST')
-    if kind != 'json' and method != 'GET':
-        raise ValueError(f'{where}: only json sources may use POST')
-
     fields = item.get('fields') or {}
     if not isinstance(fields, dict):
         raise ValueError(f'{where}: fields must be an object')
-    if kind == 'json' and 'url' not in fields:
-        raise ValueError(f'{where}: json sources need a fields.url path')
-    if kind == 'feed' and fields and 'url' not in fields:
-        # Feed fields rebuild each item from the mapped keys only; without url every row is dropped.
-        raise ValueError(f'{where}: feed sources with fields need a fields.url entry (e.g. "url": "url")')
-    if kind == 'html':
-        if not item.get('itemSelector'):
-            raise ValueError(f'{where}: html sources need itemSelector')
-        if 'url' not in fields:
-            raise ValueError(f'{where}: html sources need a fields.url selector (e.g. "a@href")')
+    _check_kind_rules(kind, item, method, fields, where)
 
     extra = dict(item.get('extra') or {})
     clash = _RESERVED.intersection(extra)
@@ -207,6 +183,39 @@ def _parse_one(item: Any, index: int, default_max_items: int) -> SourceSpec:
         extra=extra,
         enabled=bool(item.get('enabled', True)),
     )
+
+
+def _parse_urls(raw_urls: Any, where: str) -> List[UrlEntry]:
+    """The ``url`` / ``urls`` entry: one string or object, or a list of them."""
+    if isinstance(raw_urls, (str, dict)):
+        raw_urls = [raw_urls]
+    if not raw_urls or not isinstance(raw_urls, list):
+        raise ValueError(f'{where}: url or urls is required')
+    urls = []
+    for u in raw_urls:
+        if isinstance(u, str):
+            urls.append(UrlEntry(url=u))
+        elif isinstance(u, dict) and u.get('url'):
+            urls.append(UrlEntry(url=str(u['url']), name=u.get('name'), extra=dict(u.get('extra') or {})))
+        else:
+            raise ValueError(f'{where}: each url must be a string or an object with "url"')
+    return urls
+
+
+def _check_kind_rules(kind: str, item: Dict[str, Any], method: str, fields: Dict[str, Any], where: str) -> None:
+    """The rules that depend on the source ``kind``; a new kind adds its own here."""
+    if kind != 'json' and method != 'GET':
+        raise ValueError(f'{where}: only json sources may use POST')
+    if kind == 'json' and 'url' not in fields:
+        raise ValueError(f'{where}: json sources need a fields.url path')
+    if kind == 'feed' and fields and 'url' not in fields:
+        # Feed fields rebuild each item from the mapped keys only; without url every row is dropped.
+        raise ValueError(f'{where}: feed sources with fields need a fields.url entry (e.g. "url": "url")')
+    if kind == 'html':
+        if not item.get('itemSelector'):
+            raise ValueError(f'{where}: html sources need itemSelector')
+        if 'url' not in fields:
+            raise ValueError(f'{where}: html sources need a fields.url selector (e.g. "a@href")')
 
 
 # ---------------------------------------------------------------------------

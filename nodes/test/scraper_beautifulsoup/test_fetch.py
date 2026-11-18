@@ -43,6 +43,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
+import requests
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'scraper_beautifulsoup'))
@@ -198,7 +199,8 @@ def make(validator=None, **kw):
     kw.setdefault('allow_match', url_policy.url_matches_pattern)
     kw.setdefault('canonicalize', url_policy.canonicalize_url)
     kw.setdefault('timeout', 5)
-    return Fetcher(resolve_url=validator or Validator(), open_session=pinned_http.pinned_session, **kw)
+    kw.setdefault('open_session', pinned_http.pinned_session)
+    return Fetcher(resolve_url=validator or Validator(), **kw)
 
 
 def pinned(server, path):
@@ -332,6 +334,88 @@ def test_error_messages_omit_query_string(server):
         make().fetch(f'{server}/404?apiKey=SECRET-KEY')
     assert 'SECRET-KEY' not in str(exc.value)
     assert f'{server}/404' in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    'url, error',
+    [('api.example.com/x?apiKey=SECRET-KEY', 'MissingSchema'), ('https:///v1?apiKey=SECRET-KEY', 'InvalidURL')],
+)
+def test_a_url_requests_cannot_prepare_keeps_its_query_out_of_the_error(url, error):
+    # requests quotes the whole URL in these errors; only the type may be reported.
+    with pytest.raises(FetchError) as exc:
+        make().fetch(url)
+    assert 'SECRET-KEY' not in str(exc.value)
+    assert error in str(exc.value)
+
+
+def test_canonicalizer_errors_keep_their_text():
+    with pytest.raises(FetchError, match='dot segment'):
+        make().fetch('https://api.example.com/public/../private?apiKey=SECRET-KEY')
+
+
+class _FakeResponse:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeSession:
+    def __init__(self, response=None, error=None, on_request=None):
+        self.response, self.error, self.on_request = response, error, on_request
+        self.closed = self.aborted = False
+
+    def request(self, *args, **kwargs):
+        if self.on_request:
+            self.on_request()
+        if self.error:
+            raise self.error
+        return self.response
+
+    def abort(self):
+        self.aborted = True
+
+    def close(self):
+        self.closed = True
+
+
+def test_hop_session_closes_the_session_and_cancels_the_watchdog():
+    session = _FakeSession()
+    fetcher = make(open_session=lambda addresses: session)
+    with pytest.raises(RuntimeError):
+        with fetcher._hop_session((), 0.05) as (yielded, timed_out):
+            assert yielded is session
+            raise RuntimeError('hop failed')
+    assert session.closed
+    time.sleep(0.15)  # past the watchdog's deadline: it was cancelled, so it never fired
+    assert not timed_out.is_set() and not session.aborted
+
+
+def test_send_returns_the_response_with_its_body_unread():
+    response = _FakeResponse()
+    out = make()._send(_FakeSession(response), 'GET', 'https://a.example/', {}, None, 5, threading.Event())
+    assert out is response and not response.closed
+
+
+def test_send_reports_a_cut_off_response_as_a_timeout():
+    # Some platforms return the response the watchdog cut short instead of raising.
+    response, timed_out = _FakeResponse(), threading.Event()
+    session = _FakeSession(response, on_request=timed_out.set)
+    with pytest.raises(FetchError, match='timed out'):
+        make()._send(session, 'GET', 'https://a.example/?k=SECRET', {}, None, 5, timed_out)
+    assert response.closed
+
+
+@pytest.mark.parametrize('fired, message', [(True, 'timed out'), (False, 'failed: ConnectionError')])
+def test_send_names_a_transport_error_by_its_type(fired, message):
+    timed_out = threading.Event()
+    if fired:
+        timed_out.set()
+    session = _FakeSession(error=requests.ConnectionError('https://a.example/?k=SECRET refused'))
+    with pytest.raises(FetchError, match=message) as exc:
+        make()._send(session, 'GET', 'https://a.example/?k=SECRET', {}, None, 5, timed_out)
+    assert 'SECRET' not in str(exc.value)
 
 
 def test_transport_error_reports_type_not_url(server):

@@ -52,7 +52,7 @@ from scraper_beautifulsoup.IGlobal import (  # noqa: E402
     DEFAULT_USER_AGENT,
     build_fetcher,
 )
-from scraper_beautifulsoup.IInstance import IInstance  # noqa: E402
+from scraper_beautifulsoup.IInstance import IInstance, _fit_items  # noqa: E402
 from scraper_beautifulsoup.scrape_fetch import FetchError, FetchResult  # noqa: E402
 
 FEED = b"""<?xml version="1.0"?>
@@ -347,6 +347,50 @@ def test_fetch_feed_items_are_cut_to_max_chars():
     out = instance.fetch_feed({'url': 'https://news.example/feed', 'max_chars': 2000, 'limit': 500})
     assert out['items'] and len(json.dumps(out['items'])) <= 2000
     assert out['truncated'] is True
+
+
+def _one_entry_feed(body):
+    item = f'<item><title>Entry</title><link>https://news.example/1</link><description>{body}</description></item>'
+    return f'<rss version="2.0"><channel>{item}</channel></rss>'.encode()
+
+
+def test_a_feed_entry_longer_than_max_chars_comes_back_shortened():
+    # maxBodyChars and maxToolChars both default to 20000: the entry alone is too big for the list.
+    instance = make_instance({'https://news.example/feed': ('application/rss+xml', _one_entry_feed('x' * 20000))})
+    out = instance.fetch_feed({'url': 'https://news.example/feed'})
+    (entry,) = out['items']
+    assert entry['url'] == 'https://news.example/1' and entry['title'] == 'Entry'
+    assert entry['body'] == 'x' * len(entry['body']) and 19000 < len(entry['body']) < 20000
+    assert len(json.dumps(out['items'], ensure_ascii=False)) <= 20000
+    assert out['truncated'] is True
+
+
+def test_a_non_ascii_entry_that_fits_in_characters_comes_back_whole():
+    # 3400 Cyrillic characters: about 3500 characters of JSON, but over 20000 as \\uXXXX escapes.
+    body = 'Привет мир ' * 309 + 'П'
+    instance = make_instance({'https://news.example/feed': ('application/rss+xml', _one_entry_feed(body))})
+    out = instance.fetch_feed({'url': 'https://news.example/feed'})
+    assert [e['body'] for e in out['items']] == [body]
+    assert out['truncated'] is False
+
+
+def test_a_string_item_longer_than_max_chars_comes_back_shortened():
+    data = {'hits': ['a' * 5000, 'b']}
+    instance = make_instance({'https://api.example/': ('application/json', json.dumps(data).encode())})
+    out = instance.fetch_json({'url': 'https://api.example/', 'items_path': 'hits', 'max_chars': 1000})
+    (item,) = out['items']
+    assert item == 'a' * len(item) and len(json.dumps(out['items'])) <= 1000
+    assert out['truncated'] is True
+
+
+def test_fit_items_shortens_through_json_escapes():
+    # Quotes and newlines take two characters as JSON; the result must still fit.
+    (item,), cut = _fit_items([{'body': '"\n' * 500, 'url': 'u'}], 300)
+    assert cut is True and len(json.dumps([item], ensure_ascii=False)) <= 300 and item['url'] == 'u'
+
+
+def test_fit_items_drops_an_item_with_no_string_to_shorten():
+    assert _fit_items([[1] * 500], 100) == ([], True)
 
 
 def test_fetch_page_links_are_cut_to_max_chars():

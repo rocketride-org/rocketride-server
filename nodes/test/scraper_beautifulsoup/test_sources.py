@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / '
 from scrape_fetch import FetchError, FetchResult  # noqa: E402
 from scrape_sources import (  # noqa: E402
     ROW_COLUMNS,
+    _check_kind_rules,
+    _parse_urls,
     expand_template,
     hash_url,
     normalize_row,
@@ -135,6 +137,52 @@ class TestParseSources:
     def test_bad_json(self):
         with pytest.raises(ValueError, match='not valid JSON'):
             parse_sources('[{')
+
+
+class TestParseUrls:
+    def test_one_string_or_object_becomes_a_list(self):
+        assert [u.url for u in _parse_urls('https://a', 'src')] == ['https://a']
+        (entry,) = _parse_urls({'url': 'https://b', 'name': 'b', 'extra': {'k': 1}}, 'src')
+        assert (entry.url, entry.name, entry.extra) == ('https://b', 'b', {'k': 1})
+
+    @pytest.mark.parametrize('raw', [None, [], 42])
+    def test_missing_urls(self, raw):
+        with pytest.raises(ValueError, match='src: url or urls is required'):
+            _parse_urls(raw, 'src')
+
+    @pytest.mark.parametrize('entry', [7, {'name': 'no url'}])
+    def test_an_entry_without_a_url(self, entry):
+        with pytest.raises(ValueError, match='each url must be'):
+            _parse_urls(['https://a', entry], 'src')
+
+
+class TestCheckKindRules:
+    @pytest.mark.parametrize(
+        'kind, item, method, fields',
+        [
+            ('json', {}, 'POST', {'url': 'link'}),
+            ('feed', {}, 'GET', {}),
+            ('feed', {}, 'GET', {'url': 'url', 'title': 'title'}),
+            ('html', {'itemSelector': 'li'}, 'GET', {'url': 'a@href'}),
+        ],
+    )
+    def test_valid(self, kind, item, method, fields):
+        _check_kind_rules(kind, item, method, fields, 'src')
+
+    @pytest.mark.parametrize(
+        'kind, item, method, fields, message',
+        [
+            ('feed', {}, 'POST', {}, 'only json sources may use POST'),
+            ('html', {'itemSelector': 'li'}, 'POST', {'url': 'a@href'}, 'only json sources may use POST'),
+            ('json', {}, 'GET', {'title': 'title'}, 'json sources need a fields.url'),
+            ('feed', {}, 'GET', {'title': 'title'}, 'feed sources with fields need a fields.url'),
+            ('html', {}, 'GET', {'url': 'a@href'}, 'html sources need itemSelector'),
+            ('html', {'itemSelector': 'li'}, 'GET', {'title': 'h2'}, 'html sources need a fields.url'),
+        ],
+    )
+    def test_invalid(self, kind, item, method, fields, message):
+        with pytest.raises(ValueError, match=f'src: {message}'):
+            _check_kind_rules(kind, item, method, fields, 'src')
 
 
 # ---------------------------------------------------------------------------

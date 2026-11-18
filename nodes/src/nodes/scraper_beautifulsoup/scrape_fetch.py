@@ -47,8 +47,9 @@ import json
 import re
 import threading
 import time
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse, urlsplit
 
 import requests
@@ -157,7 +158,7 @@ class Fetcher:
                 return self.resolve_url(url)
             return _call_within(self.resolve_url, url, self._remaining(deadline, url))
         except TimeoutError as e:
-            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s') from e
+            raise self._timeout_error(url) from e
         except ValueError as e:
             raise FetchError(str(e)) from e
 
@@ -168,7 +169,12 @@ class Fetcher:
                 url = requests.Request('GET', url, params=params).prepare().url
             if self.canonicalize is not None:
                 url = self.canonicalize(url)
-        except (requests.RequestException, ValueError) as e:
+        except requests.RequestException as e:
+            # requests quotes the whole URL, query string included. InvalidURL and
+            # MissingSchema are also ValueErrors, so this branch must come first.
+            raise FetchError(f'Invalid URL {redact_url(url)}: {type(e).__name__}') from e
+        except ValueError as e:
+            # canonicalize_url's own errors (userinfo, dot segments) carry no URL.
             raise FetchError(f'Invalid URL {redact_url(url)}: {e}') from e
         return url
 
@@ -189,7 +195,7 @@ class Fetcher:
     def _remaining(self, deadline: float, url: str) -> float:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
+            raise self._timeout_error(url)
         return remaining
 
     # -- request ----------------------------------------------------------
@@ -228,60 +234,79 @@ class Fetcher:
             addresses = self.check_url(current, deadline)
             deadline += self._pace(current)
             timeout = self._remaining(deadline, current)
-            session = self.open_session(addresses)
-            timed_out = threading.Event()
-            watchdog = _arm_watchdog(session, timeout, timed_out)
-            try:
-                try:
-                    resp = session.request(
-                        method,
-                        current,
-                        headers=send_headers,
-                        json=json_body if method == 'POST' else None,
-                        timeout=timeout,
-                        allow_redirects=False,
-                        stream=True,
-                    )
-                except (requests.RequestException, OSError) as e:
-                    if timed_out.is_set():
-                        raise FetchError(f'Fetching {redact_url(current)} timed out after {self.timeout:g}s') from e
-                    # The exception text repeats the URL (query included): report its type only.
-                    raise FetchError(f'{method} {redact_url(current)} failed: {type(e).__name__}') from e
-
-                if timed_out.is_set():
-                    # The watchdog cut the response short (some platforms then
-                    # return a truncated response instead of raising).
-                    resp.close()
-                    raise FetchError(f'Fetching {redact_url(current)} timed out after {self.timeout:g}s')
-
-                try:
+            with self._hop_session(addresses, timeout) as (session, timed_out):
+                with closing(self._send(session, method, current, send_headers, json_body, timeout, timed_out)) as resp:
                     if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
                         current, method, json_body, send_headers = _redirect_step(
                             resp.status_code, current, resp.headers['location'], method, json_body, send_headers
                         )
                         current = self.canonical_url(current)
                         continue
-
                     content, truncated = self._read_capped(resp, deadline, current, timed_out)
-                    result = FetchResult(
-                        url=current,
-                        status=resp.status_code,
-                        headers={k.lower(): v for k, v in resp.headers.items()},
-                        content=content,
-                        truncated=truncated,
-                    )
-                finally:
-                    resp.close()
-            finally:
-                if watchdog is not None:
-                    watchdog.cancel()
-                session.close()
 
-            if raise_for_status and result.status >= 400:
-                raise FetchError(f'{method} {redact_url(current)} returned HTTP {result.status}')
-            return result
+            if raise_for_status and resp.status_code >= 400:
+                raise FetchError(f'{method} {redact_url(current)} returned HTTP {resp.status_code}')
+            return FetchResult(
+                url=current,
+                status=resp.status_code,
+                headers={k.lower(): v for k, v in resp.headers.items()},
+                content=content,
+                truncated=truncated,
+            )
 
         raise FetchError(f'Too many redirects (>{self.max_redirects}) starting at {redact_url(url)}')
+
+    @contextmanager
+    def _hop_session(self, addresses: Any, timeout: float) -> Iterator[Tuple[Any, threading.Event]]:
+        """Open the session for one hop with its watchdog armed; on exit, cancel the watchdog and close the session.
+
+        Yields ``(session, timed_out)``; ``timed_out`` is set when the watchdog fired.
+        """
+        session = self.open_session(addresses)
+        timed_out = threading.Event()
+        watchdog = _arm_watchdog(session, timeout, timed_out)
+        try:
+            yield session, timed_out
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+            session.close()
+
+    def _send(
+        self,
+        session: Any,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        json_body: Any,
+        timeout: float,
+        timed_out: threading.Event,
+    ) -> requests.Response:
+        """Send one request without following redirects; returns the response with its body unread."""
+        try:
+            resp = session.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body if method == 'POST' else None,
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+            )
+        except (requests.RequestException, OSError) as e:
+            if timed_out.is_set():
+                raise self._timeout_error(url) from e
+            # The exception text repeats the URL (query included): report its type only.
+            raise FetchError(f'{method} {redact_url(url)} failed: {type(e).__name__}') from e
+        if timed_out.is_set():
+            # The watchdog cut the response short (some platforms then
+            # return a truncated response instead of raising).
+            resp.close()
+            raise self._timeout_error(url)
+        return resp
+
+    def _timeout_error(self, url: str) -> FetchError:
+        return FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
 
     def _read_capped(
         self, resp: requests.Response, deadline: float, url: str, timed_out: threading.Event
@@ -305,13 +330,13 @@ class Fetcher:
                 chunks.append(chunk)
         except Exception as e:
             if timed_out.is_set():
-                raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s') from e
+                raise self._timeout_error(url) from e
             if isinstance(e, (requests.RequestException, OSError)):
                 raise FetchError(f'Reading {redact_url(url)} failed: {type(e).__name__}') from e
             raise
         if timed_out.is_set():
             # A body without Content-Length ends "normally" when the socket shuts down.
-            raise FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
+            raise self._timeout_error(url)
         return b''.join(chunks), False
 
 
