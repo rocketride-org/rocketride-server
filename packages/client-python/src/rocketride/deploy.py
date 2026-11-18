@@ -240,27 +240,28 @@ class DeployApi:
 
     async def add_pipe(
         self,
-        bundle_dir: str,
+        pipe_path: str,
         *,
         comment: str | None = None,
         deploy_to: str | None = None,
     ) -> PublishResult:
         """
-        Pack a pipeline BUNDLE folder and deploy it as the next immutable
-        registry version — the call behind the DEPLOY card and the CLI's
-        ``deploy add <folder>`` (plan 9, B7).
+        Pack one pipeline and deploy it as the next immutable registry
+        version — the call behind the DEPLOY card and the CLI's
+        ``deploy add <pipe>`` (plan 9).
 
-        The bundle is ``pipelines/<pipeId>/``: exactly one ``.pipe`` (what
-        runs), beside the store manifest ``<stem>.rrpipe``, ``readme.md``,
-        an icon and ``assets/`` (the readme's images). The pipe rides as the
-        artifact, the rest as the content zip the server stores beside it. A
-        folder that is not a bundle (no pipe, several pipes) is refused
-        before any call; :meth:`add` with ``kind='pipe'`` stays the raw door
-        for a pipeline dict with no bundle.
+        The pipe rides as the artifact; the zip beside it carries the pipe
+        at its root plus the readme and icon its ``store`` block declares and
+        every file the README references, laid out relative to the pipe
+        file's directory. A pipe without a ``store`` block deploys as an
+        UNLISTED artifact (the zip is the pipe alone). A declared or
+        referenced file that is missing, or that resolves outside the pipe's
+        directory, is refused by name before any call; :meth:`add` with
+        ``kind='pipe'`` stays the raw door for a pipeline dict. Mirrors the
+        TypeScript ``client.deploy.addPipe``.
 
         Args:
-            bundle_dir: The bundle folder, or its ``.pipe`` when it is the
-                folder's only pipe.
+            pipe_path: The ``.pipe`` file.
             comment: Optional "what changed" note kept in the registry.
             deploy_to: Team id to deploy the new version to immediately
                 (one-step add+deploy).
@@ -268,14 +269,9 @@ class DeployApi:
         Returns:
             The artifact entry, plus the deployment when ``deploy_to`` was given.
         """
-        from ._pipe_bundle import pack_pipe_bundle, pipe_bundle_folder_of
+        from ._pipe_bundle import pack_pipe
 
-        folder = pipe_bundle_folder_of(bundle_dir)
-        if folder is None:
-            raise ValueError(
-                f'{bundle_dir} is not a pipeline bundle - wrap the pipe in its own folder (pipelines/<id>/<id>.pipe)'
-            )
-        packed = pack_pipe_bundle(folder)
+        packed = pack_pipe(pipe_path)
         return await self.add(
             packed.pipeline,
             kind='pipe',
@@ -368,6 +364,46 @@ class DeployApi:
             server_base_url=base,
             on_progress=on_progress,
         )
+
+    async def create_pipe(
+        self,
+        pipe_id: str,
+        *,
+        workspace_root: str | None = None,
+        name: str | None = None,
+        dir: str = 'pipelines',
+    ) -> dict:
+        """
+        Scaffold a new pipeline in the workspace — the programmatic twin of
+        ``rocketride pipe new`` and :meth:`create_app`'s pipeline
+        counterpart. Writes ``<dir>/<pipe_id>/<pipe_id>.pipe`` carrying the
+        default ``store`` block, the placeholder ``icon.svg``, a
+        ``README.md`` stub and an empty ``assets/`` directory. Scaffolding
+        only — nothing is deployed; the normal lifecycle (edit ->
+        :meth:`add_pipe` -> publish) follows. Mirrors the TypeScript
+        ``client.deploy.createPipe``.
+
+        Args:
+            pipe_id: The pipeline id: one dot-free segment of letters,
+                digits, ``_`` or ``-``. The file carries the id alone; the
+                organization that deploys the pipe attaches its developer id.
+            workspace_root: The workspace folder (default: the current
+                working directory).
+            name: Display name (default: the id).
+            dir: The pipelines directory, workspace-relative
+                (default ``pipelines``).
+
+        Returns:
+            The created pipeline, with the same camelCase keys as the
+            TypeScript ``CreatedPipe``: ``folder``, ``pipePath`` and
+            ``files`` (workspace-relative POSIX paths).
+
+        Raises:
+            ValueError: On an invalid id or an existing pipe file.
+        """
+        from ._pipe_bundle import scaffold_pipe
+
+        return scaffold_pipe(workspace_root or os.getcwd(), pipe_id, name=name, dir=dir)
 
     async def verify_app(self, app_root: str, *, workspace_root: str | None = None) -> AppVerifyReport:
         """

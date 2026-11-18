@@ -9,8 +9,8 @@
 // PIPELINE EXTENSION VOCABULARY
 // =============================================================================
 
-/** Recognized pipeline file extensions — both spellings are valid on disk. */
-export const PIPELINE_EXTENSIONS = ['.pipe', '.pipe.json'];
+/** The pipeline file extension: `.pipe` is the one spelling (plan §9). */
+export const PIPELINE_EXTENSIONS = ['.pipe'];
 
 /**
  * Whether a path names a pipeline file (carries one of {@link PIPELINE_EXTENSIONS}).
@@ -26,7 +26,7 @@ export function isPipelineFile(path: string): boolean {
  * The pipeline extension a path carries.
  *
  * @param path - Relative or absolute file path.
- * @returns The matching extension (e.g. ".pipe.json"), or '' for non-pipeline paths.
+ * @returns The matching extension (".pipe"), or '' for non-pipeline paths.
  */
 export function pipelineExtension(path: string): string {
 	return PIPELINE_EXTENSIONS.find((ext) => path.endsWith(ext)) ?? '';

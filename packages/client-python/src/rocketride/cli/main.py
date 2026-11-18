@@ -34,6 +34,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     diff <old> <new>           Semantic .pipe diff (fully local; no server)
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
+    pipe new                   Pipeline scaffold (no connection)
     deploy add/list/publish/.. Deploy lifecycle (deployment target)
     profile run/start/tree/..  Profile the server process or a pipeline
 
@@ -521,6 +522,20 @@ def setup_parser() -> argparse.ArgumentParser:
         '--workspace', help='Workspace root the pack would be rooted at (default: current directory)'
     )
 
+    # ── pipe ─────────────────────────────────────────────────────────────
+    pipe_parser = subparsers.add_parser('pipe', help='Pipeline workspace operations (deploying: rocketride deploy)')
+    pipe_subparsers = pipe_parser.add_subparsers(dest='pipe_subcommand', help='Pipe commands', metavar='COMMAND')
+
+    pipe_new_parser = pipe_subparsers.add_parser(
+        'new',
+        help='Scaffold a new pipeline under ./pipelines/<id>/: the .pipe with its store block, icon.svg, README.md and assets/',
+    )
+    _add_json_arg(pipe_new_parser)
+    pipe_new_parser.add_argument('id', help='Pipeline id: one dot-free segment of letters, digits, _ or -')
+    pipe_new_parser.add_argument('--name', help='Display name (default: the id)')
+    pipe_new_parser.add_argument('--dir', help='Pipelines directory, relative to the workspace (default: pipelines)')
+    pipe_new_parser.add_argument('--workspace', help='Workspace root (default: current directory)')
+
     # ── deploy ───────────────────────────────────────────────────────────
     deploy_parser = subparsers.add_parser('deploy', help='Deploy lifecycle operations (deployment target)')
     deploy_subparsers = deploy_parser.add_subparsers(
@@ -529,10 +544,10 @@ def setup_parser() -> argparse.ArgumentParser:
 
     d_add = deploy_subparsers.add_parser(
         'add',
-        help='Deploy a pipeline bundle folder (pipelines/<id>/) or a node package as the next registry version (deploying activates nothing)',
+        help='Deploy a pipeline (.pipe) or a node package as the next registry version (deploying activates nothing)',
     )
     _add_deploy_connection_args(d_add)
-    d_add.add_argument('file', help='Pipeline bundle folder (or its only .pipe), or a node package JSON')
+    d_add.add_argument('file', help='The .pipe file, or a node package JSON')
     d_add.add_argument('--kind', default='pipe', help='Artifact kind: pipe or node (default: %(default)s)')
     d_add.add_argument('--comment', help='What-changed note kept in the registry')
     d_add.add_argument('--deploy-to', dest='deploy_to', help='Also point this team at the new version in the same call')
@@ -646,6 +661,7 @@ async def _dispatch(args) -> int:
     from .commands.deploy import run_deploy
     from .commands.diff import run_diff
     from .commands.otel import run_otel
+    from .commands.pipe import run_pipe
     from .commands.profile import run_profile
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
@@ -687,6 +703,11 @@ async def _dispatch(args) -> int:
             print('Error: App subcommand is required (create, deploy, verify)', file=sys.stderr)
             return 1
         return await run_app(args)
+    if args.command == 'pipe':
+        if not getattr(args, 'pipe_subcommand', None):
+            print('Error: Pipe subcommand is required (new)', file=sys.stderr)
+            return 1
+        return await run_pipe(args)
     if args.command == 'deploy':
         if not getattr(args, 'deploy_subcommand', None):
             print(

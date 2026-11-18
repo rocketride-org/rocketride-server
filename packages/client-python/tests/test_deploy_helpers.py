@@ -144,7 +144,7 @@ def test_wire_team_id_of_addresses_own_space_as_me():
     assert wire_team_id_of('t-qa', 'u1') == 't-qa'
 
 
-def test_pipeline_name_from_path_strips_pipe_extensions():
+def test_pipeline_name_from_path_strips_the_pipe_extension():
     assert pipeline_name_from_path('pipelines/ingest.pipe') == 'ingest'
-    assert pipeline_name_from_path('C:\work\chat.pipe.json') == 'chat'
+    assert pipeline_name_from_path('C:\\work\\chat.pipe') == 'chat'
     assert pipeline_name_from_path('plain.json') == 'plain.json'

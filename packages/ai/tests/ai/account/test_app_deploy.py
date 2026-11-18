@@ -50,6 +50,7 @@ from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _serving_block_of,
+    artifact_file_url,
     developer_id_required,
     entitled_version_dirs,
     handle_app_add,
@@ -1575,6 +1576,38 @@ async def test_open_dirs_serve_every_built_version(registry):
     assert await open_version_dirs('acme.brandy') == {1: _V1_DIST}
 
 
+# The store/ dir the fake's v1 artifactPath maps to for a PIPE (the bundle's files).
+_V1_STORE = 'orgs/org1/files/.deployments/acme.brandy/v000001-fakesha1/store'
+
+
+@pytest.mark.asyncio
+async def test_open_dirs_serve_a_pipes_store_dir_unless_its_content_failed(registry):
+    """A pipe never builds: every version serves its store/ dir except one whose content write failed."""
+    registry.add_version(1, '1.0.0', kind='pipe', build=None)
+    registry.add_version(2, '1.1.0', kind='pipe', build=None, state='failed')
+
+    assert await open_version_dirs('acme.brandy', 'pipe') == {1: _V1_STORE}
+
+
+@pytest.mark.asyncio
+async def test_entitled_pipe_dirs_follow_the_pipe_gate(registry, monkeypatch):
+    """A team binding entitles the pipe's store/ dir; a public binding needs a 'ready'
+    deployment unconditionally (plan 10.1), ladder or not; the developer org's own rail
+    serves without a binding.
+    """
+    registry.add_version(1, '1.0.0', kind='pipe', build=None, state='private')
+    registry.seed_publish(AUD_TEAM, 1)
+
+    assert await entitled_version_dirs(_info(), 'acme.brandy', 'pipe') == {1: _V1_STORE}
+    assert await entitled_version_dirs(_info(user_id='u2', org_id='org2', teams=[]), 'acme.brandy', 'pipe') == {}
+
+    monkeypatch.setattr(account_singleton, 'review_ladder', False, raising=False)
+    registry.seed_publish(AUD_PUBLIC, 1)
+    assert await entitled_version_dirs(None, 'acme.brandy', 'pipe') == {}
+    registry.versions[0]['state'] = 'ready'
+    assert await entitled_version_dirs(None, 'acme.brandy', 'pipe') == {1: _V1_STORE}
+
+
 @pytest.mark.asyncio
 async def test_submit_requires_green_build(registry):
     """Every review-queue entry must be a real, servable candidate — submit
@@ -1712,27 +1745,56 @@ async def test_resolve_public_without_ladder_serves_unapproved(registry, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_resolve_rewrites_relative_icon_to_versioned_url(registry):
-    """The manifest's app-relative icon ('./icon.svg') resolves to the
-    version's constructed serving URL — the build harvest copies the asset
-    into the version's dist/ tree, so the desktop's <img> can load it. A
-    seeded absolute path passes through verbatim; an empty one stays ''.
+async def test_resolve_rewrites_icon_and_readme_to_versioned_urls(registry):
+    """The manifest's app-relative icon ('./icon.svg') and readme resolve to
+    the version's immutable serving URLs — the build harvest copies both
+    into the version's dist/ tree, so the shell's <img> and readme pane
+    load them (the readme was a raw path the shell rendered as text). A
+    seeded manifest names the file by its served path under the id
+    ('/apps/<id>/icon.svg', the seeder copies that tree into dist/): the
+    version slots in behind the id. Undeclared ones are omitted.
     """
     registry.add_version(1, '1.0.0', state='ready')
     registry.seed_publish(AUD_PUBLIC, 1)
     row = registry.publishes[('acme.brandy', 'public~')]
 
-    row['snapshot'] = {'name': 'Brandy', 'iconPath': './icon.svg'}
+    row['snapshot'] = {'name': 'Brandy', 'iconPath': './icon.svg', 'readmePath': 'docs/README.md'}
     resolved = await resolve_app_pins('org1', 'u1', [])
     assert resolved[0]['icon'] == '/apps/acme.brandy/v1/icon.svg'
+    assert resolved[0]['readme'] == '/apps/acme.brandy/v1/docs/README.md'
 
-    row['snapshot'] = {'name': 'Brandy', 'iconPath': '/apps/acme.brandy/icon.svg'}
+    row['snapshot'] = {
+        'name': 'Brandy',
+        'iconPath': '/apps/acme.brandy/icon.svg',
+        'readmePath': '/apps/acme.brandy/README.md',
+    }
     resolved = await resolve_app_pins('org1', 'u1', [])
-    assert resolved[0]['icon'] == '/apps/acme.brandy/icon.svg'
+    assert resolved[0]['icon'] == '/apps/acme.brandy/v1/icon.svg'
+    assert resolved[0]['readme'] == '/apps/acme.brandy/v1/README.md'
 
     row['snapshot'] = {'name': 'Brandy'}
     resolved = await resolve_app_pins('org1', 'u1', [])
-    assert resolved[0]['icon'] == ''
+    assert 'icon' not in resolved[0] and 'readme' not in resolved[0]
+
+
+@pytest.mark.parametrize(
+    'kind, path, url',
+    [
+        ('app', './icon.svg', '/apps/acme.brandy/v3/icon.svg'),
+        ('app', 'docs\\README.md', '/apps/acme.brandy/v3/docs/README.md'),
+        ('app', '/apps/acme.brandy/icon.svg', '/apps/acme.brandy/v3/icon.svg'),
+        ('pipe', 'images/flow.png', '/pipelines/acme.brandy/v3/images/flow.png'),
+        ('pipe', '/pipelines/acme.brandy/icon.svg', '/pipelines/acme.brandy/v3/icon.svg'),
+        ('app', '', None),
+        ('app', None, None),
+        ('app', '../other/icon.svg', None),
+        ('app', '/apps/other.app/icon.svg', None),
+        ('pipe', '/apps/acme.brandy/icon.svg', None),
+    ],
+)
+def test_artifact_file_url_is_the_one_builder_for_both_kinds(kind, path, url):
+    """One prefix-aware builder: the kind's prefix, the id, the version, the relative path; None when unsafe."""
+    assert artifact_file_url(kind, 'acme.brandy', 3, path) == url
 
 
 @pytest.mark.asyncio

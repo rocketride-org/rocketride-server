@@ -216,7 +216,7 @@ export class WebDevSession {
 					const uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 					if (uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				} else {
-					const uri = await readAppImageDataUri(this.client, this.folder, rel);
+					const uri = await readAppImageDataUri(this.folder, rel);
 					if (uri && uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				}
 			} catch {
@@ -226,7 +226,6 @@ export class WebDevSession {
 		this.registrationMeta = meta;
 	}
 
-	private readonly client: RocketRideClient;
 	private readonly appId: string;
 	private readonly folder: string;
 	private readonly appName: string;
@@ -288,7 +287,6 @@ export class WebDevSession {
 	 * @param appName - Display name (registerLocalApp meta).
 	 */
 	constructor(client: RocketRideClient, appId: string, folder: string, appName: string) {
-		this.client = client;
 		this.appId = appId;
 		this.folder = folder;
 		this.appName = appName;

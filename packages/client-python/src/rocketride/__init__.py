@@ -157,10 +157,12 @@ from .types.client import TeamInfo, OrgInfo, ConnectResult, ServerInfoResult
 
 # Pure deploy/publish helpers shared by every host (teams, versions, names)
 from .deploy_helpers import (
+    LOCAL_DEVELOPER_ID,
     DeployTeamRef,
     parse_registry_version,
     pick_publish_version,
     pipeline_name_from_path,
+    registry_id_of,
     resolve_deploy_teams,
     resolve_team_arg,
     team_name_of,
@@ -200,10 +202,12 @@ __all__ = [
     'RocketRideClientConfig',
     'RocketRideException',
     'LogEventStream',
+    'LOCAL_DEVELOPER_ID',
     'DeployTeamRef',
     'parse_registry_version',
     'pick_publish_version',
     'pipeline_name_from_path',
+    'registry_id_of',
     'resolve_deploy_teams',
     'resolve_team_arg',
     'team_name_of',

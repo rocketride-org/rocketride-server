@@ -443,10 +443,8 @@ class ExecutionMixin(DAPClient):
         effective_name = name
         if effective_name is None and filepath:
             base = os.path.basename(filepath)
-            for ext in ('.pipe.json', '.pipe'):
-                if base.endswith(ext):
-                    base = base[: -len(ext)]
-                    break
+            if base.endswith('.pipe'):
+                base = base[: -len('.pipe')]
             effective_name = base
         if effective_name is not None:
             arguments['name'] = effective_name

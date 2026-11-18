@@ -37,9 +37,6 @@
 				"selector": [
 					{
 						"filenamePattern": "*.pipe"
-					},
-					{
-						"filenamePattern": "*.pipe.json"
 					}
 				],
 				"priority": "default"

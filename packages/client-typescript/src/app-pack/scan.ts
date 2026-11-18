@@ -192,7 +192,7 @@ export function findAppMarkers(workspaceRoot: string, maxDepth = 6): string[] {
 
 /** What an app argument resolved to. */
 export interface AppRef {
-	/** The app id (`<developerId>.<name>`). */
+	/** The app id: the slug the manifest carries. */
 	appId: string;
 	/** The local working copy, when there is one (absent for a server-only id). */
 	app?: ScannedApp;

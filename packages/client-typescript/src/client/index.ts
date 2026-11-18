@@ -50,6 +50,10 @@ export { normalizeSignupProperties } from './signup.js';
 // Pure deploy/publish helpers shared by every host (teams, versions, names)
 export * from './deploy-helpers.js';
 
+// The pipeline store block (listing keys, validation, README references) —
+// pure, so browser hosts and the Node packer share one rule set
+export * from './pipe-store.js';
+
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
 
@@ -62,7 +66,8 @@ export type { CreateSequelizeOptions, SequelizeConstructor } from './database/se
 // session and its user-facing types are public surface)
 export { LogEventStream } from './log-stream.js';
 
-// Deploy's app verbs (createApp/verifyApp) return these app-pack report
-// types on the MAIN entry — re-export them type-only so callers can name
-// what deploy returns without reaching into the app-pack subpath.
-export type { AppVerifyCheck, AppVerifyReport, CreatedApp } from '../app-pack/index.js';
+// Deploy's app and pipe verbs (createApp/verifyApp/createPipe) return these
+// app-pack report types on the MAIN entry — re-export them type-only so
+// callers can name what deploy returns without reaching into the app-pack
+// subpath.
+export type { AppVerifyCheck, AppVerifyReport, CreatedApp, CreatedPipe } from '../app-pack/index.js';

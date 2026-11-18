@@ -111,7 +111,7 @@ export default function EnumWidget({ id, options, value, ghost, onChange, disabl
 					{String(value)} (no longer available)
 				</option>
 			)}
-			{options.map(([optionValue, label], index) => (
+			{options.map(([, label], index) => (
 				<option key={keys[index]} value={keys[index]}>
 					{label}
 				</option>

@@ -80,6 +80,9 @@ from .client import (
 # Pipeline types: the structures that describe a pipeline's topology — its
 # components and the connections wired between them.
 from .pipeline import (
+    BillingPlan,
+    PipeStoreBilling,
+    PipeStoreBlock,
     PipelineInputConnection,
     PipelineControlConnection,
     PipelineComponent,
@@ -244,6 +247,9 @@ __all__ = [
     'AppManifestEntry',
     'DevEntry',
     # Pipeline types
+    'BillingPlan',
+    'PipeStoreBilling',
+    'PipeStoreBlock',
     'PipelineInputConnection',
     'PipelineControlConnection',
     'PipelineComponent',

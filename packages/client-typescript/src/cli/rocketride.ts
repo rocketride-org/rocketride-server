@@ -59,6 +59,7 @@ import { registerStoreCommands } from './commands/store';
 import { registerValidateCommands } from './commands/validate';
 import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
+import { registerPipeCommands } from './commands/pipe';
 import { registerProfileCommands } from './commands/profile';
 import { disconnectAll, takeInterrupt } from './common';
 import { SDK_VERSION } from '../client/constants';
@@ -120,10 +121,12 @@ Getting started:
   rocketride app create clock                      new app in ./apps/clock-ui
   rocketride app dev clock --open                  live preview; updates on save
   rocketride app deploy clock --publish @me        deploy and put it on your desktop
+  rocketride pipe new ingest                       new pipeline in ./pipelines/ingest/
 
 Connections (.env, written by 'rocketride login' / 'init'):
   ROCKETRIDE_URI / ROCKETRIDE_APIKEY                 development: start, upload, validate,
                                                      store, profile, app create, app dev
+                                                     (pipe new needs no connection)
   ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY   deployment target: deploy *, app deploy,
                                                      publish, versions, and other lifecycle verbs
 
@@ -134,6 +137,7 @@ Run 'rocketride <command> --help' for details, e.g. 'rocketride app --help'.`,
 	registerValidateCommands(program);
 	registerStoreCommands(program);
 	registerAppCommands(program);
+	registerPipeCommands(program);
 	registerDeployCommands(program);
 	registerProfileCommands(program);
 	return program;

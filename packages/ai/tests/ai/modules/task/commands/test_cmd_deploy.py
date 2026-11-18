@@ -159,6 +159,21 @@ def account_stub(monkeypatch):
 
 
 PIPE = {'project_id': 'proj-1', 'name': 'P', 'components': []}
+# The same pipe with a store block: publishable, listed (plan 9, C.17b)
+LISTED = {**PIPE, 'store': {'tagline': 'Reads invoices', 'categories': ['finance'], 'readme': 'docs/README.md'}}
+
+
+def _bundle(pipeline, files=None):
+    """One bundle zip: the pipe at the root, the files ({path: text}) with their layout."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as zf:
+        zf.writestr('proj-1.pipe', json.dumps(pipeline))
+        for name, content in (files or {}).items():
+            zf.writestr(name, content)
+    return buffer.getvalue()
 
 
 # ============================================================================
@@ -204,63 +219,91 @@ class TestPublish:
 
     @pytest.mark.asyncio
     async def test_publish_takes_the_bundle_zip_beside_the_pipeline(self, account_stub, monkeypatch):
-        """The bundle (plan 9, B7): its pipe is the artifact, its manifest the listing, its files the content."""
-        import io
-        import zipfile
-
+        """The bundle (plan 9, C.17b): its pipe is the artifact, its store block the listing, its files the content."""
         from ai.modules.task.commands import cmd_deploy
 
         written = AsyncMock(return_value=['p'])
         monkeypatch.setattr(cmd_deploy, 'write_pipe_content', written)
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w') as zf:
-            zf.writestr('proj-1.pipe', json.dumps(PIPE))
-            zf.writestr('proj-1.rrpipe', json.dumps({'tagline': 'Reads invoices', 'category': 'finance'}))
-            zf.writestr('readme.md', '# Invoice Ingest')
+        data = _bundle(LISTED, {'docs/README.md': '# Invoice Ingest'})
         conn = _make_conn(_account_info())
-        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'data': buffer.getvalue(), 'comment': 'v1'})
+        resp = await conn._deploy_add_pipe({}, {'pipeline': LISTED, 'data': data, 'comment': 'v1'})
 
         args = account_stub.deployments_publish.await_args
-        assert args.args[2] == PIPE
-        manifest = args.kwargs['metadata']['manifest']
-        assert (manifest['tagline'], manifest['categories'], manifest['readme']) == (
-            'Reads invoices',
-            ['finance'],
-            'readme.md',
-        )
+        assert args.args[2] == LISTED
+        # The manifest is the block plus the pipe's root keys, in the app row's field names
+        assert args.kwargs['metadata']['manifest'] == {
+            'name': 'P',
+            'description': '',
+            'defaultSource': '',
+            'tagline': 'Reads invoices',
+            'categories': ['finance'],
+            'tags': [],
+            'icon': '',
+            'readme': 'docs/README.md',
+            'links': {},
+            'mode': 'free',
+        }
         written.assert_awaited_once()
-        assert written.await_args.args[0] == 'org-1' and written.await_args.args[2] == {'version': 3, 'sha256': 'abc'}
+        org_id, user_id, entry, bundle, block = written.await_args.args
+        assert (org_id, user_id, entry) == ('org-1', 'user-1', {'version': 3, 'sha256': 'abc'})
+        assert bundle.entries == ['docs/README.md'] and block == LISTED['store']
         assert resp['body']['artifact']['version'] == 3
 
     @pytest.mark.asyncio
-    async def test_publish_refuses_a_pipeline_that_differs_from_the_bundles_pipe(self, account_stub):
-        import io
-        import zipfile
+    async def test_a_dict_deploy_without_a_block_is_an_unlisted_artifact(self, account_stub, monkeypatch):
+        """No block: no manifest in the metadata, no content stage, the registry still takes the version."""
+        from ai.modules.task.commands import cmd_deploy
 
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w') as zf:
-            zf.writestr('proj-1.pipe', json.dumps({**PIPE, 'components': [{'id': 'x'}]}))
+        written = AsyncMock()
+        monkeypatch.setattr(cmd_deploy, 'write_pipe_content', written)
+        conn = _make_conn(_account_info())
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': {'ci': 'run-7'}})
+
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'ci': 'run-7'}
+        written.assert_not_awaited()
+        assert resp['body']['artifact']['version'] == 3
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_store_key_refuses_the_deploy_by_name(self, account_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='store: unknown key "category"'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'store': {'category': 'finance'}}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_bad_mode_and_bad_plans_refuse_the_deploy(self, account_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='store.mode must be'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'store': {'mode': 'usage'}}})
+        with pytest.raises(ValueError, match='store.billing.plans must be a list of plan objects'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'store': {'billing': {'plans': 'pro'}}}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_declared_file_missing_from_the_bundle_marks_the_version_failed_by_name(self, account_stub):
+        """The REAL content stage: the block names docs/README.md, the zip lacks it, the version fails by name."""
+        account_stub.set_artifact_state = AsyncMock()
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='version 3 marked failed.*names readme "docs/README.md"'):
+            await conn._deploy_add_pipe({}, {'pipeline': LISTED, 'data': _bundle(LISTED)})
+        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'acme.proj-1', 3, 'failed')
+
+    @pytest.mark.asyncio
+    async def test_publish_refuses_a_pipeline_that_differs_from_the_bundles_pipe(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match="differs from the bundle's .pipe"):
-            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'data': buffer.getvalue()})
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'data': _bundle({**PIPE, 'components': [{'id': 'x'}]})})
         account_stub.deployments_publish.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_publish_flips_the_version_failed_when_the_content_write_fails(self, account_stub, monkeypatch):
-        import io
-        import zipfile
-
         from ai.modules.task.commands import cmd_deploy
 
         monkeypatch.setattr(cmd_deploy, 'write_pipe_content', AsyncMock(side_effect=RuntimeError('store down')))
         account_stub.set_artifact_state = AsyncMock()
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w') as zf:
-            zf.writestr('proj-1.pipe', json.dumps(PIPE))
-            zf.writestr('readme.md', '# x')
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='marked failed'):
-            await conn._deploy_add_pipe({}, {'data': buffer.getvalue()})
+            await conn._deploy_add_pipe({}, {'data': _bundle(LISTED, {'docs/README.md': '# x'})})
         assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'acme.proj-1', 3, 'failed')
 
     @pytest.mark.asyncio
@@ -277,9 +320,6 @@ class TestPublish:
     @pytest.mark.asyncio
     async def test_a_failed_content_write_lands_on_failed_without_a_review_ladder(self, account_stub, monkeypatch):
         """The real transition table: born 'private' the version can still become 'failed' when its bytes never land."""
-        import io
-        import zipfile
-
         from ai.account.deployment_backend import _assert_review_transition
         from ai.modules.task.commands import cmd_deploy
 
@@ -294,13 +334,9 @@ class TestPublish:
         account_stub.review_ladder = False
         account_stub.set_artifact_state = AsyncMock(side_effect=set_state)
         monkeypatch.setattr(cmd_deploy, 'write_pipe_content', AsyncMock(side_effect=RuntimeError('store down')))
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w') as zf:
-            zf.writestr('proj-1.pipe', json.dumps(PIPE))
-            zf.writestr('readme.md', '# x')
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='marked failed'):
-            await conn._deploy_add_pipe({}, {'data': buffer.getvalue()})
+            await conn._deploy_add_pipe({}, {'data': _bundle(LISTED, {'docs/README.md': '# x'})})
         assert states[3] == 'failed'
 
     @pytest.mark.asyncio

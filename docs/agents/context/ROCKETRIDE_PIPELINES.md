@@ -65,6 +65,8 @@ bottom. This is the canonical layout the editor tooling expects and every shippe
 | `viewport` | yes | bottom | Editor pan/zoom state; default `{ "x": 0, "y": 0, "zoom": 1 }` |
 | `version` | yes | bottom | Pipeline format version; write `1` |
 | `source` | optional | — | ID of the entry-point component; see Source Nodes |
+| `name`, `description` | optional | — | Display name (the registry's `pipelineName`; the file stem when absent) and store description |
+| `store` | optional | — | The store listing block; present = the pipeline is listable (see below) |
 
 **`project_id`** is the permanent identity of the pipeline (runtime events and deploy history
 key on it): a literal GUID, unique per file, generated with `uuidgen` /
@@ -75,6 +77,45 @@ key on it): a literal GUID, unique per file, generated with `uuidgen` /
 
 **Wrapper note:** some existing files wrap the pipeline as `{ "pipeline": { ... } }`; the
 client unwraps this on load. Author the flat form.
+
+### The `store` block (store listing)
+
+A pipeline's store listing is a root block `store` beside `project_id`, `name`,
+`description` and `source` — never duplicating them. It mirrors an app's `appManifest`
+listing fields and carries exactly these keys (an unknown key is an error naming it):
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `tagline` | string | One line for the store card |
+| `categories` | string[] | Store categories |
+| `tags` | string[] | Free tags |
+| `icon` | relative path | The icon, relative to the pipe file's directory |
+| `readme` | relative path | The store page (markdown), relative to the pipe file's directory |
+| `links` | `{ label: url }` | Links the listing shows |
+| `mode` | `free` \| `subscription` \| `paywall` | Monetization mode |
+| `billing` | `{ plans: BillingPlan[] }` | Pricing plans, the app's plan shape (`nickname`, `amountCents`, `currency`, `interval`, `metadata?`) |
+
+`rocketride pipe new <id>` stamps the default block:
+
+```json
+"store": { "tagline": "", "categories": ["pipeline"], "tags": [], "icon": "./icon.svg",
+           "readme": "./README.md", "links": {}, "mode": "free", "billing": { "plans": [] } }
+```
+
+**Present = listable.** Without the block a pipe still validates, runs and deploys — as an
+UNLISTED artifact. The engine never sees the block (the server drops it from the task file).
+
+**What a deploy packs** (`rocketride deploy add pipelines/<id>/<id>.pipe`,
+`client.deploy.addPipe(pipePath)` / `add_pipe(pipe_path)`): the `.pipe` itself, the declared
+`readme` and `icon`, and every file the README references through a markdown image
+`![alt](path)`, a markdown link `[text](path)` or an HTML `<img src="path">`, resolved
+relative to the README and laid out as the files sit relative to the pipe (a readme at
+`docs/README.md` referencing `../images/a.png` packs `docs/README.md` and `images/a.png`).
+`http(s)://`, `data:`, `mailto:`, `#anchor` and protocol-relative references are skipped.
+Nothing unreferenced is packed; two pipes in one folder are two pipes and may share files.
+A declared or referenced file that is missing, or whose real location is outside the pipe
+file's directory tree, fails the pack with an error naming it; an undeclared icon or readme
+is only a warning. Caps: readme 1 MiB, icon 256 KiB, each referenced file 10 MiB.
 
 ---
 

@@ -40,7 +40,7 @@ import os
 
 import pytest
 
-from rocketride import RocketRideClient
+from rocketride import LOCAL_DEVELOPER_ID, RocketRideClient, registry_id_of
 
 SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://127.0.0.1:5565')
 
@@ -80,9 +80,15 @@ class TestDeploy:
     @pytest.fixture(autouse=True)
     async def setup(self):
         self.client = RocketRideClient(SERVER_URI, 'MYAPIKEY')
-        await self.client.connect()
+        result = await self.client.connect()
+        org = result.get('organization') or {}
+        self.developer_id = org.get('developerId') or LOCAL_DEVELOPER_ID
         yield
         await self.client.disconnect()
+
+    def registry_id(self, project: str) -> str:
+        """The row name the server composes for a short id (developerId.slug)."""
+        return registry_id_of(project, self.developer_id)
 
     async def _cleanup(self, project_id: str) -> None:
         """Soft-remove the test deployment; tolerate never-deployed projects."""
@@ -129,7 +135,7 @@ class TestDeploy:
             result = await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             dep = result['deployment']
             assert dep['teamId'] == TEAM
-            assert dep['projectId'] == project
+            assert dep['projectId'] == self.registry_id(project)
             assert dep['version'] == 1
             assert dep['state'] == 'enabled'
         finally:
@@ -205,7 +211,7 @@ class TestDeploy:
 
             body = await self.client.deploy.list()
             assert set(body) == {'rows', 'total', 'page', 'pageSize'}
-            assert any(d['projectId'] == project for d in body['rows'])
+            assert any(d['projectId'] == self.registry_id(project) for d in body['rows'])
 
             # Team scope + paging args travel through.
             page = await self.client.deploy.list(team_id=TEAM, page_size=1)
@@ -219,7 +225,7 @@ class TestDeploy:
         try:
             await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             dep = await self.client.deploy.get(project, TEAM)
-            assert dep['projectId'] == project
+            assert dep['projectId'] == self.registry_id(project)
             assert dep['sha256']
             assert dep['schedules'] == {}
         finally:
@@ -253,7 +259,7 @@ class TestDeploy:
 
         # Hidden from listings...
         body = await self.client.deploy.list()
-        assert not any(d['projectId'] == project for d in body['rows'])
+        assert not any(d['projectId'] == self.registry_id(project) for d in body['rows'])
         # ...but the audit trail keeps everything, including the removal.
         history = await self.client.deploy.history(project)
         assert 'remove' in [h['action'] for h in history['rows']]

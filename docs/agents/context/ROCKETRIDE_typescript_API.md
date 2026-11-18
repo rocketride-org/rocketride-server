@@ -835,12 +835,21 @@ Deploy an object as the next immutable registry version. Returns `{ artifact, de
 - `options.comment?: string` — "what changed" note kept in the registry
 - `options.deployTo?: string` — team id to deploy the new version to immediately (one-step add+deploy; pipes only)
 
-##### `client.deploy.addPipe(bundleDir: string, { comment?, deployTo? }): Promise<PublishResult>`
+##### `client.deploy.addPipe(pipePath: string, { comment?, deployTo? }): Promise<PublishResult>`
 
-Pack a pipeline BUNDLE folder and deploy it as the next registry version (Node.js only; the call behind the DEPLOY card and `rocketride deploy add <folder>`). A pipeline publishes as a folder, `pipelines/<id>/`: exactly one `.pipe` (what runs), beside the store manifest `<id>.rrpipe` (display only: `name`, `tagline`, `description`, `category`, `tags`, `icon`, `links`, `mode`, `plans`; never a publisher or author, the server derives those), `readme.md` (the store page), an icon (`icon.svg` or `icon.png`) and `assets/` (the images the readme references). The pipe rides as the artifact, the rest as the content the server stores beside it. `bundleDir` may also be the `.pipe` itself when it is its folder's only pipe; a bare pipe beside other pipes is refused with the way out. `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a pipeline dict with no bundle (nothing for the store to show until a bundle is deployed).
+Pack one pipeline and deploy it as the next registry version (Node.js only; the call behind the DEPLOY card and `rocketride deploy add <pipe>`). The pipe rides as the artifact; the zip beside it carries the pipe at its root plus what the pipe's root `store` block names — the declared `readme` and `icon` (paths relative to the pipe file) and every file the README references (markdown images and links, HTML `<img src>`), laid out as they sit relative to the pipe. The block present = the pipeline is listable; a pipe without one deploys as an UNLISTED artifact (the zip is the pipe alone). A declared or referenced file that is missing, or that resolves outside the pipe's directory, throws naming it before any call; a folder is not accepted. `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a pipeline dict. The block's keys and the pack rules: ROCKETRIDE_PIPELINES.md, "The `store` block"; the pure rules (`STORE_KEYS`, `validateStoreBlock`, `scanReadmeReferences`, `pipeStoreFiles`, `defaultStoreBlock`) are exported from `rocketride` for browser hosts, the packer (`packPipe`, `scaffoldPipe`) from `rocketride/app-pack`.
 
 ```typescript
-await client.deploy.addPipe('./pipelines/docBrain', { comment: 'v2: faster OCR' });
+await client.deploy.addPipe('./pipelines/docBrain/docBrain.pipe', { comment: 'v2: faster OCR' });
+```
+
+##### `client.deploy.createPipe(pipeId: string, { workspaceRoot?, name?, dir? }): Promise<CreatedPipe>`
+
+Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (Node.js only). Writes `<dir>/<pipeId>/<pipeId>.pipe` (`dir` defaults to `pipelines`) carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipeId` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `addPipe` deploys it. Returns `{ folder, pipePath, files }` (workspace-relative POSIX paths); throws on an invalid id or an existing pipe file.
+
+```typescript
+const created = await client.deploy.createPipe('ingest', { name: 'Document ingest' });
+await client.deploy.addPipe(created.pipePath);
 ```
 
 ##### `client.deploy.deploy(projectId: string, version: number, teamId: string): Promise<Deployment>`

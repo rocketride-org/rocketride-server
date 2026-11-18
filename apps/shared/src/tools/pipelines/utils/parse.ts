@@ -58,6 +58,14 @@ export interface Pipeline {
 	}>;
 	source?: string;
 	project_id?: string;
+	/**
+	 * The store manifest (plan §9, C.17b): present = the pipeline is listable
+	 * when published; absent = it runs and deploys unlisted. Its shape is the
+	 * SDK's `PipeStoreBlock` (`rocketride`); kept loose here because this
+	 * parser compiles in the VS Code extension host too and never validates
+	 * the block (the publish door does).
+	 */
+	store?: Record<string, unknown>;
 }
 
 /** One source component, parsed for the sidebar/run surfaces. */
@@ -70,7 +78,7 @@ export interface ParsedSourceComponent {
 	icon: string;
 }
 
-/** The parse result for one `.pipe` / `.pipe.json` file. */
+/** The parse result for one `.pipe` file. */
 export interface ParsedPipelineFile {
 	filePath: string;
 	isValid: boolean;

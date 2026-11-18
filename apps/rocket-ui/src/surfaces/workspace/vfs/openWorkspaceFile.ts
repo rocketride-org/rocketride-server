@@ -29,7 +29,8 @@
 // exactly once:
 //
 //   pipelines/**.pipe   → the pipeline canvas (Documents adapter — editable,
-//                         saves through the view)
+//                         saves through the view); `.pipe` is the one
+//                         pipeline spelling (plan §9)
 //   apps/<folder>/*.rrapp → the App Builder panel for that app (the .rrapp
 //                         is a contentless trigger marker, same as VS Code)
 //   **.rrnode           → the Node Designer — SEAM ONLY today: the designer

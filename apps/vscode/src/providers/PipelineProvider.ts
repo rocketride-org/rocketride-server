@@ -29,7 +29,10 @@ import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
-import { packPipeBundle, pipeBundleFolderOf } from 'rocketride/app-pack';
+import { besidePath } from 'shared/components/assets/assetsModel';
+import { appIconDataUri, MAX_README_IMAGE_BYTES } from 'shared/tools/appdev';
+import { hostWorkspaceFs } from './toolhost/hostWorkspaceFs';
+import { packPipe, scaffoldPipe } from 'rocketride/app-pack';
 import { getLogger } from '../shared/util/output';
 // Deep import on purpose — see SidebarProvider: the barrel drags view types
 // into the extension-host compile; parse.ts is pure.
@@ -78,6 +81,39 @@ function parseTaskDoc(doc: string): { projectId: string; sourceId: string } | nu
 	const dot = rest.lastIndexOf('.');
 	if (dot <= 0 || dot === rest.length - 1) return null;
 	return { projectId: rest.slice(0, dot), sourceId: rest.slice(dot + 1) };
+}
+
+/**
+ * The URI of a file beside a pipeline document, or null when the document
+ * is untitled (no folder yet) or the path leaves the folder (besidePath's
+ * ruling) — the one containment check PACKAGE › Assets' ops share.
+ *
+ * @param document - The open pipeline document.
+ * @param relPath - The requested path, relative to the document's folder.
+ * @returns The target URI, or null to refuse.
+ */
+function besideDocument(document: vscode.TextDocument, relPath: string): vscode.Uri | null {
+	if (document.isUntitled) return null;
+	const rel = besidePath(relPath);
+	return rel ? vscode.Uri.joinPath(document.uri, '..', ...rel.split('/')) : null;
+}
+
+/**
+ * The bytes of a file beside a document: null when it does not exist or is
+ * not a plain file; any other failure rejects.
+ *
+ * @param target - The file URI.
+ * @returns The bytes, or null.
+ */
+async function readBesideFile(target: vscode.Uri): Promise<Uint8Array | null> {
+	try {
+		const stat = await vscode.workspace.fs.stat(target);
+		if ((stat.type & vscode.FileType.File) === 0) return null;
+		return await vscode.workspace.fs.readFile(target);
+	} catch (err) {
+		if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') return null;
+		throw err;
+	}
 }
 
 // =============================================================================
@@ -337,16 +373,12 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 					const saved = await document.save();
 					if (!saved) throw new Error('Save failed; publish cancelled');
 				}
-				// A pipeline publishes as a BUNDLE (plan §9, B7): the folder
-				// holding this one .pipe, its .rrpipe manifest, readme, icon and
-				// assets. The SDK's packer reads the folder (the extension host
-				// is Node); a pipe that is not alone in its folder is refused
-				// with the way out.
-				const folder = pipeBundleFolderOf(document.uri.fsPath);
-				if (!folder) {
-					throw new Error('This pipeline is not in a bundle folder. Move it to pipelines/<id>/<id>.pipe (beside its readme, icon and assets) to deploy it.');
-				}
-				const packed = packPipeBundle(folder);
+				// A pipeline publishes PER PIPE, BY REFERENCE (plan §9): the pipe
+				// file, the readme and icon its `store` block declares, and every
+				// file the readme references. The SDK's packer reads them (the
+				// extension host is Node); a packer error IS the publish failure.
+				const packed = packPipe(document.uri.fsPath);
+				for (const warning of packed.warnings) this.logger.info(`Publish ${vscode.workspace.asRelativePath(document.uri)}: ${warning}`);
 				await deployClient.deploy.add({
 					pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
 					data: packed.data,
@@ -433,8 +465,9 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				return { developerId: typeof res.developerId === 'string' ? res.developerId : p.developerId };
 			},
 			// The New Pipeline form (plan §2.1, §9): the untitled document asks
-			// the name (the pipeline's id); the extension creates the bundle
-			// `<pipelines dir>/<name>/<name>.pipe` and swaps the documents.
+			// the name (the pipeline's id); the extension scaffolds
+			// `<pipelines dir>/<name>/` (the pipe with its store block, icon,
+			// README, assets/) through the SDK and swaps the documents.
 			'host.pipeline.newIdentity': async () => {
 				const folder = vscode.workspace.workspaceFolders?.[0];
 				const developerId = this.connectionManager.getClient()?.getAccountInfo()?.organization?.developerId ?? '';
@@ -443,7 +476,7 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
 				let existingNames: string[] = [];
 				try {
-					existingNames = (await vscode.workspace.fs.readDirectory(dirUri)).map(([name, type]) => (type === vscode.FileType.Directory ? name : name.replace(/\.pipe(?:\.json)?$/i, '')));
+					existingNames = (await vscode.workspace.fs.readDirectory(dirUri)).map(([name, type]) => (type === vscode.FileType.Directory ? name : name.replace(/\.pipe$/i, '')));
 				} catch {
 					existingNames = [];
 				}
@@ -458,44 +491,79 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				if (!SHORT_ID_PATTERN.test(p.name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
 				const dir = resolveDefaultPipelineDir();
 				const dirUri = dir ? vscode.Uri.joinPath(folder.uri, ...dir.split('/')) : folder.uri;
-				const bundleDir = vscode.Uri.joinPath(dirUri, p.name);
-				const bundleFile = vscode.Uri.joinPath(bundleDir, `${p.name}.pipe`);
+				const pipeDir = vscode.Uri.joinPath(dirUri, p.name);
 				try {
-					await vscode.workspace.fs.stat(bundleDir);
-					throw new Error(`"${vscode.workspace.asRelativePath(bundleDir)}" already exists. Choose another name.`);
+					await vscode.workspace.fs.stat(pipeDir);
+					throw new Error(`"${vscode.workspace.asRelativePath(pipeDir)}" already exists. Choose another name.`);
 				} catch (error) {
 					if (error instanceof Error && error.message.endsWith('Choose another name.')) throw error;
 				}
-				await vscode.workspace.fs.createDirectory(bundleDir);
-				// The untitled document's content rides along (its components stay);
-				// only the identity is set here.
+				// Step 1: the SDK scaffold — the same files the CLI writes: the pipe
+				// with its default store block, icon.svg, README.md and assets/.
+				const scaffolded = scaffoldPipe(folder.uri.fsPath, p.name, { name: p.displayName, ...(dir ? { dir } : {}) });
+				const pipeFile = vscode.Uri.file(scaffolded.pipePath);
+				// Step 2: the untitled document's content rides along (its
+				// components stay) on top of the scaffold's identity and block.
 				const base = p.project && typeof p.project === 'object' ? (p.project as Record<string, unknown>) : {};
-				const content = JSON.stringify({ ...base, project_id: p.name, name: p.displayName, components: Array.isArray(base.components) ? base.components : [] }, null, 2);
-				try {
-					await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(content, 'utf8'));
-				} catch (error) {
-					// A failed write must leave the name retryable: the folder THIS
-					// attempt made goes if it is still empty (never anyone else's content).
-					try {
-						if ((await vscode.workspace.fs.readDirectory(bundleDir)).length === 0) await vscode.workspace.fs.delete(bundleDir);
-					} catch {
-						// nothing to clean, or not ours to clean
-					}
-					throw error;
+				if (Array.isArray(base.components) && base.components.length > 0) {
+					const scaffoldedPipe = JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(pipeFile)).toString('utf8')) as Record<string, unknown>;
+					const content = JSON.stringify({ ...base, ...scaffoldedPipe, components: base.components }, null, 2);
+					await vscode.workspace.fs.writeFile(pipeFile, Buffer.from(`${content}\n`, 'utf8'));
 				}
-				// Retire the untitled form document and open the file in its place.
+				// Step 3: retire the untitled form document and open the file in its place.
 				const editorState = this.findLiveEditorState(p.doc);
 				if (editorState) {
 					editorState.webviewPanel.reveal(undefined, false);
 					await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
 				}
-				await vscode.commands.executeCommand('vscode.openWith', bundleFile, 'rocketride.page.project');
+				await vscode.commands.executeCommand('vscode.openWith', pipeFile, 'rocketride.page.project');
 			},
 			'host.pipeline.cancelNew': async (p) => {
 				const editorState = this.findLiveEditorState(p.doc);
 				if (!editorState) return;
 				editorState.webviewPanel.reveal(undefined, false);
 				await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+			},
+			// PACKAGE › Assets: the files beside the document's .pipe. A path is
+			// served only when it stays inside the pipe's folder after
+			// normalisation (besidePath); reads answer null for an untitled
+			// document, a missing file, a directory or a refused path and reject
+			// on any other failure; writes and opens reject on all of those.
+			'host.pipeline.readFile': async (p) => {
+				const target = besideDocument(stateFor(p.doc).document, p.relPath);
+				if (!target) return { text: null };
+				const bytes = await readBesideFile(target);
+				return { text: bytes ? Buffer.from(bytes).toString('utf8') : null };
+			},
+			'host.pipeline.readImageDataUri': async (p) => {
+				const target = besideDocument(stateFor(p.doc).document, p.relPath);
+				if (!target) return { dataUri: null };
+				return { dataUri: (await appIconDataUri(hostWorkspaceFs, target.fsPath, MAX_README_IMAGE_BYTES)) ?? null };
+			},
+			'host.pipeline.writeFile': async (p) => {
+				const target = besideDocument(stateFor(p.doc).document, p.relPath);
+				if (!target) throw new Error(`Cannot write ${p.relPath}: the path must stay inside the pipeline's folder.`);
+				await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, '..'));
+				const bytes = p.dataB64 !== undefined ? Buffer.from(p.dataB64, 'base64') : Buffer.from(p.text ?? '', 'utf8');
+				await vscode.workspace.fs.writeFile(target, bytes);
+			},
+			'host.pipeline.pickFile': async (p) => {
+				const document = stateFor(p.doc).document;
+				const picked = await vscode.window.showOpenDialog({
+					canSelectMany: false,
+					defaultUri: document.isUntitled ? undefined : vscode.Uri.joinPath(document.uri, '..'),
+					openLabel: 'Select',
+					filters: p.accept === 'image' ? { Images: ['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp'] } : { Markdown: ['md'] },
+				});
+				if (!picked || picked.length === 0) return null;
+				const bytes = await vscode.workspace.fs.readFile(picked[0]);
+				return { name: path.basename(picked[0].fsPath), dataB64: Buffer.from(bytes).toString('base64') };
+			},
+			'host.pipeline.openAsset': async (p) => {
+				const target = besideDocument(stateFor(p.doc).document, p.relPath);
+				if (!target) throw new Error(`Cannot open ${p.relPath}: the path must stay inside the pipeline's folder.`);
+				const textDocument = await vscode.workspace.openTextDocument(target);
+				await vscode.window.showTextDocument(textDocument, vscode.ViewColumn.Beside);
 			},
 		};
 		registerOpHandlers<PipelineHostOpMap>(this.busHost.rootBus, impls);

@@ -558,3 +558,65 @@ export function getWorkspaceVfs(): IWorkspaceFileSystem {
 export function getStagedWorkspace(): StagedFileSystem {
 	return getWorkspace().view;
 }
+
+// =============================================================================
+// BYTES — the raw escape hatch beside the text-only view
+// =============================================================================
+
+/**
+ * Reads one workspace file as bytes, straight from the store: the view's
+ * content contract is text (vfsTypes), so images — icons, README assets —
+ * come through here. Null when the file is absent or over `maxBytes`.
+ *
+ * @param path - The virtual path ('apps/...', 'pipelines/...').
+ * @param maxBytes - The size cap.
+ * @returns The bytes, or null.
+ */
+export async function readWorkspaceBytes(path: string, maxBytes: number): Promise<Uint8Array | null> {
+	const [entry] = await requireClient().fsReadMany([toStorePath(parseVirtualPath(path) as VirtualPath)]);
+	if (!entry?.ok || !entry.data || entry.data.byteLength > maxBytes) return null;
+	return entry.data;
+}
+
+/**
+ * Writes one workspace file as bytes through the store's handle API (the
+ * view stages strings only), records it in the view's inventory so the
+ * Explorer lists it, and announces the change like a view write.
+ *
+ * @param path - The virtual path.
+ * @param data - The bytes.
+ * @param origin - The writer's identity for the change notification.
+ */
+export async function writeWorkspaceBytes(path: string, data: Uint8Array, origin?: string): Promise<void> {
+	const vp = parseVirtualPath(path) as VirtualPath;
+	if (!vp.rest) throw new Error(`Cannot write to the ${vp.mount}/ root.`);
+	const client = requireClient();
+	const storePath = toStorePath(vp);
+	const { handle } = await client.fsOpen(storePath, 'w');
+	try {
+		await client.fsWrite(handle, data);
+	} finally {
+		await client.fsClose(handle, 'w');
+	}
+	const view = getWorkspaceVfs();
+	view.invalidate(path);
+	view.upsert(path, 'file');
+	emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);
+}
+
+/**
+ * Creates the folder chain above a path when it is not there yet (the
+ * store does not create parents on write), through the view so the
+ * Explorer learns of each folder.
+ *
+ * @param path - The virtual path of the file about to be written.
+ */
+export async function ensureWorkspaceParents(path: string): Promise<void> {
+	const view = getWorkspaceVfs();
+	const segments = path.split('/').filter((s) => s.length > 0);
+	// step: the mount itself always exists; walk the folders under it
+	for (let depth = 2; depth < segments.length; depth++) {
+		const dir = segments.slice(0, depth).join('/');
+		if ((await view.stat(dir)) === null) await view.mkdir(dir);
+	}
+}

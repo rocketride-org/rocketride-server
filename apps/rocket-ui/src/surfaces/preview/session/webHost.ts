@@ -43,7 +43,9 @@ import { ConnectionManager } from 'shell';
 import type { RocketRideClient, PrefsStore } from 'shell';
 import { createBusAppBuilderHost, projectListing, applyListing, probePackage, runListingPreflight } from 'shared/tools/appdev';
 import type { IAppBuilderHost } from 'shared/tools/appdev';
-import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppPackage } from './appStore';
+import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppFile, writeAppPackage } from './appStore';
+import { openWorkspaceFile } from '../../workspace/vfs/openWorkspaceFile';
+import { pickLocalFile } from '../../../utils/pickLocalFile';
 import { packAppSource } from './pack';
 import type { WebDevSession } from './devSession';
 
@@ -164,9 +166,15 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 				probeDependency: (name, range) => probePackage({ name, version: range }),
 			});
 		},
-		// Manifest-asset previews ride the store VFS. The native pickers stay
-		// unimplemented — a store-backed file picker is Phase 2 UI.
+		// PACKAGE › Assets rides the store VFS: text through the view, images
+		// and dropped bytes through the byte escape hatch, the picker is the
+		// browser's own dialog, and "Open in editor" is the workspace file tab.
 		readAppTextFile: async (relPath) => await readAppText(folder, relPath),
-		readAppImageDataUri: async (relPath) => await readAppImageDataUri(client, folder, relPath),
+		readAppImageDataUri: async (relPath) => await readAppImageDataUri(folder, relPath),
+		writeAppFile: async (relPath, data) => await writeAppFile(folder, relPath, data),
+		pickAssetFile: pickLocalFile,
+		openAppFile: async (relPath) => {
+			if (!(await openWorkspaceFile(`apps/${folder}/${relPath.replace(/^\.\//, '')}`))) throw new Error(`No editor opens ${relPath} in this workspace.`);
+		},
 	};
 }

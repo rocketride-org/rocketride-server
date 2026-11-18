@@ -45,6 +45,7 @@ import * as path from 'path';
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/globals';
 import { RocketRideClient } from '../src/client';
 import { getEchoPipeline } from './echo.pipeline';
+import { getToolPipeline } from './tool.pipeline';
 
 // Test configuration
 const TEST_CONFIG = {
@@ -440,7 +441,8 @@ describe('CLI profile Integration Tests', () => {
 	it('should list which tasks are being profiled', async () => {
 		let other: string | undefined;
 		try {
-			other = (await client.use({ pipeline: getEchoPipeline(), token: privateToken(`${TOKEN_BASE}-other`) })).token;
+			// A different pipeline: identical content would share the profiled task's engine.
+			other = (await client.use({ pipeline: getToolPipeline(), token: privateToken(`${TOKEN_BASE}-other`) })).token;
 			expect((await client.cprofileStart(pipelineToken)).status).toBe('started');
 
 			let result = await runCli(['profile', 'list', '--json', ...serverArgs()]);

@@ -241,7 +241,35 @@ def pipeline_name_from_path(file_path: str) -> str:
         file_path: The pipeline file path (either separator).
 
     Returns:
-        The basename without its ``.pipe`` / ``.pipe.json`` extension.
+        The basename without its ``.pipe`` extension.
     """
     base = re.split(r'[\\/]', file_path)[-1] or file_path
-    return re.sub(r'\.pipe(?:\.json)?$', '', base) or base
+    return re.sub(r'\.pipe$', '', base) or base
+
+
+# =============================================================================
+# REGISTRY NAMES
+# =============================================================================
+
+# The developer id a build names itself under when its organization has none yet.
+LOCAL_DEVELOPER_ID = 'local'
+
+
+def registry_id_of(slug: str, developer_id: Optional[str]) -> str:
+    """
+    The registry name a deploy row carries for a short id.
+
+    The server composes ``<developerId>.<slug>`` from the deploying
+    organization; this is the value to MATCH rows and events against.
+
+    Args:
+        slug: The short id the file carries.
+        developer_id: The caller organization's developer id, if known.
+
+    Returns:
+        The registry name, or ``''`` when the developer id is unknown (no row
+        can match: nothing deploys without one).
+    """
+    if not slug or not developer_id:
+        return ''
+    return slug if '.' in slug else f'{developer_id}.{slug}'

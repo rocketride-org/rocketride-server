@@ -21,60 +21,54 @@
 // SOFTWARE.
 
 // =============================================================================
-// PIPE BUNDLE — the publish unit of a pipeline (plan §9, B7)
+// PIPE PACK — the publish unit of a pipeline (plan §9)
 // =============================================================================
 //
-// A pipeline publishes as a FOLDER: `pipelines/<pipeId>/` holding exactly one
-// `.pipe` (what runs), beside the store manifest `<stem>.rrpipe` (display
-// only: name, tagline, description, category, tags, icon, links, mode,
-// plans — never publisher or author, which the server derives), `readme.md`
-// (the store page), an icon, and `assets/` (the images the readme references).
-// `packPipeBundle` reads that folder and builds the zip the deploy door takes
-// as `data` beside the pipeline dict (pipe-at-root layout, deterministic
-// entries). Node.js only, like the app packer; the browser twin lives in
-// rocket-ui over its store VFS.
+// A pipeline publishes PER PIPE, BY REFERENCE: `packPipe` takes the path of
+// one `.pipe` and builds the zip the deploy door takes as `data` beside the
+// pipeline dict. The zip holds the pipe itself at the root under its own
+// basename, the readme and icon the pipe's `store` block declares, and every
+// file the README references (markdown images and links, HTML `<img src>`),
+// laid out as they sit relative to the pipe file's directory. There is no
+// folder rule: two pipes in one folder are two pipes and may share files.
+// Nothing unreferenced is packed; every packed file must really live inside
+// the pipe file's directory tree. Without a `store` block the pack is the
+// pipe alone (an UNLISTED artifact). Node.js only, like the app packer; the
+// rules themselves are the pure `client/pipe-store.ts`.
 // =============================================================================
 
 import * as fs from 'fs';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
+import { defaultStoreBlock, normalizePosixPath, PIPE_ICON_SVG, pipeReadmeStub, pipeStoreFiles, validateStoreBlock } from '../client/pipe-store.js';
+import type { PipeStoreBlock } from '../client/pipe-store.js';
 import { MAX_ICON_BYTES, MAX_README_IMAGE_BYTES } from './scan.js';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** The store manifest of a pipeline (`<stem>.rrpipe`), display only. */
-export interface PipeManifest {
-	/** Display name (defaults to the pipe's `name`, else the stem). */
-	name?: string;
-	/** One-line tagline for the store card. */
-	tagline?: string;
-	/** Store page description. */
-	description?: string;
-	/** Store category. */
-	category?: string;
-	/** Free tags. */
-	tags?: string[];
-	/** Bundle-relative icon path (`icon.svg` | `icon.png`). */
-	icon?: string;
-	/** Links the listing shows. */
-	links?: { docs?: string; support?: string };
-	/** Monetization mode, the app model: 'free' | 'subscription' | 'paywall'. */
-	mode?: 'free' | 'subscription' | 'paywall';
-	/** Subscription plans (the app plan machinery). */
-	plans?: unknown[];
-}
-
-/** The result of {@link packPipeBundle}. */
-export interface PackedPipeBundle {
+/** The result of {@link packPipe}. */
+export interface PackedPipe {
 	/** The pipeline dict (the `.pipe` JSON, display `name` filled). */
-	pipeline: Record<string, unknown> & { name: string };
-	/** The manifest as read (an empty object when the folder has none). */
-	manifest: PipeManifest;
+	pipeline: Record<string, unknown>;
+	/** The validated store block, or null when the pipe carries none (unlisted). */
+	store: PipeStoreBlock | null;
+	/** Paths packed, relative to the pipe file's directory, in zip order. */
+	files: string[];
 	/** The zip bytes to pass as `deploy.add({ kind: 'pipe', pipeline, data })`. */
 	data: Uint8Array;
-	/** Bundle-relative paths packed, in zip order. */
+	/** Advisory notes (an undeclared icon or readme). */
+	warnings: string[];
+}
+
+/** The result of {@link scaffoldPipe}. */
+export interface CreatedPipe {
+	/** Workspace-relative POSIX path of the created folder. */
+	folder: string;
+	/** Workspace-relative POSIX path of the `.pipe` file. */
+	pipePath: string;
+	/** Workspace-relative POSIX paths of the files written. */
 	files: string[];
 }
 
@@ -82,126 +76,42 @@ export interface PackedPipeBundle {
 // CONSTANTS
 // =============================================================================
 
-/** The readme file name the store page reads. */
-export const PIPE_README_NAME = 'readme.md';
-
-/** The folder of images the readme references. */
-export const PIPE_ASSETS_DIR = 'assets';
-
-/** The icon file names a bundle may carry, in preference order. */
-export const PIPE_ICON_NAMES = ['icon.svg', 'icon.png'] as const;
-
-/** Manifest keys the server accepts; anything else is refused at pack time. */
-const MANIFEST_KEYS = new Set(['name', 'tagline', 'description', 'category', 'tags', 'icon', 'links', 'mode', 'plans']);
-
 /** The readme cap (a store page, not a book). */
 export const MAX_PIPE_README_BYTES = 1024 * 1024;
 
-/** The manifest cap. */
-export const MAX_PIPE_MANIFEST_BYTES = 64 * 1024;
-
-/** Fixed entry timestamp: two packs of one folder hash the same. */
+/** Fixed entry timestamp: two packs of one pipe hash the same. */
 const ZIP_EPOCH = new Date(1980, 0, 1, 0, 0, 0);
 
+/** Pipe id grammar: one dot-free address segment (the developer id is attached at deploy). */
+const PIPE_ID_RE = /^[A-Za-z0-9_-]+$/;
+
 // =============================================================================
-// FOLDER
+// READS
 // =============================================================================
 
 /**
- * The bundle folder of a path: the folder itself, or the folder of a `.pipe`
- * that is the only pipe in it. `null` when the path is neither — a bare pipe
- * beside other pipes, or no pipe at all (the B7 refusal).
+ * Reads one file of the pipe's tree, refusing a path whose real location
+ * leaves the pipe file's directory.
  *
- * @param target - A folder or a `.pipe` file.
- * @returns The bundle folder, or null.
- */
-export function pipeBundleFolderOf(target: string): string | null {
-	const stat = fs.existsSync(target) ? fs.statSync(target) : null;
-	if (!stat) return null;
-	const folder = stat.isDirectory() ? target : path.dirname(target);
-	const pipes = fs.readdirSync(folder).filter((name) => name.endsWith('.pipe'));
-	if (pipes.length !== 1) return null;
-	if (!stat.isDirectory() && path.basename(target) !== pipes[0]) return null;
-	return folder;
-}
-
-/**
- * The one `.pipe` of a bundle folder and its stem.
+ * `fs.readFileSync` follows symlinks: a link inside the tree pointing at a
+ * file outside it would pack that file, and a `..` reference would read a
+ * sibling's. Every read resolves the real path and requires it under the
+ * real directory of the pipe.
  *
- * @param folder - The bundle folder.
- * @returns `{ file, stem }`.
- * @throws Error when the folder holds no pipe or more than one.
- */
-export function pipeOfBundle(folder: string): { file: string; stem: string } {
-	const names = fs.readdirSync(folder);
-	const pipes = names.filter((name) => name.endsWith('.pipe'));
-	if (pipes.length === 0) {
-		const legacy = names.find((name) => name.endsWith('.pipe.json'));
-		if (legacy) throw new Error(`${folder} holds ${legacy}; a pipeline bundle takes <id>.pipe — rename it to ${legacy.slice(0, -'.json'.length)}`);
-		throw new Error(`${folder} holds no .pipe file — a pipeline bundle is one folder with one .pipe`);
-	}
-	if (pipes.length > 1) throw new Error(`${folder} holds ${pipes.length} .pipe files — a pipeline bundle is one folder with one .pipe`);
-	return { file: path.join(folder, pipes[0]), stem: pipes[0].slice(0, -'.pipe'.length) };
-}
-
-/**
- * Reads one bundle file, refusing a path whose real location leaves the folder.
- *
- * `fs.readFileSync` follows symlinks: a link inside the bundle pointing at a
- * file outside it would pack that file. Every read resolves the real path and
- * requires it under the real bundle folder.
- *
- * @param folder - The bundle folder.
- * @param rel - The bundle-relative path.
+ * @param pipeDir - The pipe file's directory.
+ * @param rel - The path relative to it (posix).
  * @returns The bytes.
- * @throws Error when the real path leaves the folder.
+ * @throws Error naming the path when it is missing, not a file, or outside.
  */
-export function readContained(folder: string, rel: string): Buffer {
-	const root = fs.realpathSync(folder);
-	const real = fs.realpathSync(path.join(folder, rel));
-	if (!real.startsWith(root + path.sep)) throw new Error(`${rel} resolves outside the bundle folder`);
+function readContained(pipeDir: string, rel: string): Buffer {
+	if (rel.split('/')[0] === '..') throw new Error(`${rel} resolves outside the pipe file's directory`);
+	const root = fs.realpathSync(pipeDir);
+	const abs = path.join(pipeDir, ...rel.split('/'));
+	if (!fs.existsSync(abs)) throw new Error(`${rel} does not exist beside the pipe`);
+	const real = fs.realpathSync(abs);
+	if (!real.startsWith(root + path.sep)) throw new Error(`${rel} resolves outside the pipe file's directory`);
+	if (!fs.statSync(real).isFile()) throw new Error(`${rel} is not a file`);
 	return fs.readFileSync(real);
-}
-
-// =============================================================================
-// MANIFEST
-// =============================================================================
-
-/**
- * Reads and checks the bundle's `<stem>.rrpipe`.
- *
- * @param folder - The bundle folder.
- * @param stem - The pipe's stem.
- * @returns The manifest, or an empty object when the file is absent.
- * @throws Error on unparseable JSON, an unknown key, a bad mode, or an icon path outside the folder.
- */
-export function readPipeManifest(folder: string, stem: string): PipeManifest {
-	const file = path.join(folder, `${stem}.rrpipe`);
-	if (!fs.existsSync(file)) return {};
-	const raw = readContained(folder, `${stem}.rrpipe`);
-	if (raw.byteLength > MAX_PIPE_MANIFEST_BYTES) throw new Error(`${stem}.rrpipe exceeds ${MAX_PIPE_MANIFEST_BYTES} bytes`);
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw.toString('utf8'));
-	} catch (err) {
-		throw new Error(`${stem}.rrpipe is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
-	}
-	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${stem}.rrpipe must hold a JSON object`);
-	const manifest = parsed as Record<string, unknown>;
-	for (const key of Object.keys(manifest)) {
-		if (!MANIFEST_KEYS.has(key)) throw new Error(`${stem}.rrpipe: unknown key "${key}" (allowed: ${[...MANIFEST_KEYS].join(', ')})`);
-	}
-	if (manifest.mode !== undefined && !['free', 'subscription', 'paywall'].includes(String(manifest.mode))) {
-		throw new Error(`${stem}.rrpipe: mode must be free, subscription or paywall`);
-	}
-	if (manifest.tags !== undefined && (!Array.isArray(manifest.tags) || manifest.tags.some((t) => typeof t !== 'string'))) {
-		throw new Error(`${stem}.rrpipe: tags must be a list of strings`);
-	}
-	if (manifest.icon !== undefined) {
-		const icon = String(manifest.icon).replace(/\\/g, '/');
-		if (icon.startsWith('/') || icon.split('/').includes('..')) throw new Error(`${stem}.rrpipe: icon must be a path inside the bundle`);
-	}
-	return manifest as PipeManifest;
 }
 
 // =============================================================================
@@ -209,35 +119,71 @@ export function readPipeManifest(folder: string, stem: string): PipeManifest {
 // =============================================================================
 
 /**
- * Packs a pipeline bundle folder into the deploy zip.
+ * Packs one pipeline into the deploy zip.
  *
- * Entries: the `.pipe`, the `.rrpipe` when present, `readme.md` when present,
- * the icon (the manifest's, else the first of {@link PIPE_ICON_NAMES} found),
- * and every file under `assets/`. Nothing else in the folder is packed.
+ * Entries: the `.pipe` at the root under its own basename, then — in
+ * code-point order — the declared readme and icon and every file the README
+ * references, each at its path relative to the pipe file's directory.
  *
- * @param folder - The bundle folder (`pipelines/<pipeId>/`).
- * @returns The pipeline dict, the manifest and the zip.
- * @throws Error on a malformed folder, an unparseable pipe or manifest, or a breached cap.
+ * @param pipePath - The `.pipe` file.
+ * @returns The pipeline dict, the store block, the zip, and any warnings.
+ * @throws Error when the path is not a `.pipe`, the JSON is invalid, the
+ *   store block is invalid, a declared or referenced file is missing or
+ *   resolves outside the pipe's directory, or a cap is breached.
  */
-export function packPipeBundle(folder: string): PackedPipeBundle {
-	// Step 1: the one pipe, parsed (the artifact the server snapshots)
-	const { file, stem } = pipeOfBundle(folder);
-	const pipeBytes = readContained(folder, path.basename(file));
+export function packPipe(pipePath: string): PackedPipe {
+	// Step 1: the pipe, parsed (the artifact the server snapshots)
+	const base = path.basename(pipePath);
+	if (!base.endsWith('.pipe')) throw new Error(`${pipePath} is not a .pipe file`);
+	if (!fs.existsSync(pipePath) || !fs.statSync(pipePath).isFile()) throw new Error(`${pipePath} does not exist`);
+	const pipeDir = path.dirname(pipePath);
+	const pipeBytes = fs.readFileSync(pipePath);
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(pipeBytes.toString('utf8'));
 	} catch (err) {
-		throw new Error(`${path.basename(file)} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+		throw new Error(`${base} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
 	}
-	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${path.basename(file)} must hold a JSON object`);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${base} must hold a JSON object`);
 	const pipe = parsed as Record<string, unknown>;
+	const stem = base.slice(0, -'.pipe'.length);
+	const pipeline: Record<string, unknown> = { ...pipe, name: String(pipe.name || stem) };
 
-	// Step 2: the manifest; the display name falls back pipe -> manifest -> stem
-	const manifest = readPipeManifest(folder, stem);
-	const name = String(pipe.name || manifest.name || stem);
-	const pipeline = { ...pipe, name } as Record<string, unknown> & { name: string };
+	// Step 2: the store block — present = listable, absent = unlisted
+	const store = pipe.store === undefined ? null : validateStoreBlock(pipe.store);
+	const warnings: string[] = [];
+	if (store && !store.icon) warnings.push('store.icon is not declared, so tiles show a generic glyph');
+	if (store && !store.readme) warnings.push('store.readme is not declared, so the listing has no page');
 
-	// Step 3: the content files, each under its cap
+	// Step 3: the declared files, each under its cap
+	const entries = new Map<string, Buffer>();
+	const readmeRel = store?.readme ? normalizePosixPath(store.readme) : null;
+	let readmeText: string | null = null;
+	if (readmeRel) {
+		const readme = readContained(pipeDir, readmeRel);
+		if (readme.byteLength > MAX_PIPE_README_BYTES) throw new Error(`${readmeRel} exceeds ${MAX_PIPE_README_BYTES} bytes`);
+		entries.set(readmeRel, readme);
+		readmeText = readme.toString('utf8');
+	}
+	if (store?.icon) {
+		const iconRel = normalizePosixPath(store.icon);
+		const icon = readContained(pipeDir, iconRel);
+		if (icon.byteLength > MAX_ICON_BYTES) throw new Error(`${iconRel} exceeds ${MAX_ICON_BYTES} bytes`);
+		entries.set(iconRel, icon);
+	}
+
+	// Step 4: the README's references, resolved against the README and laid
+	// out relative to the pipe; a reference that escapes upward is refused
+	// by the containment read, by name
+	for (const rel of pipeStoreFiles(store, readmeText, readmeRel).referenced) {
+		if (entries.has(rel) || rel === base) continue;
+		const bytes = readContained(pipeDir, rel);
+		if (bytes.byteLength > MAX_README_IMAGE_BYTES) throw new Error(`${rel} exceeds ${MAX_README_IMAGE_BYTES} bytes`);
+		entries.set(rel, bytes);
+	}
+
+	// Step 5: the zip — pipe first, then code-point order (the Python
+	// packer's `sorted()`), fixed timestamps: identical bytes on every pack
 	const zip = new AdmZip();
 	const files: string[] = [];
 	const add = (rel: string, bytes: Buffer): void => {
@@ -246,39 +192,51 @@ export function packPipeBundle(folder: string): PackedPipeBundle {
 		if (entry) entry.header.time = ZIP_EPOCH;
 		files.push(rel);
 	};
-	add(path.basename(file), pipeBytes);
-	const manifestPath = path.join(folder, `${stem}.rrpipe`);
-	if (fs.existsSync(manifestPath)) add(`${stem}.rrpipe`, readContained(folder, `${stem}.rrpipe`));
-	const readmePath = path.join(folder, PIPE_README_NAME);
-	if (fs.existsSync(readmePath)) {
-		const readme = readContained(folder, PIPE_README_NAME);
-		if (readme.byteLength > MAX_PIPE_README_BYTES) throw new Error(`${PIPE_README_NAME} exceeds ${MAX_PIPE_README_BYTES} bytes`);
-		add(PIPE_README_NAME, readme);
-	}
-	const iconRel = manifest.icon ? String(manifest.icon).replace(/\\/g, '/') : PIPE_ICON_NAMES.find((n) => fs.existsSync(path.join(folder, n)));
-	if (iconRel) {
-		const iconPath = path.join(folder, iconRel);
-		if (!fs.existsSync(iconPath)) throw new Error(`the manifest names icon "${iconRel}" but the bundle has no such file`);
-		const icon = readContained(folder, iconRel);
-		if (icon.byteLength > MAX_ICON_BYTES) throw new Error(`${iconRel} exceeds ${MAX_ICON_BYTES} bytes`);
-		add(iconRel, icon);
-	}
-	const assetsDir = path.join(folder, PIPE_ASSETS_DIR);
-	if (fs.existsSync(assetsDir) && fs.statSync(assetsDir).isDirectory()) {
-		const walk = (dir: string, rel: string): void => {
-			// Code-point order, the Python packer's `sorted()`: two packs of one
-			// folder hash the same on every machine and in both languages
-			for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-				const childRel = `${rel}/${entry.name}`;
-				if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
-				else if (entry.isFile()) {
-					const bytes = readContained(folder, childRel);
-					if (bytes.byteLength > MAX_README_IMAGE_BYTES) throw new Error(`${childRel} exceeds ${MAX_README_IMAGE_BYTES} bytes`);
-					add(childRel, bytes);
-				}
-			}
-		};
-		walk(assetsDir, PIPE_ASSETS_DIR);
-	}
-	return { pipeline, manifest, data: new Uint8Array(zip.toBuffer()), files };
+	add(base, pipeBytes);
+	for (const rel of [...entries.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) add(rel, entries.get(rel) as Buffer);
+	return { pipeline, store, files, data: new Uint8Array(zip.toBuffer()), warnings };
+}
+
+// =============================================================================
+// SCAFFOLD (a new pipeline)
+// =============================================================================
+
+/**
+ * Scaffolds a new pipeline — the ONE scaffold behind `rocketride pipe new`
+ * and `client.deploy.createPipe()`. Writes `<dir>/<pipeId>/<pipeId>.pipe`
+ * with the default `store` block, the placeholder `icon.svg` the app
+ * scaffold ships, a `README.md` stub, and an empty `assets/` directory.
+ *
+ * @param workspaceRoot - The workspace folder that owns `<dir>`.
+ * @param pipeId - The pipeline id: one dot-free segment of letters, digits,
+ *   `_` or `-` (the deploying organization's developer id is attached at
+ *   deploy, never written into the file).
+ * @param options.name - Display name (default: the id).
+ * @param options.dir - The pipelines directory, relative to the workspace
+ *   (default `pipelines`).
+ * @returns The created folder, pipe path and files, workspace-relative.
+ * @throws Error on an invalid id or an existing pipe file.
+ */
+export function scaffoldPipe(workspaceRoot: string, pipeId: string, options: { name?: string; dir?: string } = {}): CreatedPipe {
+	// step: identity — validate before touching disk
+	if (!PIPE_ID_RE.test(pipeId)) throw new Error(`Pipeline id "${pipeId}" is invalid — one dot-free segment of letters, digits, _ or -.`);
+	const dir = normalizePosixPath(options.dir ?? 'pipelines') || 'pipelines';
+	const folderRel = `${dir}/${pipeId}`;
+	const folderAbs = path.join(path.resolve(workspaceRoot), ...folderRel.split('/'));
+	const pipeRel = `${folderRel}/${pipeId}.pipe`;
+	const pipeAbs = path.join(folderAbs, `${pipeId}.pipe`);
+	if (fs.existsSync(pipeAbs)) throw new Error(`"${pipeRel}" already exists — pick another id or remove the file.`);
+
+	// step: the files — components first (the layout the editor expects),
+	// identity and the listing block after
+	const name = options.name ?? pipeId;
+	const pipe = { components: [], project_id: pipeId, name, description: '', store: defaultStoreBlock() };
+	const files: Array<[string, string]> = [
+		[`${pipeId}.pipe`, `${JSON.stringify(pipe, null, 2)}\n`],
+		['icon.svg', PIPE_ICON_SVG],
+		['README.md', pipeReadmeStub(name)],
+	];
+	fs.mkdirSync(path.join(folderAbs, 'assets'), { recursive: true });
+	for (const [rel, content] of files) fs.writeFileSync(path.join(folderAbs, rel), content);
+	return { folder: folderRel, pipePath: pipeRel, files: files.map(([rel]) => `${folderRel}/${rel}`) };
 }

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-17T18:49:43.328Z
-// Source commit: 395648816177e237c5b49941569adb8cdb864ae1
+// Generated:     2026-11-18T07:54:12.296Z
+// Source commit: b32ce47d01c2cfdb4357b3ac26b6e950e5aa8cf7
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1121,28 +1121,141 @@ export interface CreditPack {
     nickname: string;
 }
 /**
- * MIT License
- *
- * Copyright (c) 2026 Aparavi Software AG
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * One billing plan of a listing's `billing.plans` — the Stripe-shaped pricing
+ * proposal that rides every deploy (the packed manifest is the listing truth)
+ * and goes live on store approval. Apps carry it in `appManifest.billing`,
+ * pipelines in the `store.billing` block.
  */
+export interface BillingPlan {
+    /** Plan display name ("Starter", "Pro"). */
+    nickname: string;
+    /** Price in cents. */
+    amountCents: number;
+    /** ISO currency code. */
+    currency: string;
+    /** Billing interval ("month", "year", "one_time"). */
+    interval: string;
+    /**
+     * Opaque plan metadata (credits, seats, features, ordering, display
+     * overrides) — preserved verbatim on the save round-trip, never edited
+     * by the listing form.
+     */
+    metadata?: Record<string, unknown>;
+}
+/** The eight keys a `store` block may carry, in the scaffold's order. */
+export declare const STORE_KEYS: readonly [
+    "tagline",
+    "categories",
+    "tags",
+    "icon",
+    "readme",
+    "links",
+    "mode",
+    "billing"
+];
+/** The monetization modes, the app model. */
+export declare const STORE_MODES: readonly [
+    "free",
+    "subscription",
+    "paywall"
+];
+/** One key of the block. */
+export type StoreKey = (typeof STORE_KEYS)[number];
+/** One monetization mode. */
+export type StoreMode = (typeof STORE_MODES)[number];
+/** The `store` block of a `.pipe`: the pipeline's store listing. */
+export interface PipeStoreBlock {
+    /** One-line tagline for the store card. */
+    tagline?: string;
+    /** Store categories. */
+    categories?: string[];
+    /** Free tags. */
+    tags?: string[];
+    /** Icon path, relative to the pipe file's directory. */
+    icon?: string;
+    /** README path (the store page), relative to the pipe file's directory. */
+    readme?: string;
+    /** Links the listing shows, label -> URL. */
+    links?: Record<string, string>;
+    /** Monetization mode. */
+    mode?: StoreMode;
+    /** Pricing plans (the app plan machinery). */
+    billing?: {
+        plans: BillingPlan[];
+    };
+}
+/** The placeholder icon every scaffolded pipeline ships — the app scaffold's. */
+export declare const PIPE_ICON_SVG: string;
+/**
+ * The block a new pipeline is stamped with — a fresh object each call.
+ *
+ * @returns The scaffold's default store block.
+ */
+export declare function defaultStoreBlock(): PipeStoreBlock;
+/**
+ * The scaffolded starter README of a pipeline — the pipeline scaffold's twin
+ * of the app scaffold's README: the store listing has a document to grow into.
+ *
+ * @param displayName - The pipeline's display name.
+ * @returns The README.md file content.
+ */
+export declare function pipeReadmeStub(displayName: string): string;
+/**
+ * Normalises a posix path: separators unified, `.` segments dropped, `..`
+ * folded into the segment before it. A `..` with nothing to fold stays, so
+ * the caller can see an escape (`../x` stays `../x`).
+ *
+ * @param rel - The path, either separator.
+ * @returns The normalised posix path ('' for an empty one).
+ */
+export declare function normalizePosixPath(rel: string): string;
+/**
+ * Projects one raw plan into the typed shape — the Stripe fields coerced to
+ * their contracted types, every OTHER key carried verbatim so the load→save
+ * round trip never sheds content it does not understand.
+ *
+ * @param raw - One entry of `billing.plans`, straight from JSON.
+ * @returns The typed plan.
+ * @throws Error on a price that is not a number.
+ */
+export declare function normalizeBillingPlan(raw: unknown): BillingPlan;
+/**
+ * Checks a `store` block and returns it typed, plans normalised.
+ *
+ * @param store - The block as read from the `.pipe` JSON.
+ * @returns The validated block.
+ * @throws Error naming the offending key or value: not an object, an unknown
+ *   key, a non-string tagline, a non-string-list categories/tags, a bad
+ *   icon/readme path, non-string links, an unknown mode, or malformed billing.
+ */
+export declare function validateStoreBlock(store: unknown): PipeStoreBlock;
+/**
+ * The relative files a README references: markdown images and links and
+ * HTML `<img src>`, in order of appearance, de-duplicated, percent-decoded,
+ * with any query string or fragment stripped. URLs (`http(s)://`, `data:`,
+ * `mailto:` and every other scheme), protocol-relative refs and `#anchors`
+ * are skipped, as is anything inside code.
+ *
+ * @param markdown - The README text.
+ * @returns The references, relative to the README.
+ */
+export declare function scanReadmeReferences(markdown: string): string[];
+/**
+ * The files a pipeline's store listing names, as posix paths relative to the
+ * PIPE's directory: the declared readme and icon, and every file the README
+ * references (resolved against the README's own directory). Paths are
+ * normalised; a reference that escapes upward keeps its leading `..` so the
+ * packer can refuse it by name.
+ *
+ * @param store - The validated block (null = no listing).
+ * @param readmeText - The README content (null = none read).
+ * @param readmePath - The README path relative to the pipe's directory.
+ * @returns `declared` ([readme, icon] that are set) and `referenced`.
+ */
+export declare function pipeStoreFiles(store: PipeStoreBlock | null, readmeText: string | null, readmePath: string | null): {
+    declared: string[];
+    referenced: string[];
+};
 /**
  * Data flow connection between pipeline components.
  */
@@ -1207,6 +1320,10 @@ export interface PipelineConfig {
     source?: string;
     /** Project identifier for organization and permissions */
     project_id?: string;
+    /** The store listing (tagline, categories, tags, icon, readme, links,
+        mode, billing). Present = the pipeline is listable; absent = it
+        deploys unlisted. The engine never sees it. */
+    store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
     /** UI viewport settings for visual editors */
@@ -4608,6 +4725,15 @@ export declare class DatabaseApi {
         sequelizeOptions?: import("sequelize").Options;
     }): import("sequelize").Sequelize;
 }
+/** The result of {@link scaffoldPipe}. */
+export interface CreatedPipe {
+    /** Workspace-relative POSIX path of the created folder. */
+    folder: string;
+    /** Workspace-relative POSIX path of the `.pipe` file. */
+    pipePath: string;
+    /** Workspace-relative POSIX paths of the files written. */
+    files: string[];
+}
 /** One verification check's outcome. */
 export interface AppVerifyCheck {
     /** Stable check id (e.g. 'manifest', 'id', 'include', 'pack-size'). */
@@ -4725,26 +4851,26 @@ declare class DeployApi {
         onProgress?: (line: string) => void;
     }): Promise<PublishResult>;
     /**
-     * Packs a pipeline BUNDLE folder and deploys it as the next immutable
-     * registry version — the call behind the DEPLOY card and the CLI's
-     * `deploy add <folder>` (Node.js only; plan §9, B7).
+     * Packs one pipeline and deploys it as the next immutable registry
+     * version — the call behind the DEPLOY card and the CLI's
+     * `deploy add <pipe>` (Node.js only; plan §9).
      *
-     * The bundle is `pipelines/<pipeId>/`: exactly one `.pipe` (what runs),
-     * beside the store manifest `<stem>.rrpipe`, `readme.md`, an icon and
-     * `assets/` (the readme's images). The pipe rides as the artifact, the
-     * rest as the content zip the server stores beside it. A folder that is
-     * not a bundle (no pipe, several pipes) is refused before any call;
-     * `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a
-     * pipeline dict with no bundle.
+     * The pipe rides as the artifact; the zip beside it carries the pipe at
+     * its root plus the readme and icon its `store` block declares and every
+     * file the README references, laid out relative to the pipe file's
+     * directory. A pipe without a `store` block deploys as an UNLISTED
+     * artifact (the zip is the pipe alone). A declared or referenced file
+     * that is missing, or that resolves outside the pipe's directory, is
+     * refused by name before any call; `deploy.add({ kind: 'pipe', pipeline })`
+     * stays the raw door for a pipeline dict.
      *
-     * @param bundleDir - The bundle folder, or its `.pipe` when it is the
-     *   folder's only pipe.
+     * @param pipePath - The `.pipe` file.
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.deployTo - Team id to deploy the new version to
      *   immediately (one-step add+deploy).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
-    addPipe(bundleDir: string, options?: {
+    addPipe(pipePath: string, options?: {
         comment?: string;
         deployTo?: string;
     }): Promise<PublishResult>;
@@ -4758,10 +4884,10 @@ declare class DeployApi {
      * `addApp` → `publishApp`) follows.
      *
      * @param slug - The app-name slug (lowercase; digits/-/_ after the
-     *   first character). The id becomes `<developerId>.<slug>`.
-     * @param options - Template, display name, developer id (default: this
-     *   client's organization developer id, else 'local' — the same
-     *   resolution as the New App wizard and `rocketride app create`),
+     *   first character). The files carry the slug alone; the organization
+     *   that deploys the app attaches its developer id, so the registry
+     *   name becomes `<developerId>.<slug>` at deploy.
+     * @param options - Template, display name,
      *   frame options, install toggle, `onProgress`, and
      *   `workspaceRoot` (default `process.cwd()`). The server base URL for
      *   vendoring defaults to this client's own connection.
@@ -4771,7 +4897,6 @@ declare class DeployApi {
         workspaceRoot?: string;
         template?: "Blank" | "Dashboard";
         displayName?: string;
-        developerId?: string;
         sidebar?: boolean;
         statusFooter?: boolean;
         docTabs?: boolean;
@@ -4779,6 +4904,29 @@ declare class DeployApi {
         serverBaseUrl?: string;
         onProgress?: (line: string) => void;
     }): Promise<CreatedApp>;
+    /**
+     * Scaffolds a new pipeline in the workspace — the programmatic twin of
+     * `rocketride pipe new` and `createApp`'s pipeline counterpart (Node.js
+     * only). Writes `<dir>/<pipeId>/<pipeId>.pipe` carrying the default
+     * `store` block, the placeholder `icon.svg`, a `README.md` stub and an
+     * empty `assets/` directory. Scaffolding only — nothing is deployed; the
+     * normal lifecycle (edit → `addPipe` → publish) follows.
+     *
+     * @param pipeId - The pipeline id: one dot-free segment of letters,
+     *   digits, `_` or `-`. The file carries the id alone; the organization
+     *   that deploys the pipe attaches its developer id.
+     * @param options.workspaceRoot - The workspace folder (default
+     *   `process.cwd()`).
+     * @param options.name - Display name (default: the id).
+     * @param options.dir - The pipelines directory, workspace-relative
+     *   (default `pipelines`).
+     * @returns The created folder, pipe path and files, workspace-relative.
+     */
+    createPipe(pipeId: string, options?: {
+        workspaceRoot?: string;
+        name?: string;
+        dir?: string;
+    }): Promise<CreatedPipe>;
     /**
      * Pre-checks everything `addApp` needs, WITHOUT deploying (Node.js
      * only, purely local — no server call). Verifies the manifest shape and
@@ -6777,6 +6925,60 @@ export declare function resolveDeployTeams(client: {
     getAccountInfo(): ConnectResult | undefined;
 } | null | undefined, deployments: Deployment[]): DeployTeamRef[];
 /**
+ * The slug an app manifest names: the id with anything up to and including
+ * its LAST dot discarded.
+ *
+ * An app's files carry only the slug (`appManifest.id`, the `.rrapp`
+ * trigger, the descriptor literal); the developer namespace is attached by
+ * the organization that deploys it, never read from the file. A manifest
+ * written before this rule may still carry `<developerId>.<slug>`: the
+ * prefix is ignored as if it had never been specified. Pipes are stricter
+ * (a dotted `project_id` is refused), so this is for apps only.
+ *
+ * @param manifestId - `appManifest.id` as written.
+ * @returns The slug ('' when the id is missing).
+ */
+export declare function appSlugOf(manifestId: string | null | undefined): string;
+/**
+ * The registry name an app or pipe is deployed, published and resolved under.
+ *
+ * Every registry row (`deployment_projects`, `deployment_artifacts`,
+ * `published_artifacts`, `deployment_history`), every deploy-change event
+ * and every `apaevt_build*` event carries `<developerId>.<slug>`. Clients
+ * SEND the slug (the server composes the name from the deploying
+ * organization); this is the value to MATCH rows and events against.
+ *
+ * @param slug - The short id the file carries.
+ * @param developerId - The caller organization's developer id, if known.
+ * @returns The registry name, or '' when the developer id is unknown (no
+ *          row can match: nothing deploys without one).
+ */
+export declare function registryIdOf(slug: string, developerId: string | null | undefined): string;
+/** The developer id a build names itself under when its organization has none yet. */
+export declare const LOCAL_DEVELOPER_ID = "local";
+/**
+ * The Module Federation container name of a registry name: the name with
+ * every character outside `[a-zA-Z0-9_$]` as an underscore (`acme.chat` is
+ * `acme_chat`). A served build is named this way by the server from the
+ * registry row; a dev build by the host that runs it.
+ *
+ * @param name - A registry name (`<developerId>.<slug>`).
+ * @returns The container name.
+ */
+export declare function containerNameOf(name: string): string;
+/**
+ * The container name of a DEV build: the slug inside the organization's
+ * developer namespace, or inside the reserved `local` namespace while the
+ * organization has not claimed a developer id. `local` can never be a real
+ * developer id, so a dev build never collides with a served one; the first
+ * dev start after the claim renames the build.
+ *
+ * @param slug - The app slug (appManifest.id).
+ * @param developerId - The organization's developer id, if it has one.
+ * @returns `<developerId>_<slug>` or `local_<slug>`.
+ */
+export declare function devContainerNameOf(slug: string, developerId: string | null | undefined): string;
+/**
  * Resolves a team id to its display name, falling back to the id. Personal
  * (`user~`) owner keys render as "Me" for the caller's own space and
  * "Personal" for another user's (admin visibility) — the raw guid never
@@ -6815,7 +7017,7 @@ export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): s
  * names live in FILENAMES, and every deploy surface renders pipelineName.
  *
  * @param filePath - The pipeline file path (either separator).
- * @returns The basename without its `.pipe` / `.pipe.json` extension.
+ * @returns The basename without its `.pipe` extension.
  */
 export declare function pipelineNameFromPath(filePath: string): string;
 interface ShellConnectionState {
@@ -14728,6 +14930,11 @@ interface MessageListProps {
 export declare const MessageList: React$1.FC<MessageListProps>;
 interface MarkdownRendererProps {
     content: string;
+    /**
+     * The URL of the document the markdown came from (a served README);
+     * relative image sources and links resolve against its directory.
+     */
+    baseUrl?: string;
 }
 export declare const MarkdownRenderer: React$1.FC<MarkdownRendererProps>;
 interface UseChatMessagesReturn {

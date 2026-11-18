@@ -3366,7 +3366,7 @@ export class RocketRideClient extends DAPClient {
 	 * Empty segments (from leading/trailing/double slashes) are skipped because
 	 * they carry no security risk on the server side.
 	 *
-	 * @param path - Relative path to validate (e.g. `.templates/my-pipe.json`)
+	 * @param path - Relative path to validate (e.g. `.templates/my-pipe.pipe`)
 	 * @throws Error if any segment is `..` or contains illegal characters
 	 */
 	private validateStorePath(path: string): void {

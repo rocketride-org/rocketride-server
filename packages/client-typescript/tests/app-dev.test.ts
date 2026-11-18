@@ -84,14 +84,14 @@ function fakeClient() {
 }
 
 /** Writes an app at apps/clock-ui whose "rsbuild" prints a dev banner and a build. */
-function writeServedApp(port = 3999): { folder: string; app: { id: string; name: string; moduleId: string; folder: string } } {
+function writeServedApp(port = 3999): { folder: string; app: { id: string; name: string; folder: string } } {
 	const folder = path.join(ws, 'apps', 'clock-ui');
 	const bin = path.join(folder, 'node_modules', '@rsbuild', 'core', 'bin');
 	fs.mkdirSync(bin, { recursive: true });
-	fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.0', appManifest: { id: 'acme.clock', name: 'Clock' } }));
+	fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.0', appManifest: { id: 'clock', name: 'Clock' } }));
 	fs.writeFileSync(path.join(folder, 'clock.rrapp'), '{}');
 	fs.writeFileSync(path.join(bin, 'rsbuild.js'), `console.log('  \\u279c Local:    http://localhost:${port}/');\nconsole.log('ready   built in 0.10 s');\nsetInterval(() => {}, 1000);\n`);
-	return { folder, app: { id: 'acme.clock', name: 'Clock', moduleId: 'acme_clock', folder } };
+	return { folder, app: { id: 'clock', name: 'Clock', folder } };
 }
 
 /** The folder's 8.3 short path on Windows; undefined elsewhere or when it cannot be read. */
@@ -111,8 +111,10 @@ describe('primitives', () => {
 	it('devPreviewUrl locks the app and turns dev hooks on, on the dev origin', () => {
 		// Local-first: the DEV SERVER's own origin is the session identity —
 		// no nonce rides the URL; the page self-registers by convention.
-		expect(devPreviewUrl('http://localhost:3013/', 'acme.clock')).toMatch(/^http:\/\/localhost:3013\/\?appid=acme\.clock&rrdev=1&_ts=\d+$/);
-		expect(devPreviewUrl('http://localhost:3013', 'acme.clock')).not.toContain('rrsession');
+		// the deep link carries the SLUG: the dev build's container name
+		// (`local_<slug>` / `<developerId>_<slug>`) is the host's business
+		expect(devPreviewUrl('http://localhost:3013/', 'clock')).toMatch(/^http:\/\/localhost:3013\/\?appid=clock&rrdev=1&_ts=\d+$/);
+		expect(devPreviewUrl('http://localhost:3013', 'clock')).not.toContain('rrsession');
 	});
 
 	it('splitCompleteLines carries a torn line to the next chunk', () => {
@@ -144,17 +146,17 @@ describe('primitives', () => {
 	it('writeProxyConfig renders the front-door wrapper: dev prefix carved out, engine proxied, manifest copied', async () => {
 		const folder = path.join(ws, 'apps', 'clock-ui');
 		fs.mkdirSync(folder, { recursive: true });
-		fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', appManifest: { id: 'acme.clock', icon: 'assets/icon.png' } }));
+		fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', appManifest: { id: 'clock', icon: 'assets/icon.png' } }));
 		fs.writeFileSync(path.join(folder, 'rsbuild.config.mts'), 'export default {};');
 
-		const wrapperPath = await writeProxyConfig(folder, 'acme.clock', 'http://localhost:5565');
+		const wrapperPath = await writeProxyConfig(folder, 'clock', 'http://localhost:5565');
 		const wrapper = fs.readFileSync(wrapperPath, 'utf8');
 
 		// session-unique name: owner pid + token, so concurrent sessions for
 		// the same folder never overwrite each other's wrapper
 		expect(path.dirname(wrapperPath)).toBe(path.join(folder, '.rocketride'));
 		expect(path.basename(wrapperPath)).toMatch(/^dev-proxy\.\d+-[0-9a-f]+\.rsbuild\.config\.mts$/);
-		expect(wrapper).toContain('"/apps/acme.clock/dev"');
+		expect(wrapper).toContain('"/apps/clock/dev"');
 		expect(wrapper).toContain('"http://localhost:5565"');
 		// the catch-all proxy must carve out the locally served prefixes
 		expect(wrapper).toContain('pathFilter');
@@ -212,7 +214,7 @@ describe('DevSession', () => {
 
 		expect(origin).toBe('http://localhost:3999');
 		expect(wrapper).toContain('"http://localhost:5565"');
-		expect(wrapper).toContain('"/apps/acme.clock/dev"');
+		expect(wrapper).toContain('"/apps/clock/dev"');
 		// stop() removes the session's own wrapper
 		expect(fs.existsSync(path.join(rocketrideDir, wrapperName))).toBe(false);
 		expect(states).toContain('ok');
@@ -260,7 +262,7 @@ describe('DevSession', () => {
 		const restarts = () => lines.filter((l) => l.startsWith('package.json changed')).length;
 		const atomicSave = (version: string) => {
 			const pkg = path.join(folder, 'package.json');
-			fs.writeFileSync(`${pkg}.new`, JSON.stringify({ name: 'clock-ui', version, appManifest: { id: 'acme.clock', name: 'Clock' } }));
+			fs.writeFileSync(`${pkg}.new`, JSON.stringify({ name: 'clock-ui', version, appManifest: { id: 'clock', name: 'Clock' } }));
 			fs.renameSync(`${pkg}.new`, pkg);
 		};
 
@@ -283,7 +285,7 @@ describe('DevSession', () => {
 
 		await session.start();
 		try {
-			fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'acme.clock', name: 'Clock' } }));
+			fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'clock', name: 'Clock' } }));
 			// the replacement server prints a second banner
 			await waitFor(() => lines.filter((l) => l.includes('http://localhost:3995')).length >= 2);
 		} finally {
@@ -312,7 +314,7 @@ describe('executeAppDev', () => {
 		expect(await running).toBe(0);
 		expect(logs.join('\n')).toContain('Dev server: http://localhost:3998');
 		// local-first: the preview rides the DEV SERVER's origin, not the engine's
-		expect(logs.join('\n')).toContain('Preview:    http://localhost:3998/?appid=acme.clock&rrdev=1');
+		expect(logs.join('\n')).toContain('Preview:    http://localhost:3998/?appid=clock&rrdev=1');
 		expect(client.calls.length).toBe(0);
 	});
 });

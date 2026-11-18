@@ -49,13 +49,21 @@ import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
-import { bundlePathsFor, isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
+import { isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
-import { packPipeBundle } from './packBundle';
+import { packPipe } from './packBundle';
+import { scaffoldPipe } from './scaffoldPipe';
 import { createProjectVfs } from '../workspace/projectVfs';
+import { defaultStoreBlock } from 'rocketride';
+import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
+import { besidePath, imageDataUri, isImageName } from 'shared/components/assets/assetsModel';
+import { MAX_README_IMAGE_BYTES } from 'shared/tools/appdev';
+import { ensureWorkspaceParents, getWorkspaceVfs, readWorkspaceBytes, writeWorkspaceBytes } from '../workspace/vfs/workspace';
+import { openWorkspaceFile } from '../workspace/vfs/openWorkspaceFile';
 import { downloadJson } from '../../utils/downloadFile';
+import { pickLocalFile } from '../../utils/pickLocalFile';
 
 // =============================================================================
 // STYLES
@@ -181,7 +189,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				return;
 			}
 			try {
-				await projectVfs.write(saveFilename, project);
+				// A save stamps the store block when the file has none (plan §9):
+				// every saved pipe is listable, as every scaffolded one is.
+				await projectVfs.write(saveFilename, { ...project, store: project.store ?? defaultStoreBlock() });
 				// Mark clean in Documents model
 				await getDocs()?.saveDocument(uri);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
@@ -287,26 +297,13 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			if (!pipeline || !client || !isConnected) return;
 			setSaveDialogOpen(false);
 
-			// A new pipeline is born as a BUNDLE (plan §9, B7): `<dir>/<name>/
-			// <name>.pipe`, the folder that later holds its readme, icon and
-			// assets and is the publish unit. The name is the FILE's; the
+			// The pipe lands at the typed path (plan §9: no folder rule; the
+			// dialog ran its own overwrite confirm). The name is the FILE's; the
 			// pipeline's id lives inside the file and is not derived from it (the
 			// author picks it on PACKAGE › Identity).
-			const stem = pipeStemOf(dialogPath) ?? dialogPath.slice(dialogPath.lastIndexOf('/') + 1);
-			const dir = dialogPath.includes('/') ? dialogPath.slice(0, dialogPath.lastIndexOf('/')) : '';
-			const bundle = bundlePathsFor(dir, stem);
-			const fileRelPath = bundle.file;
+			const fileRelPath = pipeStemOf(dialogPath) ? dialogPath : `${dialogPath}.pipe`;
 			const saved: PipelineConfig = pipeline;
 			try {
-				// The dialog checked the typed path; the bundle's pipe is another
-				// path, so an existing bundle of that name is never replaced unasked.
-				const existing = await projectVfs.list(bundle.folder).catch(() => []);
-				if (existing.some((e) => e.name === `${stem}.pipe` && e.type !== 'dir')) {
-					setPipelineError(`A pipeline named "${stem}" already exists at ${fileRelPath}. Choose another name.`);
-					deferredRunRef.current = null;
-					return;
-				}
-				await projectVfs.mkdir(bundle.folder);
 				await projectVfs.write(fileRelPath, saved);
 			} catch (err) {
 				console.error('[PipelineProvider] Save-as failed:', err);
@@ -391,11 +388,11 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const handlePublish = useCallback(
 		async (comment: string, deployTo?: string): Promise<void> => {
 			if (!client || !pipeline) throw new Error('Not connected');
-			// A pipeline publishes as a BUNDLE (plan §9, B7): the folder holding
-			// this one .pipe, its .rrpipe manifest, readme, icon and assets,
-			// packed from the store as saved. A pipe that is not alone in its
-			// folder is refused with the way out.
-			const packed = await packPipeBundle(client, filename);
+			// A pipeline publishes PER PIPE, BY REFERENCE (plan §9): the pipe
+			// file, the readme and icon its `store` block declares and every file
+			// the readme references, packed from the store as saved. A packer
+			// error IS the publish failure.
+			const packed = await packPipe(client, filename);
 			await client.deploy.add({
 				pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
 				data: packed.data,
@@ -449,8 +446,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		const existingNames = entries.map((e) => (e.type === 'dir' ? e.name : (pipeStemOf(e.name) ?? e.name)));
 		return { developerId, workspaceOpen: true, existingNames };
 	}, [client, isConnected, projectVfs, settingDefaultDir]);
-	/** Creates the bundle with the name as the id, retires this untitled
-	 *  document and opens the file. */
+	/** Scaffolds `<dir>/<name>/` (the pipe with its store block, icon.svg,
+	 *  README.md, assets/) with the name as the id, retires this untitled
+	 *  document and opens the pipe. */
 	const handleCreatePipeline = useCallback(
 		async (name: string, displayName: string, project: unknown): Promise<void> => {
 			if (!client || !isConnected) throw new Error('Not connected to server');
@@ -458,25 +456,15 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			// here, not only in the form.
 			if (!isShortId(name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
 			const dir = settingDefaultDir === 'pipelines' ? '' : settingDefaultDir;
-			const bundle = bundlePathsFor(dir, name);
+			const folder = dir ? `${dir}/${name}` : name;
 			const taken = await projectVfs.list(dir).catch(() => []);
-			if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${bundle.folder}" already exists. Choose another name.`);
-			await projectVfs.mkdir(bundle.folder);
-			// The untitled document's content rides along (its components stay);
-			// only the identity is set here.
-			const base = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
-			try {
-				await projectVfs.write(bundle.file, { ...base, project_id: name, name: displayName, components: Array.isArray(base.components) ? base.components : [] });
-			} catch (err) {
-				// A failed write must leave the name retryable: the folder THIS
-				// attempt made goes if it is still empty (never anyone else's content).
-				const left = await projectVfs.list(bundle.folder).catch(() => null);
-				if (left && left.length === 0) await projectVfs.delete(bundle.folder).catch(() => undefined);
-				throw err;
-			}
+			if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${folder}" already exists. Choose another name.`);
+			// The untitled document's content rides along (its components stay)
+			// on top of the scaffold's identity and store block.
+			const scaffolded = await scaffoldPipe(dir, name, displayName, project);
 			const docs = getDocs();
 			docs?.discardDocument(uri);
-			await docs?.openDocument(bundle.file);
+			await docs?.openDocument(scaffolded.pipePath);
 			window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: name } }));
 		},
 		[client, isConnected, projectVfs, settingDefaultDir, uri]
@@ -484,6 +472,61 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const handleCancelNew = useCallback(() => {
 		getDocs()?.discardDocument(uri);
 	}, [uri]);
+
+	/** PACKAGE › Assets: the files beside this document's .pipe, through the
+	 *  staged pipelines view (text) and the store's byte escape hatch
+	 *  (images). A path is served only when it stays inside the pipe's folder
+	 *  after normalisation (besidePath) and the document has a folder at all:
+	 *  reads resolve null otherwise (and for a missing file or a directory);
+	 *  writes and opens reject. Any other failure rejects. */
+	const besideDoc = useCallback(
+		(relPath: string): string | null => {
+			if (isNew) return null;
+			const rel = besidePath(relPath);
+			if (!rel) return null;
+			const pipeDir = filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : '';
+			return pipeDir ? `${pipeDir}/${rel}` : rel;
+		},
+		[filename, isNew]
+	);
+	const handleReadFile = useCallback(
+		async (relPath: string): Promise<string | null> => {
+			const path = besideDoc(relPath);
+			if (!path) return null;
+			const view = scopedFileSystem(getWorkspaceVfs(), 'pipelines');
+			if ((await view.stat(path)) !== 'file') return null;
+			return String(await view.read(path));
+		},
+		[besideDoc]
+	);
+	const handleReadImageDataUri = useCallback(
+		async (relPath: string): Promise<string | null> => {
+			const path = besideDoc(relPath);
+			if (!path || !isImageName(path)) return null;
+			const bytes = await readWorkspaceBytes(`pipelines/${path}`, MAX_README_IMAGE_BYTES);
+			return bytes ? imageDataUri(path, bytes) : null;
+		},
+		[besideDoc]
+	);
+	const handleWriteFile = useCallback(
+		async (relPath: string, data: Uint8Array | string): Promise<void> => {
+			const path = besideDoc(relPath);
+			if (!path) throw new Error(`Cannot write ${relPath}: the path must stay inside the pipeline's folder.`);
+			const virtual = `pipelines/${path}`;
+			await ensureWorkspaceParents(virtual);
+			if (typeof data === 'string') await getWorkspaceVfs().write(virtual, data);
+			else await writeWorkspaceBytes(virtual, data);
+		},
+		[besideDoc]
+	);
+	const handleOpenFile = useCallback(
+		async (relPath: string): Promise<void> => {
+			const path = besideDoc(relPath);
+			if (!path) throw new Error(`Cannot open ${relPath}: the path must stay inside the pipeline's folder.`);
+			if (!(await openWorkspaceFile(`pipelines/${path}`))) throw new Error(`No editor opens ${relPath} in this workspace.`);
+		},
+		[besideDoc]
+	);
 
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
@@ -510,9 +553,14 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			newPipelineIdentity: handleNewPipelineIdentity,
 			createPipeline: handleCreatePipeline,
 			cancelNew: handleCancelNew,
+			readFile: handleReadFile,
+			readImageDataUri: handleReadImageDataUri,
+			writeFile: handleWriteFile,
+			pickFile: pickLocalFile,
+			openFile: handleOpenFile,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleExport]
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleReadFile, handleReadImageDataUri, handleWriteFile, handleOpenFile, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------

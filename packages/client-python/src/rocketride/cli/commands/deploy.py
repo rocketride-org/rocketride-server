@@ -34,6 +34,7 @@ deploy fallback. Kept in exact parity with the TypeScript CLI's
 """
 
 import json
+import os
 import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -137,19 +138,15 @@ async def run_deploy(args) -> int:
             if client is None:
                 return 1
             if args.kind == 'pipe':
-                # A pipeline publishes as a BUNDLE (plan 9, B7): the folder
-                # pipelines/<id>/ with its one .pipe, the .rrpipe manifest,
-                # readme, icon and assets. A .pipe is accepted when it is its
-                # folder's only pipe; a bare pipe beside others is refused.
-                try:
-                    result = await client.deploy.add_pipe(args.file, comment=args.comment, deploy_to=args.deploy_to)
-                except ValueError as exc:
-                    if 'not a pipeline bundle' in str(exc):
-                        return out.fail(
-                            str(exc),
-                            'a pipeline deploys from its own folder: pipelines/<id>/<id>.pipe beside <id>.rrpipe, readme.md, an icon and assets/',
-                        )
-                    raise
+                # A pipeline publishes PER PIPE (plan 9): the .pipe itself,
+                # plus the readme, icon and README-referenced files its store
+                # block names. The argument names the file, never a folder.
+                if os.path.isdir(args.file):
+                    return out.fail(
+                        f'{args.file} is a folder',
+                        'name the pipeline file: rocketride deploy add pipelines/<id>/<id>.pipe',
+                    )
+                result = await client.deploy.add_pipe(args.file, comment=args.comment, deploy_to=args.deploy_to)
             else:
                 with open(args.file, 'rb') as f:
                     data = f.read()

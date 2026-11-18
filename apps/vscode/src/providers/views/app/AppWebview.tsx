@@ -35,6 +35,7 @@ import { announceFramePresence, createFrameBusPeer, createToolChannel } from 'sh
 import { createBusAppBuilderHost } from 'shared/tools/appdev';
 import type { AppErrorRow, AppEventRow, AppSummary, BuildStatusTick, ConsoleRow, IAppBuilderHost, ListingDraft, PreflightCheck, WatchStatus } from 'shared/tools/appdev';
 import type { AppBuilderLoadPayload } from 'shared/ops/previewOps';
+import { base64ToBytes, bytesToBase64 } from 'shared/components/assets/assetsModel';
 // The UNBOUND builder's body: the New App wizard (the builder's empty state).
 import { NewAppWizard } from 'shared/tools/appdev/views/new-app/NewAppWizard';
 import { createBusNewAppWizardHost } from 'shared/tools/appdev/views/new-app/newAppWizardBusHost';
@@ -910,12 +911,23 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				await req('host.preview.saveListing', { app: appId, draft });
 			},
 			runPreflight: async () => await req<PreflightCheck[]>('host.preview.preflight', { app: appId }),
-			// Package assets: native pick (app-folder-relative result) + text
-			// read for the icon/README previews.
-			pickAppFile: async (kind) => await req<string | null>('host.preview.pickAppFile', { app: appId, kind }),
+			// Package assets: native pick (bytes) + text/image reads for the
+			// icon and README.
+			pickAssetFile: async (accept) => {
+				const picked = await req<{ name: string; dataB64: string } | null>('host.preview.pickAssetFile', { app: appId, accept });
+				return picked ? { name: picked.name, data: base64ToBytes(picked.dataB64) } : null;
+			},
 			pickIncludePath: async () => await req<string | null>('host.preview.pickIncludePath', { app: appId }),
 			readAppTextFile: async (relPath) => await req<string>('host.preview.readTextFile', { app: appId, relPath }),
 			readAppImageDataUri: async (relPath) => await req<string | null>('host.preview.readImage', { app: appId, relPath }),
+			// PACKAGE › Assets writes and opens beside the manifest; bytes cross
+			// the bridge as base64 strings, like the image reads above.
+			writeAppFile: async (relPath, data) => {
+				await req('host.preview.writeFile', { app: appId, relPath, ...(typeof data === 'string' ? { text: data } : { dataB64: bytesToBase64(data) }) });
+			},
+			openAppFile: async (relPath) => {
+				await req('host.preview.openFile', { app: appId, relPath });
+			},
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- cm is a singleton
 	}, [capabilities, previewUrl, proxyPreviewUrl, req, accountSeq, subscribeEvents, subscribeConsole, subscribeErrors, subscribeWatch, subscribeBuildStatus, subscribeDeployChanged]);

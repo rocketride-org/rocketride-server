@@ -186,7 +186,7 @@ Examples:
 	// ── deploy add ───────────────────────────────────────────────────────
 	const addCmd = deployCmd
 		.command('add <path>')
-		.description('Deploy a pipeline bundle folder (pipelines/<id>/) or a node package as the next registry version (deploying activates nothing)')
+		.description('Deploy a pipeline (.pipe) or a node package as the next registry version (deploying activates nothing)')
 		.option('--kind <kind>', 'Artifact kind: pipe or node', 'pipe')
 		.option('--comment <text>', 'What-changed note kept in the registry')
 		.option('--deploy-to <team>', 'Also point this team (@me, a name, or an id) at the new version in the same call')
@@ -203,19 +203,13 @@ Examples:
 				const deployTo = options.deployTo !== undefined ? teamArgOf(client, options.deployTo) : undefined;
 				let result;
 				if (options.kind === 'pipe') {
-					// A pipeline publishes as a BUNDLE (plan §9, B7): the folder
-					// pipelines/<id>/ with its one .pipe, the .rrpipe manifest,
-					// readme, icon and assets. A .pipe is accepted when it is its
-					// folder's only pipe; a bare pipe beside others is refused.
-					try {
-						result = await client.deploy.addPipe(file, { comment: options.comment, deployTo });
-					} catch (err) {
-						const message = err instanceof Error ? err.message : String(err);
-						if (message.includes('not a pipeline bundle')) {
-							return out.fail(message, 'a pipeline deploys from its own folder: pipelines/<id>/<id>.pipe beside <id>.rrpipe, readme.md, an icon and assets/');
-						}
-						throw err;
+					// A pipeline publishes PER PIPE (plan §9): the .pipe itself,
+					// plus the readme, icon and README-referenced files its store
+					// block names. The argument names the file, never a folder.
+					if (fs.statSync(file).isDirectory()) {
+						return out.fail(`${file} is a folder`, 'name the pipeline file: rocketride deploy add pipelines/<id>/<id>.pipe');
 					}
+					result = await client.deploy.addPipe(file, { comment: options.comment, deployTo });
 				} else {
 					result = await client.deploy.add({ kind: 'node', data: fs.readFileSync(file), comment: options.comment, deployTo });
 				}

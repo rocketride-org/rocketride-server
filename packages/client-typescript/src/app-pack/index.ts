@@ -65,17 +65,22 @@ import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
 import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
 import { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
-import { MAX_PIPE_MANIFEST_BYTES, MAX_PIPE_README_BYTES, PIPE_ASSETS_DIR, PIPE_ICON_NAMES, PIPE_README_NAME, packPipeBundle, pipeBundleFolderOf, pipeOfBundle, readPipeManifest } from './pipe-bundle.js';
+import { defaultStoreBlock, normalizeBillingPlan, normalizePosixPath, PIPE_ICON_SVG, pipeReadmeStub, pipeStoreFiles, scanReadmeReferences, STORE_KEYS, STORE_MODES, validateStoreBlock } from '../client/pipe-store.js';
+import { MAX_PIPE_README_BYTES, packPipe, scaffoldPipe } from './pipe-bundle.js';
 import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 
 export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
-export type { AppListing, AppListingPatch, BillingPlan } from './marker.js';
+export type { AppListing, AppListingPatch } from './marker.js';
 export { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
 export type { AppRef, ScannedApp } from './scan.js';
 export { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 export type { PlatformVendorResult, VendorLog, VendorPlatformOptions } from './vendor.js';
-export { MAX_PIPE_MANIFEST_BYTES, MAX_PIPE_README_BYTES, PIPE_ASSETS_DIR, PIPE_ICON_NAMES, PIPE_README_NAME, packPipeBundle, pipeBundleFolderOf, pipeOfBundle, readPipeManifest } from './pipe-bundle.js';
-export type { PackedPipeBundle, PipeManifest } from './pipe-bundle.js';
+// The pipeline store block rules are pure (client/pipe-store.ts) and ride
+// the main entry too; re-exported here so a packer host imports one path.
+export { defaultStoreBlock, normalizeBillingPlan, normalizePosixPath, PIPE_ICON_SVG, pipeReadmeStub, pipeStoreFiles, scanReadmeReferences, STORE_KEYS, STORE_MODES, validateStoreBlock } from '../client/pipe-store.js';
+export type { BillingPlan, PipeStoreBlock, StoreKey, StoreMode } from '../client/pipe-store.js';
+export { MAX_PIPE_README_BYTES, packPipe, scaffoldPipe } from './pipe-bundle.js';
+export type { CreatedPipe, PackedPipe } from './pipe-bundle.js';
 
 /** Receives one human-readable line per pack/verify step. */
 export type PackProgress = (line: string) => void;
@@ -701,7 +706,7 @@ export async function preflightApp(appFolder: string, workspaceRoot?: string): P
 	const fileExists = (rel: string): boolean => fs.existsSync(path.join(scanned.folder, ...rel.replace(/^\.\//, '').split('/')));
 
 	// ── package tier — the personal-publish bar ──────────
-	checks.push(scanned.id.includes('.') ? { id: 'appid', state: 'pass', label: 'App id namespaced', note: scanned.id, tier: 'package' } : { id: 'appid', state: 'fail', label: 'App id namespaced', note: `"${scanned.id}" must be <developerId>.<name>`, tier: 'package' });
+	checks.push(APP_SLUG_RE.test(scanned.id) ? { id: 'appid', state: 'pass', label: 'App id', note: scanned.id, tier: 'package' } : { id: 'appid', state: 'fail', label: 'App id', note: `"${scanned.id}" must be a slug (a letter, then letters, digits, _ or -); the deploying organization adds its developer id.`, tier: 'package' });
 	checks.push(scanned.name ? { id: 'name', state: 'pass', label: 'Display name', note: scanned.name, tier: 'package' } : { id: 'name', state: 'fail', label: 'Display name', note: 'appManifest.name is required.', tier: 'package' });
 	// Icon/readme: a DECLARED path that does not resolve is a fail (the
 	// manifest lies); undeclared is only a warn.
@@ -749,7 +754,6 @@ export interface CreateAppOptions {
 	template?: TemplateName;
 	/** Display name (default: the slug, title-cased). */
 	displayName?: string;
-	/** Developer id for `<developerId>.<slug>` (default
 	/** Frame options — chrome regions of the generated app. */
 	sidebar?: boolean;
 	statusFooter?: boolean;
@@ -770,7 +774,7 @@ export interface CreateAppOptions {
 
 /** The result of {@link createAppWorkspace}. */
 export interface CreatedApp {
-	/** The full app id (`<developerId>.<slug>`). */
+	/** The app id: the slug the manifest carries (the registry name is composed at deploy). */
 	appId: string;
 	/** Workspace-relative POSIX path of the created folder. */
 	folder: string;
@@ -988,13 +992,17 @@ registerAppPack({
 	extractInstallCause,
 	isTransientLockError,
 	vendorPlatformPackages,
-	MAX_PIPE_MANIFEST_BYTES,
 	MAX_PIPE_README_BYTES,
-	PIPE_ASSETS_DIR,
-	PIPE_ICON_NAMES,
-	PIPE_README_NAME,
-	packPipeBundle,
-	pipeBundleFolderOf,
-	pipeOfBundle,
-	readPipeManifest,
+	packPipe,
+	scaffoldPipe,
+	defaultStoreBlock,
+	normalizeBillingPlan,
+	normalizePosixPath,
+	PIPE_ICON_SVG,
+	pipeReadmeStub,
+	pipeStoreFiles,
+	scanReadmeReferences,
+	STORE_KEYS,
+	STORE_MODES,
+	validateStoreBlock,
 });

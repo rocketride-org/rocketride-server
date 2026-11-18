@@ -50,6 +50,7 @@ import { createLiveEventStore, type LiveEventStore } from './panels/development/
 import type { ProjectViewMode, ViewState, TaskStatus } from './types';
 import { DeployTab } from './panels/deploy';
 import { PackagePanel } from './panels/package';
+import type { IAssetsHost } from '../../components/assets';
 import type { IPipelineDeploy } from './panels/deploy';
 import { TASK_STATE } from './types';
 
@@ -94,6 +95,8 @@ export interface IProjectViewProps {
 	onRegisterDeveloper?: (developerId: string) => Promise<string>;
 	/** Whether the viewer may claim (org admin): false shows the member guidance, undefined = unknown (the form shows, the server decides). */
 	canRegisterDeveloper?: boolean;
+	/** The files beside the pipeline file (PACKAGE › Assets); absent = the host cannot reach them. */
+	assetsHost?: IAssetsHost;
 	/** Whether the document has unsaved changes. */
 	isDirty?: boolean;
 	/** Whether the document is a new (never-saved) file. */
@@ -264,7 +267,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -631,6 +634,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						onContentChanged={isReadonly ? undefined : handleContentChanged}
 						developerId={developerId ?? ''}
 						serverHost={serverHost}
+						assetsHost={assetsHost}
 					/>
 				) : (
 					<div style={commonStyles.empty}>No pipeline loaded</div>

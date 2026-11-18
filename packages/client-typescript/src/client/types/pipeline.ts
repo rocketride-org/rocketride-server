@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import type { PipeStoreBlock } from '../pipe-store.js';
+
 /**
  * Data flow connection between pipeline components.
  */
@@ -103,6 +105,11 @@ export interface PipelineConfig {
 
 	/** Project identifier for organization and permissions */
 	project_id?: string;
+
+	/** The store listing (tagline, categories, tags, icon, readme, links,
+	    mode, billing). Present = the pipeline is listable; absent = it
+	    deploys unlisted. The engine never sees it. */
+	store?: PipeStoreBlock;
 
 	/** Per-call params: public name -> `nodeId.configKey` */
 	parameters?: Record<string, string>;

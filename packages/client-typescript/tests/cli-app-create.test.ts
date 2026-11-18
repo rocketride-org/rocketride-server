@@ -23,9 +23,10 @@
  */
 
 /**
- * `rocketride app create` resolves the app id namespace like the App
- * Builder's New App wizard: --developer, else the account's developer id,
- * else 'local' with a warning — never a failure.
+ * `rocketride app create` writes the SLUG as the app id. The developer
+ * namespace is attached by the organization that deploys the app (the
+ * server composes `<developerId>.<slug>` at its door), so create never
+ * reads a developer id off an account and has no namespace fallback.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -36,15 +37,17 @@ import * as common from '../src/cli/common';
 import { executeAppCreate } from '../src/cli/commands/app';
 import { Output } from '../src/cli/output';
 
-type ConnectedClient = Awaited<ReturnType<typeof common.connectClient>>;
-
 let ws: string;
+let logs: string[];
 let errors: string[];
 
 beforeEach(() => {
 	ws = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-cli-create-'));
+	logs = [];
 	errors = [];
-	jest.spyOn(console, 'log').mockImplementation(() => undefined);
+	jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+		logs.push(args.map(String).join(' '));
+	});
 	jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
 		errors.push(args.map(String).join(' '));
 	});
@@ -56,61 +59,37 @@ afterEach(() => {
 });
 
 /** Runs `app create clock` offline (no install, no vendoring server). */
-async function create(options: Record<string, unknown>): Promise<{ code: number; appId: string }> {
+async function create(options: Record<string, unknown>): Promise<{ code: number; appId: string; folder: string }> {
 	const code = await executeAppCreate('clock', { workspace: ws, install: false, ...options }, new Output(undefined));
-	const pkg = JSON.parse(fs.readFileSync(path.join(ws, 'apps', 'clock-ui', 'package.json'), 'utf8'));
-	return { code, appId: pkg.appManifest.id };
+	const folder = path.join(ws, 'apps', 'clock-ui');
+	const pkg = JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8'));
+	return { code, appId: pkg.appManifest.id, folder };
 }
 
-describe('executeAppCreate developer id', () => {
-	it('uses the connected account developer id', async () => {
-		const connectSpy = jest.spyOn(common, 'connectClient').mockImplementation(async () => ({ getAccountInfo: () => ({ organization: { developerId: 'personal' } }) }) as unknown as ConnectedClient);
-
-		const { code, appId } = await create({ apikey: 'key' });
+describe('executeAppCreate app id', () => {
+	it('writes the slug as the app id and names the trigger after it', async () => {
+		const { code, appId, folder } = await create({});
 
 		expect(code).toBe(0);
-		expect(appId).toBe('personal.clock');
-		expect(connectSpy).toHaveBeenCalledTimes(1);
+		expect(appId).toBe('clock');
+		expect(fs.existsSync(path.join(folder, 'clock.rrapp'))).toBe(true);
+		expect(logs.join('\n')).toContain('Created clock at apps/clock-ui');
 		expect(errors).toEqual([]);
 	});
 
-	it('lets --developer win without connecting', async () => {
-		const connectSpy = jest.spyOn(common, 'connectClient');
-
-		const { appId } = await create({ apikey: 'key', developer: 'acme' });
-
-		expect(appId).toBe('acme.clock');
-		expect(connectSpy).not.toHaveBeenCalled();
-	});
-
-	it('falls back to local with a warning when the connection fails', async () => {
-		jest.spyOn(common, 'connectClient').mockImplementation(async () => {
-			throw new Error('ECONNREFUSED');
+	it('never connects to read a developer id, with or without credentials', async () => {
+		const connectSpy = jest.spyOn(common, 'connectClient').mockImplementation(async () => {
+			throw new Error('app create must not connect');
 		});
 
-		const { code, appId } = await create({ apikey: 'key' });
+		const withKey = await create({ apikey: 'key' });
+		fs.rmSync(path.join(ws, 'apps'), { recursive: true, force: true });
+		const withoutKey = await create({});
 
-		expect(code).toBe(0);
-		expect(appId).toBe('local.clock');
-		expect(errors.join('\n')).toMatch(/Warning: could not read the developer id .*ECONNREFUSED.*using 'local'/);
-	});
-
-	it('falls back to local with a warning when no key is configured', async () => {
-		const connectSpy = jest.spyOn(common, 'connectClient');
-
-		const { appId } = await create({});
-
-		expect(appId).toBe('local.clock');
+		expect(withKey.appId).toBe('clock');
+		expect(withoutKey.appId).toBe('clock');
 		expect(connectSpy).not.toHaveBeenCalled();
-		expect(errors.join('\n')).toMatch(/Warning: no account credentials/);
-	});
-
-	it('falls back to local with a warning when the org has no developer id', async () => {
-		jest.spyOn(common, 'connectClient').mockImplementation(async () => ({ getAccountInfo: () => ({ organization: { developerId: null } }) }) as unknown as ConnectedClient);
-
-		const { appId } = await create({ apikey: 'key' });
-
-		expect(appId).toBe('local.clock');
-		expect(errors.join('\n')).toMatch(/no registered developer id/);
+		// no namespace fallback exists any more, so nothing warns about one
+		expect(errors).toEqual([]);
 	});
 });

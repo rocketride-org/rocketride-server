@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** Pipeline bundles in the sidebar: a folder holding one pipe is one entry (plan §9). */
+/** Pipeline folders in the sidebar: a folder holding one pipe collapses to one entry (plan §9). */
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { bundlePathsFor, collapseBundles, entryPathOfFile, fileOfEntry, isShortId, pipeStemOf } from './bundles';
+import { collapseBundles, entryPathOfFile, fileOfEntry, isShortId, pipeStemOf } from './bundles';
 import type { ProjectEntry } from './types';
 
 test('a short id is one dot-free segment', () => {
@@ -37,19 +37,15 @@ test('a short id is one dot-free segment', () => {
 	assert.equal(isShortId('doc brain'), false);
 });
 
-test('the pipe stem drops either pipeline extension and nothing else', () => {
+test('the pipe stem drops the .pipe extension and nothing else', () => {
 	assert.equal(pipeStemOf('ingest/docBrain.pipe'), 'docBrain');
-	assert.equal(pipeStemOf('docBrain.pipe.json'), 'docBrain');
+	// Only `.pipe` is a pipeline file: any other suffix has no stem.
+	assert.equal(pipeStemOf('docBrain.pipe.bak'), null);
 	assert.equal(pipeStemOf('docBrain/readme.md'), null);
 	assert.equal(pipeStemOf('.pipe'), null);
 });
 
-test('bundle paths for a new pipeline put the pipe in a folder of the typed name', () => {
-	assert.deepEqual(bundlePathsFor('', 'docBrain'), { folder: 'docBrain', file: 'docBrain/docBrain.pipe' });
-	assert.deepEqual(bundlePathsFor('ingest', 'docBrain'), { folder: 'ingest/docBrain', file: 'ingest/docBrain/docBrain.pipe' });
-});
-
-test('a folder holding one pipe is a bundle whatever the file is called; its id comes from the file', () => {
+test('a folder holding one pipe collapses whatever the file is called; its id comes from the file', () => {
 	const entries: ProjectEntry[] = [
 		{ path: 'docBrain', type: 'dir' },
 		{ path: 'docBrain/assets', type: 'dir' },
@@ -71,30 +67,30 @@ test('a folder holding one pipe is a bundle whatever the file is called; its id 
 	assert.equal(entries.length, 7);
 });
 
-test('a folder with one direct pipe but pipes deeper is a directory, not a bundle', () => {
+test('a folder with one direct pipe but pipes deeper stays a directory', () => {
 	const entries: ProjectEntry[] = [
 		{ path: 'ingest/main.pipe', projectId: 'main' },
 		{ path: 'ingest/sub/other.pipe', projectId: 'other' },
 	];
 	const out = collapseBundles(entries);
 	assert.equal(out.length, 2);
-	// The inner folder holds one pipe and nothing deeper: that one IS a bundle.
+	// The inner folder holds one pipe and nothing deeper: that one collapses.
 	assert.deepEqual(out[1], { path: 'ingest/sub', type: 'file', projectId: 'other', file: 'ingest/sub/other.pipe' });
 	assert.deepEqual(out[0], entries[0]);
 });
 
-test('a bundle discovered without its folder entry (VS Code lists files only) still collapses', () => {
+test('a one-pipe folder discovered without its folder entry (VS Code lists files only) still collapses', () => {
 	const out = collapseBundles([{ path: 'pipelines/docBrain/docBrain.pipe', projectId: 'docBrain' }]);
 	assert.deepEqual(out, [{ path: 'pipelines/docBrain', type: 'file', projectId: 'docBrain', file: 'pipelines/docBrain/docBrain.pipe' }]);
 });
 
-test('a bare .pipe counts as a pipeline when telling a bundle from a folder', () => {
-	// `pkg` holds two pipelines (one has no display stem): a folder, not a bundle.
+test('a bare .pipe counts as a pipeline when deciding whether a folder collapses', () => {
+	// `pkg` holds two pipelines (one has no display stem): two pipes, no collapse.
 	const entries: ProjectEntry[] = [{ path: 'pkg/main.pipe', projectId: 'main' }, { path: 'pkg/.pipe', projectId: 'bare' }];
 	assert.equal(collapseBundles(entries), entries);
 });
 
-test('no bundles: the list is returned as is', () => {
+test('two pipes in one folder are two pipes: the list is returned as is', () => {
 	const entries: ProjectEntry[] = [{ path: 'a.pipe' }, { path: 'dir', type: 'dir' }, { path: 'dir/x.pipe' }, { path: 'dir/y.pipe' }];
 	assert.equal(collapseBundles(entries), entries);
 });

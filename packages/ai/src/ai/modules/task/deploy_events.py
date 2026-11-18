@@ -63,21 +63,33 @@ from .task_control import DeploymentRef
 
 
 async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, project_id: str, action: str) -> None:
-    """Push the org-scoped ``apaevt_deploy`` invalidation event.
+    """Push the org-scoped ``apaevt_deploy`` invalidation event, for any kind.
 
-    Best-effort by contract: a failed broadcast must never fail the
-    mutation or the scheduler's bookkeeping — the failure is logged and
-    swallowed.
+    First drops the server's own cached serving verdicts for the artifact
+    (shell.py — a session that asked for a version while it was still
+    building or being written would otherwise keep its 404 after the version
+    became servable, #2461; a disable or revocation would wait out the hard
+    expiry). Registry names are ``developerId.<id>`` and a name is fixed in
+    kind, so the id names one artifact: an app's and a pipe's verdicts drop
+    through the one cache alike. Best-effort by contract: a failed drop or
+    broadcast must never fail the mutation or the scheduler's bookkeeping —
+    the failure is logged and swallowed.
 
     Args:
         server: The DAP server (``broadcast_server_event`` provider).
         org_id: The org whose connections receive the event (the scope).
         team_id: The mutated deployment's team ('' for registry-only
             actions such as publish).
-        project_id: The mutated deployment's project.
+        project_id: The mutated deployment's registry name.
         action: What changed ('publish', 'deploy', 'run', 'errored',
             a state name, ...) — advisory; receivers re-fetch either way.
     """
+    try:
+        from ai.modules.shell.shell import invalidate_app_serving
+
+        invalidate_app_serving(project_id)
+    except Exception as e:
+        error(f'[DEPLOY] {project_id}: serving-cache invalidation failed: {e}')
     try:
         # Local import: rocketride is the client SDK package — imported
         # lazily so module import never depends on it.
@@ -127,13 +139,9 @@ async def release_deployment_holds(server: Any, org_id: str, team_id: str, proje
 async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: str) -> None:
     """Announce a change to an APP's deployments (build, binding, review).
 
-    Drops the server's own cached serving verdicts for the app (shell.py —
-    a session that asked for a version while it was still building would
-    otherwise keep its 404 after the version became servable, #2461), then
-    pushes the org-scoped ``apaevt_deploy`` invalidation. App producers
-    only: a PIPELINE's project id is user-chosen, so pipeline events must
-    never reach another tenant's app cache. Best-effort like every deploy
-    event, and a failed drop never costs the org its broadcast.
+    The registry-only form of :func:`broadcast_deploy_changed` (no team
+    slot): the serving-cache drop and the org-scoped ``apaevt_deploy`` push
+    both happen there, for every kind.
 
     Args:
         server: The DAP server (``broadcast_server_event`` provider).
@@ -142,12 +150,6 @@ async def broadcast_app_changed(server: Any, org_id: str, app_id: str, action: s
         action: What changed ('build', 'publish', 'disable', 'remove', a
             review state, ...) — advisory; receivers re-fetch either way.
     """
-    try:
-        from ai.modules.shell.shell import invalidate_app_serving
-
-        invalidate_app_serving(app_id)
-    except Exception as e:
-        error(f'[DEPLOY] {app_id}: serving-cache invalidation failed: {e}')
     await broadcast_deploy_changed(server, org_id, '', app_id, action)
 
 

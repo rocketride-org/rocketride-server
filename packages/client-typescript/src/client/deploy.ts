@@ -45,7 +45,7 @@ import type { RocketRideClient } from './client.js';
 import type { DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
 import { getRegisteredAppPack } from './app-pack-registry.js';
 import type { AppPackModule } from './app-pack-registry.js';
-import type { AppVerifyReport, CreatedApp } from '../app-pack/index.js';
+import type { AppVerifyReport, CreatedApp, CreatedPipe } from '../app-pack/index.js';
 
 // =============================================================================
 // HELPERS
@@ -196,32 +196,28 @@ export class DeployApi {
 	}
 
 	/**
-	 * Packs a pipeline BUNDLE folder and deploys it as the next immutable
-	 * registry version — the call behind the DEPLOY card and the CLI's
-	 * `deploy add <folder>` (Node.js only; plan §9, B7).
+	 * Packs one pipeline and deploys it as the next immutable registry
+	 * version — the call behind the DEPLOY card and the CLI's
+	 * `deploy add <pipe>` (Node.js only; plan §9).
 	 *
-	 * The bundle is `pipelines/<pipeId>/`: exactly one `.pipe` (what runs),
-	 * beside the store manifest `<stem>.rrpipe`, `readme.md`, an icon and
-	 * `assets/` (the readme's images). The pipe rides as the artifact, the
-	 * rest as the content zip the server stores beside it. A folder that is
-	 * not a bundle (no pipe, several pipes) is refused before any call;
-	 * `deploy.add({ kind: 'pipe', pipeline })` stays the raw door for a
-	 * pipeline dict with no bundle.
+	 * The pipe rides as the artifact; the zip beside it carries the pipe at
+	 * its root plus the readme and icon its `store` block declares and every
+	 * file the README references, laid out relative to the pipe file's
+	 * directory. A pipe without a `store` block deploys as an UNLISTED
+	 * artifact (the zip is the pipe alone). A declared or referenced file
+	 * that is missing, or that resolves outside the pipe's directory, is
+	 * refused by name before any call; `deploy.add({ kind: 'pipe', pipeline })`
+	 * stays the raw door for a pipeline dict.
 	 *
-	 * @param bundleDir - The bundle folder, or its `.pipe` when it is the
-	 *   folder's only pipe.
+	 * @param pipePath - The `.pipe` file.
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.deployTo - Team id to deploy the new version to
 	 *   immediately (one-step add+deploy).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
-	async addPipe(bundleDir: string, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
+	async addPipe(pipePath: string, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
 		const pack = await this.loadAppPack();
-		const folder = pack.pipeBundleFolderOf(bundleDir);
-		if (!folder) {
-			throw new Error(`${bundleDir} is not a pipeline bundle - wrap the pipe in its own folder (pipelines/<id>/<id>.pipe)`);
-		}
-		const packed = pack.packPipeBundle(folder);
+		const packed = pack.packPipe(pipePath);
 		return this.add({
 			kind: 'pipe',
 			pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },
@@ -266,6 +262,30 @@ export class DeployApi {
 		}
 		const { workspaceRoot, onProgress, ...rest } = options;
 		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
+	}
+
+	/**
+	 * Scaffolds a new pipeline in the workspace — the programmatic twin of
+	 * `rocketride pipe new` and `createApp`'s pipeline counterpart (Node.js
+	 * only). Writes `<dir>/<pipeId>/<pipeId>.pipe` carrying the default
+	 * `store` block, the placeholder `icon.svg`, a `README.md` stub and an
+	 * empty `assets/` directory. Scaffolding only — nothing is deployed; the
+	 * normal lifecycle (edit → `addPipe` → publish) follows.
+	 *
+	 * @param pipeId - The pipeline id: one dot-free segment of letters,
+	 *   digits, `_` or `-`. The file carries the id alone; the organization
+	 *   that deploys the pipe attaches its developer id.
+	 * @param options.workspaceRoot - The workspace folder (default
+	 *   `process.cwd()`).
+	 * @param options.name - Display name (default: the id).
+	 * @param options.dir - The pipelines directory, workspace-relative
+	 *   (default `pipelines`).
+	 * @returns The created folder, pipe path and files, workspace-relative.
+	 */
+	async createPipe(pipeId: string, options: { workspaceRoot?: string; name?: string; dir?: string } = {}): Promise<CreatedPipe> {
+		const pack = await this.loadAppPack();
+		const { workspaceRoot, ...rest } = options;
+		return pack.scaffoldPipe(workspaceRoot ?? process.cwd(), pipeId, rest);
 	}
 
 	/**

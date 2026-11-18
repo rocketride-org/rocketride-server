@@ -96,6 +96,47 @@ PipelineInputConnection = TypedDict(
     },
 )
 
+
+class BillingPlan(TypedDict, total=False):
+    """
+    One billing plan of a store listing's ``billing.plans`` — the
+    Stripe-shaped pricing proposal that rides every deploy and goes live on
+    store approval. Apps carry it in ``appManifest.billing``, pipelines in
+    the ``store.billing`` block.
+    """
+
+    nickname: str  # Plan display name ("Starter", "Pro")
+    amountCents: int  # Price in cents
+    currency: str  # ISO currency code
+    interval: str  # Billing interval ("month", "year", "one_time")
+    metadata: dict[str, Any]  # Opaque plan metadata, preserved verbatim
+
+
+class PipeStoreBilling(TypedDict):
+    """The ``billing`` entry of a store block."""
+
+    plans: list[BillingPlan]
+
+
+class PipeStoreBlock(TypedDict, total=False):
+    """
+    The ``store`` block of a ``.pipe``: the pipeline's store listing. Present
+    = the pipeline is listable; absent = it deploys unlisted. Mirrors an
+    app's ``appManifest`` listing fields; ``project_id``, ``name``,
+    ``description`` and ``source`` stay at the pipe's root and are never
+    duplicated here. The engine never sees the block.
+    """
+
+    tagline: str  # One-line tagline for the store card
+    categories: list[str]  # Store categories
+    tags: list[str]  # Free tags
+    icon: str  # Icon path, relative to the pipe file's directory
+    readme: str  # README path (the store page), relative to the pipe file's directory
+    links: dict[str, str]  # Links the listing shows, label -> URL
+    mode: Literal['free', 'subscription', 'paywall']  # Monetization mode
+    billing: PipeStoreBilling  # Pricing plans
+
+
 PipelineControlConnection = TypedDict(
     'PipelineControlConnection',
     {
@@ -136,6 +177,7 @@ class PipelineConfig(TypedDict, total=False):
     components: list[PipelineComponent]  # Array of pipeline components - REQUIRED
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
+    store: PipeStoreBlock  # The store listing; present = listable, absent = deploys unlisted
     parameters: dict[str, str]  # Per-call params: public name -> 'nodeId.configKey'
     viewport: dict[str, Any]  # UI viewport settings for visual editors
     docRevision: int  # Editor document revision counter for change tracking

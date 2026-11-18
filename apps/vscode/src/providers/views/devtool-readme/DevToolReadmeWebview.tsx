@@ -81,10 +81,11 @@ const DevToolReadmeWebview: React.FC = () => {
 		return <div style={statusStyle}>{installedIds === null || (connected && catalog === null) ? 'Loading…' : connected ? 'This tool is no longer available on the server.' : 'Connect to a RocketRide server to view this tool.'}</div>;
 	}
 
-	// Engine-served icons are root-relative in the catalog; the page CSP
-	// admits the engine origin.
+	// Engine-served icons and READMEs are root-relative in the catalog
+	// (`/apps/<id>/v<N>/<path>`); the page CSP admits the engine origin.
 	const base = (cm.getHttpUrl() || '').replace(/\/$/, '');
 	const iconUrl = row.icon ? (row.icon.startsWith('/') && base ? `${base}${row.icon}` : row.icon) : undefined;
+	const readmeUrl = row.readme ? (row.readme.startsWith('/') && base ? `${base}${row.readme}` : row.readme) : undefined;
 
 	return (
 		<ToolDetailsView
@@ -95,9 +96,8 @@ const DevToolReadmeWebview: React.FC = () => {
 				...(row.version !== undefined ? { version: row.version } : {}),
 				...(row.description !== undefined ? { description: row.description } : {}),
 				...(iconUrl !== undefined ? { iconUrl } : {}),
-				// README from the manifest; the description is the fallback so
-				// the page is never an empty sheet.
-				readme: row.readme || row.description || '',
+				// The README's URL; ToolDetailsView fetches it (no README = no sheet).
+				...(readmeUrl !== undefined ? { readme: readmeUrl } : {}),
 			}}
 			installed={installedIds.includes(appId)}
 			connected={connected}

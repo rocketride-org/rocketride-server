@@ -413,11 +413,10 @@ export interface IAppBuilderHost {
 	saveListing?: (patch: ListingPatch) => Promise<void>;
 	/** Run the pre-flight checks for the current build. */
 	runPreflight?: () => Promise<PreflightCheck[]>;
-	/** Native file picker for a manifest asset. Returns the picked file's
-	 * APP-FOLDER-relative './'-prefixed POSIX path, or null on cancel. The
-	 * host enforces containment: assets must live inside the app folder
-	 * (the server's harvest only copies app-root-relative paths). */
-	pickAppFile?: (kind: 'icon' | 'readme') => Promise<string | null>;
+	/** Native file picker for PACKAGE › Assets: an image (the icon, a README
+	 * image) or a markdown file, anywhere on the host — the pane copies the
+	 * bytes beside the manifest itself. Null on cancel. */
+	pickAssetFile?: (accept: 'image' | 'markdown') => Promise<{ name: string; data: Uint8Array } | null>;
 	/** Native picker for an include path — a workspace FOLDER or FILE.
 	 * Returns the picked entry's WORKSPACE-relative POSIX path (no './'
 	 * prefix — include entries are workspace-relative, unlike app assets),
@@ -431,6 +430,13 @@ export interface IAppBuilderHost {
 	 * often binary — png/jpg — so text reads would corrupt them). null =
 	 * unreadable, unsupported type, or over the host's size cap. */
 	readAppImageDataUri?: (relPath: string) => Promise<string | null>;
+	/** Write one app-folder-relative file (text or bytes), creating folders
+	 * as needed — PACKAGE › Assets writes the icon, the README and dropped
+	 * images with it. The host guards traversal. */
+	writeAppFile?: (relPath: string, data: Uint8Array | string) => Promise<void>;
+	/** Open one app-folder-relative file in the host's text editor (PACKAGE
+	 * › Assets "Open in editor"). */
+	openAppFile?: (relPath: string) => Promise<void>;
 	/** Submit the given version for public review (addressed by the registry
 	 * version int, like publish). */
 	submitForReview?: (version: number) => Promise<void>;
