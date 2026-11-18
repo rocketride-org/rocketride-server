@@ -34,6 +34,7 @@ is covered by the e2e deploy flow on dev machines/CI, not here.
 import io
 import json
 import os
+import re
 import time
 import zipfile
 from typing import Any, Dict, List
@@ -47,6 +48,7 @@ from ai.account.app_build import (
     BuildFailure,
     BuildInfraFailure,
     _drift_of,
+    _emit_config,
     _lockfile_importer_pins,
     _patched_workspace_yaml,
     _safe_asset_rel,
@@ -121,6 +123,25 @@ def test_safe_asset_rel_refuses_traversal_and_absolute():
     """
     for bad in ('../x.svg', 'a/../../x', '/etc/passwd', 'c:/x.svg', '', 'a\x00b'):
         assert _safe_asset_rel(bad) is None
+
+
+# =============================================================================
+# CANONICAL CONFIG — rsbuild's default public/ -> dist/ copy must stay on
+# =============================================================================
+
+
+def test_canonical_config_keeps_rsbuild_public_dir_copy(tmp_path):
+    """The public-pages feature ships an app's committed ``public/app-manifest.json``
+    and ``public/pages/*.html`` to ``dist/`` through rsbuild's DEFAULT
+    ``server.publicDir`` copy (the canonical config has no author plugins). If the
+    config ever sets ``publicDir`` / ``copy`` or relocates the dist root, those
+    snapshots silently stop reaching the store and the pages vanish.
+    """
+    config_path = _emit_config(str(tmp_path / '.build'), str(tmp_path / 'app'), str(tmp_path / '.out'), 'acme_x')
+    text = open(config_path, encoding='utf-8').read()
+    # Blank the interpolated (json.dumps) path strings so only config KEYS are matched.
+    text = re.sub(r'"(?:[^"\\]|\\.)*"', '""', text)
+    assert not re.search(r'(?:^|[{,])\s*(?:publicDir|copy|copyOnBuild|server)\s*:', text, re.MULTILINE)
 
 
 # =============================================================================
