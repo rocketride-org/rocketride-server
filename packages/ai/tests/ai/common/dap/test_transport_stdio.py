@@ -396,6 +396,14 @@ async def test_exit_message_non_zero_code_marks_disconnect_as_error():
 
 
 @pytest.mark.asyncio
+async def test_exit_message_cancelled_code_maps_to_one():
+    """In 4-field form, CANCELLED, a code name no engine error has, is no stop: exit code 1."""
+    events, disconnects = await _drive('>EXIT*CANCELLED*user stop*x')
+    assert events[0]['body']['exitCode'] == 1
+    assert disconnects[0]['has_error'] is True
+
+
+@pytest.mark.asyncio
 async def test_exit_message_three_fields_unknown_token_maps_to_one():
     """In 3-field form, unparseable codes (not hex) map to exit code 1."""
     events, disconnects = await _drive('>EXIT*WHAT*broken')
