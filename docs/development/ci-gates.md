@@ -132,7 +132,11 @@ node scripts/build.js shell:regen-derived && git diff --exit-code -- \
 ```
 
 `shell:check` fails on a removed or broken frozen export (via per-version tsc
-floors) and on an added export that was never `shell:freeze`d. The second step
+floors), on an added export that was never `shell:freeze`d, and on a changed
+body of an existing exported declaration (for example a new member on an
+interface) that was never frozen. Comments and whitespace are ignored. The
+inlined `RocketRideClient` class is exempt from the body comparison so additive
+SDK method changes don't fail every PR. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
 

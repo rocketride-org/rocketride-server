@@ -71,6 +71,22 @@ import { useShellApiConfig } from './connection/ShellApiConfigContext';
 import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './hooks/useAppComponent';
 
+// Telemetry: the bound per-app reporter and the consent surface (the shell
+// owns the one analytics transport; apps carry no keys and no SDK). The
+// reporter is HANDED to the app: TelemetryProvider wraps the app outlet and
+// useReport() reads it. There is deliberately no public by-name registry. The
+// shell picks the stamp once, when it binds the reporter: the descriptor id,
+// or a telemetryId alias that only a first-party rocketride.* descriptor may
+// choose, and never 'shell' or another registered app's id.
+import { TelemetryProvider, useConsent, useReport } from './telemetry/TelemetryContext';
+import { openConsentBanner } from './telemetry/consentUi';
+// Module-level consent/experiment seams for app code that runs outside React
+// (home-ui's roulette measurement and pre-auth signup attribution): pure
+// consent reads, the consented-capture gateway, the experiment before-send
+// veto, and the replay-resume signal only the home app can time.
+import { consentExpiresAt, getConsentState, subscribeConsent } from './telemetry/consentState';
+import { getConsentedCapture, resumeSignedOutCapture } from './telemetry/host';
+
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
 import { useLatest } from './hooks/useLatest';
@@ -186,6 +202,9 @@ export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, Shel
 // manifest. settingStoreOf normalizes a schema's store declaration.
 export { registerSettings, getSettingsContributions, onSettingsContributionsChanged } from './components/workspace/settingsContributions';
 export type { SettingsContribution } from './components/workspace/settingsContributions';
+export type { TelemetryProviderProps, ConsentApi } from './telemetry/TelemetryContext';
+export type { ConsentState, ConsentChoice, ConsentOrigin } from './telemetry/consent';
+export type { ConsentedCapture, ConsentedReporter } from './telemetry/host';
 export { buildSettingsRegistry, effectiveSettings, settingStoreOf, labelFromKey, SHELL_SECTION_ID } from './components/workspace/settingsRegistry';
 export type { SettingsRegistry, RegistrySection, RegistryEntry, RegistryBuildOptions, ShellKind } from './components/workspace/settingsRegistry';
 // The ONE settings surface: the cloud overlay wraps it (SettingsProvider);
@@ -596,6 +615,15 @@ export const shellApi = {
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useShellApiKey() { return useShellApiKey; },
+	get TelemetryProvider() { return TelemetryProvider; },
+	get useReport() { return useReport; },
+	get useConsent() { return useConsent; },
+	get openConsentBanner() { return openConsentBanner; },
+	get getConsentState() { return getConsentState; },
+	get subscribeConsent() { return subscribeConsent; },
+	get consentExpiresAt() { return consentExpiresAt; },
+	get getConsentedCapture() { return getConsentedCapture; },
+	get resumeSignedOutCapture() { return resumeSignedOutCapture; },
 	get useAuthUser() { return useAuthUser; },
 	get useLogout() { return useLogout; },
 	get useWorkspace() { return useWorkspace; },
@@ -755,6 +783,10 @@ export {
 	AppLayout,
 	// Desktop version selector — session override read + apply/clear
 	getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl,
+	// Telemetry: the provider + hook the reporter is handed through, consent surface, banner reopen
+	TelemetryProvider, useReport, useConsent, openConsentBanner,
+	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
+	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, resumeSignedOutCapture,
 };
 
 /**

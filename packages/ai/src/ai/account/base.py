@@ -30,10 +30,11 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import json
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Dict, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -302,6 +303,18 @@ class AccountBase(ABC):
         """
         pass
 
+    def node_index(self) -> dict:
+        """The nodes this server serves: {contract, archive, nodes: {name: {sha256, size, services, icons}}}."""
+        from ai.common import node_release
+
+        return json.loads(node_release.read_index())
+
+    def node_package(self, name: str, sha256: str) -> bytes:
+        """The <name>.rrnode the index lists with that digest."""
+        from ai.common import node_release
+
+        return node_release.read_package(name, sha256)
+
     async def get_public_apps(self) -> list:
         """
         Return apps visible to unauthenticated users.
@@ -311,6 +324,31 @@ class AccountBase(ABC):
 
         Returns:
             List of app manifest dicts (same shape as apps.json entries).
+        """
+        return []
+
+    async def get_public_plans(self, app_id: str) -> List[Dict[str, Any]]:
+        """
+        Return one app's public subscription plans (the ``plans`` page data source).
+
+        Shape (append-only): ``[{id, name, price, currency, period, features[]}]``,
+        the prices the app's live pricing page shows, with ``price`` a decimal
+        string (``"29"``, ``"29.50"``). OSS has no billing and returns []. The
+        SaaS edition serves its plan table and calls
+        ``ai.modules.shell.data_sources.invalidate('plans')`` after every
+        price change.
+
+        Args:
+            app_id: The app whose plans to list.
+
+        Returns:
+            The app's plans in the shape above; [] for an app without plans.
+
+        Raises:
+            Exception: the plan store could not be read (an override's own
+                error, of any type). The page is then served without its data
+                and uncached, so the next crawl asks again; an app without
+                plans returns [] instead of raising.
         """
         return []
 
@@ -482,7 +520,9 @@ class AccountBase(ABC):
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
 
-    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
+    async def authorize_db_target(
+        self, identity: dict, target: dict | None = None, *, credential: str | None = None
+    ) -> DbDecision:
         """
         Decide whether a run (or caller) may receive a cloud database DSN.
 
@@ -498,6 +538,15 @@ class AccountBase(ABC):
                 public_endpoint, path, task_id}``. Unused here.
             target: ``{scope, team_id, user_id}``, or None for the org
                 database.
+            credential: The ``AccountInfo.auth`` of the connection that started
+                or restarted the run: the one that supplied the pipeline, so a
+                restart carries the restarter's, not the original starter's.
+                ``''`` is the trusted in-process deploy dispatch, which holds
+                none. ``None`` means the engine had no connection identity to
+                read (or a caller that predates this argument). An
+                implementation may use it only to look up what that credential
+                is allowed to reach, per call. It is never stored, logged, or
+                added to ``identity``. Unused here.
 
         Returns:
             DbDecision(allowed, reason, audit, owner_id). A denial is falsy;

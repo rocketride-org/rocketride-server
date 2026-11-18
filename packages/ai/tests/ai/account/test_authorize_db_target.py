@@ -92,3 +92,12 @@ def test_the_default_authorizer_is_identifiable_by_the_task_engine():
 
     assert _Minimal.authorize_db_target is AccountBase.authorize_db_target
     assert _Own.authorize_db_target is not AccountBase.authorize_db_target
+
+
+def test_the_credential_is_accepted_and_changes_nothing():
+    # The engine passes the presenting connection's credential; the single-tenant
+    # default has nothing to narrow, so every value, None included, decides alike.
+    for credential in (None, '', 'rr_session', 'rr_scoped'):
+        assert asyncio.run(_Minimal().authorize_db_target(IDENTITY, credential=credential)).allowed
+        refused = asyncio.run(_Minimal().authorize_db_target(IDENTITY, {'scope': 'team'}, credential=credential))
+        assert (refused.allowed, refused.reason) == (False, 'scope_needs_rocketride_cloud')
