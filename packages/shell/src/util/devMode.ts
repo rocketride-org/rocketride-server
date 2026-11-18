@@ -39,7 +39,7 @@
  */
 
 import React from 'react';
-import { appSlugOf } from 'rocketride';
+import { appSlugOf, devContainerNameOf } from 'rocketride';
 import * as ReactDom from 'react-dom';
 import * as ReactJsxRuntime from 'react/jsx-runtime';
 import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
@@ -353,9 +353,9 @@ export async function installDevHooks(): Promise<void> {
 				failHold(`Dev app at ${prefix} is "${String(manifest.id)}", not "${appId}"`);
 				return;
 			}
-			const moduleId = typeof manifest.moduleId === 'string' && manifest.moduleId
-				? manifest.moduleId
-				: appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+			// The same name the host's build used: the org's developer id plus the
+			// slug, or local_<slug> before the org has claimed one
+			const moduleId = devContainerNameOf(appId, ConnectionManager.getInstance().getAccountInfo()?.organization?.developerId);
 			const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : appId;
 			console.log(`[devMode] self-registering "${appId}" from ${prefix} (URL convention)`);
 			registerDevRemote(appId, moduleId, name, `${prefix}/remoteEntry.js`, metaFromManifest({

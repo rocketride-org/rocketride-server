@@ -54,6 +54,7 @@
  */
 
 import * as LocalJsxRuntime from 'react/jsx-runtime';
+import { devContainerNameOf } from 'rocketride';
 import * as LocalJsxDevRuntime from 'react/jsx-dev-runtime';
 import * as LocalRocketride from 'rocketride';
 import type { editor as MonacoEditorNs } from 'monaco-editor';
@@ -200,7 +201,7 @@ export class WebDevSession {
 			: m.configuration) as Record<string, unknown> | undefined;
 		const meta: DevRegistrationMeta = {
 			name: typeof m.name === 'string' && m.name ? m.name : this.appName,
-			moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : this.moduleId,
+			moduleId: this.moduleId,
 			description: typeof m.description === 'string' ? m.description : undefined,
 			version: typeof pkg.version === 'string' ? pkg.version : undefined,
 			configuration,
@@ -291,7 +292,9 @@ export class WebDevSession {
 		this.appId = appId;
 		this.folder = folder;
 		this.appName = appName;
-		this.moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+		// The dev container is named by this host: the org's developer id plus
+		// the slug, or local_<slug> before the org has claimed one
+		this.moduleId = devContainerNameOf(appId, client.getAccountInfo()?.organization?.developerId);
 		this.scopeKey = `${appId}#${this.sessionId}`;
 		// step: a prefix lens over the ONE shared staged workspace view —
 		// editor overlays, staged state, and agent writes all converge there

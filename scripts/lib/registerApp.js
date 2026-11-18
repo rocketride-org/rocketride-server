@@ -227,8 +227,7 @@ function registerApp(appRoot) {
 			const buildDir = path.join(BUILD_ROOT, APPS_BASE, servedName);
 
 			// Derive moduleId from appId
-			// The MF container is named from the SLUG, like every dev loop names it
-			const moduleId = toModuleId(String(appManifest.id).split('.').pop());
+			const moduleId = toModuleId(appId);
 
 			// The shell contract version this app was built against.
 			const shellApiVersion = readShellApiVersion();

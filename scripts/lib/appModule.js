@@ -59,7 +59,12 @@ const {
 	exists,
 } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
-const { registerApp, assertSafeAppId, servedAppIdOf } = require('./registerApp');
+const { registerApp, assertSafeAppId, servedAppIdOf, PLATFORM_DEVELOPER_ID } = require('./registerApp');
+
+// The rsbuild config names the registry name from RR_DEVELOPER_ID (the
+// manifest carries only the slug); for the apps this repo serves itself the
+// namespace is the platform's, the same one registerApp.js writes to apps.json.
+const BUILD_ENV = { ...process.env, RR_DEVELOPER_ID: PLATFORM_DEVELOPER_ID };
 const registry = require('./registry');
 
 // Shared dependency sources — same for every remote app. Dual-layout:
@@ -165,7 +170,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 
 				// Clean build output before rebuilding to prevent stale chunks
 				await removeDir(buildDir);
-				await execLocalBin('rsbuild', ['build'], { task, cwd: appRoot });
+				await execLocalBin('rsbuild', ['build'], { task, cwd: appRoot, env: BUILD_ENV });
 
 				// Persist the pre-build hash so any concurrent edits force a rebuild next time
 				await saveSourceHash(buildHashKey, hash);
@@ -244,7 +249,7 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 				description: `Start ${name} (dev)`,
 				run: async (ctx, task) => {
 					task.output = 'Starting development server...';
-					await execLocalBin('rsbuild', ['dev'], { task, cwd: appRoot });
+					await execLocalBin('rsbuild', ['dev'], { task, cwd: appRoot, env: BUILD_ENV });
 				},
 			}),
 		});

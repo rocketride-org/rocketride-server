@@ -167,6 +167,13 @@ it. A manifest written under the old rule may still carry
 `<prefix>.<slug>`: everything up to and including the last dot is ignored
 as if it had never been written, and it is never stored or written back.
 
+The Module Federation container follows the same name: `<developerId>_<slug>`.
+A deployed build gets it from the registry row; a dev build gets it from the
+host that runs it (the App Builder passes `RR_DEVELOPER_ID` to `rsbuild dev`,
+the in-browser build composes it directly), and before your organization has
+claimed a developer id the reserved `local_<slug>` applies, so a dev build
+never collides with a served one.
+
 ---
 
 ## Creating an App: the Scaffold
@@ -1690,10 +1697,13 @@ import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
-// The local dev container name derives from the appManifest.id slug; the
-// server names a published app's container from its registry name.
+// The container is named <developerId>_<slug>: the App Builder passes your
+// organization's developer id as RR_DEVELOPER_ID; without one the reserved
+// local namespace applies (local_<slug>). A deployed build is named by the
+// server from the registry row, never by this file.
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
+const appSlug = String(pkg.appManifest?.id ?? 'unknown').split('.').pop();
+const moduleId = `${process.env.RR_DEVELOPER_ID || 'local'}.${appSlug}`.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 export default defineConfig(() => ({
 	plugins: [

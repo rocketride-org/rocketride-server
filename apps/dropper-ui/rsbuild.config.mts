@@ -12,10 +12,10 @@ import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 // Module Federation remote: the shell loads ./AppDescriptor at runtime.
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 // The manifest carries the SLUG; the served id is the platform namespace + slug.
-const appSlug = String(pkg.appManifest?.id ?? 'unknown').split('.').pop() as string;
-const appId = `rocketride.${appSlug}`;
-// The MF container is named from the SLUG, like every dev loop names it.
-const moduleId = appSlug.replace(/[^a-zA-Z0-9_$]/g, '_');
+// The manifest carries the slug; whoever runs the build names the namespace
+// (RR_DEVELOPER_ID), the reserved local one without it.
+const appId = `${process.env.RR_DEVELOPER_ID || 'local'}.${String(pkg.appManifest?.id ?? 'unknown').split('.').pop()}`;
+const moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 export default defineConfig(() => ({
 	plugins: [

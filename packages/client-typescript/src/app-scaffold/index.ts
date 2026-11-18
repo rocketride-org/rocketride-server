@@ -157,9 +157,9 @@ function packageJson(v: TemplateVars): string {
 
 /**
  * rsbuild.config.mts — the standalone MF remote shape from
- * .rocketride/docs/ROCKETRIDE_APPS.md: moduleId derived from the appManifest.id
- * slug in-config (a local dev container; the server derives a published app's
- * container from its registry name), the src/index.ts async boundary as the entry, shell shared.
+ * .rocketride/docs/ROCKETRIDE_APPS.md: the container named <developerId>_<slug>
+ * from RR_DEVELOPER_ID (local_<slug> without one; the server names a deployed
+ * build from the registry row), the src/index.ts async boundary as the entry, shell shared.
  */
 function rsbuildConfig(v: TemplateVars): string {
 	return `${TS_HEADER}
@@ -170,8 +170,15 @@ import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
 // Module Federation remote: the shell loads ./AppDescriptor at runtime.
+// The container name is the app's REGISTRY name with separators as
+// underscores, <developerId>_<slug>. The host that runs the dev loop passes
+// the organization's developer id as RR_DEVELOPER_ID; without one (an
+// organization that has not claimed its id, or rsbuild run by hand) the
+// reserved local namespace applies: local_<slug>. A deployed build is named
+// by the server from the registry row, never by this file.
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
+const appSlug = String(pkg.appManifest?.id ?? 'unknown').split('.').pop();
+const moduleId = \`\${process.env.RR_DEVELOPER_ID || 'local'}.\${appSlug}\`.replace(/[^a-zA-Z0-9_$]/g, '_');
 
 export default defineConfig(() => ({
 	plugins: [
