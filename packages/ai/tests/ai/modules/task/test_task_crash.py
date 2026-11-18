@@ -1,7 +1,7 @@
 """A real eaas.py runs a pipeline whose Python node crashes its task process.
 
-Each server writes the node, under a name of its own, where the engine looks
-for nodes, and removes it when it stops. The name starts with `_`, which the
+Each server writes the node, under a name of its own, where the builder puts a
+real node, and removes it when it stops. The name starts with `_`, which the
 node contract tests skip.
 """
 
@@ -22,6 +22,7 @@ from ai.constants import CONST_TASK_DATA_PATH
 from rocketride import TASK_STATE, RocketRideClient
 
 _SERVER_DIR = Path(sys.executable).resolve().parent
+_SOURCE_NODES = Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes'
 _APIKEY = 'MYAPIKEY'
 
 pytestmark = pytest.mark.skipif(
@@ -93,23 +94,6 @@ def _pipeline(provider: str) -> dict:
     }
 
 
-def _nodes_dirs() -> list[Path]:
-    """Where the engine reads a node's services.json (services.cpp) and where its Python imports the node (python/init.cpp).
-
-    Both are the source tree's when the engine runs from <repo>/dist/server. When <repo> holds this repo as its
-    rocketride-server submodule, services.cpp still reads dist/server/nodes, but Python imports the submodule's.
-    """
-    if _SERVER_DIR.parts[-2:] == ('dist', 'server'):
-        repo = _SERVER_DIR.parents[1]
-        source = repo / 'nodes' / 'src' / 'nodes'
-        if source.is_dir():
-            return [source]
-        submodule = repo / 'rocketride-server' / 'nodes' / 'src' / 'nodes'
-        if submodule.is_dir():
-            return [_SERVER_DIR / 'nodes', submodule]
-    return [_SERVER_DIR / 'nodes']
-
-
 def _write_node(node: Path, provider: str) -> None:
     node.mkdir(exist_ok=True)  # only a killed run with the same PID leaves one
     services = dict(_SERVICES, protocol=f'{provider}://', prefix=provider, path=f'nodes._{provider}')
@@ -139,7 +123,8 @@ def server(request, tmp_path_factory):
     workspace = tmp_path_factory.mktemp('crash-node')
     # Its own name: xdist may run both servers at once, in two processes
     provider = f'crash_probe_{os.getpid()}_{int(dumps)}'
-    nodes = [d / f'_{provider}' for d in _nodes_dirs()]
+    # Where the builder keeps a real node: its source, and the copy nodes:sync makes in dist/server/nodes
+    nodes = [d / f'_{provider}' for d in (_SOURCE_NODES, _SERVER_DIR / 'nodes')]
     try:
         for node in nodes:
             _write_node(node, provider)
