@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
@@ -497,11 +498,28 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
 ENV_UI_DOMAIN = 'MCP_UI_DOMAIN'
 
 
+_HOST_LABEL = re.compile(r'(?!-)[a-z0-9-]{1,63}(?<!-)')
+
+
+def _valid_host(host: str) -> bool:
+    """Whether ``host`` (lowercase, no brackets) is an IP address or a DNS hostname.
+
+    ``urlsplit`` does not validate the host, so a value such as
+    ``https://widgets example.test`` would otherwise pass as an origin.
+    """
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    return len(host) <= 253 and all(_HOST_LABEL.fullmatch(label) for label in host.split('.'))
+
+
 def _widget_domain(value: str) -> Optional[str]:
     """Return ``value`` as an origin, or None if it is not a usable widget domain.
 
     It must be a bare https origin (http only on a loopback host, a local
-    engine): no path, query, fragment or user info.
+    engine) with a valid host: no path, query, fragment or user info.
     """
     try:
         parts = urlsplit(value)
@@ -509,6 +527,8 @@ def _widget_domain(value: str) -> Optional[str]:
     except ValueError:
         return None
     if parts.path not in ('', '/') or parts.query or parts.fragment or '@' in parts.netloc:
+        return None
+    if not _valid_host(parts.hostname or ''):
         return None
     origin = origin_of(value)
     if origin is None:

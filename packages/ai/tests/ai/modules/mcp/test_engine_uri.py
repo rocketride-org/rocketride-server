@@ -383,6 +383,7 @@ def test_ui_domain_comes_only_from_mcp_ui_domain(monkeypatch, fake_web_server, c
         'https://widgets.example.test/app',  # a path, not an origin
         'https:/user:secret@widgets.example.test',  # parses as a path, so nothing strips the credential
         'https://[::1',  # unparsable: must not raise
+        'https://widgets example.test',  # urlsplit accepts a space in the host
     ],
 )
 def test_invalid_mcp_ui_domain_is_ignored_with_one_warning(monkeypatch, fake_web_server, caplog, value):
