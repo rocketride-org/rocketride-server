@@ -42,8 +42,10 @@ using FatalityHandler =
 [[nodiscard]] size_t registerFatalityHandler(
     FatalityHandler&& handler) noexcept;
 void deRegisterFatalityHandler(size_t slot) noexcept;
+// Whether a handler was ever registered: the monitor registers the only one
+ROCKETRIDE_CORE_API bool fatalityHandlerEverRegistered() noexcept;
 
-ROCKETRIDE_CORE_API bool onFatality(Location location, const Error& ccode) noexcept;
+ROCKETRIDE_CORE_API void onFatality(Location location, const Error& ccode) noexcept;
 ROCKETRIDE_CORE_API bool& bugCheck() noexcept;
 ROCKETRIDE_CORE_API bool& fatalityExecuting() noexcept;
 

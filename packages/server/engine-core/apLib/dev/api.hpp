@@ -62,15 +62,17 @@ template <typename... DebugInfo>
 
         // A lone Error keeps its own code, e.g. Ec::Crash
         if constexpr (sizeof...(DebugInfo) == 1 &&
-                      (traits::IsErrorV<DebugInfo> && ...))
-            keepAbort =
-                onFatality(location, info...) || ((info == Ec::Crash) && ...);
-        else
-            keepAbort = onFatality(
-                location,
-                error::makeError(Ec::Fatality, location,
-                                 _tsd<' ', Format::ERROROROK>(
-                                     std::forward<DebugInfo>(info)...)));
+                      (traits::IsErrorV<DebugInfo> && ...)) {
+            onFatality(location, info...);
+            keepAbort = fatalityHandlerEverRegistered() ||
+                        ((info == Ec::Crash) && ...);
+        } else {
+            onFatality(location,
+                       error::makeError(Ec::Fatality, location,
+                                        _tsd<' ', Format::ERROROROK>(
+                                            std::forward<DebugInfo>(info)...)));
+            keepAbort = fatalityHandlerEverRegistered();
+        }
     }
 
 #if defined(ROCKETRIDE_PLAT_WIN)
