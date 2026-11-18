@@ -413,7 +413,7 @@ function visit(pass: IPass, v: unknown, mode: Mode, byKey: boolean, depth: numbe
 				if (typeof pass.userAlias === 'string') setOwn(out, k, pass.userAlias);
 				continue;
 			}
-			if (PROJECT_KEYS.has(k) && typeof x === 'string') {
+			if (PROJECT_KEYS.has(lk) && typeof x === 'string') {
 				setOwn(out, k, pass.projectAlias(x));
 				continue;
 			}

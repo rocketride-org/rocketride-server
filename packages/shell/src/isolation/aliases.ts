@@ -51,8 +51,8 @@ export const KNOWN_LIMIT = 4096;
 export const USER_KEYS: ReadonlySet<string> = new Set(['userid', 'user_id', 'client_id']);
 /** Team, run-kind, owner-kind and org fields (lowercased): removed from everything a realm receives. */
 export const REMOVED_KEYS: ReadonlySet<string> = new Set(['teamid', 'team_id', 'devteam', 'runkind', 'run_kind', 'ownerkind', 'owner_kind', 'orgid', 'org_id']);
-/** Fields whose value is a project id: aliased whatever the id looks like. */
-export const PROJECT_KEYS: ReadonlySet<string> = new Set(['project_id', 'projectId']);
+/** Fields whose value is a project id (lowercased, matched in any case): aliased whatever the id looks like. */
+export const PROJECT_KEYS: ReadonlySet<string> = new Set(['project_id', 'projectid']);
 /** A server-minted per-app user alias (`ru_`, plan section 4.9). */
 const USER_ALIAS_RE = /^ru_[A-Za-z0-9_-]+$/;
 
