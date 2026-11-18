@@ -570,8 +570,9 @@ def _resolve_ui_domain() -> Optional[str]:
         # Name the variable, never the value: a malformed value can carry a credential
         # where a parser would not find user info to strip.
         logger.warning(
-            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback) '
-            'with an ASCII host name or IP address, and no path, query or user info. No widget domain is sent.',
+            'Ignoring %s for the MCP widget domain: it must be an https origin (http only on loopback) whose host is '
+            'an IP address or an ASCII name (the xn-- form for an internationalized name), with no path, query or '
+            'user info. No widget domain is sent.',
             ENV_UI_DOMAIN,
         )
     return domain
