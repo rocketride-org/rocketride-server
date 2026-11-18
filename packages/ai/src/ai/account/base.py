@@ -277,6 +277,14 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
+    async def authorize_app_use(self, info: Any, app_id: str) -> bool:
+        """Authorize app delivery/use independently of catalog visibility.
+
+        OSS has no paid seats. A SaaS overlay must supply its live commerce
+        check; an older overlay must not silently inherit open serving.
+        """
+        return 'saas' not in getattr(self, 'capabilities', ())
+
     def get_billing_rates(self) -> dict[str, float]:
         """
         Return billing rates (metric_key -> tokens_per_unit).

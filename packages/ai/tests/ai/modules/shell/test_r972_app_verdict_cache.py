@@ -72,6 +72,9 @@ class _Account:
     async def get_public_apps(self):
         return []
 
+    async def authorize_app_use(self, info, app_id):
+        return info is not None and app_id in self.entitled
+
 
 def _setup(monkeypatch, account):
     clock = _Clock()

@@ -1333,6 +1333,8 @@ async def _caller_entitled_to_version(
     exactly here), or when the caller deployed that registry version (the
     developer flow — a fresh version is published nowhere yet).
     """
+    if not await account.authorize_app_use(conn._account_info, app_id):
+        return False
     user_id = conn._account_info.userId
     rows = await _visible_rows_of(conn, account, org_id, app_id)
     for row in rows:
@@ -1535,6 +1537,8 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     """
     from ai.account import account
 
+    if not await account.authorize_app_use(info, app_id):
+        return {}
     user_id = str(getattr(info, 'userId', '') or '') if info is not None else ''
     sys_perms = set(getattr(info, 'sysPermissions', None) or []) if info is not None else set()
     org = getattr(info, 'organization', None) if info is not None else None
