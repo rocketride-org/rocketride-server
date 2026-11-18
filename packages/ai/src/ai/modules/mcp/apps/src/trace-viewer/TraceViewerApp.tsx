@@ -68,6 +68,11 @@ interface ParsedInitial {
 	errorType?: string;
 }
 
+/** The server's note (for example, why a run recorded no traces) as a sentence. */
+function sentence(text: string): string {
+	return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** An aged-out or missing trace is an expected state, not a failure. */
 const NOTICE_ERROR_TYPES = new Set(['TraceExpired', 'NotFound']);
 
@@ -166,7 +171,7 @@ export const TraceViewerApp: React.FC<TraceViewerAppProps> = ({ app, initialResu
 	const list = initial.list as ListPayload;
 	if (list.summaries.length === 0) {
 		return (
-			<p className="rr-message">There are no traces to show yet. Run the pipeline, then open its traces again.</p>
+			<p className="rr-message">{list.note ? sentence(list.note) : 'There are no traces to show yet. Run the pipeline, then open its traces again.'}</p>
 		);
 	}
 	return (

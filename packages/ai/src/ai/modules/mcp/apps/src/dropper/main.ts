@@ -244,9 +244,14 @@ function upload(files: FileList | File[]): void {
 			renderResults(envelope.data);
 			return;
 		}
+		// The engine's error envelope is { status: 'Error', error: { message, file, lineno } }:
+		// show its message, and keep the whole answer in the console.
+		const raw = envelope?.error?.message;
+		const detail = typeof raw === 'string' ? raw : '';
 		const message = envelope?.status === 'Error'
-			? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}`
-			: `Unexpected response (HTTP ${xhr.status})`;
+			? (detail ? `The pipeline returned an error: ${detail}` : 'The pipeline returned an error.')
+			: `The engine sent an unexpected answer (HTTP ${xhr.status}).`;
+		console.error('upload failed', xhr.status, xhr.responseText);
 		root.replaceChildren(el('p', 'rr-message rr-message-error', message), buildDropzone('Try again'));
 	};
 	xhr.onerror = () => {

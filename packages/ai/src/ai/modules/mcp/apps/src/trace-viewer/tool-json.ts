@@ -25,11 +25,7 @@ export function friendlyToolError(payload: Record<string, unknown>): string {
 	if (payload.error_type === 'NotFound') {
 		return 'No recorded trace was found at this position.';
 	}
-	if (payload.error_type === 'Timeout') {
-		return 'The engine did not answer in time. Try again.';
-	}
-	// Other server messages name tools and arguments; they are for the model, not the card.
-	return 'The trace could not be read. Try again.';
+	return (typeof payload.message === 'string' && payload.message) || 'The trace could not be read. Try again.';
 }
 
 function tryParseJson(text: string | undefined): Record<string, unknown> | null {

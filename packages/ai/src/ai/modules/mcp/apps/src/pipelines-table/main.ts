@@ -39,7 +39,7 @@ function parseRows(result: unknown): TaskRow[] {
 	// Tool results arrive as [{ type: 'text', text: '<json>' }].
 	const text = (res.content ?? []).find((c) => c.type === 'text')?.text;
 	if (res.isError) {
-		throw new Error(text || 'tool call failed');
+		throw failure(text);
 	}
 	if (!text) throw new Error('malformed tool result (missing text content)');
 	let payload: { ok?: boolean; tasks?: TaskRow[]; message?: string };
@@ -54,6 +54,26 @@ function parseRows(result: unknown): TaskRow[] {
 		throw new Error(payload.message || 'malformed tool result');
 	}
 	return payload.tasks;
+}
+
+/**
+ * A failed tool result as an Error whose message is the readable cause: the
+ * server's own `message` (for example a waitlist refusal or a timeout), or
+ * the plain text. The raw text rides along for the console.
+ */
+function failure(text: string | undefined): Error & { raw?: string } {
+	let cause = text || 'the tool call failed';
+	try {
+		const payload = JSON.parse(text ?? '') as { message?: unknown };
+		cause = typeof payload.message === 'string' && payload.message ? payload.message : 'the tool call failed';
+	} catch {
+		// Not JSON: the text itself is the cause.
+	}
+	return Object.assign(new Error(cause), { raw: text });
+}
+
+function causeOf(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 /** A one-sentence state with Refresh below it, so the widget can always
@@ -121,16 +141,18 @@ function render(rows: TaskRow[]): void {
 				// callServerTool resolves with isError set on a server-side tool
 				// failure instead of rejecting — treat that as a failure too, or
 				// the row would stay visible with its button dead.
-				if ((result as { isError?: boolean }).isError) {
-					throw new Error('terminate reported an error');
+				const res = result as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+				if (res.isError) {
+					throw failure((res.content ?? []).find((c) => c.type === 'text')?.text);
 				}
 				await refresh();
 			} catch (err) {
 				stop.disabled = false;
 				stop.textContent = 'Retry';
+				// The task may already be gone, so say why the stop failed, not that it still runs.
 				// A Refresh that finished first has replaced this row; leave the new list alone.
-				if (tr.isConnected) showRowError(`Could not stop "${row.name}". It is still running.`);
-				console.error('terminate failed', err);
+				if (tr.isConnected) showRowError(`Could not stop "${row.name}": ${causeOf(err)}`);
+				console.error('terminate failed', err, (err as { raw?: string }).raw);
 			}
 		};
 		actions.appendChild(stop);
@@ -150,9 +172,8 @@ async function refresh(): Promise<void> {
 		const result = await app.callServerTool({ name: 'list_running_pipelines', arguments: {} });
 		render(parseRows(result));
 	} catch (err) {
-		// The reason (often a raw tool message) goes to the console, not the card.
-		showError('Could not refresh the list. Check that the engine is running, then press Refresh.');
-		console.error('refresh failed', err);
+		showError(`Could not refresh the list: ${causeOf(err)}`);
+		console.error('refresh failed', err, (err as { raw?: string }).raw);
 	}
 }
 
@@ -163,8 +184,8 @@ app.ontoolresult = (result) => {
 	try {
 		render(parseRows(result));
 	} catch (err) {
-		showError('Could not load the running pipelines.');
-		console.error('render failed', err);
+		showError(`Could not load the running pipelines: ${causeOf(err)}`);
+		console.error('render failed', err, (err as { raw?: string }).raw);
 	}
 };
 app.connect().catch((err) => {

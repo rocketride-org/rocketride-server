@@ -66,12 +66,7 @@ describe('friendlyToolError', () => {
 	it('translates NotFound', () => {
 		expect(friendlyToolError({ error_type: 'NotFound' })).toMatch(/No recorded trace/);
 	});
-	it('says plainly that the engine timed out', () => {
-		expect(friendlyToolError({ error_type: 'Timeout', message: 'log_trace timed out waiting for the engine' })).toBe(
-			'The engine did not answer in time. Try again.',
-		);
-	});
-	it('keeps server wording (tool names, arguments) out of other errors', () => {
-		expect(friendlyToolError({ error_type: 'BadRequest', message: 'beginSeq is required' })).toBe('The trace could not be read. Try again.');
+	it('falls back to the payload message', () => {
+		expect(friendlyToolError({ error_type: 'BadRequest', message: 'beginSeq is required' })).toBe('beginSeq is required');
 	});
 });
