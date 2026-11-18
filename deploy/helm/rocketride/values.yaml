@@ -118,6 +118,8 @@ engine:
     LOG_LEVEL: 'info'
     # -- Number of worker threads
     WORKER_THREADS: '4'
+    # -- App compilers require a filesystem/network sandbox (bubblewrap on Linux).
+    RR_APP_BUILD_SANDBOX: 'required'
     # -- Account file store backend. REQUIRED for any multi-replica deployment:
     # left unset, the engine keeps files on a container-local filesystem path,
     # so each pod gets its own private copy and the chart refuses to render
