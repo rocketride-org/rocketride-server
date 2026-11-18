@@ -669,6 +669,7 @@ class Task(DAPBase):
         owner_kind: str = '',
         trigger: str = 'manual',
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
+        node_versions: Optional[Dict[str, Dict[str, Any]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -693,6 +694,8 @@ class Task(DAPBase):
                 '' is the interactive-dev spelling (only the trusted
                 dispatch stamps manual/schedule); stamped on the
                 run-begin marker
+            node_versions: Published node id -> the publish row resolved for
+                this run at launch; exactly these versions are unpacked for it
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
@@ -704,6 +707,7 @@ class Task(DAPBase):
         self.client_id = client_id
         self.team_id = team_id
         self.org_id = org_id
+        self.node_versions = node_versions or {}
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -1280,8 +1284,10 @@ class Task(DAPBase):
             # A node EaaS serves is not in the engine's registry, and the gate must see it too
             problem = saas_pipeline_violation(
                 pipeline,
-                lambda provider: getServiceDefinition(provider) or node_store.served(provider),
-                lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                lambda provider: getServiceDefinition(provider) or node_store.served(provider, self.node_versions),
+                lambda provider, config: Config.getNodeConfig(
+                    provider, config, node_store.served(provider, self.node_versions)
+                ),
                 shared_host=self._shares_host(),
             )
             if problem:
@@ -1910,6 +1916,9 @@ class Task(DAPBase):
                     self._task_metrics = None
         except Exception as e:
             self.debug_message(f'Error cleaning up metrics: {e}')
+
+        # Another version of the published nodes it used may be unpacked now
+        node_store.release(self.token)
 
         try:
             # Clean up temporary files
@@ -3093,9 +3102,15 @@ class Task(DAPBase):
 
             # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
             try:
-                await asyncio.to_thread(node_store.place, resolved)
+                published = await node_store.published_packages(
+                    self.org_id or 'local', self.client_id, self.node_versions
+                )
+                await asyncio.to_thread(node_store.place, resolved, published, self.token)
             except Exception as e:
-                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+                refused = RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})")
+                # A node error keeps its code, NODE_VERSION_IN_USE for one
+                refused.code = getattr(e, 'code', None)
+                raise refused from e
             del resolved
 
             # Setup the first part of the command line args
