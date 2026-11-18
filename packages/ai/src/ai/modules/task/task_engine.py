@@ -1271,7 +1271,7 @@ class Task(DAPBase):
         if not _is_saas_engine():
             return False
         try:
-            return wants_hosted_openai(pipeline)
+            return wants_hosted_openai(pipeline, node_store.served)
         except Exception as e:
             self.debug_message(f'Hosted models check failed: {type(e).__name__}')
             return False

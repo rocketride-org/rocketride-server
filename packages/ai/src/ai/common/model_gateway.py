@@ -611,16 +611,17 @@ def _components(container: Any) -> list:
     return components if isinstance(components, list) else []
 
 
-def _is_keyless(provider: str, settings: Any) -> bool:
+def _is_keyless(provider: str, settings: Any, served: Optional[Callable[[str], Any]] = None) -> bool:
     """True for an OpenAI node whose effective settings have no key (and, for
     ``llm_openai_api``, no base URL). Settings the resolver cannot read count as keyed.
+    ``served`` gives the definition of a node the engine serves but has not unpacked.
     """
     if not isinstance(settings, dict):
         return False
     from ai.common.config import Config
 
     try:
-        config = Config.getNodeConfig(provider, settings)
+        config = Config.getNodeConfig(provider, settings, served(provider) if served is not None else None)
     except Exception:
         return False
     if not _is_empty(config.get('apikey')):
@@ -628,7 +629,7 @@ def _is_keyless(provider: str, settings: Any) -> bool:
     return provider != _COMPATIBLE_PROVIDER or _is_empty(config.get('base_url'))
 
 
-def _any_keyless(components: list, depth: int) -> bool:
+def _any_keyless(components: list, depth: int, served: Optional[Callable[[str], Any]]) -> bool:
     """Walk components and their groups, to a depth of _MAX_DEPTH."""
     if depth >= _MAX_DEPTH:
         return False
@@ -636,14 +637,14 @@ def _any_keyless(components: list, depth: int) -> bool:
         if not isinstance(component, dict):
             continue
         settings = component.get('config')
-        if component.get('provider') in OPENAI_PROVIDERS and _is_keyless(component['provider'], settings or {}):
+        if component.get('provider') in OPENAI_PROVIDERS and _is_keyless(component['provider'], settings or {}, served):
             return True
-        if isinstance(settings, dict) and _any_keyless(_components(settings.get('pipeline')), depth + 1):
+        if isinstance(settings, dict) and _any_keyless(_components(settings.get('pipeline')), depth + 1, served):
             return True
     return False
 
 
-def wants_hosted_openai(pipeline: Any) -> bool:
+def wants_hosted_openai(pipeline: Any, served: Optional[Callable[[str], Any]] = None) -> bool:
     """True when the pipeline has an OpenAI node that would run with no key.
 
     That is an ``llm_openai`` node with an empty ``apikey``, or an
@@ -652,7 +653,8 @@ def wants_hosted_openai(pipeline: Any) -> bool:
     profile block counts). Secure parameters are decoded on a copy first, so a
     key inside one is seen; the copy is dropped before this returns, and the
     input is never changed. A ``${ROCKETRIDE_...}`` left unfilled is a key, so
-    that node keeps its own message. Pass the resolved pipeline the run starts.
+    that node keeps its own message. Pass the resolved pipeline the run starts, and
+    ``served`` (``node_store.served``) for nodes not unpacked yet.
 
     Returns False when decoding fails.
     """
@@ -665,6 +667,6 @@ def wants_hosted_openai(pipeline: Any) -> bool:
     except Exception:
         return False
     try:
-        return _any_keyless(_components(decoded), 0)
+        return _any_keyless(_components(decoded), 0, served)
     finally:
         del decoded
