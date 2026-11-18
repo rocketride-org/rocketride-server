@@ -13,7 +13,7 @@ description = "Hardcoded API key in .pipe pipeline file"
 regex = '''(?i)"(apikey|api_key|secret|token|password|auth)"\s*:\s*"([^"]{8,})"'''
 secretGroup = 2
 keywords = ["apikey", "api_key", "secret", "token", "password", "auth"]
-paths = ['''\.pipe(\.json)?$''']
+path = '''\.pipe(\.json)?$'''
 
     [rules.allowlist]
     regexes = [
@@ -28,7 +28,7 @@ description = "Hardcoded API key in node services.json config"
 regex = '''(?i)"(apikey|api_key|secret_key|access_key)"\s*:\s*"([^"]{16,})"'''
 secretGroup = 2
 keywords = ["apikey", "api_key", "secret_key", "access_key"]
-paths = ['''services.*\.json$''']
+path = '''services.*\.json$'''
 
     [rules.allowlist]
     regexes = [

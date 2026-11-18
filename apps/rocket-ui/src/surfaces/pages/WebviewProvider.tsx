@@ -30,6 +30,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { isAllowedWebviewUrl } from './webviewUrl';
 
 // =============================================================================
 // STYLES
@@ -72,7 +73,9 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 	// Extract URL by stripping the "webview:" prefix
 	const url = uri.slice(WEBVIEW_PREFIX.length);
 
-	if (!url) {
+	// Same-authority pages (anything on the shell origin but the engine's chat
+	// and dropper pages) and non-web schemes are never framed (#1022).
+	if (!url || !isAllowedWebviewUrl(url, window.location.origin)) {
 		return <div>Invalid webview URI: {uri}</div>;
 	}
 

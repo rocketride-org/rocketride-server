@@ -820,8 +820,16 @@ class AccountBase(ABC):
         overrides the by-kind born state — the seeder registers
         pre-approved platform artifacts directly as 'ready'.
 
+        A non-app artifact's ``metadata`` loses the server-owned keys
+        (``platform``, ``approvedCapabilities``, ``build``) and says
+        ``platform: False``: only the app deploy and the seeder write them (#1022).
+
         Returns the new registry entry (version, sha256, publishedBy, ...).
         """
+        if isinstance(metadata, dict) and str(pipeline.get('kind') or 'pipe') != 'app':
+            from .deployment_backend import caller_metadata
+
+            metadata = {**caller_metadata(metadata), 'platform': False}
         return await self._deployment_backend().publish(
             org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
         )
@@ -1004,6 +1012,93 @@ class AccountBase(ABC):
         return self._deployment_backend().iter_enabled()
 
     # =========================================================================
+    # APP ISOLATION (#1022) — what the app-origin decisions ask the account
+    #
+    # The base versions are the OSS behaviour. A SaaS edition overrides
+    # account_info_for, is_first_party, set_approved_capabilities and
+    # approved_capabilities: the startup check refuses RR_APP_ISOLATION other
+    # than 'off' until it does.
+    # =========================================================================
+
+    async def account_info_for(self, user_id: str, org_id: str):
+        """The account of one user in one org, for the frame-token entitlement re-check.
+
+        SaaS returns an AccountInfo with ``userId``, ``organization.teams``
+        and ``sysPermissions`` populated (what ``entitled_version_dirs``
+        reads), or None when the user is not a member of the org. OSS serving
+        is open and never asks, so the base knows nobody.
+
+        Returns:
+            AccountInfo | None: Always None here.
+        """
+        return None
+
+    async def is_first_party(self, app_id: str, binding_org_id: str) -> bool:
+        """Whether ``app_id``, bound by ``binding_org_id``, is the platform's own app.
+
+        OSS rule: the binding org is ``local`` and every APP version on the
+        app's rail was written by the seeder: ``metadata.platform is True``.
+        Rows seeded before that flag existed carry only the seeder's build
+        stamp, so a row WITHOUT a ``platform`` key falls back to
+        ``metadata.build.seeded is True`` (legacy rows only; where the key
+        exists it decides). No caller can set either: the deploy doors strip
+        ``platform``, ``approvedCapabilities`` and ``build`` from caller
+        metadata. Pipe rows on the same rail are ignored. Any error answers
+        False (fail closed: the app is isolated).
+        """
+        if binding_org_id != 'local':
+            return False
+        try:
+            entries = await self.deployments_versions(binding_org_id, app_id)
+        except Exception:
+            return False
+
+        from .seed_apps import is_seed_row
+
+        apps = [e for e in entries or [] if isinstance(e, dict) and str(e.get('kind') or 'pipe') == 'app']
+        return bool(apps) and all(is_seed_row(entry) for entry in apps)
+
+    async def set_approved_capabilities(self, org_id: str, app_id: str, version: int, caps: list, actor: dict) -> dict:
+        """Record the capabilities an admin granted one app version (``metadata.approvedCapabilities``).
+
+        Names must come from ``capabilities.json``. The grant is audited on
+        the app's history stream.
+
+        Returns:
+            The refreshed rail entry.
+
+        Raises:
+            ValueError: ``caps`` is not a list of known capability names.
+        """
+        from ai.modules.shell.app_origin import known_capabilities
+
+        known = known_capabilities()
+        if known is None:
+            raise ValueError('capabilities.json is not available on this server')
+        if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
+            raise ValueError(f'capabilities must be a list of {sorted(known)}')
+        entry = await self._deployment_backend().set_approved_capabilities(org_id, app_id, version, list(caps))
+        await self.deployments_history_append(
+            org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
+        )
+        return entry
+
+    async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:
+        """The capabilities granted to one app version; ``['core']`` when none (or nothing valid) is stored."""
+        try:
+            entries = await self.deployments_versions(org_id, app_id)
+        except Exception:
+            return ['core']
+        for entry in entries or []:
+            if not isinstance(entry, dict) or int(entry.get('version', 0)) != version:
+                continue
+            metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+            caps = metadata.get('approvedCapabilities')
+            if isinstance(caps, list) and caps and all(isinstance(c, str) for c in caps):
+                return list(caps)
+        return ['core']
+
+    # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all of these
     # =========================================================================
 
@@ -1132,6 +1227,11 @@ class AccountBase(ABC):
             shell = args.get('shell')
             if shell:
                 apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
+            # Isolated apps lose their load fields for a client without the
+            # appIsolation:1 shellCap, as on connect (#1022; identity under off).
+            from ai.modules.shell.app_origin import wire_view
+
+            apps = wire_view(apps, getattr(conn, '_shell_caps', ()))
             if sub == 'get':
                 app_id = args.get('appId', '')
                 if not app_id:
@@ -1188,6 +1288,15 @@ class AccountBase(ABC):
         # Basic client-side pagination for OSS
         total = len(apps)
         page = apps[offset : offset + limit]
+        # The wire view of isolated apps (#1022; identity under off).
+        from ai.modules.shell.app_origin import wire_view
+
+        # An unauthenticated connection has no stored shellCaps (set by auth),
+        # so the request may declare them, as the probe's arguments do.
+        from ai.modules.shell.app_origin import sanitize_shell_caps
+
+        caps = getattr(conn, '_shell_caps', ()) or sanitize_shell_caps(args.get('shellCaps'))
+        page = wire_view(page, caps)
 
         return conn.build_response(
             request,

@@ -124,6 +124,9 @@ SENSITIVE_PARAM_SUFFIXES: Tuple[str, ...] = (
 # anchored: an absolute-form target has the scheme and host in front of the path.
 _FETCH_PATH_TOKEN = re.compile(r'(/task/fetch/)[^/?]+')
 
+# The token segment of an app-origin bundle URL (/_t/<token>/v<N>/..., #1022).
+_FRAME_PATH_TOKEN = re.compile(r'(/_t/)[^/?]+')
+
 # ``user:password@`` after the scheme of an absolute URL, plain or as h11 logs it
 # (``http%3A//user%3Apass%40host``). Stops at the first ``/`` so an ``@`` in the
 # path is left alone; takes the last ``@`` before it.
@@ -162,10 +165,11 @@ def redact_query_string(query: str) -> str:
 
 
 def redact_request_target(target: str) -> str:
-    """Redact userinfo, the fetch path token and sensitive query values of a request target of any form."""
+    """Redact userinfo, the fetch and frame path tokens and sensitive query values of a request target of any form."""
     path, sep, query = target.partition('?')
     path = _USERINFO.sub(rf'\g<1>{REDACTED}\g<2>', path)
     path = _FETCH_PATH_TOKEN.sub(rf'\g<1>{REDACTED}', path)
+    path = _FRAME_PATH_TOKEN.sub(rf'\g<1>{REDACTED}', path)
     return f'{path}{sep}{redact_query_string(query)}'
 
 

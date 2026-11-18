@@ -1,0 +1,275 @@
+{
+	"v": 1,
+	"rows": [
+		{
+			"cap": "core",
+			"op": "client.request",
+			"command": "rrext_ping",
+			"args": {}
+		},
+		{
+			"cap": "core",
+			"op": "shell.frameToken.refresh",
+			"args": {}
+		},
+		{
+			"cap": "core",
+			"op": "shell.notify",
+			"args": {
+				"message": "string"
+			}
+		},
+		{
+			"cap": "core",
+			"op": "shell.statusMessage",
+			"args": {
+				"message": "string"
+			}
+		},
+		{
+			"cap": "core",
+			"op": "shell.loginRequest",
+			"args": {}
+		},
+		{
+			"cap": "core",
+			"op": "shell.openExternal",
+			"args": {
+				"url": "https-url"
+			}
+		},
+		{
+			"cap": "core",
+			"op": "shell.prefs.attach",
+			"args": {
+				"partition": "app-partition"
+			}
+		},
+		{
+			"cap": "core",
+			"op": "shell.setPref",
+			"args": {
+				"partition": "app-partition",
+				"key": "string",
+				"value": "json"
+			}
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "execute",
+			"args": {
+				"pipeline": "object:mint-project",
+				"args": "optional:empty-array",
+				"source": "optional:string",
+				"ttl": "optional:int<=3600",
+				"name": "optional:string",
+				"env": "optional:empty-object"
+			},
+			"top": []
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "terminate",
+			"args": {
+				"token": "run-handle"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_get_task_status",
+			"args": {
+				"token": "run-handle"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_get_pipeline",
+			"args": {
+				"token": "run-handle"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "restart",
+			"args": {
+				"token": "run-handle",
+				"pipeline": "object:handle-project",
+				"projectId": "minted-project",
+				"source": "string"
+			},
+			"top": []
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_get_token",
+			"args": {
+				"projectId": "minted-project",
+				"source": "string"
+			},
+			"top": []
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_monitor",
+			"args": {
+				"token": "run-handle",
+				"types": "string[]",
+				"pipeId": "optional:owned-pipe"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_process",
+			"subcommands": ["open"],
+			"args": {
+				"subcommand": "string",
+				"token": "run-handle",
+				"object": "optional:object",
+				"mimeType": "optional:string",
+				"provider": "optional:string"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_process",
+			"subcommands": ["write"],
+			"args": {
+				"subcommand": "string",
+				"token": "run-handle",
+				"pipe_id": "owned-pipe",
+				"data": "bytes<=8MiB"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.request",
+			"command": "rrext_process",
+			"subcommands": ["close"],
+			"args": {
+				"subcommand": "string",
+				"token": "run-handle",
+				"pipe_id": "owned-pipe"
+			},
+			"top": ["token"]
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.addMonitor",
+			"args": {
+				"key": "monitor-key:run-handle",
+				"types": "string[]"
+			}
+		},
+		{
+			"cap": "pipelines.run",
+			"op": "client.removeMonitor",
+			"args": {
+				"key": "monitor-key:run-handle",
+				"types": "string[]"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_stat", "fs_list_dir", "fs_mkdir", "fs_get_json"],
+			"args": {
+				"subcommand": "string",
+				"path": "app-path"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_open"],
+			"args": {
+				"subcommand": "string",
+				"path": "app-path",
+				"mode": "'r'|'w'"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_read"],
+			"args": {
+				"subcommand": "string",
+				"handle": "owned-fs-handle",
+				"offset": "int",
+				"length": "int"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_write"],
+			"args": {
+				"subcommand": "string",
+				"handle": "owned-fs-handle",
+				"data": "bytes<=8MiB"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_close"],
+			"args": {
+				"subcommand": "string",
+				"handle": "owned-fs-handle",
+				"mode": "'r'|'w'"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_delete", "fs_rmdir"],
+			"args": {
+				"subcommand": "string",
+				"path": "app-path",
+				"recursive": "optional:bool"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_put_json"],
+			"args": {
+				"subcommand": "string",
+				"path": "app-path",
+				"value": "json"
+			}
+		},
+		{
+			"cap": "fs.app",
+			"op": "client.request",
+			"command": "rrext_store",
+			"subcommands": ["fs_rename"],
+			"args": {
+				"subcommand": "string",
+				"old_path": "app-path",
+				"new_path": "app-path"
+			}
+		}
+	]
+}
