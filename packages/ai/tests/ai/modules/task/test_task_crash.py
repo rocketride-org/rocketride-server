@@ -64,6 +64,8 @@ class IInstance(IInstanceBase):
     def writeText(self, text: str):
         if text == 'segv':
             ctypes.c_int.from_address(0).value
+        elif text == 'abort':
+            os.abort()
         elif text == 'failfast':
             ctypes.windll.kernel32.RaiseFailFastException(None, None, 0)
         elif text == 'sigkill':
@@ -218,19 +220,34 @@ def _dump_lines(lines):
 
 
 @pytest.mark.asyncio
-async def test_a_node_that_crashes_stops_its_task_unexpectedly(server):
-    token, status, lines = await _run(server, 'segv')
+@pytest.mark.parametrize(
+    'text, windows, elsewhere',
+    [
+        (
+            'segv',
+            ['Application caught unhandled SEH exception: 0xc0000005'],
+            ['Application received system signal: SIGSEGV: Invalid access to storage (11)'],
+        ),
+        # abort: on Windows the engine's abort handler reports it itself. Elsewhere abort() raises SIGABRT
+        # again once the handler returns, racing the engine's signal listener thread that writes >EXIT:
+        # Linux raises it at once, so the server reads the signal; macOS waits 10 ms, so the engine mostly wins
+        (
+            'abort',
+            ['Application received system signal: SIGABRT: Abnormal termination triggered by abort call (22)'],
+            ['Application received system signal: SIGABRT: Abnormal termination (6)', 'SIGABRT (code 6)'],
+        ),
+    ],
+    ids=['segv', 'abort'],
+)
+async def test_a_node_that_crashes_stops_its_task_unexpectedly(server, text, windows, elsewhere):
+    token, status, lines = await _run(server, text)
     dumps = _dumps_of(token)
     try:
         assert status['status'] == 'Stopped unexpectedly', server['log'].read_text(errors='replace')
         assert status['exitMessage'] == 'Stopped unexpectedly'
 
-        expected = (
-            'Application caught unhandled SEH exception: 0xc0000005'
-            if os.name == 'nt'
-            else 'Application received system signal: SIGSEGV: Invalid access to storage (11)'
-        )
-        assert _crash_lines(lines) == [f'Unexpected termination: {expected}'], lines
+        expected = windows if os.name == 'nt' else elsewhere
+        assert _crash_lines(lines) in [[f'Unexpected termination: {e}'] for e in expected], lines
         if server['dumps']:
             assert len(dumps) == 1
             assert _dump_lines(lines) == [f'Crash dump: {dumps[0].name}'], lines
