@@ -55,8 +55,7 @@ type G4Root = IAppRoot & {
 	sessionStamp?(): unknown;
 };
 
-const shellEvents = (realm: IOpenedRealm, from = 0): string[] =>
-	(realm.received.slice(from) as Array<Record<string, unknown>>).filter((m) => m?.__rrbus === 'emitOp' && String(m.op).startsWith('shell.event.')).map((m) => String(m.op));
+const shellEvents = (realm: IOpenedRealm, from = 0): string[] => (realm.received.slice(from) as Array<Record<string, unknown>>).filter((m) => m?.__rrbus === 'emitOp' && String(m.op).startsWith('shell.event.')).map((m) => String(m.op));
 
 test('G4 final teardown: every client.request after it is denied and nothing reaches the engine, also after a logout-clear delay', async (tt) => {
 	const t = makeRoot();
@@ -158,4 +157,18 @@ test('G4 an in-process org rescope (shell:orgChanged) detaches every realm', asy
 	assert.notEqual(outcome, 'ok', 'the realm is not served under the new org');
 	assert.equal(t.cm.engine.received.length, before, 'nothing forwarded');
 	assert.throws(() => (t.root as IAppRoot).bridgeInit(A.realmId, { displayName: '', theme: {}, props: { isConnected: true, activeView: '', activeActivity: null, sidePanelOpen: false, theme: '' }, engineHttpUrl: 'http://localhost:5565', proto: 1 }), 'detached');
+});
+
+test('G4 a realm attached signed out never adopts the account of a later sign-in (only a signed-in, account-less realm binds on first sight)', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const getAccountInfo = t.cm.engine.client.getAccountInfo;
+	t.cm.engine.client.getAccountInfo = () => undefined;
+	t.cm.setSignedIn(false);
+	const A = t.open(ENTRY_A, { grant: GRANT_A });
+	t.cm.setSignedIn(true);
+	t.cm.engine.client.getAccountInfo = getAccountInfo;
+	const before = t.cm.engine.received.length;
+	expectDenied(await execute(A), 'capability', 'an anonymous realm after a sign-in shell:login has not announced');
+	assert.equal(t.cm.engine.received.length, before);
 });

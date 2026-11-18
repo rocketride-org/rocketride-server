@@ -125,6 +125,10 @@ interface IRealmState {
 	userId: string | undefined;
 	/** The logout count when the realm was attached. */
 	logouts: number;
+	/** Attached signed in with no account info yet: may bind to the first account user (see op()). */
+	adoptUser: boolean;
+	/** Closes the root's end of the realm's port (DA LOW 5). */
+	closeEndpoint: () => void;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -292,7 +296,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	/** Scrubs one owned event for a realm and delivers it (a hit or an over-budget event is dropped and logged). */
 	const deliverEvent = (st: IRealmState, event: DAPMessage): void => {
-		if (st.detached) return;
+		if (st.detached || sealed) return;
 		if (!hasAccount()) {
 			logDrop(st, CLIENT_EVENT_OP, 'capability');
 			return;
@@ -318,6 +322,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	/** Teardowns in progress: every realm request is refused meanwhile. */
 	let closing = 0;
+	/**
+	 * Set by a FINAL teardown (the logout path): the root stays closed, every
+	 * op refused and every event withheld, until the next shell:login or
+	 * shell:logout. The logout clear between teardownAll and cm.logout() can
+	 * take seconds, and no run may start in it (DA must-fix 1).
+	 */
+	let sealed = false;
 	/** Bumped by teardown and logout: an answer to a request started earlier is ended, not recorded. */
 	let epoch = 0;
 
@@ -586,9 +597,18 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		const bus = createOpBus();
 		const op = (name: string, impl: (raw: unknown) => Promise<unknown>, onRefuse: (err: unknown) => unknown): void => {
 			bus.handle(name, async (raw) => {
-				if (closing > 0 || st.detached) return onRefuse(deny('capability', name));
-				// Engine ops need account info (fail closed); shell.* ops (login request included) do not.
-				if (ENGINE_OPS.has(name) && !hasAccount()) return onRefuse(deny('capability', name));
+				if (closing > 0 || sealed || st.detached) return onRefuse(deny('capability', name));
+				// Engine ops need account info (fail closed), and the account user the realm was attached
+				// under (a switch shell:login has not announced yet, DA LOW 2); shell.* ops do not.
+				if (ENGINE_OPS.has(name)) {
+					if (!hasAccount()) return onRefuse(deny('capability', name));
+					const user = accountUserId();
+					// A realm attached while signed in but before the account info arrived is bound to the
+					// first account user seen (the residual's "serves once it has account info"); a realm
+					// attached signed out, or after a logout, never adopts one.
+					if (st.userId === undefined && st.adoptUser && user !== undefined && st.logouts === logouts) st.userId = user;
+					if (user === undefined || st.userId === undefined || user !== st.userId) return onRefuse(deny('capability', name));
+				}
 				if (st.inflight >= QUOTAS.inflight) return onRefuse(deny('rate', name));
 				st.inflight++;
 				try {
@@ -802,8 +822,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// ── shell.event.* (plan section 4.8): allowlisted payloads only ─────────
 
 	const deliverAll = (op: string, payload: unknown, only?: (st: IRealmState) => boolean): void => {
-		// Withheld while the root has no account info (fail closed).
-		if (!hasAccount()) return;
+		// Withheld while the root has no account info or is sealed by a logout (fail closed).
+		if (sealed || !hasAccount()) return;
 		for (const st of realms.values()) if (!only || only(st)) router.deliver(st.info.realmId, op, payload);
 	};
 	cm.on('shell:connected', () => deliverAll('shell.event.connected', {}));
@@ -835,6 +855,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	cm.on('shell:logout', () => {
 		epoch++;
 		logouts++;
+		sealed = false;
 		for (const st of [...realms.values()]) {
 			st.ledger.clear();
 			st.scrub.aliases.clear();
@@ -850,6 +871,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// A sign-in detaches every realm attached under another user, under an
 	// unknown user (either side), or before a logout. A same-user reconnect keeps them.
 	cm.on('shell:login', (payload: unknown) => {
+		sealed = false;
 		const user = isPlainObject(payload) && isPlainObject(payload.user) ? payload.user.userId : undefined;
 		const userId = typeof user === 'string' && user !== '' ? user : undefined;
 		for (const st of [...realms.values()]) {
@@ -860,6 +882,12 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			}
 		}
 		refreshApiKeys();
+	});
+
+	// An in-process org rescope: a realm holds the old org's grant (capabilities,
+	// aliases, frame token), so every realm is detached (security LOW 1).
+	cm.on('shell:orgChanged', () => {
+		for (const st of [...realms.values()]) detachRealm(st, true);
 	});
 
 	// ── client.event (N1-b): owned runs only, scrubbed, only while attached ─
@@ -908,6 +936,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			});
 		}
 		st.ledger.clear();
+		st.closeEndpoint();
 		try {
 			opts.onDetached?.(st.info.realmId);
 		} catch {
@@ -919,6 +948,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		attach(entry: IsolatedEntry, endpoint: IBusEndpoint, grant: IRealmGrant = {}): RealmId {
 			if (!entry || entry.isolated !== true || entry.firstParty === true || !isCanonicalAppId(entry.id)) {
 				throw new Error('appRoot.attach: only an isolated, third-party entry can be attached');
+			}
+			// A grant fetched before a logout or under another user is stale (DA LOW 1).
+			if (grant.session && (grant.session.logouts !== logouts || grant.session.userId !== accountUserId())) {
+				throw new Error('appRoot.attach: the frame grant belongs to an earlier session');
 			}
 			const realmId = `realm-${base64url(opts.random(12))}`;
 			const caps = new Set(['core', ...(grant.capabilities ?? []).filter((c) => KNOWN_CAPS.has(c))]);
@@ -946,13 +979,21 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				detachRouter: () => {},
 				userId: accountUserId(),
 				logouts,
+				adoptUser: accountUserId() === undefined && cm.loadToken() !== '',
+				closeEndpoint: () => {
+					try {
+						(endpoint as IBusEndpoint & { close?: () => void }).close?.();
+					} catch {
+						/* already closed */
+					}
+				},
 			};
 			st.detachRouter = router.addGatedRealm(endpoint, {
 				info,
 				handlers: buildHandlers(st),
 				outbound: outboundFor(st),
 				admit: (lane, value) => {
-					if (closing > 0) throw deny('capability', lane);
+					if (closing > 0 || sealed) throw deny('capability', lane);
 					return admitValue(st.gate, lane, value);
 				},
 			});
@@ -993,9 +1034,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			return init;
 		},
 
-		async teardownAll(timeoutMs: number): Promise<void> {
+		sessionStamp: () => ({ logouts, userId: accountUserId() }),
+
+		async teardownAll(timeoutMs: number, options: { final?: boolean } = {}): Promise<void> {
 			// New requests are refused while this runs, and answers to requests
-			// started before it are terminated instead of recorded (epoch).
+			// started before it are terminated instead of recorded (epoch). A
+			// final teardown (logout) keeps the root sealed afterwards.
+			if (options.final) sealed = true;
 			closing++;
 			epoch++;
 			try {

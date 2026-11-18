@@ -61,7 +61,7 @@ function stubPage(): void {
 
 afterEach(() => mock.restoreAll());
 
-test('G4 an isolated entry claiming a LOADED in-realm app\'s module name does not ask for a reload', async () => {
+test("G4 an isolated entry claiming a LOADED in-realm app's module name does not ask for a reload", async () => {
 	stubPage();
 	installIsolation({ mode: 'optin', originTemplate: 'https://{label}.apps.example', protoMin: 1, protoMax: 1 });
 	spyFederation();
