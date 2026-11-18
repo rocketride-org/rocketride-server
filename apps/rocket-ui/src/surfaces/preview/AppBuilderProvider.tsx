@@ -47,7 +47,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { appSlugOf, registryIdOf } from 'rocketride';
+import { appSlugOf, devContainerNameOf, registryIdOf } from 'rocketride';
 import type { CSSProperties } from 'react';
 import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
@@ -387,7 +387,7 @@ const AppBuilderProvider: React.FC<{
 		if (!stored) return null;
 		return {
 			id: stored.id,
-			moduleId: stored.moduleId,
+			moduleId: devContainerNameOf(stored.id, client?.getAccountInfo()?.organization?.developerId),
 			name: liveMeta?.name ?? stored.name,
 			version: liveMeta?.version ?? (stored.version || undefined),
 			status: 'local',

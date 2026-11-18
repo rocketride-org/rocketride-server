@@ -353,9 +353,17 @@ export async function installDevHooks(): Promise<void> {
 				failHold(`Dev app at ${prefix} is "${String(manifest.id)}", not "${appId}"`);
 				return;
 			}
-			const moduleId = typeof manifest.moduleId === 'string' && manifest.moduleId
-				? manifest.moduleId
-				: appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+			// The container name is whatever the BUILD emitted: its Module
+			// Federation manifest declares it. Nothing is guessed from an account
+			// here — the host that ran the build named the namespace, and the
+			// built artifact is the one source of truth this page can read.
+			const mfRes = await fetch(`${prefix}/mf-manifest.json`, { cache: 'no-store' });
+			const mf = mfRes.ok ? ((await mfRes.json()) as { name?: unknown }) : null;
+			const moduleId = mf && typeof mf.name === 'string' && mf.name ? mf.name : '';
+			if (!moduleId) {
+				failHold(`Dev app at ${prefix} has no mf-manifest.json naming its container — is this an rsbuild Module Federation build?`);
+				return;
+			}
 			const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : appId;
 			console.log(`[devMode] self-registering "${appId}" from ${prefix} (URL convention)`);
 			registerDevRemote(appId, moduleId, name, `${prefix}/remoteEntry.js`, metaFromManifest({

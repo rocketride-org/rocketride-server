@@ -46,7 +46,6 @@ export interface IScannedWorkspaceApp {
 	/** Display name (appManifest.name, falling back to the package name). */
 	name: string;
 	/** MF container name (dots/hyphens → underscores, as registerApp derives). */
-	moduleId: string;
 	/** Absolute folder path of the app project. */
 	folder: string;
 	/** package.json version, if present. */
@@ -144,7 +143,6 @@ async function probeFolder(fs: WorkspaceFs, folder: string): Promise<IScannedWor
 		return {
 			id,
 			name: manifest.name || pkg.name || id,
-			moduleId: id.replace(/[.-]/g, '_'),
 			folder,
 			...(pkg.version !== undefined ? { version: pkg.version } : {}),
 			...(manifest.description !== undefined ? { description: manifest.description } : {}),

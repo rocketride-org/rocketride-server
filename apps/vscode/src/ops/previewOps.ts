@@ -17,6 +17,7 @@
 // =============================================================================
 
 import * as vscode from 'vscode';
+import { devContainerNameOf } from 'rocketride';
 import * as path from 'path';
 import { ConnectionManager } from '../connection/connection';
 import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from 'shared/tools/appdev';
@@ -122,7 +123,9 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			return {
 				app: {
 					id: p.app,
-					moduleId: app?.moduleId ?? p.app.replace(/[.-]/g, '_'),
+					// The dev container is named by the host: the org's developer id
+					// plus the slug, or local_<slug> before the org has claimed one
+					moduleId: devContainerNameOf(p.app, (connectionManager.getClient()?.getAccountInfo() as { organization?: { developerId?: string | null } } | null | undefined)?.organization?.developerId),
 					name: app?.name ?? p.app,
 					version: app?.version,
 					description: app?.description,

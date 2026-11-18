@@ -337,9 +337,12 @@ export class DevSessionManager {
 		// argument with whitespace so a spaced app path survives the shell.
 		const quoteForShell = (a: string): string => (spawnArgs.shell && /\s/.test(a) ? `"${a}"` : a);
 		const childArgs = [...spawnArgs.args, 'dev', '--config', proxyConfigPath].map(quoteForShell);
+		const developerId = (this.connectionManager.getClient()?.getAccountInfo() as { organization?: { developerId?: string | null } } | null | undefined)?.organization?.developerId;
 		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...childArgs], {
 			cwd: app.folder,
-			env: { ...process.env, NO_COLOR: '1' },
+			// The app's rsbuild config names its container <developerId>_<slug>
+			// from this variable; absent, it falls back to local_<slug>
+			env: { ...process.env, NO_COLOR: '1', ...(developerId ? { RR_DEVELOPER_ID: developerId } : {}) },
 			// Never allocate a console window for the guard or its tree.
 			windowsHide: true,
 			// POSIX: make the guard its own process GROUP (rsbuild joins it)

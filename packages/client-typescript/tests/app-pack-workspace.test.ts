@@ -200,7 +200,8 @@ describe('scanAppMarkers', () => {
 
 		expect(apps).toHaveLength(1);
 		// The manifest's prefix is ignored: the scanner reads the slug
-		expect(apps[0]).toMatchObject({ id: 'clock', name: 'Clock', moduleId: 'clock', folder: shallow });
+		expect(apps[0]).toMatchObject({ id: 'clock', name: 'Clock', folder: shallow });
+		expect(apps[0]).not.toHaveProperty('moduleId');
 	});
 });
 

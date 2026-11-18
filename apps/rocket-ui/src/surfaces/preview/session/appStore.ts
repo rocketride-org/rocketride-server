@@ -96,8 +96,6 @@ export interface StoredApp {
 	id: string;
 	/** Display name (appManifest.name, falling back to the pkg name). */
 	name: string;
-	/** MF container name (appManifest.moduleId, or derived from the id). */
-	moduleId: string;
 	/** The folder name under .appdev. */
 	folder: string;
 	/** Top-level package.json semver. */
@@ -154,7 +152,6 @@ export async function scanApps(): Promise<StoredApp[]> {
 			apps.push({
 				id,
 				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? id),
-				moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : id.replace(/[^a-zA-Z0-9_$]/g, '_'),
 				folder,
 				version: typeof pkg.version === 'string' ? pkg.version : '',
 				description: typeof m.description === 'string' ? m.description : '',

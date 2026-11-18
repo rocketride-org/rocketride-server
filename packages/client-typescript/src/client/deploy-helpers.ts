@@ -179,6 +179,37 @@ export function registryIdOf(slug: string, developerId: string | null | undefine
 	return slug.includes('.') ? slug : `${developerId}.${slug}`;
 }
 
+/** The developer id a build names itself under when its organization has none yet. */
+export const LOCAL_DEVELOPER_ID = 'local';
+
+/**
+ * The Module Federation container name of a registry name: the name with
+ * every character outside `[a-zA-Z0-9_$]` as an underscore (`acme.chat` is
+ * `acme_chat`). A served build is named this way by the server from the
+ * registry row; a dev build by the host that runs it.
+ *
+ * @param name - A registry name (`<developerId>.<slug>`).
+ * @returns The container name.
+ */
+export function containerNameOf(name: string): string {
+	return name.replace(/[^a-zA-Z0-9_$]/g, '_');
+}
+
+/**
+ * The container name of a DEV build: the slug inside the organization's
+ * developer namespace, or inside the reserved `local` namespace while the
+ * organization has not claimed a developer id. `local` can never be a real
+ * developer id, so a dev build never collides with a served one; the first
+ * dev start after the claim renames the build.
+ *
+ * @param slug - The app slug (appManifest.id).
+ * @param developerId - The organization's developer id, if it has one.
+ * @returns `<developerId>_<slug>` or `local_<slug>`.
+ */
+export function devContainerNameOf(slug: string, developerId: string | null | undefined): string {
+	return containerNameOf(`${developerId || LOCAL_DEVELOPER_ID}.${slug}`);
+}
+
 /**
  * Resolves a team id to its display name, falling back to the id. Personal
  * (`user~`) owner keys render as "Me" for the caller's own space and
