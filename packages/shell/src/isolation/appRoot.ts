@@ -57,7 +57,7 @@ import { createGatedBusRouter } from '../ops/busBridge';
 import type { IBusEndpoint } from '../ops/busBridge';
 import { createOpBus } from '../ops/busOps';
 import type { IOpBus } from '../ops/busOps';
-import { createBoundedSet, createIdentityIds, createKnownProjects, isHighEntropy, learnIdentity } from './aliases';
+import { createBoundedSet, createIdentityIds, createKnownProjects, isEngineShaped, isHighEntropy } from './aliases';
 import type { IdentityKind } from './aliases';
 import { appKeyOf, isCanonicalAppId } from './appKey';
 import { KNOWN_CAPS } from './capabilities';
@@ -80,6 +80,8 @@ const NEEDLE_MIN = 8;
 const API_KEY_WAIT_MS = 3000;
 /** Events buffered per execute still waiting on its answer (DA F8). */
 const PENDING_EVENTS_MAX = 64;
+/** A real task id (`<hash8>.<source>`, `task_server.py:1540`): only that shape of a status event's `id` is remembered. */
+const TASK_ID_RE = /^[0-9a-f]{8}\.\S{1,128}$/;
 /** The engine's status update, whose `id` is a real task id (`task_engine.py:1841`). */
 const STATUS_EVENT = 'apaevt_status_update';
 /** The guest op engine events are delivered on (`clientOps.ts` CLIENT_EVENT_OP; a literal, as in busBridge.ts). */
@@ -169,7 +171,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	const known = createKnownProjects();
 	/** Every token and real task id the root saw (bounded): exact-match backstop and N1-f. */
 	const seen = createBoundedSet();
-	/** Real high-entropy user, team and org ids (account info, engine stamps): replaced in free text (DA F1). */
+	/** Real high-entropy user, team and org ids, from the SDK account info only: replaced in free text (DA F1, security N1). */
 	const identities = createIdentityIds();
 	/** The shell API keys (fetched at attach and on shell:login). */
 	const apiKeys = new Set<string>();
@@ -791,9 +793,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	cm.on('shell:event', (payload: unknown) => {
 		const event = isPlainObject(payload) && isPlainObject(payload.event) ? payload.event : undefined;
 		const body = event && isPlainObject(event.body) ? event.body : undefined;
-		if (event && event.event === STATUS_EVENT) remember(event.id);
-		// The engine stamps the owner on every event body (`task_engine.py:2128-2140`): authoritative identity ids.
-		if (body) learnIdentity(identities, body);
+		// Root-wide sets take engine-shaped values only (security N1): a task-id-shaped status id here,
+		// an engine-shaped project id below. Event bodies never feed the identity store.
+		if (event && event.event === STATUS_EVENT && typeof event.id === 'string' && TASK_ID_RE.test(event.id)) remember(event.id);
 		const projectId = body && typeof body.project_id === 'string' && body.project_id !== '' ? body.project_id : undefined;
 		const owners = projectId === undefined ? [] : [...realms.values()].filter((st) => !st.detached && st.ledger.runs().some((r) => r.projectId === projectId));
 		if (owners.length === 0) {
@@ -805,8 +807,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				return;
 			}
 			eventsDropped++;
-			// Only the root's own engine-event stream feeds the foreign set (security M1).
-			if (projectId !== undefined && !waiting) known.add(projectId);
+			// Only the root's own engine-event stream feeds the foreign set (security M1), and only
+			// with engine-shaped ids, a UUID or a minted rrapp. id (security N1, round 2).
+			if (projectId !== undefined && !waiting && isEngineShaped(projectId)) known.add(projectId);
 			return;
 		}
 		for (const st of owners) deliverEvent(st, event as unknown as DAPMessage);

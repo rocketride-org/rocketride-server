@@ -53,7 +53,7 @@
 
 import type { DAPMessage } from 'rocketride';
 import type { IBoundedSet, IdentityKind, IIdentityIds, IKnownProjects } from './aliases';
-import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, learnIdentity, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS } from './aliases';
+import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS } from './aliases';
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
@@ -367,13 +367,11 @@ function scrubText(pass: IPass, text: string): string {
 }
 
 /**
- * Records the documented engine positions of a body (DA F2): its project ids
- * as this realm's own sightings and, where the engine stamps the owner
- * (`stamped`: events and task status, `task_engine.py:2128-2140`), its
- * identity ids root-wide. Nothing else of a reply feeds a root-wide set.
+ * Records the documented engine positions of a body (DA F2) as this realm's
+ * own sightings. Nothing of a reply or an event feeds a root-wide set:
+ * identity ids come from the SDK's account info only (security N1, round 2).
  */
-function learnFrom(ctx: IScrubContext, body: Record<string, unknown>, stamped: boolean): void {
-	if (stamped) learnIdentity(ctx.root.sources.identities, body);
+function learnFrom(ctx: IScrubContext, body: Record<string, unknown>): void {
 	const pipeline = isPlainObject(body.pipeline) ? body.pipeline : undefined;
 	for (const id of [body.project_id, body.projectId, pipeline?.project_id]) {
 		if (typeof id !== 'string' || id === '' || ctx.ownedByAnyRealm(id)) continue;
@@ -383,10 +381,10 @@ function learnFrom(ctx: IScrubContext, body: Record<string, unknown>, stamped: b
 }
 
 /** The scrub of a DAP message (a response or an event): the scrubbed copy, and whether a hit is left outside notes and error text. */
-function scrubMessage(ctx: IScrubContext, message: DAPMessage, opts: { extraRuns: readonly IRunEntry[]; op: string; store?: string; stamped: boolean }): { message: DAPMessage; hit: boolean } {
+function scrubMessage(ctx: IScrubContext, message: DAPMessage, opts: { extraRuns: readonly IRunEntry[]; op: string; store?: string }): { message: DAPMessage; hit: boolean } {
 	checkBudget(message, opts.op);
 	const msg = message as unknown as Record<string, unknown>;
-	if (isPlainObject(msg.body)) learnFrom(ctx, msg.body, opts.stamped);
+	if (isPlainObject(msg.body)) learnFrom(ctx, msg.body);
 	const pass = prepare(ctx, opts.extraRuns);
 	// The app's own file content (DA F5): fs_get_json `value`, fs_list_dir entry names.
 	const fileName: Special = (k, x) => (k === 'name' && typeof x === 'string' ? { value: scrubString(pass, x, 'file') } : undefined);
@@ -433,7 +431,7 @@ export function scrubOutbound<T>(ctx: IScrubContext, value: T): T {
  *   Throws a `too_large` denial when the response is over the scrub budget.
  */
 export function scrubResponse(ctx: IScrubContext, req: IGatedRequest, response: DAPMessage): { message: DAPMessage; hit: boolean } {
-	return scrubMessage(ctx, response, { extraRuns: req.run ? [req.run] : [], op: 'client.request', stamped: req.command === 'rrext_get_task_status', ...(req.command === 'rrext_store' && req.subcommand !== undefined ? { store: req.subcommand } : {}) });
+	return scrubMessage(ctx, response, { extraRuns: req.run ? [req.run] : [], op: 'client.request', ...(req.command === 'rrext_store' && req.subcommand !== undefined ? { store: req.subcommand } : {}) });
 }
 
 /**
@@ -445,7 +443,7 @@ export function scrubResponse(ctx: IScrubContext, req: IGatedRequest, response: 
  */
 export function scrubEvent(ctx: IScrubContext, event: DAPMessage): DAPMessage | null {
 	try {
-		const { message, hit } = scrubMessage(ctx, event, { extraRuns: [], op: 'client.event', stamped: true });
+		const { message, hit } = scrubMessage(ctx, event, { extraRuns: [], op: 'client.event' });
 		return hit ? null : message;
 	} catch {
 		return null;

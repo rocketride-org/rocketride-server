@@ -36,7 +36,9 @@
 // alias (the server minted it under `RR_APP_ALIAS_KEY`; the root only copies
 // it); team, run-kind, owner-kind and org fields are removed. Real
 // high-entropy user, team and org ids are also replaced inside free text
-// (`identityIds`, DA F1).
+// (`identityIds`, DA F1). They are learnt from the SDK's account info only:
+// an engine body can carry stamps a pipeline authored (security N1, G4
+// round 2).
 // =============================================================================
 
 import type { IRealmGrant } from './types';
@@ -50,8 +52,6 @@ export const USER_KEYS: ReadonlySet<string> = new Set(['userid', 'user_id', 'cli
 export const REMOVED_KEYS: ReadonlySet<string> = new Set(['teamid', 'team_id', 'devteam', 'runkind', 'run_kind', 'ownerkind', 'owner_kind', 'orgid', 'org_id']);
 /** Fields whose value is a project id: aliased whatever the id looks like. */
 export const PROJECT_KEYS: ReadonlySet<string> = new Set(['project_id', 'projectId']);
-/** Team fields whose value names a real team (lowercased; for learning identity ids). */
-export const TEAM_KEYS: ReadonlySet<string> = new Set(['teamid', 'team_id', 'devteam']);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A project id the root minted for an app (`rrapp.<appKey>.<uuid4>`). */
@@ -187,22 +187,6 @@ export function createIdentityIds(limit = KNOWN_LIMIT): IIdentityIds {
 		},
 		version: () => version,
 	};
-}
-
-/**
- * Records the identity ids an engine-stamped object carries at its top level
- * (`task_engine.py:2128-2140` stamps `userId`, `teamId` on every event body).
- *
- * @param ids - The store.
- * @param body - An event body or a response body.
- */
-export function learnIdentity(ids: IIdentityIds, body: unknown): void {
-	if (typeof body !== 'object' || body === null || Array.isArray(body)) return;
-	for (const [k, v] of Object.entries(body)) {
-		const lk = k.toLowerCase();
-		if (USER_KEYS.has(lk)) ids.add(v, 'user');
-		else if (TEAM_KEYS.has(lk)) ids.add(v, 'team');
-	}
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) && !ArrayBuffer.isView(v) && !(v instanceof ArrayBuffer);
