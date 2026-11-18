@@ -152,7 +152,9 @@ export function resolveDeployTeams(client: { getAccountInfo(): ConnectResult | u
  * @returns The slug ('' when the id is missing).
  */
 export function appSlugOf(manifestId: string | null | undefined): string {
-	const id = typeof manifestId === 'string' ? manifestId.trim() : '';
+	// No trimming: the deploy door validates the untrimmed suffix, so verify
+	// must report what deploy will see
+	const id = typeof manifestId === 'string' ? manifestId : '';
 	if (!id) return '';
 	const dot = id.lastIndexOf('.');
 	return dot >= 0 ? id.slice(dot + 1) : id;

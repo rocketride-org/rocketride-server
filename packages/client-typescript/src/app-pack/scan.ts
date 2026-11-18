@@ -236,7 +236,10 @@ export async function findApp(workspaceRoot: string, ref?: string, cwd: string =
 		if (loose.length > 1) {
 			throw new Error(`"${ref}" matches several apps — use the full id: ${loose.map((a) => a.id).join(', ')}`);
 		}
-		if (APP_SLUG_RE.test(appSlugOf(ref))) return { appId: appSlugOf(ref) };
+		// A reference with no working copy goes to the server as written: a
+		// qualified id keeps its namespace (the door checks it), a bare slug is
+		// composed there
+		if (APP_SLUG_RE.test(appSlugOf(ref))) return { appId: ref };
 	}
 	const known = apps.length > 0 ? ` Apps in ${workspaceRoot}: ${apps.map((a) => a.id).join(', ')}.` : '';
 	throw new Error(ref ? `No app "${ref}" found.${known}` : `The current directory is not an app folder — pass an app folder or app id.${known}`);

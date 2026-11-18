@@ -210,6 +210,9 @@ function registerApp(appRoot) {
 			// public URL (entry/icon/readme) below, so it MUST be a
 			// filesystem-safe slug — an id with a path separator or a ".."
 			// segment could write copies outside build/apps/.
+			if (typeof appManifest.id !== 'string' || !appManifest.id.split('.').pop()) {
+				throw new Error(`${appRoot}: package.json appManifest.id must be a non-empty string`);
+			}
 			const appId = servedAppIdOf(appManifest.id);
 			assertSafeAppId(appId);
 
@@ -224,7 +227,8 @@ function registerApp(appRoot) {
 			const buildDir = path.join(BUILD_ROOT, APPS_BASE, servedName);
 
 			// Derive moduleId from appId
-			const moduleId = toModuleId(appId);
+			// The MF container is named from the SLUG, like every dev loop names it
+			const moduleId = toModuleId(String(appManifest.id).split('.').pop());
 
 			// The shell contract version this app was built against.
 			const shellApiVersion = readShellApiVersion();

@@ -385,9 +385,11 @@ by hand.
 | `billing.plans` | `object[]` | — | Pricing plans for paid modes: `{ nickname, amountCents, currency, interval, metadata? }` (Stripe-shaped). A *proposal* that rides every deploy and goes live when a version is approved for the store. Edited on the Store tab. |
 | `contributes.configuration` | `object` | — | Settings declaration in the VS Code `contributes.configuration` shape (below). |
 
-The slug grammar is enforced at scaffold and at deploy:
-`^[a-z][a-zA-Z0-9_-]*$` (`s3-explorer`, `app2`). The store derives the
-publisher from the registry name; the manifest never names one.
+Two validators apply to the slug. The scaffold and the New App wizard
+require `^[a-z][a-zA-Z0-9_-]*$` (a lowercase first letter: `s3-explorer`,
+`app2`). The deploy door and the pre-flight accept any address segment,
+`^[A-Za-z][A-Za-z0-9_-]*$`, so a hand-written `Reports` deploys. The store
+derives the publisher from the registry name; the manifest never names one.
 
 ### Declaring settings (`contributes.configuration`)
 
@@ -1764,12 +1766,13 @@ gets your app from are:
   the watch status line. Rebuilding into `dist/` will not help.
 - **Everyone else** loads a deployed version, which the server built itself
   from your uploaded source and serves at
-  `/apps/<appManifest.id>/v<N>/remoteEntry.js` (see
+  `/apps/<developerId>.<slug>/v<N>/remoteEntry.js` (see
   [Deploy and Publish](#deploy-and-publish)). If a change does not appear
   for them, deploy a new version and publish it.
 
-The served path is keyed on `appManifest.id`, never on the name of your app
-folder.
+The served path is keyed on the registry name, the deploying
+organization's developer id plus the manifest's slug, never on the name of
+your app folder.
 
 ---
 

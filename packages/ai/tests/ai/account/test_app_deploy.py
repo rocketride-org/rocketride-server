@@ -549,7 +549,7 @@ async def test_add_ignores_a_manifest_prefix_and_binds_the_deploying_org(registr
 
 
 @pytest.mark.asyncio
-async def test_add_takes_the_slug_from_a_bare_manifest_id(registry):
+async def test_add_takes_the_slug_from_a_bare_manifest_id(registry, content_store):
     """A manifest written under the slug rule deploys under the org's namespace."""
     conn = _FakeConn(developer_id='xyz')
     data = _app_zip(manifest={'id': 'brandy', 'name': 'Brandy', 'version': '1.0.0'})

@@ -79,7 +79,7 @@ export async function runListingPreflight(listing: ListingDraft | null, io: Pref
 	}
 
 	// ── package tier — the personal-publish bar ──────────────────────────
-	checks.push(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(appSlugOf(listing.appId)) ? { id: 'appid', state: 'pass', label: 'App slug', note: appSlugOf(listing.appId), tier: 'package' } : { id: 'appid', state: 'fail', label: 'App slug', note: `"${listing.appId}" must be <developerId>.<name>`, tier: 'package' });
+	checks.push(/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(appSlugOf(listing.appId)) ? { id: 'appid', state: 'pass', label: 'App slug', note: appSlugOf(listing.appId), tier: 'package' } : { id: 'appid', state: 'fail', label: 'App slug', note: `"${listing.appId}" is not an app slug: a letter, then letters, digits, _ or - (for example "reports")`, tier: 'package' });
 	checks.push(listing.name ? { id: 'name', state: 'pass', label: 'Display name', note: listing.name, tier: 'package' } : { id: 'name', state: 'fail', label: 'Display name', note: 'appManifest.name is required.', tier: 'package' });
 
 	// Icon/readme: a DECLARED path that does not resolve is a fail (the

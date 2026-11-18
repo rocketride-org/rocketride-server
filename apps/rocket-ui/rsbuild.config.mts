@@ -38,7 +38,9 @@ if (typeof appSlug !== 'string' || appSlug.length === 0) {
 // The manifest carries the SLUG; a platform app is served inside the
 // platform namespace, the same name the deploy door would compose for it.
 const appId = `rocketride.${appSlug.split('.').pop()}`;
-const moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+// The MF container is named from the SLUG: the dev loops and the scanners
+// derive the same name, so a dev build and a served build agree.
+const moduleId = String(appSlug.split('.').pop()).replace(/[^a-zA-Z0-9_$]/g, '_');
 
 // Load build-time config (.config defaults -> repo-root .env overrides) via
 // the repo's shared helper so env layering matches the shell host.

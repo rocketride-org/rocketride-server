@@ -36,6 +36,7 @@
  */
 
 import { PROJECT_DIR } from 'rocketride';
+import { appSlugOf } from 'rocketride';
 import type { RocketRideClient } from 'shell';
 import { getStagedWorkspace, getWorkspaceVfs, toScopedStorePath } from '../../workspace/vfs/workspace';
 import { renderTemplate } from 'shared/tools/appdev';
@@ -142,10 +143,13 @@ export async function scanApps(): Promise<StoredApp[]> {
 				console.log('[appStore] skipping apps/' + folder + ' — package.json has no appManifest.id');
 				continue;
 			}
+			// The slug is the app's identity; a prefix an older manifest still
+			// carries is ignored as if it had never been written
+			const id = appSlugOf(m.id);
 			apps.push({
-				id: m.id,
-				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? m.id),
-				moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : m.id.replace(/[^a-zA-Z0-9_$]/g, '_'),
+				id,
+				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? id),
+				moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : id.replace(/[^a-zA-Z0-9_$]/g, '_'),
 				folder,
 				version: typeof pkg.version === 'string' ? pkg.version : '',
 				description: typeof m.description === 'string' ? m.description : '',

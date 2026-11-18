@@ -79,10 +79,11 @@ def app_slug_of(manifest_id: Any) -> str:
     Returns:
         The slug ('' when the id is missing).
     """
-    if not isinstance(manifest_id, str):
+    # No trimming: the deploy door validates the untrimmed suffix, so verify
+    # must report what deploy will see
+    if not isinstance(manifest_id, str) or not manifest_id:
         return ''
-    text = manifest_id.strip()
-    return text.rsplit('.', 1)[-1] if text else ''
+    return manifest_id.rsplit('.', 1)[-1]
 
 
 # Ceiling on the UNCOMPRESSED source the deploy zip may carry (in-memory

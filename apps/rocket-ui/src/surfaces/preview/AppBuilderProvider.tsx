@@ -47,7 +47,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { registryIdOf } from 'rocketride';
+import { appSlugOf, registryIdOf } from 'rocketride';
 import type { CSSProperties } from 'react';
 import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
@@ -313,7 +313,7 @@ const AppBuilderProvider: React.FC<{
 		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: { event: { event?: string; body?: { appId?: string; phase?: string; lines?: string[] } } }) => {
 			const body = event?.body;
 			// Build events carry the REGISTRY name (the slug inside the org's namespace)
-			if (!body || body.appId !== registryIdOf(appId, client.getAccountInfo()?.organization?.developerId)) return;
+			if (!body || body.appId !== registryIdOf(appSlugOf(appId), client.getAccountInfo()?.organization?.developerId)) return;
 			if (event.event === 'apaevt_build' && Array.isArray(body.lines)) {
 				for (const line of body.lines) session.pushConsole('log', `[build:${body.phase ?? '?'}] ${line}`);
 			}

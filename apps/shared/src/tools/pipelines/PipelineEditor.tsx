@@ -371,6 +371,10 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 
 	useEffect(() => {
 		const cm = ConnectionManager.getInstance();
+		// The registry name needs the developer id; an invalidation that arrived
+		// while it was still unknown was dropped, so an open drawer re-fetches
+		// once the name can be matched
+		if (developerId && openDeploymentRef.current) scheduleDeploymentRefetch();
 		return cm.on('shell:event', ({ event }) => {
 			const pid = projectIdRef.current;
 			// statusMap keeps feeding the canvas (per-node badges + page error

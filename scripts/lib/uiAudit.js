@@ -86,6 +86,12 @@ const ALLOWED_RANGES = {
 // The single browser floor every remote (and the shell host) compiles for.
 const CANONICAL_BROWSERSLIST = ['chrome >= 81', 'edge >= 83', 'firefox >= 76', 'safari >= 13'];
 
+// Documented per-app floors ABOVE the canonical one (never below): home-ui's
+// observer sites rely on ResizeObserver, which Safari gained in 13.1.
+const BROWSERSLIST_FLOORS = {
+	'home-ui': ['chrome >= 81', 'edge >= 83', 'firefox >= 76', 'safari >= 13.1'],
+};
+
 // Scripts block every app package.json must expose.
 const REQUIRED_SCRIPTS = ['build', 'build:prod', 'dev', 'typecheck'];
 
@@ -272,8 +278,9 @@ function checkManifestHygiene(name, pkg, isApp, needsBrowserslist) {
 			}
 		}
 	}
-	if (needsBrowserslist && JSON.stringify(pkg.browserslist) !== JSON.stringify(CANONICAL_BROWSERSLIST)) {
-		errors.push(`${name}: browserslist must equal the canonical floor ${JSON.stringify(CANONICAL_BROWSERSLIST)}`);
+	const floor = BROWSERSLIST_FLOORS[name] ?? CANONICAL_BROWSERSLIST;
+	if (needsBrowserslist && JSON.stringify(pkg.browserslist) !== JSON.stringify(floor)) {
+		errors.push(`${name}: browserslist must equal the canonical floor ${JSON.stringify(floor)}`);
 	}
 	return errors;
 }

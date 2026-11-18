@@ -38,7 +38,7 @@
 // =============================================================================
 
 import type { IAppBuilderHost, BuildStatusTick } from './types';
-import { registryIdOf } from 'rocketride';
+import { appSlugOf, registryIdOf } from 'rocketride';
 import { toVersionInfos, toRungPins, walkDeploymentHistory } from './wire';
 import type { WireRailEntry, WirePin, WireHistoryRow } from './wire';
 
@@ -123,7 +123,7 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 	 * deploy/build event carries it; the files carry only the slug. '' while
 	 * the organization has no developer id (nothing is deployed then).
 	 */
-	const registryId = (): string => registryIdOf(appId, bus.getAccountInfo()?.organization?.developerId);
+	const registryId = (): string => registryIdOf(appSlugOf(appId), bus.getAccountInfo()?.organization?.developerId);
 	/** The registry name for a verb that needs one, or the claim message. */
 	const needRegistryId = (): string => {
 		const id = registryId();
