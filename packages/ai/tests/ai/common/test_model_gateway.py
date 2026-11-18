@@ -648,11 +648,14 @@ def test_a_reply_that_ran_out_of_output_budget_says_what_to_change(monkeypatch, 
     assert len(gateway.requests) == 1
 
 
-def test_an_output_budget_the_pass_lowered_is_not_offered_as_the_fix(monkeypatch, backend, hosted):
+@pytest.mark.parametrize('node_limit', [32768, 16384], ids=['lowered', 'already-at-the-limit'])
+def test_an_output_budget_at_the_pass_limit_is_not_offered_as_the_fix(monkeypatch, backend, hosted, node_limit):
     _with_pass(monkeypatch, max_output_tokens=16384)
     backend(responses_out_of_budget)
 
-    _result, error = _ask(_driver(monkeypatch, 'llm_openai', REASONING), _prompt(), True)
+    _result, error = _ask(
+        _driver(monkeypatch, 'llm_openai', {**REASONING, 'modelOutputTokens': node_limit}), _prompt(), True
+    )
 
     assert '16384 tokens, the most RocketRide-hosted models allow' in str(error), repr(error)
     assert 'Raise modelOutputTokens' not in str(error)
