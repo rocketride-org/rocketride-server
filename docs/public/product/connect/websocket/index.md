@@ -1,5 +1,6 @@
 ---
-title: WebSocket
+title: WebSocket protocol
+sidebar_label: WebSocket
 ---
 
 # WebSocket protocol
@@ -24,7 +25,8 @@ send so you can debug, trace, or build your own client.
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
   task request carries the task `token` returned by `execute` (the SDK's `use()`)
   in its `arguments`.
-  Cloud requires a key; a local engine typically does not.
+  Cloud requires a key. The SDKs and the CLI also need one for a local engine;
+  an engine started without a key accepts any non-empty value.
 
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
@@ -34,7 +36,9 @@ different host or port to reach a remote or self-hosted engine.
 Before authenticating, a client may open a public connection and send
 `rrext_public_probe`. The response body carries `version`, `capabilities`,
 `platform`, the public `apps` list, `stripePublishableKey` (when billing is
-configured), and `endpoints` — the server's public addresses:
+configured), `posthogPublishableKey` + `posthogHost` (when product telemetry
+is configured; absent means telemetry is off), and `endpoints` — the server's
+public addresses:
 
 ```json
 { "endpoints": { "api": "origin", "ui": "origin" } }

@@ -246,6 +246,15 @@ class TestPublishes:
         assert by_action['removed']['data']['audience']['handle'] == '@me'
 
     @pytest.mark.asyncio
+    async def test_publish_list_of_the_public_audience_returns_public_rows_only(self, backend):
+        """Team and user pins never reach a public-rung listing (app_rows.public_winners relies on it)."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        for audience in (AUD_USER, AUD_TEAM, AUD_PUBLIC):
+            await backend.publish_set('org-1', 'app', 'acme.brandy', audience, v1['version'], {'name': 'B'}, ACTOR)
+        rows = await backend.publish_list('org-1', 'app', [AUD_PUBLIC])
+        assert [r['audience'] for r in rows] == [AUD_PUBLIC]
+
+    @pytest.mark.asyncio
     async def test_set_artifact_state_review_lifecycle(self, backend):
         """The review lifecycle lives on the deployment: private -> submit ->
         ready | rejected, with illegal transitions refused and a history event

@@ -405,6 +405,9 @@ class FakeWebServer:
         if public:
             self.public.add(path)
 
+    def add_raw_route(self, route):
+        self.app.router.routes.append(route)
+
     def is_public_route(self, path):
         return path in self.public
 
