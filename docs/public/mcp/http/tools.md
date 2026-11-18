@@ -103,8 +103,9 @@ node on the connected engine are listed.
 - **Hosted models:** on an engine that reports the `hosted-models:openai`
   capability, `llm_openai` with no saved key is `configured` with an empty
   `wiring`, `hosted: true` and a one-line `note` to relay: the node runs on
-  RocketRide-hosted models when `apikey` is left empty. A saved key still wins
-  and wires as usual. No other integration changes.
+  RocketRide-hosted models when `apikey` is left empty, except in a pipeline
+  deployed to a team, which needs its own key. A saved key still wins and
+  wires as usual. No other integration changes.
 - **Notable:** only environment-variable **names** are read and reported —
   values never transit MCP. Wiring values are emitted as `${VAR}` placeholder
   strings for use in a pipeline config.
@@ -346,7 +347,8 @@ Register an inline pipeline as the next version of its project.
   the version); `deploy_to` (string, optional — a team id to point at the new
   version in the same call).
 - **Returns:** `{ok, artifact}` — `artifact.version` is the new version
-  number — plus `deployment` when `deploy_to` was given.
+  number — plus `deployment` when `deploy_to` was given, and `warnings` as
+  for `deploy_to_team`.
 - **Notable:** every call registers a new version, so it is not idempotent —
   after a timeout, call `deploy_versions` before retrying.
 
@@ -390,7 +392,11 @@ are all this call. Deploying to a removed deployment revives it.
 
 - **Parameters:** `project_id` (string, required); `version` (integer,
   required); `team_id` (string, required).
-- **Returns:** `{ok, deployment}`.
+- **Returns:** `{ok, deployment}`, plus `warnings` (a list of sentences to
+  relay) when the deploy went through but the pipeline will fail on that team:
+  on an engine with RocketRide-hosted models, a team (not `"@me"`) whose
+  version has an OpenAI node with no API key, since hosted models don't cover
+  team deployments yet.
 
 ### deploy_set_schedule
 

@@ -15,6 +15,7 @@ enable/disable/remove act on one team's deployment, addressed by
 
 from typing import Any, Dict, Optional
 
+from ..credentials import TEAM_DEPLOY_WARNING, fetch_hosted_models
 from ..errors import _bad
 from ..tooling import ToolHints, ToolRegistry
 from ._common import engine_call as _engine_call
@@ -311,6 +312,36 @@ def list_envelope_payload(envelope: Optional[Dict[str, Any]], rows_key: str) -> 
     }
 
 
+# The team_id of a user's personal space, which hosted models do cover.
+_PERSONAL_SPACE = '@me'
+
+
+async def _team_deploy_warning(client, team_id: Any, pipeline: Any) -> Optional[str]:
+    """TEAM_DEPLOY_WARNING for a deploy to a team whose pipeline has an OpenAI node
+    with no key, on an engine with hosted models; else None.
+
+    ``pipeline`` is the pipeline, or a no-argument function that fetches it (called
+    only on an engine with hosted models). Never raises: the deploy already
+    happened, and a failed check only means no warning.
+    """
+    if not isinstance(team_id, str) or not team_id or team_id == _PERSONAL_SPACE:
+        return None
+    try:
+        if not await fetch_hosted_models(client):
+            return None
+        if callable(pipeline):
+            pipeline, err = await _engine_call(pipeline(), 'deploy_to_team')
+            if err:
+                return None
+        if not isinstance(pipeline, dict):
+            return None
+        from ai.common.model_gateway import wants_hosted_openai
+
+        return TEAM_DEPLOY_WARNING if wants_hosted_openai(pipeline.get('pipeline', pipeline)) else None
+    except Exception:
+        return None
+
+
 async def _deploy_add(client, tasks, args: Dict[str, Any]) -> dict:
     pipeline = load_pipeline(args)  # raises ValueError -> normalized by the dispatch layer
     result, err = await _engine_call(
@@ -325,6 +356,9 @@ async def _deploy_add(client, tasks, args: Dict[str, Any]) -> dict:
     payload = {'ok': True, 'artifact': result.get('artifact')}
     if result.get('deployment') is not None:
         payload['deployment'] = result['deployment']
+        warning = await _team_deploy_warning(client, args.get('deploy_to'), pipeline)
+        if warning:
+            payload['warnings'] = [warning]
     return payload
 
 
@@ -387,7 +421,13 @@ async def _deploy_to_team(client, tasks, args: Dict[str, Any]) -> dict:
     )
     if err:
         return err
-    return {'ok': True, 'deployment': deployment}
+    payload = {'ok': True, 'deployment': deployment}
+    warning = await _team_deploy_warning(
+        client, args['team_id'], lambda: client.deploy_artifact(args['project_id'], version)
+    )
+    if warning:
+        payload['warnings'] = [warning]
+    return payload
 
 
 async def _deploy_set_schedule(client, tasks, args: Dict[str, Any]) -> dict:

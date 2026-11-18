@@ -1,5 +1,6 @@
 from rocketlib import IGlobalBase, OPEN_MODE, warning, debug
 from ai.common.config import Config, warn_if_credential_unresolved
+from ai.common.model_gateway import hosted_engine
 from ai.common.chat import ChatBase
 import os
 import re
@@ -45,9 +46,9 @@ class IGlobal(IGlobalBase):
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
                 return
 
-            # No key and no endpoint of its own: on a hosted engine the run gets its
+            # No key and no endpoint of its own on a hosted engine: the run gets its
             # models when it starts, so there is nothing to probe now
-            if (not isinstance(apikey, str) or not apikey.strip()) and not base_url:
+            if (not isinstance(apikey, str) or not apikey.strip()) and not base_url and hosted_engine():
                 return
 
             # Simple API validation using provider-driven exceptions
@@ -108,4 +109,6 @@ class IGlobal(IGlobalBase):
             self._chat = Chat(self.glb.logicalType, self.glb.connConfig, bag)
 
     def endGlobal(self):
+        if self._chat is not None and hasattr(self._chat, 'close'):
+            self._chat.close()
         self._chat = None

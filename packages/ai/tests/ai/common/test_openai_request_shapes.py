@@ -8,10 +8,10 @@
 A hosted backend forwards only the fields, items and content types these nodes send,
 and refuses the rest by name. The nodes run for real here (the openai SDK and
 langchain-openai build every body) on every path: string prompts streamed and not, a
-reasoning prompt and its fallback, native tool turns with the tool result sent back,
+reasoning prompt, native tool turns with the tool result sent back,
 reasoning tool turns that replay encrypted reasoning, and the compatible reasoning
 stream, each with and without stop sequences. A new langchain-openai that adds a field
-fails here first.
+fails here first. The nodes never send `safety_identifier` or `user`: the backend sets the first.
 
 ALLOWED is a literal copy of that list, kept here on purpose.
 """
@@ -350,28 +350,6 @@ def test_every_request_fits_the_list(monkeypatch, recorder, name, kind, streamed
         assert violations(endpoint, body) == [], (endpoint, body)
         if endpoint == 'responses':
             assert body.get('store') is False
-
-
-def test_the_reasoning_prompt_fallback_fits_the_list(monkeypatch, recorder):
-    """The Responses stream ends without text; the Chat Completions fallback is recorded too."""
-    original = Recorder.__call__
-
-    def empty_first(self, request):
-        if request.url.path.endswith('/responses') and not self.sent:
-            self.sent.append(('responses', request.headers.get('authorization'), json.loads(request.content)))
-            events = [{'type': 'response.created', 'sequence_number': 0, 'response': {'id': 'r', 'status': 'x'}}]
-            content = ''.join(f'data: {json.dumps(e)}\n\n' for e in events).encode()
-            return httpx.Response(200, headers={'content-type': 'text/event-stream'}, content=content)
-        return original(self, request)
-
-    monkeypatch.setattr(Recorder, '__call__', empty_first)
-    chat = _driver(monkeypatch, 'llm_openai', REASONING)
-
-    _run(chat, 'prompt', True, True)
-
-    assert [endpoint for endpoint, _a, _b in recorder.sent] == ['responses', 'chat']
-    for endpoint, _authorization, body in recorder.sent:
-        assert violations(endpoint, body) == [], (endpoint, body)
 
 
 def test_the_paths_reach_both_apis_and_replay_reasoning(monkeypatch, recorder):

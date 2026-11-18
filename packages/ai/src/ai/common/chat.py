@@ -29,6 +29,7 @@ from ai.common.validation import (
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
+from ai.common.model_gateway import HostedModelError, friendly_gateway_error, stream_lost_error
 from ai.common.llm_tools import (
     InvalidTurn,
     ToolNames,
@@ -109,6 +110,8 @@ class ChatBase:
     _native_stream_provider: str = ''
     # Raw openai SDK client for the generic reasoning handler; built lazily by ChatBase.
     _raw_openai_client = None
+    # True when the driver's clients run on the run's hosted models pass (see model_gateway).
+    _hosted_models = False
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -189,9 +192,11 @@ class ChatBase:
         try:
             from openai import OpenAI
 
-            # Same HTTP client as the model it mirrors (None builds the default)
+            # Same HTTP client as the model it mirrors (None builds the default). On hosted
+            # models the SDK sends a call once: the backend charges each request it takes.
+            retries = {'max_retries': 0} if self._hosted_models else {}
             self._raw_openai_client = OpenAI(
-                api_key=api_key, base_url=str(base_url), http_client=getattr(llm, 'http_client', None)
+                api_key=api_key, base_url=str(base_url), http_client=getattr(llm, 'http_client', None), **retries
             )
             self._native_stream_provider = 'openai_compat_reasoning'
         except Exception as e:  # openai SDK missing / bad client → fall back to generic stream
@@ -290,14 +295,17 @@ class ChatBase:
 
         A terminal error ends the call where it is caught: no engine retry, no
         fallback request through another path, no empty answer in its place.
-        A driver returns one for an error that sending again cannot change.
+        On hosted models, a refusal from the backend is one: its sentence.
 
         Args:
             error (Exception): The error a model call raised.
         Returns:
             Optional[Exception]: The error to raise instead, or None.
         """
-        return None
+        if not self._hosted_models:
+            return None
+        sentence = friendly_gateway_error(error, self._model)
+        return HostedModelError(sentence) if sentence else None
 
     def _raise_if_terminal(self, error: Exception) -> None:
         """Raise ``terminal_error(error)`` when it is not None. Called first in every handler that retries or falls back."""
@@ -309,6 +317,18 @@ class ChatBase:
         if terminal is error:
             raise error
         raise terminal from error
+
+    def _no_second_hosted_request(self, error: Optional[Exception]) -> None:
+        """On hosted models, end the call instead of a fallback request after a failed stream.
+
+        The backend may already have charged the stream, and a second request is
+        charged again. Called after ``_raise_if_terminal`` wherever a failed or
+        empty stream would fall back to another request.
+        """
+        if not self._hosted_models:
+            return
+        debug(f'Hosted stream for model={self._model} ended without a reply ({type(error).__name__}): {error}')
+        raise stream_lost_error() from error
 
     def is_retryable_error(self, error: Exception) -> bool:
         """
@@ -492,7 +512,11 @@ class ChatBase:
         try:
             adapter = NativeOpenAIResponsesAdapter(self)
             text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
-            if not text and adapter.finish_reason in _OUTPUT_LIMIT_REASONS and _EXPECT_JSON_VAR.get():
+            if (
+                not text
+                and adapter.finish_reason in _OUTPUT_LIMIT_REASONS
+                and (_EXPECT_JSON_VAR.get() or self._hosted_models)
+            ):
                 # The model spent its whole output budget (usually on reasoning) before
                 # writing anything. The fallback below would send the same request with
                 # the same budget and fail the same way, at the price of a second call.
@@ -512,6 +536,7 @@ class ChatBase:
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
+                self._no_second_hosted_request(e)
                 adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
                 try:
                     content_text, _items = adapter.collect(prompt)
@@ -598,6 +623,8 @@ class ChatBase:
                 return native_text
             # Native handler returned None after emitting chunks: don't restart
             # the request through a different path, just close with an error.
+            if self._native_stream_provider:
+                self._no_second_hosted_request(None)
             if emitted['any']:
                 if on_finish is not None:
                     on_finish('error')
@@ -621,6 +648,7 @@ class ChatBase:
                         on_finish(adapter.finish_reason)
             except Exception as e:
                 self._raise_if_terminal(e)
+                self._no_second_hosted_request(e)
                 warning(
                     f'Streaming disabled for model={self._model} '
                     f'({type(e).__name__}): {e}. Falling back to non-streaming response.'
@@ -633,6 +661,9 @@ class ChatBase:
                     on_finish('error')
                 result = ''
             else:
+                if on_chunk_w is not None:
+                    # A stream ran above and gave no answer
+                    self._no_second_hosted_request(None)
                 result = self._chat_with_retries(prompt)
 
         # Count tokens in the response to check for potential truncation
@@ -698,6 +729,7 @@ class ChatBase:
                 self._raise_if_terminal(e)
                 if emitted:
                     raise
+                self._no_second_hosted_request(e)
                 warning(
                     f'Streaming disabled for model={self._model} '
                     f'({type(e).__name__}): {e}. Falling back to non-streaming response.'

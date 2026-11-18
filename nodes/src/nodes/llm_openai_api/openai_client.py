@@ -11,9 +11,9 @@ from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.model_gateway import (
-    HostedModelError,
-    friendly_gateway_error,
+    close_http_clients,
     hosted_http_clients,
+    hosted_output_tokens,
     resolve_openai_credentials,
 )
 from langchain_openai import ChatOpenAI as _LangChainChatOpenAI
@@ -163,8 +163,7 @@ class Chat(ChatBase):
     _llm: ChatOpenAI
 
     SUPPORTS_NATIVE_TOOLS = True
-    # True when the client runs on the run's hosted models pass (no key of our own)
-    _hosted_models = False
+    _http_clients: Dict[str, Any] = {}
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -182,6 +181,8 @@ class Chat(ChatBase):
         apikey = credentials.apikey
         base_url = credentials.base_url or None
         self._hosted_models = credentials.hosted
+        if credentials.hosted:
+            self._modelOutputTokens = hosted_output_tokens(provider, self._modelOutputTokens, credentials.gateway)
 
         # Build kwargs for ChatOpenAI
         kwargs = {
@@ -195,7 +196,9 @@ class Chat(ChatBase):
         if base_url:
             kwargs['base_url'] = base_url
         if self._hosted_models:
-            kwargs.update(hosted_http_clients())
+            # The run's limits, and one send per call: the backend charges each request it takes
+            self._http_clients = hosted_http_clients(credentials.gateway)
+            kwargs.update(self._http_clients, max_retries=0)
 
         # Get the llm
         self._llm = ChatOpenAI(**kwargs)
@@ -203,14 +206,12 @@ class Chat(ChatBase):
         # Save our chat class into the bag
         bag['chat'] = self
 
-    def terminal_error(self, error):
+    def close(self) -> None:
         """
-        A refusal from the hosted models backend ends the call with its sentence.
+        Close the HTTP clients built for the hosted models pass.
         """
-        if not self._hosted_models:
-            return None
-        sentence = friendly_gateway_error(error, self._model)
-        return HostedModelError(sentence) if sentence else None
+        close_http_clients(self._http_clients)
+        self._http_clients = {}
 
     def is_retryable_error(self, error):
         """
