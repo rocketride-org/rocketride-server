@@ -57,8 +57,8 @@ import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
-import { createMatcher, hasMatch, replaceMatches } from './match';
-import type { IMatcher } from './match';
+import { createMatcher, hasMatch, replaceMatches, scan } from './match';
+import type { IMatch, IMatcher } from './match';
 import { SIZES } from './rate';
 import type { IRealmGrant } from './types';
 import { isWireBinary } from './walk';
@@ -230,7 +230,12 @@ type Mode = 'deny' | 'inline' | 'file';
 
 /** One scrub of one message for one realm. */
 interface IPass {
-	matchers: ReadonlyArray<IMatcher<Repl>>;
+	/** What is replaced (own values, identity ids, sightings, foreign ids), in priority order. */
+	replace: ReadonlyArray<IMatcher<Repl>>;
+	/** The backstop's exact values. */
+	deny: IMatcher<Repl>;
+	/** Whether a needle is one the pass replaces (an own value is never a hit). */
+	replaces(needle: string): boolean;
 	userAlias: string | undefined;
 	projectAlias(id: string): string;
 	isProjectKey(key: string): boolean;
@@ -279,9 +284,12 @@ function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[]): IPass {
 		return alias;
 	};
 	const known = ctx.root.sources.known;
+	// Priority on equal length: own values, identity ids, sightings, foreign ids.
+	const replace = [cache.own.m, ctx.root.identityMatcher(), cache.sighted.m, ctx.root.knownMatcher()];
 	return {
-		// Priority on equal length: own values, identity ids, sightings, foreign ids, then the exact hits.
-		matchers: [cache.own.m, ctx.root.identityMatcher(), cache.sighted.m, ctx.root.knownMatcher(), ctx.root.needleMatcher()],
+		replace,
+		deny: ctx.root.needleMatcher(),
+		replaces: (needle) => replace.some((m) => m.has(needle)),
 		userAlias: ctx.grant.frame?.identity?.userId,
 		projectAlias,
 		// Short ids are map keys only when this realm sighted them; root-wide membership counts for high-entropy ids only (security M1).
@@ -290,10 +298,76 @@ function prepare(ctx: IScrubContext, extraRuns: readonly IRunEntry[]): IPass {
 	};
 }
 
-/** Scrubs one string. */
+/** Merges overlapping or touching ranges (sorted by start). */
+function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
+	const sorted = ranges.map((r) => [r[0], r[1]] as [number, number]).sort((a, b) => a[0] - b[0]);
+	const out: Array<[number, number]> = [];
+	for (const r of sorted) {
+		const last = out[out.length - 1];
+		if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+		else out.push(r);
+	}
+	return out;
+}
+
+/**
+ * Error text with must-deny values: each is redacted, and so is any
+ * replacement that overlaps one (the deny wins, DA R2 LOW); the other
+ * replacements apply.
+ */
+function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, replacement: (m: IMatch<Repl>) => string): string {
+	const reps: Array<IMatch<Repl>> = [];
+	scan(s, pass.replace, (m) => {
+		reps.push(m);
+	});
+	let ranges = mergeRanges(deny);
+	for (let grown = true; grown; ) {
+		grown = false;
+		for (const r of reps) {
+			const a = r.index;
+			const b = a + r.needle.length;
+			for (const g of ranges)
+				if (a < g[1] && b > g[0] && (a < g[0] || b > g[1])) {
+					g[0] = Math.min(g[0], a);
+					g[1] = Math.max(g[1], b);
+					grown = true;
+				}
+		}
+		if (grown) ranges = mergeRanges(ranges);
+	}
+	const items = [...ranges.map((g) => ({ a: g[0], b: g[1], text: REDACTED })), ...reps.filter((r) => !ranges.some((g) => r.index < g[1] && r.index + r.needle.length > g[0])).map((r) => ({ a: r.index, b: r.index + r.needle.length, text: replacement(r) }))].sort((x, y) => x.a - y.a);
+	let out = '';
+	let pos = 0;
+	for (const it of items) {
+		out += s.slice(pos, it.a) + it.text;
+		pos = it.b;
+	}
+	return out + s.slice(pos);
+}
+
+/**
+ * Scrubs one string. The backstop's exact values are looked for first, at
+ * every position of the original string (so a replacement that starts
+ * earlier cannot consume part of one); an own value is never a hit.
+ */
 function scrubString(pass: IPass, s: string, mode: Mode): string {
 	let hit = false;
-	let out = replaceMatches(s, pass.matchers, (m) => {
+	const deny: Array<[number, number]> = [];
+	scan(
+		s,
+		[pass.deny],
+		(m) => {
+			if (pass.replaces(m.needle)) return true;
+			if (mode === 'inline') {
+				deny.push([m.index, m.index + m.needle.length]);
+				return true;
+			}
+			hit = true;
+			return false;
+		},
+		true
+	);
+	const replacement = (m: IMatch<Repl>): string => {
 		const r = m.value;
 		switch (r.k) {
 			case 'to':
@@ -303,11 +377,10 @@ function scrubString(pass: IPass, s: string, mode: Mode): string {
 			case 'id':
 				return r.kind === 'user' && typeof pass.userAlias === 'string' ? pass.userAlias : REDACTED;
 			default:
-				if (mode === 'inline') return REDACTED;
-				hit = true;
 				return m.needle;
 		}
-	});
+	};
+	let out = deny.length > 0 ? redactWithin(s, deny, pass, replacement) : replaceMatches(s, pass.replace, replacement);
 	if (mode !== 'file' && (out.includes('k_') || out.includes('rrapp.'))) {
 		out = out.replace(BROAD_G, (x) => (ENGINE_CREDENTIAL_HEAD.test(x) ? x : REDACTED));
 		if (mode === 'inline') out = out.replace(ENGINE_CREDENTIAL_G, REDACTED).replace(MINTED_G, REDACTED);
