@@ -805,10 +805,14 @@ export function invalidateAppDescriptor(appId: string): void {
  * the real fetch. Safe for failed containers — nothing has successfully
  * consumed them, unlike force-re-registering a live, loaded remote.
  *
+ * @param appId - The app id the container belongs to (only its own container is reset).
  * @param moduleId - The MF container name (AppManifestEntry.moduleId).
  */
-export function resetRemote(moduleId: string): void {
-	if (isolatedModules.has(moduleId)) return;
+export function resetRemote(appId: string, moduleId: string): void {
+	// The same ownership rule as repointRemote: only the container the shell
+	// mapped for this app id, never an isolated app's (#1022).
+	if (isolatedIds.has(appId) || isolatedModules.has(moduleId)) return;
+	if (serverAppModules.get(appId) !== moduleId) return;
 	const entry = registeredEntries.get(moduleId);
 	if (!entry) return;
 	registerRemotes([{ name: moduleId, entry }], { force: true });

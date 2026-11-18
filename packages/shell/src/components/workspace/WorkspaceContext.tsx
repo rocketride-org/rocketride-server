@@ -568,7 +568,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		// REAL fresh fetch — re-loading the cached failed container only throws
 		// TDZ errors ("Cannot access 'x' before initialization").
 		const entry = apps.find((a) => a.id === appId);
-		if (entry?.moduleId) resetRemote(entry.moduleId);
+		if (entry?.moduleId) resetRemote(appId, entry.moduleId);
 		return loadDescriptor(appId);
 	}, [apps, loadDescriptor]);
 
