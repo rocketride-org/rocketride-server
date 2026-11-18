@@ -54,12 +54,11 @@ import { findApp, readApps, type AppEntry } from './inventory';
 /** The tool's name. The loop's writePaths keys on the same string. */
 export const SHOW_VIEW_TOOL = 'show_view';
 
-// TODO(Dylan): wording
 /** Everything show_view says to the model. */
 const WORDS = {
 	instructions: `## Showing your work
 
-- Before you change something the user can see, call show_view with the path of the app or pipeline. Their own App Builder (on Design) or pipeline canvas opens beside this chat, and they watch each change appear as you save it.
+- Before you change something the user can see, an app's screens or a pipeline, call show_view with its path. Their own App Builder (on Design) or pipeline canvas opens beside this chat, and they watch each change appear as you save it.
 - Call it once for each app or pipeline you change in a turn, before its first edit. The view stays open and keeps up with your saves.
 - List show_view before those edits in the same step, because calls on one app or pipeline run in the order you list them.
 - Don't call it when there is nothing to watch (a deploy, a publish, a schedule, a README), or to try the app yourself: use_app does that, on your own copy.`,
