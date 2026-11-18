@@ -341,6 +341,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [apiKeyError] = useState<string | null>(null);
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
+	// Set by the logout handlers before their final teardown: an org-change
+	// rescope backs off, so its reconnect cannot run during the logout clear (#1022).
+	const loggingOutRef = useRef(false);
 
 	// ── Separate-origin app isolation (#1022) ─────────────────────────────
 	// The root of every isolated app frame: created beside registerClientOps
@@ -776,6 +779,8 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			})();
 		};
 		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
+			// A logout is in progress: the session is ending, so there is nothing to rescope.
+			if (loggingOutRef.current) return;
 			if (rescopeRunningRef.current) {
 				rescopePendingRef.current = orgId;
 				return;
@@ -857,6 +862,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// =====================================================================
 
 	const handleLogout = useCallback(async () => {
+		loggingOutRef.current = true;
 		// Isolated apps end their runs while the session token is still valid,
 		// then their origins' storage is cleared (#1022, plan 4.7). The final
 		// teardown keeps the root sealed through the clear: nothing new starts.
@@ -876,6 +882,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// RocketRide-chromed page here instead — off-brand for a deep-app
 			// tab and a THIRD signed-out surface to keep consistent.
 			cm.logout().finally(() => {
+				loggingOutRef.current = false;
 				if (mountedRef.current) setRenderPhase('shell');
 			});
 		} else {
@@ -889,6 +896,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			setActiveAppId(defaultAppId);
 			cm.emit('shell:switchApp', { appId: defaultAppId });
 			cm.logout().finally(() => {
+				loggingOutRef.current = false;
 				if (mountedRef.current) setRenderPhase('shell');
 			});
 		}
@@ -909,6 +917,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// the token + session app ids synchronously before its async disconnect, so
 	// those are wiped before the navigation unloads the page.
 	const handleBackToHome = useCallback(async () => {
+		loggingOutRef.current = true;
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		// Isolated apps end their runs first (#1022); their storage is cleared
 		// by the boot-time sweep of the next load (plan 4.7, missed sweeps).
