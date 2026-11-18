@@ -78,7 +78,7 @@ test('G4 the claimed container can still be repointed and reset', async () => {
 	markIsolated(entry('acme.claim2', { isolated: true, moduleId: 'rocketride_docs' }));
 	assert.equal((repointRemote as unknown as (a: string, m: string, u: string) => boolean)('rocketride.docs', 'rocketride_docs', 'https://x.example/remoteEntry.js'), true, 'repoint is not blocked');
 	const before = spies.registered.length;
-	resetRemote('rocketride_docs');
+	(resetRemote as unknown as (a: string, m: string) => void)('rocketride.docs', 'rocketride_docs');
 	assert.equal(spies.registered.length, before + 1, 'reset is not blocked');
 });
 

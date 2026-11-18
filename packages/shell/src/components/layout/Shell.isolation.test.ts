@@ -83,3 +83,17 @@ test('T56 Shell creates the app root beside registerClientOps (the root owns the
 	assert.ok(create >= 0, 'Shell.tsx calls createAppRoot');
 	assert.ok(register >= 0 && Math.abs(create - register) < 1500, 'next to registerClientOps');
 });
+
+test('final: both logout handlers run the teardown and the logout clear inside try/finally, so cm.logout() always runs and the logout flag is cleared', () => {
+	for (const name of ['handleLogout', 'handleBackToHome']) {
+		const body = handler(name);
+		const tryAt = body.search(/try\s*\{/);
+		const teardownAt = body.search(/teardownAll\(/);
+		const finallyAt = body.search(/\}\s*finally\s*\{/);
+		assert.ok(tryAt >= 0 && tryAt < teardownAt, `${name}: the teardown is inside a try`);
+		assert.ok(finallyAt > teardownAt, `${name}: followed by a finally`);
+		const tail = body.slice(finallyAt);
+		assert.match(tail, /cm\.logout\(\)/, `${name}: cm.logout() runs in the finally`);
+		assert.match(tail, /loggingOutRef\.current\s*=\s*false/, `${name}: the logout flag is cleared in the finally path`);
+	}
+});

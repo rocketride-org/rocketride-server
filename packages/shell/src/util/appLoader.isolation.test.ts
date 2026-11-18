@@ -249,7 +249,7 @@ test('T65 E4 resetRemote and fallbackSkippedRemote are refused for an isolated a
 	stubPage();
 	const spies = spyFederation();
 	registerAndMapApps([entry('acme.e4', { isolated: true })]);
-	resetRemote('acme_e4');
+	(resetRemote as unknown as (a: string, m: string) => void)('acme.e4', 'acme_e4');
 	assert.equal(fallbackSkippedRemote('acme.e4'), false);
 	assert.deepEqual(spies.registered, []);
 });

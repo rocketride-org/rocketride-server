@@ -91,7 +91,7 @@ test('G4r2 a name claimed before its first-party owner is mapped does not block 
 	registerAndMapApps([entry('rocketride.gated', { firstParty: true })]);
 	assert.equal(repoint('rocketride.gated', 'rocketride_gated', versionedEntryUrl('rocketride.gated', 5)), true, 'repoint');
 	const before = spies.registered.length;
-	resetRemote('rocketride_gated');
+	(resetRemote as unknown as (a: string, m: string) => void)('rocketride.gated', 'rocketride_gated');
 	assert.equal(spies.registered.length, before + 1, 'reset');
 	registerDevRemote('rocketride.gated', 'rocketride_gated', 'Dev', 'http://localhost:3000/remoteEntry.js');
 	assert.equal(isDevRemote('rocketride_gated'), true, 'dev registration');
