@@ -612,7 +612,18 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					// attached signed out, or after a logout, never adopts one.
 					// The session token must be the one the realm was attached under (a same-tab switch to
 					// another user's token is refused before any account info could be adopted, DA r2 item 2).
-					if (cm.loadToken() !== st.attachToken) return onRefuse(deny('capability', name));
+					if (cm.loadToken() !== st.attachToken) {
+						// The request that found it is refused; then the realm is detached (its frame shows the
+						// Reload tile) rather than refusing every op forever (security LOW-6). After the response:
+						// a macrotask, so the refusal is posted before the lane goes. The ledger is only cleared:
+						// its runs belong to the earlier session (idle ttl ends them, as at logout).
+						setTimeout(() => {
+							st.ledger.clear();
+							st.pending.clear();
+							detachRealm(st, false);
+						}, 0);
+						return onRefuse(deny('capability', name));
+					}
 					if (st.userId === undefined && st.adoptUser && user !== undefined && st.logouts === logouts) st.userId = user;
 					if (user === undefined || st.userId === undefined || user !== st.userId) return onRefuse(deny('capability', name));
 				}
