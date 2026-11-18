@@ -65,8 +65,10 @@ config and the tsc are the platform's, every auto-loaded postcss/babel
 config is neutralized, .env files keep only PUBLIC_ entries, and the
 bundler refuses any loader outside the platform toolchain and any module
 outside the job directory or the toolchain. What the type checker can still
-READ while it compiles is bounded only by the process sandbox (an infra
-concern, not this module); the typecheck runs with incremental and
+READ while it compiles is bounded by app_build_sandbox: hosted engines
+require a job-only filesystem and a read-only toolchain, without network
+access, and fail closed when that boundary is unavailable. The typecheck
+runs with incremental and
 composite off and tsBuildInfoFile reset, so tsconfig cannot make it write
 build-info files (and a configured tsBuildInfoFile is not a TS5069 error on
 typescript < 5.6).
@@ -89,6 +91,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rocketlib import debug, error
 
 from ai.account.deployment_backend import artifact_content_dir
+from ai.account import app_build_sandbox
 
 # =============================================================================
 # CONFIGURATION — env knobs, phase timeouts, toolchain pins
@@ -431,6 +434,7 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
             *argv,
             cwd=cwd,
             env=_build_env(),
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=_SUBPROCESS_BUFFER,
@@ -469,6 +473,17 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
         _kill_tree(proc)
         raise
     return int(proc.returncode or 0), _truncated(''.join(chunks))
+
+
+async def _exec_compiler(
+    argv: List[str], cwd: str, timeout: int, job_dir: str, env_dir: str, on_line: Any = None
+) -> Tuple[int, str]:
+    """Compile inside the filesystem boundary, failing closed when required."""
+    try:
+        isolated = app_build_sandbox.command(argv, cwd, job_dir, env_dir)
+    except app_build_sandbox.SandboxUnavailable as exc:
+        raise BuildInfraFailure('sandbox', str(exc)) from exc
+    return await _exec(isolated, cwd, timeout, on_line=on_line)
 
 
 # =============================================================================
@@ -974,10 +989,15 @@ def _resolved_request_allowed(request: str, module_roots: Tuple[str, ...], loade
             break
     if rest.startswith('data:'):
         return True  # an inline data: module (its body may contain '!')
-    segments = rest.split('!')
-    if any(not segment for segment in segments):
+    # A data URI body can contain literal '!'. Split only its loader prefix,
+    # otherwise platform-generated Module Federation data modules are rejected.
+    data_at = rest.find('!data:')
+    if data_at != -1:
+        loaders, resource = rest[:data_at].split('!'), rest[data_at + 1 :]
+    else:
+        *loaders, resource = rest.split('!')
+    if not resource or any(not loader for loader in loaders):
         return False
-    *loaders, resource = segments
     for loader in loaders:
         if not _loader_options_allowed(loader):
             return False
@@ -1016,9 +1036,10 @@ function rrRequestAllowed(request) {
     if (rest.startsWith(prefix)) { rest = rest.slice(prefix.length); break; }
   }
   if (rest.startsWith('data:')) return true;
-  const segments = rest.split('!');
-  if (segments.some((segment) => !segment)) return false;
-  const resource = segments.pop();
+  const dataAt = rest.indexOf('!data:');
+  const segments = (dataAt === -1 ? rest : rest.slice(0, dataAt)).split('!');
+  const resource = dataAt === -1 ? segments.pop() : rest.slice(dataAt + 1);
+  if (!resource || segments.some((segment) => !segment)) return false;
   for (const loader of segments) {
     const q = loader.indexOf('?');
     if (q !== -1 && !(loader.startsWith('??', q) && loader.indexOf('#', q) === -1)) return false;
@@ -1944,10 +1965,12 @@ class AppBuildWorker:
                 '-p',
                 tsconfig,
             ]
-            code, out = await _exec(
+            code, out = await _exec_compiler(
                 [node, tsc, *tsc_args],
                 app_dir,
                 _PHASE_TIMEOUTS['typecheck'],
+                job_dir,
+                env_dir,
                 on_line=feed.line,
             )
             await feed.flush()
@@ -1962,8 +1985,13 @@ class AppBuildWorker:
         if not rsbuild:
             raise BuildInfraFailure('bundle', 'baked rsbuild missing from the toolchain env')
         await feed.set_phase('bundle')
-        code, out = await _exec(
-            [node, rsbuild, 'build', '--config', config_path], app_dir, _PHASE_TIMEOUTS['bundle'], on_line=feed.line
+        code, out = await _exec_compiler(
+            [node, rsbuild, 'build', '--config', config_path],
+            app_dir,
+            _PHASE_TIMEOUTS['bundle'],
+            job_dir,
+            env_dir,
+            on_line=feed.line,
         )
         await feed.flush()
         log_parts.append(f'== bundle ==\n$ node {rsbuild} build --config {config_path}\n{out}')

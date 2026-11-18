@@ -1127,6 +1127,8 @@ def _guard_cases(job, env):
         (f'{app_css}.webpack[javascript/auto]!=!{loader}!{app_css}', True),  # matchResource shape
         ('builtin:swc-loader??x!' + app_ts, True),  # builtin loader
         ('data:text/javascript,export default 1', True),
+        ('builtin:swc-loader??rule1!data:text/javascript,if(!a){b()}', True),
+        (f'{os.path.join(job, "evil.cjs")}!data:text/javascript,if(!a){{b()}}', False),
         ('data:text/javascript,if(!a){b()}', True),  # an inline runtime module whose body has '!'
         (os.path.join(job, 'node_modules', 'x-loader', 'i.js') + '!' + app_ts, True),  # toolchain copy fallback
         (f'!!{tree_loader}!{app_ts}', False),  # a loader file from the developer tree
