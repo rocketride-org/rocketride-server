@@ -90,6 +90,22 @@ function isEngineChatPage(url: URL): boolean {
 }
 
 /**
+ * The isolated apps' host suffix from `RR_APP_ORIGIN_TEMPLATE` (`apps.example`
+ * for `https://{label}.apps.example`), or '' when there is none.
+ *
+ * @param template - The origin template, if isolation is on.
+ */
+function appSuffixOf(template: string | null | undefined): string {
+	if (!template || !template.includes('{label}')) return '';
+	try {
+		const host = new URL(template.replace('{label}', 'x')).hostname.toLowerCase().replace(/\.+$/, '');
+		return host.startsWith('x.') ? host.slice(2) : '';
+	} catch {
+		return '';
+	}
+}
+
+/**
  * Decide whether a `webview:` document may frame a URL.
  *
  * Only absolute http(s) URLs without credentials are considered (relative and
@@ -109,9 +125,10 @@ function isEngineChatPage(url: URL): boolean {
  *
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
+ * @param appOriginTemplate - `getIsolation()?.originTemplate`: hosts under its suffix are refused (#1022, E7).
  * @returns True when the URL may be framed.
  */
-export function isAllowedWebviewUrl(raw: string, shellOrigin: string): boolean {
+export function isAllowedWebviewUrl(raw: string, shellOrigin: string, appOriginTemplate?: string | null): boolean {
 	let url: URL;
 	try {
 		url = new URL(raw);
@@ -120,6 +137,12 @@ export function isAllowedWebviewUrl(raw: string, shellOrigin: string): boolean {
 	}
 	const target = endpointOf(url);
 	if (!target || url.username || url.password) return false;
+	// E7 (#1022): never a host under the isolated apps' origin suffix.
+	const suffix = appSuffixOf(appOriginTemplate);
+	if (suffix) {
+		const host = url.hostname.toLowerCase().replace(/\.+$/, '');
+		if (host === suffix || host.endsWith(`.${suffix}`)) return false;
+	}
 
 	let shell: Endpoint | null = null;
 	try {

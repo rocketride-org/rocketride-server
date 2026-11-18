@@ -48,7 +48,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs } from 'shell';
+import { useShellConnection, ConnectionManager, createMirroredPrefsStore, scopedPrefs, getIsolation } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
 import { AppBuilderScreen } from 'shared/tools/appdev/views';
 import type { AppSummary } from 'shared/tools/appdev';
@@ -58,6 +58,7 @@ import type { StoredApp } from './session/appStore';
 import { createWebAppBuilderHost } from './session/webHost';
 import { createDevPreviewPage } from './session/devPreviewPage';
 import { WebDevSession } from './session/devSession';
+import { previewAllowed } from './isolationGate';
 
 // =============================================================================
 // STYLES
@@ -194,6 +195,9 @@ const AppBuilderProvider: React.FC<{
 	}, [client, storedFolder, storedName, appId]);
 
 	// ── Preview state ────────────────────────────────────────────────────
+	// E6 (#1022): under app isolation only a first-party app may run in this
+	// origin, so no preview frame and no token posts for any other id.
+	const allowed = previewAllowed(appId, getIsolation());
 	const [reloadSeq, setReloadSeq] = useState(0);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	const debugWindowRef = useRef<Window | null>(null);
@@ -238,10 +242,11 @@ const AppBuilderProvider: React.FC<{
 			authAnswerMountedRef.current = true;
 			return;
 		}
+		if (!allowed) return;
 		const token = previewSessionToken();
 		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, window.location.origin);
 		debugWindowRef.current?.postMessage({ type: 'rrdev:auth', token }, window.location.origin);
-	}, [inheritAuth, previewToken, previewSessionToken]);
+	}, [inheritAuth, previewToken, previewSessionToken, allowed]);
 
 	// The preview page is AUTHORED by this builder (blob transport, injected
 	// __rrDevBoot — see devPreviewPage.ts); the legacy ?appid&rrdev=1 URL is
@@ -251,6 +256,7 @@ const AppBuilderProvider: React.FC<{
 	const legacyUrl = `${window.location.origin}/?appid=${encodeURIComponent(appId)}&rrdev=1`;
 	const [liveUrl, setLiveUrl] = useState<string | null>(null);
 	useEffect(() => {
+		if (!allowed) return;
 		let cancelled = false;
 		let revoke: (() => void) | null = null;
 		void createDevPreviewPage(appId)
@@ -270,14 +276,14 @@ const AppBuilderProvider: React.FC<{
 			revoke?.();
 			setLiveUrl(null);
 		};
-	}, [appId, legacyUrl]);
+	}, [appId, legacyUrl, allowed]);
 
 	// ── Preview handshake + feed routing ─────────────────────────────────
 	// The embedded (or debug-tab) dev shell posts shell:devReady, waits for
 	// rrdev:auth (its token store is frame-local in-memory), then the
 	// session adopts it as the injection target.
 	useEffect(() => {
-		if (!session) return;
+		if (!session || !allowed) return;
 		const handler = (e: MessageEvent): void => {
 			const fromIframe = iframeRef.current?.contentWindow && e.source === iframeRef.current.contentWindow;
 			const fromDebug = debugWindowRef.current && e.source === debugWindowRef.current;
@@ -303,7 +309,7 @@ const AppBuilderProvider: React.FC<{
 		};
 		window.addEventListener('message', handler);
 		return () => window.removeEventListener('message', handler);
-	}, [session]);
+	}, [session, allowed]);
 
 	// ── Server build feed -> Console pane ────────────────────────────────
 	useEffect(() => {
@@ -395,6 +401,7 @@ const AppBuilderProvider: React.FC<{
 
 	// ── Render ───────────────────────────────────────────────────────────
 	if (!isConnected) return <div style={styles.root}><div style={styles.loading}>Connect to a server to open the App Builder.</div></div>;
+	if (!allowed) return <div style={styles.root}><div style={styles.loading}>&quot;{appId}&quot; runs in its own isolated origin, so it cannot be previewed here.</div></div>;
 	if (stored === null) return <div style={styles.root}><div style={styles.loading}>No working copy for &quot;{appId}&quot; in your store.</div></div>;
 	if (stored === undefined || !host || !app || !liveUrl) return <div style={styles.root}><div style={styles.loading}>Loading app&hellip;</div></div>;
 

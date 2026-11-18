@@ -30,6 +30,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
+import { getIsolation } from 'shell';
 import { isAllowedWebviewUrl } from './webviewUrl';
 
 // =============================================================================
@@ -75,7 +76,8 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 
 	// Same-authority pages (anything on the shell origin but the engine's chat
 	// and dropper pages) and non-web schemes are never framed (#1022).
-	if (!url || !isAllowedWebviewUrl(url, window.location.origin)) {
+	// Nor any isolated app's origin (E7, #1022): a webview frame is not the app frame.
+	if (!url || !isAllowedWebviewUrl(url, window.location.origin, getIsolation()?.originTemplate)) {
 		return <div>Invalid webview URI: {uri}</div>;
 	}
 
