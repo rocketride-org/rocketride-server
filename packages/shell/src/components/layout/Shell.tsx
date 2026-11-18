@@ -866,11 +866,14 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		// Isolated apps end their runs while the session token is still valid,
 		// then their origins' storage is cleared (#1022, plan 4.7). The final
 		// teardown keeps the root sealed through the clear: nothing new starts.
-		// try/finally: a failing teardown or clear never skips the logout or
-		// leaves the logout flag set.
+		// Nested try/finally: a failing teardown still runs the logout clear,
+		// and neither failing skips the logout or leaves the logout flag set.
 		try {
-			await appRootRef.current?.teardownAll(3000, { final: true });
-			if (appRootRef.current) await runLogoutClear();
+			try {
+				await appRootRef.current?.teardownAll(3000, { final: true });
+			} finally {
+				if (appRootRef.current) await runLogoutClear();
+			}
 		} finally {
 			setIdentity(null);
 			// Clear the pending-sign-in flag so HomeApp doesn't get stuck on

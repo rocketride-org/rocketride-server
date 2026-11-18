@@ -97,3 +97,15 @@ test('final: both logout handlers run the teardown and the logout clear inside t
 		assert.match(tail, /loggingOutRef\.current\s*=\s*false/, `${name}: the logout flag is cleared in the finally path`);
 	}
 });
+
+test('final: in handleLogout a throwing teardown still runs the logout clear (nested try/finally), and the logout stays last in the outer finally', () => {
+	const body = handler('handleLogout');
+	const teardownAt = body.search(/teardownAll\(/);
+	const clearAt = body.search(/runLogoutClear\(/);
+	const innerFinally = body.slice(teardownAt).search(/\}\s*finally\s*\{/) + teardownAt;
+	assert.ok(innerFinally > teardownAt && clearAt > innerFinally, 'runLogoutClear runs in the finally of the try that holds teardownAll');
+	const outerFinally = body.slice(clearAt).search(/\}\s*finally\s*\{/) + clearAt;
+	assert.ok(outerFinally > clearAt, 'an outer finally follows the logout clear');
+	const logouts = [...body.matchAll(/cm\.logout\(\)/g)].map((m) => m.index!);
+	assert.ok(logouts.length > 0 && logouts.every((at) => at > outerFinally), 'every cm.logout() is in the outer finally, after the clear');
+});
