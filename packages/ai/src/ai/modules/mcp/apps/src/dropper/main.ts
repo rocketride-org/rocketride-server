@@ -164,13 +164,17 @@ function renderResults(data: DataResult): void {
 		el('p', undefined, `${data.objectsCompleted}/${data.objectsRequested} objects processed`),
 	);
 
-	// Failed objects carry a formatted exception instead of a pipe result.
+	// Failed objects carry a formatted exception ({status, error: {message, file, lineno}})
+	// instead of a pipe result: show its message, and keep the whole object in the console.
 	for (const [objectKey, objectValue] of Object.entries(data.objects ?? {})) {
-		const status = (objectValue as Record<string, unknown> | null)?.status;
-		if (status !== 'OK') {
+		const record = objectValue as Record<string, unknown> | null;
+		if (record?.status !== 'OK') {
+			const error = record?.error as Record<string, unknown> | undefined;
+			const detail = typeof error?.message === 'string' && error.message ? error.message : 'This file could not be processed.';
+			console.error('object failed', objectKey, objectValue);
 			const card = el('div', 'result-object error');
 			card.appendChild(el('h3', undefined, `${objectKey} — failed`));
-			card.appendChild(el('pre', undefined, JSON.stringify(objectValue, null, 2)));
+			card.appendChild(el('p', 'rr-message', detail));
 			wrap.appendChild(card);
 		}
 	}
