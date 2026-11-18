@@ -386,6 +386,14 @@ export interface IAppBuilderHost {
 	getPref?: (key: string) => unknown;
 	/** Persist an App Builder UI preference to per-workspace storage. */
 	setPref?: (key: string, value: unknown) => void;
+	/**
+	 * Hears every change to the App Builder UI prefs, from this screen or from any other writer of the
+	 * app's partition; getPref has the new values. Hosts without live prefs leave it out, and the screen
+	 * reads its prefs once.
+	 *
+	 * @returns The unsubscribe.
+	 */
+	subscribePrefs?: (listener: () => void) => () => void;
 
 	// ── Deploy ───────────────────────────────────────────────────────────
 	/** List deployed immutable versions, newest first. */

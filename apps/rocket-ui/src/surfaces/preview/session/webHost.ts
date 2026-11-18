@@ -126,6 +126,7 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 		// synchronous off the mirror, as getPref's contract requires.
 		getPref: (key: string) => prefs.get(key),
 		setPref: (key: string, value: unknown) => prefs.set(key, value),
+		subscribePrefs: (listener: () => void) => prefs.subscribe(listener),
 
 		// ── Deploy — the one SDK member that stays host-specific here:
 		// DEPLOY = pack the STORE-VFS source, upload bytes; the server builds

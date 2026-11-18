@@ -55,8 +55,8 @@ import type { AppBuilderStage, AppSummary, IAppBuilderHost } from '../../types';
 // TYPES
 // =============================================================================
 
-/** The prefs key holding the active activity view. */
-const STAGE_PREF_KEY = 'stage';
+/** The prefs key holding the active activity view; the agent's show_view writes it too. */
+export const STAGE_PREF_KEY = 'stage';
 
 /**
  * Maps a persisted stage to the CURRENT vocabulary, defaulting to the landing
@@ -128,6 +128,14 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	// Builder UI pref, read synchronously off the host's prefs partition.
 	// Both hosts used to carry identical stage plumbing of their own.
 	const [stage, setStage] = useState<AppBuilderStage>(() => normalizeStage(host.getPref?.(STAGE_PREF_KEY)));
+	// The stage follows its pref live, so a write from outside this screen (the agent showing Design) moves
+	// an open builder too. The first read catches a write that landed between render and subscribe.
+	// Hosts without live prefs (VS Code) read it once more here and never again.
+	useEffect(() => {
+		const follow = (): void => setStage(normalizeStage(host.getPref?.(STAGE_PREF_KEY)));
+		follow();
+		return host.subscribePrefs?.(follow);
+	}, [host]);
 
 	// ── Namespace gate ───────────────────────────────────────────────────
 	// The app id's prefix must match the org's developerId to publish. On a
