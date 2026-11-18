@@ -357,11 +357,15 @@ class TaskConn(
         """
         # Central event gate includes direct account/org pushes and future
         # notification paths, in addition to the monitor/debugger entry gates.
-        # Error/auth responses still reach a temporarily gated client. Revoke
-        # notices carry the bare identity after authority has been dropped.
+        # Error/auth responses still reach a temporarily gated client. A
+        # prepared event queued before deauth/revocation must not get through
+        # merely because the connection is no longer a recheck subject.
         authz = getattr(self._server, '_authz', None)
-        if message.get('type') == 'event' and authz is not None and not authz.gate_ok(self):
-            return
+        if message.get('type') == 'event':
+            if getattr(self, '_revoked', False) or not self._authenticated:
+                return
+            if authz is not None and not authz.gate_ok(self):
+                return
         # Increment outbound message counter for dashboard metrics
         self._messages_out += 1
         # Update last activity timestamp so idle-time tracking stays accurate
@@ -580,15 +584,14 @@ class TaskConn(
         it) and was not revoked already. Otherwise, with no await before the
         effect: marks the connection revoked, records the user for the
         disconnect handler, and drops its authority (``_drop_authority``).
-        Then tells the client its new identity (``pushed`` when the caller
-        rebuilt one, else the bare identity) and disconnects. The disconnect
+        Then tells the client only the bare revoked identity and disconnects. The disconnect
         cleanup commits open write handles and ends tasks this connection
         launched, as for any disconnect.
 
         Args:
             expected_info: The identity the caller decided on.
             reason: Why, for the log line.
-            pushed: The rebuilt (narrower) identity, if the caller has one.
+            pushed: Accepted for caller compatibility; never sent after revocation.
         """
         if self.revoke_authority(expected_info, reason):
             await self.send_revoke_notice(pushed)
@@ -627,8 +630,12 @@ class TaskConn(
         reading cannot hold the caller; the disconnect always happens.
         """
         try:
-            body = (pushed if pushed is not None else self._account_info).to_push_result()
-            await asyncio.wait_for(self.send_event('apaext_account', body=body), NOTICE_SEND_TIMEOUT)
+            # The sole exception to the outbound event gate is constructed
+            # here, always bare. A previously rebuilt identity may still
+            # contain apps, credits or organization data after key revocation.
+            body = AccountInfo(waitlisted=True).to_push_result()
+            message = self.build_event('apaext_account', body=body)
+            await asyncio.wait_for(super().send(message), NOTICE_SEND_TIMEOUT)
         except Exception as e:
             debug(f'[AUTHZ] revoke notice failed for conn {self.get_connection_id()}: {e!r}')
         finally:
