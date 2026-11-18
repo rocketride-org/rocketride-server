@@ -66,6 +66,8 @@ const isTurn = (question: Question): boolean => question.messages.length > 0;
 const TEAM_A_SESSION = '11111111-1111-4111-8111-111111111111';
 const OLD_SESSION = '22222222-2222-4222-8222-222222222222';
 const SAVED_SESSION = '55555555-5555-4555-8555-555555555555';
+const MODEL_SESSION = '66666666-6666-4666-8666-666666666666';
+const OPEN_SESSION = '77777777-7777-4777-8777-777777777777';
 
 /** Where a conversation is saved. */
 const sessionPath = (sessionId: string): string => `.agents/agent.test/${sessionId}.json`;
@@ -303,6 +305,46 @@ test("Undo on the latest turn's card outlives a refused message, puts the file b
 	assert.equal(closingRows(session, chat)[0].card?.actions, undefined, 'one level: Undo is gone');
 });
 
+test('a running turn belongs to the conversation: a second look-up gets the same session and chat mid-turn, a waiting card can still be answered, and only the chat closing stops the turn', async () => {
+	const written = store(scripted([planReply(['delete_file', { path: 'a.txt' }]), doneReply('Deleted a.txt.'), planReply(['delete_file', { path: 'b.txt' }])]));
+	const { backend, vfs } = workspace({ 'a.txt': 'alpha', 'b.txt': 'beta' });
+	let close = (): void => undefined;
+	setAgentHost({ ...hostOver(vfs), onChatClosed: (_id, closed) => ((close = closed), () => undefined) });
+	const saved = (): AgentSessionFile | undefined => written.get(sessionPath(OPEN_SESSION)) as AgentSessionFile | undefined;
+	const session = await AgentSession.getSession(OPEN_SESSION);
+	// step: the chat the first tab's useChatMessages makes, which the conversation adopts
+	const chat = new TurnController({ initialMessages: session.messages, request: () => session.request, now: () => '12:00', stopGraceMs: 0 });
+	session.adopt(chat);
+	chat.send('Delete a.txt.');
+	await until(() => chat.snapshot().asks.length === 1);
+	// step: a tab drawn again mid-turn looks the conversation up and gets the same running chat
+	assert.equal(await AgentSession.getSession(OPEN_SESSION), session);
+	assert.equal(AgentSession.loaded(OPEN_SESSION), session);
+	session.adopt(new TurnController({ request: () => session.request }));
+	assert.equal(session.chat, chat);
+	assert.equal(chat.snapshot().phase, 'running');
+	chat.answerAsk(chat.snapshot().asks[0].id, 'approve');
+	await until(() => chat.snapshot().phase === 'idle' && closingRows(session, chat).length === 1);
+	assert.equal(backend.files.has('a.txt'), false);
+	await until(() => saved()?.messages.at(-1)?.text === 'Deleted a.txt.');
+	// step: the host's close: the last tab closed while a card waits and a message is queued
+	chat.send('Delete b.txt.');
+	await until(() => chat.snapshot().asks.length === 1);
+	chat.send('Then c.txt.');
+	close();
+	assert.equal(AgentSession.loaded(OPEN_SESSION), null);
+	// step: a reopen right away reads the file once the closed chat's last saves land
+	const reopened = await AgentSession.getSession(OPEN_SESSION);
+	assert.notEqual(reopened, session);
+	assert.ok(reopened.messages.at(-1)?.text.startsWith('Stopped by you: the Agent tab closed.'), reopened.messages.at(-1)?.text);
+	assert.ok(!reopened.messages.some((m) => m.queued), 'a row was saved still queued');
+	assert.deepEqual(
+		reopened.messages.map((m) => m.text),
+		saved()?.messages.map((m) => m.text)
+	);
+	assert.equal(backend.files.get('b.txt'), 'beta');
+});
+
 /** The agent's file tools over a view, as one run has them, and their Undo record. A delete's approval is the loop's; these let it through. */
 function agentTools(vfs: StagedFileSystem): { record: UndoRecord; tool: (name: string, args: Record<string, unknown>) => Promise<string> } {
 	const files = new FilesystemTools(vfs);
@@ -496,10 +538,10 @@ test("a conversation keeps its model: a turn asks it, it is saved with it, and a
 	const openai = { provider: 'openai', model: 'openai-5-4' } as const;
 	const opus = { provider: 'anthropic', model: 'claude-opus-5' } as const;
 	const engine = keyedEngine({ now: 'good' }, ['ROCKETRIDE_OPENAI_KEY'], [doneReply('Answered.')]);
-	const written = store(engine, [{ version: 2, sessionId: SAVED_SESSION, title: 'Old save', date: 1, contextRefs: [], messages: [], scopeKey: 'team-a', model: openai }]);
+	const written = store(engine, [{ version: 2, sessionId: MODEL_SESSION, title: 'Old save', date: 1, contextRefs: [], messages: [], scopeKey: 'team-a', model: openai }]);
 	let last = { ...DEFAULT_MODEL };
 	setAgentHost({ ...hostOver(workspace({}).vfs), lastModel: { read: () => last, write: (choice) => void (last = choice as typeof last) } });
-	const stored = await AgentSession.getSession(SAVED_SESSION);
+	const stored = await AgentSession.getSession(MODEL_SESSION);
 	// step: a pick in one conversation is what the next new one starts from, and nothing else
 	AgentSession.newSession().setModel(opus);
 	assert.deepEqual(stored.model, openai);
@@ -509,10 +551,10 @@ test("a conversation keeps its model: a turn asks it, it is saved with it, and a
 	const [pipeline] = engine.started as Array<{ components: Array<{ provider: string; config: { profile?: string } }> }>;
 	assert.deepEqual({ node: pipeline.components[1].provider, profile: pipeline.components[1].config.profile, asked: ended.model }, { node: 'llm_openai', profile: 'openai-5-4', asked: 'openai-5-4' });
 	await stored.save(stored.messages);
-	assert.deepEqual((await AgentSession.getSession(SAVED_SESSION)).model, openai);
+	assert.deepEqual((written.get(sessionPath(MODEL_SESSION)) as AgentSessionFile).model, openai);
 	// step: a stored conversation saves its own pick at once
 	stored.setModel(opus);
-	await until(() => (written.get(sessionPath(SAVED_SESSION)) as AgentSessionFile).model?.model === opus.model);
+	await until(() => (written.get(sessionPath(MODEL_SESSION)) as AgentSessionFile).model?.model === opus.model);
 });
 
 // =============================================================================

@@ -282,6 +282,18 @@ export interface AgentHost {
 	 */
 	watchFor?(conversationId: string): AgentWatchPlace;
 	/**
+	 * Calls `closed` once, when a conversation's chat is really gone: the last tab of it closed (by the
+	 * user, or by deleting the conversation), or this team's editor area was torn down (a team switch,
+	 * signing out). A tab drawn again by a layout change, a moved tab, or a second tab of the same
+	 * conversation is not a close. The agent's session stops a running turn on it and lets the
+	 * conversation go. Hosts without editors leave it out; a session there lives until the page goes.
+	 *
+	 * @param conversationId - The conversation (its tab is the static doc `tool:agent/<id>`).
+	 * @param closed - Called at most once. Called at once when the chat is already gone.
+	 * @returns Stops listening.
+	 */
+	onChatClosed?(conversationId: string, closed: () => void): () => void;
+	/**
 	 * The user's approval mode and grants, live. Without it a run asks for
 	 * everything the approval list rates as asking, nothing is always allowed,
 	 * and the chat shows no mode switch.
