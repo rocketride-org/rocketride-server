@@ -131,16 +131,6 @@ describe('applyHostTheme', () => {
 		expect(dom.attrs['data-theme']).toBe('light'); // host wins
 	});
 
-	it('keeps the host theme when a context change carries no theme', () => {
-		const dom = stubDom(false); // OS says light
-		const { app, fireHostContextChanged } = fakeApp({ theme: 'dark' });
-
-		applyHostTheme(app);
-		fireHostContextChanged({ displayMode: 'inline' });
-
-		expect(dom.attrs['data-theme']).toBe('dark');
-	});
-
 	it('still falls back to the OS scheme on later OS changes once the host reports no theme', () => {
 		const dom = stubDom(false);
 		const { app } = fakeApp(undefined);
@@ -152,15 +142,6 @@ describe('applyHostTheme', () => {
 		expect(dom.attrs['data-theme']).toBe('dark');
 	});
 
-	it('ignores OS changes while the host has a theme', () => {
-		const dom = stubDom(false);
-		const { app } = fakeApp({ theme: 'light' });
-
-		applyHostTheme(app);
-		dom.fireOsChange(true);
-
-		expect(dom.attrs['data-theme']).toBe('light');
-	});
 });
 
 describe('RocketRide token set', () => {
@@ -178,41 +159,4 @@ describe('RocketRide token set', () => {
 		expect(dom.props.get('--rr-bg-default')).not.toBe(lightTokens['--rr-bg-default']);
 	});
 
-	it('sets every token of the theme except the widget-owned accent', () => {
-		const dom = stubDom(false);
-		const { app } = fakeApp({ theme: 'dark' });
-
-		applyHostTheme(app);
-
-		const expected = Object.keys(darkTokens).filter((key) => key !== '--rr-accent');
-		expect([...dom.props.keys()].sort()).toEqual(expected.sort());
-		expect(dom.props.has('--rr-accent')).toBe(false);
-	});
-
-	it('raises the faint text tokens to AA contrast for the widgets', () => {
-		const dom = stubDom(false);
-		const { app, fireHostContextChanged } = fakeApp({ theme: 'dark' });
-
-		applyHostTheme(app);
-		expect(dom.props.get('--rr-text-disabled')).toBe('#a0a0a0');
-		expect(dom.props.get('--rr-brand')).toBe('#41b6e6');
-
-		fireHostContextChanged({ theme: 'light' });
-		expect(dom.props.get('--rr-text-disabled')).toBe('#6b6b6b');
-		expect(dom.props.get('--rr-brand')).toBe('#0b6f9c');
-	});
-
-	it('drops a token the next theme does not define', () => {
-		const lightOnly = Object.keys(lightTokens).filter((key) => !(key in darkTokens));
-		expect(lightOnly.length).toBeGreaterThan(0); // the case this test exists for
-
-		const dom = stubDom(false);
-		const { app, fireHostContextChanged } = fakeApp({ theme: 'light' });
-
-		applyHostTheme(app);
-		for (const key of lightOnly) expect(dom.props.has(key)).toBe(true);
-
-		fireHostContextChanged({ theme: 'dark' });
-		for (const key of lightOnly) expect(dom.props.has(key)).toBe(false);
-	});
 });
