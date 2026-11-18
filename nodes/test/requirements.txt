@@ -35,4 +35,4 @@ langchain-core              # agent_langchain, agent_deepagent: test_tool_builde
 astrapy                     # store_astra: test_active_paths.py
 pymilvus                    # store_milvus: test_store_milvus_live.py
 langchain-text-splitters    # summarization: test_summarization.py
-luxor-ai==1.5.2             # tool_tenki: test_tool_tenki_sdk.py, at the node's pin (its requirements.txt)
+luxor-ai                    # tool_tenki: test_tool_tenki_sdk.py; the engine constraints pin it
