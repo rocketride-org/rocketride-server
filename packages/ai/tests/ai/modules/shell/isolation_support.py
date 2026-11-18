@@ -71,6 +71,24 @@ TEMPLATE = 'https://{label}.apps.example'
 LOCAL_TEMPLATE = 'http://{label}.apps.localhost:8765'
 SHELL_ORIGIN = 'https://app.example'
 
+# The chunk files of the fixture runtime.json (PR2b), with bodies the tests can compare byte for byte.
+GUEST_CHUNK_BODIES = {
+    'guest-chunk.1a2b3c.js': b'/* chunk js */',
+    'guest-style.4d5e6f.css': b'.a{color:red}',
+    'guest-font.7a8b9c.woff2': b'wOF2-bytes',
+    'guest-font.7a8b9c.woff': b'wOFF-bytes',
+    'guest-logo.0a1b2c.svg': b'<svg xmlns="http://www.w3.org/2000/svg"/>',
+    'guest-image.3d4e5f.png': b'\x89PNG-bytes',
+}
+GUEST_CHUNK_TYPES = {
+    'js': 'text/javascript',
+    'css': 'text/css',
+    'woff2': 'font/woff2',
+    'woff': 'font/woff',
+    'svg': 'image/svg+xml',
+    'png': 'image/png',
+}
+
 CAPABILITIES_STUB = {
     'v': 1,
     'rows': [
@@ -156,6 +174,7 @@ def valid_env(**overrides: Optional[str]) -> Dict[str, str]:
         'RR_APP_ISOLATION': 'enforce',
         'RR_APP_ORIGIN_TEMPLATE': TEMPLATE,
         'RR_APP_FRAME_TOKEN_KEYS': key_entry('k1', new_key()),
+        'RR_APP_ALIAS_KEY': b64u(new_key()),  # PR2b: required when not off, ignored by earlier code
         'RR_SHELL_ORIGINS': SHELL_ORIGIN,
     }
     for name, value in overrides.items():
@@ -171,6 +190,7 @@ ISOLATION_VARS = (
     'RR_APP_ISOLATION_APPS',
     'RR_APP_ORIGIN_TEMPLATE',
     'RR_APP_FRAME_TOKEN_KEYS',
+    'RR_APP_ALIAS_KEY',
     'RR_SHELL_ORIGINS',
     'RR_APP_HOST_SOURCE',
     'RR_EDGE_SECRET',
@@ -223,6 +243,10 @@ def write_static_tree(root: Path, *, runtime: Any = True, caps: Any = True, fram
     if frame:
         (guest / 'frame.html').write_text((FIXTURES / 'frame.html').read_text())
         (guest / 'guest-test.js').write_text('/* guest runtime test stub */')
+        # PR2b: every chunk the marker lists exists beside the guest (flat directory)
+        if runtime is True:
+            for name, body in GUEST_CHUNK_BODIES.items():
+                (guest / name).write_bytes(body)
     return static
 
 
@@ -342,7 +366,7 @@ class FakeRegistry:
         return SimpleNamespace(
             userId=user_id,
             displayName='User',
-            organization={'id': member['org'], 'teams': [{'id': t} for t in member['teams']]},
+            organization={'id': member['org'], 'name': f'Org {member["org"]}', 'teams': [{'id': t} for t in member['teams']]},
             sysPermissions=[],
             auth='rr_user',
         )
@@ -681,3 +705,38 @@ async def manifest_pushed_account(apps: list, monkeypatch, shell_caps=()):
         if call.args[0] == 'apaext_account':
             return call.kwargs['body']
     raise AssertionError('no apaext_account push was sent')
+
+
+# ---------------------------------------------------------------------------
+# PR2b: sealing a token or ticket independently of the product code
+# ---------------------------------------------------------------------------
+
+_FRAME_KEY_INFO = b'rocketride/app-frame-token/aes-256-gcm/v1'
+
+
+def derived_aead_key(key: bytes) -> bytes:
+    """The documented HKDF-SHA256 derivation (no salt) of one configured token key."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_FRAME_KEY_INFO).derive(key)
+
+
+def seal_raw(key: bytes, kid: str, claims, aad_suffix: str = '') -> str:
+    """``v1.<kid>.<nonce>.<ct>`` with AAD ``v1.<kid>`` plus ``aad_suffix`` (``.csp`` for a ticket)."""
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = os.urandom(12)
+    plain = claims if isinstance(claims, bytes) else json.dumps(claims, separators=(',', ':')).encode()
+    sealed = AESGCM(derived_aead_key(key)).encrypt(nonce, plain, f'v1.{kid}{aad_suffix}'.encode())
+    return f'v1.{kid}.{b64u(nonce)}.{b64u(sealed)}'
+
+
+def open_raw(token: str, key: bytes, aad_suffix: str = '') -> dict:
+    """Decrypt a token or ticket with the documented key, AAD and layout."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    head, kid, nonce, sealed = token.split('.')
+    return json.loads(AESGCM(derived_aead_key(key)).decrypt(unb64u(nonce), unb64u(sealed), f'{head}.{kid}{aad_suffix}'.encode()))

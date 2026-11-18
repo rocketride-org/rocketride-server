@@ -586,3 +586,287 @@ def test_app_host_scripts_keep_their_type_when_the_os_maps_js_differently(served
     for resp in (served_app.get_bundle(), served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js')):
         assert resp.status_code == 200
         assert resp.headers['content-type'].startswith('text/javascript')
+
+
+# ===========================================================================
+# PR2b: T80 ticketed frame.html, T81 network on /_t and /_p, T82 Vary, T104 chunks
+# ===========================================================================
+
+NET = ['https://api.example.com', 'https://cdn.example.org:8443']
+
+
+def _ticket(served_app, network, *, app='acme.thirdparty', version=1):
+    ao = sup.load_module('ai.modules.shell.app_origin')
+    return sup.need(ao, 'mint_frame_ticket')(app, version, network, config=served_app.config)
+
+
+def _frame(served_app, ticket=None, *, host=None, extra=''):
+    query = f'?c={ticket}{extra}' if ticket is not None else ''
+    return served_app.get(f'/_rr/frame.html{query}', host=host)
+
+
+def _base_frame_csp(served_app):
+    return csp_directives(_frame(served_app).headers['content-security-policy'])
+
+
+def test_t80_a_ticketed_frame_widens_img_and_connect_src_to_the_network_only(served_app):
+    """T80: the version's approved origins join ``img-src`` and ``connect-src``; nothing else moves."""
+    base = _base_frame_csp(served_app)
+    resp = _frame(served_app, _ticket(served_app, NET))
+    assert resp.status_code == 200
+    csp = csp_directives(resp.headers['content-security-policy'])
+    assert csp['img-src'] == ["'self'", 'data:', 'blob:', *NET]
+    assert csp['connect-src'] == ["'self'", *NET]
+    for name, sources in base.items():
+        if name not in ('img-src', 'connect-src'):
+            assert csp[name] == sources, name
+    assert csp['frame-ancestors'] == [sup.SHELL_ORIGIN]
+    assert '*' not in resp.headers['content-security-policy']
+    assert meta_content(resp.text, 'rr-shell-origins') is not None
+
+
+def test_t80_a_ticketed_frame_is_never_cached(served_app):
+    """T80: ``no-store``, because the CSP depends on the query (B4 keys on it too)."""
+    assert _frame(served_app, _ticket(served_app, NET)).headers['cache-control'] == 'no-store'
+
+
+def test_t80_a_frame_without_a_ticket_is_unchanged(served_app):
+    """T80 control: no ticket, the base policy and ``no-cache``, as in PR1."""
+    resp = _frame(served_app)
+    assert resp.headers['cache-control'] == 'no-cache'
+    csp = csp_directives(resp.headers['content-security-policy'])
+    assert csp['connect-src'] == ["'self'"]
+    assert csp['img-src'] == ["'self'", 'data:', 'blob:']
+
+
+def test_t80_an_empty_network_ticket_is_the_base_policy(served_app):
+    """T80: a version with no network gets exactly the base CSP, still ``no-store`` (it IS a ticketed request)."""
+    resp = _frame(served_app, _ticket(served_app, []))
+    assert csp_directives(resp.headers['content-security-policy']) == _base_frame_csp(served_app)
+
+
+def _bad_tickets(served_app, clock):
+    ao = sup.load_module('ai.modules.shell.app_origin')
+    cfg = served_app.config
+    kid, key = cfg.token_keys[0]
+    now = int(clock.now)
+    good = _ticket(served_app, NET)
+    other_app = sup.need(ao, 'mint_frame_ticket')('acme.other', 1, NET, config=cfg)
+    frame_token = served_app.token()
+    forged_http = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': ['http://evil.example'], 'iat': now, 'exp': now + 900}, '.csp')
+    forged_wild = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': ['https://*.example.com', "'unsafe-eval'", 'https:'], 'iat': now, 'exp': now + 900}, '.csp')
+    forged_shell = sup.seal_raw(key, kid, {'a': 'acme.thirdparty', 'v': 1, 'n': [sup.SHELL_ORIGIN], 'iat': now, 'exp': now + 900}, '.csp')
+    flipped = good[:-3] + ('AAA' if not good.endswith('AAA') else 'BBB')
+    return {
+        'garbage': 'not-a-ticket',
+        'empty': '',
+        'other app': other_app,
+        'a frame token': frame_token,
+        'tampered': flipped,
+        'network over http': forged_http,
+        'wildcard network': forged_wild,
+        'the shell origin as network': forged_shell,
+    }
+
+
+def test_t80_a_bad_ticket_gets_the_base_policy(served_app, clock):
+    """T80: bad, foreign, forged or revalidated-away tickets never widen anything (and never fail the frame itself)."""
+    base = _base_frame_csp(served_app)
+    for name, ticket in _bad_tickets(served_app, clock).items():
+        resp = _frame(served_app, ticket)
+        assert resp.status_code == 200, name
+        assert csp_directives(resp.headers['content-security-policy']) == base, name
+        assert 'evil.example' not in resp.headers['content-security-policy'], name
+
+
+def test_t80_an_expired_ticket_gets_the_base_policy(served_app, clock):
+    """T80: expiry means the base CSP; a reload remints."""
+    ticket = _ticket(served_app, NET)
+    assert csp_directives(_frame(served_app, ticket).headers['content-security-policy'])['connect-src'] != ["'self'"]
+    clock.advance(901)
+    assert csp_directives(_frame(served_app, ticket).headers['content-security-policy']) == _base_frame_csp(served_app)
+
+
+def test_t80_the_ticket_only_counts_on_its_own_host(served_app):
+    """T80: label-bound: another app's host with this app's ticket is the base policy."""
+    other_host = app_host_of(label_for('acme.other'))
+    resp = _frame(served_app, _ticket(served_app, NET), host=other_host)
+    assert resp.status_code == 200
+    assert csp_directives(resp.headers['content-security-policy'])['connect-src'] == ["'self'"]
+
+
+def test_t80_the_query_is_read_strictly(served_app):
+    """T80: two ``c`` parameters, or a ticket on a non-frame route, never widen."""
+    good = _ticket(served_app, NET)
+    two = served_app.get(f'/_rr/frame.html?c=garbage&c={good}')
+    assert csp_directives(two.headers['content-security-policy'])['connect-src'] == ["'self'"]
+    guest = served_app.get(f'/_rr/guest-test.js?c={good}')
+    assert csp_directives(guest.headers['content-security-policy'])['connect-src'] == ["'self'"]
+
+
+def _add_net_app(served_app, app_id='acme.net', version=1, network=None, **kw):
+    served_app.registry.add(app_id, version, org='acme-org', network=NET if network is None else network, **kw)
+    return app_host_of(label_for(app_id))
+
+
+def test_t81_token_route_csp_carries_the_versions_network(served_app):
+    """T81: ``/_t/<token>/v<N>/`` documents and scripts get the version's network in ``img-src`` and ``connect-src``."""
+    host = _add_net_app(served_app)
+    resp = served_app.get_bundle(token=served_app.token(app='acme.net'), host=host)
+    assert resp.status_code == 200
+    csp = csp_directives(resp.headers['content-security-policy'])
+    assert csp['connect-src'] == ["'self'", *NET]
+    assert csp['img-src'] == ["'self'", 'data:', 'blob:', *NET]
+    assert 'frame-ancestors' not in csp
+    base = _base_frame_csp(served_app)
+    for name, sources in base.items():
+        if name not in ('img-src', 'connect-src', 'frame-ancestors'):
+            assert csp[name] == sources, name
+
+
+def test_t81_public_route_csp_carries_the_versions_network(served_app):
+    """T81: the anonymous ``/_p/`` route too."""
+    host = _add_net_app(served_app)
+    resp = served_app.get('/_p/acme.net/v1/remoteEntry.js', host=host)
+    assert resp.status_code == 200
+    assert csp_directives(resp.headers['content-security-policy'])['connect-src'] == ["'self'", *NET]
+
+
+def test_t81_html_from_a_dist_keeps_frame_ancestors_none_and_gets_the_network(served_app):
+    """T81: the document policy is the same plus ``frame-ancestors 'none'``."""
+    host = _add_net_app(served_app)
+    resp = served_app.get_bundle(token=served_app.token(app='acme.net'), file='index.html', host=host)
+    csp = csp_directives(resp.headers['content-security-policy'])
+    assert csp['frame-ancestors'] == ["'none'"]
+    assert csp['connect-src'] == ["'self'", *NET]
+
+
+def test_t81_each_version_has_its_own_network(served_app):
+    """T81: v1 and v2 of one app carry different lists; each response gets its own version's."""
+    host = _add_net_app(served_app, 'acme.multi', 1, ['https://one.example.com'])
+    served_app.registry.add('acme.multi', 2, org='acme-org', network=['https://two.example.com'])
+    token = served_app.token(app='acme.multi', version=1)
+    one = served_app.get_bundle(token=token, version=1, host=host)
+    assert csp_directives(one.headers['content-security-policy'])['connect-src'] == ["'self'", 'https://one.example.com']
+    token2 = served_app.token(app='acme.multi', version=2)
+    two = served_app.get_bundle(token=token2, version=2, host=host)
+    assert csp_directives(two.headers['content-security-policy'])['connect-src'] == ["'self'", 'https://two.example.com']
+
+
+def test_t81_a_version_without_network_and_a_404_stay_on_the_base_policy(served_app):
+    """T81 control: the default app has no network; a refused request carries no one's network."""
+    base = _base_frame_csp(served_app)
+    ok = served_app.get_bundle()
+    assert {k: v for k, v in csp_directives(ok.headers['content-security-policy']).items()} == {k: v for k, v in base.items() if k != 'frame-ancestors'}
+    host = _add_net_app(served_app)
+    miss = served_app.get(f'/_t/{served_app.token(app="acme.net")}/v9/remoteEntry.js', host=host)
+    assert miss.status_code == 404
+    assert csp_directives(miss.headers['content-security-policy'])['connect-src'] == ["'self'"]
+
+
+def test_t81_an_invalid_stored_network_is_dropped_not_served(served_app):
+    """T81: the list is revalidated at serve time (the registry is not trusted): one bad entry drops it all."""
+    host = _add_net_app(served_app, 'acme.badnet', 1, ['https://ok.example.com', 'http://evil.example'])
+    resp = served_app.get_bundle(token=served_app.token(app='acme.badnet'), host=host)
+    assert 'evil.example' not in resp.headers['content-security-policy']
+    assert csp_directives(resp.headers['content-security-policy'])['connect-src'] == ["'self'"]
+
+
+def test_t82_vary_merges_a_routes_value_with_service_worker(isolation_env, monkeypatch):
+    """T82: a route's own ``Vary`` survives next to ``Service-Worker`` (the middleware used to overwrite it)."""
+    from starlette.responses import Response
+
+    host_mod = sup.load_module('ai.web.app_host')
+
+    async def route(self, scope, headers, label, path):
+        return Response('x', media_type='text/plain', headers={'Vary': 'Origin, Accept-Encoding'})
+
+    monkeypatch.setattr(sup.need(host_mod, 'AppHostMiddleware'), '_serve', route)
+    resp = _client(isolation_env).get('/anything', headers={'host': HOST})
+    tokens = [t.strip().lower() for t in resp.headers['vary'].split(',') if t.strip()]
+    assert {'service-worker', 'origin', 'accept-encoding'} <= set(tokens), resp.headers['vary']
+    assert len(tokens) == len(set(tokens)), 'no token twice'
+
+
+def test_t82_vary_star_and_absent_vary(isolation_env, monkeypatch):
+    """T82: ``Vary: *`` stays ``*``; a route with no ``Vary`` still gets ``Service-Worker``; a route that already says it does not repeat it."""
+    from starlette.responses import Response
+
+    host_mod = sup.load_module('ai.web.app_host')
+    cls = sup.need(host_mod, 'AppHostMiddleware')
+    for given, check in (
+        ('*', lambda toks: toks == ['*']),
+        (None, lambda toks: toks == ['service-worker']),
+        ('service-worker', lambda toks: toks == ['service-worker']),
+        ('Service-Worker, Origin', lambda toks: sorted(toks) == ['origin', 'service-worker']),
+    ):
+
+        async def route(self, scope, headers, label, path, _given=given):
+            return Response('x', media_type='text/plain', headers={'Vary': _given} if _given else {})
+
+        monkeypatch.setattr(cls, '_serve', route)
+        resp = _client(isolation_env).get('/anything', headers={'host': HOST})
+        tokens = [t.strip().lower() for t in resp.headers['vary'].split(',') if t.strip()]
+        assert check(tokens), (given, resp.headers['vary'])
+
+
+def _chunk_names():
+    return sorted(sup.GUEST_CHUNK_BODIES)
+
+
+def test_t104_every_listed_chunk_is_served_with_its_type_and_an_immutable_cache(isolation_env):
+    """T104: exact-name allowlist from ``runtime.json``: the bytes, the right type, cached forever."""
+    client = _client(isolation_env)
+    for name in _chunk_names():
+        resp = client.get(f'/_rr/{name}', headers={'host': HOST})
+        assert resp.status_code == 200, name
+        assert resp.content == sup.GUEST_CHUNK_BODIES[name], name
+        ext = name.rsplit('.', 1)[1]
+        assert resp.headers['content-type'].split(';')[0] == sup.GUEST_CHUNK_TYPES[ext], name
+        assert resp.headers['cache-control'] == 'public, max-age=31536000, immutable', name
+        assert 'set-cookie' not in resp.headers
+
+
+def test_t104_the_guest_bundle_keeps_working_beside_the_chunks(isolation_env):
+    """T104 control: PR1's behaviour for the entry file is unchanged."""
+    resp = _client(isolation_env).get('/_rr/guest-test.js', headers={'host': HOST})
+    assert resp.status_code == 200 and 'immutable' in resp.headers['cache-control']
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/_rr/guest-unlisted.js',  # exists on disk (see the fixture below), not in runtime.json
+        '/_rr/guest-chunk.1a2b3c.js.map',
+        '/_rr/guest-chunk.1a2b3c.JS',
+        '/_rr/Guest-chunk.1a2b3c.js',
+        '/_rr/guest-chunk.1a2b3c.js/',
+        '/_rr/guest-%20.js',
+        '/_rr/guest-a b.js',
+        '/_rr/guest-.js',
+        '/_rr/guest-..js',
+        '/_rr/guest-x.exe',
+        '/_rr/runtime.json',
+        '/_rr/frame.html.bak',
+        '/_rr/..%2fframe.html',
+        '/_rr/../guest-chunk.1a2b3c.js',
+        '/_rr/sub/guest-chunk.1a2b3c.js',
+        '/_rr//guest-chunk.1a2b3c.js',
+        '/_rr/guest-chunk.1a2b3c.js%00.png',
+        '/_rr/guest-chunk.1a2b3c.js?x=../y',
+    ],
+)
+def test_t104_anything_else_is_404(path, isolation_env):
+    """T104: an unlisted name (even one on disk), a name outside the charset, ``../`` and a two-segment path are all 404."""
+    (isolation_env.static / 'shell-guest' / 'guest-unlisted.js').write_text('/* on disk but not listed */')
+    resp = _client(isolation_env).get(path, headers={'host': HOST})
+    if path.endswith('?x=../y'):
+        assert resp.status_code == 200  # a query never changes which file is served
+    else:
+        assert resp.status_code == 404, (path, resp.status_code)
+
+
+def test_t104_chunks_are_app_host_only(isolation_env):
+    """T104: on the shell host the guest chunks are as absent as the guest bundle is (H4)."""
+    resp = _client(isolation_env).get(f'/_rr/{_chunk_names()[0]}', headers={'host': 'app.example'})
+    assert resp.status_code == 404

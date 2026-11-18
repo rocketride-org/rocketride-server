@@ -24,7 +24,7 @@
 ``POST /apps/frame {appId, version}`` (bearer optional) answers what the shell
 needs to open an isolated app's frame::
 
-    200 {v: 1, origin, entryPrefix, expiresAt (epoch ms), capabilities, network, state}
+    200 {v: 1, origin, entryPrefix, expiresAt (epoch ms), capabilities, network, state, frame, identity}  (frame and identity: PR2b)
     400 bad_request | 401 invalid_token | 404 not_found | 409 isolation_off | 429 rate_limited
 
 The route table is the REAL one: these tests mount what ``initModule``
@@ -99,7 +99,7 @@ def test_apps_frame_200_contract(world):
     resp = world.frame(THIRD)
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert set(body) == {'v', 'origin', 'entryPrefix', 'expiresAt', 'capabilities', 'network', 'state'}
+    assert set(body) == {'v', 'origin', 'entryPrefix', 'expiresAt', 'capabilities', 'network', 'state', 'frame', 'identity'}  # PR2b T78
     assert body['v'] == 1
     assert body['origin'] == f'https://{label_for(THIRD)}.apps.example'
     assert body['state'] == 'ready'
@@ -521,3 +521,79 @@ def test_e8_isolated_icon_is_not_a_script_vector(world):
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PR2b T78 / T84: the grant carries the frame ticket path and the identity aliases
+# ---------------------------------------------------------------------------
+
+
+def _frame_ticket(body):
+    match = re.fullmatch(r'/_rr/frame\.html\?c=([A-Za-z0-9._-]+)', body['frame'])
+    assert match, body['frame']
+    return match.group(1)
+
+
+def test_apps_frame_200_adds_frame_and_identity(world):
+    """T78: ``frame`` is ``/_rr/frame.html?c=<ticket>``; ``identity`` is ``{userId: ru_, organizations: [{id: ro_, name}]}``."""
+    body = world.frame(THIRD).json()
+    ao = _ao()
+    claims = sup.need(ao, 'verify_frame_ticket')(_frame_ticket(body), label_for(THIRD), config=world.config())
+    assert (claims['a'], claims['v'], claims['n']) == (THIRD, 1, [])
+    identity = body['identity']
+    assert set(identity) == {'userId', 'organizations'}
+    assert re.fullmatch(r'ru_[A-Za-z0-9_-]{22}', identity['userId'])
+    assert len(identity['organizations']) == 1
+    org = identity['organizations'][0]
+    assert set(org) == {'id', 'name'}
+    assert re.fullmatch(r'ro_[A-Za-z0-9_-]{22}', org['id'])
+    assert org['name'] == 'Org org-1'
+    # the ticket is not a credential: it never carries the frame token or a user
+    assert '/_t/' not in body['frame']
+
+
+def test_apps_frame_ticket_carries_the_manifest_network(world):
+    """T78: the ticket's ``n`` is the version's validated network (what widens the frame's CSP)."""
+    world.registry.add('acme.net', 1, org='acme-org', network=['https://api.example.com', 'https://cdn.example.org:8443'])
+    body = world.frame('acme.net').json()
+    claims = sup.need(_ao(), 'verify_frame_ticket')(_frame_ticket(body), label_for('acme.net'), config=world.config())
+    assert claims['n'] == ['https://api.example.com', 'https://cdn.example.org:8443']
+
+
+def test_apps_frame_anonymous_gets_a_frame_and_no_identity(world):
+    """T78: an anonymous public caller gets the frame ticket too, and ``identity`` is null."""
+    body = world.frame(THIRD, auth=False).json()
+    assert body['identity'] is None
+    claims = sup.need(_ao(), 'verify_frame_ticket')(_frame_ticket(body), label_for(THIRD), config=world.config())
+    assert claims['a'] == THIRD
+
+
+def test_apps_frame_identity_carries_no_real_user_or_org_id(world):
+    """T84: the identity in the grant is aliases only; the real user and org ids appear nowhere in the answer."""
+    import json
+
+    resp = world.frame(THIRD)
+    body = resp.json()
+    ao = _ao()
+    cfg = world.config()
+    assert body['identity']['userId'] == sup.need(ao, 'user_alias')(THIRD, 'u1', config=cfg)
+    assert body['identity']['organizations'][0]['id'] == sup.need(ao, 'org_alias')(THIRD, 'org-1', config=cfg)
+    text = json.dumps(body)
+    assert '"u1"' not in text and 'org-1' not in text.replace('Org org-1', '')
+
+
+def test_apps_frame_identity_differs_per_app_and_survives_frame_key_rotation(world):
+    """T84: same user, another app: another alias; rotating the frame keys: the same alias."""
+    import json
+
+    from .isolation_support import key_entry, new_key
+
+    world.registry.add('acme.second', 1, org='acme-org')
+    first = world.frame(THIRD).json()['identity']
+    second = world.frame('acme.second').json()['identity']
+    assert first['userId'] != second['userId']
+    assert first['organizations'][0]['id'] != second['organizations'][0]['id']
+    old = world.env.values['RR_APP_FRAME_TOKEN_KEYS']
+    world.env.set(RR_APP_FRAME_TOKEN_KEYS=f'{key_entry("k2", new_key())},{old}')
+    shell_mod.invalidate_app_serving(THIRD)
+    assert json.dumps(world.frame(THIRD).json()['identity']) == json.dumps(first)
