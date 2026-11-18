@@ -76,7 +76,7 @@ test('G4 the claimed container can still be repointed and reset', async () => {
 	const spies = spyFederation();
 	registerAndMapApps([entry('rocketride.docs', { firstParty: true })]);
 	markIsolated(entry('acme.claim2', { isolated: true, moduleId: 'rocketride_docs' }));
-	assert.equal(repointRemote('rocketride_docs', 'https://x.example/remoteEntry.js'), true, 'repoint is not blocked');
+	assert.equal((repointRemote as unknown as (a: string, m: string, u: string) => boolean)('rocketride.docs', 'rocketride_docs', 'https://x.example/remoteEntry.js'), true, 'repoint is not blocked');
 	const before = spies.registered.length;
 	resetRemote('rocketride_docs');
 	assert.equal(spies.registered.length, before + 1, 'reset is not blocked');
@@ -95,7 +95,7 @@ test('G4 an isolated entry whose module name nobody else owns is still refused e
 	stubPage();
 	spyFederation();
 	registerAndMapApps([entry('acme.own', { isolated: true })]);
-	assert.equal(repointRemote('acme_own', 'https://x.example/remoteEntry.js'), false);
+	assert.equal((repointRemote as unknown as (a: string, m: string, u: string) => boolean)('acme.own', 'acme_own', 'https://x.example/remoteEntry.js'), false);
 	registerDevRemote('acme.own', 'acme_own', 'Dev', 'http://localhost:3000/remoteEntry.js');
 	assert.equal(isDevRemote('acme_own'), false);
 });

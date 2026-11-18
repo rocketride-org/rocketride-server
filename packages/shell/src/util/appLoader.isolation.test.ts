@@ -234,7 +234,7 @@ test('T64 E3 repointRemote is refused for an isolated module, and a version over
 	stubPage();
 	const spies = spyFederation();
 	registerAndMapApps([entry('acme.e3', { isolated: true })]);
-	assert.equal(repointRemote('acme_e3', 'https://x.example/remoteEntry.js'), false);
+	assert.equal((repointRemote as unknown as (a: string, m: string, u: string) => boolean)('acme.e3', 'acme_e3', 'https://x.example/remoteEntry.js'), false);
 	assert.deepEqual(spies.registered, []);
 	const invalidated: string[] = [];
 	setDescriptorInvalidator((appId) => void invalidated.push(appId));

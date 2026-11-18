@@ -69,6 +69,8 @@ export interface IFakeCm extends IAppRootCm {
 	setConnected(connected: boolean): void;
 	/** Signed out: no token, not connected, state DISCONNECTED. */
 	setSignedIn(signedIn: boolean): void;
+	/** Replaces the session token (a same-tab switch to another user's token, G4 round 2). */
+	setSessionToken(token: string): void;
 	setConnectionStatus(status: Partial<ConnectionStatus>): void;
 }
 
@@ -103,7 +105,7 @@ export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
 
 	const listeners = new Map<string, Set<(payload: unknown) => void>>();
 	const emitted: Array<{ event: string; payload: unknown }> = [];
-	const sessionToken = `sess-${randomBytes(20).toString('hex')}`;
+	let sessionToken = `sess-${randomBytes(20).toString('hex')}`;
 	let connected = true;
 	let signedIn = true;
 	let status = { state: ConnectionState.CONNECTED, connectionMode: 'cloud', lastError: 'secret' } as unknown as ConnectionStatus;
@@ -112,7 +114,9 @@ export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
 		engine,
 		emitted,
 		opsEmitted,
-		sessionToken,
+		get sessionToken() {
+			return sessionToken;
+		},
 		getClient: () => engine.client,
 		isConnected: () => connected && signedIn,
 		ops: () => ops,
@@ -151,6 +155,9 @@ export function createFakeCm(options: IFakeEngineOptions = {}): IFakeCm {
 		},
 		setConnected(value) {
 			connected = value;
+		},
+		setSessionToken(token) {
+			sessionToken = token;
 		},
 		setSignedIn(value) {
 			signedIn = value;
