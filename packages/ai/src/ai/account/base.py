@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 # Version of the live-authority contract below (#972): ``supports_live_authority``,
 # ``live_authority`` and ``rebuild_account_info``. An edition that relies on the
 # engine re-checking platform authority requires at least this version.
-LIVE_AUTHORITY_API = 1
+LIVE_AUTHORITY_API = 2
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -191,6 +191,9 @@ class AccountBase(ABC):
     # it (``AuthzRecheck``) and refuses requests and events on a connection it
     # could not verify recently. False (OSS): no re-check, no gate.
     supports_live_authority: bool = False
+    # API 2: revalidate every presenting rr_ credential, including users with
+    # no platform permissions. The hook receives hashes, never raw secrets.
+    supports_live_credentials: bool = False
 
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
@@ -227,6 +230,17 @@ class AccountBase(ABC):
             ``{user_id: (enabled, frozenset(sys_permissions))}`` for the users
             whose row exists; an id missing from the result has no row. None
             (or an exception) means the read failed: nothing is decided on it.
+        """
+        return None
+
+    async def live_credentials(self, key_hashes: Sequence[str]) -> Optional[Dict[str, Tuple[str, Optional[float]]]]:
+        """Read active API-key owners and effective UTC expiry by SHA-256 hash.
+
+        Only active keys belonging to enabled users appear in the result.
+        Values are ``(exact_user_id, expires_at_epoch_or_None)``; session-key
+        expiry includes the absolute session-age bound. Missing hashes are
+        refused. None or an exception means the store could not be read.
+        This hook never refreshes credentials or grants additional scope.
         """
         return None
 

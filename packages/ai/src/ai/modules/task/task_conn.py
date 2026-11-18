@@ -256,6 +256,11 @@ class TaskConn(
     # When this connection's platform authority was last verified, on the
     # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
     _authz_verified_at: float = 0.0
+    # Independent presenting-key liveness; user-authority pushes never renew
+    # this stamp. The UTC deadline is enforced between periodic sweeps too.
+    _credential_verified_at: float = 0.0
+    _credential_verified_for: Optional[tuple] = None
+    _credential_expires_at: Optional[float] = None
     # When the last ``[AUTHZ] denied`` warning for this connection was logged
     _authz_denied_logged_at: float = float('-inf')
 
@@ -350,6 +355,13 @@ class TaskConn(
             message (Dict[str, Any]): The fully-formed DAP message dict to transmit.
                 Must be JSON-serialisable; encoding is handled by the transport layer.
         """
+        # Central event gate includes direct account/org pushes and future
+        # notification paths, in addition to the monitor/debugger entry gates.
+        # Error/auth responses still reach a temporarily gated client. Revoke
+        # notices carry the bare identity after authority has been dropped.
+        authz = getattr(self._server, '_authz', None)
+        if message.get('type') == 'event' and authz is not None and not authz.gate_ok(self):
+            return
         # Increment outbound message counter for dashboard metrics
         self._messages_out += 1
         # Update last activity timestamp so idle-time tracking stays accurate
@@ -458,6 +470,21 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        credential_record = None
+        if authz is not None and authz.credential_subject(result):
+            try:
+                credential_record = await authz.check_credential(result)
+            except Exception as exc:
+                authz._read_failed(1, f'credential authentication: {type(exc).__name__}')
+            if credential_record is None:
+                # No partially authenticated/re-authenticated socket may
+                # retain authority when its presenting key cannot be verified.
+                if self._authenticated:
+                    self._drop_authority()
+                await self.send(self.build_error(request, 'Credential verification failed'))
+                self._transport.disconnect()
+                return
+
         # A revoke that landed while authenticate_credential was awaited has
         # already closed this socket's authority: install nothing (#972).
         if self._revoked:
@@ -467,6 +494,12 @@ class TaskConn(
         self._account_info = result
         self._authenticated = True
         self._authz_verified_at = t0
+        if credential_record is not None:
+            authz.stamp_credential(self, result, credential_record, t0)
+        else:
+            self._credential_verified_for = None
+            self._credential_verified_at = 0.0
+            self._credential_expires_at = None
         self._server.release_unauthed_slot(self._client_ip)
 
         # Capture optional client identification from auth arguments
