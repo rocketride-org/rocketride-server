@@ -145,7 +145,8 @@ test('T112 the shell API key is in the backstop: denied, redacted in notes and e
 			const A = t.open(ENTRY_A, { grant: GRANT_A });
 			const run = await startRun(A);
 			t.cm.apiKey = newKey();
-			t.cm.emit('shell:login', { user: {} });
+			// A same-user sign-in (a reconnect): the realm stays attached (PR2b lead answer 2), the key is re-fetched.
+			t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
 			await settle();
 			t.cm.engine.setStatus({ name: `key ${t.cm.apiKey}` });
 			expectDenied(await status(A, run.token), 'credential', `the key of a new session from ${label}`);

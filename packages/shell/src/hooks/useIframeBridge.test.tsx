@@ -51,7 +51,7 @@ async function mount() {
 		return React.createElement('iframe', {
 			ref: (el: HTMLIFrameElement | null) => {
 				frame = el;
-				ref.current = el;
+				(ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el;
 			},
 		});
 	}
@@ -60,7 +60,7 @@ async function mount() {
 	const win = { postMessage: (message: Record<string, unknown>, targetOrigin: unknown) => void posted.push({ message, targetOrigin }) };
 	Object.defineProperty(frame!, 'contentWindow', { value: win, configurable: true });
 	const send = (origin: string, data: unknown, source: unknown = win): void => {
-		dom.window.dispatchEvent(new (dom.window as unknown as { MessageEvent: typeof MessageEvent }).MessageEvent('message', { data, origin, source: source as MessageEventSource }));
+		dom.window.dispatchEvent(new (dom.window as unknown as { MessageEvent: typeof MessageEvent }).MessageEvent('message', { data, origin, source: source as MessageEventSource }) as never);
 	};
 	return {
 		posted,

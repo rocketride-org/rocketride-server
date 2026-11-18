@@ -144,13 +144,19 @@ test('T58 the shell.event.* ops update the mirror state and re-emit as the local
 	enter(cm, init());
 	const seen: Array<[string, unknown]> = [];
 	for (const e of ['shell:connected', 'shell:disconnected', 'shell:statusChange', 'shell:themeChange', 'shell:viewActivated']) cm.on(e as never, ((p: unknown) => void seen.push([e, p])) as never);
+	// emitOp handlers run on a microtask (busOps.ts), as the root's deliveries always do: settle after each.
 	cm.ops().emitOp('shell.event.disconnected', { reason: 'root disconnected', hasError: false });
+	await settle();
 	assert.equal(cm.isConnected(), false);
 	cm.ops().emitOp('shell.event.connected', {});
+	await settle();
 	assert.equal(cm.isConnected(), true);
 	cm.ops().emitOp('shell.event.statusChange', { state: 'connected', connectionMode: 'cloud', authPhase: 'signed_in' });
+	await settle();
 	cm.ops().emitOp('shell.event.themeChange', { tokens: { '--rr-bg': '#fff' } });
+	await settle();
 	cm.ops().emitOp('shell.event.viewActivated', { viewId: 'v1' });
+	await settle();
 	const names = seen.map(([e]) => e);
 	assert.deepEqual(names, ['shell:disconnected', 'shell:connected', 'shell:statusChange', 'shell:themeChange', 'shell:viewActivated']);
 	assert.deepEqual(seen[0][1], { reason: 'root disconnected', hasError: false });

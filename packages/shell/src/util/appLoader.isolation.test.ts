@@ -294,7 +294,7 @@ test('T66 E5 through the message path of devMode (rrdev:registerRemote from the 
 			new (dom.window as unknown as { MessageEvent: typeof MessageEvent }).MessageEvent('message', {
 				data: { type: 'rrdev:registerRemote', appId: 'acme.viamessage', moduleId: 'acme_viamessage', entry: 'http://localhost:3000/remoteEntry.js' },
 				source: dom.window.parent as unknown as MessageEventSource,
-			})
+			}) as never
 		);
 		assert.equal(isDevRemote('acme_viamessage'), false, 'the message path');
 		assert.ok(!spies.registered.includes('acme_viamessage'));

@@ -286,6 +286,30 @@ test('PR2b N4: a sign-in with no logout before it (another tab signed in as some
 	assert.notEqual(await outcomeOf(status(old, String(run.token))), 'ok', 'a frame attached before a sign-in does not survive it (a reload needs a fresh /apps/frame grant)');
 });
 
+test('PR2b N4: a same-user sign-in (a reconnect re-emits shell:login) keeps the realm, its handles and its shell.event.*', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A, { grant: GRANT_A });
+	const run = expectOk(await execute(A), 'run');
+	t.cm.emit('shell:login', { user: { userId: t.cm.engine.userId } });
+	await settle();
+	assert.equal(await outcomeOf(status(A, String(run.token))), 'ok', 'the same user: the realm still serves');
+	const mark = A.received.length;
+	t.cm.emit('shell:connected', {});
+	await settle();
+	assert.deepEqual(shellEvents(A, mark), ['shell.event.connected'], 'and still gets shell events');
+});
+
+test('PR2b N4: a sign-in whose user id is unknown detaches (fail closed)', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A, { grant: GRANT_A });
+	const run = expectOk(await execute(A), 'run');
+	t.cm.emit('shell:login', { user: {} });
+	await settle();
+	assert.notEqual(await outcomeOf(status(A, String(run.token))), 'ok');
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Plan section 8, PR2a-2 residual: connected, but no account info
 // ─────────────────────────────────────────────────────────────────────────────
