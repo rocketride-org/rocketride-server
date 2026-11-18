@@ -45,8 +45,11 @@
 // events reach a gated realm only for runs it owns, only while attached.
 // Inbound strings holding a credential or a real id are refused (N1-f).
 //
-// INERT in PR2a-1/PR2a-2: nothing outside `src/isolation/` imports this
-// module (T30 guards it) until PR2b wires it in `Shell.tsx`.
+// PR2b: `Shell.tsx` creates the root and the frame component attaches realms.
+// Every logout detaches every realm, and so does a sign-in by another (or an
+// unknown) user; the `rr:bridge:init` goes through the realm's choke point
+// (`bridgeInit`); a connected shell without account info serves no engine op
+// and delivers no event to a gated realm (fail closed).
 // =============================================================================
 
 import type { DAPMessage } from 'rocketride';
@@ -69,9 +72,11 @@ import type { IGateContext, IGatedRequest } from './gate';
 import { base64url, createLedger, mintProjectAlias } from './ledger';
 import type { ILedger, IRunEntry } from './ledger';
 import { createRateLimiter, QUOTAS, SIZES } from './rate';
+import { buildBridgeInit } from './projection';
+import type { IBridgeInitInput } from './projection';
 import { createScrubRoot, REDACTED, scrubErrorText, scrubEvent, scrubOutbound, scrubResponse } from './scrub';
 import type { IScrubContext } from './scrub';
-import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
+import type { BridgeInit, IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
 import { measure } from './walk';
 
 /** The shortest exact value the root remembers (shorter values would match ordinary text). */
@@ -92,6 +97,8 @@ const LOST_RUN_RETRY_MS = [30_000, 120_000];
 const TASK_NOT_REGISTERED = 'TASK_NOT_REGISTERED';
 /** Failures raised before the request reaches the socket (`client()` here, `DAPClient.request` in the SDK): nothing was sent, so nothing can be lost. */
 const NOT_SENT_ERRORS: ReadonlySet<string> = new Set(['Not connected to server', 'Server is not connected']);
+/** Realm ops that reach the engine: refused while the root has no account info. */
+const ENGINE_OPS: ReadonlySet<string> = new Set(['client.request', 'client.addMonitor', 'client.removeMonitor']);
 /** Root-internal frame refresh retries (ms). */
 const REFRESH_RETRY_MS = [2000, 4000, 8000];
 /** `/apps/frame` answers that end the session instead of being retried. */
@@ -114,6 +121,10 @@ interface IRealmState {
 	/** Set by detach: late answers are ended, not recorded. */
 	detached: boolean;
 	detachRouter: () => void;
+	/** The account user id when the realm was attached (undefined: unknown). */
+	userId: string | undefined;
+	/** The logout count when the realm was attached. */
+	logouts: number;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -233,6 +244,27 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			return [];
 		}
 	};
+	/** The account info's user id, read live (undefined: no account info). */
+	const accountUserId = (): string | undefined => {
+		try {
+			const info = (cm.getClient() as { getAccountInfo?: () => unknown } | null | undefined)?.getAccountInfo?.() as { userId?: unknown } | undefined;
+			return info && typeof info.userId === 'string' && info.userId !== '' ? info.userId : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	/**
+	 * Whether the root has account info (plan section 8 residual, closed in
+	 * PR2b): without it no identity id is known to the scrubber, so a gated
+	 * realm gets no engine op and no event until it arrives (fail closed).
+	 */
+	const hasAccount = (): boolean => {
+		try {
+			return !!(cm.getClient() as { getAccountInfo?: () => unknown } | null | undefined)?.getAccountInfo?.();
+		} catch {
+			return false;
+		}
+	};
 	/** Whether any attached realm's ledger holds this project id as its own run's. */
 	const ownedByAnyRealm = (projectId: string): boolean => [...realms.values()].some((st) => st.ledger.runs().some((r) => r.projectId === projectId));
 	/** Every attached realm's live ledger values (N1-L: never evicted while the handle lives). */
@@ -260,6 +292,11 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	/** Scrubs one owned event for a realm and delivers it (a hit or an over-budget event is dropped and logged). */
 	const deliverEvent = (st: IRealmState, event: DAPMessage): void => {
+		if (st.detached) return;
+		if (!hasAccount()) {
+			logDrop(st, CLIENT_EVENT_OP, 'capability');
+			return;
+		}
 		const scrubbed = scrubEvent(st.scrub, event);
 		if (scrubbed === null) {
 			logDrop(st, CLIENT_EVENT_OP, 'credential');
@@ -310,6 +347,14 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
 			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined));
 		}
+	};
+
+	/** An execute answer the choke point refuses: its run leaves the ledger and is terminated. */
+	const endDeniedRun = (st: IRealmState, req: IGatedRequest, response: DAPMessage): void => {
+		const body = isPlainObject(response) && isPlainObject(response.body) ? response.body : undefined;
+		const run = body && typeof body.token === 'string' ? st.ledger.runByToken(body.token) : undefined;
+		if (run) st.ledger.dropRun(run.handle);
+		endOrphan(req, response);
 	};
 
 	/**
@@ -542,6 +587,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		const op = (name: string, impl: (raw: unknown) => Promise<unknown>, onRefuse: (err: unknown) => unknown): void => {
 			bus.handle(name, async (raw) => {
 				if (closing > 0 || st.detached) return onRefuse(deny('capability', name));
+				// Engine ops need account info (fail closed); shell.* ops (login request included) do not.
+				if (ENGINE_OPS.has(name) && !hasAccount()) return onRefuse(deny('capability', name));
 				if (st.inflight >= QUOTAS.inflight) return onRefuse(deny('rate', name));
 				st.inflight++;
 				try {
@@ -630,7 +677,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
 					const envelope = { ok: true, value: encoded } satisfies IWireEnvelope;
 					verdicts.set(envelope, hit ? 'deny' : 'ok');
-					// The run is in the ledger now: events that came first are delivered (DA F8).
+					if (hit) {
+						// The choke point refuses this answer (DA F8): the app never learns the run, so it is
+						// ended and forgotten, and the events buffered for it are dropped (finally, below).
+						if (req.command === 'execute') endDeniedRun(st, req, response);
+						return envelope;
+					}
+					// The answer clears the choke point: the events that came first are delivered (DA F8).
 					const early = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
 					if (early) {
 						st.pending.delete(req.mintedProject!);
@@ -749,6 +802,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// ── shell.event.* (plan section 4.8): allowlisted payloads only ─────────
 
 	const deliverAll = (op: string, payload: unknown, only?: (st: IRealmState) => boolean): void => {
+		// Withheld while the root has no account info (fail closed).
+		if (!hasAccount()) return;
 		for (const st of realms.values()) if (!only || only(st)) router.deliver(st.info.realmId, op, payload);
 	};
 	cm.on('shell:connected', () => deliverAll('shell.event.connected', {}));
@@ -773,21 +828,39 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		if (typeof viewId !== 'string') return;
 		deliverAll('shell.event.viewActivated', { viewId }, (st) => st.info.viewId === viewId);
 	});
-	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
+	// Every logout detaches every realm (PR2b, DA N4): a frame never outlives
+	// its session, and a reload needs a fresh /apps/frame grant. The token is
+	// already gone (logouts that bypassed teardownAll), so ledgers are only
+	// cleared; their runs end by idle ttl (documented residual).
 	cm.on('shell:logout', () => {
 		epoch++;
-		for (const st of realms.values()) {
+		logouts++;
+		for (const st of [...realms.values()]) {
 			st.ledger.clear();
 			st.scrub.aliases.clear();
 			st.scrub.sighted.clear();
 			st.pending.clear();
+			detachRealm(st, false);
 		}
 		known.clear();
 		seen.clear();
 		identities.clear();
 		apiKeys.clear();
 	});
-	cm.on('shell:login', () => refreshApiKeys());
+	// A sign-in detaches every realm attached under another user, under an
+	// unknown user (either side), or before a logout. A same-user reconnect keeps them.
+	cm.on('shell:login', (payload: unknown) => {
+		const user = isPlainObject(payload) && isPlainObject(payload.user) ? payload.user.userId : undefined;
+		const userId = typeof user === 'string' && user !== '' ? user : undefined;
+		for (const st of [...realms.values()]) {
+			if (userId === undefined || st.userId === undefined || st.userId !== userId || st.logouts !== logouts) {
+				st.ledger.clear();
+				st.pending.clear();
+				detachRealm(st, false);
+			}
+		}
+		refreshApiKeys();
+	});
 
 	// ── client.event (N1-b): owned runs only, scrubbed, only while attached ─
 	cm.on('shell:event', (payload: unknown) => {
@@ -818,6 +891,30 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		for (const st of owners) deliverEvent(st, event as unknown as DAPMessage);
 	});
 
+	/** Logouts seen (a realm attached before one never serves after it). */
+	let logouts = 0;
+
+	/** Detaches one realm; `teardown` ends its runs, store handles and monitors (best effort). */
+	const detachRealm = (st: IRealmState, teardown: boolean): void => {
+		if (!realms.has(st.info.realmId)) return;
+		realms.delete(st.info.realmId);
+		st.detached = true;
+		st.detachRouter();
+		if (teardown) {
+			// Best effort: the frame is gone, so nothing waits for this.
+			const tally = { failed: 0 };
+			void Promise.allSettled(teardownRealm(st, tally)).then(() => {
+				if (tally.failed > 0) opts.log('warn', `[isolation] detach: ${tally.failed} terminate request(s) failed`);
+			});
+		}
+		st.ledger.clear();
+		try {
+			opts.onDetached?.(st.info.realmId);
+		} catch {
+			/* a UI hook never keeps a realm attached */
+		}
+	};
+
 	return {
 		attach(entry: IsolatedEntry, endpoint: IBusEndpoint, grant: IRealmGrant = {}): RealmId {
 			if (!entry || entry.isolated !== true || entry.firstParty === true || !isCanonicalAppId(entry.id)) {
@@ -847,6 +944,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				loggedDrops: new Set(),
 				detached: false,
 				detachRouter: () => {},
+				userId: accountUserId(),
+				logouts,
 			};
 			st.detachRouter = router.addGatedRealm(endpoint, {
 				info,
@@ -864,16 +963,34 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 		detach(realmId: RealmId): void {
 			const st = realms.get(realmId);
-			if (!st) return;
-			realms.delete(realmId);
-			st.detached = true;
-			st.detachRouter();
-			// Best effort: the frame is gone, so nothing waits for this.
-			const tally = { failed: 0 };
-			void Promise.allSettled(teardownRealm(st, tally)).then(() => {
-				if (tally.failed > 0) opts.log('warn', `[isolation] detach: ${tally.failed} terminate request(s) failed`);
-			});
-			st.ledger.clear();
+			if (st) detachRealm(st, true);
+		},
+
+		bridgeInit(realmId: RealmId, input: Omit<IBridgeInitInput, 'info' | 'frame'>): BridgeInit {
+			const st = realms.get(realmId);
+			if (!st || st.detached) throw new Error('appRoot.bridgeInit: no such realm');
+			const frame = st.scrub.grant.frame;
+			if (!frame) throw deny('credential', 'rr:bridge:init');
+			const init = buildBridgeInit({ ...input, info: st.info, frame });
+			// Through the realm's choke point (PR2b checklist (1)): the exact needles (session token,
+			// API keys, seen and live values) as well as the patterns. An init never needs rewriting,
+			// so any change the scrubber would make is a denial. entryPrefix (the frame token, the one
+			// N1 exemption) is scanned on its own: a needle inside it denies too.
+			const { entryPrefix, ...rest } = init;
+			const checks: Array<[unknown, string]> = [
+				[rest, JSON.stringify(rest)],
+				[{ entryPrefix }, JSON.stringify({ entryPrefix })],
+			];
+			for (const [value, before] of checks) {
+				let after: string;
+				try {
+					after = JSON.stringify(scrubOutbound(st.scrub, value));
+				} catch {
+					throw deny('credential', 'rr:bridge:init');
+				}
+				if (after !== before) throw deny('credential', 'rr:bridge:init');
+			}
+			return init;
 		},
 
 		async teardownAll(timeoutMs: number): Promise<void> {

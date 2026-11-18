@@ -96,7 +96,7 @@ export interface FrameOk {
 }
 
 /** What the guest receives in `rr:bridge:init` (PR2a-2 builds it). */
-export interface BridgeInit {
+export type BridgeInit = {
 	type: 'rr:bridge:init';
 	proto: number;
 	entryPrefix: string;
@@ -110,7 +110,7 @@ export interface BridgeInit {
 	moduleId: string;
 	viewId: string;
 	engineHttpUrl: string;
-}
+};
 
 /** One chip in the frame strip. */
 export interface StripItem {
@@ -164,6 +164,8 @@ export interface IAppRootOptions {
 	 * pass one driven by their fake clock.
 	 */
 	schedule?(cb: () => void, ms: number): () => void;
+	/** Called once when a realm is detached (logout, another user's sign-in, `detach`): the frame shows its tile. */
+	onDetached?(realmId: RealmId): void;
 	/** Test-only: makes the named hook throw (the gate must then fail closed). */
 	__throwIn?: 'gate' | 'ledger' | 'outbound';
 }
@@ -175,6 +177,12 @@ export interface IAppRoot {
 	detach(realmId: RealmId): void;
 	/** Terminates live runs, closes fs handles, removes monitors, clears ledgers. */
 	teardownAll(timeoutMs: number): Promise<void>;
+	/**
+	 * The realm's `rr:bridge:init`, built by `buildBridgeInit` from its grant and
+	 * passed through its outbound choke point. Throws for an unknown or detached
+	 * realm, and a `CapabilityDeniedError` (`credential`) when the choke point refuses it.
+	 */
+	bridgeInit(realmId: RealmId, input: { displayName: string; theme: Record<string, string>; props: BridgeInit['props']; engineHttpUrl: string; proto: number }): BridgeInit;
 	/** Test-only counters (PR2a-2): engine events dropped because no realm owns them, and project ids held. */
 	__stats?(): { eventsDropped: number; knownProjects: number };
 }

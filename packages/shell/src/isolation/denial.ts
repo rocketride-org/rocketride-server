@@ -88,6 +88,27 @@ export function deniedMessage(err: CapabilityDeniedError): string {
 }
 
 /**
+ * GUEST side: rebuilds a denied request op's rejection (`RR_DENIED:` + JSON)
+ * as a `CapabilityDeniedError` (PR2b, T70). Anything else passes unchanged.
+ *
+ * @param err - What the bus request rejected with.
+ * @returns The rehydrated denial, or `err` itself.
+ */
+export function rehydrateDenied(err: unknown): unknown {
+	const message = err instanceof Error ? err.message : undefined;
+	if (typeof message !== 'string' || !message.startsWith(DENIED_PREFIX)) return err;
+	try {
+		const raw = JSON.parse(message.slice(DENIED_PREFIX.length)) as Record<string, unknown>;
+		if (typeof raw?.code !== 'string' || typeof raw.op !== 'string') return err;
+		const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+		const extra = { command: str(raw.command), subcommand: str(raw.subcommand), capability: str(raw.capability) };
+		return deny(raw.code as DenyCode, raw.op, Object.fromEntries(Object.entries(extra).filter(([, v]) => v !== undefined)));
+	} catch {
+		return err;
+	}
+}
+
+/**
  * An outgoing envelope for a gated realm: errors lose `stack` and keep only
  * allowlisted primitive fields; values pass unchanged.
  *
