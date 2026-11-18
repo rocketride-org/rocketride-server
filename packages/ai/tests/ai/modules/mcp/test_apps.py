@@ -217,3 +217,32 @@ def test_trace_viewer_spec_registered():
     assert spec.filename == 'trace-viewer.html'
     # All data flows over the tool bridge — no engine-origin CSP needed.
     assert spec.needs_engine_origin is False
+
+
+def test_pipeline_canvas_spec_registered():
+    spec = next(s for s in apps.APPS if s.uri == apps.PIPELINE_CANVAS_URI)
+    assert spec.filename == 'pipeline-canvas.html'
+    assert spec.title == 'Pipeline canvas'
+    # The drawing comes in the tool result; the widget makes no request.
+    assert spec.needs_engine_origin is False
+
+
+@pytest.mark.asyncio
+async def test_view_pipeline_links_canvas_widget_and_canvas_is_served(fake_engine, tmp_path):
+    import ai.modules.mcp.handlers as handlers_mod
+
+    (tmp_path / 'pipeline-canvas.html').write_text('<!doctype html><html><body>c</body></html>', encoding='utf-8')
+    server = handlers_mod.build_mcp_server(lambda: fake_engine, apps_dir=tmp_path)
+    async with Client(server) as client:
+        tools = await client.list_tools()
+        tool = next(t for t in tools.tools if t.name == 'view_pipeline')
+        assert tool.meta == {'ui': {'resourceUri': apps.PIPELINE_CANVAS_URI}}
+        listed = await client.list_resources()
+        canvas = next(r for r in listed.resources if str(r.uri) == apps.PIPELINE_CANVAS_URI)
+        assert canvas.name == 'Pipeline canvas'
+        # The widget makes no request: an empty CSP, like every widget without the engine origin.
+        assert canvas.meta == _csp()
+        read = await client.read_resource(apps.PIPELINE_CANVAS_URI)
+        assert read.contents[0].mime_type == apps.UI_MIME_TYPE
+        assert 'c</body>' in read.contents[0].text
+        assert read.contents[0].meta == _csp()

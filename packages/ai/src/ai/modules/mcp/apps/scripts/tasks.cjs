@@ -29,8 +29,9 @@ const APP_ROOT = path.join(__dirname, '..');
 const DIST_DIR = path.join(APP_ROOT, 'dist');
 
 // Build inputs: own src + the toolchain files that shape the output
-// (vite.config.ts changes the entry/target/outDir; tsconfig.json changes
-// emitted syntax) — a config-only change must not reuse stale widget HTML.
+// (vite.config.ts changes the entry/target/outDir; resolve.ts changes what
+// each import resolves to; tsconfig.json changes emitted syntax) — a
+// config-only change must not reuse stale widget HTML.
 // The widgets also bundle code from outside this workspace: the trace viewer's
 // shared components (apps/shared/src), the shell's theme CSS and the token
 // files every widget applies (packages/shell/src, packages/shell/public/themes).
@@ -44,10 +45,11 @@ const SHARED_DIRS = [
 ];
 const PKG_JSON = path.join(APP_ROOT, 'package.json');
 const VITE_CONFIG = path.join(APP_ROOT, 'vite.config.ts');
+const RESOLVE_CONFIG = path.join(APP_ROOT, 'resolve.ts');
 const TS_CONFIG = path.join(APP_ROOT, 'tsconfig.json');
 const BUILD_HASH_KEY = 'mcp-widgets.buildHash';
 
-const WIDGETS = ['pipelines-table', 'dropper', 'trace-viewer'];
+const WIDGETS = ['pipelines-table', 'dropper', 'trace-viewer', 'pipeline-canvas'];
 
 // =============================================================================
 // ACTION FACTORIES
@@ -64,7 +66,7 @@ function makeBundleAction() {
 			const { changed, hash } = await hasBuildInputChanged(
 				BUILD_HASH_KEY,
 				[SRC_DIR, ...SHARED_DIRS],
-				[PKG_JSON, VITE_CONFIG, TS_CONFIG]
+				[PKG_JSON, VITE_CONFIG, RESOLVE_CONFIG, TS_CONFIG]
 			);
 			// Check every expected bundle, not just the dist dir: a deleted or
 			// never-emitted widget HTML would otherwise ride a matching hash and

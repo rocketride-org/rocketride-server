@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Pipeline canvas</title>
+		<!-- Pre-JS styling only: a skeleton the shape of the canvas (no header,
+		     the name and buttons on the frame's corners) at a typical height, so
+		     the chat moves little when the drawing arrives. The widget design
+		     system and canvas.css are imported by main.tsx and inlined at build.
+		     Heights are pixels, never % or vh: host auto-resize measures this
+		     document, and a relative height would collapse it. -->
+		<style>
+			:root {
+				color-scheme: light dark;
+			}
+			body {
+				font:
+					13px/1.5 system-ui,
+					sans-serif;
+				margin: 12px;
+			}
+			/* The canvas frame, with the name and two buttons on its top corners. */
+			.rr-skeleton {
+				position: relative;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				height: 240px;
+				border-radius: 10px;
+				border: 1px solid color-mix(in srgb, currentcolor 14%, transparent);
+				background-image: radial-gradient(color-mix(in srgb, currentcolor 18%, transparent) 1px, transparent 1px);
+				background-size: 20px 20px;
+				opacity: 0.7;
+			}
+			.rr-skeleton::before,
+			.rr-skeleton::after {
+				content: '';
+				position: absolute;
+				top: 8px;
+				height: 22px;
+				border-radius: 6px;
+				background: color-mix(in srgb, currentcolor 9%, transparent);
+			}
+			.rr-skeleton::before {
+				left: 8px;
+				width: 120px;
+			}
+			.rr-skeleton::after {
+				right: 8px;
+				width: 60px;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="root">
+			<div class="rr-skeleton" role="status">Loading pipeline...</div>
+		</div>
+		<script type="module" src="./main.tsx"></script>
+	</body>
+</html>

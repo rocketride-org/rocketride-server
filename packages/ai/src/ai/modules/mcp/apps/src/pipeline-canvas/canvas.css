@@ -1,0 +1,336 @@
+/**
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * See LICENSE file for details.
+ *
+ * Canvas widget chrome: the frame, the name and view buttons on its corners,
+ * the larger titles drawn at overview zoom, and the read-only adjustments to
+ * React Flow.
+ * The nodes and edges themselves are styled by the builder's own CSS.
+ */
+body {
+	color: var(--rr-text-primary);
+	background: transparent;
+}
+
+/* --- The drawing area (height set in px by CanvasApp.tsx) ---------------
+   No header: the name and the view buttons sit on the drawing's top corners. */
+.rr-canvas-frame {
+	position: relative;
+	transition: height 150ms ease;
+	border-radius: 10px;
+	overflow: hidden;
+	border: 1px solid var(--rr-line);
+	background: var(--rr-bg-default);
+}
+.rr-canvas-frame:focus-visible {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+	.rr-canvas-frame {
+		transition: none;
+	}
+}
+
+/* The pipeline's name: small and quiet, in the top-left corner. */
+.rr-canvas-name {
+	position: absolute;
+	top: 8px;
+	left: 8px;
+	z-index: 10;
+	/* max-width is set inline: the room the view buttons leave. */
+	padding: 2px 7px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--rr-bg-default) 88%, transparent);
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* View buttons: icon only, in the top-right corner. A 28 px face; on a touch
+   screen the hit area around it is 44 px. */
+.rr-canvas-tools {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	z-index: 10;
+	display: flex;
+}
+.rr-canvas-tool {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: none;
+	background: transparent;
+	color: var(--rr-text-primary);
+	cursor: pointer;
+}
+.rr-canvas-coarse .rr-canvas-tool {
+	width: 44px;
+	height: 44px;
+}
+.rr-canvas-tool-face {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	border: 1px solid var(--rr-line-strong);
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-coarse .rr-canvas-tool-face {
+	width: 32px;
+	height: 32px;
+}
+@media (hover: hover) {
+	.rr-canvas-tool:hover .rr-canvas-tool-face {
+		background: var(--rr-inset);
+	}
+}
+.rr-canvas-tool:focus-visible {
+	outline: none;
+}
+.rr-canvas-tool:focus-visible .rr-canvas-tool-face {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: 1px;
+}
+.rr-canvas-tool svg {
+	width: 16px;
+	height: 16px;
+	fill: currentColor;
+}
+
+/* How to read the names, shown only while they are too small to read. */
+.rr-canvas-cue {
+	position: absolute;
+	left: 50%;
+	bottom: 10px;
+	z-index: 10;
+	transform: translateX(-50%);
+	max-width: calc(100% - 24px);
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--rr-line);
+	background: color-mix(in srgb, var(--rr-bg-paper) 92%, transparent);
+	color: var(--rr-text-secondary);
+	font-size: 12px;
+	line-height: 18px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	pointer-events: none;
+}
+
+/* The notes that apply only sometimes: a cut-short drawing, a node type this engine lacks. */
+.rr-canvas-notes {
+	margin-top: 6px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--rr-text-secondary);
+}
+
+/* The builder's node CSS assumes the app's global border-box sizing (MUI's
+   baseline); without it a node header is wider than its node. */
+.rr-canvas-frame,
+.rr-canvas-frame *,
+.rr-canvas-frame *::before,
+.rr-canvas-frame *::after {
+	box-sizing: border-box;
+}
+
+/* Read only: a handle is not a place to start a connection. No crosshair,
+   and a drag that starts on one pans the canvas. */
+.rr-canvas .react-flow .react-flow__handle,
+.rr-canvas .react-flow .react-flow__handle.connectionindicator {
+	cursor: inherit;
+	pointer-events: none;
+}
+
+/* Inline, a one-finger swipe scrolls the chat (CanvasApp.tsx stops it before
+   the canvas sees it); the browser must be allowed to scroll. */
+.rr-canvas:not(.rr-canvas-full) .react-flow__pane,
+.rr-canvas:not(.rr-canvas-full) .react-flow__renderer {
+	touch-action: pan-y;
+}
+
+/* --- Larger titles at overview zoom (see OverviewLabels) ---------------- */
+.rr-overview {
+	position: absolute;
+	inset: 0;
+	z-index: 6;
+	pointer-events: none;
+	overflow: hidden;
+}
+.rr-overview-label {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 0 7px;
+	border: 1px solid var(--rr-border);
+	border-radius: 4px 4px 0 0;
+	background: var(--rr-bg-titleBar-inactive);
+	color: var(--rr-fg-titleBar-inactive);
+	font-family: var(--rr-font-family);
+	font-weight: 500;
+	line-height: 1.2;
+	white-space: nowrap;
+	overflow: hidden;
+}
+.rr-overview-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.rr-overview-icon {
+	flex: none;
+}
+/* A narrow node: up to two lines, broken between words. */
+.rr-overview-narrow {
+	gap: 3px;
+	padding: 0 3px;
+	letter-spacing: -0.01em;
+}
+.rr-overview-narrow .rr-overview-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	white-space: normal;
+	/* The widget checks every word fits a line, so a word never splits. */
+	overflow-wrap: normal;
+	line-height: 1.15;
+}
+/* A narrow node whose longest word cannot fit: one line, cut short. */
+.rr-overview-short {
+	padding: 0 3px;
+	letter-spacing: -0.01em;
+}
+/* A connection drawn again above the labels where it would run under another node's label. */
+.rr-overview-edges {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	pointer-events: none;
+}
+.rr-overview-edge {
+	fill: none;
+	stroke: var(--xy-edge-stroke, var(--rr-text-disabled));
+	/* As the connections it redraws: 1.5 px at zoom 1, scaled with the drawing. */
+	stroke-width: 1.5px;
+}
+.rr-overview-invoke {
+	stroke-dasharray: 2 4;
+	stroke-linecap: round;
+}
+/* At overview zoom edges are drawn 1.5 px wide at zoom 1, so they stay visible when the drawing is small. */
+.react-flow:has(.rr-overview) .react-flow__edge-path {
+	stroke-width: 1.5px;
+}
+/* A node whose component this engine does not have. */
+.rr-canvas .react-flow__node.rr-node-missing::after {
+	content: '';
+	position: absolute;
+	inset: -5px;
+	border: 1.5px dashed var(--rr-text-secondary);
+	border-radius: 7px;
+	pointer-events: none;
+}
+
+/* --- Full screen -------------------------------------------------------- */
+.rr-canvas-full .react-flow__minimap {
+	/* Above the overview labels (z-index 6). */
+	z-index: 7;
+	border: 1px solid var(--rr-line-strong);
+	border-radius: 8px;
+	overflow: hidden;
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-full .react-flow__minimap svg {
+	background: var(--rr-bg-paper);
+}
+.rr-canvas-full .react-flow__minimap svg {
+	display: block;
+	width: 168px;
+	height: 108px;
+}
+@media (max-width: 560px) {
+	.rr-canvas-full .react-flow__minimap svg {
+		width: 120px;
+		height: 78px;
+	}
+}
+.rr-canvas-full .react-flow__minimap-mask {
+	fill: color-mix(in srgb, var(--rr-text-primary) 8%, transparent);
+	stroke: var(--rr-accent);
+	stroke-width: 2;
+}
+.rr-canvas-full .rr-minimap-node {
+	fill: var(--rr-text-disabled);
+	stroke: none;
+}
+
+/* --- States ------------------------------------------------------------- */
+/* One border is enough: the chat already frames the widget. */
+.rr-canvas-empty,
+.rr-canvas-error {
+	border: none;
+	margin: 0;
+}
+.rr-canvas-empty {
+	color: var(--rr-text-secondary);
+}
+.rr-canvas-empty-name {
+	margin-bottom: 2px;
+	color: var(--rr-text-primary);
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.rr-canvas-error {
+	display: flex;
+	gap: 10px;
+	align-items: flex-start;
+}
+.rr-canvas-error-icon {
+	flex: none;
+	width: 18px;
+	height: 18px;
+	margin-top: 1px;
+	fill: var(--rr-flame);
+}
+.rr-canvas-error-title {
+	font-weight: 650;
+}
+.rr-canvas-error-message {
+	margin-top: 2px;
+}
+.rr-canvas-hint {
+	margin-top: 4px;
+	color: var(--rr-text-secondary);
+}
+
+/* Visually hidden, read by screen readers. */
+.rr-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}

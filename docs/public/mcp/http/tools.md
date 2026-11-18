@@ -1,12 +1,12 @@
 ---
 title: Tools
 sidebar_position: 2
-description: The RocketRide MCP server exposes 33 tools, 32 on a deployed engine where send_files is not offered. This page is the full tool reference.
+description: The RocketRide MCP server exposes 34 tools, 33 on a deployed engine where send_files is not offered. This page is the full tool reference.
 ---
 
 # Tools
 
-The server exposes **33 tools** — 32 on a deployed engine, where `send_files`
+The server exposes **34 tools** — 33 on a deployed engine, where `send_files`
 is not offered (see its entry). This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
@@ -31,8 +31,11 @@ is not offered (see its entry). This page is the full reference; the
 - **Pipelines are inline-only.** Every `pipeline` parameter takes the pipeline
   JSON itself (a `{"pipeline": {...}}` wrapper is auto-unwrapped). File paths
   are rejected — the client reads its own `.pipe` file and sends the contents.
+  The one tool that opens a saved pipeline file,
+  [`view_pipeline`](#view_pipeline), only draws it: it returns the nodes and
+  connections, never the node settings.
 - **Every tool carries annotations.** `readOnlyHint`, `destructiveHint` and
-  `openWorldHint` are explicit on all 33 tools (32 on a deployed engine,
+  `openWorldHint` are explicit on all 34 tools (33 on a deployed engine,
   where `send_files` is not offered); the table under
   [Annotations](#annotations) gives each value and its reason. Five tools are
   open-world: the four execution tools, because a pipeline's nodes run whatever
@@ -308,6 +311,47 @@ counterpart to `store_read` for large or binary files.
   filename the browser saves as).
 - **Returns:** `{ok, path, url, expires_in}`.
 
+## View a saved pipeline
+
+### view_pipeline
+
+Show one saved pipeline as a read-only diagram. In MCP Apps hosts the result
+renders as the
+[pipeline canvas widget](/connect/mcp/http/resources-and-widgets#widgets),
+drawn with the builder's own nodes and edges; it can be panned and zoomed,
+never edited or run.
+
+- **Parameters:** `path` (string, required) — a `.pipe` or `.pipe.json` file
+  under `.projects/`, for example `.projects/invoices.pipe`, or a full team
+  path `@/Team/=<teamId>/.projects/<name>.pipe`.
+- **Workspace:** a `.projects/...` path is read from your active workspace,
+  the same one the builder opens: your development team's shared files
+  (`@/Team/=<teamId>/.projects`) when your account has a development team in
+  the current organization, otherwise your own `.projects`. On a self-hosted
+  open source engine every caller's development team is the built-in `local`
+  team, so the workspace is `@/Team/=local/.projects`. A full team path is
+  used as given, and the file store checks that you belong to that team, as it
+  does for `store_read`.
+- **Returns:** `{ok, path, workspace, name, description, node_count, truncated,
+  nodes: [{id, provider, title}], connections: [{from, to, lane | control}]}`.
+  `path` is the full store path that was read, and `workspace` is the folder
+  to pass to `store_list` to find other pipelines. The drawing data (the
+  pipeline without node settings, plus the catalog entries and icons of its
+  nodes) goes to the widget in the result's `_meta` under `rocketride/canvas`;
+  the model never reads it.
+- **Secrets:** node settings are never returned. Each node keeps only its id,
+  provider, name, description, connections and position; a note keeps its
+  text and colours. Variable references, keys and encrypted
+  `secureParameters` stay on the server, and nothing is validated, resolved
+  or decrypted.
+- **Limits:** a file over 2,097,152 bytes is refused, and at most 200 nodes
+  are drawn (`truncated` is true and `node_count` gives the full count).
+- **Errors:** every error also carries `path` and `workspace`.
+  `InvalidPath` (not a pipeline file under `.projects/`, or a path with `..`,
+  a backslash or a leading slash), `NotFound`, `AccessDenied`,
+  `PipelineTooLarge` (with the file's `size` in bytes), `InvalidPipeline` (not
+  JSON, or no `components` list).
+
 ## Manage deployments
 
 Deployments follow the teams-as-environments model. `deploy_add` registers a
@@ -512,4 +556,5 @@ does.
 | `log_traces` | true | false | false | Reads trace summaries from the persisted run log. |
 | `log_trace` | true | false | false | Reads one trace's events from the persisted run log. |
 | `scaffold_node` | true | false | false | Renders node file contents for the caller to write; the server writes nothing. |
+| `view_pipeline` | true | false | false | Reads one saved pipeline file from the caller's store and returns its graph without node settings. |
 | `list_integrations` | true | false | false | Reports credential setup status by variable name; values never transit MCP; nothing is stored. |
