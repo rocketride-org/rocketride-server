@@ -104,7 +104,7 @@ def _shrink_item(item: Any, max_chars: int) -> Any:
     if isinstance(item, str):
         key, text = None, item
     elif isinstance(item, dict):
-        strings = [(k, v) for k, v in item.items() if isinstance(v, str)]
+        strings = [(k, v) for k, v in item.items() if isinstance(v, str) and k != 'url']
         if not strings:
             return None
         key, text = max(strings, key=lambda kv: len(kv[1]))
