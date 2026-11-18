@@ -39,7 +39,7 @@
  */
 
 import React from 'react';
-import { appSlugOf, devContainerNameOf } from 'rocketride';
+import { appSlugOf } from 'rocketride';
 import * as ReactDom from 'react-dom';
 import * as ReactJsxRuntime from 'react/jsx-runtime';
 import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
@@ -353,9 +353,17 @@ export async function installDevHooks(): Promise<void> {
 				failHold(`Dev app at ${prefix} is "${String(manifest.id)}", not "${appId}"`);
 				return;
 			}
-			// The same name the host's build used: the org's developer id plus the
-			// slug, or local_<slug> before the org has claimed one
-			const moduleId = devContainerNameOf(appId, ConnectionManager.getInstance().getAccountInfo()?.organization?.developerId);
+			// The container name is whatever the BUILD emitted: its Module
+			// Federation manifest declares it. Nothing is guessed from an account
+			// here — the host that ran the build named the namespace, and the
+			// built artifact is the one source of truth this page can read.
+			const mfRes = await fetch(`${prefix}/mf-manifest.json`, { cache: 'no-store' });
+			const mf = mfRes.ok ? ((await mfRes.json()) as { name?: unknown }) : null;
+			const moduleId = mf && typeof mf.name === 'string' && mf.name ? mf.name : '';
+			if (!moduleId) {
+				failHold(`Dev app at ${prefix} has no mf-manifest.json naming its container — is this an rsbuild Module Federation build?`);
+				return;
+			}
 			const name = typeof manifest.name === 'string' && manifest.name ? manifest.name : appId;
 			console.log(`[devMode] self-registering "${appId}" from ${prefix} (URL convention)`);
 			registerDevRemote(appId, moduleId, name, `${prefix}/remoteEntry.js`, metaFromManifest({
