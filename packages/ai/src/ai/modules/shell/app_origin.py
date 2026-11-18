@@ -225,6 +225,9 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         raise _refuse('RR_APP_FRAME_TOKEN_KEYS is required (kid:base64url, at least 32 bytes)')
     token_keys = _parse_keys(keys_value)
     alias_key = _parse_alias_key(env.get('RR_APP_ALIAS_KEY') or '')
+    # One secret, one purpose: the alias key is never also a frame-token key.
+    if any(hmac.compare_digest(alias_key, key) for _, key in token_keys):
+        raise _refuse('RR_APP_ALIAS_KEY must differ from every RR_APP_FRAME_TOKEN_KEYS key')
 
     origins_value = env.get('RR_SHELL_ORIGINS') or env.get('RR_FRONTEND_ORIGIN') or ''
     shell_origins = []
