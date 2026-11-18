@@ -43,7 +43,7 @@ import { ProfilerDevToolSidebar } from './ProfilerSidebar';
  * the sidebar panel.
  */
 const PROFILER_APP: AppDescriptor = {
-	id: 'rocketride.profiler',
+	id: 'profiler',
 	name: 'Profiler',
 	branding: {
 		appName: 'Profiler',

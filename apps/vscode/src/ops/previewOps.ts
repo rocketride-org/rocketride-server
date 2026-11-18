@@ -29,7 +29,6 @@ import { runListingPreflight } from 'shared/tools/appdev/preflight';
 import { probePackage } from 'shared/tools/appdev/compatProbe';
 import { getDevSessionManager } from '../appdev/devSessionManager';
 import { deployApp } from '../appdev/publish';
-import { adoptDeveloperId } from '../appdev/adoptDeveloperId';
 import { getLogger } from '../shared/util/output';
 import { signInPreview } from '../auth/previewAuth';
 import { ConfigManager } from '../config';
@@ -198,29 +197,6 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			saveAppListing(app.folder, p.draft);
 		},
 
-		'host.preview.adoptDeveloperId': async (p) => {
-			// The checks and the rewrite live in adoptDeveloperId (tested);
-			// this wires them to the server, the workspace and the editor.
-			const client = connectionManager.getClient();
-			if (!client) throw new Error('Not connected to server');
-			const result = await adoptDeveloperId(p.app, p.developerId, {
-				developerStatus: async () => (await client.call<{ developerId?: string | null } | undefined>('rrext_deploy_app', { subcommand: 'developer_status' }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.developerId ?? '',
-				versionsOf: async (appId) => (await client.call<{ versions?: unknown[] } | undefined>('rrext_deploy_app', { subcommand: 'versions', appId }, { timeout: SERVER_CHECK_TIMEOUT_MS }))?.versions?.length ?? 0,
-				scan: () => scanWorkspaceApps(hostWorkspaceFs),
-				dirtyPaths: (paths) => {
-					const keys = paths.map((f) => vscode.Uri.file(f).fsPath);
-					return vscode.workspace.textDocuments.filter((d) => d.isDirty && keys.includes(d.uri.fsPath)).map((d) => d.uri.fsPath);
-				},
-			});
-			for (const line of result.changes) getLogger().output(`[appdev] ${line}`);
-			// After this reply: the panel that asked is the one being replaced.
-			setTimeout(() => {
-				reopenRenamed(result.folder, p.app, result.appId).catch((err) => {
-					void vscode.window.showErrorMessage(`The app is now ${result.appId}, but the App Builder could not reopen: ${err instanceof Error ? err.message : String(err)}`);
-				});
-			}, 0);
-			return { appId: result.appId };
-		},
 
 		'host.preview.preflight': async (p) => {
 			// The SHARED tiered readiness bar (one implementation for every

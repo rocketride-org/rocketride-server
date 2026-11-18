@@ -5,9 +5,8 @@
 	"description": "Server monitoring dashboard — connections, tasks, activity",
 	"license": "MIT",
 	"appManifest": {
-		"id": "rocketride.monitor",
+		"id": "monitor",
 		"projectId": "5c1b4921-0d93-4c82-8023-3f94cb85a008",
-		"publisher": "RocketRide",
 		"name": "Server Monitor",
 		"description": "Real-time server dashboard showing connections, tasks, and activity",
 		"icon": "./src/icon.svg",

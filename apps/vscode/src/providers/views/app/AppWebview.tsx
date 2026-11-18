@@ -21,6 +21,7 @@
  */
 
 import 'shell/themes/rocketride-default.css';
+import { registryIdOf } from 'rocketride';
 import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -632,6 +633,9 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 
 		const feedTime = (): string => new Date().toLocaleTimeString(undefined, { hour12: false });
 
+		// The server names this app by its registry name (the slug inside the
+		// organization's developer namespace); the files carry the slug.
+		const registryId = (): string => registryIdOf(appId, (cm.getClient()?.getAccountInfo() as { organization?: { developerId?: string | null } } | undefined)?.organization?.developerId);
 		const offs = [
 			// Watch/build status (RETAINED — replay covers a reloaded webview;
 			// an undefined delivery is the close-time retraction).
@@ -700,7 +704,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				// pnpm/tsc/rsbuild output — one Console row PER LINE.
 				if (event.event === 'apaevt_build' && event.body) {
 					const b = event.body as { appId?: string; phase?: string; lines?: string[] };
-					if (b.appId === appId && Array.isArray(b.lines)) {
+					if (b.appId === registryId() && Array.isArray(b.lines)) {
 						const prefix = `[build:${b.phase || '?'}]`;
 						for (const line of b.lines) emitConsole({ time: feedTime(), level: 'log', text: `${prefix} ${line}` });
 					}
@@ -709,7 +713,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				// display word per lifecycle transition ('' clears).
 				if (event.event === 'apaevt_build_status' && event.body) {
 					const b = event.body as { appId?: string; version?: number; status?: string };
-					if (b.appId === appId && typeof b.status === 'string') {
+					if (b.appId === registryId() && typeof b.status === 'string') {
 						emitBuildStatus({ version: b.version, status: b.status });
 					}
 				}
@@ -718,7 +722,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				// are keyed by version alone — drop them with the identity).
 				if (event.event === 'app:statusChanged' && event.body) {
 					const b = event.body as { appId?: string };
-					if (b.appId === appId) {
+					if (b.appId === registryId()) {
 						buildTicks.current.clear();
 						setAccountSeq((n) => n + 1);
 					}
@@ -728,7 +732,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				// identity is unchanged, so the retained build words stay.
 				if (event.event === 'apaevt_deploy' && event.body) {
 					const b = event.body as { projectId?: string };
-					if (b.projectId === appId) {
+					if (b.projectId === registryId()) {
 						for (const fn of deployChangedListeners.current) fn();
 					}
 				}
@@ -906,9 +910,6 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				await req('host.preview.saveListing', { app: appId, draft });
 			},
 			runPreflight: async () => await req<PreflightCheck[]>('host.preview.preflight', { app: appId }),
-			adoptDeveloperId: async (developerId) => {
-				await req('host.preview.adoptDeveloperId', { app: appId, developerId });
-			},
 			// Package assets: native pick (app-folder-relative result) + text
 			// read for the icon/README previews.
 			pickAppFile: async (kind) => await req<string | null>('host.preview.pickAppFile', { app: appId, kind }),

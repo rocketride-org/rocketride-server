@@ -52,7 +52,7 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from pathspec.gitignore import GitIgnoreSpec
 
@@ -60,8 +60,31 @@ from pathspec.gitignore import GitIgnoreSpec
 # verify_app result with them), so they live in rocketride.types.deploy
 from .types.deploy import AppVerifyCheck, AppVerifyReport
 
-# App id grammar: <developerId>.<name> (mirrors the App Builder).
-_APP_ID_RE = re.compile(r'^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$')
+# App slug grammar: a dot-free address segment starting with a letter (the App Builder's rule).
+_APP_SLUG_RE = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]*$')
+
+
+def app_slug_of(manifest_id: Any) -> str:
+    """
+    The slug an app manifest names: the id with anything up to and including its LAST dot discarded.
+
+    An app's files carry only the slug; the developer namespace is attached by
+    the organization that deploys it, never read from the file. A manifest
+    written before this rule may still carry ``<developerId>.<slug>``: the
+    prefix is ignored as if it had never been specified.
+
+    Args:
+        manifest_id: ``appManifest.id`` as written.
+
+    Returns:
+        The slug ('' when the id is missing).
+    """
+    # No trimming: the deploy door validates the untrimmed suffix, so verify
+    # must report what deploy will see
+    if not isinstance(manifest_id, str) or not manifest_id:
+        return ''
+    return manifest_id.rsplit('.', 1)[-1]
+
 
 # Ceiling on the UNCOMPRESSED source the deploy zip may carry (in-memory
 # build bound; source-only packs never legitimately approach it).
@@ -403,22 +426,19 @@ def verify_app_source(workspace_root: str, app_root: str) -> AppVerifyReport:
 
         # step: identity — id grammar and name
         app_id = manifest.get('id') if isinstance(manifest.get('id'), str) else ''
+        slug = app_slug_of(app_id)
         if not app_id:
             add('id', False, 'appManifest.id is missing')
-        elif not _APP_ID_RE.match(app_id):
-            add(
-                'id',
-                False,
-                f'appManifest.id "{app_id}" is not <developerId>.<name> (lowercase; name may add digits/-/_)',
-            )
-        elif app_id.startswith('local.'):
+        elif not _APP_SLUG_RE.match(slug):
+            add('id', False, f'appManifest.id "{app_id}" is not an app slug (a letter, then letters, digits, _ or -)')
+        elif slug != app_id:
             add(
                 'id',
                 True,
-                f'id "{app_id}" is in the local namespace - register a developer id before publishing beyond this workspace',
+                f'id "{app_id}" is read as the slug "{slug}": the prefix is ignored, the deploying organization\'s developer id is attached at deploy',
             )
         else:
-            add('id', True, f'id "{app_id}" is well-formed')
+            add('id', True, f'slug "{slug}" is well-formed; the registry name is <developerId>.<slug> once deployed')
         name = manifest.get('name') if isinstance(manifest.get('name'), str) else ''
         add(
             'name',

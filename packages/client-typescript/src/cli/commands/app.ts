@@ -55,7 +55,6 @@ import { toHttpBase } from '../../../../client-common/typescript/src/provision';
 export interface AppCreateOptions extends ConnectionOptions {
 	template?: string;
 	name?: string;
-	developer?: string;
 	sidebar?: boolean;
 	statusFooter?: boolean;
 	docTabs?: boolean;
@@ -63,43 +62,6 @@ export interface AppCreateOptions extends ConnectionOptions {
 	install?: boolean;
 }
 
-/**
- * Resolves the app id namespace for `app create` the way the App Builder's
- * New App wizard does: an explicit `--developer` wins; otherwise the
- * development account's `organization.developerId`; otherwise
- * DEFAULT_DEVELOPER_ID with a warning naming both ways out. Scaffolding
- * stays offline-capable — a missing key or an unreachable server is a
- * warning, never a failure.
- *
- * @param options - Parsed command options (`--developer`, dev pair).
- * @param out - Command output (warnings go to stderr).
- * @returns The developer id to scaffold under.
- */
-async function resolveCreateDeveloperId(options: AppCreateOptions, out: Output): Promise<string> {
-	const { DEFAULT_DEVELOPER_ID, resolveDeveloperId } = await import('../../app-pack/index.js');
-	if (options.developer) return options.developer;
-
-	const fallback = (why: string): string => {
-		out.warn(`${why}; using '${DEFAULT_DEVELOPER_ID}' (run 'rocketride login', or pass --developer <id>)`);
-		return DEFAULT_DEVELOPER_ID;
-	};
-
-	// step: no key = no account to ask
-	if (!options.apikey) return fallback('no account credentials (ROCKETRIDE_APIKEY) to read a developer id from');
-
-	// step: the developer id rides the auth response — one connect, no extra
-	// call, closed before the scaffold so no idle socket outlives the read
-	let developerId: string | null;
-	try {
-		developerId = resolveDeveloperId(await connectClient(options));
-	} catch (err) {
-		return fallback(`could not read the developer id from ${options.uri} (${err instanceof Error ? err.message : String(err)})`);
-	} finally {
-		await disconnectAll();
-	}
-	if (!developerId) return fallback('the connected account has no registered developer id');
-	return developerId;
-}
 
 /**
  * The `app create` body: resolve the developer id, scaffold through the
@@ -111,13 +73,11 @@ async function resolveCreateDeveloperId(options: AppCreateOptions, out: Output):
  * @returns The exit code.
  */
 export async function executeAppCreate(slug: string, options: AppCreateOptions, out: Output): Promise<number> {
-	const developerId = await resolveCreateDeveloperId(options, out);
 	const { createAppWorkspace } = await import('../../app-pack/index.js');
 	const serverBaseUrl = options.uri ? toHttpBase(String(options.uri)) : undefined;
 	const created = await createAppWorkspace(options.workspace ?? process.cwd(), slug, {
 		template: options.template as 'Blank' | 'Dashboard' | undefined,
 		displayName: options.name,
-		developerId,
 		sidebar: Boolean(options.sidebar),
 		statusFooter: options.statusFooter !== false,
 		docTabs: Boolean(options.docTabs),
@@ -643,7 +603,6 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 		.description('Scaffold a new app under ./apps/<slug>-ui (same scaffold as the App Builder wizard)')
 		.option('--template <name>', 'Template: Blank or Dashboard', 'Blank')
 		.option('--name <text>', 'Display name (default: title-cased slug)')
-		.option('--developer <id>', "Developer id for <developerId>.<slug> (default: the connected account's, else 'local')")
 		.option('--sidebar', 'Two-column layout with a navigation sidebar')
 		.option('--no-status-footer', 'Omit the bottom status bar')
 		.option('--doc-tabs', 'Document tab strip (Documents + DocTabs)')

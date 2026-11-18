@@ -470,7 +470,7 @@ async def test_s6_publish_rejects_a_dotted_component_id():
 
     backend = FileDeploymentBackend(MagicMock())
     with pytest.raises(TaskError):
-        await backend.publish('org-1', 'docBrain', _pipeline('parsePDF', 'llm.gpt'), {'userId': 'user-a'})
+        await backend.publish('org-1', 'acme.docBrain', _pipeline('parsePDF', 'llm.gpt'), {'userId': 'user-a'})
     with pytest.raises(TaskError):
         await backend.publish('org-1', 'acme.docBrain', _pipeline('parsePDF', project_id='acme.docBrain'), {})
 
@@ -871,3 +871,27 @@ def test_endpoints_scope_is_part_of_account_info_and_never_echoed_as_auth():
     assert info.endpoints == ['acme.docBrain.chat']
     assert info.to_connect_result()['endpoints'] == ['acme.docBrain.chat']
     assert _account().endpoints is None
+
+
+def test_s7_pipe_registry_name_is_two_segments():
+    """A pipe is registered as developerId.pipeId: one dot, two valid segments."""
+    from ai.modules.task.address import validate_pipe_name
+
+    name = validate_pipe_name('acme.docBrain')
+    assert (name.developer_id, name.pipe_id, name.source) == ('acme', 'docBrain', None)
+    for bad in ('docBrain', 'acme.docBrain.parsePDF', 'acme.doc brain', '', None, 7):
+        with pytest.raises(TaskError) as err:
+            validate_pipe_name(bad)
+        assert err.value.code == TaskError.INVALID_ARGUMENT
+
+
+@pytest.mark.asyncio
+async def test_s7_publish_refuses_a_file_id_that_is_not_the_names_pipe_segment():
+    """The .pipe keeps the short id, and it must be the registry name's pipe segment."""
+    from ai.account.deployment_backend import FileDeploymentBackend
+
+    backend = FileDeploymentBackend(MagicMock())
+    with pytest.raises(ValueError, match='does not match the registry name'):
+        await backend.publish('org-1', 'acme.docBrain', _pipeline('parsePDF', project_id='other'), {})
+    with pytest.raises(TaskError):
+        await backend.publish('org-1', 'docBrain', _pipeline('parsePDF'), {})

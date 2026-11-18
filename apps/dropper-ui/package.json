@@ -5,9 +5,8 @@
 	"description": "RocketRide Dropper — the drag-and-drop upload front end of a pipeline: a dev tool beside the canvas, a signed-in app by deep link",
 	"license": "MIT",
 	"appManifest": {
-		"id": "rocketride.dropper",
+		"id": "dropper",
 		"projectId": "8232bfa3-73c3-48d3-8d88-64d8eef4371e",
-		"publisher": "RocketRide",
 		"name": "Dropper",
 		"description": "Drop files into a pipeline through its dropper source",
 		"icon": "./icon.svg",

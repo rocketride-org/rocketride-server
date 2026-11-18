@@ -131,6 +131,24 @@ function upsert(manifest, entry) {
  * @param {string} appId - The app identifier (e.g. 'rocketride.pipeBuilder').
  * @returns {string} A valid JS identifier (e.g. 'rocketride_pipeBuilder').
  */
+/**
+ * The served id of an in-repo platform app: its manifest SLUG inside the
+ * platform namespace. The manifest never carries a developer id (the
+ * organization that deploys an app attaches its own); for the apps this
+ * repo builds and serves itself, that organization is the platform. A
+ * prefix an older manifest still carries is ignored.
+ *
+ * @param {string} manifestId - package.json appManifest.id as written.
+ * @returns {string} `rocketride.<slug>`.
+ */
+function servedAppIdOf(manifestId) {
+	const slug = String(manifestId || '').split('.').pop();
+	return `${PLATFORM_DEVELOPER_ID}.${slug}`;
+}
+
+/** The developer namespace the platform's own apps are served under. */
+const PLATFORM_DEVELOPER_ID = 'rocketride';
+
 function toModuleId(appId) {
 	return appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 }
@@ -192,7 +210,11 @@ function registerApp(appRoot) {
 			// public URL (entry/icon/readme) below, so it MUST be a
 			// filesystem-safe slug — an id with a path separator or a ".."
 			// segment could write copies outside build/apps/.
-			assertSafeAppId(appManifest.id);
+			if (typeof appManifest.id !== 'string' || !appManifest.id.split('.').pop()) {
+				throw new Error(`${appRoot}: package.json appManifest.id must be a non-empty string`);
+			}
+			const appId = servedAppIdOf(appManifest.id);
+			assertSafeAppId(appId);
 
 			// The SERVED name is the app id, not the source folder: rsbuild
 			// bundles to build/apps/<appId>, appModule's copy step lands it at
@@ -201,11 +223,12 @@ function registerApp(appRoot) {
 			// fetch by app id. The icon/readme copies below MUST target the
 			// same appId dir — keying them on the source folder name would
 			// recreate the old build/apps/<folder>-ui dirs.
-			const servedName = appManifest.id;
+			const servedName = appId;
 			const buildDir = path.join(BUILD_ROOT, APPS_BASE, servedName);
 
 			// Derive moduleId from appId
-			const moduleId = appManifest.moduleId ?? toModuleId(appManifest.id);
+			// The MF container is named from the SLUG, like every dev loop names it
+			const moduleId = toModuleId(String(appManifest.id).split('.').pop());
 
 			// The shell contract version this app was built against.
 			const shellApiVersion = readShellApiVersion();
@@ -219,7 +242,7 @@ function registerApp(appRoot) {
 			// Validate mode value
 			if (!['free', 'subscription', 'paywall'].includes(mode)) {
 				throw new Error(
-					`App "${appManifest.id}" has invalid mode="${mode}". ` +
+					`App "${appId}" has invalid mode="${mode}". ` +
 						'Must be "free", "subscription", or "paywall".'
 				);
 			}
@@ -237,21 +260,21 @@ function registerApp(appRoot) {
 					Array.isArray(configuration.properties)
 				) {
 					throw new Error(
-						`App "${appManifest.id}" has an invalid contributes.configuration. ` +
+						`App "${appId}" has an invalid contributes.configuration. ` +
 							'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
 					);
 				}
 				const validTypes = ['string', 'number', 'integer', 'boolean'];
 				for (const [key, schema] of Object.entries(configuration.properties)) {
-					if (!key.startsWith(`${appManifest.id}.`)) {
+					if (!key.startsWith(`${appId}.`)) {
 						throw new Error(
-							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id ` +
-								`("${appManifest.id}.<settingName>") so setting keys are globally unique.`
+							`App "${appId}" setting "${key}" must be prefixed with the app id ` +
+								`("${appId}.<settingName>") so setting keys are globally unique.`
 						);
 					}
 					if (!schema || !validTypes.includes(schema.type)) {
 						throw new Error(
-							`App "${appManifest.id}" setting "${key}" has invalid type ` +
+							`App "${appId}" setting "${key}" has invalid type ` +
 								`"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
 						);
 					}
@@ -270,7 +293,7 @@ function registerApp(appRoot) {
 				for (const s of shells) {
 					if (!valid.includes(s)) {
 						throw new Error(
-							`App "${appManifest.id}" has invalid shell="${s}". ` +
+							`App "${appId}" has invalid shell="${s}". ` +
 								`Must be one of: ${valid.join(', ')}.`
 						);
 					}
@@ -318,7 +341,7 @@ function registerApp(appRoot) {
 
 			// Build the apps.json entry
 			const appEntry = {
-				id: appManifest.id,
+				id: appId,
 				moduleId,
 				publisher: appManifest.publisher ?? '',
 				name: appManifest.name,
@@ -377,4 +400,4 @@ function registerApp(appRoot) {
 	};
 }
 
-module.exports = { registerApp, assertSafeAppId };
+module.exports = { registerApp, assertSafeAppId, servedAppIdOf, PLATFORM_DEVELOPER_ID };

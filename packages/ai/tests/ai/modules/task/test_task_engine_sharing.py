@@ -1686,19 +1686,22 @@ class _Deployments:
         pipeline=None,
         project='docBrain',
     ):
-        self.deployments[(org, slot, project)] = {
+        # ``project`` is the SHORT id the file carries; the rows are keyed by
+        # the registry name the deploy door stores, ``developerId.pipeId``
+        name = f'acme.{project}'
+        self.deployments[(org, slot, name)] = {
             'teamId': slot,
             'version': version,
             'state': state,
             'billingTeamId': billing,
         }
-        self.states[(org, project, version)] = review
-        self.artifacts[(org, project, version)] = pipeline or _pipeline(project_id=project)
+        self.states[(org, name, version)] = review
+        self.artifacts[(org, name, version)] = pipeline or _pipeline(project_id=project)
 
     def publish(self, *, org='org-1', version=1, state='enabled', review='ready'):
-        self.publics[(org, 'docBrain')] = {'version': version, 'state': state, 'artifactState': review}
-        self.states[(org, 'docBrain', version)] = review
-        self.artifacts[(org, 'docBrain', version)] = _pipeline()
+        self.publics[(org, 'acme.docBrain')] = {'version': version, 'state': state, 'artifactState': review}
+        self.states[(org, 'acme.docBrain', version)] = review
+        self.artifacts[(org, 'acme.docBrain', version)] = _pipeline()
 
     async def deployments_get(self, org_id, team_id, project_id):
         return self.deployments.get((org_id, team_id, project_id))
@@ -1809,7 +1812,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
     assert control.rung == 'me' and control.key == f'me.user-a.{ADDRESS}'
     assert (control.run_kind, control.owner_kind, control.owner_id) == ('deploy', 'user', 'user-a')
     assert control.trigger == 'submit'
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='acme.docBrain')
     assert control.teamId == 'team-1' and control.engine_state == 'running'
 
     # The next name call attaches to it
@@ -1826,7 +1829,7 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
 
     assert control.rung == 'team' and control.key == f'team.team-1.{ADDRESS}'
     assert (control.owner_kind, control.owner_id) == ('team', 'team-1')
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.docBrain')
 
     # A teammate resolves the same team control through the owner index
     assert ts.resolve_control(ADDRESS, _caller('user-b'), 'task.data') is control
@@ -1859,7 +1862,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     assert control.address == ADDRESS
     assert (control.owner_kind, control.owner_id, control.userId) == ('user', 'user-z', 'user-z')
     assert (control.orgId, control.teamId) == ('org-2', 'team-z')
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='~public', project_id='docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='~public', project_id='acme.docBrain')
     assert control.trigger == 'submit'
     assert ts.resolve_control(ADDRESS, stranger, 'task.data') is control
 

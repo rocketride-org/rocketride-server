@@ -189,10 +189,8 @@ class DeployPipeCommands(_DeployBase):
 
     async def _deploy_deploy(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Point a team at a published version — promotion and rollback alike."""
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         version = args.get('version')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not isinstance(version, int):
             raise ValueError('version is required and must be an integer')
 
@@ -254,9 +252,7 @@ class DeployPipeCommands(_DeployBase):
 
     async def _deploy_get(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """One team deployment, registry-joined (visibility-gated scope)."""
-        project_id = args.get('projectId')
-        if not project_id:
-            raise ValueError('projectId is required')
+        project_id = self._registry_id(args.get('projectId'))
         team_id = self._visible_team_ref(args)
 
         dep = await account.deployments_get(self._org_id(), team_id, project_id)
@@ -272,9 +268,7 @@ class DeployPipeCommands(_DeployBase):
         self, request: Dict[str, Any], args: Dict[str, Any], state: str, reason: str
     ) -> Dict[str, Any]:
         """Shared body of enable/disable/remove: flip state, resync, audit."""
-        project_id = args.get('projectId')
-        if not project_id:
-            raise ValueError('projectId is required')
+        project_id = self._registry_id(args.get('projectId'))
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
@@ -304,10 +298,8 @@ class DeployPipeCommands(_DeployBase):
 
     async def _deploy_schedule_set(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Set (or clear) one source's schedule on a team deployment."""
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not source_id:
             raise ValueError('sourceId is required')
         cron: Optional[str] = args.get('schedule')
@@ -348,10 +340,8 @@ class DeployPipeCommands(_DeployBase):
         self, request: Dict[str, Any], args: Dict[str, Any], paused: bool, reason: str
     ) -> Dict[str, Any]:
         """Shared body of schedule_pause/schedule_resume: flip, resync, audit."""
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not source_id:
             raise ValueError('sourceId is required')
         team_id = self._require_team(args, 'task.control')
@@ -375,10 +365,8 @@ class DeployPipeCommands(_DeployBase):
 
     async def _deploy_source_config(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Set one source's execution settings (trace level + debug output)."""
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not source_id:
             raise ValueError('sourceId is required')
 
@@ -437,10 +425,8 @@ class DeployPipeCommands(_DeployBase):
         only ever run from a cron tick — no way to smoke-test a version or
         fire an unscheduled source on demand.
         """
-        project_id = args.get('projectId')
+        project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
-        if not project_id:
-            raise ValueError('projectId is required')
         if not source_id:
             raise ValueError('sourceId is required')
         team_id = self._require_team(args, 'task.control')

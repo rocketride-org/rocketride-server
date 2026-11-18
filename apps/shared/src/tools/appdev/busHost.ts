@@ -38,6 +38,7 @@
 // =============================================================================
 
 import type { IAppBuilderHost, BuildStatusTick } from './types';
+import { appSlugOf, registryIdOf } from 'rocketride';
 import { toVersionInfos, toRungPins, walkDeploymentHistory } from './wire';
 import type { WireRailEntry, WirePin, WireHistoryRow } from './wire';
 
@@ -64,7 +65,7 @@ export interface IAppBuilderBus {
 	/** Realm-local event stream (mirror.event → shell:event). */
 	on(event: 'shell:event', listener: (payload: ShellEventPayload) => void): () => void;
 	/** The mirrored account snapshot (retained shell:account topic). */
-	getAccountInfo(): { organization?: { teams?: Array<{ id: string; name: string }> } | null } | undefined;
+	getAccountInfo(): { organization?: { teams?: Array<{ id: string; name: string }>; developerId?: string | null } | null } | undefined;
 }
 
 /** The client members this adapter reaches — the narrowing view over
@@ -88,7 +89,7 @@ interface IAppBuilderClient {
 export interface IBusAppBuilderHostOptions {
 	/** The realm's ConnectionManager (or any structural equivalent). */
 	bus: IAppBuilderBus;
-	/** The app under construction. */
+	/** The app under construction: its SLUG (appManifest.id). */
 	appId: string;
 	/** Whether the server runs the review ladder (gates submit/withdraw). */
 	hasReviewLadder: boolean;
@@ -116,6 +117,19 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 		if (!c) throw new Error('Not connected to server');
 		return c;
 	};
+	/**
+	 * The registry name the server knows this app by: the slug inside the
+	 * caller organization's developer namespace. Every rail verb and every
+	 * deploy/build event carries it; the files carry only the slug. '' while
+	 * the organization has no developer id (nothing is deployed then).
+	 */
+	const registryId = (): string => registryIdOf(appSlugOf(appId), bus.getAccountInfo()?.organization?.developerId);
+	/** The registry name for a verb that needs one, or the claim message. */
+	const needRegistryId = (): string => {
+		const id = registryId();
+		if (!id) throw new Error('Deploying or publishing an app requires a registered developer id, and your organization has none. Claim one on the Deploy tab.');
+		return id;
+	};
 
 	return {
 		// ── Develop: server-fed tickers, derived realm-locally ────────────────
@@ -139,7 +153,7 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 			const off = bus.on('shell:event', ({ event }) => {
 				if (event?.event !== 'apaevt_build_status') return;
 				const body = event.body;
-				if (!body || body.appId !== appId) return;
+				if (!body || body.appId !== registryId()) return;
 				listener({ version: body.version, status: body.status ?? '' });
 			});
 			return () => {
@@ -159,33 +173,33 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 		subscribeDeployChanged: (listener: () => void) => {
 			return bus.on('shell:event', ({ event }) => {
 				if (event?.event !== 'apaevt_deploy') return;
-				if (event.body?.projectId !== appId) return;
+				if (event.body?.projectId !== registryId()) return;
 				listener();
 			});
 		},
 
 		// ── Deploy (the publish ladder) ───────────────────────────────────────
-		listVersions: async () => toVersionInfos((await client().listDeployments(appId)) as WireRailEntry[]),
+		listVersions: async () => (registryId() ? toVersionInfos((await client().listDeployments(registryId())) as WireRailEntry[]) : []),
 		publish: async (version, target) => {
-			await client().publishApp(appId, version, target);
+			await client().publishApp(needRegistryId(), version, target);
 		},
 		removePublish: async (target) => {
-			await client().removeAppPublish(appId, target);
+			await client().removeAppPublish(needRegistryId(), target);
 		},
 		listTeams: async () => (bus.getAccountInfo()?.organization?.teams ?? []).map((t) => ({ id: t.id, name: t.name })),
-		getWhereLive: async () => toRungPins((await client().whereApp(appId)) as WirePin[], hasReviewLadder),
+		getWhereLive: async () => (registryId() ? toRungPins((await client().whereApp(registryId())) as WirePin[], hasReviewLadder) : []),
 		loadBuildLog: async (version) => {
-			const body = await client().buildLog(appId, version);
+			const body = await client().buildLog(needRegistryId(), version);
 			return body?.log ?? '';
 		},
 		submitForReview: hasReviewLadder
 			? async (version) => {
-					await client().submitApp(appId, version);
+					await client().submitApp(needRegistryId(), version);
 				}
 			: undefined,
 		withdrawReview: hasReviewLadder
 			? async (version) => {
-					await client().withdrawApp(appId, version);
+					await client().withdrawApp(needRegistryId(), version);
 				}
 			: undefined,
 		getDeveloperId: async () => {
@@ -199,9 +213,9 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 
 		// ── Dashboard + review thread ─────────────────────────────────────────
 		loadHistory: async () =>
-			walkDeploymentHistory(async (page, pageSize) => (await client().deploy.history(appId, { page, pageSize })) as { rows?: WireHistoryRow[]; total?: number } | undefined),
+			walkDeploymentHistory(async (page, pageSize) => (await client().deploy.history(needRegistryId(), { page, pageSize })) as { rows?: WireHistoryRow[]; total?: number } | undefined),
 		sendReply: async (message, version) => {
-			await client().replyApp(appId, message, version);
+			await client().replyApp(needRegistryId(), message, version);
 		},
 	};
 }

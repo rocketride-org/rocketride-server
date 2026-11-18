@@ -241,16 +241,16 @@ export class DeployApi {
 	 * `addApp` → `publishApp`) follows.
 	 *
 	 * @param slug - The app-name slug (lowercase; digits/-/_ after the
-	 *   first character). The id becomes `<developerId>.<slug>`.
-	 * @param options - Template, display name, developer id (default: this
-	 *   client's organization developer id, else 'local' — the same
-	 *   resolution as the New App wizard and `rocketride app create`),
+	 *   first character). The files carry the slug alone; the organization
+	 *   that deploys the app attaches its developer id, so the registry
+	 *   name becomes `<developerId>.<slug>` at deploy.
+	 * @param options - Template, display name,
 	 *   frame options, install toggle, `onProgress`, and
 	 *   `workspaceRoot` (default `process.cwd()`). The server base URL for
 	 *   vendoring defaults to this client's own connection.
 	 * @returns The created app's identity and a report of what ran.
 	 */
-	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; developerId?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
+	async createApp(slug: string, options: { workspaceRoot?: string; template?: 'Blank' | 'Dashboard'; displayName?: string; sidebar?: boolean; statusFooter?: boolean; docTabs?: boolean; install?: boolean; serverBaseUrl?: string; onProgress?: (line: string) => void } = {}): Promise<CreatedApp> {
 		const pack = await this.loadAppPack();
 		// Vendor from the server THIS client talks to unless overridden —
 		// ws(s) URIs map onto the http(s) origin serving /client/*. This is
@@ -265,8 +265,7 @@ export class DeployApi {
 			}
 		}
 		const { workspaceRoot, onProgress, ...rest } = options;
-		const developerId = options.developerId ?? pack.resolveDeveloperId(this.client) ?? undefined;
-		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, developerId, serverBaseUrl, onProgress });
+		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
 	}
 
 	/**

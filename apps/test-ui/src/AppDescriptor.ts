@@ -12,7 +12,7 @@ import type { AppDescriptor } from 'shell';
 import TestApp from './TestApp';
 
 const TEST_APP: AppDescriptor = {
-	id: 'rocketride.test',
+	id: 'test',
 	name: 'Test UI',
 	branding: {
 		appName: 'Test UI',

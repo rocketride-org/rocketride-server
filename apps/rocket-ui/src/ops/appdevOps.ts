@@ -42,9 +42,6 @@ import type { NewAppIdentity } from 'shared/tools/appdev/types';
 import { getDocs } from '../docs';
 import { listAppFolders, scaffoldApp } from '../surfaces/preview/session/appStore';
 
-/** The developer id applied when the org has none or the connection is local/offline. */
-const DEFAULT_DEVELOPER_ID = 'local';
-
 /** The untitled (unbound) builder's document key under the apps tool. */
 const WIZARD_DOC = 'tool:apps/newapp';
 
@@ -59,14 +56,14 @@ export function registerRocketAppDevOps(): () => void {
 	/** Resolves the developer id from the connected server's account info. */
 	const resolveDeveloperId = (): { developerId: string; source: 'organization' | 'default' } => {
 		const developerId = cm.isConnected() ? cm.getClient()?.getAccountInfo()?.organization?.developerId : undefined;
-		return developerId ? { developerId, source: 'organization' } : { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
+		return developerId ? { developerId, source: 'organization' } : { developerId: '', source: 'default' };
 	};
 
 	const buildIdentity = async (): Promise<NewAppIdentity> => {
 		// Disconnected: no store to scaffold into — the form renders its
 		// no-target note (workspaceOpen false).
 		if (!cm.isConnected()) {
-			return { developerId: DEFAULT_DEVELOPER_ID, source: 'default', workspaceOpen: false, existingFolders: [] };
+			return { developerId: '', source: 'default', workspaceOpen: false, existingFolders: [] };
 		}
 		const { developerId, source } = resolveDeveloperId();
 		return { developerId, source, workspaceOpen: true, existingFolders: await listAppFolders() };
@@ -75,11 +72,10 @@ export function registerRocketAppDevOps(): () => void {
 	const impls: OpImplTable<AppDevOpMap> = {
 		'host.appdev.identity': () => buildIdentity(),
 		'host.appdev.scaffold': async (p) => {
-			// Resolve the developer id NOW — the wizard is modeless, so the
-			// form may have been open across a login/logout.
+			// The files carry the SLUG only; the deploy door attaches the
+			// organization's developer id.
 			if (!cm.isConnected()) throw new Error('Not connected to server');
-			const publisher = resolveDeveloperId().developerId;
-			const { appId } = await scaffoldApp({ appName: p.appName, displayName: p.displayName, publisher, frame: p.frame });
+			const { appId } = await scaffoldApp({ appName: p.appName, displayName: p.displayName, frame: p.frame });
 			// The sidebar re-scans off the scaffold's own onFsChange bus
 			// notifications (emitFsChange inside scaffoldApp). The untitled
 			// document retires and the new app's builder opens in its place.

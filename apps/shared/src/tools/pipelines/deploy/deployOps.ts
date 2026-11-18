@@ -22,7 +22,7 @@
 
 import { ConnectionManager } from 'shell';
 import type { DeployArtifact, DeployHistoryEntry, RocketRideClient } from 'rocketride';
-import { resolveDeployTeams, teamNameOf, wireTeamIdOf } from 'rocketride';
+import { registryIdOf, resolveDeployTeams, teamNameOf, wireTeamIdOf } from 'rocketride';
 import { mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, mapDeploymentInfo } from './deployMapping';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeploymentLoadPayload } from './deployTypes';
 
@@ -77,9 +77,12 @@ export async function fetchDeployLifecycle(projectId: string | undefined): Promi
 		]);
 		const deploymentRows = list.rows ?? [];
 		const teams = resolveDeployTeams({ getAccountInfo: () => info }, deploymentRows);
+		// Rows carry the registry name (`developerId.pipeId`); the editor
+		// knows the file's short id, so the match is on the composed name.
+		const registryId = registryIdOf(projectId, info?.organization?.developerId);
 		return {
 			versions: mapVersionCards((versions.rows ?? []) as DeployArtifact[]),
-			deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams, info?.userId ?? ''),
+			deployments: mapTeamDeploymentRows(deploymentRows, registryId, teams, info?.userId ?? ''),
 			teams,
 		};
 	} catch {

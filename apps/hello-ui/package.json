@@ -5,9 +5,8 @@
   "description": "RocketRide Hello — OSS landing page and dashboard",
   "license": "MIT",
   "appManifest": {
-    "id": "rocketride.hello",
+    "id": "hello",
     "projectId": "cbf738b8-95f1-4d41-8d4d-4179c3d4a380",
-    "publisher": "RocketRide",
     "name": "RocketRide",
     "description": "Landing page and dashboard",
     "icon": "./src/icon.svg",

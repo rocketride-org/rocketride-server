@@ -59,7 +59,9 @@ const LEGACY_APPS = ['chat-ui', 'dropper-ui'];
 
 // Apps allowed to extend the baseline (extra plugins/rules); checked for the
 // structural invariants instead of byte-conformance.
-const STRUCTURAL_APPS = ['rocket-ui'];
+// home-ui validates its copy-roulette catalog at config time (an extra import
+// and a guard before the canonical header), so it is structural too.
+const STRUCTURAL_APPS = ['rocket-ui', 'home-ui'];
 
 // Directories under apps/ that are not MF remotes.
 const EXCLUDED_DIRS = ['vscode', 'shared'];
@@ -72,10 +74,23 @@ const ALLOWED_RANGES = {
 	// explorer-ui pins the concrete 3.4.x line; shared's peer states the
 	// broader floor apps must satisfy.
 	dompurify: ['~3.4.13', '~3.4.0'],
+	// The platform packages have TWO canonical specs by ruling (server PR
+	// #2238): an app manifest carries the portable, depth-independent
+	// file:../../.rocketride/ spec so a lifted-out app installs on its own,
+	// while in-repo packages say workspace:*; the workspace yaml overrides
+	// resolve both to the workspace package, so neither side is rewritten.
+	rocketride: ['workspace:*', 'file:../../.rocketride/client/rocketride.tgz'],
+	shell: ['workspace:*', 'file:../../.rocketride/shell/shell.tgz'],
 };
 
 // The single browser floor every remote (and the shell host) compiles for.
 const CANONICAL_BROWSERSLIST = ['chrome >= 81', 'edge >= 83', 'firefox >= 76', 'safari >= 13'];
+
+// Documented per-app floors ABOVE the canonical one (never below): home-ui's
+// observer sites rely on ResizeObserver, which Safari gained in 13.1.
+const BROWSERSLIST_FLOORS = {
+	'home-ui': ['chrome >= 81', 'edge >= 83', 'firefox >= 76', 'safari >= 13.1'],
+};
 
 // Scripts block every app package.json must expose.
 const REQUIRED_SCRIPTS = ['build', 'build:prod', 'dev', 'typecheck'];
@@ -263,8 +278,9 @@ function checkManifestHygiene(name, pkg, isApp, needsBrowserslist) {
 			}
 		}
 	}
-	if (needsBrowserslist && JSON.stringify(pkg.browserslist) !== JSON.stringify(CANONICAL_BROWSERSLIST)) {
-		errors.push(`${name}: browserslist must equal the canonical floor ${JSON.stringify(CANONICAL_BROWSERSLIST)}`);
+	const floor = BROWSERSLIST_FLOORS[name] ?? CANONICAL_BROWSERSLIST;
+	if (needsBrowserslist && JSON.stringify(pkg.browserslist) !== JSON.stringify(floor)) {
+		errors.push(`${name}: browserslist must equal the canonical floor ${JSON.stringify(floor)}`);
 	}
 	return errors;
 }

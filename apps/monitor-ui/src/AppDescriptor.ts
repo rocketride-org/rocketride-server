@@ -41,7 +41,7 @@ import { MonitorDevToolSidebar } from './MonitorSidebar';
  * resource usage, and activity events.
  */
 const MONITOR_APP: AppDescriptor = {
-	id: 'rocketride.monitor',
+	id: 'monitor',
 	name: 'Server Monitor',
 	branding: {
 		appName: 'Server Monitor',

@@ -39,7 +39,7 @@ import EventsApp from './EventsApp';
  * controls live in the Capture card, not the sidebar.
  */
 const EVENTS_APP: AppDescriptor = {
-	id: 'rocketride.events',
+	id: 'events',
 	name: 'Event Monitor',
 	branding: {
 		appName: 'Event Monitor',

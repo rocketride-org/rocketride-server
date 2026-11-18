@@ -36,6 +36,7 @@
  */
 
 import { PROJECT_DIR } from 'rocketride';
+import { appSlugOf } from 'rocketride';
 import type { RocketRideClient } from 'shell';
 import { getStagedWorkspace, getWorkspaceVfs, toScopedStorePath } from '../../workspace/vfs/workspace';
 import { renderTemplate } from 'shared/tools/appdev';
@@ -142,10 +143,18 @@ export async function scanApps(): Promise<StoredApp[]> {
 				console.log('[appStore] skipping apps/' + folder + ' — package.json has no appManifest.id');
 				continue;
 			}
+			// The slug is the app's identity; a prefix an older manifest still
+			// carries is ignored as if it had never been written. An id that is
+			// nothing but a prefix ("acme.") names no app.
+			const id = appSlugOf(m.id);
+			if (!id) {
+				console.log('[appStore] skipping apps/' + folder + ' — appManifest.id "' + m.id + '" has no slug after its last dot');
+				continue;
+			}
 			apps.push({
-				id: m.id,
-				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? m.id),
-				moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : m.id.replace(/[^a-zA-Z0-9_$]/g, '_'),
+				id,
+				name: typeof m.name === 'string' && m.name ? m.name : (pkg.name ?? id),
+				moduleId: typeof m.moduleId === 'string' && m.moduleId ? m.moduleId : id.replace(/[^a-zA-Z0-9_$]/g, '_'),
 				folder,
 				version: typeof pkg.version === 'string' ? pkg.version : '',
 				description: typeof m.description === 'string' ? m.description : '',
@@ -272,12 +281,10 @@ export async function appFileExists(folder: string, relPath: string): Promise<bo
 
 /** Inputs for a new-app scaffold into the store VFS. */
 export interface ScaffoldRequest {
-	/** The app-name slug (the half after the dot in the app id). */
+	/** The app slug: the whole appManifest.id (the files carry no namespace). */
 	appName: string;
 	/** Human-readable display name. */
 	displayName: string;
-	/** Publisher slug (the org developer id, or 'local'). */
-	publisher: string;
 	/** Frame options composing the generated App.tsx. */
 	frame: FrameOptions;
 	/** Template to render (defaults to 'Blank'). */
@@ -296,7 +303,7 @@ export interface ScaffoldRequest {
  * @returns The created app's id and folder name.
  */
 export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string; folder: string }> {
-	const appId = `${req.publisher}.${req.appName}`;
+	const appId = req.appName;
 	const folder = `${req.appName}-ui`;
 
 	// step: refuse a live collision (the form checks too, but the scan can
@@ -309,7 +316,6 @@ export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string
 	const files = renderTemplate(req.template ?? 'Blank', {
 		appId,
 		appName: req.displayName,
-		publisher: req.publisher,
 		moduleId: appId.replace(/[^a-zA-Z0-9_$]/g, '_'),
 		port: 3011,
 		previewUrl: `${window.location.origin}/?appid=${encodeURIComponent(appId)}&rrdev=1`,

@@ -291,7 +291,6 @@ class DeployApi:
         workspace_root: str | None = None,
         template: str = 'Blank',
         display_name: str | None = None,
-        developer_id: str | None = None,
         sidebar: bool = False,
         status_footer: bool = True,
         doc_tabs: bool = False,
@@ -316,10 +315,6 @@ class DeployApi:
                 (default: the current working directory).
             template: 'Blank' (default) or 'Dashboard'.
             display_name: Display name (default: the slug, title-cased).
-            developer_id: Developer id for the app-id namespace (default:
-                this client's organization developer id, else 'local' —
-                the same resolution as the New App wizard and
-                ``rocketride app create``).
             sidebar: Two-column frame with a navigation sidebar.
             status_footer: Status bar across the bottom of the app.
             doc_tabs: Document tab strip across the content area.
@@ -338,7 +333,7 @@ class DeployApi:
             ``installed``).
 
         Raises:
-            ValueError: On an invalid slug/developer id/template or an
+            ValueError: On an invalid slug/template or an
                 existing folder.
         """
         # step: scaffold with the shared templates (lazy imports mirror
@@ -357,12 +352,6 @@ class DeployApi:
             if uri:
                 base = to_http_base(uri)
 
-        # step: the app-id namespace defaults to the connected org's
-        # developer id (off the cached login result — no extra call)
-        if developer_id is None:
-            organization = (self._client.get_account_info() or {}).get('organization') or {}
-            developer_id = organization.get('developerId') or None
-
         # step: the scaffold blocks for minutes (two artifact downloads
         # plus `pnpm install`), so it runs on a worker thread instead of
         # stalling the event loop that services this client's socket
@@ -372,7 +361,6 @@ class DeployApi:
             slug,
             template=template,
             display_name=display_name,
-            developer_id=developer_id,
             sidebar=sidebar,
             status_footer=status_footer,
             doc_tabs=doc_tabs,

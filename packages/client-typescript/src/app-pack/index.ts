@@ -55,6 +55,7 @@
  */
 
 import * as fs from 'fs';
+import { appSlugOf } from '../client/deploy-helpers.js';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
 import ignore from 'ignore';
@@ -560,8 +561,8 @@ export interface AppVerifyReport {
 	uncompressedBytes: number;
 }
 
-/** App id grammar: `<developerId>.<name>` (mirrors the App Builder). */
-const APP_ID_RE = /^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$/;
+/** App slug grammar: a dot-free address segment starting with a letter (the App Builder's rule). */
+const APP_SLUG_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
 /**
  * Pre-checks everything an app deploy needs, WITHOUT deploying — the
@@ -599,12 +600,13 @@ export function verifyAppSource(workspaceRoot: string, appRoot: string): AppVeri
 
 		// step: identity — id grammar and name
 		const id = typeof manifest.id === 'string' ? manifest.id : '';
+		const slug = appSlugOf(id);
 		if (!id) {
 			add('id', false, 'appManifest.id is missing');
-		} else if (!APP_ID_RE.test(id)) {
-			add('id', false, `appManifest.id "${id}" is not <developerId>.<name> (lowercase; name may add digits/-/_)`);
+		} else if (!APP_SLUG_RE.test(slug)) {
+			add('id', false, `appManifest.id "${id}" is not an app slug (a letter, then letters, digits, _ or -)`);
 		} else {
-			add('id', true, id.startsWith('local.') ? `id "${id}" is in the local namespace — register a developer id before publishing beyond this workspace` : `id "${id}" is well-formed`);
+			add('id', true, slug !== id ? `id "${id}" is read as the slug "${slug}": the prefix is ignored, the deploying organization's developer id is attached at deploy` : `slug "${slug}" is well-formed; the registry name is <developerId>.<slug> once deployed`);
 		}
 		const name = typeof manifest.name === 'string' ? manifest.name.trim() : '';
 		add('name', name.length > 0, name ? `display name "${name}"` : 'appManifest.name is missing or empty');
@@ -748,10 +750,6 @@ export interface CreateAppOptions {
 	/** Display name (default: the slug, title-cased). */
 	displayName?: string;
 	/** Developer id for `<developerId>.<slug>` (default
-	    {@link DEFAULT_DEVELOPER_ID} — publishable beyond the workspace only
-	    after a real developer id is registered). Hosts with a connection
-	    resolve it with {@link resolveDeveloperId}. */
-	developerId?: string;
 	/** Frame options — chrome regions of the generated app. */
 	sidebar?: boolean;
 	statusFooter?: boolean;
@@ -786,30 +784,6 @@ export interface CreatedApp {
 
 /** Slug grammar: the name part of the app id. */
 const SLUG_RE = /^[a-z][a-zA-Z0-9_-]*$/;
-/** Developer-id grammar: the namespace part of the app id. */
-const DEVELOPER_RE = /^[a-z][a-z_]*$/;
-
-/** The developer namespace used when no account supplies one. Apps in it
-    run and deploy, but publish beyond the workspace only after a real
-    developer id is registered. */
-export const DEFAULT_DEVELOPER_ID = 'local';
-
-/**
- * Resolves the developer id from a connected client's account info —
- * `organization.developerId` off the cached auth response (no extra
- * server call). The New App wizard and `rocketride app create` both default
- * the app id's namespace through this.
- *
- * @param client - A connected client, or null/undefined when there is none.
- * @returns The organization's developer id, or null when there is no
- *   client, no organization, or the organization has not registered one
- *   (always the case on OSS servers).
- */
-export function resolveDeveloperId(client: { getAccountInfo(): unknown } | null | undefined): string | null {
-	const info = client?.getAccountInfo() as { organization?: { developerId?: string | null } } | undefined;
-	return info?.organization?.developerId || null;
-}
-
 /**
  * Scaffolds a new app — the ONE scaffold behind the App Builder's New App
  * wizard, `rocketride app create`, and `client.deploy.createApp()`. Writes
@@ -833,11 +807,9 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 	if (!SLUG_RE.test(slug)) {
 		throw new Error(`App slug "${slug}" is invalid — lowercase letter first, then letters/digits/-/_.`);
 	}
-	const developerId = options.developerId ?? DEFAULT_DEVELOPER_ID;
-	if (!DEVELOPER_RE.test(developerId)) {
-		throw new Error(`Developer id "${developerId}" is invalid — lowercase letters/underscores only.`);
-	}
-	const appId = `${developerId}.${slug}`;
+	// The files carry the SLUG only: the organization that deploys the app
+	// attaches its developer id, so the same source deploys under any org.
+	const appId = slug;
 	const template = options.template ?? 'Blank';
 	if (!TEMPLATE_NAMES.includes(template)) {
 		throw new Error(`Unknown template "${template}" — available: ${TEMPLATE_NAMES.join(', ')}.`);
@@ -862,7 +834,6 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 	const files = renderTemplate(template, {
 		appId,
 		appName: displayName,
-		publisher: developerId,
 		moduleId: appId.replace(/[.-]/g, '_'),
 		port,
 		previewUrl: `${base}/?appid=${encodeURIComponent(appId)}&rrdev=1`,
@@ -992,14 +963,12 @@ registerAppPack({
 	MAX_ZIP_BYTES,
 	MAX_ICON_BYTES,
 	MAX_README_IMAGE_BYTES,
-	DEFAULT_DEVELOPER_ID,
 	collectPackedFiles,
 	readIncludeEntries,
 	packAppSource,
 	verifyAppSource,
 	preflightApp,
 	createAppWorkspace,
-	resolveDeveloperId,
 	markerPathOf,
 	ensureAppTrigger,
 	ensureProjectId,

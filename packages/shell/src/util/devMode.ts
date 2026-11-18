@@ -39,6 +39,7 @@
  */
 
 import React from 'react';
+import { appSlugOf } from 'rocketride';
 import * as ReactDom from 'react-dom';
 import * as ReactJsxRuntime from 'react/jsx-runtime';
 import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
@@ -236,7 +237,8 @@ export async function installDevHooks(): Promise<void> {
 	 */
 	const metaFromManifest = (manifest?: Record<string, unknown>): LocalAppMeta | undefined => {
 		if (!manifest || typeof manifest !== 'object') return undefined;
-		const appId = typeof manifest.id === 'string' ? manifest.id : '';
+		// The manifest carries the slug; an older one may still carry a prefix
+		const appId = appSlugOf(typeof manifest.id === 'string' ? manifest.id : '');
 		const contributes = manifest.contributes;
 		const configuration = contributes && typeof contributes === 'object' && !Array.isArray(contributes)
 			? (contributes as Record<string, unknown>).configuration
@@ -347,7 +349,7 @@ export async function installDevHooks(): Promise<void> {
 			}
 			const pkg = (await res.json()) as Record<string, unknown>;
 			const manifest = (pkg.appManifest ?? {}) as Record<string, unknown>;
-			if (manifest.id !== appId) {
+			if (appSlugOf(typeof manifest.id === 'string' ? manifest.id : '') !== appId) {
 				failHold(`Dev app at ${prefix} is "${String(manifest.id)}", not "${appId}"`);
 				return;
 			}

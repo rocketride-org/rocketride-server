@@ -334,7 +334,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	const canCreate = nameValid && !collision && displayName.trim() !== '' && workspaceOpen && !creating;
 
 	// step: compute the identity summary values
-	const developerId = identity.developerId || 'local';
+	const developerId = identity.developerId || '<developerId>';
 	const shownName = nameValid ? appName : '<name>';
 	const linkageName = `${developerId}.${shownName}`;
 	const location = `${locationPrefix}${shownName}-ui/`;
@@ -356,8 +356,8 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	const note = !workspaceOpen
 		? (noWorkspaceNote ?? 'Open a workspace folder first. The app is scaffolded into it.')
 		: identity.source === 'default'
-			? 'No organization developer id. Using the "local" default.'
-			: 'Developer ID is read from the organization account profile.';
+			? 'The files carry the app slug only. Deploying needs a registered organization developer id; claim one on the Deploy tab.'
+			: 'The files carry the app slug only; the organization developer id is attached at deploy.';
 
 	return (
 		<div style={styles.page}>
@@ -422,10 +422,10 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 					<div style={styles.identityRow}>
 						<span style={styles.identityKey}>Developer ID</span>
 						<span style={styles.chip}>{developerId}</span>
-						<span style={styles.chipSource}>{identity.source === 'organization' ? 'from organization profile' : 'default (no organization developer id)'}</span>
+						<span style={styles.chipSource}>{identity.source === 'organization' ? 'from organization profile' : 'none registered yet'}</span>
 					</div>
 					<div style={styles.identityRow}>
-						<span style={styles.identityKey}>Linkage name</span>
+						<span style={styles.identityKey}>Registry name (at deploy)</span>
 						<span style={{ ...styles.identityValue, ...styles.linkage }}>{linkageName}</span>
 					</div>
 					<div style={styles.identityRow}>

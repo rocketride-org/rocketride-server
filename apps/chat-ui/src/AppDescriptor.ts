@@ -25,7 +25,7 @@ import App from './App';
 import { ChatDevTool, ChatDevToolSidebar } from './DevTool';
 
 const CHAT_APP: AppDescriptor = {
-	id: 'rocketride.chat',
+	id: 'chat',
 	name: 'Chat',
 	branding: { appName: 'Chat' },
 	app: App,

@@ -41,7 +41,7 @@ import { SqlDevToolSidebar } from './SqlSidebar';
  * schema tree.
  */
 const SQL_APP: AppDescriptor = {
-	id: 'rocketride.sql',
+	id: 'sql',
 	name: 'SQL Explorer',
 	branding: {
 		appName: 'SQL Explorer',

@@ -39,6 +39,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { appSlugOf } from '../client/deploy-helpers.js';
 
 // =============================================================================
 // TYPES
@@ -46,7 +47,7 @@ import * as path from 'path';
 
 /** One app project found in the workspace. */
 export interface ScannedApp {
-	/** appManifest.id (e.g. 'acme.brandy'). */
+	/** The app slug (appManifest.id with any prefix dropped, e.g. 'brandy'). */
 	id: string;
 	/** Display name (appManifest.name, falling back to the package name). */
 	name: string;
@@ -94,10 +95,15 @@ export async function probeAppFolder(folder: string): Promise<ScannedApp | null>
 			if (fs.existsSync(iconPath)) icon = iconPath;
 		}
 
+		// The slug is the app's local identity; a prefix an older manifest
+		// still carries is ignored as if it were never written. An id that is
+		// nothing but a prefix ("acme.") names no app.
+		const id = appSlugOf(manifest.id);
+		if (!id) return null;
 		return {
-			id: manifest.id,
-			name: manifest.name || pkg.name || manifest.id,
-			moduleId: manifest.id.replace(/[.-]/g, '_'),
+			id,
+			name: manifest.name || pkg.name || id,
+			moduleId: id.replace(/[.-]/g, '_'),
 			folder,
 			version: pkg.version,
 			description: manifest.description,
@@ -195,7 +201,7 @@ export interface AppRef {
 }
 
 /** Full app-id grammar — an id that may exist only on the server. */
-const FULL_APP_ID_RE = /^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$/;
+const APP_SLUG_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
 /**
  * Resolves what a person typed to name an app:
@@ -227,12 +233,15 @@ export async function findApp(workspaceRoot: string, ref?: string, cwd: string =
 	if (ref) {
 		const exact = apps.find((a) => a.id === ref);
 		if (exact) return { appId: exact.id, app: exact };
-		const loose = apps.filter((a) => a.id.endsWith(`.${ref}`) || path.basename(a.folder) === ref);
+		const loose = apps.filter((a) => a.id === appSlugOf(ref) || path.basename(a.folder) === ref);
 		if (loose.length === 1) return { appId: loose[0].id, app: loose[0] };
 		if (loose.length > 1) {
 			throw new Error(`"${ref}" matches several apps — use the full id: ${loose.map((a) => a.id).join(', ')}`);
 		}
-		if (FULL_APP_ID_RE.test(ref)) return { appId: ref };
+		// A reference with no working copy goes to the server as written: a
+		// qualified id keeps its namespace (the door checks it), a bare slug is
+		// composed there
+		if (APP_SLUG_RE.test(appSlugOf(ref))) return { appId: ref };
 	}
 	const known = apps.length > 0 ? ` Apps in ${workspaceRoot}: ${apps.map((a) => a.id).join(', ')}.` : '';
 	throw new Error(ref ? `No app "${ref}" found.${known}` : `The current directory is not an app folder — pass an app folder or app id.${known}`);

@@ -173,7 +173,7 @@ class TestPublish:
         resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'comment': 'note'})
 
         args = account_stub.deployments_publish.await_args.args
-        assert args[0] == 'org-1' and args[1] == 'proj-1'
+        assert args[0] == 'org-1' and args[1] == 'acme.proj-1'
         # The audit actor is the denormalized caller identity.
         assert args[3] == {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'}
         # Every version is born 'private' (plan S8): the door never passes a state
@@ -200,7 +200,7 @@ class TestPublish:
         await conn._deploy_add_pipe({}, {'pipeline': PIPE})
 
         withdrawn = [call.args[:4] for call in account_stub.set_artifact_state.await_args_list]
-        assert withdrawn == [('org-1', 'proj-1', 2, 'private')]
+        assert withdrawn == [('org-1', 'acme.proj-1', 2, 'private')]
 
     @pytest.mark.asyncio
     async def test_publish_takes_the_bundle_zip_beside_the_pipeline(self, account_stub, monkeypatch):
@@ -261,7 +261,7 @@ class TestPublish:
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='marked failed'):
             await conn._deploy_add_pipe({}, {'data': buffer.getvalue()})
-        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'proj-1', 3, 'failed')
+        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'acme.proj-1', 3, 'failed')
 
     @pytest.mark.asyncio
     async def test_publish_is_promoted_to_ready_without_a_review_ladder(self, account_stub):
@@ -271,7 +271,7 @@ class TestPublish:
         resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE})
 
         assert 'state' not in account_stub.deployments_publish.await_args.kwargs
-        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'proj-1', 3, 'ready')
+        assert account_stub.set_artifact_state.await_args.args[:4] == ('org-1', 'acme.proj-1', 3, 'ready')
         assert resp['body']['artifact']['state'] == 'ready'
 
     @pytest.mark.asyncio
@@ -374,7 +374,7 @@ class TestDeploy:
         account_stub.deployments_deploy.assert_awaited_once_with(
             'org-1',
             'team-1',
-            'proj-1',
+            'acme.proj-1',
             3,
             {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'},
             'team-1',
@@ -407,7 +407,7 @@ class TestDeploy:
             EVENT_TYPE.DEPLOY,
             {
                 'event': 'apaevt_deploy',
-                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'proj-1', 'action': 'deploy'},
+                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'acme.proj-1', 'action': 'deploy'},
             },
             org_id='org-1',
         )
@@ -559,7 +559,7 @@ class TestReads:
         assert dispatched['team_id'] == 'team-1'
         # The run names the deployment it resolved through: disabling or
         # removing that deployment releases the run's hold
-        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1')
+        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.proj-1')
         assert dispatched['pipeline']['source'] == 'webhook_1'
         # No actor rides the dispatch — the run is owned by the team alone.
         assert 'actor' not in dispatched
@@ -567,11 +567,11 @@ class TestReads:
         assert dispatched['ttl'] is None
         assert dispatched['trace_level'] == 'summary'
         assert dispatched['debug_out'] is True
-        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'proj-1', 'webhook_1')
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'acme.proj-1', 'webhook_1')
         # The control KEY lands under the scheduler's overlap guard so the
         # next cron tick sees this run and skips.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'team-1', 'proj-1', 'webhook_1', 'deploy.team-1.acme.proj-1.webhook_1'
+            'team-1', 'acme.proj-1', 'webhook_1', 'deploy.team-1.acme.proj-1.webhook_1'
         )
 
     @pytest.mark.asyncio
@@ -611,7 +611,7 @@ class TestReads:
         conn = _make_conn(_account_info())
         result = await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 3})
         assert result['body'] == {'project_id': 'proj-1', 'components': [{'id': 's1'}, {'id': 'webhook_1'}]}
-        assert account_stub.deployments_artifact.await_args.args == ('org-1', 'proj-1', 3)
+        assert account_stub.deployments_artifact.await_args.args == ('org-1', 'acme.proj-1', 3)
 
     @pytest.mark.asyncio
     async def test_artifact_needs_task_monitor_and_integer_version(self, account_stub):
@@ -656,7 +656,7 @@ class TestReads:
         args = {'projectId': 'proj-1', 'page': 3, 'page_size': 10, 'search': 'rollback'}
         result = await conn._deploy_history({}, args)
         passed = account_stub.deployments_history.await_args.args
-        assert passed[1] == 'proj-1' and passed[3] is args
+        assert passed[1] == 'acme.proj-1' and passed[3] is args
         assert result['body']['rows'] == [{'action': 'publish', 'seq': 1}]
 
 
@@ -730,9 +730,9 @@ class TestPersonalDeploy:
         assert dispatched['team_id'] == 'team-1'
         # Overlap guard + mark_run key on the OWNER key.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'user~user-1', 'proj-1', 's1', 'deploy.user-1.acme.proj-1.s1'
+            'user~user-1', 'acme.proj-1', 's1', 'deploy.user-1.acme.proj-1.s1'
         )
-        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'proj-1', 's1')
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'acme.proj-1', 's1')
 
     @pytest.mark.asyncio
     async def test_me_run_refuses_without_a_billing_stamp(self, account_stub, monkeypatch):
@@ -1026,3 +1026,58 @@ class TestInterfaces:
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError):
             await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces'}})
+
+
+# ============================================================================
+# The registry name: developerId.pipeId, composed at the door (plan 2.3, B37)
+# ============================================================================
+
+
+class TestRegistryId:
+    """Clients send the short id; the door stores the pipe inside the caller's namespace."""
+
+    def test_short_id_is_composed_from_the_callers_developer_id(self):
+        conn = _make_conn(_account_info())
+        assert conn._registry_id('proj-1') == 'acme.proj-1'
+
+    def test_a_name_in_the_callers_namespace_passes_through(self):
+        conn = _make_conn(_account_info())
+        assert conn._registry_id('acme.proj-1') == 'acme.proj-1'
+
+    def test_a_name_in_another_namespace_is_refused(self):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='outside your developer namespace'):
+            conn._registry_id('other.proj-1')
+
+    def test_a_dotted_short_id_is_refused_by_the_grammar(self):
+        from ai.modules.task.types import TaskError
+
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError):
+            conn._registry_id('a.b.c')
+        with pytest.raises(TaskError):
+            conn._registry_id('bad id')
+
+    def test_no_developer_id_is_refused_with_the_claim_message(self):
+        info = _account_info()
+        info.organization['developerId'] = None
+        conn = _make_conn(info)
+        with pytest.raises(ValueError, match='requires a registered developer id'):
+            conn._registry_id('proj-1')
+
+    def test_no_organization_is_the_membership_refusal(self):
+        info = _account_info()
+        info.organization = None
+        conn = _make_conn(info)
+        with pytest.raises(PermissionError, match='organisation membership'):
+            conn._registry_id('proj-1')
+
+    @pytest.mark.asyncio
+    async def test_add_stores_the_registry_name_and_keeps_the_short_id_in_the_file(self, account_stub):
+        conn = _make_conn(_account_info())
+        pipeline = {'project_id': 'proj-1', 'name': 'P', 'source': 'webhook_1', 'components': []}
+        resp = await conn._deploy_add_pipe({}, {'pipeline': pipeline})
+        args = account_stub.deployments_publish.await_args.args
+        assert args[1] == 'acme.proj-1'
+        assert args[2]['project_id'] == 'proj-1'
+        assert resp['body']['fullName'] == 'acme.proj-1'

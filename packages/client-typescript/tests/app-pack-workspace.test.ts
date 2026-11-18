@@ -34,14 +34,12 @@ import * as os from 'os';
 import * as path from 'path';
 import {
 	createAppWorkspace,
-	DEFAULT_DEVELOPER_ID,
 	ensureProjectId,
 	ensureWorkspaceFile,
 	ensureWorkspaceGitignore,
 	preflightApp,
 	readAppListing,
 	readProjectIdAt,
-	resolveDeveloperId,
 	saveAppListing,
 	scanAppMarkers,
 } from '../src/app-pack/index';
@@ -74,19 +72,22 @@ describe('createAppWorkspace', () => {
 	it('scaffolds apps/<slug>-ui under the default developer id', async () => {
 		const created = await createAppWorkspace(ws, 'clock', { install: false });
 
-		expect(created.appId).toBe(`${DEFAULT_DEVELOPER_ID}.clock`);
+		expect(created.appId).toBe('clock');
 		expect(created.folder).toBe('apps/clock-ui');
 		expect(fs.existsSync(path.join(ws, 'apps', 'clock'))).toBe(false);
 		expect(fs.existsSync(path.join(ws, 'apps', 'clock-ui', 'clock.rrapp'))).toBe(true);
 		expect(created.installed).toBe(false);
 	});
 
-	it('uses the given developer id as the namespace and publisher', async () => {
-		const created = await createAppWorkspace(ws, 'clock', { developerId: 'acme', install: false });
+	it('writes the slug alone: no developer namespace, no publisher', async () => {
+		const created = await createAppWorkspace(ws, 'clock', { install: false });
 		const pkg = JSON.parse(read('apps/clock-ui/package.json'));
 
-		expect(created.appId).toBe('acme.clock');
-		expect(pkg.appManifest.id).toBe('acme.clock');
+		expect(created.appId).toBe('clock');
+		expect(pkg.appManifest.id).toBe('clock');
+		expect(pkg.appManifest.publisher).toBeUndefined();
+		expect(read('apps/clock-ui/src/AppDescriptor.ts')).toContain("id: 'clock'");
+		expect(JSON.parse(read('apps/clock-ui/clock.rrapp'))).toEqual({ id: 'clock' });
 	});
 
 	it('stamps a working-copy projectId at creation', async () => {
@@ -129,7 +130,7 @@ describe('createAppWorkspace', () => {
 
 		const created = await createAppWorkspace(ws, 'clock', { install: false, onProgress: (l) => lines.push(l) });
 
-		expect(created.appId).toBe('local.clock');
+		expect(created.appId).toBe('clock');
 		expect(lines.some((l) => /warning: pnpm-workspace\.yaml not updated/.test(l))).toBe(true);
 	});
 
@@ -139,10 +140,6 @@ describe('createAppWorkspace', () => {
 		await expect(createAppWorkspace(ws, 'clock', { install: false })).rejects.toThrow(/"apps\/clock-ui" already exists/);
 	});
 
-	it('refuses an invalid developer id before touching disk', async () => {
-		await expect(createAppWorkspace(ws, 'clock', { developerId: 'Acme', install: false })).rejects.toThrow(/Developer id/);
-		expect(fs.existsSync(path.join(ws, 'apps'))).toBe(false);
-	});
 });
 
 describe('ensureWorkspaceFile', () => {
@@ -202,7 +199,8 @@ describe('scanAppMarkers', () => {
 		const apps = await scanAppMarkers(markers);
 
 		expect(apps).toHaveLength(1);
-		expect(apps[0]).toMatchObject({ id: 'acme.clock', name: 'Clock', moduleId: 'acme_clock', folder: shallow });
+		// The manifest's prefix is ignored: the scanner reads the slug
+		expect(apps[0]).toMatchObject({ id: 'clock', name: 'Clock', moduleId: 'clock', folder: shallow });
 	});
 });
 
@@ -243,7 +241,7 @@ describe('manifest', () => {
 	it('saveAppListing drops emptied keys and round-trips through readAppListing', () => {
 		const folder = writeApp('apps/clock', { id: 'acme.clock', icon: 'icon.svg', billing: { plans: [{ id: 'p' }] } });
 
-		saveAppListing(folder, { appId: 'acme.clock', mode: 'free', name: 'Clock', description: 'Tells time', plans: [], icon: '', typecheck: false });
+		saveAppListing(folder, { mode: 'free', name: 'Clock', description: 'Tells time', plans: [], icon: '', typecheck: false });
 
 		const pkg = JSON.parse(read('apps/clock/package.json'));
 		expect(pkg.appManifest.icon).toBeUndefined();
@@ -288,17 +286,5 @@ describe('preflightApp', () => {
 		fs.mkdirSync(folder);
 
 		expect(await preflightApp(folder, ws)).toEqual([expect.objectContaining({ id: 'manifest', state: 'fail' })]);
-	});
-});
-
-describe('resolveDeveloperId', () => {
-	it('reads organization.developerId off the account info', () => {
-		expect(resolveDeveloperId({ getAccountInfo: () => ({ organization: { developerId: 'acme' } }) })).toBe('acme');
-	});
-
-	it('is null for an unregistered org, a missing org, or no client', () => {
-		expect(resolveDeveloperId({ getAccountInfo: () => ({ organization: { developerId: null } }) })).toBeNull();
-		expect(resolveDeveloperId({ getAccountInfo: () => undefined })).toBeNull();
-		expect(resolveDeveloperId(undefined)).toBeNull();
 	});
 });

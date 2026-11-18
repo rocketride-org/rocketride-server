@@ -37,6 +37,7 @@
 // Leaf import: these modules also compile in the VS Code EXTENSION HOST
 // program, which must not resolve the shell's React barrel.
 import type { WorkspaceFs } from 'shell/src/workspace/workspaceFs';
+import { appSlugOf } from 'rocketride';
 
 /** One app project found in the workspace. */
 export interface IScannedWorkspaceApp {
@@ -135,10 +136,15 @@ async function probeFolder(fs: WorkspaceFs, folder: string): Promise<IScannedWor
 		};
 		const manifest = pkg.appManifest;
 		if (!manifest?.id) return null;
+		// The slug is the app's local identity; a prefix an older manifest
+		// still carries is ignored as if it had never been written. An id that
+		// is nothing but a prefix ("acme.") names no app.
+		const id = appSlugOf(manifest.id);
+		if (!id) return null;
 		return {
-			id: manifest.id,
-			name: manifest.name || pkg.name || manifest.id,
-			moduleId: manifest.id.replace(/[.-]/g, '_'),
+			id,
+			name: manifest.name || pkg.name || id,
+			moduleId: id.replace(/[.-]/g, '_'),
 			folder,
 			...(pkg.version !== undefined ? { version: pkg.version } : {}),
 			...(manifest.description !== undefined ? { description: manifest.description } : {}),

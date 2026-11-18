@@ -240,6 +240,32 @@ def artifact_sha256(data: str) -> str:
     return hashlib.sha256(data.encode('utf-8')).hexdigest()
 
 
+def _assert_file_id_matches(pipeline: Dict[str, Any], pipe_id: str) -> None:
+    """
+    Require the artifact's own ``project_id`` to be the registry name's pipe segment.
+
+    The ``.pipe`` file carries the SHORT id and the registry name is that id
+    inside the publisher's namespace; a file whose id is dotted, or differs
+    from the name it is being registered under, would be addressable under
+    one name and run under another.
+
+    Args:
+        pipeline: The artifact dict.
+        pipe_id: The pipe segment of the registry name.
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` when the file's id breaks the grammar.
+        ValueError: The file's id is not ``pipe_id``.
+    """
+    from ai.modules.task.address import validate_segment
+
+    file_id = pipeline.get('project_id')
+    if file_id is None:
+        return
+    if validate_segment(file_id, 'pipeline.project_id') != pipe_id:
+        raise ValueError(f'pipeline.project_id {file_id!r} does not match the registry name (expected {pipe_id!r})')
+
+
 def kind_mismatch_message(project_id: str, existing_kind: str, wanted_kind: str) -> str:
     """The refusal when a name already belongs to another kind in the org (plan 2.3, B37).
 
@@ -364,16 +390,19 @@ class FileDeploymentBackend:
         if state is not None and state not in ('private', 'submit', 'ready', 'rejected', 'failed'):
             raise ValueError(f'Unknown artifact state: {state!r}')
         # A PIPE artifact must satisfy the address grammar at publish exactly
-        # as at execute: the SHORT dot-free project id and dot-free component
-        # ids are what make ``developerId.pipelineId.source`` unambiguous.
-        # (Deferred import: ai.modules.task's package init pulls the task
-        # server, which imports this account layer.)
+        # as at execute: the registry name is ``developerId.pipeId`` (the
+        # short id the file carries inside the publisher's namespace, composed
+        # by the deploy door) and dot-free component ids are what make
+        # ``developerId.pipelineId.source`` unambiguous. (Deferred import:
+        # ai.modules.task's package init pulls the task server, which imports
+        # this account layer.)
         if str(pipeline.get('kind') or 'pipe') == 'pipe':
             from ai.common.parameters import validate_parameters
-            from ai.modules.task.address import validate_component_ids, validate_segment
+            from ai.modules.task.address import validate_component_ids, validate_pipe_name
             from ai.modules.task.task_convert import convert_pipeline
 
-            validate_segment(project_id, 'project_id')
+            name = validate_pipe_name(project_id, 'project_id')
+            _assert_file_id_matches(pipeline, name.pipe_id)
             validate_component_ids(pipeline)
             # Old-format node config is converted before it is frozen into an
             # artifact (plan 5.6.8), so no old-shape artifact is created again

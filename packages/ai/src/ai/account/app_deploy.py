@@ -311,10 +311,10 @@ def developer_id_required(action: str) -> str:
 def _namespace_id_of(conn: Any, artifact_id: str) -> str:
     """The full name of a registry key for the namespace check.
 
-    An app's registry key IS its full name (``<developerId>.<name>``); a
-    pipe's registry key is its SHORT id, and its full name is derived from
-    the caller's developer id (plan 2.1), the address grammar. A key without
-    a dot is a pipe's.
+    Every registry key is a full name (``<developerId>.<slug>``) for apps and
+    pipes alike (plan 2.3). A client may still send the bare slug of its own
+    app or pipe: it is composed with the caller's developer id, so a key
+    without a dot is the caller's own.
 
     Args:
         conn: The connection (the caller's developer id).
@@ -456,16 +456,33 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         manifest, app_version = _manifest_of_zip(archive, app_root)
     except ValueError as exc:
         return conn.build_error(request, str(exc))
-    app_id = str(manifest.get('id') or '')
-    if not app_id:
+    # The manifest carries the app's SLUG; the registry name is that slug
+    # inside the DEPLOYING organization's developer namespace, composed here
+    # and never read from the file (plan 2.3, B37: one rule for apps and
+    # pipes). A manifest written before this rule may still carry
+    # `<prefix>.<slug>`: everything up to and including the last dot is
+    # discarded as if it had never been specified. The stored manifest keeps
+    # the slug and loses its authored `publisher` (the store derives the
+    # publisher from the registry name, plan S7).
+    # Deferred imports: ai.modules.task's package init pulls the task server,
+    # which imports this account layer (the same seam the backends use).
+    from ai.modules.task.address import validate_segment
+    from ai.modules.task.types import TaskError
+
+    raw_id = str(manifest.get('id') or '')
+    if not raw_id:
         return conn.build_error(request, 'package.json appManifest.id is required')
-    # Namespace ownership — fail fast before decompressing the archive: an org
-    # may only deploy app ids inside its own developer namespace (the guarantee
-    # is re-enforced at publish, which also covers the pipe-forge path).
+    slug = raw_id.rsplit('.', 1)[-1]
     try:
-        _assert_owns_namespace(conn, app_id)
-    except ValueError as exc:
+        validate_segment(slug, 'appManifest.id')
+    except TaskError as exc:
         return conn.build_error(request, str(exc))
+    developer_id = _developer_id_of(conn)
+    if not developer_id:
+        return conn.build_error(request, developer_id_required('Deploying or publishing an app'))
+    app_id = f'{developer_id}.{slug}'
+    manifest = {key: value for key, value in manifest.items() if key != 'publisher'}
+    manifest['id'] = slug
     guard_error = _zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
@@ -474,7 +491,10 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     artifact = {
         'kind': 'app',
         'appId': app_id,
-        'moduleId': str(manifest.get('moduleId') or app_id.replace('.', '_').replace('-', '_')),
+        # The MF container name is DERIVED from the registry name, never taken
+        # from the manifest: two organizations' apps with one slug must load
+        # side by side in one shell.
+        'moduleId': app_id.replace('.', '_').replace('-', '_'),
         'name': str(manifest.get('name') or app_id),
         'appVersion': app_version,
         'bundleSha256': hashlib.sha256(data).hexdigest(),
@@ -902,7 +922,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not developer:
             return conn.build_error(request, f'Only the developer organization can submit {app_id} for review')
         try:
-            # A pipe's registry key is its short id; the namespace holds full names
+            # Registry keys are full names (developerId.slug); a bare slug is composed
             _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
@@ -964,7 +984,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         if not developer:
             return conn.build_error(request, f'Only the developer organization can withdraw {app_id} from review')
         try:
-            # A pipe's registry key is its short id; the namespace holds full names
+            # Registry keys are full names (developerId.slug); a bare slug is composed
             _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))
@@ -1009,7 +1029,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
                 request, f'Only the developer organization can reply on the review thread of {app_id}'
             )
         try:
-            # A pipe's registry key is its short id; the namespace holds full names
+            # Registry keys are full names (developerId.slug); a bare slug is composed
             _assert_owns_namespace(conn, _namespace_id_of(conn, app_id))
         except ValueError as exc:
             return conn.build_error(request, str(exc))

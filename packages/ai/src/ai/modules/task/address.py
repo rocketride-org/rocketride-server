@@ -176,6 +176,38 @@ def build_address(developer_id: str, pipe_id: str, source: Optional[str] = None)
     return '.'.join(parts)
 
 
+def validate_pipe_name(value: Any, field: str = 'project_id') -> Address:
+    """
+    Require ``value`` to be a pipe's REGISTRY name: ``developerId.pipeId``.
+
+    The ``.pipe`` file carries only the short, dot-free pipe id; the name a
+    pipe is registered, published and resolved under is that id inside the
+    publishing organization's developer namespace. Every registry row
+    (``deployment_projects``, ``deployment_artifacts``,
+    ``published_artifacts``, ``deployment_history``) stores this two-segment
+    form, the same shape an app id has (plan 2.3, B37).
+
+    Args:
+        value: The candidate registry name.
+        field: What the value is, for the error.
+
+    Returns:
+        The parsed name as an ``Address`` whose ``source`` is ``None``.
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` unless the value is exactly two
+            dot-free segments.
+    """
+    if not isinstance(value, str) or value.count('.') != 1:
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            f'{field} {value!r} is not a pipe registry name: expected developerId.pipeId',
+            field=field,
+        )
+    developer_id, pipe_id = value.split('.')
+    return Address(validate_segment(developer_id, 'developerId'), validate_segment(pipe_id, field), None)
+
+
 def parse_address(address: Any) -> Address:
     """
     Split an address into its 2 or 3 segments.

@@ -59,7 +59,7 @@ const {
 	exists,
 } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
-const { registerApp, assertSafeAppId } = require('./registerApp');
+const { registerApp, assertSafeAppId, servedAppIdOf } = require('./registerApp');
 const registry = require('./registry');
 
 // Shared dependency sources — same for every remote app. Dual-layout:
@@ -94,7 +94,7 @@ function readAppId(appRoot, fallback) {
 	try {
 		const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
 		const id = pkg.appManifest && pkg.appManifest.id;
-		if (id) return id;
+		if (id) return servedAppIdOf(id);
 		// No appManifest.id — serve under the folder name and warn loudly.
 		console.warn(
 			`  Warning: ${appRoot} has no appManifest.id — serving under "${fallback}"; ` +

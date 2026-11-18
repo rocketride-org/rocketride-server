@@ -42,13 +42,12 @@
  * surface is the only host-rendered piece, passed in as a slot.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { TabControl } from 'shell';
 import type { ViewMenu } from 'shell';
 import { DesignView } from './panels/design/DesignView';
 import { DeployView } from './panels/deploy/DeployView';
 import { PackageView } from './panels/package/PackageView';
-import { NamespaceBanner } from './NamespaceBanner';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost } from '../../types';
 
 // =============================================================================
@@ -133,18 +132,6 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 	// Both hosts used to carry identical stage plumbing of their own.
 	const [stage, setStage] = useState<AppBuilderStage>(() => normalizeStage(host.getPref?.(STAGE_PREF_KEY)));
 
-	// ── Namespace gate ───────────────────────────────────────────────────
-	// The app id's prefix must match the org's developerId to publish. On a
-	// mismatch STORE and DEPLOY render read-only (DEVELOP is untouched —
-	// local work is always allowed). null = unknown (signed out / no org):
-	// no gate, the server enforces ownership anyway.
-	const [developerId, setDeveloperId] = useState<string | null>(null);
-	useEffect(() => {
-		if (!host.getDeveloperId) { setDeveloperId(null); return; }
-		void host.getDeveloperId().then((id) => setDeveloperId(id || null)).catch(() => setDeveloperId(null));
-	}, [host]);
-	const namespaceMismatch = developerId !== null && app.id.split('.')[0] !== developerId;
-
 	// The activity views (named-pipes mockups 1.x, 2026-11-16): Design lands
 	// first; Package describes the app, Store included, in side tabs.
 	const viewMenu: ViewMenu = useMemo(() => ({
@@ -176,26 +163,15 @@ export const AppBuilderScreen: React.FC<IAppBuilderScreenProps> = ({
 				}
 			/>
 
-			{/* Namespace-mismatch banner — why parts of the page below are
-			    read-only. PACKAGE/DEPLOY: DESIGN is local work (always allowed);
-			    on PACKAGE the local pages stay editable and only the Store and
-			    Review side tabs are gated (the reply box disables with an inline
-			    hint). A `local.*` app on a host that can rewrite its files is
-			    offered the move to <developerId>.<name>; anything else keeps the
-			    hand-edit instruction. */}
-			{namespaceMismatch && developerId !== null && (stage === 'package' || stage === 'deploy') && (
-				<NamespaceBanner appId={app.id} developerId={developerId} onAdopt={host.adoptDeveloperId} />
-			)}
-
 			{/* Active view body */}
 			<div style={styles.body}>
 				{stage === 'design' && (
 					<DesignView host={host} previewPane={previewPane} />
 				)}
-				{/* Package edits LOCAL files (like DESIGN); its Store and Review
-				    side tabs are the namespace-gated ones. */}
-				{stage === 'package' && <PackageView host={host} app={app} readOnly={namespaceMismatch} onNavigate={selectStage} />}
-				{stage === 'deploy' && <DeployView host={host} app={app} readOnly={namespaceMismatch} />}
+				{/* The files carry the app's SLUG; the organization that deploys
+				    attaches its developer id, so there is no namespace to gate. */}
+				{stage === 'package' && <PackageView host={host} app={app} onNavigate={selectStage} />}
+				{stage === 'deploy' && <DeployView host={host} app={app} />}
 			</div>
 		</div>
 	);
