@@ -104,7 +104,7 @@ test('T126 shared-prefix needles cost nothing extra: lookup is per distinct leng
 		assert.ok(ms < 50, `outbound took ${ms.toFixed(1)} ms`);
 	});
 
-	await tt.test('(b) outbound: an 8 MiB status of the flood text with shared-prefix needles held is delivered in under 200 ms', async () => {
+	await tt.test('(b) outbound: an 8 MiB status of the flood text with shared-prefix needles held is delivered in under 1000 ms', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
