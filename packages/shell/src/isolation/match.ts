@@ -31,12 +31,17 @@
 // cannot be precomputed). Needles of 16 characters or more are keyed by the
 // hashes of their first TWO 8-character blocks, shorter ones (8-15) by the
 // first. A position is a candidate only when its block hashes are a key;
-// the prefix is then confirmed with `startsWith` and the needle found with
-// ONE exact `Map` lookup per distinct length of that group. So the work at a
-// position never depends on how many needles share a prefix or a hash: all
-// minted ids of one app share `rrapp.<key>.` and still cost one lookup
-// (DA R2-1, security N2). Worst case: O(string x distinct needle lengths).
-// A matcher is immutable and built once per version of the sets it holds.
+// the prefix is then confirmed with `startsWith`. Groups form a trie on
+// 8-character blocks: a node holds only the needles shorter than its prefix
+// plus 8 (so at most {@link GROUP_LENGTHS} lengths, one exact `Map` lookup
+// each), and longer ones sit one block deeper, reached by one exact lookup
+// of the next block. So the work at a position never depends on how many
+// needles share a prefix or a hash: all minted ids of one app share
+// `rrapp.<key>.` and still cost one lookup per level (DA R2-1, security N2),
+// and no group can collect lengths without bound (post-G4 LOW). Every needle
+// stays reachable; nothing is skipped. Scan state is per call (re-entrant),
+// and no string outlives its scan. A matcher is immutable and built once
+// per version of the sets it holds.
 // =============================================================================
 
 /** The shortest needle matched (shorter values would match ordinary text). */
@@ -80,10 +85,18 @@ interface ILengthEntry<T> {
 	needles: Map<string, T>;
 }
 
-/** Needles sharing a prefix (8 chars for short needles, 16 for long ones), by length, longest first. */
+/** The most lengths one trie node holds: those in [prefix length, prefix length + 8). */
+export const GROUP_LENGTHS = PREFIX;
+
+/**
+ * Needles sharing a prefix (8 chars at the root of a short needle, 16 at the
+ * root of a long one, 8 more per level below): the ones shorter than the
+ * prefix plus 8, by length (longest first), and deeper nodes by next block.
+ */
 interface IGroup<T> {
 	prefix: string;
 	lengths: Array<ILengthEntry<T>>;
+	next: Map<string, IGroup<T>> | null;
 }
 
 /** A set of needles, each with a value. */
@@ -132,7 +145,16 @@ function addTo<T>(index: Map<number, Array<IGroup<T>>>, key: number, prefix: str
 	let slot = index.get(key);
 	if (!slot) index.set(key, (slot = []));
 	let group = slot.find((g) => g.prefix === prefix);
-	if (!group) slot.push((group = { prefix, lengths: [] }));
+	if (!group) slot.push((group = { prefix, lengths: [], next: null }));
+	// Longer needles go one 8-character block deeper, so a node never holds more than GROUP_LENGTHS lengths.
+	while (needle.length >= group.prefix.length + PREFIX) {
+		const end: number = group.prefix.length + PREFIX;
+		const block = needle.slice(group.prefix.length, end);
+		const next: Map<string, IGroup<T>> = (group.next ??= new Map());
+		let child = next.get(block);
+		if (!child) next.set(block, (child = { prefix: needle.slice(0, end), lengths: [], next: null }));
+		group = child;
+	}
 	let entry = group.lengths.find((e) => e.len === needle.length);
 	if (!entry) {
 		group.lengths.push((entry = { len: needle.length, needles: new Map() }));
@@ -181,9 +203,38 @@ export interface IMatch<T> {
 	matcher: number;
 }
 
-/** The window hashes of the last string scanned (a reused buffer). */
-let windows = new Int32Array(1024);
-let hashed: string | undefined;
+/** The 8-character window hashes of one string. A caller that scans one string twice can compute them once ({@link hashWindows}). */
+export interface IWindows {
+	readonly s: string;
+	readonly h: Int32Array;
+}
+
+/** Spare hash buffers (ints only, never a string). A nested scan takes its own, so scans are re-entrant. */
+const spare: Int32Array[] = [];
+const SPARE_MAX = 4;
+
+/**
+ * Computes the window hashes of `s` into a pooled buffer. Give it back with
+ * {@link releaseWindows} when done (forgetting only costs a reallocation).
+ */
+export function hashWindows(s: string): IWindows {
+	const count = Math.max(0, s.length - PREFIX + 1);
+	let h = spare.length > 0 && spare[spare.length - 1].length >= count ? spare.pop()! : new Int32Array(Math.max(count, 1024));
+	if (count > 0) {
+		let x = hashAt(s, 0);
+		h[0] = x;
+		for (let i = 1; i < count; i++) {
+			x = (Math.imul((x - Math.imul(s.charCodeAt(i - 1), LEAD)) | 0, BASE) + s.charCodeAt(i + PREFIX - 1)) | 0;
+			h[i] = x;
+		}
+	}
+	return { s, h };
+}
+
+/** Returns a buffer from {@link hashWindows} to the pool. */
+export function releaseWindows(w: IWindows): void {
+	if (spare.length < SPARE_MAX) spare.push(w.h);
+}
 
 /**
  * Scans `s` for the needles of `matchers`, leftmost first; at one position
@@ -195,39 +246,44 @@ let hashed: string | undefined;
  * @param matchers - The matchers, in priority order.
  * @param onMatch - Called per match.
  * @param overlap - Report matches at every position.
+ * @param windows - The window hashes of `s`, when the caller computed them ({@link hashWindows}).
  */
-export function scan<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap = false): void {
+export function scan<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap = false, windows?: IWindows): void {
 	const n = s.length;
 	if (n < PREFIX || !matchers.some((m) => m.size > 0)) return;
-	const count = n - PREFIX + 1;
-	// The scrubber scans one string twice (backstop, then replacements): its window hashes are reused.
-	if (s !== hashed) {
-		if (windows.length < count) windows = new Int32Array(Math.max(count, windows.length * 2));
-		let h = hashAt(s, 0);
-		windows[0] = h;
-		for (let i = 1; i < count; i++) {
-			h = (Math.imul((h - Math.imul(s.charCodeAt(i - 1), LEAD)) | 0, BASE) + s.charCodeAt(i + PREFIX - 1)) | 0;
-			windows[i] = h;
-		}
-		hashed = s;
+	const own = windows === undefined || windows.s !== s ? hashWindows(s) : undefined;
+	try {
+		scanWith(s, (own ?? windows!).h, matchers, onMatch, overlap);
+	} finally {
+		if (own) releaseWindows(own);
 	}
-	const H = windows;
+}
+
+function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap: boolean): void {
+	const n = s.length;
+	const count = n - PREFIX + 1;
 	const union = unionOf(matchers);
 	const consider = (groups: Array<IGroup<T>> | undefined, p: number, best: { len: number; needle: string; value: T | undefined; matcher: number }, mi: number): void => {
 		if (!groups) return;
-		for (const group of groups) {
-			if (!s.startsWith(group.prefix, p)) continue;
-			for (const entry of group.lengths) {
-				if (entry.len <= best.len) break;
-				if (p + entry.len > n) continue;
-				const candidate = entry.len === group.prefix.length ? group.prefix : s.slice(p, p + entry.len);
-				if (entry.needles.has(candidate)) {
-					best.len = entry.len;
-					best.needle = candidate;
-					best.value = entry.needles.get(candidate);
-					best.matcher = mi;
-					break;
+		for (const root of groups) {
+			if (!s.startsWith(root.prefix, p)) continue;
+			// Down the trie: at most GROUP_LENGTHS exact lookups per node, one block lookup per level.
+			for (let node: IGroup<T> | undefined = root; node !== undefined; ) {
+				const width = node.prefix.length;
+				for (const entry of node.lengths) {
+					if (entry.len <= best.len) break;
+					if (p + entry.len > n) continue;
+					const candidate = entry.len === width ? node.prefix : s.slice(p, p + entry.len);
+					if (entry.needles.has(candidate)) {
+						best.len = entry.len;
+						best.needle = candidate;
+						best.value = entry.needles.get(candidate);
+						best.matcher = mi;
+						break;
+					}
 				}
+				if (node.next === null || p + width + PREFIX > n) break;
+				node = node.next.get(s.slice(p + width, p + width + PREFIX));
 			}
 		}
 	};
@@ -262,12 +318,18 @@ export function scan<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, onMatch
 }
 
 /** Whether `s` holds any needle of `matchers`. */
-export function hasMatch(s: string, matchers: ReadonlyArray<IMatcher<unknown>>): boolean {
+export function hasMatch(s: string, matchers: ReadonlyArray<IMatcher<unknown>>, windows?: IWindows): boolean {
 	let found = false;
-	scan(s, matchers, () => {
-		found = true;
-		return false;
-	});
+	scan(
+		s,
+		matchers,
+		() => {
+			found = true;
+			return false;
+		},
+		false,
+		windows
+	);
 	return found;
 }
 
@@ -276,25 +338,38 @@ export function hasMatch(s: string, matchers: ReadonlyArray<IMatcher<unknown>>):
  *
  * @returns `s` itself when nothing matched.
  */
-export function replaceMatches<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, replace: (m: IMatch<T>) => string): string {
+export function replaceMatches<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, replace: (m: IMatch<T>) => string, windows?: IWindows): string {
 	let out = '';
 	let last = 0;
 	let any = false;
-	scan(s, matchers, (m) => {
-		any = true;
-		out += s.slice(last, m.index) + replace(m);
-		last = m.index + m.needle.length;
-	});
+	scan(
+		s,
+		matchers,
+		(m) => {
+			any = true;
+			out += s.slice(last, m.index) + replace(m);
+			last = m.index + m.needle.length;
+		},
+		false,
+		windows
+	);
 	return any ? out + s.slice(last) : s;
 }
 
 /**
- * The matcher's shape, for tests: needles held, the most lengths one group
- * holds (each is one exact lookup at a candidate position, never a scan over
- * needles), and the bound on that number (the distinct needle lengths).
+ * The matcher's shape, for tests: needles held, the most lengths one trie
+ * node holds (each is one exact lookup at a candidate position, never a scan
+ * over needles), the bound on that number (at most {@link GROUP_LENGTHS}, and
+ * never more than the distinct needle lengths), and the deepest node level.
  */
-export function matcherShape(m: IMatcher<unknown>): { needles: number; maxLengthsPerGroup: number; lengthBound: number } {
+export function matcherShape(m: IMatcher<unknown>): { needles: number; maxLengthsPerGroup: number; lengthBound: number; maxDepth: number } {
 	let max = 0;
-	for (const index of [m.long, m.short]) for (const slot of index.values()) for (const group of slot) max = Math.max(max, group.lengths.length);
-	return { needles: m.size, maxLengthsPerGroup: max, lengthBound: m.lengths };
+	let depth = 0;
+	const walk = (g: IGroup<unknown>, d: number): void => {
+		max = Math.max(max, g.lengths.length);
+		depth = Math.max(depth, d);
+		if (g.next) for (const child of g.next.values()) walk(child, d + 1);
+	};
+	for (const index of [m.long, m.short]) for (const slot of index.values()) for (const group of slot) walk(group, 0);
+	return { needles: m.size, maxLengthsPerGroup: max, lengthBound: Math.min(GROUP_LENGTHS, m.lengths), maxDepth: depth };
 }

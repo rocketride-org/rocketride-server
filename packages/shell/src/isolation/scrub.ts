@@ -57,8 +57,8 @@ import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
-import { createMatcher, hasMatch, replaceMatches, scan } from './match';
-import type { IMatch, IMatcher } from './match';
+import { createMatcher, hasMatch, hashWindows, releaseWindows, replaceMatches, scan } from './match';
+import type { IMatch, IMatcher, IWindows } from './match';
 import { SIZES } from './rate';
 import type { IRealmGrant } from './types';
 import { isWireBinary } from './walk';
@@ -315,11 +315,17 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
  * replacement that overlaps one (the deny wins, DA R2 LOW); the other
  * replacements apply.
  */
-function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, replacement: (m: IMatch<Repl>) => string): string {
+function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, replacement: (m: IMatch<Repl>) => string, windows: IWindows): string {
 	const reps: Array<IMatch<Repl>> = [];
-	scan(s, pass.replace, (m) => {
-		reps.push(m);
-	});
+	scan(
+		s,
+		pass.replace,
+		(m) => {
+			reps.push(m);
+		},
+		false,
+		windows
+	);
 	let ranges = mergeRanges(deny);
 	for (let grown = true; grown; ) {
 		grown = false;
@@ -351,6 +357,16 @@ function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, rep
  * earlier cannot consume part of one); an own value is never a hit.
  */
 function scrubString(pass: IPass, s: string, mode: Mode): string {
+	// One string, two scans (backstop, then replacements): its window hashes are computed once.
+	const windows = hashWindows(s);
+	try {
+		return scrubStringWith(pass, s, mode, windows);
+	} finally {
+		releaseWindows(windows);
+	}
+}
+
+function scrubStringWith(pass: IPass, s: string, mode: Mode, windows: IWindows): string {
 	let hit = false;
 	const deny: Array<[number, number]> = [];
 	scan(
@@ -365,7 +381,8 @@ function scrubString(pass: IPass, s: string, mode: Mode): string {
 			hit = true;
 			return false;
 		},
-		true
+		true,
+		windows
 	);
 	const replacement = (m: IMatch<Repl>): string => {
 		const r = m.value;
@@ -380,7 +397,7 @@ function scrubString(pass: IPass, s: string, mode: Mode): string {
 				return m.needle;
 		}
 	};
-	let out = deny.length > 0 ? redactWithin(s, deny, pass, replacement) : replaceMatches(s, pass.replace, replacement);
+	let out = deny.length > 0 ? redactWithin(s, deny, pass, replacement, windows) : replaceMatches(s, pass.replace, replacement, windows);
 	if (mode !== 'file' && (out.includes('k_') || out.includes('rrapp.'))) {
 		out = out.replace(BROAD_G, (x) => (ENGINE_CREDENTIAL_HEAD.test(x) ? x : REDACTED));
 		if (mode === 'inline') out = out.replace(ENGINE_CREDENTIAL_G, REDACTED).replace(MINTED_G, REDACTED);
