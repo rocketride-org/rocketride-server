@@ -121,8 +121,12 @@ interface IRealmState {
 	/** Set by detach: late answers are ended, not recorded. */
 	detached: boolean;
 	detachRouter: () => void;
-	/** The account user id when the realm was attached (undefined: unknown). */
+	/** The account user id when the realm was attached (undefined: unknown). Never changes (lead answer 2). */
+	attachUserId: string | undefined;
+	/** The user the per-request check compares against: the attach user, or the one adopted on first sight. */
 	userId: string | undefined;
+	/** The session token when the realm was attached: every engine op needs the same one (G4 round 2). */
+	attachToken: string;
 	/** The logout count when the realm was attached. */
 	logouts: number;
 	/** Attached signed in with no account info yet: may bind to the first account user (see op()). */
@@ -606,6 +610,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					// A realm attached while signed in but before the account info arrived is bound to the
 					// first account user seen (the residual's "serves once it has account info"); a realm
 					// attached signed out, or after a logout, never adopts one.
+					// The session token must be the one the realm was attached under (a same-tab switch to
+					// another user's token is refused before any account info could be adopted, DA r2 item 2).
+					if (cm.loadToken() !== st.attachToken) return onRefuse(deny('capability', name));
 					if (st.userId === undefined && st.adoptUser && user !== undefined && st.logouts === logouts) st.userId = user;
 					if (user === undefined || st.userId === undefined || user !== st.userId) return onRefuse(deny('capability', name));
 				}
@@ -871,11 +878,13 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// A sign-in detaches every realm attached under another user, under an
 	// unknown user (either side), or before a logout. A same-user reconnect keeps them.
 	cm.on('shell:login', (payload: unknown) => {
-		sealed = false;
+		// A sign-in never lifts the final-teardown seal (a same-user reconnect or an org rescope
+		// during the logout clear); only shell:logout does (security LOW-4).
 		const user = isPlainObject(payload) && isPlainObject(payload.user) ? payload.user.userId : undefined;
 		const userId = typeof user === 'string' && user !== '' ? user : undefined;
 		for (const st of [...realms.values()]) {
-			if (userId === undefined || st.userId === undefined || st.userId !== userId || st.logouts !== logouts) {
+			// The ATTACH-time user decides (an adopted one does not count): unknown at attach detaches.
+			if (userId === undefined || st.attachUserId === undefined || st.attachUserId !== userId || st.logouts !== logouts) {
 				st.ledger.clear();
 				st.pending.clear();
 				detachRealm(st, false);
@@ -977,7 +986,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				loggedDrops: new Set(),
 				detached: false,
 				detachRouter: () => {},
+				attachUserId: accountUserId(),
 				userId: accountUserId(),
+				attachToken: cm.loadToken(),
 				logouts,
 				adoptUser: accountUserId() === undefined && cm.loadToken() !== '',
 				closeEndpoint: () => {
