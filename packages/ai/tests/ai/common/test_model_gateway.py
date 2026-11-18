@@ -706,6 +706,72 @@ def test_a_busy_answer_stops_at_the_deadline(monkeypatch, backend, hosted):
     assert model_gateway._gate._value == 4
 
 
+class _Open(httpx.SyncByteStream):
+    """A streamed body that is still open when the response is handed back."""
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    def __iter__(self):
+        yield from self.chunks
+
+
+def test_a_stream_that_fails_in_a_callback_gives_its_slot_back(monkeypatch, backend, hosted):
+    _with_pass(monkeypatch, max_concurrent_calls=1)
+    chunks = [_chunk({'role': 'assistant', 'content': 'partial'}), _chunk({}, 'stop')]
+    body = ''.join(f'data: {json.dumps(c)}\n\n' for c in chunks).encode() + b'data: [DONE]\n\n'
+    backend(lambda _r, _b: httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=_Open([body])))
+    chat = _driver(monkeypatch, 'llm_openai_api', {**REASONING, 'base_url': ''})
+
+    def broken(_text):
+        raise RuntimeError('the caller failed')
+
+    with pytest.raises(Exception):
+        chat.chat(_prompt(), on_chunk=broken)
+
+    assert model_gateway._gate._value == 1
+
+
+def _transports(limit, deadline_s):
+    gate = model_gateway._run_gate(limit)
+    sync, async_ = model_gateway._gated_transport_types()
+    return gate, sync(gate, deadline_s), async_(gate, deadline_s)
+
+
+def test_a_busy_retry_never_waits_for_a_slot_past_the_deadline(monkeypatch, backend):
+    monkeypatch.setattr(model_gateway, '_busy_delay', lambda attempt: 0.05)
+    gateway = backend(refused('rate_limited', charged=False), answer)
+    gate, transport, _ = _transports(1, 0.2)
+    taken = threading.Event()
+
+    def hold_the_slot_during_the_backoff(request, body):
+        threading.Thread(target=lambda: (gate.acquire(), taken.set(), time.sleep(0.5), gate.release())).start()
+        return refused('rate_limited', charged=False)(request, body)
+
+    gateway.script[0] = hold_the_slot_during_the_backoff
+    response = transport.handle_request(httpx.Request('POST', f'{BASE_URL}/chat/completions', json={}))
+
+    assert response.status_code == 429 and len(gateway.requests) == 1
+    time.sleep(0.6)
+    assert taken.is_set() and gate._value == 1
+
+
+async def test_a_cancelled_async_wait_for_a_slot_keeps_none(monkeypatch):
+    gate, _, transport = _transports(1, 600.0)
+    gate.acquire()
+    waiting = asyncio.create_task(
+        transport.handle_async_request(httpx.Request('POST', f'{BASE_URL}/chat/completions', json={}))
+    )
+    await asyncio.sleep(0.1)
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    gate.release()
+    await asyncio.sleep(0.2)
+
+    assert gate._value == 1
+
+
 # ---------------------------------------------------------------------------
 # The task's pass, from issue to revoke
 # ---------------------------------------------------------------------------

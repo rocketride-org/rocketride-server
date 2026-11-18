@@ -450,8 +450,18 @@ def try_openai_compat_reasoning_stream(
     emitted = 0
 
     def _drain(kw: Dict[str, Any]) -> None:
+        stream = client.chat.completions.create(**kw)
+        try:
+            _read(stream)
+        finally:
+            # A raise mid-stream (a callback, a bad chunk) still releases the connection
+            closer = getattr(stream, 'close', None)
+            if callable(closer):
+                closer()
+
+    def _read(stream: Any) -> None:
         nonlocal finish_reason, usage, emitted
-        for chunk in client.chat.completions.create(**kw):
+        for chunk in stream:
             # The final chunk carries usage with an empty choices list, so read it
             # before the choices guard skips that chunk.
             if getattr(chunk, 'usage', None) is not None:

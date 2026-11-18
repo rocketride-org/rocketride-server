@@ -562,7 +562,7 @@ class LangChainAdapter:
                     e = retry_err
 
         # try/finally so a mid-stream raise still records the usage the chunks already
-        # carried, matching the two native adapters.
+        # carried, matching the two native adapters, and closes the stream at once.
         try:
             while piece is not None:
                 um = getattr(piece, 'usage_metadata', None)
@@ -599,6 +599,8 @@ class LangChainAdapter:
                 parts.append(tail_text)
                 yield Event('text', tail_text)
         finally:
+            if gen is not None:
+                gen.close()
             report_llm_tokens(
                 max(0, total_in - cache_read - cache_creation),
                 out_toks,

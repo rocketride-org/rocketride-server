@@ -332,6 +332,17 @@ def _busy_delay(attempt: int) -> float:
     return delay * (0.5 + random.random() / 2)
 
 
+async def _acquire_async(gate: threading.BoundedSemaphore, deadline: Optional[float]) -> bool:
+    """Take a slot without blocking the event loop, by ``deadline`` (a monotonic time) or
+    with no limit. Polls, so a cancelled wait holds nothing.
+    """
+    while not gate.acquire(blocking=False):
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
 def _gated_transport_types():
     """The two transports, built on first use so loading this module never imports httpx."""
     import httpx
@@ -373,8 +384,8 @@ def _gated_transport_types():
                 self._free()
 
     class GatedTransport(httpx.BaseTransport):
-        """Holds one of the run's slots from a request until its body is closed, and
-        retries an uncharged busy answer with backoff until the deadline.
+        """Holds one of the run's slots from a request until its body is done, and
+        retries an uncharged busy answer with backoff, never past the deadline.
         """
 
         def __init__(self, gate: threading.BoundedSemaphore, deadline_s: float):
@@ -382,8 +393,8 @@ def _gated_transport_types():
 
         def handle_request(self, request):
             deadline, attempt = time.monotonic() + self._deadline_s, 0
+            self._gate.acquire()
             while True:
-                self._gate.acquire()
                 try:
                     response = self._inner.handle_request(request)
                     if response.status_code == 429:
@@ -393,24 +404,21 @@ def _gated_transport_types():
                     raise
                 delay = _busy_delay(attempt)
                 if _retry_busy(response) and time.monotonic() + delay < deadline:
-                    response.close()
                     self._gate.release()
                     time.sleep(delay)
                     attempt += 1
-                    continue
-                if response.is_closed:
-                    # Already read (a refusal's body): the call is over
-                    self._gate.release()
-                else:
-                    response.stream = ReleaseOnClose(response.stream, self._gate.release)
-                return response
+                    if self._gate.acquire(timeout=max(0.0, deadline - time.monotonic())):
+                        continue
+                    # No slot before the deadline: the last busy answer, already read, holds none
+                    return response
+                return _finish(response, self._gate)
 
         def close(self) -> None:
             self._inner.close()
 
     class AsyncGatedTransport(httpx.AsyncBaseTransport):
-        """The same for an async client. The slot is the same threading semaphore,
-        taken in a worker thread so the event loop never blocks.
+        """The same for an async client, on the same semaphore. It takes a slot without
+        blocking the event loop, and a cancelled wait never keeps one.
         """
 
         def __init__(self, gate: threading.BoundedSemaphore, deadline_s: float):
@@ -418,8 +426,8 @@ def _gated_transport_types():
 
         async def handle_async_request(self, request):
             deadline, attempt = time.monotonic() + self._deadline_s, 0
+            await _acquire_async(self._gate, None)
             while True:
-                await asyncio.to_thread(self._gate.acquire)
                 try:
                     response = await self._inner.handle_async_request(request)
                     if response.status_code == 429:
@@ -429,20 +437,25 @@ def _gated_transport_types():
                     raise
                 delay = _busy_delay(attempt)
                 if _retry_busy(response) and time.monotonic() + delay < deadline:
-                    await response.aclose()
                     self._gate.release()
                     await asyncio.sleep(delay)
                     attempt += 1
-                    continue
-                if response.is_closed:
-                    # Already read (a refusal's body): the call is over
-                    self._gate.release()
-                else:
-                    response.stream = ReleaseOnClose(response.stream, self._gate.release)
-                return response
+                    if await _acquire_async(self._gate, deadline):
+                        continue
+                    return response
+                return _finish(response, self._gate)
 
         async def aclose(self) -> None:
             await self._inner.aclose()
+
+    def _finish(response, gate):
+        """Hand back a response holding its slot until its body is done."""
+        if response.is_closed:
+            # Already read (a refusal's body): the call is over
+            gate.release()
+        else:
+            response.stream = ReleaseOnClose(response.stream, gate.release)
+        return response
 
     return GatedTransport, AsyncGatedTransport
 
