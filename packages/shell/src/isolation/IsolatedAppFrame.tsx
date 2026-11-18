@@ -48,7 +48,7 @@ import { createHandshake } from './handshake';
 import type { IHandshake } from './handshake';
 import { planLogoutClear, plainOrigin, shouldSweepAtBoot, VISITED_KEY, visitedRecord } from './logoutClear';
 import { portEndpoint } from './portEndpoint';
-import type { BridgeInit, FrameOk, IAppRoot, IAppRootOptions, IsolatedEntry, RealmId, StripItem } from './types';
+import type { BridgeInit, FrameOk, IAppRoot, IAppRootOptions, ISessionStamp, IsolatedEntry, RealmId, StripItem } from './types';
 
 // =============================================================================
 // HOST — set by Shell.tsx when it creates the app root
@@ -232,7 +232,19 @@ export interface IIsolatedFrameEntry {
 	firstParty?: boolean;
 }
 
-type FrameState = { kind: 'loading' } | { kind: 'failed'; text: string } | { kind: 'framed'; grant: FrameOk; attrs: NonNullable<ReturnType<typeof frameAttributes>> };
+type FrameState = { kind: 'loading' } | { kind: 'failed'; text: string } | { kind: 'framed'; grant: FrameOk; session: ISessionStamp; attrs: NonNullable<ReturnType<typeof frameAttributes>> };
+
+/** Open-link confirmations shown at once per frame (G4, DA LOW 6); extras are answered false. */
+export const OPEN_CHIP_CAP = 3;
+
+/** Adds a chip; an open-link chip over the cap is dropped and answered false at once. */
+export function addChip<T extends { open?: { resolve(answer: boolean): void } }>(list: T[], chip: T): T[] {
+	if (chip.open && list.filter((c) => c.open).length >= OPEN_CHIP_CAP) {
+		chip.open.resolve(false);
+		return list;
+	}
+	return [...list, chip];
+}
 
 interface IChip {
 	id: number;
@@ -282,11 +294,13 @@ function IsolatedAppFrame({ entry, isConnected, identity }: { entry: IIsolatedFr
 			try {
 				await currentHost.ready;
 				if (typeof version !== 'number') throw new Error('no version');
+				// The session the grant belongs to: attach refuses it after a logout or a user change.
+				const session = currentHost.root.sessionStamp();
 				const grant = await currentHost.fetchFrame(entry.id, version);
 				const expected = originOf(currentHost.originTemplate, entry.id);
 				const attrs = grant && grant.origin === expected ? frameAttributes(grant.origin, grant.frame, currentHost.shellOrigins, entry.name) : null;
 				if (!live) return;
-				setState(attrs ? { kind: 'framed', grant, attrs } : { kind: 'failed', text: 'This app could not be opened.' });
+				setState(attrs ? { kind: 'framed', grant, session, attrs } : { kind: 'failed', text: 'This app could not be opened.' });
 			} catch {
 				if (live) setState({ kind: 'failed', text: 'This app could not be opened.' });
 			}
@@ -299,7 +313,7 @@ function IsolatedAppFrame({ entry, isConnected, identity }: { entry: IIsolatedFr
 	// 2. The handshake, for the framed state only.
 	useEffect(() => {
 		if (state.kind !== 'framed' || !currentHost) return;
-		const { grant } = state;
+		const { grant, session: grantSession } = state;
 		const origin = grant.origin;
 		let realmId: RealmId | null = null;
 		let handshake: IHandshake | null = null;
@@ -321,14 +335,14 @@ function IsolatedAppFrame({ entry, isConnected, identity }: { entry: IIsolatedFr
 			admit: () => {
 				const channel = new MessageChannel();
 				const endpoint = portEndpoint(channel.port1, () => handshake?.onPortClosed());
-				realmId = currentHost.root.attach(isolated, endpoint, { frame: grant, version: getAppVersionOverride(entry.id)?.version ?? entry.registryVersion ?? 1, viewId: entry.id, capabilities: grant.capabilities });
+				realmId = currentHost.root.attach(isolated, endpoint, { frame: grant, session: grantSession, version: getAppVersionOverride(entry.id)?.version ?? entry.registryVersion ?? 1, viewId: entry.id, capabilities: grant.capabilities });
 				const id = realmId;
 				realmUi.set(id, {
 					strip: (item) => setChips((prev) => [...prev.slice(-4), { id: Date.now() + Math.random(), text: `${entry.name}: ${item.text}` }]),
 					confirmOpen: (url) =>
 						new Promise<boolean>((resolve) => {
 							const chip: IChip = { id: Date.now() + Math.random(), text: `${entry.name} wants to open ${new URL(url).host}`, open: { url, resolve } };
-							setChips((prev) => [...prev, chip]);
+							setChips((prev) => addChip(prev, chip));
 							setTimeout(() => {
 								resolve(false);
 								setChips((prev) => prev.filter((c) => c !== chip));

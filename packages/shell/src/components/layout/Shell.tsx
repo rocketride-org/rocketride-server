@@ -354,11 +354,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		sweepGateRef.current = { promise, resolve };
 	}
 	const mustReload = useReloadRequired();
-	// The boot-time sweep (plan 4.7): once auth resolved, before any frame mounts.
+	// Set when the root is created (a ref alone would not re-run the sweep effect: G4, DA LOW 7).
+	const [rootReady, setRootReady] = useState(false);
+	// The boot-time sweep (plan 4.7): once auth resolved and the root exists, before any frame mounts.
 	useEffect(() => {
-		if (!authResolved || !appRootRef.current) return;
+		if (!authResolved || !rootReady) return;
 		void sweepAtBoot(identity?.userId ?? null).finally(() => sweepGateRef.current?.resolve());
-	}, [authResolved, identity?.userId]);
+	}, [authResolved, identity?.userId, rootReady]);
 	useEffect(() => cm.on('shell:themeChange', ({ tokens }) => void (themeTokensRef.current = { ...tokens })), [cm]);
 
 	// ── In-process workspace rescope ──────────────────────────────────────
@@ -508,6 +510,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					log: (level, line) => console[level](line),
 				});
 				appRootRef.current = root;
+				setRootReady(true);
 				setFrameHost({
 					root,
 					fetchFrame: (appId, version) => fetchFrameGrant(cm, appId, version),
@@ -851,8 +854,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	const handleLogout = useCallback(async () => {
 		// Isolated apps end their runs while the session token is still valid,
-		// then their origins' storage is cleared (#1022, plan 4.7).
-		await appRootRef.current?.teardownAll(3000);
+		// then their origins' storage is cleared (#1022, plan 4.7). The final
+		// teardown keeps the root sealed through the clear: nothing new starts.
+		await appRootRef.current?.teardownAll(3000, { final: true });
 		if (appRootRef.current) await runLogoutClear();
 		setIdentity(null);
 		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
@@ -904,7 +908,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		// Isolated apps end their runs first (#1022); their storage is cleared
 		// by the boot-time sweep of the next load (plan 4.7, missed sweeps).
-		await appRootRef.current?.teardownAll(1500);
+		await appRootRef.current?.teardownAll(1500, { final: true });
 		cm.logout();
 		window.location.href = window.location.origin + window.location.pathname;
 	}, [cm]);
