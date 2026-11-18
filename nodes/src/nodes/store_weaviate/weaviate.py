@@ -377,7 +377,7 @@ class Store(DocumentStoreBase):
         filter = self._convertFilter(docFilter=docFilter)
 
         points = self.collectionObj.query.fetch_objects(
-            filters=(filter & Filter.by_property('content').like(f'*{query}*')),
+            filters=(filter & Filter.by_property('content').like(f'*{query.text}*')),
             limit=docFilter.limit,
         )
 
