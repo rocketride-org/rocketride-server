@@ -300,6 +300,11 @@ class AppManifestEntry(TypedDict, total=False):
         devEntries (list[DevEntry]): Every live dev-server registration
             for this app — one per editor session, newest first; ``entry``
             already carries the newest.
+        isolated (bool): The server isolates this app: it loads only in a
+            sandboxed frame on its own origin, never in the shell realm.
+            Present only while app isolation is on.
+        firstParty (bool): The app is the platform's own (never isolated).
+            Present only while app isolation is on.
     """
 
     id: str
@@ -324,6 +329,8 @@ class AppManifestEntry(TypedDict, total=False):
     features: list[str]
     dev: bool
     devEntries: list[DevEntry]
+    isolated: bool
+    firstParty: bool
 
 
 class ConnectResult(TypedDict, total=False):

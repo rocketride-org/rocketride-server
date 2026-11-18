@@ -111,6 +111,10 @@ class TestRedactRequestTarget:
             ('//task/fetch/eyJ.abc.def/x', '//task/fetch/[redacted]/x'),
             ('/task/fetch/eyJ.abc.def', '/task/fetch/[redacted]'),
             ('/task/fetch/eyJ.abc.def/x?token=t&a=1', '/task/fetch/[redacted]/x?token=[redacted]&a=1'),
+            # The app-origin frame token (#1022): a path segment of /_t/<token>/v<N>/
+            ('/_t/v1.k1.bm9uY2U.c2VhbGVk/v1/remoteEntry.js', '/_t/[redacted]/v1/remoteEntry.js'),
+            ('/_t/v1.k1.bm9uY2U.c2VhbGVk/v3/static/js/1.js?x=1', '/_t/[redacted]/v3/static/js/1.js?x=1'),
+            ('http%3A//a.apps.example/_t/v1.k1.n.s/v1/x', 'http%3A//a.apps.example/_t/[redacted]/v1/x'),
             # Userinfo in an absolute-form target, plain and as h11 logs it
             ('http%3A//user%3Apass%40localhost/x?a=1', 'http%3A//[redacted]%40localhost/x?a=1'),
             ('http%3A//user:pass@host/x', 'http%3A//[redacted]@host/x'),

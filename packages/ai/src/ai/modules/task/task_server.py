@@ -1241,7 +1241,12 @@ class TaskServer(DAPBase):
             conn._account_info = fresh
             if authz is not None:
                 conn._authz_verified_at = t0
-            await asyncio.wait_for(conn.send_event('apaext_account', body=fresh.to_push_result()), NOTICE_SEND_TIMEOUT)
+            from ai.modules.shell.app_origin import wire_view
+
+            body = fresh.to_push_result()
+            if 'apps' in body:
+                body['apps'] = wire_view(body['apps'], getattr(conn, '_shell_caps', ()))
+            await asyncio.wait_for(conn.send_event('apaext_account', body=body), NOTICE_SEND_TIMEOUT)
         except Exception as e:
             self.debug_message(f'{label} failed for conn {conn.get_connection_id()}: {e}')
             return False

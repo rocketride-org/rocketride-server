@@ -316,9 +316,9 @@ class Account(AccountBase):
         """
         from ai.account.seed_apps import (
             PUBLIC_AUDIENCE,
-            SEED_COMMENT,
             SYSTEM_ACTOR,
             bundle_digest,
+            is_seed_row,
             load_manifest_entries,
             public_serves_user_deploy,
             seed_manifest_app,
@@ -341,7 +341,7 @@ class Account(AccountBase):
                 if rows:
                     # Rows are newest-first; the newest SEED row carries the
                     # manifest this install last seeded for the app.
-                    seeds = [r for r in rows if r.get('comment') == SEED_COMMENT]
+                    seeds = [r for r in rows if is_seed_row(r)]
                     if not seeds:
                         force = True
                     else:

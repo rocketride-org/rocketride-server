@@ -41,8 +41,9 @@ import type { ConnectResult } from 'rocketride';
  * Sent by the shell to an iframe immediately after the iframe posts `view:ready`.
  *
  * Bootstraps the iframe's initial state: current CSS theme tokens, the
- * authenticated user (or null), the WebSocket connection status, and all
- * runtime API config values (RR_* keys).
+ * authenticated user (or null) with a blank `userToken`, the WebSocket
+ * connection status, and the runtime API config values (RR_* keys) except
+ * `RR_APIKEY` (#1022).
  */
 export interface ShellInitMsg {
 	type: 'shell:init';
@@ -77,8 +78,9 @@ export interface ShellConnectionChangeMsg {
 /**
  * Sent by the shell when a user successfully authenticates.
  *
- * Contains the full `ConnectResult` so the iframe can update any auth-
- * dependent UI (e.g. user display name, permissions checks).
+ * Contains the `ConnectResult` with a blank `userToken` (#1022) so the iframe
+ * can update any auth-dependent UI (e.g. user display name, permissions
+ * checks).
  */
 export interface ShellLoginMsg {
 	type: 'shell:login';
