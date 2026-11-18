@@ -492,7 +492,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
             info = None
         # A cached publish/version map is not a cached paid seat. Re-check
         # live membership and seat allocation even on a warm asset request.
-        if not await account.authorize_app_use(info, app_id):
+        if want is not None and not await account.authorize_app_use(info, app_id, want):
             return {}
 
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
@@ -505,6 +505,12 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
         # key's current floor answers stale to keep the miss path from
         # becoming a per-request walk.
         if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
+            if _is_saas() and want is None:
+                return {
+                    version: path
+                    for version, path in hit['dirs'].items()
+                    if await account.authorize_app_use(info, app_id, version)
+                }
             return hit['dirs']
 
     if _is_saas():

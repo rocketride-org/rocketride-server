@@ -104,7 +104,7 @@ def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
     async def authenticate(token):
         return SimpleNamespace(userId='u1', organization={'id': 'o'})
 
-    async def authorize_app_use(info, app_id):
+    async def authorize_app_use(info, app_id, version=None):
         return allowed
 
     async def entitled_version_dirs(info, app_id):
@@ -119,6 +119,31 @@ def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
     allowed = False
     assert _dirs(want=1) == {}
     assert calls == ['app.x']  # denial happened before using the warm map
+
+
+def test_warm_full_map_filters_every_concrete_version(monkeypatch):
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    allowed = {1, 2}
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        return version in allowed
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'free/dist', 2: 'paid/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}
+    allowed.remove(2)
+    assert _dirs() == {1: 'free/dist'}
+    assert _dirs(want=2) == {}
 
 
 # =============================================================================

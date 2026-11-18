@@ -1333,7 +1333,7 @@ async def _caller_entitled_to_version(
     exactly here), or when the caller deployed that registry version (the
     developer flow — a fresh version is published nowhere yet).
     """
-    if not await account.authorize_app_use(conn._account_info, app_id):
+    if not await account.authorize_app_use(conn._account_info, app_id, version):
         return False
     user_id = conn._account_info.userId
     rows = await _visible_rows_of(conn, account, org_id, app_id)
@@ -1537,8 +1537,6 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     """
     from ai.account import account
 
-    if not await account.authorize_app_use(info, app_id):
-        return {}
     user_id = str(getattr(info, 'userId', '') or '') if info is not None else ''
     sys_perms = set(getattr(info, 'sysPermissions', None) or []) if info is not None else set()
     org = getattr(info, 'organization', None) if info is not None else None
@@ -1581,7 +1579,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
             continue
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
-        if isinstance(version, int) and artifact_path:
+        if isinstance(version, int) and artifact_path and await account.authorize_app_use(info, app_id, version):
             dirs[version] = dist_dir_of(artifact_path)
 
     # Developer-org entitlement: the caller org's OWN rail (rail rows exist
@@ -1599,7 +1597,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
                 continue
             version = int(entry.get('version', 0))
             artifact_path = str(entry.get('artifactPath') or '')
-            if version and artifact_path:
+            if version and artifact_path and await account.authorize_app_use(info, app_id, version):
                 dirs[version] = dist_dir_of(artifact_path)
     return dirs
 

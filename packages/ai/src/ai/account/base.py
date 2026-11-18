@@ -277,7 +277,7 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
-    async def authorize_app_use(self, info: Any, app_id: str) -> bool:
+    async def authorize_app_use(self, info: Any, app_id: str, version: Optional[int] = None) -> bool:
         """Authorize app delivery/use independently of catalog visibility.
 
         OSS has no paid seats. A SaaS overlay must supply its live commerce

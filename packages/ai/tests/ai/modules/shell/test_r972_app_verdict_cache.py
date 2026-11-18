@@ -72,7 +72,7 @@ class _Account:
     async def get_public_apps(self):
         return []
 
-    async def authorize_app_use(self, info, app_id):
+    async def authorize_app_use(self, info, app_id, version=None):
         return info is not None and app_id in self.entitled
 
 
