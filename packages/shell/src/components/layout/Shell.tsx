@@ -639,6 +639,8 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	useEffect(() => {
 		const identityApps = (identity?.apps ?? []) as ServerAppEntry[];
 		for (const a of identityApps) {
+			// An isolated app is never an MF container here, and its module name is only a claim (#1022).
+			if (isIsolatedId(a.id)) continue;
 			if (!a.moduleId || isDevRemote(a.moduleId)) continue;
 			const target = resolveServerEntry(a);
 			if (!target) continue;
@@ -647,7 +649,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// Invalidate ONLY when the repoint actually happened — evicting
 			// the descriptor of a still-old container would remount the same
 			// stale code for nothing.
-			if (repointRemote(a.moduleId, target)) {
+			if (repointRemote(a.id, a.moduleId, target)) {
 				invalidateAppDescriptor(a.id);
 			}
 		}
@@ -670,6 +672,8 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// Dev-owned containers keep the live build; unknown apps keep
 			// their override dormant until the app appears in the manifest.
 			if (!app || isDevRemote(app.moduleId)) continue;
+			// An isolated app's override remints its frame (versionOverride.ts), never a container (#1022).
+			if (isIsolatedId(appId)) continue;
 			const url = versionedEntryUrl(appId, overrides[appId].version);
 			const claimKey = `${appId}@${url}`;
 			if (getRegisteredEntry(app.moduleId) === url) {
@@ -682,7 +686,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// document (repointing corrupts its shared getters); a full
 			// reload re-registers the override's URL at boot, before
 			// anything loads.
-			if (repointRemote(app.moduleId, url)) {
+			if (repointRemote(appId, app.moduleId, url)) {
 				invalidateAppDescriptor(appId);
 			} else if (claimReload(claimKey)) {
 				// EVERY automatic reload names itself — a silent reload turns

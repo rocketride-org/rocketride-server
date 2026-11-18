@@ -152,13 +152,21 @@ export function isRemoteLoaded(moduleId: string): boolean {
  * precondition is ENFORCED here rather than trusted to callers — a refusal
  * returns false so the caller can fall back to a full page reload.
  *
+ * Only the container the shell mapped for `appId` can be repointed: a module
+ * name in a manifest entry is the publisher's claim, and an isolated app (never
+ * mapped here) or any other app id naming someone else's container is refused
+ * (#1022, G4 round 2).
+ *
+ * @param appId - The app id the container belongs to.
  * @param moduleId - The MF container name.
  * @param entry - The new remoteEntry.js URL.
  * @returns True when the container was repointed; false when refused
- *          (dev-owned, or already loaded — reload the page instead).
+ *          (not this app's container, isolated, dev-owned, or already loaded —
+ *          reload the page instead).
  */
-export function repointRemote(moduleId: string, entry: string): boolean {
-	if (isolatedModules.has(moduleId)) return false;
+export function repointRemote(appId: string, moduleId: string, entry: string): boolean {
+	if (isolatedIds.has(appId) || isolatedModules.has(moduleId)) return false;
+	if (serverAppModules.get(appId) !== moduleId) return false;
 	if (devRemoteModules.has(moduleId)) return false;
 	// A loaded container is committed to its version for the document's
 	// lifetime — force-repointing it corrupts its shared getters.
@@ -184,10 +192,11 @@ const isolatedModules = new Set<string>();
  *
  * The module name in a manifest entry is the publisher's claim, so the
  * isolated set takes only the container the shell itself mapped for this
- * app id, or the claimed name when no other app id owns it. An isolated
- * entry claiming a first-party container can then neither ask for a reload
- * nor block that container's repoint, reset or dev registration (G4, DA
- * must-fix 2).
+ * app id (an app that ran in-realm before its stamp arrived). A merely
+ * claimed name never joins it, so an isolated entry can neither ask for a
+ * reload for, nor block the repoint, reset or dev registration of, a container
+ * another app owns now or later (G4, DA must-fix 2; round 2 DA LOW 1). An
+ * isolated app's own calls are refused by app id instead.
  *
  * @param entry - The server entry stamped isolated.
  * @returns True when ITS container had already loaded (or is loading) in
@@ -200,14 +209,6 @@ export function markIsolated(entry: ServerAppEntry): boolean {
 		isolatedModules.add(mapped);
 		return loadedModules.has(mapped) || isRemotePending(mapped);
 	}
-	if (!moduleOwnedByOther(entry.moduleId, entry.id)) isolatedModules.add(entry.moduleId);
-	return false;
-}
-
-/** Whether another app id owns this container (a mapped server app or a local registration). */
-function moduleOwnedByOther(moduleId: string, appId: string): boolean {
-	for (const [id, m] of serverAppModules) if (m === moduleId && id !== appId) return true;
-	for (const [id, meta] of localAppMetas) if (meta.moduleId === moduleId && id !== appId) return true;
 	return false;
 }
 

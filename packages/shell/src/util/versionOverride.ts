@@ -246,7 +246,7 @@ export function applyAppVersionOverride(
 	// A loaded container is committed to its version for this document
 	if (isRemoteLoaded(moduleId)) return 'reload-required';
 	// Not loaded yet — repoint the registration and evict the descriptor
-	repointRemote(moduleId, versionedEntryUrl(appId, override.version));
+	repointRemote(appId, moduleId, versionedEntryUrl(appId, override.version));
 	invalidateAppDescriptor(appId);
 	return 'ready';
 }
