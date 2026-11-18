@@ -556,6 +556,12 @@ function makeDownloadAction(options = {}) {
 				return;
 			}
 
+			// A non-Release request always compiles, so dist/server's engine is
+			// unmarked before any later step can fail
+			if (cmakeConfig !== 'Release') {
+				await updateState({ 'server.buildHash': null, 'server.downloadHash': null });
+			}
+
 			if (options.nodownload) {
 				task.output = 'Download skipped (--nodownload)';
 				await setState('server.downloadHash', null);
@@ -564,7 +570,6 @@ function makeDownloadAction(options = {}) {
 
 			if (cmakeConfig !== 'Release') {
 				task.output = `Cached engines are Release builds; compiling ${cmakeConfig}`;
-				await setState('server.downloadHash', null);
 				return;
 			}
 
@@ -663,8 +668,7 @@ function makeConfigureServerAction(options = {}) {
 			// distEngineType() reads a compiled engine's type from buildType, so a
 			// type change unmarks dist/server's engine even when no compile follows
 			if (((await getState('server.buildType')) || 'Release') !== cmakeConfig) {
-				await setState('server.buildHash', null);
-				await setState('server.downloadHash', null);
+				await updateState({ 'server.buildHash': null, 'server.downloadHash': null });
 			}
 
 			await mkdir(BUILD_ROOT);
@@ -840,8 +844,7 @@ function makeCompileEngineAction(options = {}) {
 
 			const cmakeConfig = options.cmakeConfig || 'Release';
 			// A compile that fails or is stopped leaves no engine marked as built
-			await setState('server.buildHash', null);
-			await setState('server.downloadHash', null);
+			await updateState({ 'server.buildHash': null, 'server.downloadHash': null });
 			await execCommand('cmake', cmake.getBuildArgs(BUILD_ROOT, cmakeConfig, { target: 'engine' }), {
 				task,
 				env,
