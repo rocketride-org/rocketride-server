@@ -112,6 +112,8 @@ class ChatBase:
     _raw_openai_client = None
     # True when the driver's clients run on the run's hosted models pass (see model_gateway).
     _hosted_models = False
+    # The pass's output limit, when it lowered the node's own; None otherwise.
+    _hosted_output_cap: Optional[int] = None
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -320,6 +322,13 @@ class ChatBase:
 
     def _output_budget_error(self) -> EmptyResponseError:
         """The error for a model that wrote no text because its output budget ran out."""
+        if self._hosted_output_cap is not None:
+            # Raising the node's limit cannot help: the pass already lowered it
+            return EmptyResponseError(
+                f'model returned no text; it most likely used its whole output budget ({self._hosted_output_cap} '
+                'tokens, the most RocketRide-hosted models allow) before replying. Disable reasoning for this call, '
+                'or add your own OpenAI key in the node settings'
+            )
         return EmptyResponseError(
             'model returned no text; it most likely used its whole output budget before '
             f'replying. Raise modelOutputTokens (now {self._modelOutputTokens}), or disable '

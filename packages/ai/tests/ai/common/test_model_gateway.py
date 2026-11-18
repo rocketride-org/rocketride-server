@@ -648,6 +648,16 @@ def test_a_reply_that_ran_out_of_output_budget_says_what_to_change(monkeypatch, 
     assert len(gateway.requests) == 1
 
 
+def test_an_output_budget_the_pass_lowered_is_not_offered_as_the_fix(monkeypatch, backend, hosted):
+    _with_pass(monkeypatch, max_output_tokens=16384)
+    backend(responses_out_of_budget)
+
+    _result, error = _ask(_driver(monkeypatch, 'llm_openai', REASONING), _prompt(), True)
+
+    assert '16384 tokens, the most RocketRide-hosted models allow' in str(error), repr(error)
+    assert 'Raise modelOutputTokens' not in str(error)
+
+
 def test_a_keyed_node_still_falls_back_after_a_failed_stream(monkeypatch, backend, hosted):
     gateway = backend(cut_stream, answer)
     result, error = _ask(_driver(monkeypatch, 'llm_openai', {**PLAIN, 'apikey': 'sk-user'}), _prompt(), True)

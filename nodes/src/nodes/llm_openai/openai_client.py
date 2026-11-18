@@ -86,7 +86,10 @@ class Chat(ChatBase):
         if credentials.base_url:
             self._client_kwargs['base_url'] = credentials.base_url
         if credentials.hosted:
-            self._modelOutputTokens = hosted_output_tokens(provider, self._modelOutputTokens, credentials.gateway)
+            requested = self._modelOutputTokens
+            self._modelOutputTokens = hosted_output_tokens(provider, requested, credentials.gateway)
+            if self._modelOutputTokens != requested:
+                self._hosted_output_cap = self._modelOutputTokens
             self._http_clients = hosted_http_clients(credentials.gateway)
             self._client_kwargs['max_retries'] = 0
 
