@@ -55,7 +55,7 @@ def _client() -> TestClient:
     """Mount shell_static as ``initModule`` does: ``/shell/*`` plus public routes."""
     app = FastAPI()
     app.get('/shell/{file_path:path}')(shell_mod.shell_static)
-    for route in shell_mod.PUBLIC_ROUTES:
+    for route in ('/', '/pricing'):
         app.get(route)(shell_mod.shell_static)
     return TestClient(app)
 
