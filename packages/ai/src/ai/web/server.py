@@ -66,7 +66,7 @@ from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import compile_path
-from rocketlib import debug
+from rocketlib import debug, args as startup_args
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
@@ -215,6 +215,9 @@ class WebServer:
         # environment from the engine (task_engine.filter_subprocess_env) and
         # must not pull the excluded names back in from the file.
         if kwargs.get('load_env', True):
+            from .env_policy import validate_hosted_env_file
+
+            validate_hosted_env_file(exec_dir + '/.env', startup_args())
             load_dotenv(dotenv_path=exec_dir + '/.env')
 
         # Authenticators, given an authorization string, return a structure of the decode key info

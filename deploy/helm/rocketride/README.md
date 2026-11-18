@@ -127,10 +127,16 @@ If `RR_STORE_URL` reaches the pods from outside this chart (for example through 
 
 A single-replica deployment may keep the default filesystem store. Two things to know:
 
-- Set `engine.secrets.RR_SIGNING_KEY` explicitly. Without it the engine generates an ephemeral key at startup, so every download URL it has handed out stops verifying as soon as the pod restarts.
+- Set `engine.secrets.RR_SIGNING_KEY` explicitly, using at least 32 UTF-8 bytes (for example `secrets.token_urlsafe(32)`). A configured shorter key is rejected before task routes or workers start. Without it the engine generates an ephemeral key at startup, so every download URL it has handed out stops verifying as soon as the pod restarts.
 - The chart mounts no PersistentVolume, so the store does not survive a pod restart at all. Mount your own through `engine.volumes` / `engine.volumeMounts` and point `RR_STORE_URL` at the mount path.
 
 `engine.service.sessionAffinity: ClientIP` pins a client to one pod, which is a stopgap for a filesystem-backed deployment — it does not make state shared, and it does not survive rescheduling.
+
+The chart defaults `engine.env.RR_PROC_PRIVATE` to `'1'`. On Linux this makes the
+engine and task processes hide their `/proc` environment and memory from
+same-UID siblings. Keep it enabled on shared hosts. It does not isolate files,
+store credentials, or tenant processes from the host filesystem; those still
+require a task/container boundary.
 
 ## Architecture
 

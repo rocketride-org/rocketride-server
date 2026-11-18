@@ -20,6 +20,10 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - PUT `/pipe/process`: Calls `pipe_Process` to handle pipe processing requests.
 
     """
+    # Reject a configured weak capability-signing key before registering
+    # routes or starting workers (#1176).
+    warn_if_signing_key_is_ephemeral()
+
     # Run-log startup hygiene: delete stale spool directories from any
     # previous process. Recovery is store-side only, so leftover spool state
     # is never salvaged — this just prevents disk leaks on hosts whose
@@ -58,7 +62,6 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # Presigned file fetch — public route because auth is in the JWT token
     server.add_route('/task/fetch', handle_fetch, ['GET'], public=True)
-    warn_if_signing_key_is_ephemeral()
 
     # Directory-capability fetch for multi-file app bundles: the token rides
     # the PATH so relative chunk requests derived from remoteEntry.js inherit

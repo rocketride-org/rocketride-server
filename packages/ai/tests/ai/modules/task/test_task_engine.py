@@ -1377,6 +1377,15 @@ def test_filter_subprocess_env_never_passes_the_fetch_signing_key(opt_in):
     assert not {name.upper() for name in env} & {'RR_SIGNING_KEY'}
 
 
+@pytest.mark.parametrize('opt_in', ['*', 'RR_* ROCKETRIDE_*'])
+def test_filter_subprocess_env_never_passes_broker_or_model_admin_secrets(opt_in):
+    names = ['RR_MODEL_SERVER_ADMIN_TOKEN', 'ROCKETRIDE_DB_BROKER_TOKEN', 'RR_DATACORE_GRANT_KEY']
+    env = {name: 'engine-only-secret' for name in names}
+    env.update({name.lower(): 'engine-only-secret' for name in names})
+    env['RR_SUBPROCESS_ENV'] = opt_in
+    assert not {name.upper() for name in filter_subprocess_env(env)} & set(names)
+
+
 def test_filter_subprocess_env_opt_in_names_and_prefixes():
     """RR_SUBPROCESS_ENV adds exact names and '*'-suffixed prefixes, separated
     by commas or spaces. The knob itself is operator-tier (RR_*) and is not

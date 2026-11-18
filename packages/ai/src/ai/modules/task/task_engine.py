@@ -320,7 +320,15 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
 # token key would let pipeline code mint any run's private token, and the fetch
 # signing key a /task/fetch claim for any path under the store root (#1070).
-CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV, 'RR_SIGNING_KEY'})
+CONST_SUBPROCESS_ENV_NEVER = frozenset(
+    {
+        CONST_TASK_TOKEN_KEY_ENV,
+        'RR_SIGNING_KEY',
+        'RR_MODEL_SERVER_ADMIN_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
+        'RR_DATACORE_GRANT_KEY',
+    }
+)
 
 
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:

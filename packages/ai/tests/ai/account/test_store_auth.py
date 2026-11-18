@@ -749,6 +749,23 @@ class TestFetchSigningKeyStaysInTheEngine:
     # was unset (constants.CONST_DEFAULT_SIGNING_KEY): anyone could read it.
     _PUBLIC_DEFAULT = '<your signing key here -- replace in production>'
 
+    @pytest.mark.parametrize('key', ['weak-secret', 'x' * 31, 'é' * 15])
+    def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
+        from ai.modules import task
+
+        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        started = []
+        monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32') as error:
+            task.initModule(None, {})
+        assert key not in str(error.value)
+        assert not started
+
+    @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
+    def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
+        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        assert file_store.fetch_signing_key() == key
+
     @pytest.fixture(autouse=True)
     def _engine_env(self, monkeypatch, store):
         """No configured key, a base URL, and the fixture store as the process singleton."""

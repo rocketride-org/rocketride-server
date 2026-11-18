@@ -62,6 +62,7 @@ FETCH_CLAIM_VERSION = 2
 # a claim for any path under the store root.
 # Assumes one web worker per engine: a second worker process would draw its own key.
 _PROCESS_FETCH_SIGNING_KEY = secrets.token_urlsafe(32)
+MIN_FETCH_SIGNING_KEY_BYTES = 32
 
 
 def fetch_signing_key() -> str:
@@ -72,8 +73,15 @@ def fetch_signing_key() -> str:
 
     Returns:
         RR_SIGNING_KEY, or this process's random key when it is unset.
+
+    A configured key must contain at least 32 UTF-8 bytes. Reject weak
+    configuration instead of silently minting capabilities with a guessable
+    key; never include the configured value in an error.
     """
-    return os.environ.get('RR_SIGNING_KEY', '') or _PROCESS_FETCH_SIGNING_KEY
+    configured = os.environ.get('RR_SIGNING_KEY', '')
+    if configured and len(configured.encode('utf-8')) < MIN_FETCH_SIGNING_KEY_BYTES:
+        raise ValueError(f'RR_SIGNING_KEY must contain at least {MIN_FETCH_SIGNING_KEY_BYTES} UTF-8 bytes')
+    return configured or _PROCESS_FETCH_SIGNING_KEY
 
 
 # Characters forbidden inside any single path segment. ':' blocks Windows
