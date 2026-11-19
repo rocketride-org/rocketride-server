@@ -112,6 +112,15 @@ code 0 and no `>EXIT`. The engine reads that pair as a task that was cut off:
 console, and exit code 1 on record. A node whose own code ends the process with
 exit code 0 looks the same from outside and reads the same.
 
+A pod task can be lost in two more ways, and both read `Stopped unexpectedly`
+on every platform. Its output has ended and its pod shows no exit code: the
+engine deletes the pod. Or its pod is gone before it showed an exit code, and
+the engine had not deleted it. A pod that someone else deletes while its task
+runs gets `SIGTERM` first: the task reports its cancel and reads `Stopped`, as
+a cancel from outside does for a child process. A forced delete
+(`--grace-period=0 --force`) can remove the pod before that report arrives;
+the task then reads `Stopped unexpectedly`, as above.
+
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
 stops.

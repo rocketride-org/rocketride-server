@@ -29,8 +29,10 @@ library: ``kubectl attach -i`` is a real process whose stdout, stderr and stdin
 are the task's, so the stdio reader and ``--autoterm`` work as they do for a
 subprocess. A run is three commands — ``create -f -``, ``attach -i -q``,
 ``delete job`` — beside one ``get pods --watch`` that serves every task of the
-engine. The exit code always comes from that watch, never from ``kubectl
-attach``, which returns 0 whatever the task did.
+engine. The exit code comes from the pod's status, as that watch or the look
+before a kill shows it, never from ``kubectl attach``, which returns 0
+whatever the task did; a pod gone before it showed one gets
+``CONST_LOST_EXIT_CODE``.
 
 Nothing of a task is kept in the cluster: the Job's manifest holds neither the
 task file nor a value of the environment. Both travel in one tar stream on the
@@ -719,6 +721,8 @@ class WatchedPod:
         # Why the container is not running yet: ContainerCreating, ErrImageNeverPull, ...
         self.waiting = ''
         self.exit_code: Optional[int] = None
+        # Gone without ever showing an exit code
+        self.vanished = False
         self._changed = asyncio.Event()
 
     @property
@@ -761,6 +765,7 @@ class WatchedPod:
         """The pod is gone: without an exit code by now, none will come."""
         if self.exit_code is None:
             self.exit_code = CONST_LOST_EXIT_CODE
+            self.vanished = True
         self._changed.set()
 
     async def wait(self, done: Callable[[], bool]) -> None:
@@ -1143,11 +1148,26 @@ class K8sLaunch(Launch):
         self._task_id = task_id
         self._removed = False
         self._signals: set = set()
+        # The engine itself asked the cluster to delete the pod
+        self._deleting = False
+        self._lost: Optional[str] = None
 
     @property
     def returncode(self) -> Optional[int]:
         """The exit code of the pod's container, or None while it runs."""
         return self._pod.exit_code
+
+    @property
+    def lost(self) -> Optional[str]:
+        """
+        What the launch saw of a pod it lost.
+
+        Either the pod showed no exit code although its stream had ended, or it
+        went without an exit code and the engine had not deleted it.
+        """
+        if self._lost is None and self._pod.vanished and not self._deleting:
+            return "the task's pod was removed before it showed an exit code"
+        return self._lost
 
     async def wait(self) -> int:
         """Wait for the watch to show the pod's end; a timeout around this loses nothing."""
@@ -1166,6 +1186,7 @@ class K8sLaunch(Launch):
 
     async def _delete_pod(self, *how: str) -> None:
         """Ask the cluster to delete the pod; its end comes with the watch."""
+        self._deleting = True
         await self._cli.run(['delete', 'pod', self._pod.name, *how, '--wait=false'], check=False)
 
     async def _kill(self) -> None:
@@ -1175,6 +1196,10 @@ class K8sLaunch(Launch):
         The watch is away while it is started again, so it can be late with a
         pod's end, and a pod deleted before it showed its exit code would lose
         it: one that has ended keeps its code.
+
+        A pod that shows no exit code although its stream has ended was lost:
+        nothing can be written to it or read from it any more. One that is
+        gone already was not deleted by this kill.
         """
         pod = self._pod
         try:
@@ -1185,9 +1210,25 @@ class K8sLaunch(Launch):
             )
         except (OSError, K8sError):
             shown = None
+        if pod.exit_code is not None:
+            # The watch showed the end while the look was on its way
+            return
         if shown is not None and shown.returncode == 0 and shown.stdout.strip().lstrip('-').isdigit():
             pod.exited(int(shown.stdout))
             return
+        if shown is not None and shown.returncode != 0 and '(NotFound)' in shown.stderr:
+            pod.lost()
+            return
+        if self.process.returncode is not None:
+            if pod.ended:
+                # A terminal phase with no container's end on it, as after an eviction
+                self._lost = f"the task's pod ended ({pod.phase}) without showing an exit code"
+            elif shown is not None and shown.returncode == 0:
+                self._lost = (
+                    "the task's output ended while its pod still ran; the engine asked the cluster to delete the pod"
+                )
+            else:
+                self._lost = "the task's output ended and its pod could not be read"
         await self._delete_pod('--grace-period=0', '--force')
 
     def terminate(self) -> None:
@@ -1205,7 +1246,7 @@ class K8sLaunch(Launch):
     async def cleanup(self) -> None:
         """Stop the port-forward, give its port back and delete the Job; safe to call twice."""
         if not self._removed:
-            self._removed = True
+            self._removed = self._deleting = True
             try:
                 await _stop(self._forward)
             finally:

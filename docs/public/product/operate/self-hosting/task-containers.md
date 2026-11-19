@@ -309,6 +309,11 @@ pods an IPv4 address.
   image's `USER` says, and never as the engine's. An image of your own in
   `RR_K8S_IMAGE` must let uid 1000 run the engine and write under
   `/opt/rocketride` and `/opt/data`.
+- **A pod that goes away.** A pod that someone else deletes while its task
+  runs is told to stop first: the task reports its cancel and ends as
+  `Stopped`. A pod that is gone before it showed an exit code, with no word
+  from its task, ends as `Stopped unexpectedly`. So does a task whose output
+  has ended while its pod shows no exit code; the engine then deletes the pod.
 - **Cleanup.** The engine deletes each Job, and its pod with it, when the task
   ends, and at start it removes the Jobs labelled with its `RR_K8S_INSTANCE`
   that an earlier run left behind. A finished Job it never got to is removed
