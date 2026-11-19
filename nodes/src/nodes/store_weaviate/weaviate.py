@@ -60,6 +60,10 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
+# The most chunks render asks Weaviate for in one query. Weaviate rejects a
+# query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
+_RENDER_PAGE_SIZE = 10000
+
 
 class Store(DocumentStoreBase):
     apikey: str | None = None
@@ -607,56 +611,50 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grave them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
-        offset = 0
+        # Chunks come back in any order, and a document may hold tens of
+        # thousands of them. Weaviate returns 10 objects when no limit is
+        # given and rejects a limit above QUERY_MAXIMUM_RESULTS, so read the
+        # chunks one chunkId window at a time: chunkIds are unique within a
+        # document, so a window of N ids never holds more than N objects and
+        # limit=N returns all of them. The callback still gets the joined
+        # text one renderChunkSize group at a time.
+        groupSize = max(1, self.renderChunkSize)
+        pageSize = min(groupSize, _RENDER_PAGE_SIZE)
+
+        groupStart = 0
+        pieces: Dict[int, str] = {}
+        pageStart = 0
         while True:
-            # Build filter for getting a set of chunks within the offset range
+            groupEnd = groupStart + groupSize
+            pageEnd = min(pageStart + pageSize, groupEnd)
             points = self.collectionObj.query.fetch_objects(
                 filters=(
                     Filter.by_property('objectId').equal(objectId)
-                    & Filter.by_property('chunkId').greater_or_equal(offset)
-                    & Filter.by_property('chunkId').less_than(offset + self.renderChunkSize)
-                )
+                    & Filter.by_property('chunkId').greater_or_equal(pageStart)
+                    & Filter.by_property('chunkId').less_than(pageEnd)
+                ),
+                limit=pageEnd - pageStart,
             )
 
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            # Process the results
-            text = [''] * self.renderChunkSize
-            lastIndex = -1
-
             for point in points.objects:
-                content = point.properties.get('content')
                 chunk = point.properties.get('chunkId')
-                index = chunk - offset
-
-                # Should never happen since we gave it an offset
-                if chunk < offset:
+                if chunk is None or chunk < pageStart or chunk >= pageEnd:
                     continue
+                pieces[chunk] = point.properties.get('content') or ''
 
-                text[index] = content
-                if index > lastIndex:
-                    lastIndex = index
+            # An empty window means the document has no more chunks
+            done = not points.objects
+            pageStart = pageEnd
 
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
+            # Hand over the group when it is complete or the document ends;
+            # a chunk missing inside the group renders as empty text
+            if pieces and (done or pageStart >= groupEnd):
+                lastChunk = max(pieces)
+                callback(''.join(pieces.get(chunk, '') for chunk in range(groupStart, lastChunk + 1)))
+                pieces = {}
 
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+            if done:
                 break
 
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
-
-            # Call the output function
-            callback(fullText)
-
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
-
-            offset += self.renderChunkSize
+            if pageStart >= groupEnd:
+                groupStart = groupEnd

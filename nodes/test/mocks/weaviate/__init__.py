@@ -43,6 +43,12 @@ from dataclasses import dataclass, field
 import hashlib
 
 
+# Weaviate's server defaults: a query without a limit returns QUERY_DEFAULTS_LIMIT
+# objects, and one whose offset + limit exceeds QUERY_MAXIMUM_RESULTS is rejected.
+QUERY_DEFAULTS_LIMIT = 10
+QUERY_MAXIMUM_RESULTS = 10000
+
+
 # =============================================================================
 # Data Classes for Query Results
 # =============================================================================
@@ -284,8 +290,19 @@ class MockQuery:
 
         return QueryResult(objects=results[:limit])
 
-    def fetch_objects(self, filters: Optional[Filter] = None, limit: int = 100, offset: int = 0) -> QueryResult:
-        """Fetch objects matching filters."""
+    def fetch_objects(
+        self, filters: Optional[Filter] = None, limit: Optional[int] = None, offset: int = 0
+    ) -> QueryResult:
+        """Fetch objects matching filters, with Weaviate's default and maximum result limits."""
+        if limit is None:
+            limit = QUERY_DEFAULTS_LIMIT
+        if offset + limit > QUERY_MAXIMUM_RESULTS:
+            raise ValueError(
+                f'invalid pagination params: query maximum results exceeded: the total limit calculated from '
+                f"the provided offset '{offset}' and limit '{limit}' exceeds the configured value for "
+                f"QUERY_MAXIMUM_RESULTS '{QUERY_MAXIMUM_RESULTS}'"
+            )
+
         results = []
 
         for uuid, data in self.collection._storage.items():
