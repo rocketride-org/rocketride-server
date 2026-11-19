@@ -82,12 +82,13 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	assert.deepEqual(found, needles, 'every needle is found');
 
 	// Cost: 8 MiB of the shared prefix repeated (a candidate every 16 chars).
-	// The control is the same 8 MiB under a matcher of the same 200 lengths
-	// whose prefix never occurs in it: the scan's linear floor on this host,
-	// measured in the same rounds, so a host slowed by suites running beside
-	// this one slows both alike.
+	// The control is the same 8 MiB under a matcher of ONE needle whose prefix
+	// never occurs in it: the scan's linear floor on this host, measured in the
+	// same rounds, so a host slowed by suites running beside this one slows
+	// both alike. One needle, not the 200 lengths: work done per length at
+	// every position would slow a 200-length control just as much and hide.
 	const strings = Array.from({ length: 2000 }, () => prefix.repeat(250));
-	const control = createMatcher(needles.map((n) => [`other-prefix-xyz${n.slice(16)}`, n] as const));
+	const control = createMatcher([[`other-prefix-xyz${needles[0].slice(16)}`, needles[0]] as const]);
 	const time = (matcher: typeof m): number => {
 		const start = performance.now();
 		for (const s of strings) scan(s, [matcher], () => undefined);
