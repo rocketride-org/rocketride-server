@@ -252,6 +252,7 @@ class CrewManager(CrewBase):
         # the same logical run.
         sub_agents: List[Any] = []
         sub_tasks: List[Any] = []
+        crew_llms: List[Any] = [manager_llm]
 
         for d in descriptors:
             sub_host = AgentHostServices(d.invoke)
@@ -271,6 +272,7 @@ class CrewManager(CrewBase):
 
             sub_tool_descs = sub_context.tools.list
             sub_llm = self._build_crew_llm(sub_context, d.role)
+            crew_llms.append(sub_llm)
             sub_tools = self._build_crew_tools(sub_context, sub_tool_descs)
 
             sub_backstory = self._merge_instructions(d.backstory or self._DEFAULT_BACKSTORY, d.instructions)
@@ -410,7 +412,8 @@ class CrewManager(CrewBase):
             manager_goal=ig.goal or _MGR_GOAL,
         )
 
-        return _finalize_answer(findings, final_text, result), result
+        # A delegate forced to answer at max_iter leaves the synthesis a best effort too.
+        return _finalize_answer(findings, final_text, result), self._crew_trace(result, crew_llms)
 
     def _synthesize_delegate_findings(
         self,

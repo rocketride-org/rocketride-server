@@ -87,6 +87,14 @@ export type Message = UserMessage | AssistantMessage;
 export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence' | 'refusal';
 
 /**
+ * Why an agent run stopped. Only `done` means the answer is the agent's finished one:
+ * `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
+ * planning) answer with a best effort from the work so far, and `error` (the run failed,
+ * or its answer was refused) answers with the error message.
+ */
+export type AgentStopReason = 'done' | 'max_steps' | 'empty_plan' | 'error';
+
+/**
  * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
  * before any provider call. `invalid_request` means two tool names become the same provider
  * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
@@ -165,6 +173,8 @@ export class Answer {
 	error?: AnswerError;
 	/** Token usage of the turn. */
 	tokens?: Record<string, unknown>;
+	/** Set by an agent: why its run stopped. A result carries it as `stop_reason`. */
+	agentStopReason?: AgentStopReason;
 
 	constructor(expectJson = false) {
 		this.expectJson = expectJson;
@@ -173,6 +183,7 @@ export class Answer {
 	/**
 	 * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
 	 * A text entry, which an engine that predates turn mode returns, gives a text Answer.
+	 * `agentStopReason` is the result's `stop_reason`, when an agent wrote one.
 	 */
 	static fromResult(result: PIPELINE_RESULT, key = 'answers'): Answer {
 		const entries = (result[key] ?? []) as unknown[];
@@ -181,6 +192,7 @@ export class Answer {
 			throw new Error(`no '${key}' entry in the result`);
 		}
 		const answer = new Answer();
+		answer.agentStopReason = result.stop_reason;
 		if (typeof entry === 'string') {
 			answer.setAnswer(entry);
 			return answer;

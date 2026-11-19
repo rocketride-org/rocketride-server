@@ -187,7 +187,8 @@ class RocketRideDriver(AgentBase):
              done=true and every call succeeded, returns its answer.
           6. Prunes memory keys the LLM has finished with (remove field) and loops.
 
-        The trace records why the run stopped: done, max_waves, empty_plan or error.
+        The trace records why the run stopped: done, max_steps (max_waves reached),
+        empty_plan or error.
 
         Returns:
             A ``(content, trace)`` tuple consumed by ``AgentBase.run_agent``.
@@ -442,9 +443,9 @@ class RocketRideDriver(AgentBase):
         # iterations, ask it one final time to produce a best-effort answer
         # from everything that was gathered.  This prevents the agent from
         # silently returning nothing after a long run. The stop reason travels
-        # with the trace and the last status event, so a caller can tell this
-        # answer from a finished one.
-        trace.setdefault('stop_reason', 'max_waves')
+        # with the trace, the last status event and the answer, so a caller can
+        # tell this answer from a finished one.
+        trace.setdefault('stop_reason', 'max_steps')
         debug(f'rocketride wave stopping ({trace["stop_reason"]}) run_id={run_id}, synthesizing final answer')
         self.sendSSE(context, 'thinking', message='Synthesizing final answer...', stop_reason=trace['stop_reason'])
         return self._synthesize(question=question, waves=waves, context=context, scratch=current_scratch), trace

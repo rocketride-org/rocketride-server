@@ -140,6 +140,12 @@ _MESSAGE = TypeAdapter(Message)
 
 StopReason = Literal['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'refusal']
 
+# Why an agent run stopped. Only `done` means the answer is the agent's finished one:
+# `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
+# planning) answer with a best effort from the work so far, and `error` (the run failed,
+# or its answer was refused) answers with the error message.
+AgentStopReason = Literal['done', 'max_steps', 'empty_plan', 'error']
+
 
 class AnswerError(BaseModel):
     """
@@ -191,6 +197,8 @@ class Answer(BaseModel):
     message: Optional[AssistantMessage] = None
     stopReason: Optional[StopReason] = None
     error: Optional[AnswerError] = None
+    # Set by an agent: why its run stopped. A result carries it as `stop_reason`.
+    agentStopReason: Optional[AgentStopReason] = None
 
     @field_validator('answer', mode='before')
     @classmethod
@@ -202,9 +210,9 @@ class Answer(BaseModel):
 
     @model_serializer(mode='wrap')
     def _omit_unset_turn_fields(self, handler):
-        """Leave the turn fields out of a text answer's dump, so it stays as it was."""
+        """Leave the turn and agent fields out of a plain text answer's dump, so it stays as it was."""
         data = handler(self)
-        for key in ('message', 'stopReason', 'error'):
+        for key in ('message', 'stopReason', 'error', 'agentStopReason'):
             if data.get(key) is None:
                 data.pop(key, None)
         return data
@@ -231,6 +239,7 @@ class Answer(BaseModel):
         Returns:
             Answer: With `message` and `stopReason` set, or `error` set. A text entry
             (an engine that predates turn mode answers as text) gives a text Answer.
+            `agentStopReason` is the result's `stop_reason`, when an agent wrote one.
 
         Raises:
             ValueError: If `result` has no entry under `key` (a blocked guardrail, or a wrong key).
@@ -240,9 +249,11 @@ class Answer(BaseModel):
             raise ValueError(f"no '{key}' entry in the result")
         entry = entries[-1]
         if isinstance(entry, dict):
-            return cls.model_validate(entry)
-        answer = cls()
-        answer.setAnswer(entry)
+            answer = cls.model_validate(entry)
+        else:
+            answer = cls()
+            answer.setAnswer(entry)
+        answer.agentStopReason = result.get('stop_reason')
         return answer
 
     def parsePython(self, value: str) -> Any:

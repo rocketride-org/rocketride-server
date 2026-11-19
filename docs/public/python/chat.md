@@ -78,6 +78,25 @@ Semantics worth knowing:
 
 A complete chat program is [example 6](/clients/python/examples#6-chat-question-with-instructions-and-examples-parse-json-answer).
 
+## Agent answers
+
+When an agent answered, `response['stop_reason']` says why its run stopped. Only `done`
+is a finished answer:
+
+- `max_steps`: the agent ran out of steps (`max_waves` on the Wave agent) and answered
+  with a best effort from the work so far.
+- `empty_plan`: the Wave agent's model stopped planning without finishing, and the answer
+  is a best effort too.
+- `error`: the run failed or its answer was refused, and the answer is the error message.
+
+```python
+reason = response.get('stop_reason')
+if reason and reason != 'done':
+    print(f'Not a finished answer ({reason})')
+```
+
+The field is absent when no agent answered.
+
 ## Native tool calling
 
 Put the conversation in `messages` to send it as real model turns, with tools

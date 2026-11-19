@@ -113,10 +113,10 @@ class LlamaIndexDriver(AgentBase):
                 step = parser.parse(raw)
             except Exception:
                 # Unparseable output means the model answered directly; strip scaffolding.
-                return _clean_answer(raw), stack
+                return _clean_answer(raw), {'steps': stack}
 
             if step.is_done:
-                return safe_str(getattr(step, 'response', raw)), stack
+                return safe_str(getattr(step, 'response', raw)), {'steps': stack}
 
             self.sendSSE(context, 'thinking', message=f'Calling {step.action}...', tool=step.action)
             try:
@@ -132,4 +132,7 @@ class LlamaIndexDriver(AgentBase):
             stack.append({'action': step.action, 'action_input': step.action_input, 'observation': obs_text})
 
         # Iteration budget exhausted without a final Answer.
-        return 'Agent stopped after reaching the maximum number of reasoning steps.', stack
+        return 'Agent stopped after reaching the maximum number of reasoning steps.', {
+            'steps': stack,
+            'stop_reason': 'max_steps',
+        }

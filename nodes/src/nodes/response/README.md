@@ -8,6 +8,8 @@ Acts as the terminal node in pipelines triggered via HTTP: it collects everythin
 
 When an object finishes processing, the node also copies the object's name, path (the containing directory, with the file name stripped), and metadata (all keys except Tika-derived ones, which are filtered out) into the response. It also records a `result_types` map that ties each result key back to its original lane type.
 
+When an agent's answer arrives, the node also records why the agent's run stopped as `stop_reason`, next to the answers, which keep their shape. Only `done` is a finished answer: `max_steps` and `empty_plan` are a best effort from the work so far, and `error` means the answer is the error message. If several agents answer, `stop_reason` is the first reason other than `done`. It is absent when no agent answered.
+
 Data handling per lane:
 
 - **text** - chunks are accumulated (joined with blank lines) and appended as one string per object.
@@ -68,7 +70,7 @@ Choose the generic HTTP Results service when one response needs several lane typ
 
 For HTTP Results, each `lanes` entry maps a lane identifier to a result key of one to 32 characters. Use distinct keys when a client needs to distinguish returned types without consulting `result_types`; leave a lane unmapped to use its lane type as the key. In a single-lane service, the top-level `laneName` takes precedence over the `lanes` mapping, so set it only when every arriving result should use the same key.
 
-A result key cannot be `result_types`, `name`, `path`, `metadata`, `objectId`, `error` or `status`: the result object already holds those, so lane data under one of them would be overwritten or break the node. Validating the configuration warns about such a key, and the node refuses to start with one.
+A result key cannot be `result_types`, `name`, `path`, `metadata`, `stop_reason`, `objectId`, `error` or `status`: the result object already holds those, so lane data under one of them would be overwritten or break the node. Validating the configuration warns about such a key, and the node refuses to start with one.
 
 ---
 

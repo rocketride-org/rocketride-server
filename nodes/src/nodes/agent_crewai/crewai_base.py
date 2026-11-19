@@ -225,6 +225,12 @@ class CrewBase(AgentBase):
         bullets = '\n'.join(f'- {i}' for i in cleaned)
         return f'{backstory}\n\nInstructions:\n{bullets}'
 
+    @staticmethod
+    def _crew_trace(result: Any, llms: List[Any]) -> Dict[str, Any]:
+        """A run's trace: CrewAI's output, and max_steps when CrewAI forced any agent's final answer."""
+        forced = any(llm.forced_final_answer for llm in llms)
+        return {'output': result, 'stop_reason': 'max_steps' if forced else 'done'}
+
     # ─────────────────────────────────────────────────────────────────────
     # FRAMEWORK BINDING
     # ─────────────────────────────────────────────────────────────────────
@@ -240,12 +246,20 @@ class CrewBase(AgentBase):
         channels carried by `context`.
         """
         from crewai import BaseLLM
+        from crewai.utilities.i18n import I18N_DEFAULT
 
         outer_self = self
         outer_context = context
         outer_role = role
 
+        # The turn CrewAI appends when an agent reaches max_iter, to force a final answer
+        # (handle_max_iterations_exceeded in crewai/utilities/agent_utils.py).
+        forced_turn = {'role': 'user', 'content': I18N_DEFAULT.errors('force_final_answer').rstrip()}
+
         class HostInvokeLLM(BaseLLM):
+            # Set when CrewAI forces this model's final answer: its agent ran out of steps.
+            forced_final_answer: bool = False
+
             def __init__(self):
                 super().__init__(model='RocketRide-host-llm', temperature=None)
 
@@ -257,6 +271,8 @@ class CrewBase(AgentBase):
                 available_functions: Optional[Dict[str, Any]] = None,
                 **kwargs: Any,
             ) -> Union[str, Any]:
+                if isinstance(messages, list) and messages and messages[-1] == forced_turn:
+                    self.forced_final_answer = True
                 # CrewAI injects the ReAct stop list ("\nObservation:") per-call via a
                 # contextvar override that is ONLY visible through the `stop_sequences`
                 # property (crewai/llms/base_llm.py) — NOT the raw `self.stop` field.

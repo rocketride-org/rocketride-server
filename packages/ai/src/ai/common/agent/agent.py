@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, get_args
 
 from rocketlib import debug, error, warning
-from ai.common.schema import Answer, Question
+from ai.common.schema import AgentStopReason, Answer, Question
 from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
 
@@ -33,6 +33,12 @@ from ._internal.utils import (
     new_run_id,
     truncate_at_stop_words,
 )
+
+
+def _stop_reason(raw: Any) -> AgentStopReason:
+    """Why a run that returned stopped: its trace's `stop_reason`, else `done`."""
+    reason = raw.get('stop_reason') if isinstance(raw, dict) else None
+    return reason if reason in get_args(AgentStopReason) else 'done'
 
 
 class ToolCallRequiredError(RuntimeError):
@@ -227,14 +233,12 @@ class AgentBase(ABC):
                         'started_at': started_at,
                         'ended_at': ended_at,
                         'tool_calls': len(context.invoked_tools),
+                        # Lets a parent agent, and through the answer the client, tell a
+                        # best-effort answer from a finished one.
+                        'stop_reason': _stop_reason(raw),
                     },
                     'stack': [],
                 }
-                # Why the run stopped (e.g. done, max_waves), when the driver's trace
-                # says: a parent agent can then tell a forced answer from a finished one.
-                stop_reason = raw.get('stop_reason') if isinstance(raw, dict) else None
-                if isinstance(stop_reason, str) and stop_reason:
-                    answer_payload['meta']['stop_reason'] = stop_reason
 
                 stack: List[Dict[str, Any]] = []
                 stack.append(
@@ -321,6 +325,7 @@ class AgentBase(ABC):
                 )
                 answer = Answer(expectJson=False)
                 answer.setAnswer(answer_payload.get('content', ''))
+                answer.agentStopReason = answer_payload['meta']['stop_reason']
                 # The whole turn's total (every model call the run made, across threads
                 # and sub-agents), read back from the turn collector.
                 usage = read_usage()
@@ -352,6 +357,10 @@ class AgentBase(ABC):
         Drivers return a tuple of:
         - content: final user-facing text
         - raw: framework-native output object/state for trace/debugging
+
+        A run that returns has finished (`done`) unless `raw` is a dict whose
+        `stop_reason` says otherwise: a driver that answers with a best effort
+        after running out of steps reports `max_steps` there.
         """
         raise NotImplementedError
 

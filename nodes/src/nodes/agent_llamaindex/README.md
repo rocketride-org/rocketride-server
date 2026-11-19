@@ -79,7 +79,7 @@ When connected to a parent agent, the node exposes one function:
 Input is `{query: string, context?: object}` — `query` must be a non-empty
 string. The optional `context` object reaches the sub-agent as a context entry
 of type `RocketRide.agent.tool_context.v1`. Output is `{content, meta, stack}`,
-where `stack` is the list of reasoning steps taken. `meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included. When invoked as a tool the
+where `stack` holds the framework output, whose `steps` are the reasoning steps taken. `meta` holds the framework, agent and run ids, timings and the tool-call count, and `stop_reason`, which says why the run stopped. Only `done` is a finished answer: `max_steps` means it reached its 10-step limit without a final answer, and `error` means the run raised or the `require_tool_call` guard refused its answer. The answer the node writes to the answers lane carries the same reason, and the response node returns it as the result's `stop_reason`. The task's control token is never included. When invoked as a tool the
 answer returns to the caller instead of going out on the `answers` lane.
 
 The configured **Agent description** is prepended to this function's

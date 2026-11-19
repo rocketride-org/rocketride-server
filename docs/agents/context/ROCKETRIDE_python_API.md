@@ -1120,7 +1120,7 @@ pipeline = {
 
 ### Pipeline Result
 
-`{'answers': list, 'name': str, 'result_types': dict, ...}` — answer values (chat responses) plus dynamic fields based on `result_types`.
+`{'answers': list, 'name': str, 'result_types': dict, 'stop_reason': str, ...}` — answer values (chat responses) plus dynamic fields based on `result_types`. `stop_reason` is present when an agent answered: only `'done'` is a finished answer; `'max_steps'` and `'empty_plan'` are a best effort, and `'error'` means the answer is the error message.
 
 ### Task Status
 
