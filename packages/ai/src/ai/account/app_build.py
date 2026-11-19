@@ -1118,7 +1118,17 @@ class AppBuildWorker:
             await self._build(org_id, app_id, version, entry, artifact, content_root, job_dir, build, log_parts, feed)
             build.update({'status': 'ok', 'phase': 'harvest', 'endedAt': time.time()})
             build.pop('errors', None)
-            await self._stamp(org_id, app_id, version, build)
+            if not await self._stamp(org_id, app_id, version, build):
+                # The record still says 'building': the version cannot be
+                # submitted or served until the stamp lands. Route through the
+                # same failed-terminal path as a platform fault and do not
+                # announce success.
+                log_parts.append('== failed (stamp) ==\nbuild stamp failed: deployments_set_build rejected the row')
+                build.update({'status': 'failed', 'phase': 'stamp'})
+                await feed.flush()
+                await feed.status('failed')
+                error(f'[app_build] {app_id} v{version}: build ok but stamp failed; not notified')
+                return False
             await feed.status('')  # success clears the card
             await self._notify_success(org_id, app_id, entry)
             debug(f'[app_build] {app_id} v{version}: build ok')
@@ -1438,17 +1448,24 @@ class AppBuildWorker:
 
     # ── stamps, log, notifications ────────────────────────────────────────
 
-    async def _stamp(self, org_id: str, app_id: str, version: int, build: Dict[str, Any]) -> None:
+    async def _stamp(self, org_id: str, app_id: str, version: int, build: Dict[str, Any]) -> bool:
         """Persist the build blob + broadcast the org-scoped deploy event.
 
         Clients treat the event as cache invalidation and re-fetch versions
-        rows (which carry the build fields) — no payload rides the event.
+        rows (which carry the build fields) - no payload rides the event.
+
+        Returns:
+            True when the row was written; False when it was not. A failed stamp
+            leaves the version recorded as 'building' forever, so callers must not
+            clear the card or fire the success notification.
         """
         from ai.account import account
 
+        stamp_ok = True
         try:
             await account.deployments_set_build(org_id, app_id, version, dict(build))
         except Exception as exc:
+            stamp_ok = False
             error(f'[app_build] {app_id} v{version}: build stamp failed: {exc}')
         if self._server is not None:
             try:
@@ -1457,6 +1474,7 @@ class AppBuildWorker:
                 await broadcast_app_changed(self._server, org_id, app_id, 'build')
             except Exception as exc:
                 debug(f'[app_build] deploy event failed: {exc}')
+        return stamp_ok
 
     async def _write_log(
         self, content_root: str, log_parts: List[str], scrub_roots: Optional[List[str]] = None
