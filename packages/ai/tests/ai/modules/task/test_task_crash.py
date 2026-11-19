@@ -158,6 +158,7 @@ def server(request, tmp_path_factory):
                     'provider': provider,
                     'dumps': dumps,
                     'log': workspace / 'server.log',
+                    'pid': proc.pid,
                 }
             finally:
                 proc.terminate()
@@ -295,6 +296,31 @@ async def test_a_crash_past_the_handlers_stops_its_task_unexpectedly(server):
     assert _dumps_of(token) == []
 
 
+def _debug_engines(server) -> str:
+    """DEBUG (to be removed): what the processes look like while a start hangs."""
+
+    def run(*args):
+        try:
+            return subprocess.run(args, capture_output=True, text=True, timeout=60).stdout
+        except Exception as e:
+            return f'{args[0]}: {e}'
+
+    table = run('ps', '-axo', 'pid,ppid,pgid,stat,etime,command')
+    lines = [line for line in table.splitlines() if 'engine' in line or 'crashpad' in line]
+    report = ['server pid ' + str(server['pid']), *lines]
+    for line in lines:
+        if 'missing/task.log' in line:
+            pid = line.split()[0]
+            report.append(run('lsof', '-p', pid)[-4000:])
+            if sys.platform == 'darwin':
+                report.append(run('sample', pid, '1')[-12000:])
+    report.append(run('lsof', '-p', str(server['pid']))[-4000:])
+    # A process other than the engine may hold the engine's output pipe open
+    report.append(run('lsof', '-nP', '-c', 'crashpad')[-4000:])
+    report.append(server['log'].read_text(errors='replace')[-4000:])
+    return '\n'.join(report)
+
+
 @pytest.mark.asyncio
 async def test_a_fatal_error_before_the_monitor_stops_its_task(server):
     """A log file that cannot be opened ends the engine before its monitor starts: the start fails, but no crash."""
@@ -302,9 +328,12 @@ async def test_a_fatal_error_before_the_monitor_stops_its_task(server):
     try:
         # A folder the engine's own folder lacks; no space, which the server would split on
         with pytest.raises(RuntimeError) as stopped:
-            await asyncio.wait_for(
-                client.use(pipeline=_pipeline(server['provider']), args=['--log.file=missing/task.log']), 90
-            )
+            try:
+                await asyncio.wait_for(
+                    client.use(pipeline=_pipeline(server['provider']), args=['--log.file=missing/task.log']), 90
+                )
+            except TimeoutError:
+                raise AssertionError(_debug_engines(server)) from None
         assert str(stopped.value) == 'Stopped', server['log'].read_text(errors='replace')
     finally:
         await client.disconnect()
