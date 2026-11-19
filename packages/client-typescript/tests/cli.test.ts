@@ -38,10 +38,12 @@
 
 import { spawn } from 'child_process';
 import * as fs from 'fs';
+import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/globals';
+import { WebSocketServer } from 'ws';
 import { RocketRideClient } from '../src/client';
 import { getEchoPipeline } from './echo.pipeline';
 
@@ -286,6 +288,459 @@ describe('CLI upload Integration Tests', () => {
 
 		expect(code).toBe(1);
 		expect(output).toContain('--max-concurrent must be a positive integer');
+	});
+
+	it('should fail with exit code 1 when uploading to an invalid task token', async () => {
+		const files = writeUploadFiles();
+		const { code, output } = await runCli(['upload', ...files, '--token', 'TASK_DOES_NOT_EXIST', ...serverArgs()]);
+
+		expect(code).toBe(1);
+		expect(output).toContain('Failed: 2 file(s)');
+	});
+});
+
+describe('CLI upload exit codes', () => {
+	let mockServer: { uri: string; close: () => Promise<void> } | null = null;
+
+	afterEach(async () => {
+		if (mockServer) {
+			await mockServer.close();
+			mockServer = null;
+		}
+	});
+
+	function createMockUploadServer(handleOpen: (index: number) => { success: boolean; error?: string }): Promise<{ uri: string; close: () => Promise<void> }> {
+		return new Promise((resolve) => {
+			let openCount = 0;
+			const server = http.createServer();
+			const wss = new WebSocketServer({ server });
+
+			wss.on('connection', (ws) => {
+				ws.on('message', (data) => {
+					let text = data.toString();
+					const nl = text.indexOf('\n');
+					if (nl !== -1) text = text.slice(0, nl);
+					try {
+						const msg = JSON.parse(text);
+						if (msg.type === 'request') {
+							if (msg.command === 'rrext_process' && msg.arguments?.subcommand === 'open') {
+								openCount++;
+								const verdict = handleOpen(openCount);
+								if (verdict.success) {
+									ws.send(
+										JSON.stringify({
+											seq: msg.seq + 100,
+											type: 'response',
+											request_seq: msg.seq,
+											command: msg.command,
+											success: true,
+											body: { token: 'TEST_TOKEN', connection_id: 'c1' },
+										}),
+									);
+								} else {
+									ws.send(
+										JSON.stringify({
+											seq: msg.seq + 100,
+											type: 'response',
+											request_seq: msg.seq,
+											command: msg.command,
+											success: false,
+											message: verdict.error || 'Upload error',
+										}),
+									);
+								}
+							} else {
+								ws.send(
+									JSON.stringify({
+										seq: msg.seq + 100,
+										type: 'response',
+										request_seq: msg.seq,
+										command: msg.command,
+										success: true,
+										body: {},
+									}),
+								);
+							}
+						}
+					} catch {
+						// ignore malformed
+					}
+				});
+			});
+
+			server.listen(0, '127.0.0.1', () => {
+				const address = server.address() as { port: number };
+				resolve({
+					uri: `http://127.0.0.1:${address.port}`,
+					close: () =>
+						new Promise<void>((done) => {
+							wss.close(() => {
+								server.close(() => done());
+							});
+						}),
+				});
+			});
+		});
+	}
+
+	it('should exit with code 0 when all uploads succeed', async () => {
+		mockServer = await createMockUploadServer(() => ({ success: true }));
+		const files = writeUploadFiles();
+
+		const { code, output } = await runCli(['upload', ...files, '--token', 'TEST_TOKEN', '--uri', mockServer.uri, '--apikey', 'TEST']);
+
+		expect(code).toBe(0);
+		expect(output).toContain('Uploaded 2 of 2 file(s)');
+		expect(output).not.toContain('Failed:');
+	});
+
+	it('should exit with nonzero code when all uploads fail', async () => {
+		mockServer = await createMockUploadServer(() => ({ success: false, error: 'Pipeline rejected file' }));
+		const files = writeUploadFiles();
+
+		const { code, output } = await runCli(['upload', ...files, '--token', 'TEST_TOKEN', '--uri', mockServer.uri, '--apikey', 'TEST']);
+
+		expect(code).toBe(1);
+		expect(output).toContain('Uploaded 0 of 2 file(s)');
+		expect(output).toContain('Failed: 2 file(s)');
+	});
+
+	it('should exit with nonzero code when some uploads succeed and others fail (partial success)', async () => {
+		mockServer = await createMockUploadServer((index) => ({
+			success: index === 1,
+			error: index === 1 ? undefined : 'Storage quota exceeded',
+		}));
+		const files = writeUploadFiles();
+
+		const { code, output } = await runCli([
+			'upload',
+			...files,
+			'--token',
+			'TEST_TOKEN',
+			'--max-concurrent',
+			'1',
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			'TEST',
+		]);
+
+		expect(code).toBe(1);
+		expect(output).toContain('Uploaded 1 of 2 file(s)');
+		expect(output).toContain('Failed: 1 file(s)');
+	});
+
+	it('should preserve JSON report structure and exit with nonzero code on failure', async () => {
+		mockServer = await createMockUploadServer((index) => ({
+			success: index === 1,
+			error: index === 1 ? undefined : 'Storage quota exceeded',
+		}));
+		const files = writeUploadFiles();
+
+		const { code, output } = await runCli([
+			'upload',
+			...files,
+			'--token',
+			'TEST_TOKEN',
+			'--max-concurrent',
+			'1',
+			'--json',
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			'TEST',
+		]);
+
+		expect(code).toBe(1);
+		const report = JSON.parse(output.trim());
+		expect(report.uploaded).toBe(1);
+		expect(report.failed).toBe(1);
+		expect(report.files).toHaveLength(2);
+		expect(report.files.find((f: { action: string }) => f.action === 'complete')).toBeDefined();
+		expect(report.files.find((f: { action: string }) => f.action === 'error')).toBeDefined();
+	});
+
+	it('should exit with nonzero code when server connection fails', async () => {
+		const files = writeUploadFiles();
+		const { code, output } = await runCli([
+			'upload',
+			...files,
+			'--token',
+			'TEST_TOKEN',
+			'--uri',
+			'http://127.0.0.1:9',
+			'--apikey',
+			'TEST',
+		]);
+
+		expect(code).toBe(1);
+		expect(output).toContain('Failed to connect');
+	});
+});
+
+describe('CLI start and pipeline loading regression tests (Issue #2830)', () => {
+	let mockServer: { uri: string; close: () => Promise<void> } | null = null;
+
+	afterEach(async () => {
+		if (mockServer) {
+			await mockServer.close();
+			mockServer = null;
+		}
+	});
+
+	function createMockStartServer(onRequest?: (msg: Record<string, unknown>) => void): Promise<{ uri: string; close: () => Promise<void> }> {
+		return new Promise((resolve) => {
+			const server = http.createServer();
+			const wss = new WebSocketServer({ server });
+
+			wss.on('connection', (ws) => {
+				ws.on('message', (data) => {
+					let text = data.toString();
+					const nl = text.indexOf('\n');
+					if (nl !== -1) text = text.slice(0, nl);
+					try {
+						const msg = JSON.parse(text);
+						if (msg.type === 'request') {
+							onRequest?.(msg);
+							if (msg.command === 'auth') {
+								ws.send(
+									JSON.stringify({
+										seq: msg.seq + 100,
+										type: 'response',
+										request_seq: msg.seq,
+										command: msg.command,
+										success: true,
+										body: { userToken: 'MOCK_TOKEN' },
+									}),
+								);
+							} else if (msg.command === 'execute' || msg.command === 'rrext_use') {
+								ws.send(
+									JSON.stringify({
+										seq: msg.seq + 100,
+										type: 'response',
+										request_seq: msg.seq,
+										command: msg.command,
+										success: true,
+										body: { token: 'MOCK-TASK-TOKEN-98765' },
+									}),
+								);
+							} else if (msg.command === 'rrext_process' && msg.arguments?.subcommand === 'open') {
+								ws.send(
+									JSON.stringify({
+										seq: msg.seq + 100,
+										type: 'response',
+										request_seq: msg.seq,
+										command: msg.command,
+										success: true,
+										body: { token: 'MOCK-TASK-TOKEN-98765', connection_id: 'c1' },
+									}),
+								);
+							} else {
+								ws.send(
+									JSON.stringify({
+										seq: msg.seq + 100,
+										type: 'response',
+										request_seq: msg.seq,
+										command: msg.command,
+										success: true,
+										body: {},
+									}),
+								);
+							}
+						}
+					} catch {
+						// ignore
+					}
+				});
+			});
+
+			server.listen(0, '127.0.0.1', () => {
+				const address = server.address() as { port: number };
+				resolve({
+					uri: `ws://127.0.0.1:${address.port}`,
+					close: () =>
+						new Promise((res) => {
+							wss.close(() => server.close(() => res()));
+						}),
+				});
+			});
+		});
+	}
+
+	it('should display string token and not leak apikey or print [object Object]', async () => {
+		mockServer = await createMockStartServer();
+		const pipelinePath = writePipeline('start-test-project');
+		const secretApiKey = 'super-secret-key-12345';
+
+		const { code, output } = await runCli([
+			'start',
+			'--pipeline',
+			pipelinePath,
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			secretApiKey,
+		]);
+
+		expect(code).toBe(0);
+		expect(output).toContain('Token: MOCK-TASK-TOKEN-98765');
+		expect(output).toContain('Stop it with: rocketride stop --token MOCK-TASK-TOKEN-98765');
+		expect(output).not.toContain('[object Object]');
+		expect(output).not.toContain(secretApiKey);
+		expect(output).not.toContain('--apikey');
+	});
+
+	it('should output clean JSON with token and no credential leak in --json mode', async () => {
+		mockServer = await createMockStartServer();
+		const pipelinePath = writePipeline('start-json-project');
+		const secretApiKey = 'super-secret-json-key';
+
+		const { code, output } = await runCli([
+			'start',
+			'--pipeline',
+			pipelinePath,
+			'--json',
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			secretApiKey,
+		]);
+
+		expect(code).toBe(0);
+		expect(output).not.toContain(secretApiKey);
+		const parsed = JSON.parse(output);
+		expect(parsed).toEqual({ token: 'MOCK-TASK-TOKEN-98765' });
+	});
+
+	it('should accept positional pipeline argument for Python CLI compatibility', async () => {
+		mockServer = await createMockStartServer();
+		const pipelinePath = writePipeline('start-positional-project');
+
+		const { code, output } = await runCli([
+			'start',
+			pipelinePath,
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			'TEST',
+		]);
+
+		expect(code).toBe(0);
+		expect(output).toContain('Token: MOCK-TASK-TOKEN-98765');
+	});
+
+	it('should fail with actionable message when pipeline is omitted', async () => {
+		const { code, output } = await runCli(['start', '--uri', 'ws://127.0.0.1:9']);
+		expect(code).toBe(1);
+		expect(output).toContain('Pipeline file is required');
+	});
+
+	it('should accept valid wrapped {"pipeline": {...}} configuration file in start and upload', async () => {
+		let capturedExecutePipeline: Record<string, unknown> | null = null;
+		mockServer = await createMockStartServer((msg) => {
+			if (msg.command === 'execute' || msg.command === 'rrext_use') {
+				const args = msg.arguments as Record<string, unknown> | undefined;
+				capturedExecutePipeline = (args?.pipeline as Record<string, unknown>) ?? null;
+			}
+		});
+		const wrappedFile = path.join(workDir, 'wrapped.pipe');
+		const flat = getEchoPipeline('wrapped-project');
+		fs.writeFileSync(wrappedFile, JSON.stringify({ pipeline: flat }), 'utf-8');
+
+		// Test start with wrapped pipeline
+		const startResult = await runCli([
+			'start',
+			'--pipeline',
+			wrappedFile,
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			'TEST',
+		]);
+		expect(startResult.code).toBe(0);
+		expect(startResult.output).toContain('Token: MOCK-TASK-TOKEN-98765');
+		expect(capturedExecutePipeline).toBeDefined();
+		expect((capturedExecutePipeline as unknown as Record<string, unknown>).pipeline).toBeUndefined();
+		expect((capturedExecutePipeline as unknown as Record<string, unknown>).components).toBeDefined();
+		expect(Array.isArray((capturedExecutePipeline as unknown as Record<string, unknown>).components)).toBe(true);
+
+		// Test upload with wrapped pipeline
+		const uploadFile = path.join(workDir, 'upload.txt');
+		fs.writeFileSync(uploadFile, 'sample data', 'utf-8');
+		const uploadResult = await runCli([
+			'upload',
+			uploadFile,
+			'--pipeline',
+			wrappedFile,
+			'--uri',
+			mockServer.uri,
+			'--apikey',
+			'TEST',
+		]);
+		expect(uploadResult.code).toBe(0);
+		expect(uploadResult.output).toContain('Uploaded 1 of 1 file(s)');
+	});
+
+	it('should reject invalid JSON pipeline file with actionable error', async () => {
+		const badJsonFile = path.join(workDir, 'bad.pipe');
+		fs.writeFileSync(badJsonFile, '{ invalid json', 'utf-8');
+
+		const { code, output } = await runCli(['start', '--pipeline', badJsonFile]);
+		expect(code).toBe(1);
+		expect(output).toContain('Invalid JSON format in');
+	});
+
+	it('should reject wrapper whose contents are invalid or missing', async () => {
+		const nullWrapperFile = path.join(workDir, 'null-wrapper.pipe');
+		fs.writeFileSync(nullWrapperFile, JSON.stringify({ pipeline: null }), 'utf-8');
+
+		const { code, output } = await runCli(['start', '--pipeline', nullWrapperFile]);
+		expect(code).toBe(1);
+		expect(output).toContain('Invalid pipeline wrapper');
+		expect(output).toContain('wrapper contents are missing or invalid');
+	});
+
+	it('should reject pipeline without a valid source component', async () => {
+		const noSourceFile = path.join(workDir, 'no-source.pipe');
+		fs.writeFileSync(
+			noSourceFile,
+			JSON.stringify({
+				components: [
+					{
+						id: 'resp_1',
+						provider: 'response',
+						config: { mode: 'Sink' },
+					},
+				],
+			}),
+			'utf-8',
+		);
+
+		const { code, output } = await runCli(['start', '--pipeline', noSourceFile]);
+		expect(code).toBe(1);
+		expect(output).toContain('does not have a source component defined');
+	});
+
+	it('should reject pipeline whose source ID does not reference any component', async () => {
+		const badSourceFile = path.join(workDir, 'bad-source.pipe');
+		fs.writeFileSync(
+			badSourceFile,
+			JSON.stringify({
+				source: 'non_existent_source_id',
+				components: [
+					{
+						id: 'resp_1',
+						provider: 'response',
+						config: { mode: 'Sink' },
+					},
+				],
+			}),
+			'utf-8',
+		);
+
+		const { code, output } = await runCli(['start', '--pipeline', badSourceFile]);
+		expect(code).toBe(1);
+		expect(output).toContain('does not have a source component defined');
 	});
 });
 
