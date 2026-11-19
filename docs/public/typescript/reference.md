@@ -287,6 +287,7 @@ constructor(options?: {
 | `addToolResult` | `addToolResult(callId: string, content: string, isError?: boolean): void` | Adds a tool result to the user message after the assistant turn that made the call. Throws for an unknown `callId`. |
 | `checkTurn` | `checkTurn(): void` | Checks the turn-mode rules (`fromDict` runs it); throws an `Error` naming the broken rule. |
 | `cachePrefix` | field, default `false` | Set to `true` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
+| `metadata` | field, default `{}` | Pipeline state carried alongside the question, `Record<string, unknown>`. Never rendered into the prompt. Left out of `toDict()` when empty. |
 
 ## Answer
 
@@ -310,6 +311,7 @@ constructor(expectJson?: boolean)  // default false
 | `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
 | `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
 | `tokens` | field | Turn token usage, set by `fromResult`. |
+| `metadata` | field, default `{}` | Pipeline state carried over from the question, `Record<string, unknown>`. The LLM drivers and agent nodes copy the question's `metadata` onto the answer on both the success and the error path; a failed call or run also sets `llm_error` to the exception class name. It is not part of the response body sent to the client. |
 
 ## Types
 

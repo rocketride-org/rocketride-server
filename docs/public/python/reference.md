@@ -264,7 +264,7 @@ tail.
 | `addToolResult` | `addToolResult(self, callId: str, content: str, isError: bool = False)` | Adds a tool result to the user message after the assistant turn that made the call. Raises `ValueError` for an unknown `callId`. |
 | `checkTurn` | `checkTurn(self)` | Checks the turn-mode rules (parsing runs it); raises `ValueError` naming the broken rule. |
 | `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
-| `metadata` | field | Pipeline state carried alongside the question, `Optional[Dict[str, Any]]` defaulting to `{}`. Never rendered into the prompt. <!-- language-specific --> |
+| `metadata` | field | Pipeline state carried alongside the question, `Optional[Dict[str, Any]]` defaulting to `{}`. Never rendered into the prompt. |
 
 ## Answer
 
@@ -284,7 +284,7 @@ From `rocketride.schema`. Parses chat response content — see
 | `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
 | `error` | field | `AnswerError(code, message)` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
 | `toolCalls` | `toolCalls(self) -> List[ToolCallBlock]` | The calls in `message`, in order. Empty for a text answer. |
-| `metadata` | field | Pipeline state carried over from the question, `Optional[Dict[str, Any]]` defaulting to `{}`. The LLM drivers copy `Question.metadata` onto the answer on both the success and the error path; it is not part of the response body sent to the client. <!-- language-specific --> |
+| `metadata` | field | Pipeline state carried over from the question, `Optional[Dict[str, Any]]` defaulting to `{}`. The LLM drivers and agent nodes copy `Question.metadata` onto the answer on both the success and the error path; a failed call or run also sets `llm_error` to the exception class name. It is not part of the response body sent to the client. |
 
 ## Types
 

@@ -543,3 +543,48 @@ def test_no_stop_reason_when_the_trace_has_none(raw):
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
 
     assert 'stop_reason' not in payload['meta']
+
+
+# ---------------------------------------------------------------------------
+# Question metadata reaches the answer (dataset -> agent -> evaluator)
+# ---------------------------------------------------------------------------
+
+
+class _QuestionWithMetadata(_FakeQuestion):
+    def __init__(self, metadata: Dict[str, Any]) -> None:
+        self.metadata = metadata
+
+
+def test_answer_carries_the_question_metadata():
+    ii = _FakeIInstance()
+    question = _QuestionWithMetadata({'expected': 'Paris', 'dataset_id': 'row-1'})
+    _make_driver(_call_one_tool, require_tool_call=False).run_agent(ii, question, emit_answers_lane=True)
+
+    (answer,) = ii.instance.written
+    assert answer.metadata == {'expected': 'Paris', 'dataset_id': 'row-1'}
+
+
+def test_a_failed_run_marks_its_answer_as_an_error():
+    ii = _FakeIInstance()
+    question = _QuestionWithMetadata({'expected': 'Paris'})
+    _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(ii, question, emit_answers_lane=True)
+
+    (answer,) = ii.instance.written
+    assert answer.metadata == {'expected': 'Paris', 'llm_error': 'ValueError'}
+
+
+def test_a_refused_answer_is_marked_as_an_error():
+    ii = _FakeIInstance()
+    question = _QuestionWithMetadata({'expected': 'Paris'})
+    _make_driver(_narrate, require_tool_call=True).run_agent(ii, question, emit_answers_lane=True)
+
+    (answer,) = ii.instance.written
+    assert answer.metadata == {'expected': 'Paris', 'llm_error': 'ToolCallRequiredError'}
+
+
+def test_a_question_without_metadata_leaves_the_answer_without_it():
+    ii = _FakeIInstance()
+    _make_driver(_call_one_tool, require_tool_call=False).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    (answer,) = ii.instance.written
+    assert not answer.metadata

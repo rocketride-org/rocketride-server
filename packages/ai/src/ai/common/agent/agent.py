@@ -23,7 +23,7 @@ from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
 
-from ai.common.utils import parse_bool, safe_str
+from ai.common.utils import merge_metadata, parse_bool, safe_str
 
 from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
@@ -166,6 +166,9 @@ class AgentBase(ABC):
         # a failure occurs before the context is built or `_run` returns.
         context = None
         raw = None
+        # The exception class name when the run failed or its answer was refused;
+        # marks the emitted answer so an evaluator downstream does not score it.
+        failure_type: Optional[str] = None
         # Scope this turn's model calls. The agent reaches the model through many ask()
         # invokes (and may drive sub-agents), possibly on a worker thread with a copied
         # context (CrewAI); turn_usage collects them all and reads back the whole turn's
@@ -250,6 +253,7 @@ class AgentBase(ABC):
                 # guard answer — not the generic _run-failed path — so the cause is
                 # unambiguous in traces and to downstream handling.
                 guard_message = str(e)
+                failure_type = type(e).__name__
                 error(f'agent base tool-call guard tripped run_id={run_id}: {guard_message}')
                 ended_at = now_iso()
                 answer_payload = {
@@ -284,6 +288,7 @@ class AgentBase(ABC):
 
             except Exception as e:
                 error_type = type(e).__name__
+                failure_type = error_type
                 error_message = str(e)
                 error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
                 # A driver can raise before it sends any status (agent_rocketride checks its
@@ -321,6 +326,13 @@ class AgentBase(ABC):
                 )
                 answer = Answer(expectJson=False)
                 answer.setAnswer(answer_payload.get('content', ''))
+                # Carry the question's metadata (e.g. a dataset row's reference
+                # answer) onto the answer, as LLMBase.writeQuestions does, so an
+                # evaluator downstream can pair it. A failed or refused run is
+                # marked with the same key LLMBase uses for a failed call.
+                merge_metadata(answer, getattr(question, 'metadata', None))
+                if failure_type:
+                    merge_metadata(answer, {'llm_error': failure_type})
                 # The whole turn's total (every model call the run made, across threads
                 # and sub-agents), read back from the turn collector.
                 usage = read_usage()
