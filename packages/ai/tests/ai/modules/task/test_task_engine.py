@@ -2662,6 +2662,49 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     assert run_log.end_run.await_args.args[0] == outcome
 
 
+@pytest.mark.asyncio
+async def test_a_container_task_that_left_with_0_and_no_report_was_cut_off():
+    """A task reports every end it reaches; with its input closed it leaves with 0 and no word."""
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=True)
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        1,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    said = [str(call) for call in t._forward_task_event.await_args_list]
+    assert any('Unexpected termination: the task ended without reporting its end' in line for line in said)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'isolated, reported, stop_requested, status, outcome',
+    [
+        # It said >EXIT itself: the 0 is its own end
+        (True, True, False, 'Completed', 'ok'),
+        # The engine stopped it
+        (True, False, True, 'Stopped', 'cancelled'),
+        # No CLI process stands between a child process and the engine
+        (False, False, False, 'Completed', 'ok'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine', 'child-process'],
+)
+async def test_an_exit_code_0_with_a_known_reason_is_no_cut_off(isolated, reported, stop_requested, status, outcome):
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=isolated)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': ''}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == (status, 0)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
+
+
 # ---------------------------------------------------------------------------
 # TaskData — the engine's data channel to the task
 # ---------------------------------------------------------------------------

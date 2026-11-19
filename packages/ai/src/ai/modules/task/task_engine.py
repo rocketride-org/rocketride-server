@@ -1779,10 +1779,21 @@ class Task(DAPBase):
         A process that reported no crash but ended by a crash signal, an OOM
         kill or, on Windows, a crash exception code crashed before its handlers
         could say so, unless the server killed it.
+
+        A task in a container or a pod that left with code 0 was cut off from
+        the engine: a task reports every end it reaches by itself, and leaves
+        with 0 and no word once its input closes (``--autoterm``). Its 0
+        records 1, because the dashboard's task_error goes by a non-zero code.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code == 0 and self._launcher.isolated:
+                self._crash = (
+                    'the task ended without reporting its end, as it does when its connection to the engine drops'
+                )
+                self._status.exitCode = 1
+                return
             if exit_code is None or self._process_killed:
                 return
             if exit_code < 0:
