@@ -1,7 +1,7 @@
 """Real BERT on the local CPU path: forwards that share CPU slots give the serial results (no download, no GPU)."""
 
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import functools
 import sys
 import threading
 import types
@@ -72,7 +72,7 @@ def _real_torch(monkeypatch):
     return torch
 
 
-def test_minilm_forwards_in_cpu_slots_match_serial(monkeypatch):
+def test_minilm_forwards_in_cpu_slots_match_serial(monkeypatch, map_in_threads):
     """MiniLM through the local facade on CPU qualifies and gives the serial vectors from 8 threads on 4 slots."""
     np = pytest.importorskip('numpy')
     _real_torch(monkeypatch)
@@ -91,15 +91,14 @@ def test_minilm_forwards_in_cpu_slots_match_serial(monkeypatch):
 
     witness = _OverlapWitness()
     monkeypatch.setitem(budget_module._budgets, 'cpu', witness)
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        concurrent = list(pool.map(encoder.encode, batches))
+    concurrent = map_in_threads(encoder.encode, batches, workers=8, finish_s=60.0)
 
     assert witness.peak > 1
     for alone, shared in zip(serial, concurrent):
         assert np.allclose(alone, shared, rtol=0, atol=1e-6)
 
 
-def test_a_small_random_bert_keeps_its_results_and_weights(monkeypatch):
+def test_a_small_random_bert_keeps_its_results_and_weights(monkeypatch, map_in_threads):
     """A random stock BertModel (no model files) gives the serial outputs from 8 threads and keeps its weights."""
     torch = _real_torch(monkeypatch)
     from transformers import BertConfig
@@ -140,11 +139,40 @@ def test_a_small_random_bert_keeps_its_results_and_weights(monkeypatch):
     expected = [infer(request, False) for request in requests]
     witness = _OverlapWitness()
     monkeypatch.setitem(budget_module._budgets, 'cpu', witness)
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        actual = list(pool.map(lambda request: infer(request, True), requests))
+    actual = map_in_threads(lambda request: infer(request, True), requests, workers=8, finish_s=60.0)
 
     assert witness.peak > 1
     for serial, concurrent in zip(expected, actual):
         assert torch.allclose(serial, concurrent, rtol=0, atol=1e-6)
     for key, value in transformer.state_dict().items():
         assert torch.equal(before[key], value), key
+
+
+def test_a_forward_replaced_on_a_bert_class_keeps_one_call(monkeypatch):
+    """A real BertModel qualifies until a ``forward`` is set on one of its classes, as a plain function or a wrapper."""
+    _real_torch(monkeypatch)
+    from transformers import BertConfig
+    from transformers.models.bert import modeling_bert
+
+    config = BertConfig(
+        vocab_size=101, hidden_size=48, num_hidden_layers=1, num_attention_heads=4, intermediate_size=96
+    )
+    model = [types.SimpleNamespace(auto_model=modeling_bert.BertModel(config).eval())]
+    check = SentenceTransformerLoader._local_cpu_forward_calls
+    assert check(model) == SentenceTransformerLoader.LOCAL_CPU_CALLS
+    stock = modeling_bert.BertIntermediate.forward
+
+    def plain(self, hidden_states):
+        """Stand in for a forward that a tracing library sets on the class."""
+        return stock(self, hidden_states)
+
+    @functools.wraps(stock)
+    def wrapped(self, hidden_states):
+        """The same, carrying the stock forward's name and ``__module__``."""
+        return stock(self, hidden_states)
+
+    for replaced in (plain, wrapped):
+        with monkeypatch.context() as patch:
+            patch.setattr(modeling_bert.BertIntermediate, 'forward', replaced)
+            assert check(model) == 1
+    assert check(model) == SentenceTransformerLoader.LOCAL_CPU_CALLS
