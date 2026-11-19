@@ -1,0 +1,183 @@
+✔ fresh dev boot: URL params become the tab session and persist under rr:tab (1.166667ms)
+✔ OAuth return (?code= only) resolves the SAME identity from the persisted copy (0.166458ms)
+✔ bare reload (no params at all) keeps the tab identity (0.090417ms)
+✔ URL facts outrank the persisted copy field by field (0.071709ms)
+✔ a plain production tab has an all-empty session and writes nothing (0.106042ms)
+✔ a hostile rrauthorigin value is rejected; a non-origin URL collapses to its origin (0.123417ms)
+✔ a FRAMED shell neither reads nor stamps the tab sessionStorage copy (0.097ms)
+✔ updateTabSession merges, persists, and updates the cache (0.090792ms)
+✔ a production build is never a dev tab: neither the URL nor the persisted copy makes tabSession().dev true (0.160584ms)
+✔ the dev relay is honoured only by a top-level shell the relay bounce can return to (http://localhost, http://127.0.0.1) (0.251208ms)
+✔ isLoopbackShell: loopback hosts only — a host that merely ENDS WITH "localhost" (no dot) or embeds it is not loopback (0.756041ms)
+✔ the dev relay is ignored by a FRAMED shell, loopback-served or not (framed previews sign in via rrdev:auth) (0.166459ms)
+✔ isRelayBounceTarget is the bounce's own target set: http://localhost and http://127.0.0.1 with an optional port, nothing else (0.050083ms)
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "https://attacker.example")
+[devMode] ignoring rrdev:registerRemote: entry "https://attacker.example/remoteEntry.js" is not a loopback dev-server URL
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "https://attacker.example")
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://localhost:5173")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "http://localhost:5173")
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+row with href ?code=FAKE
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+row for the embedder
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1 referrer=(none)
+[devMode] embedder session received — continuing boot
+[appLoader] Local override registered for "org.org_vscode"
+[devMode] embedder session cleared — rebooting
+[appLoader] invalidateAppDescriptor("org.org_vscode") before WorkspaceProvider mounted — nothing to evict
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=http://localhost:3013/?appid=org.vsc&rrdev=1 referrer=(none)
+[devMode] embedder session received — rebooting
+[appLoader] Local override registered for "org.vsc"
+[appLoader] invalidateAppDescriptor("org.vsc") before WorkspaceProvider mounted — nothing to evict
+preview row
+[devMode] embedder session cleared — rebooting
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/ referrer=(none)
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+preview row
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/ referrer=(none)
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+preview row
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/ referrer=(none)
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+top-level row
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?rrdev=1&appid=org.victim referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] ignoring rrdev:auth from untrusted sender (origin "https://attacker.example")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "https://attacker.example")
+boot href ?code=FAKE-OAUTH-CODE
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=http://localhost:3013/?appid=org.term&rrdev=1 referrer=(none)
+[devMode] self-registering "org.term" from /apps/org.term/dev (URL convention)
+[appLoader] Local override registered for "org.term"
+[appLoader] invalidateAppDescriptor("org.term") before WorkspaceProvider mounted — nothing to evict
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=https://cloud.example.test/?appid=org.bare&rrdev=1 referrer=(none)
+✔ a foreign framing parent cannot replace the session token (real listener) (828.798ms)
+✔ a foreign framing parent cannot register a dev remote (real listener) (0.380208ms)
+✔ a window.opener cannot write the token of a top-level tab (real listener) (8.606292ms)
+✔ a loopback parent cannot drive a cloud-served shell (real listener) (0.389709ms)
+✔ console rows are never forwarded to a foreign parent, and go to the VS Code embedder origin only (0.455541ms)
+✔ positive control: the VS Code webview parent still drives the real listener (0.535208ms)
+✔ VS Code App Builder preview, exact sequence: a vscode-webview parent drives the loopback dev-proxy shell it frames (0.41575ms)
+✔ web App Builder preview iframe, exact sequence: the same-origin builder answers the blob-authored preview (0.392958ms)
+✔ web App Builder debug tab, exact sequence: a top-level shell opened by the same-origin builder (0.270542ms)
+✔ a foreign page that frames a dev shell served from the cloud origin gets nothing: no token, no remote, no console rows, no handshake data (0.463083ms)
+✔ a production build served on the production origin installs nothing and answers nobody (real listener) (0.117125ms)
+✔ terminal host (rocketride app dev), exact sequence: a top-level loopback dev-proxy shell self-registers by URL convention (0.253125ms)
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=http://localhost:7201/?appid=org.vsc&rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://127.0.0.1:7202")
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://127.0.0.1:7202")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "http://127.0.0.1:7202")
+boot href ?code=FAKE-OAUTH-CODE
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=http://localhost:7201/?appid=org.vsc&rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://evil.localhost:7202")
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://evil.localhost:7202")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "http://evil.localhost:7202")
+boot href ?code=FAKE-OAUTH-CODE
+[devMode] Dev hooks installed (window.__rrShellDev)
+[devMode] boot flavor=development href=http://localhost:7201/?appid=org.vsc&rrdev=1 referrer=(none)
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://[::1]:7202")
+[devMode] ignoring rrdev:auth from untrusted sender (origin "http://[::1]:7202")
+[devMode] ignoring rrdev:registerRemote from untrusted sender (origin "http://[::1]:7202")
+boot href ?code=FAKE-OAUTH-CODE
+✔ a dev flavor served from the cloud origin never self-registers from its URL (no probe, the hold fails at once) (21.379708ms)
+✔ a page on another loopback port gets nothing from a loopback dev shell that holds the seeded token (real listener) (0.869834ms)
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+[devMode] embedder session cleared — rebooting
+[devMode] embedder session received — rebooting
+[devMode] embedder session received — rebooting
+✔ a production build ignores ?rrdev=1: the gate is closed and no hooks are installed (0.843792ms)
+✔ a production build ignores the persisted tab session and rr:dev flag (what the flavor picker persists) (0.121959ms)
+✔ a production build ignores an injected __rrDevBoot (the web App Builder's authored-page signal) (0.088834ms)
+✔ the production gate is constant: every URL / storage / boot-config combination leaves it closed (0.524875ms)
+✔ a production build refuses rrdev messages even from a well-formed embedder (0.626709ms)
+✔ a development build keeps the gate open without any URL flag (0.083792ms)
+✔ messages from an unexpected origin are ignored, even from the parent window (0.246708ms)
+✔ a hostile window.opener is ignored (the attacker window.open()s the shell) (0.180334ms)
+✔ a hostile framing parent (foreign origin) is ignored (0.099167ms)
+✔ a sibling or child frame (not the parent) is ignored even from an allowed origin (0.212208ms)
+✔ a top-level shell has no parent: self-posts and strangers are ignored (0.131416ms)
+✔ registerRemote entries outside the loopback dev servers are rejected (0.303666ms)
+✔ the VS Code preview works: a vscode-webview parent drives a loopback dev-proxy shell and a cloud-served one (0.651958ms)
+✔ the web App Builder preview works: the same-origin parent answers rrdev:auth (grant, no-op re-answer, revoke) (0.196291ms)
+✔ the web App Builder debug tab works: the same-origin OPENER of a top-level shell answers rrdev:auth (0.111459ms)
+✔ the same-origin allowance is exactly the shell's own origin: lookalikes, other schemes/ports and paths are refused (0.469583ms)
+✔ an opaque shell origin never reads as "same origin" with an opaque sender (0.124375ms)
+✔ the OPENER relation accepts only the shell's own origin, never the other embedder origins (0.121917ms)
+✔ a loopback origin is never a sender: denied for a cloud shell AND a loopback shell, as parent AND as opener (1.33325ms)
+✔ unrelated window messages are ignored silently (0.079333ms)
+✔ a top-level tab with NO opener trusts no window: a null/undefined/other source is never "the opener" (opener == null confusion) (0.160291ms)
+✔ a top-level tab WITH an opener refuses a different same-origin window; only the real opener passes (0.172292ms)
+✔ a nested framed shell does not accept window.top: only the PARENT, and only from an allowed origin (0.168083ms)
+✔ policy P1: VS Code App Builder -> cloud-served shell iframe -> ACCEPTED (0.068542ms)
+✔ policy P2: VS Code App Builder -> loopback dev-proxy shell iframe -> ACCEPTED (0.040958ms)
+✔ policy P3: web App Builder -> same-origin blob preview iframe -> ACCEPTED (0.043416ms)
+✔ policy P4: web App Builder -> same-origin debug tab (opener) -> ACCEPTED (0.044041ms)
+✔ policy P5: foreign page frames the shell -> DENIED (0.04575ms)
+✔ policy P6: foreign page window.open()s the shell -> DENIED (0.039708ms)
+✔ policy P7: a vscode-webview opener (only a PARENT may be one) -> DENIED (0.03275ms)
+✔ policy P8: loopback page frames a CLOUD-served shell -> DENIED (0.055292ms)
+✔ policy P9: loopback page window.open()s a CLOUD-served shell -> DENIED (0.085459ms)
+✔ policy P10: loopback page frames a loopback-served shell (no in-repo sender; was trusted before, now denied) -> DENIED (0.045292ms)
+✔ policy P11: loopback page window.open()s a loopback-served shell -> DENIED (0.043958ms)
+✔ policy P12: sandboxed / opaque sender frames the shell -> DENIED (0.048917ms)
+✔ policy P13: sandboxed / opaque sender opens the shell -> DENIED (0.029708ms)
+✔ policy P14: same-origin sibling/child frame (not the parent) -> DENIED (0.028917ms)
+✔ policy P15: the shell posting to itself (top level) -> DENIED (0.028583ms)
+✔ policy P16: origin lookalike of the shell frames it -> DENIED (0.039833ms)
+✔ policy P17: origin lookalike of loopback frames a loopback shell -> DENIED (0.031708ms)
+✔ policy P18: lookalike of the vscode-webview scheme frames the shell -> DENIED (0.0325ms)
+✔ policy P19: vscode-webview opener-style origin with a path -> DENIED (0.033041ms)
+✔ policy P20: production build: the VS Code parent -> DENIED (0.033416ms)
+✔ policy P21: production build: the same-origin parent -> DENIED (0.029958ms)
+✔ policy P22: production build: the same-origin opener -> DENIED (0.028833ms)
+✔ policy P23: another loopback origin (127.0.0.1) frames a localhost-served shell -> DENIED (0.030791ms)
+✔ policy P24: evil.localhost frames a localhost-served shell -> DENIED (0.029917ms)
+✔ policy P25: the SAME loopback origin frames a loopback-served shell (the web builder on a local engine) -> ACCEPTED (0.030084ms)
+✔ policy P26: the SAME loopback origin opens a loopback-served shell (debug tab on a local engine) -> ACCEPTED (0.029875ms)
+✔ isAllowedEmbedderOrigin: exactly vscode-webview or the shell's own origin — no loopback origin is a member (0.212709ms)
+✔ trustedParentOrigin names only a trusted embedder, so console rows are never aimed at a foreign parent (0.139625ms)
+✔ trustedParentOrigin: a loopback ancestor is no embedder, even of a loopback-served shell (0.088292ms)
+✔ trustedParentOrigin of a same-origin parent (the web App Builder preview) is the shell's own origin, with or without ancestorOrigins (0.04975ms)
+✔ normalizeDevRemoteEntry accepts only absolute http(s) loopback URLs without credentials, and return the canonical URL (0.116833ms)
+ℹ tests 81
+ℹ suites 0
+ℹ pass 81
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1155.5865

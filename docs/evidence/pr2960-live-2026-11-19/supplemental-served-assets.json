@@ -1,0 +1,42 @@
+{
+  "testedHead": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "recordedAtUtc": "2026-11-19T09:08:54.668944+00:00",
+  "checks": [
+    {
+      "flavor": "prod",
+      "url": "http://127.0.0.1:5586/shell/static/js/u.5139ccfb1a.js",
+      "status": 200,
+      "bytes": 1569855,
+      "expectedSha256": "98de4f77d6b554ceb6c4b45882169e692ebd02df9589fa665e9f0703865c6709",
+      "servedSha256": "98de4f77d6b554ceb6c4b45882169e692ebd02df9589fa665e9f0703865c6709",
+      "matches": true
+    },
+    {
+      "flavor": "prod",
+      "url": "http://127.0.0.1:5586/shell/static/js/index.60f36376eb.js",
+      "status": 200,
+      "bytes": 855005,
+      "expectedSha256": "639090822e12de52e7b31e0608fc104bff1d9dd696bfc120bc7a96eb16f5832f",
+      "servedSha256": "639090822e12de52e7b31e0608fc104bff1d9dd696bfc120bc7a96eb16f5832f",
+      "matches": true
+    },
+    {
+      "flavor": "dev",
+      "url": "http://127.0.0.1:5586/shell/static/js/u.957d03b5a0.js",
+      "status": 200,
+      "bytes": 1749844,
+      "expectedSha256": "38ffc262eab1bea842533bc30b961ebc6ab65bd4b63942f342b975d0d27220ba",
+      "servedSha256": "38ffc262eab1bea842533bc30b961ebc6ab65bd4b63942f342b975d0d27220ba",
+      "matches": true
+    },
+    {
+      "flavor": "dev",
+      "url": "http://127.0.0.1:5586/shell/static/js/index.6f0422d28a.js",
+      "status": 200,
+      "bytes": 855498,
+      "expectedSha256": "2ed58a31f91c9f88af5fa87e5fd6a555e6362c5e3bf33db3ad3332f4523e9b2d",
+      "servedSha256": "2ed58a31f91c9f88af5fa87e5fd6a555e6362c5e3bf33db3ad3332f4523e9b2d",
+      "matches": true
+    }
+  ]
+}

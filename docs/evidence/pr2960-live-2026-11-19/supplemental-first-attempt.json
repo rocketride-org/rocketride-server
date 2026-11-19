@@ -1,0 +1,103 @@
+{
+  "testedHead": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "assets": {
+    "prod": [
+      {
+        "url": "/shell/static/js/u.5139ccfb1a.js",
+        "sha256": "98de4f77d6b554ceb6c4b45882169e692ebd02df9589fa665e9f0703865c6709"
+      },
+      {
+        "url": "/shell/static/js/index.60f36376eb.js",
+        "sha256": "639090822e12de52e7b31e0608fc104bff1d9dd696bfc120bc7a96eb16f5832f"
+      }
+    ],
+    "dev": [
+      {
+        "url": "/shell/static/js/u.957d03b5a0.js",
+        "sha256": "38ffc262eab1bea842533bc30b961ebc6ab65bd4b63942f342b975d0d27220ba"
+      },
+      {
+        "url": "/shell/static/js/index.6f0422d28a.js",
+        "sha256": "2ed58a31f91c9f88af5fa87e5fd6a555e6362c5e3bf33db3ad3332f4523e9b2d"
+      }
+    ]
+  },
+  "results": {
+    "dev-foreign-parent": {
+      "id": "dev-foreign-parent",
+      "flavor": "dev",
+      "hooksPresent": true,
+      "selectedScriptsLoaded": true,
+      "otherFlavorLoaded": false,
+      "rootRendered": true,
+      "bootstrapPortal": true,
+      "bootstrapError": false,
+      "assetErrors": 0,
+      "framed": true,
+      "parentSameOrigin": false,
+      "openerPresent": false,
+      "registrationLog": false,
+      "rejectionLogs": 2,
+      "status": "PASS",
+      "tokenObserverReadable": true,
+      "tokenBaselineUnchanged": true,
+      "tokenSentinelSaved": false,
+      "remoteRequests": 0,
+      "positiveRendered": false,
+      "fragmentRemoved": false,
+      "receivedAt": "2026-11-19T09:03:34.734Z",
+      "forwardedConsole": false
+    },
+    "dev-same-origin-positive": {
+      "id": "dev-same-origin-positive",
+      "flavor": "dev",
+      "hooksPresent": true,
+      "selectedScriptsLoaded": true,
+      "otherFlavorLoaded": false,
+      "rootRendered": true,
+      "bootstrapPortal": true,
+      "bootstrapError": false,
+      "assetErrors": 0,
+      "framed": true,
+      "parentSameOrigin": true,
+      "openerPresent": false,
+      "registrationLog": true,
+      "rejectionLogs": 0,
+      "status": "FAIL",
+      "tokenObserverReadable": true,
+      "tokenBaselineUnchanged": true,
+      "tokenSentinelSaved": false,
+      "remoteRequests": 0,
+      "positiveRendered": false,
+      "fragmentRemoved": false,
+      "receivedAt": "2026-11-19T09:03:35.282Z",
+      "forwardedConsole": true
+    },
+    "production-parent": {
+      "id": "production-parent",
+      "flavor": "prod",
+      "hooksPresent": false,
+      "selectedScriptsLoaded": true,
+      "otherFlavorLoaded": false,
+      "rootRendered": true,
+      "bootstrapPortal": true,
+      "bootstrapError": false,
+      "assetErrors": 0,
+      "framed": true,
+      "parentSameOrigin": true,
+      "openerPresent": false,
+      "registrationLog": false,
+      "rejectionLogs": 0,
+      "status": "FAIL",
+      "tokenObserverReadable": true,
+      "tokenBaselineUnchanged": true,
+      "tokenSentinelSaved": false,
+      "remoteRequests": 0,
+      "positiveRendered": false,
+      "fragmentRemoved": false,
+      "receivedAt": "2026-11-19T09:03:35.283Z",
+      "forwardedConsole": false
+    }
+  },
+  "remoteRequests": {}
+}

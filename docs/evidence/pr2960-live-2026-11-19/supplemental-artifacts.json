@@ -1,0 +1,29 @@
+{
+  "testedHead": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "engine": "http://localhost:5565",
+  "shellOrigin": "http://127.0.0.1:5586",
+  "attackerOrigin": "http://localhost:5587",
+  "sourceIndexSha256": "2210f1b5ecbf8b2e2420a6f430b959bf2436dc69ffd970b0f897f50a887b1973",
+  "assets": {
+    "prod": [
+      {
+        "url": "/shell/static/js/u.5139ccfb1a.js",
+        "sha256": "98de4f77d6b554ceb6c4b45882169e692ebd02df9589fa665e9f0703865c6709"
+      },
+      {
+        "url": "/shell/static/js/index.60f36376eb.js",
+        "sha256": "639090822e12de52e7b31e0608fc104bff1d9dd696bfc120bc7a96eb16f5832f"
+      }
+    ],
+    "dev": [
+      {
+        "url": "/shell/static/js/u.957d03b5a0.js",
+        "sha256": "38ffc262eab1bea842533bc30b961ebc6ab65bd4b63942f342b975d0d27220ba"
+      },
+      {
+        "url": "/shell/static/js/index.6f0422d28a.js",
+        "sha256": "2ed58a31f91c9f88af5fa87e5fd6a555e6362c5e3bf33db3ad3332f4523e9b2d"
+      }
+    ]
+  }
+}

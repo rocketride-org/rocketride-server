@@ -1,0 +1,577 @@
+{
+  "recordedAtUtc": "2026-11-19T09:01:09.535751+00:00",
+  "recordedAtIndia": "2026-11-19T14:31:09.535917+05:30",
+  "prUrl": "https://github.com/rocketride-org/rocketride-server/pull/2960",
+  "exactHead": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "prReviewDecision": "CHANGES_REQUESTED",
+  "prMergeState": "BLOCKED",
+  "currentRollupConclusionCounts": {
+    "SUCCESS": 29,
+    "SKIPPED": 4
+  },
+  "currentRollup": [
+    {
+      "name": "Verify action pins",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986275"
+    },
+    {
+      "name": "notify",
+      "workflow": "Discord PR Notification",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214754/job/134069985007"
+    },
+    {
+      "name": "notify",
+      "workflow": "Discord PR Notification",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44242492261/job/134593473177"
+    },
+    {
+      "name": "notify",
+      "workflow": "Discord PR Notification",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44243086854/job/134595388387"
+    },
+    {
+      "name": "notify",
+      "workflow": "Discord PR Notification",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44276788452/job/134706849500"
+    },
+    {
+      "name": "notify",
+      "workflow": "Discord PR Notification",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092671720/job/134072046767"
+    },
+    {
+      "name": "Docs site build",
+      "workflow": "Doc schemas",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214601/job/134069983753"
+    },
+    {
+      "name": "Auto-label",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214740/job/134069990652"
+    },
+    {
+      "name": "Auto-label",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44242494487/job/134593484446"
+    },
+    {
+      "name": "Auto-label",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44243087381/job/134595394217"
+    },
+    {
+      "name": "Auto-label",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44276790163/job/134706860900"
+    },
+    {
+      "name": "check-externals (PR)",
+      "workflow": "check-externals",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214695/job/134069986630"
+    },
+    {
+      "name": "check-externals (nightly)",
+      "workflow": "check-externals",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214695/job/134069989395"
+    },
+    {
+      "name": "Initialize / Build variables",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986824"
+    },
+    {
+      "name": "discord-notify / notify",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214740/job/134078764481"
+    },
+    {
+      "name": "discord-notify / notify",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44242494487/job/134593538305"
+    },
+    {
+      "name": "discord-notify / notify",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44243087381/job/134595439939"
+    },
+    {
+      "name": "discord-notify / notify",
+      "workflow": "PR checks",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44276790163/job/134706936298"
+    },
+    {
+      "name": "Detect changes",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986366"
+    },
+    {
+      "name": "Detect Helm changes",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986648"
+    },
+    {
+      "name": "Container scan / ${{ matrix.dockerfile }}",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069988428"
+    },
+    {
+      "name": "Ruff",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069985854"
+    },
+    {
+      "name": "ESLint (build scripts)",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986378"
+    },
+    {
+      "name": "gitleaks",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986795"
+    },
+    {
+      "name": "Build / Ubuntu 22.04",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736572"
+    },
+    {
+      "name": "Build / Windows Server 2022",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736540"
+    },
+    {
+      "name": "Build / macOS (ARM64)",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736501"
+    },
+    {
+      "name": "Build / ${{ matrix.label }}",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074738687"
+    },
+    {
+      "name": "Shell API contract",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736212"
+    },
+    {
+      "name": "Helm lint & kubeconform",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SKIPPED",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134079071007"
+    },
+    {
+      "name": "CI OK",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134094199747"
+    },
+    {
+      "name": "discord-notify / notify",
+      "workflow": "CI",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134104075526"
+    },
+    {
+      "name": "CodeRabbit",
+      "workflow": "",
+      "status": "COMPLETED",
+      "conclusion": "SUCCESS",
+      "url": "https://app.coderabbit.ai/change-stack/rocketride-org/rocketride-server/pull/2960"
+    }
+  ],
+  "runs": [
+    {
+      "id": 44092214610,
+      "workflow": ".github/workflows/ci.yml",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "metadataHeadSha": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610",
+      "createdAt": "2026-11-17T13:23:16Z",
+      "updatedAt": "2026-11-17T14:39:25Z",
+      "jobConclusionCounts": {
+        "success": 13,
+        "skipped": 3
+      },
+      "jobs": [
+        {
+          "name": "Ruff",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069985854",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Verify action pins",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986275",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Detect changes",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986366",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "ESLint (build scripts)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986378",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Detect Helm changes",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986648",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "gitleaks",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986795",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Initialize / Build variables",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069986824",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Container scan / ${{ matrix.dockerfile }}",
+          "status": "completed",
+          "conclusion": "skipped",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134069988428",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Shell API contract",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736212",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Build / macOS (ARM64)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736501",
+          "buildStep": "success",
+          "testStep": "success"
+        },
+        {
+          "name": "Build / Windows Server 2022",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736540",
+          "buildStep": "success",
+          "testStep": "success"
+        },
+        {
+          "name": "Build / Ubuntu 22.04",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074736572",
+          "buildStep": "success",
+          "testStep": "success"
+        },
+        {
+          "name": "Build / ${{ matrix.label }}",
+          "status": "completed",
+          "conclusion": "skipped",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134074738687",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "Helm lint & kubeconform",
+          "status": "completed",
+          "conclusion": "skipped",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134079071007",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "CI OK",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134094199747",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "discord-notify / notify",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214610/job/134104075526",
+          "buildStep": null,
+          "testStep": null
+        }
+      ]
+    },
+    {
+      "id": 44092214601,
+      "workflow": ".github/workflows/docs-schemas.yml",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "metadataHeadSha": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214601",
+      "createdAt": "2026-11-17T13:23:16Z",
+      "updatedAt": "2026-11-17T13:25:54Z",
+      "jobConclusionCounts": {
+        "success": 1
+      },
+      "jobs": [
+        {
+          "name": "Docs site build",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214601/job/134069983753",
+          "buildStep": null,
+          "testStep": null
+        }
+      ]
+    },
+    {
+      "id": 44092214695,
+      "workflow": ".github/workflows/check-externals.yml",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success",
+      "metadataHeadSha": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+      "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214695",
+      "createdAt": "2026-11-17T13:23:16Z",
+      "updatedAt": "2026-11-17T13:30:29Z",
+      "jobConclusionCounts": {
+        "success": 1,
+        "skipped": 1
+      },
+      "jobs": [
+        {
+          "name": "check-externals (PR)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214695/job/134069986630",
+          "buildStep": null,
+          "testStep": null
+        },
+        {
+          "name": "check-externals (nightly)",
+          "status": "completed",
+          "conclusion": "skipped",
+          "url": "https://github.com/rocketride-org/rocketride-server/actions/runs/44092214695/job/134069989395",
+          "buildStep": null,
+          "testStep": null
+        }
+      ]
+    }
+  ],
+  "ciCheckout": {
+    "kind": "synthetic PR merge",
+    "ref": "refs/pull/2960/merge",
+    "checkedOutSha": "d5b5e5b5c678570ed123084405602baafe78e986",
+    "prHeadSha": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+    "baseSha": "a3456b1754b5d139fb03c09a628026d1bab3a54f",
+    "evidence": "Checkout lines read from all three Build job logs: Uses _build.yaml@refs/pull/2960/merge (d5b5e5b...), then HEAD is now at d5b5e5b Merge 7c36f51... into a3456b17... . Raw logs were not saved or printed.",
+    "distinction": "Run metadata head_sha is the PR head; the Build jobs checked out the synthetic merge. Current local live engine/assets and suite source use detached PR head, with standard build-generated SDK_VERSION synchronization recorded separately."
+  },
+  "ciSecurityTestEvidence": {
+    "sampledLabelsPresentInAllThreeBuildLogs": [
+      "policy P1:",
+      "policy P26:",
+      "web App Builder preview iframe, exact sequence",
+      "production build served on the production origin installs nothing"
+    ],
+    "shell468SummaryPresentInAllThreeBuildLogs": true,
+    "note": "These are log-presence samples, not a newly executed test run or coverage-percentage measurement."
+  },
+  "sourceCoverage": [
+    {
+      "label": "Production gate: URL cannot enable hooks",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 132,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L132"
+    },
+    {
+      "label": "Production gate: URL/storage/boot-config combinations",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 163,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L163"
+    },
+    {
+      "label": "Real listener: production installs no hooks and answers nobody",
+      "path": "packages/shell/src/util/devMode.listener.test.ts",
+      "line": 391,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.listener.test.ts#L391"
+    },
+    {
+      "label": "Policy P1\u2013P26: relation/origin matrix; includes same-origin loopback web builder positives",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 463,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L463"
+    },
+    {
+      "label": "Null opener and unrelated source refusal",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 399,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L399"
+    },
+    {
+      "label": "Nested window.top is not parent",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 427,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L427"
+    },
+    {
+      "label": "Handler remote entry validation",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 265,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L265"
+    },
+    {
+      "label": "Canonical loopback-only HTTP(S), no credential URLs",
+      "path": "packages/shell/src/util/devMode.test.ts",
+      "line": 580,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.test.ts#L580"
+    },
+    {
+      "label": "Loader choke point rejects disallowed remote",
+      "path": "packages/shell/src/util/appLoader.test.ts",
+      "line": 227,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/appLoader.test.ts#L227"
+    },
+    {
+      "label": "Loader registers vetted canonical entry",
+      "path": "packages/shell/src/util/appLoader.test.ts",
+      "line": 250,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/appLoader.test.ts#L250"
+    },
+    {
+      "label": "Real listener: VS Code auth, remote registration and console sequence",
+      "path": "packages/shell/src/util/devMode.listener.test.ts",
+      "line": 290,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.listener.test.ts#L290"
+    },
+    {
+      "label": "Real listener: blob iframe auth grant/revoke and forwarding sequence",
+      "path": "packages/shell/src/util/devMode.listener.test.ts",
+      "line": 319,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.listener.test.ts#L319"
+    },
+    {
+      "label": "Real listener: same-origin opener auth and foreign-origin refusal",
+      "path": "packages/shell/src/util/devMode.listener.test.ts",
+      "line": 345,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.listener.test.ts#L345"
+    },
+    {
+      "label": "Console forwarding to verified origin only",
+      "path": "packages/shell/src/util/devMode.listener.test.ts",
+      "line": 259,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/util/devMode.listener.test.ts#L259"
+    },
+    {
+      "label": "Production token fragment ignored and stripped",
+      "path": "packages/shell/src/connection/connection.test.ts",
+      "line": 2506,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/connection/connection.test.ts#L2506"
+    },
+    {
+      "label": "Framed auth uses embedder; fragment remains embedder-owned",
+      "path": "packages/shell/src/connection/connection.test.ts",
+      "line": 2526,
+      "url": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/packages/shell/src/connection/connection.test.ts#L2526"
+    }
+  ],
+  "localSuite": {
+    "result": "468 passed, 0 failed",
+    "source": "Current runtime verification README and exact-head shell:build result",
+    "rerunByThisAudit": false
+  },
+  "limitations": [
+    "Skipped jobs are not passes. The four current skipped contexts are container scan, inactive build matrix placeholder, Helm lint/kubeconform, and check-externals nightly.",
+    "Rollup includes repeated successful notification/auto-label contexts plus CodeRabbit; its total is not the number of test suites.",
+    "This supplemental audit did not rerun tests or inspect full semantic test coverage; source anchors name the regression cases.",
+    "No merge or deployment was performed."
+  ]
+}

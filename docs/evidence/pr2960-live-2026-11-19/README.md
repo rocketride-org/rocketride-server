@@ -18,3 +18,17 @@ The fixture uses the public SDK `fsReadString` to read a private marker file fro
 468 shell tests passed; shell production/dev flavors, VS Code extension and Rocket Builder builds completed. Full `server:build` was stopped before unrelated native-node builds; targeted runtime dependency/sync/staging completed. Standard build-generated SDK_VERSION synchronization (1.5.0 → the manifest's 1.6.0) is recorded in provenance; no hand-edited product source or PR commit change.
 
 Node 24.13.1 was used after the default Node 26 native dependency build failed. Credentials, headers, storage contents, raw runtime logs and local .env files are excluded from publication. Screenshots were visually checked. The additional screenshot/direct auth-reply limitations above remain open; no Firefox/Safari or production deployment result is claimed.
+
+## Supplemental production and sender controls
+
+Additional exact-head verification on 19 November 2026: five real-browser
+controls passed, and the focused policy/listener suites passed 81/81 under
+both production and development environments. See
+[supplemental-summary.md](supplemental-summary.md),
+[supplemental-controls.jpg](supplemental-controls.jpg), and
+[supplemental-sanitized.zip](supplemental-sanitized.zip). The CI audit also
+records successful build/test jobs and distinguishes the synthetic merge
+checkout from the detached head used locally.
+
+The actual App Builder debug screenshot/direct reply observation remains
+pending; these independent HTTP controls do not replace that capture.
