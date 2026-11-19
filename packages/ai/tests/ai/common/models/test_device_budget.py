@@ -696,6 +696,23 @@ def test_the_operator_sets_the_cpu_slots(monkeypatch, value, slots):
     assert budgetmod.cpu_slots() == slots
 
 
+def _set_cpu_slots_env(monkeypatch, value):
+    """Set ``RR_CPU_INFERENCE_SLOTS`` as an operator's shell does: as UTF-8 bytes where the environment holds bytes.
+
+    The engine's interpreter on Linux reads the environment as ASCII, so ``os.environ`` refuses a
+    character outside ASCII there. The process then reads such bytes back as something other than
+    the character, and that must give 1 slot all the same.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        value: The variable's value.
+    """
+    if hasattr(os, 'environb'):
+        monkeypatch.setitem(os.environb, budgetmod.CPU_SLOTS_ENV.encode(), value.encode('utf-8'))
+    else:
+        monkeypatch.setenv(budgetmod.CPU_SLOTS_ENV, value)
+
+
 @pytest.mark.parametrize(
     'value, slots, warned',
     [
@@ -726,7 +743,7 @@ def test_an_invalid_cpu_slots_setting_falls_back(monkeypatch, value, slots, warn
     """
     warnings = []
     monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
-    monkeypatch.setenv('RR_CPU_INFERENCE_SLOTS', value)
+    _set_cpu_slots_env(monkeypatch, value)
     monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 16)  # computed: 4 slots, so a fallback to them shows
     assert budgetmod.cpu_slots() == slots
     assert len(warnings) == int(warned)
