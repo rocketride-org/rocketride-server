@@ -17,6 +17,9 @@ from . import _store_data
 _store = _store_data._store
 _indices = _store_data._indices
 
+# index.max_result_window on an index with default settings
+MAX_RESULT_WINDOW = 10000
+
 
 class IndicesMock:
     def exists(self, index: str) -> bool:
@@ -57,6 +60,16 @@ class Elasticsearch:
         return {'count': len(_store.get(index, []))}
 
     def search(self, index: str, body: Optional[Dict] = None, **kwargs: Any) -> Dict[str, Any]:
+        # Like a server with default index settings, reject a page past index.max_result_window
+        body = body or {}
+        window = int(body.get('from', 0) or 0) + int(body.get('size', 10) or 0)
+        if window > MAX_RESULT_WINDOW:
+            raise ValueError(
+                f'Result window is too large, from + size must be less than or equal to: '
+                f'[{MAX_RESULT_WINDOW}] but was [{window}]. This limit can be set by changing the '
+                f'[index.max_result_window] index level setting.'
+            )
+
         docs = _store.get(index, [])
         hits = []
         for i, d in enumerate(docs):

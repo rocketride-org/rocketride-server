@@ -48,6 +48,10 @@ from .constants import (
     ELASTICSEARCH_DEFAULT_PORT,
 )
 
+# The most hits render asks for in one search. Elasticsearch rejects a search
+# whose from + size exceeds index.max_result_window (10000 by default).
+_RENDER_PAGE_SIZE = 10000
+
 
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
     """Highlight configuration for text search (Elasticsearch/OpenSearch DSL)."""
@@ -665,23 +669,43 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grab them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
-        offset = 0
+        # A document may hold tens of thousands of chunks, and Elasticsearch
+        # rejects a search whose from + size exceeds index.max_result_window
+        # (10000 by default). So page through the document in chunkId order
+        # with a cursor, at most _RENDER_PAGE_SIZE hits a page. ChunkIds need
+        # not be contiguous, and a chunk number can be stored more than once
+        # (an upsert without chunk 0 that repeats one), so neither a gap nor a
+        # page's chunkId span says where the document ends; only a short page
+        # does.
+        #
+        # Render keeps one copy of each chunk number, so after a full page the
+        # next one starts at that page's last chunkId (whose copies may not all
+        # have fit), or past it when the page held copies of that one chunkId
+        # only. The cursor moves forward on every full page, and re-reading a
+        # copy only replaces it in place. The callback gets the joined text one
+        # renderChunkSize group of chunkIds at a time.
+        groupSize = max(1, self.renderChunkSize)
+        groupStart = 0
+        pieces: Dict[int, str] = {}
+
+        def handOver() -> None:
+            # In chunkId order; a missing chunk adds no text, and the join walks
+            # only the chunks present, not the gaps between them
+            if pieces:
+                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
+
+        cursor = 0
         while True:
-            # Build query for getting a set of chunks
             search_body = {
                 'query': {
                     'bool': {
                         'must': [
                             {'term': {'meta.objectId': objectId}},
-                            {'range': {'meta.chunkId': {'gte': offset, 'lt': offset + self.renderChunkSize}}},
+                            {'range': {'meta.chunkId': {'gte': cursor}}},
                         ]
                     }
                 },
-                'size': self.renderChunkSize,
+                'size': _RENDER_PAGE_SIZE,
                 'sort': [{'meta.chunkId': {'order': 'asc'}}],
                 '_source': [CONTENT_FIELD, 'meta.chunkId'],
             }
@@ -690,60 +714,28 @@ class Store(DocumentStoreBase):
             response = self.client.search(index=self.index, body=search_body)
             hits = response.get('hits', {}).get('hits', [])
 
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            text: List[str] = [''] * self.renderChunkSize
-            lastIndex = -1
-
-            # Now, add the documents to the results
+            lastChunk = cursor
             for hit in hits:
-                # Get the source
-                source = hit.get('_source', {})
-                if source is None:
+                source = hit.get('_source') or {}
+                chunk = (source.get('meta') or {}).get('chunkId')
+                if not isinstance(chunk, int) or chunk < cursor:
                     continue
+                lastChunk = max(lastChunk, chunk)
 
-                # Get the info
-                content = source.get(CONTENT_FIELD, '')
-                meta = source.get('meta', {})
-                chunk = meta.get('chunkId', 0)
+                # Hits arrive in chunkId order, so a chunk past the current group completes it
+                if chunk >= groupStart + groupSize:
+                    handOver()
+                    pieces = {}
+                    groupStart = chunk - chunk % groupSize
 
-                # Should never happen since we gave it an offset
-                if chunk < offset:
-                    continue
+                # Of several copies of one chunk number, the last one read is kept
+                pieces[chunk] = source.get(CONTENT_FIELD) or ''
 
-                # Should never happen since we gave it a range
-                if chunk >= offset + self.renderChunkSize:
-                    continue
-
-                # Get the index into the array
-                index = chunk - offset
-
-                # Add it to our array
-                text[index] = content
-
-                # Determine the highest index we use
-                if index > lastIndex:
-                    lastIndex = index
-
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
-
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+            if len(hits) < _RENDER_PAGE_SIZE:
                 break
+            cursor = lastChunk if lastChunk > cursor else cursor + 1
 
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
-
-            # Call the output function
-            callback(fullText)
-
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
-
-            offset += self.renderChunkSize
+        handOver()
 
     # -------------------------------------------------------------------------
     # Text/Index mode (BM25, no embeddings)
