@@ -536,6 +536,9 @@ interface AppDescriptor {
 	/** Optional cross-app component catalog. Never mounted by the shell —
 	 * entries are loadable by other apps via useAppComponent(). */
 	components?: { [key: string]: React.ComponentType<any> | undefined };
+	/** First-party apps only: the `app` value stamped on telemetry instead
+	 * of `id`. Ignored for other apps. See Telemetry below. */
+	telemetryId?: string;
 }
 ```
 
@@ -853,10 +856,20 @@ uses the snake_case `signup_properties` key. See the public Shell API signup att
 **Telemetry.** The shell owns the ONE product-telemetry transport: the key
 arrives from the server's pre-auth probe at runtime (never baked into any
 bundle), consent and delivery are the shell's, and the shell reports its own
-auth facts (`auth:start`, `auth:complete`). Your app receives a bound
-reporter from the shell — `useReport()` from `'shell'` — and calls
-`report(event, props?, options?)`; every event is stamped with YOUR app id,
-fixed at creation. Event names are your app's own taxonomy. `useConsent()`
+auth facts (`auth:start` with `is_authed: false`, `auth:complete` with
+`is_authed: true`) and consent facts, stamped `app: 'shell'`. Your app
+receives a bound reporter from the shell (`useReport()` from `'shell'`) and
+calls `report(event, props?, options?)`. Every event is stamped with an `app`
+property, fixed at creation: the descriptor's `telemetryId` when the app is
+first-party (id `rocketride` or starting `rocketride.`) and the alias matches
+`^[A-Za-z0-9._-]{1,128}$`, is not `shell` and is not another registered app's
+id. Otherwise it is the app's `id`, with no warning. SDK-generated events
+(`$pageleave`, `$web_vitals`, `$autocapture` and the like) carry no `app`.
+Events sent through `getConsentedCapture(...).report` are tagged internally
+and dropped at send time unless consent is still accepted and no DNT/GPC
+signal is on; without consent they are always dropped. Ordinary events are
+never dropped for their property names, and apps cannot set the tag. Event
+names are your app's own taxonomy. `useConsent()`
 reads the visitor's consent state (plus `openSettings()`); with no telemetry
 configured on the server, every call is a silent no-op. The old
 `cm.drainTelemetry()` / `shell:telemetry` channel is deprecated and drains
