@@ -39,18 +39,34 @@ export function missingNodeArchive(engineDir: string, nodesDir: string): string 
 }
 
 /**
+ * Renames src to dest, retrying while Windows holds a file just written (an antivirus scan),
+ * as graceful-fs does for Windows renames.
+ */
+export async function renameRetrying(src: string, dest: string, delayMs = 500): Promise<void> {
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await fs.promises.rename(src, dest);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException).code ?? '';
+			if (attempt >= 10 || !['EPERM', 'EACCES', 'EBUSY'].includes(code)) throw err;
+			await new Promise((resolve) => setTimeout(resolve, delayMs));
+		}
+	}
+}
+
+/**
  * Moves a staged release into place once all of it is downloaded: the server's files into
  * engineDir, already cleared, and its node archive, if it has one, into a fresh nodesDir.
  */
-export function commitStagedRelease(stagedEngine: string, engineDir: string, stagedArchive: string | null, nodesDir: string): void {
+export async function commitStagedRelease(stagedEngine: string, engineDir: string, stagedArchive: string | null, nodesDir: string): Promise<void> {
 	fs.mkdirSync(engineDir, { recursive: true });
 	for (const entry of fs.readdirSync(stagedEngine)) {
-		fs.renameSync(path.join(stagedEngine, entry), path.join(engineDir, entry));
+		await renameRetrying(path.join(stagedEngine, entry), path.join(engineDir, entry));
 	}
 	// A prerelease and its release name the same archive, so the old one goes too
 	fs.rmSync(nodesDir, { recursive: true, force: true });
 	if (stagedArchive) {
 		fs.mkdirSync(nodesDir, { recursive: true });
-		fs.renameSync(stagedArchive, path.join(nodesDir, path.basename(stagedArchive)));
+		await renameRetrying(stagedArchive, path.join(nodesDir, path.basename(stagedArchive)));
 	}
 }

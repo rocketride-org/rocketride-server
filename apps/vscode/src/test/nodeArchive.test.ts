@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { commitStagedRelease, missingNodeArchive, nodeArchiveOf } from '../engine/shared/node-archive';
+import { commitStagedRelease, missingNodeArchive, nodeArchiveOf, renameRetrying } from '../engine/shared/node-archive';
 
 /** An engine/ folder whose nodes/index.json holds index, or none when index is undefined. */
 function engineWith(index?: unknown): string {
@@ -44,7 +44,7 @@ test('an install misses its node archive only when its index names one that node
 	assert.equal(missingNodeArchive(engineWith({ contract: 1, nodes: {} }), nodesDir), null);
 });
 
-test('a staged release replaces the server files and the node archive', () => {
+test('a staged release replaces the server files and the node archive', async () => {
 	const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-install-'));
 	const write = (file: string, text = '') => {
 		fs.mkdirSync(path.dirname(path.join(parent, file)), { recursive: true });
@@ -56,20 +56,58 @@ test('a staged release replaces the server files and the node archive', () => {
 	write('.staging/engine/ai/eaas.py');
 	write('.staging/rocketride-nodes-v1.zip', 'new');
 
-	commitStagedRelease(path.join(parent, '.staging', 'engine'), path.join(parent, 'engine'), path.join(parent, '.staging', 'rocketride-nodes-v1.zip'), path.join(parent, 'nodes'));
+	await commitStagedRelease(path.join(parent, '.staging', 'engine'), path.join(parent, 'engine'), path.join(parent, '.staging', 'rocketride-nodes-v1.zip'), path.join(parent, 'nodes'));
 
 	assert.deepEqual(fs.readdirSync(path.join(parent, 'engine')).sort(), ['ai', 'engine', 'engine.pid']);
 	assert.deepEqual(fs.readdirSync(path.join(parent, 'nodes')), ['rocketride-nodes-v1.zip']);
 	assert.equal(fs.readFileSync(path.join(parent, 'nodes', 'rocketride-nodes-v1.zip'), 'utf8'), 'new');
 });
 
-test('a staged release without a node archive leaves no nodes folder', () => {
+test('a staged release without a node archive leaves no nodes folder', async () => {
 	const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-install-'));
 	fs.mkdirSync(path.join(parent, '.staging', 'engine'), { recursive: true });
 	fs.mkdirSync(path.join(parent, 'nodes'));
 	fs.writeFileSync(path.join(parent, 'nodes', 'rocketride-nodes-v0.zip'), 'old');
 
-	commitStagedRelease(path.join(parent, '.staging', 'engine'), path.join(parent, 'engine'), null, path.join(parent, 'nodes'));
+	await commitStagedRelease(path.join(parent, '.staging', 'engine'), path.join(parent, 'engine'), null, path.join(parent, 'nodes'));
 
 	assert.equal(fs.existsSync(path.join(parent, 'nodes')), false);
+});
+
+// A rename that fails with code the given number of times, then renames
+function failingRename(t: { mock: typeof test.mock }, code: string, times: number) {
+	const rename = fs.promises.rename;
+	let calls = 0;
+	t.mock.method(fs.promises, 'rename', async (src: fs.PathLike, dest: fs.PathLike) => {
+		if (++calls <= times) throw Object.assign(new Error(code), { code });
+		return rename(src, dest);
+	});
+	return () => calls;
+}
+
+test('a rename Windows holds for a moment is retried until it moves', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-rename-'));
+	fs.writeFileSync(path.join(dir, 'a'), 'a');
+	const calls = failingRename(t, 'EBUSY', 2);
+
+	await renameRetrying(path.join(dir, 'a'), path.join(dir, 'b'), 1);
+
+	assert.equal(calls(), 3);
+	assert.deepEqual(fs.readdirSync(dir), ['b']);
+});
+
+test('a rename that fails for another reason is not retried', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-rename-'));
+	const calls = failingRename(t, 'ENOSPC', 1);
+
+	await assert.rejects(renameRetrying(path.join(dir, 'a'), path.join(dir, 'b'), 1), { code: 'ENOSPC' });
+	assert.equal(calls(), 1);
+});
+
+test('a rename still held after ten tries fails', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-rename-'));
+	const calls = failingRename(t, 'EPERM', 10);
+
+	await assert.rejects(renameRetrying(path.join(dir, 'a'), path.join(dir, 'b'), 1), { code: 'EPERM' });
+	assert.equal(calls(), 10);
 });

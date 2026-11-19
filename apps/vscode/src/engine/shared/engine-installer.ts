@@ -363,7 +363,7 @@ export class EngineInstaller {
 
 			// The server and its node archive are both staged beside engine/ before the installed ones are
 			// touched, so a failed download leaves a working install; the same volume, so they move by rename
-			fs.rmSync(staging, { recursive: true, force: true });
+			await fs.promises.rm(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 });
 			fs.mkdirSync(stagedEngine, { recursive: true });
 			progress?.report({ message: 'Extracting server...' });
 			await this.extractArchive(tmpPath, stagedEngine);
@@ -378,7 +378,7 @@ export class EngineInstaller {
 			// FATAL on a locked survivor — never extract over a dirty tree.
 			fs.rmSync(this.versionJsonPath(), { force: true });
 			await this.clearEngineDir();
-			commitStagedRelease(stagedEngine, this.engineDir, stagedArchive, this.nodesDir());
+			await commitStagedRelease(stagedEngine, this.engineDir, stagedArchive, this.nodesDir());
 
 			// Set executable permissions on Unix
 			const exePath = this.getExecutablePath();
@@ -410,7 +410,8 @@ export class EngineInstaller {
 			} catch {
 				// Ignore cleanup errors
 			}
-			fs.rmSync(staging, { recursive: true, force: true });
+			// Async with retries, as in clearEngineDir; a cleanup failure must not hide the install's own error
+			await fs.promises.rm(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 }).catch(() => undefined);
 		}
 	}
 
