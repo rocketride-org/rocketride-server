@@ -294,6 +294,7 @@ class FakeRegistry:
             self.approved[(app_id, version)] = approved
         artifact_path = f'orgs/{org}/files/.deployments/{app_id}/v{version:06d}-fake.json'
         entry = {
+            'kind': 'app',
             'version': version,
             'state': deploy_state,
             'metadata': metadata,
@@ -326,11 +327,11 @@ class FakeRegistry:
 
     def dist_dir(self, app_id: str, version: int = 1, org: str = 'acme-org') -> str:
         """The store dist dir the real resolvers hand back for one seeded version."""
-        from ai.account.app_deploy import _dist_dir_of
+        from ai.account.app_rows import dist_dir_of
 
         for entry in self.versions[(org, app_id)]:
             if entry['version'] == version:
-                return _dist_dir_of(entry['artifactPath'])
+                return dist_dir_of(entry['artifactPath'])
         raise KeyError((org, app_id, version))
 
     # -- identities ---------------------------------------------------------
@@ -424,6 +425,9 @@ class FakeServer:
 
     def add_route(self, path, routeHandler, methods=None, public=False, **kwargs):
         self.routes.append((path, routeHandler, list(methods or ['GET'])))
+
+    def add_public_predicate(self, predicate):
+        """The public-page catch-all's predicate: nothing in these tests consults it."""
 
 
 def shell_inner_app(hits: Optional[list] = None):

@@ -44,6 +44,9 @@ RESOLVE_ALLOWLIST = {
     'account/oss/__init__.py',
     'modules/shell/shell.py',
     'modules/shell/app_origin.py',
+    # These two only name it in a docstring (the walk their rules mirror).
+    'account/app_rows.py',
+    'modules/shell/data_sources.py',
 }
 # The only module that may write the stamp keys; everything else reads them.
 STAMP_WRITERS = {'modules/shell/app_origin.py'}
