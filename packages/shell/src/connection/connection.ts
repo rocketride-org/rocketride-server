@@ -61,6 +61,7 @@ import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
 import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
+import { shellReporter } from '../telemetry/host';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
 import { getAuthPhase, setAuthPhase } from './authPhase';
 import {
@@ -610,6 +611,12 @@ export class ConnectionManager implements IConnectionManager {
 	 * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
 	 * whose last listener left before its dispatch. Never throws.
 	 *
+	 * @deprecated The shell owns the telemetry transport now: facts go through
+	 * the shell's own reporter (telemetry/host.ts shellReporter), whose queue
+	 * holds across teardown. Nothing feeds this channel any more — it drains
+	 * empty. Kept because `shell:telemetry`/`drainTelemetry` are frozen v8/v9
+	 * floor surface; real removal is a separate, signed-off contract decision.
+	 *
 	 * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
 	 * @param props - Flat properties; the forwarding app adds its own super properties.
 	 */
@@ -719,6 +726,10 @@ export class ConnectionManager implements IConnectionManager {
 	 * Call once from the app's analytics init, then subscribe to `shell:telemetry`
 	 * for the rest.
 	 *
+	 * @deprecated The shell owns the telemetry transport now; nothing feeds the
+	 * channel, so this drains empty. Kept because it is frozen v8/v9 floor
+	 * surface — real removal is a separate, signed-off contract decision.
+	 *
 	 * @returns The buffered facts in the order they were raised.
 	 */
 	public drainTelemetry(): TelemetryFact[] {
@@ -760,7 +771,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.oauthStarted = true;
 		// auth:start is raised after the guard, so a failed start that releases it is reported
 		// again on retry. The embedded flow signs in through the auth popup and is not reported.
-		const startProps: Record<string, unknown> = { register: !!register };
+		// is_authed is pinned to what was true when the fact happened (signed out: a sign-in is starting); the
+		// registered super property would otherwise stamp the replay on the callback page with that load's state.
+		const startProps: Record<string, unknown> = { register: !!register, is_authed: false };
 		const appId = context?.appId || this.getPendingAppId();
 		if (appId) {
 			startProps.app_id = appId;
@@ -774,10 +787,12 @@ export class ConnectionManager implements IConnectionManager {
 			// Optional context getters cannot prevent navigation or latch the one-shot guard.
 		}
 		const signup = currentSignupProperties(signupValue);
-		// Held even with an app listening: delivered live, it would depend on the app's analytics
-		// flushing before the redirect unloads the page; the hold's sessionStorage mirror reaches the
-		// callback page, whose drain hands it over.
-		this.holdTelemetry('auth:start', startProps);
+		// Reported on the shell's OWN reporter (the shell owns the telemetry
+		// transport now): beacon when the SDK is up; otherwise the queue's
+		// sessionStorage hold reaches the callback page's drain. Bare — no
+		// experiment props ride auth events (experiment→signup joins are
+		// server-side via the PKCE signup attribution below).
+		shellReporter()('auth:start', startProps, { transport: 'sendBeacon' });
 		try {
 			if (!this.authProvider) {
 				console.error('[ConnectionManager] No auth provider configured');
@@ -1014,7 +1029,12 @@ export class ConnectionManager implements IConnectionManager {
 				if (completed) {
 					const isNew = completed.result.isNewUser ?? null;
 					const waitlisted = completed.result.waitlisted === true;
-					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
+					// The shell's own reporter: lands even when NO app ever mounts (a
+				// waitlisted sign-up closing the tab) — the reason the old held
+				// channel and the home remote's ./telemetry expose existed.
+				// is_authed: true pins the fact to its moment (an identity resolved, waitlisted or not),
+				// whatever the super property says on the page load that sends it.
+				shellReporter()('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs(), is_authed: true });
 				}
 				return completed;
 			} catch (error) {

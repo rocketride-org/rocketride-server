@@ -312,18 +312,18 @@ void initJvm() noexcept(false) {
     using jvmAbort = void (*)(void);
     addOption("abort", _reCast<void *>(_cast<jvmAbort>([]() noexcept {
                   const auto reason = string::format(
-                      "JNI called abort on thread {}", async::threadId());
+                      "JVM called abort on thread {}", async::threadId());
                   java::onJvmCrash(reason);
-                  dev::fatality(_location, reason);
+                  dev::fatality(_location, APERR(Ec::Crash, reason));
               })));
 
     using jvmExit = void (*)(int);
     addOption("exit", _reCast<void *>(_cast<jvmExit>([](int status) noexcept {
                   const auto reason = string::format(
-                      "JNI called exit with status {} on thread {}", status,
+                      "JVM called exit with status {} on thread {}", status,
                       async::threadId());
                   java::onJvmCrash(reason);
-                  dev::fatality(_location, reason);
+                  dev::fatality(_location, APERR(Ec::Crash, reason));
               })));
 
     // Add any opions we specified on the command line (in JavaExec mode)

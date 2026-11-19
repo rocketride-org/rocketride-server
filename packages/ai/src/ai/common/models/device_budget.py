@@ -9,9 +9,11 @@ call always enters, so an image too large for the card still runs alone. Calls e
 arrival order, so a large one is not overtaken forever by small ones. Waiters re-check
 when a call leaves and every ``RECHECK_S`` seconds, which sees memory freed by the
 desktop or another process. What the calls inside already hold is measured from the
-allocation seen when the device was last idle, so a lasting allocation made meanwhile
-(a lazily loaded model, cuBLAS workspaces) counts as their progress until it drains
-again. Other devices (CPU) admit up to ``CPU_SLOTS`` calls.
+allocation seen when the device was last idle (the base), so a lasting allocation made
+meanwhile (cuBLAS workspaces) counts as their progress until it drains again. A model
+loaded through ``loading_model`` while calls run does so only until its load ends: then its
+weights, counted from its own tensors, join the base. Other devices (CPU) admit up to
+``CPU_SLOTS`` calls.
 
 Another engine process on the same GPU reads the same free memory, so two budgets would
 over-commit the card. While NVML lists one there (or a process it cannot name) and has
@@ -64,8 +66,10 @@ import collections
 import contextlib
 import logging
 import os
+import sys
 import threading
 import time
+import types
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 from ai.common.utils.hardware import _process_name
@@ -349,6 +353,7 @@ class DeviceBudget:
         self._queue: collections.deque = collections.deque()
         self._inside: List[Optional[float]] = []
         self._idle_allocated = 0.0
+        self._loads = 0
         self._shared = False
         self._shared_since = 0.0
         self._neighbours_read = -float('inf')
@@ -409,6 +414,34 @@ class DeviceBudget:
             if not self._warm_warned:
                 self._warm_warned = True
                 logger.warning('%s: cannot set up the cuBLAS workspace in its own pool (%s)', self.device, e)
+
+    def _load_started(self, base_mb: Optional[float], loads: int = 1) -> None:
+        """Note models starting to load in this process: from then on the base stays as it is until they end.
+
+        Args:
+            base_mb: What the device held when the first of them started, or ``None`` if not measured; an idle guard
+                takes it as its base, since what changed while it sat idle is no call's progress.
+            loads: How many started.
+        """
+        if not self._gpu:
+            return
+        with self._cond:
+            # the calls inside measure their progress from the base they entered with
+            if base_mb is not None and not self._inside and not self._loads:
+                self._idle_allocated = base_mb
+            self._loads += loads
+
+    def _load_ended(self, weights_mb: float) -> None:
+        """Note a model done loading: its weights on this device join the base.
+
+        Args:
+            weights_mb: The MB of the model's tensors on this device; 0 when the load failed or the model lives elsewhere.
+        """
+        if not self._gpu:
+            return
+        with self._cond:
+            self._loads -= 1
+            self._idle_allocated += weights_mb
 
     def _release_when_idle(self) -> None:
         """Release the cache once the device has stayed idle for ``IDLE_RELEASE_S``; the caller holds the lock."""
@@ -484,7 +517,10 @@ class DeviceBudget:
         if not self._inside:
             if shared:
                 self._free_cache()
-            free, cache_free, self._idle_allocated = self._probe()
+            free, cache_free, allocated = self._probe()
+            if not self._loads:
+                # a model loading now is partly allocated; its weights join the base when it ends
+                self._idle_allocated = allocated
             if shared and cost_mb is not None and time.monotonic() - self._shared_since < SHARED_WAIT_S:
                 # the neighbour may still be draining the calls it admitted alone
                 return cost_mb <= free + cache_free - MARGIN_MB
@@ -518,6 +554,192 @@ _NO_BUDGET = _NoBudget()
 _budgets: Dict[str, DeviceBudget] = {}
 _budgets_lock = threading.Lock()
 
+# Models loading through loading_model now, and per GPU what this process held when the first
+# of them started plus the weights of those done since: the base of a guard made meanwhile
+_loads = 0
+_load_base: Dict[str, float] = {}
+_load_warned = False
+
+# How many levels of references, and how many objects, _resident_mb follows from a model
+_WALK_DEPTH = 6
+_WALK_LIMIT = 100_000
+
+
+def loading_model(load: Callable[[], Any]) -> Any:
+    """Load a model in this process so that its weights join the base of its GPU's guard.
+
+    A model loaded lazily may load while calls are inside, and a guard counts what the process
+    holds above its base as their progress. Torch's allocated memory cannot tell the weights
+    from what those calls take meanwhile, so the weights are counted from the loaded model's
+    own tensors and added to the base of their device's guard when the load ends. Until then
+    no guard takes its base again, which would take in part of the weights, so the part loaded
+    so far, like any other lasting allocation made meanwhile, counts as progress of the calls
+    inside until the load ends. A guard with no call inside when the load starts,
+    or made during it, takes what its device held at the start. A load that fails adds nothing.
+    A failed measurement is logged once and adds nothing either. With ``--modelserver`` the
+    model is loaded as it is.
+
+    Args:
+        load: Loads the model and returns it.
+
+    Returns:
+        What ``load`` returned.
+    """
+    if is_model_server_enabled():
+        return load()
+    _begin_load()
+    sizes: Dict[str, float] = {}
+    try:
+        model = load()
+        sizes = _measure(lambda: _resident_mb(model))
+        return model
+    finally:
+        _end_load(sizes)
+
+
+def _begin_load() -> None:
+    """Note a model load starting: every GPU guard keeps its base until the load ends."""
+    global _loads
+    with _budgets_lock:
+        if not _loads:
+            _load_base.update(_measure(_allocated_mb))
+        _loads += 1
+        for budget in _budgets.values():
+            budget._load_started(_load_base.get(budget.device))
+
+
+def _end_load(sizes: Dict[str, float]) -> None:
+    """Note a model load done: its weights join the base of the guard of their device.
+
+    Args:
+        sizes: The MB of the loaded model's tensors per device; empty when the load failed.
+    """
+    global _loads
+    with _budgets_lock:
+        for budget in _budgets.values():
+            budget._load_ended(sizes.get(budget.device, 0.0))
+        _loads -= 1
+        for device, mb in sizes.items():
+            _load_base[device] = _load_base.get(device, 0.0) + mb
+        if not _loads:
+            _load_base.clear()
+
+
+def _measure(what: Callable[[], Dict[str, float]]) -> Dict[str, float]:
+    """Run a memory measurement of ``loading_model``; a failure is logged once and measures nothing.
+
+    Args:
+        what: Returns MB per device.
+
+    Returns:
+        What ``what`` returned, or an empty dict when it raised.
+    """
+    global _load_warned
+    try:
+        return what()
+    except Exception as e:
+        # the model still loads; its weights then count as progress of the calls inside
+        if not _load_warned:
+            _load_warned = True
+            logger.warning('cannot measure a model load (%s); its weights count as progress of the calls inside', e)
+        return {}
+
+
+def _allocated_mb(torch: Any = None) -> Dict[str, float]:
+    """Read this process's torch allocated memory on each GPU.
+
+    Args:
+        torch: The torch module; the imported one by default.
+
+    Returns:
+        MB per ``'cuda:N'``; empty when torch is not imported or CUDA has not started, when
+        nothing is allocated.
+    """
+    torch = torch or sys.modules.get('torch')
+    if torch is None or not torch.cuda.is_initialized():
+        return {}
+    return {f'cuda:{i}': torch.cuda.memory_allocated(i) / _MB for i in range(torch.cuda.device_count())}
+
+
+def _resident_mb(model: Any, torch: Any = None) -> Dict[str, float]:
+    """Measure the memory of the tensors a loaded model holds.
+
+    Follows the model's attributes, dict values and list, tuple or set items for up to
+    ``_WALK_DEPTH`` levels; a torch module gives its parameters and buffers. A storage that
+    several tensors share counts once, rounded up to 512 bytes as the CUDA allocator rounds a
+    request. A tensor over 1 MiB can hold up to 1 MiB more, when the cached block it gets is
+    too small to split (torch 2.10 ``should_split``); that is not counted (2 of docTR's
+    159.5 MB).
+
+    Args:
+        model: What the load returned.
+        torch: The torch module; the imported one by default.
+
+    Returns:
+        MB per device (``'cuda:N'``, ``'cpu'``); empty when torch is not imported.
+    """
+    torch = torch or sys.modules.get('torch')
+    if torch is None:
+        return {}
+    storages: Dict[Tuple[str, int], int] = {}
+    for tensor in _tensors(model, torch):
+        storage = tensor.untyped_storage()
+        storages[(str(tensor.device), storage.data_ptr())] = -(-storage.nbytes() // 512) * 512
+    sizes: Dict[str, float] = {}
+    for (device, _), size in storages.items():
+        sizes[device] = sizes.get(device, 0.0) + size / _MB
+    return sizes
+
+
+def _tensors(root: Any, torch: Any) -> List[Any]:
+    """Collect the tensors reachable from a loaded model, as ``_resident_mb`` follows them.
+
+    Args:
+        root: What the load returned.
+        torch: The torch module.
+
+    Returns:
+        The tensors found; one reached twice may be listed twice.
+    """
+    seen: Set[int] = set()
+    tensors: List[Any] = []
+    level = [root]
+    for _ in range(_WALK_DEPTH):
+        below: List[Any] = []
+        # a large container (a tokenizer's vocabulary) never takes the walk past the limit
+        for obj in level[: max(0, _WALK_LIMIT - len(seen))]:
+            _visit(obj, torch, seen, tensors, below)
+        if not below:
+            break
+        level = below
+    return tensors
+
+
+def _visit(obj: Any, torch: Any, seen: Set[int], tensors: List[Any], below: List[Any]) -> None:
+    """Sort one object of a model the first time it is reached.
+
+    Args:
+        obj: The object.
+        torch: The torch module.
+        seen: Ids of the objects already sorted; ``obj``'s is added.
+        tensors: Gets ``obj`` if it is a tensor, or a module's parameters and buffers.
+        below: Gets what ``obj`` refers to, to follow on the next level.
+    """
+    if id(obj) in seen:
+        return
+    seen.add(id(obj))
+    if isinstance(obj, torch.Tensor):
+        tensors.append(obj)
+    elif isinstance(obj, torch.nn.Module):
+        tensors.extend(obj.parameters())
+        tensors.extend(obj.buffers())
+    elif isinstance(obj, dict):
+        below.extend(obj.values())
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        below.extend(obj)
+    elif hasattr(obj, '__dict__') and not isinstance(obj, (type, types.ModuleType)):
+        below.extend(vars(obj).values())
+
 
 def device_budget(device: str):
     """Return the process-wide guard of a device.
@@ -536,5 +758,21 @@ def device_budget(device: str):
     with _budgets_lock:
         budget = _budgets.get(device)
         if budget is None:
-            budget = _budgets[device] = DeviceBudget(device)
+            budget = _budgets[device] = _new_budget(device)
         return budget
+
+
+def _new_budget(device: str) -> DeviceBudget:
+    """Create the guard of a device; the caller holds ``_budgets_lock``.
+
+    Args:
+        device: ``'cpu'`` or ``'cuda:N'``.
+
+    Returns:
+        The guard; made while models load, it takes what its device held when the first of
+        them started as its base.
+    """
+    budget = DeviceBudget(device)
+    if _loads:
+        budget._load_started(_load_base.get(device), _loads)
+    return budget

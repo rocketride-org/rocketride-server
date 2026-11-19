@@ -69,6 +69,7 @@ class Chat(ChatBase):
     # Anthropic caches only up to an explicit marker, so the driver places one at the
     # end of the prompt's unchanging start (see apply_prompt_cache_breakpoint).
     SUPPORTS_PROMPT_CACHE_PREFIX = True
+    SUPPORTS_NATIVE_TOOLS = True
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -115,3 +116,10 @@ class Chat(ChatBase):
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _turn_llm(self) -> ChatAnthropic:
+        # A turn keeps the signed thinking blocks in its messages, so thinking can stay on
+        # through a tool loop on any path, not only the native text stream.
+        if not self._thinking_mode_kwargs:
+            return self._llm
+        return self._llm.model_copy(update=self._thinking_mode_kwargs)

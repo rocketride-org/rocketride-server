@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,11 +23,13 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
+from os.path import dirname, join, realpath
+from depends import depends
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-
-# Load any dependencies
-from depends import depends  # type: ignore
-
+requirements = join(dirname(realpath(__file__)), 'requirements.txt')
 depends(requirements)
+
+from .IGlobal import IGlobal
+from .IInstance import IInstance
+
+__all__ = ['IGlobal', 'IInstance']

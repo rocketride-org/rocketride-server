@@ -1,5 +1,6 @@
 ---
 title: Security
+description: An overview of how RocketRide handles credentials, network exposure, and authentication across its components.
 ---
 
 # Security
@@ -61,10 +62,10 @@ environment from `/proc`.
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
 
-| Variable            | Effect                                                                                                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install. |
-| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                           |
+| Variable            | Effect                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except `RR_TASK_TOKEN_KEY`, which tasks never get, and the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
+| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                                                                              |
 
 Set these in the engine's own environment. Local OSS engines also support an
 install `.env` file. Hosted engines (`--saas` or `--hosted`) refuse a populated

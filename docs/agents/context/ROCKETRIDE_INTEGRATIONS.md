@@ -12,8 +12,8 @@ code.
 
 | You want to... | Mechanism | Section |
 |---|---|---|
-| Let Claude / Cursor / any MCP client call your pipelines | `rocketride-mcp` MCP server | §MCP |
-| Choose which pipelines appear as tools, and their names | running tasks + pipeline `name`/`description` | §MCP — Controlling the tool list |
+| Let Claude / Cursor / any MCP client that supports Streamable HTTP build, run and observe pipelines | built-in MCP server (`/mcp` on the engine) | §MCP |
+| Keep using the older stdio package | `rocketride-mcp` (deprecated) | §MCP, "Deprecated: the `rocketride-mcp` stdio package" |
 | Trigger a pipeline from any external system over HTTP | `webhook` source node + POST | §Webhooks |
 | Call a pipeline from an n8n workflow | n8n HTTP Request node → webhook source | §n8n — Calling RocketRide from n8n |
 | Trigger an n8n workflow (or any of n8n's 1000+ apps) from a pipeline | `tool_n8n` node | §n8n — Calling n8n from a pipeline |
@@ -23,142 +23,129 @@ code.
 
 ---
 
-## MCP — Expose pipelines as tools for AI assistants
+## MCP: the built-in MCP server
 
-The `rocketride-mcp` server connects to a RocketRide engine over WebSocket (DAP) and
-exposes your **running pipelines** as MCP tools. Claude Desktop, Claude Code, Cursor, or
-any MCP client can then call a pipeline like any other tool. Discovery is automatic:
-start a pipeline (IDE, SDK, or CLI) and it appears as a callable tool; stop it and the
-tool disappears on the next tool-list refresh. No registration step.
+RocketRide has a built-in MCP server. It uses Streamable HTTP, is stateless, and serves
+33 tools (32 on an engine that is not bound to localhost, because `send_files` is only
+offered on a local engine). Any MCP client that supports Streamable HTTP can connect.
 
-### Install
+| Where | Address |
+|---|---|
+| Hosted (RocketRide Cloud) | `https://api.rocketride.ai/mcp` |
+| Self-hosted engine, same machine as the client | `http://localhost:5565/mcp` |
+| Self-hosted engine, other machines (behind a TLS proxy) | `https://<host>/mcp` |
+
+### Sign in
+
+Two ways to authenticate:
+
+- **Browser OAuth (hosted server).** A client that supports MCP OAuth follows the 401
+  response to the sign-in page and completes the login on first connect. A self-hosted
+  engine that is not bound to localhost needs `MCP_EXPECTED_AUDIENCE` set before it
+  accepts OAuth tokens.
+- **API key header.** Send `Authorization: Bearer rr_...` for clients that cannot do OAuth.
+
+### Claude Code
 
 ```bash
-pip install rocketride-mcp
+claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 ```
 
-Requires Python 3.10+. The package installs two entry points: `rocketride-mcp` (stdio
-server, what MCP clients launch) and `rocketride-mcp-sse` (HTTP/SSE variant, see below).
+Claude Code then shows the server as needing authentication until you finish the browser
+sign-in.
 
-### Configure the environment
+### Claude Desktop and claude.ai
 
-The server is configured entirely by environment variables — there is no config file:
+Add a custom connector (Settings, Connectors, Add custom connector) and enter the endpoint
+URL. Complete the OAuth flow on first use.
+
+### Cursor
+
+Add to `.cursor/mcp.json` in your workspace. The hosted server needs no key here, because
+sign-in happens in the browser:
+
+```json
+{
+	"mcpServers": {
+		"rocketride": {
+			"url": "https://api.rocketride.ai/mcp"
+		}
+	}
+}
+```
+
+If you need an API key header instead, add a `headers` entry:
+
+```json
+{
+	"mcpServers": {
+		"rocketride": {
+			"url": "https://api.rocketride.ai/mcp",
+			"headers": { "Authorization": "Bearer rr_..." }
+		}
+	}
+}
+```
+
+Keep the key out of files that are committed: put it in your user-level config or in an
+environment variable your client expands.
+
+### Self-hosted engine
+
+Point the same client config at your engine: `http://localhost:5565/mcp` (or
+`http://127.0.0.1:5565/mcp`) when the engine runs on the same machine as the client, or
+`https://<host>/mcp` behind a TLS proxy for any other host. Use plain `http://` only for
+`localhost` or `127.0.0.1`, because a Bearer key sent over `http://` to another host is
+unencrypted. Three rules apply:
+
+1. On an engine not bound to localhost (the Docker image is one), an API key must start
+   with `rr_`. This does not apply on a localhost bind.
+2. Set `ROCKETRIDE_URI` so tool calls reach your engine. For an engine in Docker on the
+   same machine as the client, use `ROCKETRIDE_URI=ws://127.0.0.1:5565`. For an engine
+   reached from other machines, put it behind a TLS proxy and use
+   `ROCKETRIDE_URI=wss://<public host>`. The MCP server refuses to start if
+   `ROCKETRIDE_URI` is an unencrypted address (`ws://` or `http://`) for any host that is
+   not a loopback address (`localhost`, `127.0.0.1`, `::1`). A LAN address of the
+   engine's own machine is refused too. If neither `ROCKETRIDE_URI` nor `MCP_RESOURCE_IDENTIFIER`
+   is set, engine image 3.6.0 and earlier connect MCP tool calls to RocketRide Cloud, where
+   they fail with `Invalid or revoked API key`.
+3. `ROCKETRIDE_URI` and `MCP_RESOURCE_IDENTIFIER` are not interchangeable.
+   `MCP_RESOURCE_IDENTIFIER` is the public URL of your `/mcp` endpoint. For OAuth sign-in on
+   a self-hosted engine it must equal that URL exactly. `MCP_EXPECTED_AUDIENCE` is also
+   needed, but only when the engine is not bound to localhost. API key sign-in needs neither.
+
+A reverse proxy in front of an engine bound to localhost makes remote callers look local:
+`send_files`, which uploads files from the engine host's own disk, is then offered to anyone
+with a valid key. Behind a proxy, run the engine on a bind that is not localhost, so
+`send_files` is not offered. Then limit the engine port to the proxy with a host firewall
+or a private network; otherwise clients can reach the engine directly and skip the TLS
+proxy and its access rules.
+
+More: https://docs.rocketride.org/connect/mcp/http/ and
+https://docs.rocketride.org/connect/mcp/http/self-hosting/.
+
+### Deprecated: the `rocketride-mcp` stdio package
+
+The older `rocketride-mcp` package (`pip install rocketride-mcp`, Python 3.10+) is
+deprecated; prefer the built-in server above. It runs over stdio, exposes your running
+pipelines as tools that take a single `filepath` argument, and is configured only by
+environment variables. Full reference: https://docs.rocketride.org/connect/mcp/stdio/
 
 | Variable | Required | Description |
 |---|---|---|
 | `ROCKETRIDE_URI` | Yes | WebSocket URI of the engine, e.g. `ws://localhost:5565` |
 | `ROCKETRIDE_AUTH` | Yes* | API key / auth token |
 | `ROCKETRIDE_APIKEY` | Yes* | Accepted as an alternative to `ROCKETRIDE_AUTH` |
-| `MCP_API_KEY` | No | Bearer token for the SSE variant only |
+| `MCP_API_KEY` | SSE variant only: optional on localhost, required on any other bind | Bearer token for the SSE server |
 
-*One of `ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY` must be set; the server refuses to start
-without a URI and a key.
+*One of `ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY` must be set.
 
-### Claude Desktop and Cursor
+Claude Code: `claude mcp add rocketride -e ROCKETRIDE_URI=ws://localhost:5565 -e ROCKETRIDE_APIKEY=<key> -- rocketride-mcp`.
 
-Both take the same `mcpServers` block. Claude Desktop: add it to
-`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or
-`%APPDATA%\Claude\claude_desktop_config.json` (Windows). Cursor: add it to
-`.cursor/mcp.json` in the workspace.
-
-```json
-{
-	"mcpServers": {
-		"rocketride": {
-			"command": "rocketride-mcp",
-			"env": {
-				"ROCKETRIDE_URI": "ws://localhost:5565",
-				"ROCKETRIDE_AUTH": "your-api-key"
-			}
-		}
-	}
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add rocketride -- rocketride-mcp
-```
-
-Set `ROCKETRIDE_URI` and `ROCKETRIDE_AUTH` in the environment before running. You can also
-run the server directly for debugging: `rocketride-mcp` or `python -m rocketride_mcp`.
-
-### What a tool call does
-
-Every discovered tool takes exactly one argument: `filepath` (string, required) — the
-path to a local file to process. The server reads the file (absolute or relative paths,
-`file://` URIs, and `~` expansion all work), streams the bytes into the corresponding
-running pipeline, and returns the pipeline's result — human-readable text plus the raw
-result under `structuredContent.result`. The input schema is always this single
-`filepath`; pipelines that expect chat questions or JSON payloads are better reached over
-the webhook interface (§Webhooks) or the SDK.
-
-One extra built-in tool ships with the server: **`RocketRide_Document_Processor`**, a
-bundled multi-modal document-parsing pipeline started on the fly, so it works even with no
-pipelines of your own running.
-
-### Controlling the tool list
-
-**Which pipelines become tools:** exactly the tasks *running* and *visible to the API key*
-the server was configured with. That gives you two levers:
-
-1. **Run state.** Only running pipelines are listed — completed or queued tasks are not.
-   Stop a pipeline to remove its tool.
-2. **Key identity.** Personal runs (dev runs and personal deploys) are owner-only: listed
-   only for the account that started them, never for teammates. Team deploy runs are
-   listed for anyone with permissions on that team. To expose a curated set of tools,
-   configure the MCP server with a dedicated account/API key and run only the intended
-   pipelines under it.
-
-**How tools are named and described to the model:** from the pipeline JSON itself.
-
-| Tool field | Comes from | Fallback when absent |
-|---|---|---|
-| name | top-level `name` field of the pipeline | the source component id (e.g. `webhook_1`) |
-| description | top-level `description` field of the pipeline | `RocketRide DTC MCP Tool` |
-
-Add both fields at the top level of the `.pipe` file (alongside `components`); they ride
-through unchanged when the pipeline starts:
-
-```json
-{
-	"name": "invoice-parser",
-	"description": "Extracts line items, totals, and vendor data from PDF invoices.",
-	"components": [ ... ],
-	"project_id": "...",
-	"viewport": { "x": 0, "y": 0, "zoom": 1 },
-	"version": 1
-}
-```
-
-Write the description for the model: say what the pipeline does, what kind of file it
-expects, and what comes back. Keep names **unique among your running pipelines** — tool
-execution matches by name, and the first match wins.
-
-### MCP resources and prompts
-
-The server also exposes read-only resources (JSON payloads, `rocketride://` URI scheme):
-`rocketride://pipelines` (available pipelines with name + description),
-`rocketride://status` (connection status, pipeline count, loaded pipeline names), and
-`rocketride://nodes` (available node types and schemas). Three prompt templates ship as
-well: `analyze-document` (args `pipeline`, `query`), `chat-with-data` (`pipeline`,
-`question`), and `evaluate-pipeline` (`pipeline`, `test_input`, optional
-`expected_output`).
-
-### SSE mode (remote / Docker)
-
-For remote or containerized deployments the server can run over HTTP/SSE instead of stdio:
-
-```bash
-pip install 'rocketride-mcp[sse]'
-MCP_API_KEY=your-secret-token rocketride-mcp-sse --host 0.0.0.0 --port 8080
-```
-
-Defaults are `localhost:8080`. `MCP_API_KEY` requires `Authorization: Bearer` on every
-route. It is optional only for a loopback bind (the server logs a warning and runs
-unauthenticated); any non-loopback host such as `0.0.0.0` refuses to start without it.
-`/health` is always open for monitoring.
+The HTTP/SSE variant is `rocketride-mcp-sse --host <host> --port <port>` (install with
+`pip install 'rocketride-mcp[sse]'`). Each tool is named from the top-level `name` of its
+pipeline (falling back to the source component id) and described by the top-level
+`description`.
 
 ---
 
