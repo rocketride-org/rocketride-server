@@ -30,7 +30,15 @@ import type { CheckoutPlan, PlanAction } from './types';
 
 /** Extract the action descriptor from plan metadata, if present. */
 function planAction(plan: CheckoutPlan): PlanAction | null {
-	return (plan.metadata?.action as PlanAction) ?? null;
+	const action = (plan.metadata?.action as PlanAction) ?? null;
+	if (action) return action;
+	// Free tier carries no Stripe price and no metadata.action, so its CTA
+	// would otherwise be a no-op. Route it to the self-hosting / open-source
+	// setup docs instead.
+	if (!plan.amountCents) {
+		return { type: 'link', url: 'https://docs.rocketride.org/', label: 'Get Started' } as PlanAction;
+	}
+	return null;
 }
 
 /** Extract the sort order from plan metadata, defaulting to 500. */
