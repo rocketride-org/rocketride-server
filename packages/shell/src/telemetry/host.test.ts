@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Identity, type IdentityMode } from './identity.ts';
-import { clearTelemetryOnSignOut, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity } from './host.ts';
+import { appReporter, clearTelemetryOnSignOut, getReporter, initTelemetryHost, knownSignedOutForTests, loadTransportForTests, markTelemetrySignedIn, resetTelemetryHostForTests, setPageActive, setTelemetryIdentity, shellReporter, telemetryAppStamp } from './host.ts';
 import { HOLD_STORAGE_KEY } from './sdkQueue.ts';
 import { resetDevGateForTests } from '../util/devGate.ts';
 
@@ -173,6 +173,89 @@ test('after the bind, identity reports go straight to the transport', async () =
 	});
 });
 
+test('the app stamp is the descriptor telemetryId when set, else the descriptor id', () => {
+	assert.equal(telemetryAppStamp('rocketride.home', 'home-ui'), 'home-ui');
+	assert.equal(telemetryAppStamp('rocketride.home'), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', undefined), 'rocketride.home');
+	// A malformed alias never reaches the stamp: it falls back to the id.
+	for (const bad of ['', 'has space', 'x'.repeat(129), 42, null]) {
+		assert.equal(telemetryAppStamp('rocketride.home', bad), 'rocketride.home', `bad alias ${String(bad)}`);
+	}
+});
+
+test('the reserved shell stamp is never honoured as an alias', () => {
+	assert.equal(telemetryAppStamp('rocketride.home', 'shell'), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride', 'shell'), 'rocketride');
+});
+
+test('a third-party app cannot choose a telemetry alias', () => {
+	assert.equal(telemetryAppStamp('acme.chat', 'home-ui'), 'acme.chat');
+	assert.equal(telemetryAppStamp('acme.chat', 'rocketride.home'), 'acme.chat');
+	assert.equal(telemetryAppStamp('acme.chat', 'shell'), 'acme.chat');
+	// A lookalike prefix is not the first-party namespace.
+	assert.equal(telemetryAppStamp('rocketrideX.chat', 'home-ui'), 'rocketrideX.chat');
+});
+
+test('an alias equal to another registered app id is rejected', () => {
+	const ids = ['rocketride.home', 'rocketride.models', 'acme.chat'];
+	assert.equal(telemetryAppStamp('rocketride.home', 'acme.chat', ids), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', 'rocketride.models', new Set(ids)), 'rocketride.home');
+	// Its own id is not a collision, and an unregistered alias is still honoured.
+	assert.equal(telemetryAppStamp('rocketride.home', 'rocketride.home', ids), 'rocketride.home');
+	assert.equal(telemetryAppStamp('rocketride.home', 'home-ui', ids), 'home-ui');
+});
+
+test('appReporter returns the cached reporter for the descriptor stamp', () => {
+	resetTelemetryHostForTests();
+	const ids = ['rocketride.home', 'rocketride.models', 'acme.chat'];
+	assert.equal(appReporter('rocketride.home', { telemetryId: 'home-ui' }, ids), getReporter('home-ui'));
+	assert.equal(appReporter('rocketride.models', {}, ids), getReporter('rocketride.models'));
+	assert.equal(appReporter('rocketride.models'), getReporter('rocketride.models'));
+	assert.equal(appReporter('acme.chat', { telemetryId: 'home-ui' }, ids), getReporter('acme.chat'));
+	assert.equal(appReporter('rocketride.home', { telemetryId: 'acme.chat' }, ids), getReporter('rocketride.home'));
+	assert.equal(appReporter('rocketride.home', { telemetryId: 42 }, ids), getReporter('rocketride.home'));
+});
+
+test('an app aliasing shell never gets the shell reporter', () => {
+	resetTelemetryHostForTests();
+	for (const appId of ['rocketride.home', 'rocketride', 'acme.chat']) {
+		assert.notEqual(appReporter(appId, { telemetryId: 'shell' }, [appId]), shellReporter(), appId);
+	}
+	assert.equal(telemetryAppStamp('rocketride.home', 'Shell'), 'rocketride.home', 'the reserved check ignores case');
+	assert.equal(telemetryAppStamp('rocketride.home', 'SHELL'), 'rocketride.home');
+});
+
+test('an app whose own id is shell gets a reporter that never sends, never the shell reporter', () => {
+	resetTelemetryHostForTests();
+	for (const appId of ['shell', 'Shell']) {
+		const reporter = appReporter(appId, {}, [appId]);
+		assert.notEqual(reporter, shellReporter(), appId);
+		assert.notEqual(reporter, getReporter(appId), appId);
+	}
+});
+
+test('a reporter bound to a telemetryId stamps it, and per-event props cannot overwrite it; auth facts still stamp shell', async () => {
+	const { win, runTimers } = page();
+	await withGlobals({ window: win, document: docHidden }, () => {
+		resetTelemetryHostForTests();
+		const t = fakeTransport('anonymous');
+		const captured: Array<[string, Record<string, unknown>]> = [];
+		const sdk = { capture: (event: string, props: Record<string, unknown>) => { captured.push([event, props]); }, register: () => {} };
+		(t.module as unknown as { active: () => typeof sdk }).active = () => sdk;
+		loadTransportForTests(t.module);
+		runTimers();
+		getReporter(telemetryAppStamp('rocketride.home', 'home-ui'))('chat:send', { app: 'spoofed', n: 1 });
+		getReporter(telemetryAppStamp('rocketride.models'))('models:open', { app: 'spoofed' });
+		shellReporter()('auth:complete', { app: 'home-ui', source: 'shell' });
+		assert.deepEqual(captured.map(([event, props]) => [event, props.app]), [
+			['chat:send', 'home-ui'],
+			['models:open', 'rocketride.models'],
+			['auth:complete', 'shell'],
+		]);
+		assert.equal(captured[0][1].n, 1, 'the caller props still ride along');
+	});
+});
+
 test('a page-active change after the SDK start is pushed to the live instances', async () => {
 	const { win, runTimers } = page();
 	await withGlobals({ window: win, document: docHidden }, () => {
@@ -217,6 +300,127 @@ test('every disabled branch drops the hold an earlier page load of the tab left'
 			assert.equal(tab.data.has(HOLD_STORAGE_KEY), false, `${label}: hold dropped`);
 		});
 	}
+});
+
+/** A full Storage double (key/length too, as clearPostHogStorage enumerates) over a Map. */
+function store(keys: string[]) {
+	const data = new Map<string, string>(keys.map((k) => [k, '1']));
+	return {
+		data,
+		storage: {
+			get length() { return data.size; },
+			key: (i: number) => [...data.keys()][i] ?? null,
+			getItem: (k: string) => data.get(k) ?? null,
+			setItem: (k: string, v: string) => { data.set(k, v); },
+			removeItem: (k: string) => { data.delete(k); },
+		},
+	};
+}
+
+/** A document double whose cookie setter applies expiries, as a browser's would. */
+function cookieDoc(initial: string[]) {
+	const jar = new Map<string, string>(initial.map((c) => c.split('=') as [string, string]));
+	return {
+		jar,
+		doc: {
+			visibilityState: 'hidden',
+			get cookie() { return [...jar].map(([k, v]) => `${k}=${v}`).join('; '); },
+			set cookie(value: string) {
+				const [pair] = value.split(';');
+				const [name, v] = pair.split('=');
+				if (/expires=Thu, 01 Jan 1970|max-age=0/i.test(value)) jar.delete(name.trim());
+				else jar.set(name.trim(), v);
+			},
+		},
+	};
+}
+
+const PH_LOCAL = ['ph_phc_x_posthog', '__ph_opt_in_out_phc_x', '_postHogToolbarParams'];
+const PH_SESSION = ['ph_phc_x_window_id', 'ph_phc_x_primary_window_exists'];
+
+/** Boot the host with prior-visit PostHog storage under `nav`, and return what is left. */
+async function bootWithStoredPostHog(
+	nav: Record<string, unknown>,
+	consentSource: 'stored' | 'host' = 'stored',
+	{ key = 'phc_x', embedded = false }: { key?: string; embedded?: boolean } = {},
+) {
+	const local = store([...PH_LOCAL, 'rr_consent_v1']);
+	const tab = store([...PH_SESSION, 'rr:auth:start_ts']);
+	const { jar, doc } = cookieDoc(['ph_phc_x_posthog=abc', 'other=1']);
+	const { win } = page({ localStorage: local.storage, sessionStorage: tab.storage });
+	if (embedded) {
+		// an App Builder preview: dev hooks on and framed by the host tab
+		win.location = { search: '?rrdev=1', pathname: '/', hostname: 'cloud.example.test' };
+		win.top = {};
+	}
+	await withGlobals({ window: win, document: doc, sessionStorage: tab.storage, localStorage: local.storage, navigator: nav }, () => {
+		resetTelemetryHostForTests();
+		initTelemetryHost({ key, host: key ? 'https://e.example.test' : '', consentSource });
+	});
+	return { local: [...local.data.keys()], session: [...tab.data.keys()], cookies: [...jar.keys()] };
+}
+
+for (const [label, nav] of [['DNT', { doNotTrack: '1' }], ['GPC', { globalPrivacyControl: true }]] as const) {
+	test(`a ${label} signal removes PostHog's stored keys and ph_ cookies from an earlier visit, and nothing else`, async () => {
+		const left = await bootWithStoredPostHog(nav);
+		assert.deepEqual(left.local, ['rr_consent_v1']);
+		assert.deepEqual(left.session, ['rr:auth:start_ts']);
+		assert.deepEqual(left.cookies, ['other']);
+	});
+}
+
+test('without a privacy signal a disabled boot leaves PostHog storage alone', async () => {
+	// the host-consent branch: disabled at boot like the signal branch, but no signal
+	const left = await bootWithStoredPostHog({}, 'host');
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test('a keyless boot with a privacy signal still removes PostHog storage from a keyed earlier visit', async () => {
+	const left = await bootWithStoredPostHog({ doNotTrack: '1' }, 'stored', { key: '' });
+	assert.deepEqual(left.local, ['rr_consent_v1']);
+	assert.deepEqual(left.session, ['rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['other']);
+});
+
+test('a keyless boot without a privacy signal leaves PostHog storage alone', async () => {
+	const left = await bootWithStoredPostHog({}, 'stored', { key: '' });
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test("an embedded preview's keyless boot with a privacy signal leaves the host tab's PostHog storage alone", async () => {
+	const left = await bootWithStoredPostHog({ globalPrivacyControl: true }, 'stored', { key: '', embedded: true });
+	assert.deepEqual(left.local, [...PH_LOCAL, 'rr_consent_v1']);
+	assert.deepEqual(left.session, [...PH_SESSION, 'rr:auth:start_ts']);
+	assert.deepEqual(left.cookies, ['ph_phc_x_posthog', 'other']);
+});
+
+test('a privacy-signal boot never throws when every storage accessor throws', async () => {
+	const { win } = page();
+	const boom = () => { throw new Error('SecurityError'); };
+	Object.defineProperty(win, 'localStorage', { get: boom });
+	Object.defineProperty(win, 'sessionStorage', { get: boom });
+	const doc = { visibilityState: 'hidden', get cookie(): string { return boom(); } };
+	await withGlobals({ window: win, document: doc, navigator: { globalPrivacyControl: true } }, () => {
+		resetTelemetryHostForTests();
+		assert.doesNotThrow(() => initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource: 'stored' }));
+	});
+});
+
+test('a privacy-signal boot still clears what it can read when localStorage throws', async () => {
+	const tab = store([...PH_SESSION, 'rr:auth:start_ts']);
+	const { jar, doc } = cookieDoc(['ph_phc_x_posthog=abc', 'other=1']);
+	const { win } = page({ sessionStorage: tab.storage });
+	Object.defineProperty(win, 'localStorage', { get: () => { throw new Error('SecurityError'); } });
+	await withGlobals({ window: win, document: doc, sessionStorage: tab.storage, navigator: { doNotTrack: '1' } }, () => {
+		resetTelemetryHostForTests();
+		assert.doesNotThrow(() => initTelemetryHost({ key: 'phc_x', host: 'https://e.example.test', consentSource: 'stored' }));
+	});
+	assert.deepEqual([...tab.data.keys()], ['rr:auth:start_ts'], 'sessionStorage still cleared');
+	assert.deepEqual([...jar.keys()], ['other'], 'cookies still cleared');
 });
 
 test("an embedded preview's disabled boot never touches the host tab's hold", async () => {
