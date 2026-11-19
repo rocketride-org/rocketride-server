@@ -292,6 +292,11 @@ pods an IPv4 address.
   task file on the stream the engine attaches to the pod, so reading the Job
   or the pod (`kubectl get`, `kubectl describe`) shows none of them.
 - **User.** Tasks run as the image's own user, not the engine's.
+- **A pod that goes away.** A pod that someone else deletes while its task
+  runs is told to stop first: the task reports its cancel and ends as
+  `Stopped`. A pod that is gone before it showed an exit code, with no word
+  from its task, ends as `Stopped unexpectedly`. So does a task whose output
+  has ended while its pod shows no exit code; the engine then deletes the pod.
 - **Cleanup.** The engine deletes each Job, and its pod with it, when the task
   ends, and at start it removes the Jobs labelled with its `RR_K8S_INSTANCE`
   that an earlier run left behind. A finished Job it never got to is removed

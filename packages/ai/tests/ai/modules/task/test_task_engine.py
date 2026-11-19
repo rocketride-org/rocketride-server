@@ -2475,6 +2475,7 @@ def _exit_task(exit_event_seen=False):
     t._stop_requested = False
     t._crash = None
     t._process_killed = False
+    t._launch = None
     return t
 
 
@@ -2557,6 +2558,8 @@ async def test_no_process_counts_as_failed():
 
 class _LingeringProcess:
     """Output closed, but the process only exits once it is killed."""
+
+    lost = None
 
     def __init__(self):
         self.returncode = None
@@ -2669,6 +2672,50 @@ async def test_an_exit_code_0_with_a_known_reason_is_no_cut_off(isolated, report
         await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': ''}})
     await Task._terminated(t)
     assert (t._status.status, t._status.exitCode) == (status, 0)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_task_its_runtime_lost_ends_as_stopped_unexpectedly():
+    """The runtime says what it saw; the engine's own kill of what was left does not make that a stop."""
+    lost = 'what the runtime saw of the task'
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost=lost, cleanup=AsyncMock())
+    t._process_killed = True
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        -9,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    assert any(f'Unexpected termination: {lost}' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reported, stop_requested, exit_code, outcome',
+    [
+        # It reported a failure of its own before its pod went: its own code stands
+        (True, False, 3, 'cancelled'),
+        # The engine stopped it, and deleted what was left
+        (False, True, 0, 'cancelled'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine'],
+)
+async def test_what_the_runtime_saw_is_not_asked_of_a_task_that_reported_or_was_stopped(
+    reported, stop_requested, exit_code, outcome
+):
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost='what the runtime saw of the task', cleanup=AsyncMock())
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'failed'}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == ('Stopped', exit_code)
     assert run_log.end_run.await_args.args[0] == outcome
     assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
 
