@@ -772,6 +772,31 @@ class TestEvaluateDispatch:
         assert result['evaluator'] == 'llm_judge'
 
 
+class TestResultNameMatchesWhatScoredRowsReport:
+    """``result_name`` must be the name a scored row of the same type carries.
+
+    ``eval_cobalt`` reports a row it does not score (a failed LLM call) under
+    ``result_name``. If that differed from the ``evaluator`` field of a scored
+    row, a consumer that groups score answers by evaluator would put the
+    unscored rows in a group of their own, or drop them with a filter.
+    """
+
+    def test_every_type_scores_under_its_result_name(self):
+        from eval_cobalt.cobalt_evaluator import _VALID_EVAL_TYPES
+
+        for eval_type in _VALID_EVAL_TYPES:
+            evaluator = CobaltEvaluator({'eval_type': eval_type, 'threshold': 0.5}, {})
+            result = evaluator.evaluate('Paris is the capital of France.', 'The capital of France is Paris.')
+            assert result['evaluator'] == evaluator.result_name, eval_type
+
+    def test_similarity_reports_semantic(self):
+        assert CobaltEvaluator({'eval_type': 'similarity'}, {}).result_name == 'semantic'
+
+    def test_the_other_types_report_their_own_name(self):
+        for eval_type in ('llm_judge', 'custom', 'relevance', 'grounding', 'format'):
+            assert CobaltEvaluator({'eval_type': eval_type}, {}).result_name == eval_type
+
+
 class TestDeepCopyPrevention:
     """Test that deep copy prevents mutation of the original answer."""
 

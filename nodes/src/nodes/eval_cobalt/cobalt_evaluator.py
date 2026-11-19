@@ -165,6 +165,16 @@ class CobaltEvaluator:
         """Return the configured evaluation type."""
         return self._eval_type
 
+    @property
+    def result_name(self) -> str:
+        """Return the name this evaluator's results carry in their ``evaluator`` field.
+
+        Every type reports its own name except ``similarity``, whose results
+        say ``semantic``. A row that is reported without being scored uses this
+        name, so it groups with the scored rows of the same run.
+        """
+        return 'semantic' if self._eval_type == 'similarity' else self._eval_type
+
     # ------------------------------------------------------------------
     # Evaluation methods
     # ------------------------------------------------------------------

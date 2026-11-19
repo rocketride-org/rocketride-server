@@ -103,7 +103,9 @@ class IInstance(IInstanceBase):
                     metadata,
                     score=None,
                     passed=None,
-                    evaluator_name=evaluator.eval_type,
+                    # The name a scored row of this run carries, so an unscored
+                    # row groups with them (``similarity`` reports ``semantic``).
+                    evaluator_name=evaluator.result_name,
                     reasoning=f'Not scored: the LLM call failed ({llm_error}).',
                 )
             )

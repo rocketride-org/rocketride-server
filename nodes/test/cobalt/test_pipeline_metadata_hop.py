@@ -596,6 +596,9 @@ class TestFailedLlmCallKeepsThePairing:
         assert scores[0]['cobalt_score'] is None
         assert scores[0]['cobalt_passed'] is None
         assert 'TimeoutError' in scores[0]['cobalt_reasoning']
+        # The run is in ``similarity`` mode, whose scored rows say ``semantic``;
+        # an unscored row must use the same name or it falls out of that group.
+        assert scores[0]['cobalt_evaluator'] == 'semantic'
 
     def test_unscored_row_keeps_its_reference_for_joining(self):
         """The score answer still carries the row's metadata, so it joins by key."""
