@@ -2054,3 +2054,77 @@ class TestSourceModeMetadataSurvivesTheEngineHandle:
         converted['expected'] = 'b'
 
         assert source['expected'] == 'a'
+
+
+# ===========================================================================
+# A hosted engine's own host refuses file datasets
+# ===========================================================================
+
+_HOSTING_FLAGS = ('--hosted', '--shared-host')
+
+
+def _argv_with(monkeypatch, *flags):
+    """Replace the hosting flags on sys.argv with ``flags``."""
+    monkeypatch.setattr(sys, 'argv', [*(a for a in sys.argv if a not in _HOSTING_FLAGS), *flags])
+
+
+class TestSharedHostRefusesFileDatasets:
+    """On ``--shared-host`` the ``file`` profile would read the engine's own files.
+
+    A hosted task runs in the engine binary's folder, and ``_validate_path``
+    only keeps the read inside the working directory, so a file dataset there
+    reads files that belong to the engine. The node refuses the file profile
+    on a shared host and keeps inline datasets working, as stdio MCP does.
+    """
+
+    def _real_file(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        f = tmp_path / 'data.json'
+        f.write_text('[{"input": "q1", "expected": "a1"}]')
+        return str(f)
+
+    @pytest.mark.parametrize('flags', [('--hosted', '--shared-host'), ('--shared-host',)])
+    def test_load_from_file_refuses_an_existing_file(self, tmp_path, monkeypatch, flags):
+        path = self._real_file(tmp_path, monkeypatch)
+        _argv_with(monkeypatch, *flags)
+
+        with (
+            patch.dict(sys.modules, {'cobalt': None}),
+            pytest.raises(ValueError, match='not available on RocketRide Cloud'),
+        ):
+            _make_loader(file_path=path).load_from_file(path)
+
+    @pytest.mark.parametrize('flags', [(), ('--hosted',)])
+    def test_load_from_file_reads_without_shared_host(self, tmp_path, monkeypatch, flags):
+        path = self._real_file(tmp_path, monkeypatch)
+        _argv_with(monkeypatch, *flags)
+
+        with patch.dict(sys.modules, {'cobalt': None}):
+            items = _make_loader(file_path=path).load_from_file(path)
+        assert items == [{'input': 'q1', 'expected': 'a1'}]
+
+    def test_inline_items_still_load_on_shared_host(self, monkeypatch):
+        _argv_with(monkeypatch, '--hosted', '--shared-host')
+        inline = [{'input': 'q1', 'expected': 'a1'}]
+
+        items = _make_loader(source_type='inline', items=inline).load()
+        assert len(items) == 1
+        assert items[0]['input'] == 'q1'
+
+    def test_begin_global_fails_the_run_with_the_reason(self, tmp_path, monkeypatch):
+        path = self._real_file(tmp_path, monkeypatch)
+        _argv_with(monkeypatch, '--shared-host')
+        g = TestIGlobalLifecycle._make_global(None, {'source_type': 'file', 'file_path': path, 'sample_size': 0})
+
+        with pytest.raises(DatasetLoadError, match='not available on RocketRide Cloud'):
+            g.beginGlobal()
+
+    def test_validate_config_does_not_probe_the_path(self, monkeypatch):
+        _argv_with(monkeypatch, '--shared-host')
+        g = TestIGlobalLifecycle._make_global(None, {'source_type': 'file', 'file_path': 'data.json', 'sample_size': 0})
+
+        # Probing would confirm which engine files exist and echo their paths.
+        probe = MagicMock(side_effect=AssertionError('probed the host'))
+        with patch('dataset_cobalt.dataset_loader._validate_path', probe), patch('os.path.isfile', probe):
+            g.validateConfig()
+        probe.assert_not_called()

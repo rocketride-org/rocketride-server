@@ -24,6 +24,7 @@
 import os
 from typing import TYPE_CHECKING, Any, Dict, List
 
+from hosting import is_shared_host
 from rocketlib import IGlobalBase, OPEN_MODE, debug, warning
 from ai.common.config import Config
 
@@ -46,7 +47,9 @@ class IGlobal(IGlobalBase):
         """Validate dataset configuration at save-time.
 
         Checks that:
-        - file_path exists when source_type is 'file'
+        - file_path exists when source_type is 'file' (skipped on a shared
+          host, where the file profile is refused and probing would reveal
+          engine files)
         - sample_size is non-negative
         - file path does not contain traversal sequences
         """
@@ -58,6 +61,15 @@ class IGlobal(IGlobalBase):
             sample_size = int(config.get('sample_size', 0))
 
             if source_type == 'file':
+                # On a hosted engine's own host the file profile is refused at
+                # load time; probing the path here would confirm which engine
+                # files exist and echo their absolute paths.
+                if is_shared_host():
+                    from .dataset_loader import SHARED_HOST_FILE_ERROR
+
+                    warning(f'Cobalt Dataset Global: {SHARED_HOST_FILE_ERROR}')
+                    return
+
                 if not file_path:
                     warning('Cobalt Dataset Global: No file path provided for file source type.')
                     return

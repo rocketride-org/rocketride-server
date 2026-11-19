@@ -27,7 +27,14 @@ import os
 import random
 from typing import Any, Dict, List, Optional
 
+from hosting import is_shared_host
 from rocketlib import debug, warning
+
+
+# Refusal for the file profile on a hosted engine's own host. A task started
+# with --shared-host runs in the engine's install folder, so a file read there
+# is the engine's file, not the user's (the access #2412 closed for filesys).
+SHARED_HOST_FILE_ERROR = 'File datasets are not available on RocketRide Cloud; use inline items.'
 
 
 class DatasetLoadError(Exception):
@@ -209,8 +216,12 @@ class DatasetLoader:
 
         Raises:
             FileNotFoundError: If the file does not exist.
-            ValueError: If the file extension is unsupported or path contains traversal.
+            ValueError: If the file extension is unsupported, the path contains
+                traversal, or the task shares its host with a hosted engine.
         """
+        # A hosted task runs in the engine's own folder, so any file here belongs to the engine.
+        if is_shared_host():
+            raise ValueError(SHARED_HOST_FILE_ERROR)
         # Validate path: resolves symlinks and ensures it's under cwd.
         normalized = _validate_path(path)
 

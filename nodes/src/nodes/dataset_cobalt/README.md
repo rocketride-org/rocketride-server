@@ -46,6 +46,8 @@ Pick the profile first — it is the only choice that changes which other fields
 
 `file` reads the dataset off disk and is what a committed golden dataset uses. `inline` carries the items in the pipeline itself, which keeps a small smoke-test dataset next to the pipeline that exercises it and avoids shipping a data file. The panel shows **File Path** or **Inline Items (JSON)** accordingly.
 
+On RocketRide Cloud the `file` profile is refused: a hosted task runs in the engine's own folder, so the file would belong to the engine, not to you. The run fails with `DatasetLoadError` naming the reason. Use `inline` there.
+
 ### File Path
 
 Relative to the pipeline working directory. A path containing a `..` traversal segment, or one that resolves (after following symlinks) outside that directory, is rejected at runtime — this is a security boundary, so an absolute path elsewhere on disk is rejected too. `datasets/qa-golden.jsonl` is the shape to write.
