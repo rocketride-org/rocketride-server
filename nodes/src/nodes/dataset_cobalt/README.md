@@ -12,7 +12,7 @@ Key behavior to know:
 
 - The incoming template question is **deep-copied** per emitted item, so shared question objects in fan-out pipelines are never mutated.
 - **Reference answers are attached as metadata, never as prompt context** — the emitted question carries only the dataset's input text, so the expected answer is not exposed to an LLM downstream.
-- Field mapping is None-aware and first-non-null wins: question text is taken from `input`, then `text`, then `question`; the reference from `expected`, then `output`, then `answer`. Any other keys on the item are preserved under metadata. `id` becomes `dataset_id` (synthesized when the row has none — see row identity below), and every emitted item is tagged `cobalt_source: true`.
+- Field mapping is None-aware and first-non-null wins: question text is taken from `input`, then `text`, then `question`; the reference from `expected`, then `output`, then `answer`. Any other keys on the item are preserved under metadata, except `llm_error`, which is left out because it is the marker an LLM or agent node sets on a failed call. `id` becomes `dataset_id` (synthesized when the row has none — see row identity below), and every emitted item is tagged `cobalt_source: true`.
 - **File paths are sandboxed.** A path is rejected if it contains a `..` traversal segment or resolves (after following symlinks) to a location outside the pipeline working directory. This is a security boundary, so an absolute path pointing elsewhere on disk is rejected at runtime.
 - **An empty dataset and an unreadable one are different outcomes.** A dataset that is read successfully and holds no rows completes normally with a count of zero. A dataset that cannot be read at all — a missing file, an unsupported extension, bad JSON, a non-object row — raises `DatasetLoadError` so the engine records a failed run. A typo'd **File Path** must not report a successful run that evaluated nothing.
 - **A row with no question text is skipped, not emitted.** A row carrying none of `input`, `text` or `question` — a typo'd key, a renamed CSV column — has nothing to ask. Both lanes drop it and log `skipped N row(s) with no input text` once per batch. Emitting it produced a question with no prompt at all but a populated reference, which an evaluator downstream still scored: a low score indistinguishable from a weak model. A present but falsey text (`0`) is a real prompt and is still emitted.
@@ -58,7 +58,7 @@ JSON files may be a bare array, or an envelope under `items`, `data`, or `rows`.
 
 A JSON array of objects, as a string: `[{"input": "What is 2+2?", "expected": "4"}]`. Parsed at runtime, so a syntax error surfaces as a warning and an empty question set rather than a pipeline abort.
 
-Each item's question text is taken from `input`, then `text`, then `question` — first non-null wins; the reference from `expected`, then `output`, then `answer`. Any other keys are preserved as metadata, `id` becomes `dataset_id`, and every item is tagged `cobalt_source: true`.
+Each item's question text is taken from `input`, then `text`, then `question` — first non-null wins; the reference from `expected`, then `output`, then `answer`. Any other keys are preserved as metadata (except `llm_error`), `id` becomes `dataset_id`, and every item is tagged `cobalt_source: true`.
 
 ### Sample Size, Sample Seed, Filter Field, Filter Value, Slice Start, Slice End
 

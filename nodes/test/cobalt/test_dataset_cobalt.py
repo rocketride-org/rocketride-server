@@ -693,6 +693,20 @@ class TestToQuestions:
         assert questions[0]['metadata']['difficulty'] == 'hard'
         assert questions[0]['metadata']['category'] == 'math'
 
+    def test_llm_error_field_is_left_out_of_metadata(self):
+        """``llm_error`` is the failed-call marker; a row must not be able to set it.
+
+        The LLM and agent nodes copy the question's metadata onto the answer on
+        success too, so a row field of that name (for example in a dataset
+        rebuilt from an earlier run's score answers, which carry the key) would
+        make ``eval_cobalt`` report a good answer as a failed call.
+        """
+        items = [{'input': 'q1', 'expected': 'a1', 'llm_error': 'TimeoutError', 'category': 'math'}]
+        loader = _make_loader()
+        questions = loader.to_questions(items)
+        assert 'llm_error' not in questions[0]['metadata']
+        assert questions[0]['metadata']['category'] == 'math'
+
     def test_empty_input_gives_empty_text(self):
         items = [{'other_field': 'value'}]
         loader = _make_loader()

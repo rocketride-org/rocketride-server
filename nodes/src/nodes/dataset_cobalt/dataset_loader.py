@@ -538,9 +538,13 @@ class DatasetLoader:
                 'dataset_id': dataset_id,
                 'cobalt_source': True,
             }
-            # Preserve any extra fields from the original item as metadata
+            # Preserve any extra fields from the original item as metadata.
+            # ``llm_error`` stays out: it is the marker the LLM and agent nodes
+            # set on a failed call, and they copy the question's metadata onto
+            # the answer on success too, so a row field of that name would make
+            # eval_cobalt report a good answer as a failed call.
             for key, value in item.items():
-                if key not in ('input', 'text', 'question', 'expected', 'output', 'answer', 'id'):
+                if key not in ('input', 'text', 'question', 'expected', 'output', 'answer', 'id', 'llm_error'):
                     metadata[key] = value
 
             questions.append({'text': str(text), 'metadata': metadata})
