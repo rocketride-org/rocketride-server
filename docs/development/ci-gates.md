@@ -8,15 +8,23 @@ machine. Sources of truth: `.github/workflows/ci.yml`, `.github/workflows/_build
 
 **`CI OK`** (job `ci-ok`) is the *only* job marked required in branch protection.
 It aggregates the results of `init`, `changes`, `build`, `helm-changes`,
-`helm-lint`, `ruff-check`, `gitleaks`, and `shell-contract`, and
+`helm-lint`, `ruff-check`, `eslint-scripts`, `gitleaks`, and `shell-contract`, and
 fails if any of them failed or was cancelled. Jobs that were correctly **skipped**
 do not fail it — which is the whole point: a docs-only PR skips the 90-minute
 three-platform build and still merges.
 
-One job is deliberately **outside** `ci-ok` and cannot block a merge:
+Two jobs are deliberately **outside** `ci-ok` and cannot block a merge:
 
 - `container-scan` — runs on push/schedule only, never on PRs. Adding it to the
   required list would block every merge, since it is always skipped on a PR.
+- `sanitize` — builds the engine, its C++ test programs and the C++ nodes with
+  ASan and UBSan (`.github/workflows/_sanitize.yaml`) and runs `server:test` and
+  `nodes:test` on them. It is opt-in: it runs on a PR that changes C++ code
+  (`cpp` below) and has the `ci:sanitize` label, and on manual runs, never on
+  push. The label is read when the PR is opened or pushed to, so add the label,
+  then push. It reports sanitizer errors in its job summary and fails on any,
+  but it does not block a merge until the known errors are fixed. Local
+  commands: [Sanitizer build](builder/reference.md#sanitizer-build-sanitize).
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
 in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
@@ -30,14 +38,19 @@ this workflow; findings land in the Security tab.
 
 ## What decides which jobs run
 
-The `changes` job (`dorny/paths-filter`) computes a single boolean:
+The `changes` job (`dorny/paths-filter`) computes these booleans:
 
 | Filter | Paths |
 | --- | --- |
-| `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json` |
+| `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json`, `docker/**` |
+| `container` | `docker/**`, `nodes/scripts/tasks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml` |
+| `cpp` | `packages/server/**`, the C/C++ sources and `CMakeLists.txt` files under `nodes/`, `packages/vcpkg/**`, the C++ build scripts (`scripts/build.js`, `scripts/compiler.js`, `scripts/compiler-unix.js`, `scripts/compiler-unix.sh`, `scripts/lib/cmake.js`, `scripts/lib/toolchain.js`, `nodes/scripts/node-build.js`, `nodes/scripts/tasks.js`), `packages/ai/src/ai/modules/task/task_engine.py`, `.github/workflows/_sanitize.yaml`, `scripts/ci/**` |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
+`container == true` adds the node image test to the Linux build (outside pull
+requests it always runs). `cpp == true` lets a PR with the `ci:sanitize` label
+run `sanitize`.
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
