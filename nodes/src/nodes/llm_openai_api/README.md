@@ -65,8 +65,9 @@ name. When the endpoint answers HTTP 400 or 422 and names `temperature`, the nod
 the same request once more without a temperature. If that request goes through, the node
 writes a warning and leaves the temperature out for the rest of the run, so the model
 runs at its own default; the first request of such a run is therefore refused once. If
-it is refused as well, the temperature was not the reason: the node keeps its value and
-reports that error. This retry does not send a request again for any other refusal.
+it is refused as well, the node keeps its value and reports that second refusal, which
+names what the endpoint still does not accept. This retry does not send a request again
+for any other refusal.
 
 The Nebius preset does not show the field. It sends 0 and recovers the same way.
 

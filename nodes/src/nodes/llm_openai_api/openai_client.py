@@ -69,8 +69,10 @@ class ChatOpenAI(_LangChainChatOpenAI):
     temperature with HTTP 400, and so does a gateway in front of one. A request refused
     that way is sent once more without a temperature. If it then goes through, the value
     is dropped from this client and the run goes on without it. If it is refused again,
-    the temperature was not the reason: the client keeps its value and that error is
-    raised. Nothing here looks at the model name: behind a gateway it is a deployment name.
+    the client keeps its value and that second refusal is raised, not the first: it says
+    what the endpoint still does not accept, and the shared layer (ai.common.llm_adapter)
+    retries without `stop` or streaming usage only when it is handed the refusal that
+    names them. Nothing here looks at the model name: behind a gateway it is a deployment name.
 
     Only the sync methods are wrapped, because the engine drives a chat model through
     `invoke` and `stream` (ai.common.llm_adapter).
@@ -109,6 +111,7 @@ class ChatOpenAI(_LangChainChatOpenAI):
                 raise
             refusal = e
         # The library's own method, so this second request is never sent a third time.
+        # If it is refused, that refusal is the one raised (see the class docstring).
         retry = self._without_temperature()
         result = _LangChainChatOpenAI._generate(retry, messages, stop=stop, run_manager=run_manager, **kwargs)
         self._keep_temperature_dropped(refusal, sent)

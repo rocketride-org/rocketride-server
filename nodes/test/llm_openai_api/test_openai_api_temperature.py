@@ -34,6 +34,7 @@ pytest.importorskip('langchain_openai')
 openai = pytest.importorskip('openai')
 
 from ai.common.config import Config  # noqa: E402
+from ai.common.llm_native_stream import STOP_SEQUENCES_VAR  # noqa: E402
 from ai.common.llm_tools import model_origin  # noqa: E402
 
 _MOD_PATH = os.path.join(
@@ -252,6 +253,20 @@ USAGE_REJECTION = (
     },
 )
 
+# What a model that takes no stop sequences answers a request that carries one. (A shape,
+# not a captured run; the fields are the ones OpenAI's API uses for an unsupported parameter.)
+STOP_REJECTION = (
+    400,
+    {
+        'error': {
+            'message': "Unsupported parameter: 'stop' is not supported with this model.",
+            'type': 'invalid_request_error',
+            'param': 'stop',
+            'code': 'unsupported_parameter',
+        }
+    },
+)
+
 
 def _completion(body: dict) -> bytes:
     """Answer `ok`, as one JSON completion or as a stream, the way the request asks."""
@@ -281,6 +296,8 @@ class _Endpoint(BaseHTTPRequestHandler):
     reject_always = False
     # When set, requests that carry a temperature wait here for each other before they are refused.
     barrier = None
+    # (status, body) for a request that carries `stop` and was not refused above, or None.
+    stop_rejection = None
     # (status, body) for a request that carries `stream_options` and was not refused above, or None.
     usage_rejection = None
 
@@ -295,6 +312,9 @@ class _Endpoint(BaseHTTPRequestHandler):
             _Endpoint.barrier.wait(timeout=20)
         if refuse:
             status, payload = _Endpoint.rejection
+            data, content_type = json.dumps(payload).encode(), 'application/json'
+        elif _Endpoint.stop_rejection is not None and 'stop' in body:
+            status, payload = _Endpoint.stop_rejection
             data, content_type = json.dumps(payload).encode(), 'application/json'
         elif _Endpoint.usage_rejection is not None and 'stream_options' in body:
             status, payload = _Endpoint.usage_rejection
@@ -316,6 +336,7 @@ def endpoint():
     _Endpoint.rejection = None
     _Endpoint.reject_always = False
     _Endpoint.barrier = None
+    _Endpoint.stop_rejection = None
     _Endpoint.usage_rejection = None
     httpd = ThreadingHTTPServer(('127.0.0.1', 0), _Endpoint)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
@@ -354,11 +375,11 @@ def node(monkeypatch, endpoint):
     return build, warnings
 
 
-def _ask(chat, call: str) -> str:
+def _ask(chat, call: str, **kwargs) -> str:
     """Send one question straight through the LangChain client, by `invoke` or by `stream`."""
     if call == 'invoke':
-        return chat._llm.invoke('hi').content
-    return ''.join(chunk.content for chunk in chat._llm.stream('hi'))
+        return chat._llm.invoke('hi', **kwargs).content
+    return ''.join(chunk.content for chunk in chat._llm.stream('hi', **kwargs))
 
 
 # --- what is sent ---
@@ -515,6 +536,24 @@ def test_a_refusal_repeated_without_the_temperature_is_raised_and_changes_nothin
 
 
 @pytest.mark.parametrize('call', ['invoke', 'stream'])
+def test_a_second_request_refused_for_another_reason_raises_that_refusal(node, endpoint, call):
+    """What is raised is what the endpoint still refuses once the temperature is gone, not the first refusal."""
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = OPENAI
+    _Endpoint.stop_rejection = STOP_REJECTION
+    chat = build()
+
+    with pytest.raises(openai.BadRequestError) as raised:
+        _ask(chat, call, stop=['END'])
+
+    assert raised.value.param == 'stop'
+    assert len(bodies) == 2 and 'temperature' not in bodies[1]
+    assert chat._llm.temperature == 0
+    assert warnings == []
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
 def test_once_the_temperature_is_gone_a_refusal_that_names_it_is_not_retried(node, endpoint, call):
     """Only a request that carried a temperature is sent again."""
     build, warnings = node
@@ -562,6 +601,27 @@ def test_a_proxy_that_also_refuses_streaming_usage_still_answers(node, endpoint)
 
     sent = [sorted(k for k in ('stream_options', 'temperature') if k in b) for b in bodies]
     assert sent == [['stream_options', 'temperature'], ['stream_options'], ['temperature'], []]
+    assert chat._llm.temperature is None
+
+
+@pytest.mark.parametrize('streamed', [True, False], ids=['streamed', 'not-streamed'])
+def test_a_model_that_also_refuses_stop_sequences_still_answers(node, endpoint, streamed):
+    """The shared layer drops `stop` only when it is handed the refusal that names it, so the node raises that one."""
+    build, _warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = OPENAI
+    _Endpoint.stop_rejection = STOP_REJECTION
+    chat = build()
+    on_chunk = (lambda text: None) if streamed else None
+
+    active = STOP_SEQUENCES_VAR.set(['END'])
+    try:
+        assert chat.chat_string('hi', on_chunk=on_chunk) == 'ok'
+    finally:
+        STOP_SEQUENCES_VAR.reset(active)
+
+    sent = [sorted(k for k in ('stop', 'temperature') if k in b) for b in bodies]
+    assert sent == [['stop', 'temperature'], ['stop'], ['temperature'], []]
     assert chat._llm.temperature is None
 
 
