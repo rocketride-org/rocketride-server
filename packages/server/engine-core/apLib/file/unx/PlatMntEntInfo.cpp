@@ -209,6 +209,36 @@ Opt<bool> isRemovable(const std::vector<FsType> &types) noexcept {
     return {};
 }
 
+// Return if a file system type is a kernel pseudo file system. Files on these
+// expose kernel state; their sizes and block counts are not stored data.
+bool isPseudoFileSystem(FsType type) noexcept {
+    switch (type) {
+        case FsType::BinfmtMisc:
+        case FsType::Bpf:
+        case FsType::Cgroup:
+        case FsType::Configfs:
+        case FsType::Debugfs:
+        case FsType::Devpts:
+        case FsType::Fusectl:
+        case FsType::Mqueue:
+        case FsType::Proc:
+        case FsType::Securityfs:
+        case FsType::Sysfs:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+// Given a list of file system types, returns if any is a pseudo file system
+bool isPseudoFileSystem(const std::vector<FsType> &types) noexcept {
+    for (auto &type : types) {
+        if (isPseudoFileSystem(type)) return true;
+    }
+    return false;
+}
+
 // Given a file system name, returns the file system type
 FsType toFsType(TextView str) noexcept {
     for (auto &ext : g_fsExtLookupNames) {
@@ -223,7 +253,7 @@ std::vector<FsType> toFsTypeArray(TextView str) noexcept {
     std::vector<FsType> result;
     auto types = split(str, ",");
     for (auto &type : types) {
-        result.push_back(toFsType(str));
+        result.push_back(toFsType(type));
     }
     return result;
 }
@@ -245,6 +275,13 @@ bool isOnRemovableDrive(const Path &path) noexcept {
     auto result = getGlobalCacheMntEnt(_cast<uint64_t>(pathStat.st_dev));
     if (result.hasCcode()) return false;
     return (*(result->infoIter)).second.removable;
+}
+
+// Given a device id, return if it is mounted from a pseudo file system
+bool isOnPseudoFileSystem(uint64_t deviceId) noexcept {
+    auto result = getGlobalCacheMntEnt(deviceId);
+    if (result.hasCcode()) return false;
+    return isPseudoFileSystem((*(result->infoIter)).second.types);
 }
 
 }  // namespace ap::file
