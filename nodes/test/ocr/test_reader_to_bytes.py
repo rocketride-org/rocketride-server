@@ -204,6 +204,23 @@ class TestToBytesRegression:
             assert img.format == 'PNG'
             assert img.size == (2, 2)
 
+    def test_pil_image_with_exif_orientation_is_transposed(self, reader: object) -> None:
+        """A PIL Image passed directly to _to_bytes has its EXIF orientation transposed."""
+        Image = pytest.importorskip('PIL.Image', reason='Pillow not installed in test env')
+
+        img = Image.new('RGB', (20, 10), (1, 2, 3))
+        exif = img.getexif()
+        exif[0x0112] = 6  # Rotate 90 CW (transposes to 10, 20)
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', exif=exif)
+
+        with Image.open(buf) as opened:
+            out = reader._to_bytes(opened)
+
+        with Image.open(io.BytesIO(out)) as res:
+            assert res.format == 'PNG'
+            assert res.size == (10, 20)
+
 
 class TestToBytesUnsupported:
     """An unsupported type is a bug, not data to be silently re-encoded."""

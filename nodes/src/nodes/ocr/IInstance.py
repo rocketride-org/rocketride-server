@@ -156,6 +156,12 @@ class IInstance(IInstanceBase):
                 try:
                     while True:
                         frame = gif.convert('RGB')
+                        try:
+                            from PIL import ImageOps
+
+                            frame = ImageOps.exif_transpose(frame) or frame
+                        except Exception:
+                            pass
                         frame_np = np.array(frame)
                         frame_text = self.IGlobal.reader.read(frame_np)
                         if isinstance(frame_text, list):
