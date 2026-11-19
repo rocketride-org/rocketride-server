@@ -173,7 +173,10 @@ def _check_json_format(output: str) -> dict:
     """
     stripped = output.strip()
 
-    code_block_match = re.search(r'```(?:json)?\s*(.*?)\s*```', stripped, re.DOTALL)
+    # No ``\s*`` around the group: with an unclosed fence they and the lazy
+    # group could all match the same whitespace, and the search time grew with
+    # the cube of its length. ``.strip()`` below removes that whitespace anyway.
+    code_block_match = re.search(r'```(?:json)?(.*?)```', stripped, re.DOTALL)
     if code_block_match:
         stripped = code_block_match.group(1).strip()
 

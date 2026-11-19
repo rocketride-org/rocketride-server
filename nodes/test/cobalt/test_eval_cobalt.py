@@ -1380,6 +1380,48 @@ class TestFormatCheckersShareOneListDefinition:
         assert '4/5 lines appear to be list items' in format_check._check_prose_format(text)['reasoning']
 
 
+class TestJsonFenceSearchIsLinear:
+    """The ``json`` checker must stay fast on a code fence that is never closed.
+
+    The fence pattern used to put an optional-whitespace part on each side of
+    its lazy group. With no closing fence, all three parts could match the same
+    run of whitespace, so the search time grew with the cube of the run's
+    length. The group is stripped after the match, so neither part is needed.
+    """
+
+    @pytest.mark.timeout(5)
+    def test_unclosed_fence_before_a_long_whitespace_run_returns_quickly(self):
+        result = evaluate_format_fn('```' + ' ' * 50_000 + 'x', 'json')
+        assert result['score'] == 0.0
+        assert result['passed'] is False
+
+    @pytest.mark.parametrize(
+        'output',
+        [
+            '```json\n{"a": 1}\n```',
+            '```json{"a": 1}```',
+            '```\n{"a": 1}\n```',
+            '```  \n\n {"a": 1} \n\n  ```',
+            'Here it is:\n```json\n[1, 2]\n```\nDone.',
+        ],
+    )
+    def test_fenced_json_is_read_whatever_whitespace_surrounds_it(self, output):
+        assert evaluate_format_fn(output, 'json')['score'] == 1.0
+
+    @pytest.mark.parametrize(
+        'output',
+        [
+            '``````',
+            '```json```',
+            '```\t\n```',
+            '```json\n{"a": 1}',
+            '``` json\n{"a": 1}\n```',
+        ],
+    )
+    def test_empty_unclosed_or_mistagged_fences_are_not_json(self, output):
+        assert evaluate_format_fn(output, 'json')['score'] == 0.0
+
+
 class TestValidEvalTypesArePinnedToTheSchema:
     """_VALID_EVAL_TYPES and services.json preconfig.profiles must not drift.
 
