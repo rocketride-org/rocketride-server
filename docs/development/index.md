@@ -168,6 +168,8 @@ is unpublished — it never reaches docs.rocketride.org.
   minidump
 - [MCP Module](engine/mcp-module.md) -- the built-in HTTP MCP server: engine-client
   seam, credentials catalog gates, widget workspace
+- [Local CPU Inference Slots](engine/local-cpu-inference-slots.md) -- how many
+  model calls a task runs at once on the CPU, and `RR_CPU_INFERENCE_SLOTS`
 
 ### Nodes
 
