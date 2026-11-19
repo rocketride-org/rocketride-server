@@ -1,0 +1,438 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# =============================================================================
+
+"""Guarded HTTP fetcher for scraper_beautifulsoup.
+
+Every request (and every redirect hop) is checked against an optional regex
+allow-list (matched by an injected ``allow_match``, in the engine
+``ai.common.utils.url_matches_pattern``, which only trusts patterns that pin
+the scheme and host), then resolved once by an injected ``resolve_url`` callable — in
+the engine ``ai.common.utils.resolve_public_addresses``, which rejects
+non-public hosts. The request is sent through ``open_session(addresses)``
+(``ai.common.utils.pinned_session``), which connects only to those validated
+addresses, so a second DNS answer cannot redirect it (no rebinding gap).
+Redirects are followed manually so each ``Location`` is re-resolved and
+re-validated; responses are streamed and capped at ``max_bytes``; requests to
+the same host are paced by ``min_interval``. ``timeout`` bounds the whole
+fetch (every hop: connect, TLS handshake, response headers and body), not
+each socket operation. Error messages carry the URL without its query
+string, so keys in a query never reach the logs.
+
+This module has no engine imports so it can be unit-tested standalone.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import threading
+import time
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from urllib.parse import urljoin, urlparse, urlsplit
+
+import requests
+
+DEFAULT_USER_AGENT = 'RocketRide-Scraper/1.0 (+https://rocketride.org)'
+REDIRECT_CODES = (301, 302, 303, 307, 308)
+# Headers still sent after a redirect to a different origin; all others are dropped.
+SAFE_REDIRECT_HEADERS = frozenset({'user-agent', 'accept', 'accept-language'})
+
+
+def redact_url(url: str) -> str:
+    """``url`` without query string, fragment or userinfo, for error messages."""
+    try:
+        parts = urlsplit(url)
+        netloc = parts.netloc.rpartition('@')[2]
+        return parts._replace(netloc=netloc, query='', fragment='').geturl()
+    except ValueError:
+        return '<invalid URL>'
+
+
+def _origin(url: str) -> tuple:
+    parsed = urlparse(url)
+    return (parsed.scheme, (parsed.hostname or '').lower(), parsed.port)
+
+
+class FetchError(Exception):
+    """Raised when a fetch is blocked, fails, or returns an error status."""
+
+
+@dataclass
+class FetchResult:
+    """A completed HTTP response, body already read (and size-capped)."""
+
+    url: str
+    status: int
+    headers: Dict[str, str]
+    content: bytes
+    truncated: bool = False
+
+    @property
+    def content_type(self) -> str:
+        return self.headers.get('content-type', '').split(';')[0].strip().lower()
+
+    def text(self) -> str:
+        charset = None
+        for part in self.headers.get('content-type', '').split(';')[1:]:
+            key, _, value = part.strip().partition('=')
+            if key.lower() == 'charset' and value:
+                charset = value.strip('"\'')
+        try:
+            return self.content.decode(charset or 'utf-8', errors='replace')
+        except LookupError:
+            return self.content.decode('utf-8', errors='replace')
+
+    def json(self) -> Any:
+        if self.truncated:
+            # Parsing half a document would report a syntax error, hiding the size limit.
+            raise ValueError('the response is larger than "Max response size" and was cut off')
+        return json.loads(self.text())
+
+
+@dataclass
+class Fetcher:
+    """HTTP client enforcing the node's network policy."""
+
+    resolve_url: Callable[[str], Any]
+    open_session: Callable[[Any], requests.Session]
+    timeout: float = 20.0
+    max_bytes: int = 5 * 1024 * 1024
+    max_redirects: int = 5
+    min_interval: float = 0.0
+    user_agent: str = DEFAULT_USER_AGENT
+    allow_patterns: List[re.Pattern] = field(default_factory=list)
+    allow_match: Optional[Callable[[re.Pattern, str], bool]] = None
+    # Returns the exact URL ``requests`` will send (in the engine
+    # ``ai.common.utils.canonicalize_url``, which refuses dot segments). The
+    # allow-list is matched against that form and that same string is sent,
+    # because ``requests`` removes ``.`` / ``..`` before sending.
+    canonicalize: Optional[Callable[[str], str]] = None
+
+    def __post_init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_hit: Dict[str, float] = {}
+
+    # -- policy -----------------------------------------------------------
+
+    def check_url(self, url: str, deadline: Optional[float] = None) -> Any:
+        """Validate one canonical URL (scheme, allow-list, public host); returns the resolved addresses.
+
+        With ``deadline``, the DNS lookup is bounded by it too: ``getaddrinfo``
+        cannot be interrupted, so it runs on a worker thread that is
+        abandoned when time runs out.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise FetchError(f'Only absolute http(s) URLs are allowed: {redact_url(url)!r}')
+        if self.allow_patterns:
+            if self.allow_match is None or self.canonicalize is None:
+                # Fail closed: a plain re.search would accept the pattern anywhere
+                # in the URL, and an uncanonicalized URL can walk out with "/../".
+                raise FetchError('URL allow-list is set but no allow-list matcher is configured')
+            if not any(self.allow_match(p, url) for p in self.allow_patterns):
+                raise FetchError(f'URL is not in the allow-list: {redact_url(url)}')
+        try:
+            if deadline is None:
+                return self.resolve_url(url)
+            return _call_within(self.resolve_url, url, self._remaining(deadline, url))
+        except TimeoutError as e:
+            raise self._timeout_error(url) from e
+        except ValueError as e:
+            raise FetchError(str(e)) from e
+
+    def canonical_url(self, url: str, params: Optional[Dict[str, Any]] = None) -> str:
+        """The exact URL to check and send, with ``params`` folded into its query."""
+        try:
+            if params:
+                url = requests.Request('GET', url, params=params).prepare().url
+            if self.canonicalize is not None:
+                url = self.canonicalize(url)
+        except requests.RequestException as e:
+            # requests quotes the whole URL, query string included. InvalidURL and
+            # MissingSchema are also ValueErrors, so this branch must come first.
+            raise FetchError(f'Invalid URL {redact_url(url)}: {type(e).__name__}') from e
+        except ValueError as e:
+            # canonicalize_url's own errors (userinfo, dot segments) carry no URL.
+            raise FetchError(f'Invalid URL {redact_url(url)}: {e}') from e
+        return url
+
+    def _pace(self, url: str) -> float:
+        """Sleep out the per-host interval; returns the seconds slept."""
+        if self.min_interval <= 0:
+            return 0.0
+        host = (urlparse(url).hostname or '').lower()
+        with self._lock:
+            now = time.monotonic()
+            wait = self._last_hit.get(host, 0.0) + self.min_interval - now
+            self._last_hit[host] = now + max(wait, 0.0)
+        if wait > 0:
+            time.sleep(wait)
+            return wait
+        return 0.0
+
+    def _remaining(self, deadline: float, url: str) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._timeout_error(url)
+        return remaining
+
+    # -- request ----------------------------------------------------------
+
+    def fetch(
+        self,
+        url: str,
+        *,
+        method: str = 'GET',
+        headers: Optional[Dict[str, str]] = None,
+        params: Optional[Dict[str, Any]] = None,
+        json_body: Any = None,
+        raise_for_status: bool = True,
+    ) -> FetchResult:
+        """Fetch ``url``, following redirects manually with re-validation.
+
+        ``timeout`` covers the whole call: every redirect hop, each connect
+        attempt, the TLS handshake, the response headers and the body read
+        share one deadline. Time spent pacing is
+        politeness, not network time, and extends the deadline.
+        """
+        method = (method or 'GET').upper()
+        if method not in ('GET', 'POST'):
+            raise FetchError(f'Unsupported method: {method}')
+
+        send_headers = {'User-Agent': self.user_agent, 'Accept': '*/*'}
+        send_headers.update({str(k): str(v) for k, v in (headers or {}).items()})
+        if any(k.lower() == 'host' for k in send_headers):
+            raise FetchError('The Host header is derived from the validated URL and cannot be overridden')
+
+        deadline = time.monotonic() + self.timeout
+        # Query params are folded in once, so the checked URL is the sent URL.
+        current = self.canonical_url(url, params)
+        for _hop in range(self.max_redirects + 1):
+            self._remaining(deadline, current)
+            addresses = self.check_url(current, deadline)
+            deadline += self._pace(current)
+            timeout = self._remaining(deadline, current)
+            with self._hop_session(addresses, timeout) as (session, timed_out):
+                with closing(self._send(session, method, current, send_headers, json_body, timeout, timed_out)) as resp:
+                    if resp.status_code in REDIRECT_CODES and resp.headers.get('location'):
+                        current, method, json_body, send_headers = _redirect_step(
+                            resp.status_code, current, resp.headers['location'], method, json_body, send_headers
+                        )
+                        current = self.canonical_url(current)
+                        continue
+                    content, truncated = self._read_capped(resp, deadline, current, timed_out)
+
+            if raise_for_status and resp.status_code >= 400:
+                raise FetchError(f'{method} {redact_url(current)} returned HTTP {resp.status_code}')
+            return FetchResult(
+                url=current,
+                status=resp.status_code,
+                headers={k.lower(): v for k, v in resp.headers.items()},
+                content=content,
+                truncated=truncated,
+            )
+
+        raise FetchError(f'Too many redirects (>{self.max_redirects}) starting at {redact_url(url)}')
+
+    @contextmanager
+    def _hop_session(self, addresses: Any, timeout: float) -> Iterator[Tuple[Any, threading.Event]]:
+        """Open the session for one hop with its watchdog armed; on exit, cancel the watchdog and close the session.
+
+        Yields ``(session, timed_out)``; ``timed_out`` is set when the watchdog fired.
+        """
+        session = self.open_session(addresses)
+        timed_out = threading.Event()
+        watchdog = _arm_watchdog(session, timeout, timed_out)
+        try:
+            yield session, timed_out
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+            session.close()
+
+    def _send(
+        self,
+        session: Any,
+        method: str,
+        url: str,
+        headers: Dict[str, str],
+        json_body: Any,
+        timeout: float,
+        timed_out: threading.Event,
+    ) -> requests.Response:
+        """Send one request without following redirects; returns the response with its body unread."""
+        try:
+            resp = session.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body if method == 'POST' else None,
+                timeout=timeout,
+                allow_redirects=False,
+                stream=True,
+            )
+        except (requests.RequestException, OSError) as e:
+            if timed_out.is_set():
+                raise self._timeout_error(url) from e
+            # The exception text repeats the URL (query included): report its type only.
+            raise FetchError(f'{method} {redact_url(url)} failed: {type(e).__name__}') from e
+        if timed_out.is_set():
+            # The watchdog cut the response short (some platforms then
+            # return a truncated response instead of raising).
+            resp.close()
+            raise self._timeout_error(url)
+        return resp
+
+    def _timeout_error(self, url: str) -> FetchError:
+        return FetchError(f'Fetching {redact_url(url)} timed out after {self.timeout:g}s')
+
+    def _read_capped(
+        self, resp: requests.Response, deadline: float, url: str, timed_out: threading.Event
+    ) -> tuple[bytes, bool]:
+        """Stream the body, stopping at ``max_bytes`` or the deadline; returns (content, truncated).
+
+        The hop's watchdog (see :func:`_arm_watchdog`) aborts a read that a
+        trickling server would otherwise hold open; ``timed_out`` says it fired.
+        """
+        chunks: List[bytes] = []
+        total = 0
+        try:
+            for chunk in resp.iter_content(chunk_size=65536):
+                self._remaining(deadline, url)
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > self.max_bytes:
+                    chunks.append(chunk[: len(chunk) - (total - self.max_bytes)])
+                    return b''.join(chunks), True
+                chunks.append(chunk)
+        except Exception as e:
+            if timed_out.is_set():
+                raise self._timeout_error(url) from e
+            if isinstance(e, (requests.RequestException, OSError)):
+                raise FetchError(f'Reading {redact_url(url)} failed: {type(e).__name__}') from e
+            raise
+        if timed_out.is_set():
+            # A body without Content-Length ends "normally" when the socket shuts down.
+            raise self._timeout_error(url)
+        return b''.join(chunks), False
+
+
+def _redirect_step(
+    status: int, current: str, location: str, method: str, json_body: Any, headers: Dict[str, str]
+) -> Tuple[str, str, Any, Dict[str, str]]:
+    """Apply the redirect rules to one 3xx answer.
+
+    Returns ``(target, method, json_body, headers)`` for the next hop (the
+    caller canonicalizes and re-validates ``target``):
+
+    * a redirect to another origin keeps only :data:`SAFE_REDIRECT_HEADERS`,
+      so caller credentials (``Authorization``, API keys) never leave their host;
+    * a 307 / 308 to another origin with a body is refused, because it would
+      resend the body (which can carry a key) there;
+    * 303, and 301 / 302 after a POST, continue as a GET without a body.
+
+    Raises :class:`FetchError` for a body redirect to another origin or a
+    ``Location`` that does not parse.
+    """
+    try:
+        target = urljoin(current, location)
+    except ValueError as e:
+        raise FetchError(f'Redirect from {redact_url(current)} has an invalid Location') from e
+    if _origin(target) != _origin(current):
+        if json_body is not None and status in (307, 308):
+            raise FetchError('Refusing to forward a request body to a different origin')
+        headers = {k: v for k, v in headers.items() if k.lower() in SAFE_REDIRECT_HEADERS}
+    if status == 303 or (status in (301, 302) and method == 'POST'):
+        method, json_body = 'GET', None
+    return target, method, json_body, headers
+
+
+def _call_within(function: Callable[[str], Any], argument: str, seconds: float) -> Any:
+    """Run ``function(argument)`` on a daemon thread; raise ``TimeoutError`` if it takes longer than ``seconds``."""
+    outcome: Dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            outcome['value'] = function(argument)
+        except BaseException as e:  # re-raised on the calling thread
+            outcome['error'] = e
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise TimeoutError
+    if 'error' in outcome:
+        raise outcome['error']
+    return outcome['value']
+
+
+def _arm_watchdog(session: Any, seconds: float, timed_out: threading.Event) -> Optional[threading.Timer]:
+    """Abort the hop when its share of the deadline runs out.
+
+    A per-socket timeout restarts with every byte, so a server sending its
+    TLS handshake, headers or body one byte at a time could hold a request
+    open indefinitely. The timer covers the whole hop instead: when it fires
+    it sets ``timed_out`` and calls ``session.abort()`` (``pinned_session``
+    provides it), which shuts the sockets down and ends the blocked read.
+    A session without ``abort`` gets no watchdog.
+    """
+    abort = getattr(session, 'abort', None)
+    if abort is None:
+        return None
+
+    def fire() -> None:
+        timed_out.set()
+        abort()
+
+    watchdog = threading.Timer(seconds, fire)
+    watchdog.daemon = True
+    watchdog.start()
+    return watchdog
+
+
+def compile_patterns(raw: Any) -> List[re.Pattern]:
+    """Compile an allow-list given as a list of strings / ``{pattern}`` rows, or newline text."""
+    if raw is None or raw == '':
+        return []
+    if isinstance(raw, str):
+        items: List[Any] = [line for line in raw.splitlines()]
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        raise ValueError(f'urlAllowList must be a list or newline-separated text, got {type(raw).__name__}')
+    patterns = []
+    for item in items:
+        if isinstance(item, dict):
+            item = next((v for v in item.values() if isinstance(v, str)), '')
+        text = str(item or '').strip()
+        if not text:
+            continue
+        try:
+            patterns.append(re.compile(text))
+        except re.error as e:
+            raise ValueError(f'Invalid allow-list regex {text!r}: {e}') from e
+    return patterns
