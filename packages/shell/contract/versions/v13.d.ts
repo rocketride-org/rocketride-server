@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV13 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-17T12:30:19.727Z
-// Source commit: 6098cd03426f09e6eaac741a21fed95e92ae583c
+// Generated:     2026-11-17T21:59:45.024Z
+// Source commit: f8bf682577700d759d52c94d024bb8f1440aff12
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1019,27 +1019,10 @@ export interface CreateKeyParams {
     name: string;
     /** Array of permission strings to grant to this key. Empty for full PAT. */
     permissions: string[];
-    /**
-     * Optional ISO timestamp for key expiration. Omit to ask for no expiry.
-     * The server may grant an EARLIER expiry than requested (a key created
-     * over a sign-in session expires with that session's bound); the granted
-     * value is in {@link CreateKeyResult.expiresAt}.
-     */
+    /** Optional ISO timestamp for key expiration. Omit for no expiry. */
     expiresAt?: string;
     /** Optional team UUID to scope this key to. Omit for all teams. */
     teamId?: string;
-}
-/** Result of creating an API key. */
-export interface CreateKeyResult {
-    /** The raw key string. Shown once; it cannot be retrieved later. */
-    key: string;
-    /**
-     * The expiry the server actually granted, as an ISO timestamp, or null when
-     * the key does not expire. It can be earlier than the requested one.
-     * Absent when the server did not report it (an older server), so callers
-     * must not read a missing value as "never expires".
-     */
-    expiresAt?: string | null;
 }
 /** Parameters for inviting a new member to an organization. */
 export interface InviteMemberParams {
@@ -3840,14 +3823,14 @@ declare class AccountApi {
      */
     listKeys(): Promise<ApiKeyRecord[]>;
     /**
-     * Creates a new API key and returns the raw key string and its real expiry.
+     * Creates a new API key and returns the raw key string.
      *
      * @param params - Key creation parameters (name, permissions, expiresAt).
-     * @returns The raw key, and the expiry the server granted (`expiresAt`,
-     *   which may be earlier than requested; absent when the server did not
-     *   report it).
+     * @returns Object containing the raw key string.
      */
-    createKey(params: CreateKeyParams): Promise<CreateKeyResult>;
+    createKey(params: CreateKeyParams): Promise<{
+        key: string;
+    }>;
     /**
      * Revokes an API key by its ID.
      *
@@ -7190,6 +7173,17 @@ export interface AppDescriptor {
     id: string;
     /** Display name shown in the app switcher. */
     name: string;
+    /**
+     * The app value stamped on this app's events; defaults to `id`. For apps
+     * whose dashboards predate the descriptor id. Chosen once here: the shell
+     * binds the app's reporter to it, so it is fixed for the reporter's
+     * lifetime and per-event props still cannot overwrite it. Honoured only
+     * for first-party apps (`rocketride` or `rocketride.*` ids); the value must
+     * match the events contract's `app` pattern (`^[A-Za-z0-9._-]{1,128}$`),
+     * must not be the reserved stamp 'shell', and must not be another
+     * registered app's id. Anything else falls back to `id`.
+     */
+    telemetryId?: string;
     /** Optional icon shown in the app switcher list. */
     icon?: React$1.ReactNode;
     /** Branding tokens (logo, welcome text) for the app. */
@@ -9339,7 +9333,7 @@ type Reporter = (event: string, props?: Record<string, unknown>, options?: SendO
 export type ConsentOrigin = "local" | "external";
 /** Props for the provider the shell wraps the app outlet in. */
 export type TelemetryProviderProps = {
-    /** The active app's bound reporter (host.ts getReporter). */
+    /** The active app's bound reporter (host.ts appReporter). */
     reporter: Reporter;
     children?: React$1.ReactNode;
 };
@@ -9400,9 +9394,13 @@ export declare function subscribeConsent(fn: (state: ConsentState, origin: Conse
 export declare function consentExpiresAt(): number | null;
 /**
  * A report bound to one consented session: it sends through the app's own
- * reporter (sanitised, app-stamped, consent-routed) and returns whether the
- * event went out. It refuses, returning false, once the moment the capture was
- * taken in has passed: consent withdrawn, the SDK gone, or the session rotated.
+ * reporter (sanitised, app-stamped, consent-routed) and returns whether it was
+ * handed to the transport. It refuses, returning false, once the moment the
+ * capture was taken in has passed: consent withdrawn, the SDK gone, or the
+ * session rotated. True does not mean delivered: the event can still be queued,
+ * or dropped at send time by the consent gate (attributionGate). Events sent
+ * through this report are tagged (ATTRIBUTED_TAG) and only they are gated:
+ * the same event sent through the plain reporter is not.
  */
 export type ConsentedReporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => boolean;
 /**
@@ -15229,7 +15227,6 @@ interface IAccountViewProps {
         teamId?: string;
     }) => Promise<{
         key: string;
-        expiresAt?: string | null;
     }>;
     /** Revokes an API key by its ID. */
     onRevokeKey: (keyId: string) => Promise<void>;

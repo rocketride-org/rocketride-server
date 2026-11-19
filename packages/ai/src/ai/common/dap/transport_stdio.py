@@ -900,7 +900,7 @@ class TransportStdio(TransportBase):
                     try:
                         exitCode = int(s_exitCode, 16)
                     except ValueError:
-                        exitCode = 0 if s_exitCode == 'CANCELLED' else 1
+                        exitCode = 1
                     crash = s_exitCode == 'Crash'
                     await self._transport_receive(
                         {
