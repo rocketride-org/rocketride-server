@@ -53,7 +53,7 @@ from luxor_ai import (
     WaitReadyFailedError,
 )
 
-from .sdk_shims import bound_file_calls, stop_keeping_output
+from .sdk_shims import bound_file_calls, reset_data_plane, stop_keeping_output
 
 # The deadline of every control-plane and file call; git clones share it, so it never drops below the exec timeout.
 _MIN_RPC_TIMEOUT_SECS = 60
@@ -599,6 +599,8 @@ class IGlobal(IGlobalBase):
                 return 'RUNNING'
             except SandboxError as e:
                 refusal = e
+                if isinstance(e, ResumeWaitTimeoutError):
+                    reset_data_plane(session)  # the resume may still land, and the SDK skipped its own reset
             # A refusal does not say whether it is temporary, so the state decides.
             try:
                 state = self._state(session)

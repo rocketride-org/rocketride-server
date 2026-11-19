@@ -427,6 +427,9 @@ class _Session:
             raise mod.SandboxError('paused source is still being torn down, retry shortly')
         self.state = 'RUNNING'
 
+    def _reset_data_plane(self):
+        self.calls.append('reset_data_plane')
+
     def wait_ready(self, timeout=None):
         self.calls.append(('wait_ready', timeout))
         if self.ready_gate is not None:
@@ -1127,6 +1130,25 @@ def test_a_resume_that_runs_past_its_deadline_is_not_the_calls_timeout(monkeypat
     session.resume = lambda: _raise(mod.ResumeWaitTimeoutError('timeout waiting for sandbox sb-1 to resume'))
     result = inst.run_command({'command': 'ls'})
     assert result['timed_out'] is False and 'recovering the sandbox ran past the deadline' in result['error']
+    assert 'reset_data_plane' in session.calls
+
+
+def test_a_resume_past_its_deadline_that_lands_is_warmed_up_on_a_fresh_data_plane(monkeypatch, logs):
+    # luxor-ai 1.5.2 raises ResumeWaitTimeoutError before it drops the pre-pause data-plane connection, though the
+    # resume may still land (on another host), so the node drops it.
+    session = _Session()
+    inst, _ = _used(monkeypatch, session)
+    session.state = 'PAUSED'
+
+    def lands_late():
+        session.calls.append('resume')
+        session.state = 'RUNNING'
+        raise mod.ResumeWaitTimeoutError('timeout waiting for sandbox sb-1 to resume')
+
+    session.resume = lands_late
+    assert inst.read_file({'path': 'notes.txt'})['session'] == 'resumed'
+    after = session.calls[session.calls.index('resume') :]
+    assert after.index('reset_data_plane') < after.index(('start', ('true',), 10))
 
 
 def test_shutdown_closes_the_session_and_the_client_and_nothing_is_used_after(monkeypatch, logs):

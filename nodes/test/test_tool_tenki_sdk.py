@@ -497,9 +497,14 @@ def test_a_resume_resets_the_data_plane_and_one_past_its_deadline_raises_resume_
         SimpleNamespace(_rpc=SimpleNamespace(resume_session=lambda r: _raise(_DeadlineExceeded()))),
         tenki.SandboxInfo(id='sb-contract'),
     )
+    session._data_plane_rpc, session._data_plane_verified = _DataPlane(), True
     with pytest.raises(tenki.ResumeWaitTimeoutError) as raised:
         session.resume()
     assert isinstance(raised.value, tenki.SandboxError) and not isinstance(raised.value, tenki.CommandTimeoutError)
+    # It raises before its own reset, though the resume may land, so the node drops the connection itself.
+    assert session._data_plane_verified is True
+    shims.reset_data_plane(session)
+    assert session._data_plane_rpc is None and session._data_plane_verified is False
 
 
 class _FloodingDataPlane(_DataPlane):

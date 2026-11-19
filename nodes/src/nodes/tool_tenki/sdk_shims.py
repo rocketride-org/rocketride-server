@@ -92,3 +92,10 @@ def run_ended(process) -> bool:
         return True
     done = getattr(process, '_done', None)
     return done is not None and done.is_set()
+
+
+def reset_data_plane(session) -> None:
+    """Drop ``session``'s data-plane connection so its next use connects afresh, as a resume that returns does."""
+    # Sandbox._resume (luxor-ai 1.5.2) raises ResumeWaitTimeoutError before its own reset, though the resume may still
+    # land, possibly on another host; wait_ready keeps the old connection if the endpoint reads the same.
+    session._reset_data_plane()
