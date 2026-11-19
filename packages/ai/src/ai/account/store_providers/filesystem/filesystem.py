@@ -233,6 +233,9 @@ class FilesystemStore(IStore):
             if not full_path.exists():
                 raise StorageNotFoundError(f'File not found: {filename}')
 
+            if full_path.is_dir():
+                raise StorageError(f'Cannot delete directory as file: {filename} (use rmdir instead)')
+
             # Create lock file for this resource
             lock_path = full_path.parent / f'.{full_path.name}.lock'
 
@@ -272,6 +275,16 @@ class FilesystemStore(IStore):
                         lock_path.unlink()
                 except Exception:  # noqa: S110
                     pass  # Ignore cleanup errors
+
+            # Prune empty parent directories up to _root_path so deleted
+            # directories (e.g. after removing .dirmarker) do not linger.
+            parent = full_path.parent
+            while parent != self._root_path and parent.exists():
+                try:
+                    parent.rmdir()
+                    parent = parent.parent
+                except OSError:
+                    break
 
         except StorageError:
             raise
