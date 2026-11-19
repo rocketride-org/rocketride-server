@@ -55,7 +55,7 @@ import stat
 import tarfile
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
 from rocketlib import debug
@@ -123,10 +123,16 @@ ANNOTATION_TASK = 'rocketride.task-id'
 ANNOTATION_EAS = 'rocketride.eas-instance'
 
 # One line per watch event: its type, then the pod's name, Job, phase, IPs, exit code and waiting reason
+# Where a pod shows its task's exit code: the watch reads it, and so does the look before a kill
+EXIT_CODE_PATH = '.status.containerStatuses[0].state.terminated.exitCode'
+
+# Seconds the look before a kill may take; the engine waits five for the task's end after it
+CONST_LOOK_TIMEOUT = 3.0
+
 WATCH_FORMAT = (
     '{.type}|{.object.metadata.name}|{.object.metadata.labels.job-name}'
     '|{.object.status.phase}|{.object.status.podIPs[*].ip}'
-    '|{.object.status.containerStatuses[0].state.terminated.exitCode}'
+    f'|{{.object{EXIT_CODE_PATH}}}'
     '|{.object.status.containerStatuses[0].state.waiting.reason}{"\\n"}'
 )
 WATCH_EVENTS = frozenset({'ADDED', 'MODIFIED', 'DELETED'})
@@ -746,6 +752,17 @@ class WatchedPod:
             self.lost()
         self._changed.set()
 
+    def exited(self, exit_code: int) -> None:
+        """
+        Take the exit code a look at the pod showed before the watch did.
+
+        Args:
+            exit_code: Its container's exit code.
+        """
+        if self.exit_code is None:
+            self.exit_code = exit_code
+        self._changed.set()
+
     def lost(self) -> None:
         """The pod is gone: without an exit code by now, none will come."""
         if self.exit_code is None:
@@ -1143,23 +1160,49 @@ class K8sLaunch(Launch):
         await self._pod.wait(lambda: self._pod.exit_code is not None)
         return self._pod.exit_code
 
-    def _signal(self, args: List[str]) -> None:
-        """Delete the pod in the background, as Process.terminate signals synchronously."""
+    def _signal(self, sending: Callable[[], Awaitable[Any]]) -> None:
+        """Stop the pod in the background, as Process.terminate signals synchronously."""
         if self._pod.exit_code is not None or self._removed:
             return
-        task = asyncio.ensure_future(self._cli.run(args, check=False))
+        task = asyncio.ensure_future(sending())
         self._signals.add(task)
         task.add_done_callback(self._signals.discard)
         # A delete the cluster did not take has no one to tell: the watch reports the end
         task.add_done_callback(lambda done: done.cancelled() or done.exception())
 
+    async def _delete_pod(self, *how: str) -> None:
+        """Ask the cluster to delete the pod; its end comes with the watch."""
+        await self._cli.run(['delete', 'pod', self._pod.name, *how, '--wait=false'], check=False)
+
+    async def _kill(self) -> None:
+        """
+        Delete the pod at once, after one look at it.
+
+        The watch is away while it is started again, so it can be late with a
+        pod's end, and a pod deleted before it showed its exit code would lose
+        it: one that has ended keeps its code.
+        """
+        pod = self._pod
+        try:
+            shown = await self._cli.run(
+                ['get', 'pod', pod.name, '-o', f'jsonpath={{{EXIT_CODE_PATH}}}'],
+                check=False,
+                timeout=CONST_LOOK_TIMEOUT,
+            )
+        except (OSError, K8sError):
+            shown = None
+        if shown is not None and shown.returncode == 0 and shown.stdout.strip().lstrip('-').isdigit():
+            pod.exited(int(shown.stdout))
+            return
+        await self._delete_pod('--grace-period=0', '--force')
+
     def terminate(self) -> None:
         """SIGTERM to the engine: the pod is deleted with a few seconds to finish."""
-        self._signal(['delete', 'pod', self._pod.name, f'--grace-period={CONST_TERMINATE_GRACE}', '--wait=false'])
+        self._signal(lambda: self._delete_pod(f'--grace-period={CONST_TERMINATE_GRACE}'))
 
     def kill(self) -> None:
-        """SIGKILL: the pod is deleted at once."""
-        self._signal(['delete', 'pod', self._pod.name, '--grace-period=0', '--force', '--wait=false'])
+        """SIGKILL: the pod is deleted at once, unless it has ended meanwhile."""
+        self._signal(self._kill)
 
     def metrics(self) -> Dict[str, Any]:
         """CPU and memory from the metrics API; no local PID, so the GPU half reads zero."""

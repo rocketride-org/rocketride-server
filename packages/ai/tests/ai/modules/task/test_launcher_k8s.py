@@ -212,8 +212,8 @@ class FakeKubectl:
         job = job or self.job
         self.watches[-1].stdout.feed(f'{event}|{job}-x7k2p|{job}|{phase}|{ip}|{exit_code}|{waiting}\n')
 
-    async def run(self, args, *, stdin=None, check=True):
-        self.calls.append(SimpleNamespace(args=list(args), stdin=stdin))
+    async def run(self, args, *, stdin=None, check=True, timeout=None):
+        self.calls.append(SimpleNamespace(args=list(args), stdin=stdin, timeout=timeout))
         self.log.append(args[0])
         response = self.responses.get(args[0], CliResult(0, '', ''))
         result = response(list(args), stdin) if callable(response) else response
@@ -1438,6 +1438,42 @@ async def test_terminate_and_kill_delete_the_pod():
         ['delete', 'pod', cli.pod, '--grace-period=5', '--wait=false'],
         ['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false'],
     ]
+
+
+async def test_kill_keeps_the_exit_code_of_a_pod_that_has_ended():
+    """The watch can be late: a pod that has ended is not deleted by force, and its own exit code stays."""
+    cli = FakeKubectl(get=CliResult(0, '3', ''))
+    launch = await _launcher(cli).start(_spec())
+    launch.kill()
+    assert await launch.wait() == 3
+    look = cli.call('get')
+    assert look.args[:3] == ['get', 'pod', cli.pod]
+    # The engine waits five seconds for the end after a kill: the look must be shorter
+    assert look.timeout == 3.0
+    assert cli.deletes('pod') == []
+
+
+def _timed_out(args, stdin):
+    """A kubectl that the API server does not answer."""
+    raise K8sError('kubectl get timed out after 3 s')
+
+
+@pytest.mark.parametrize(
+    'look',
+    [
+        CliResult(0, '', ''),
+        CliResult(0, 'none', ''),
+        CliResult(1, '', 'Unable to connect to the server: dial tcp 127.0.0.1:6443: connect: connection refused'),
+        _timed_out,
+    ],
+    ids=['still-running', 'not-a-number', 'unreachable', 'timed-out'],
+)
+async def test_kill_deletes_a_pod_that_shows_no_exit_code(look):
+    cli = FakeKubectl(get=look)
+    launch = await _launcher(cli).start(_spec())
+    launch.kill()
+    await asyncio.gather(*launch._signals)
+    assert cli.deletes('pod') == [['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false']]
 
 
 async def test_a_task_that_has_ended_is_not_signalled():
