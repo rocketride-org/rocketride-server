@@ -63,7 +63,7 @@ test('T131 a scan inside another scan callback leaves both scans complete', () =
 	for (const nested of foundInner) assert.deepEqual(nested, innerNeedles, 'every nested scan finds every needle');
 });
 
-test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded number of lengths, 8 MiB scans in under 1000 ms, every needle found', async (tt) => {
+test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded number of lengths, 8 MiB scans in under 1000 ms or 15x the linear floor, every needle found', async (tt) => {
 	const prefix = 'shared-prefix-16';
 	assert.equal(prefix.length, 16);
 	const needles = Array.from({ length: 200 }, (_, i) => `${prefix}${hex(8 + i)}`);
@@ -82,14 +82,25 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	assert.deepEqual(found, needles, 'every needle is found');
 
 	// Cost: 8 MiB of the shared prefix repeated (a candidate every 16 chars).
+	// The control is the same 8 MiB under a matcher of the same 200 lengths
+	// whose prefix never occurs in it: the scan's linear floor on this host,
+	// measured in the same rounds, so a host slowed by suites running beside
+	// this one slows both alike.
 	const strings = Array.from({ length: 2000 }, () => prefix.repeat(250));
-	let best = Infinity;
-	for (let r = 0; r < 3; r++) {
+	const control = createMatcher(needles.map((n) => [`other-prefix-xyz${n.slice(16)}`, n] as const));
+	const time = (matcher: typeof m): number => {
 		const start = performance.now();
-		for (const s of strings) scan(s, [m], () => undefined);
-		best = Math.min(best, performance.now() - start);
+		for (const s of strings) scan(s, [matcher], () => undefined);
+		return performance.now() - start;
+	};
+	let best = Infinity;
+	let floor = Infinity;
+	for (let r = 0; r < 3; r++) {
+		floor = Math.min(floor, time(control));
+		best = Math.min(best, time(m));
 	}
-	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms`);
-	// 1000 ms: robust on a loaded CI host (seen at 779 ms), still far under the 2.8 s quadratic case.
-	assert.ok(best < 1000, `the scan took ${best.toFixed(1)} ms`);
+	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms (linear floor ${floor.toFixed(1)} ms)`);
+	// 1000 ms on a quiet host (seen at 779 ms under load), and never more than
+	// 15x the floor on a contended one; the quadratic case is 2.8 s, 35x or more.
+	assert.ok(best < 1000 || best < 15 * floor, `the scan took ${best.toFixed(1)} ms against a ${floor.toFixed(1)} ms floor`);
 });
