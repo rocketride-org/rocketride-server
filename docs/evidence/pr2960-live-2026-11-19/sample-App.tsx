@@ -1,9 +1,10 @@
 // Disposable live acceptance fixture for PR 2960; contains no credentials.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppLayout, useShellConnection, useAuthUser } from 'shell';
+import { getHandshakeProbe, type HandshakeProbe, type ProbeRecord } from './handshakeProbe';
 
 const RUN = 'RR2960_20261119_LIVE';
-const EDIT = 'EDIT_B';
+const EDIT = 'EDIT_D';
 const PROBE_PATH = 'rr2960-live-probe.txt';
 type PreviewWindow = Window & typeof globalThis;
 
@@ -12,7 +13,8 @@ export default function App(): React.ReactElement {
 	const identity = useAuthUser();
 	const [probe, setProbe] = useState('waiting');
 	const [reads, setReads] = useState(0);
-	const [handshake, setHandshake] = useState('not observed');
+	const [handshake, setHandshake] = useState<ProbeRecord | null>(null);
+	const probeController = useRef<HandshakeProbe | null>(null);
 	const mainRef = useRef<HTMLElement>(null);
 	const [target, setTarget] = useState<PreviewWindow | null>(null);
 	// Web-linked component closures may belong to the builder's realm.
@@ -25,32 +27,19 @@ export default function App(): React.ReactElement {
 	const devHooks = target ? typeof (target as Window & { __rrShellDev?: unknown }).__rrShellDev !== 'undefined' : null;
 	let openerSameOrigin = false;
 	try { openerSameOrigin = Boolean(target?.opener && target.opener.location.origin === origin); } catch { /* foreign opener */ }
-	const recheckHandshake = useCallback((): void => {
-		if (!target?.opener) return;
-		setHandshake('waiting for real builder reply');
-		let timeout: number;
-		const observe = (event: MessageEvent): void => {
-			const data = event.data as { type?: string; token?: unknown } | undefined;
-			if (data?.type !== 'rrdev:auth') return;
-			const fromOpener = event.source === target.opener;
-			const sameOrigin = event.origin === target.location.origin;
-			const tokenPresent = typeof data.token === 'string' && data.token.length > 0;
-			const facts = `type=rrdev:auth origin=${event.origin} sourceIsOpener=${fromOpener} sameOrigin=${sameOrigin} tokenPresent=${tokenPresent}`;
-			setHandshake(facts);
-			target.console.log(`${RUN}_OPENER_HANDSHAKE ${facts}`);
-			target.removeEventListener('message', observe);
-			target.clearTimeout(timeout);
+	useEffect(() => {
+		if (!target) return;
+		const controller = getHandshakeProbe(target);
+		probeController.current = controller;
+		const unsubscribe = controller.subscribe(setHandshake);
+		return () => {
+			// React remounts detach only this UI binding. The manual attempt
+			// lives in the same rendered Window until reply/deadline/pagehide.
+			unsubscribe();
+			if (probeController.current === controller) probeController.current = null;
 		};
-		target.addEventListener('message', observe);
-		timeout = target.setTimeout(() => {
-			target.removeEventListener('message', observe);
-			setHandshake('FAIL: builder reply not observed');
-		}, 5000);
-		// Create this value-free sender in the rendered window's realm so
-		// postMessage's source is the real debug tab, not the linker realm.
-		const sendReady = (target as unknown as { Function: FunctionConstructor }).Function('window.opener?.postMessage({ type: "shell:devReady" }, window.location.origin);');
-		sendReady();
 	}, [target]);
+	const recheckHandshake = useCallback((): void => { probeController.current?.start(); }, []);
 	const recheck = useCallback(async (): Promise<void> => {
 		if (!client || !isConnected) return;
 		setProbe('requesting');
@@ -84,7 +73,19 @@ export default function App(): React.ReactElement {
 				<p>Framed: {String(framed)} · opener present: {String(opener)} · opener same origin: {String(openerSameOrigin)}</p>
 				<p>Dev hooks present: {String(devHooks)}</p>
 				<button onClick={() => { void recheck(); }} disabled={!client || !isConnected} style={{ padding: '10px 16px', fontSize: 16 }}>Recheck authenticated engine read</button>
-				{opener && <><p>Opener handshake: {handshake}</p><button onClick={recheckHandshake} style={{ padding: '10px 16px', fontSize: 16 }}>Recheck opener handshake</button></>}
+				{framed === false && <>
+					<p>Opener handshake: <strong>{handshake?.status ?? 'IDLE'}</strong> · attempt #{handshake?.attempt ?? 0} · elapsed {handshake?.elapsedMs ?? 0} ms</p>
+					{handshake && <div style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+						<div>openerPresent={String(handshake.openerPresent)} · openerClosed={String(handshake.openerClosed)} · sendReturned={String(handshake.sendReturned)}</div>
+						<div>readySeen={String(handshake.readySeen)} · sourceIsDebug={String(handshake.readySourceIsDebug)} · originMatches={String(handshake.readyOriginMatches)}</div>
+						<div>authSeen={String(handshake.authSeen)} · sourceIsOpener={String(handshake.authSourceIsOpener)} · originMatches={String(handshake.authOriginMatches)} · tokenPresent={String(handshake.tokenPresent)}</div>
+						{handshake.errorClass && <div>errorClass={handshake.errorClass}</div>}
+						{handshake.interruption && <div>interruption={handshake.interruption}</div>}
+						<details><summary>Diagnostic JSON</summary><pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(handshake, null, 2)}</pre></details>
+					</div>}
+					<button onClick={recheckHandshake} disabled={!target} style={{ padding: '10px 16px', fontSize: 16 }}>Recheck opener handshake</button>
+					<p>This sends only when clicked. Reply observations use the active attempt, source window and time; the product reply has no echoed attempt ID.</p>
+				</>}
 				<p>No credentials are displayed or logged by this fixture.</p>
 			</main>
 		</AppLayout>

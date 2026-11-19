@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-19",
+  "source": "User manually clicked the blob debug-tab helper and pasted its visible result; no automated blob observation.",
+  "fixtureRevision": "EDIT_C",
+  "attempt": 1,
+  "attemptId": "rr2960-1795082211205-1-9188.800",
+  "status": "INTERRUPTED",
+  "elapsedMs": 12,
+  "sendReturned": true,
+  "openerPresent": true,
+  "openerClosed": false,
+  "readySeen": true,
+  "readySourceIsDebug": true,
+  "readyOriginMatches": true,
+  "authSeen": false,
+  "authSourceIsOpener": null,
+  "authOriginMatches": null,
+  "tokenPresent": null,
+  "errorClass": null,
+  "interruption": "unmount",
+  "interpretation": "Tagged request delivery observed; pending observation ended on component unmount. Not a five-second timeout or direct auth-reply result."
+}

@@ -1,0 +1,35 @@
+{
+  "recordedAtUtc": "2026-11-19T10:02:09.345653+00:00",
+  "fixtureRevision": "EDIT_D",
+  "controllerSha256": "c454727fd5f14df960effa90b877588cf7ce7e591c4b0790faa4bf95c7927ea9",
+  "appSha256": "6e89b5d13bdcc662c852fa099d214209d1038c44a7a40a37639a0f9f7de5a1a6",
+  "method": "Tests transpile and execute the exact controller copied into the disposable app using deterministic Window/event/timer doubles; no browser actions or actual credential traffic.",
+  "tests": 15,
+  "pass": 15,
+  "fail": 0,
+  "skipped": 0,
+  "cases": [
+    "construction and elapsed idle time never send or install listeners",
+    "a queued old timeout cannot overwrite the second attempt",
+    "waiting exposes monotonic elapsed time and send return",
+    "only tagged ready messages are observed; trusted auth reply is recorded without a token value",
+    "wrong-source and wrong-origin auth do not complete the attempt",
+    "a sender exception is explicit and cancels the timer and listeners",
+    "missing and closed opener are distinguished without a send",
+    "a reply during the React subscriber gap survives and is shown on remount",
+    "completed reply metadata survives a component remount without replaying the handshake",
+    "timeout cleans every message, pagehide and timer resource even without a subscriber",
+    "StrictMode-style unsubscribe/resubscribe and module re-evaluation reuse one target controller",
+    "a controller copied onto another target is not reused for that window",
+    "real document pagehide interrupts active work without sending or waiting for React",
+    "closed opener and closed target clean active work on the bounded ticker",
+    "a prematurely invoked current timer is labeled TIMER_EARLY instead of a five-second timeout"
+  ],
+  "change": "Per-rendered-window singleton owns the manual attempt across React remounts; React owns only unsubscribeable UI bindings. Reply/deadline/repeat/document lifecycle cleans event/timer resources.",
+  "review": "Dedicated devil reviewer independently reran all15 tests and returned SHIP for manual observation.",
+  "limitations": [
+    "No live debug-tab auth reply is claimed by these unit tests.",
+    "Product auth replies do not echo an attempt id; observations use active attempt, sender/origin and timing.",
+    "No automatic sends or replay; sending occurs only from the user button click."
+  ]
+}

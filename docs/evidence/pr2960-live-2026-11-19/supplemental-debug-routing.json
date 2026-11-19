@@ -1,0 +1,50 @@
+{
+  "recordedAtUtc": "2026-11-19T09:46:28.263Z",
+  "exactHead": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "method": "Extracted actual handler arrow function from exact-head TypeScript AST, transpiled it, and supplied distinct fake Window references. No browser used; no replacement gate implementation.",
+  "source": "apps/rocket-ui/src/surfaces/preview/AppBuilderProvider.tsx",
+  "sourceLine": 281,
+  "sourceSha256": "285791ace2a87b4b33c70d313503e834ca9fab25cdba4f1fe29a1604f045d9e3",
+  "sourceUrl": "https://github.com/rocketride-org/rocketride-server/blob/7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b/apps/rocket-ui/src/surfaces/preview/AppBuilderProvider.tsx#L281",
+  "cases": [
+    {
+      "label": "Latest recorded debug window receives auth then attach",
+      "pass": true,
+      "authReply": true,
+      "attachPreview": true,
+      "callOrder": [
+        "auth",
+        "attach"
+      ]
+    },
+    {
+      "label": "Older debug window is ignored despite same origin and same ready payload",
+      "pass": true,
+      "authReply": false,
+      "attachPreview": false,
+      "callOrder": []
+    },
+    {
+      "label": "Debug window is ignored when current reference is absent",
+      "pass": true,
+      "authReply": false,
+      "attachPreview": false,
+      "callOrder": []
+    },
+    {
+      "label": "Actual iframe window remains accepted alongside current debug window",
+      "pass": true,
+      "authReply": true,
+      "attachPreview": true,
+      "callOrder": [
+        "auth",
+        "attach"
+      ]
+    }
+  ],
+  "limitations": [
+    "This proves Builder receiver routing by Window identity; it does not observe the live debug tab or prove browser postMessage source semantics.",
+    "No credential values or raw MessageEvents are logged.",
+    "A visible fixture timeout remains an observed failure until the newest-tab retry succeeds."
+  ]
+}

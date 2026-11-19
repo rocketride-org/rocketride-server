@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-19",
+  "source": "User manually clicked the blob debug-tab helper and pasted its visible result; no automated blob observation.",
+  "fixtureRevision": "EDIT_D",
+  "connected": true,
+  "identity": "RocketRide Developer",
+  "authenticatedEngineRead": "PASS",
+  "completedReads": 3,
+  "origin": "http://localhost:5565",
+  "protocol": "blob:",
+  "framed": false,
+  "openerPresent": true,
+  "openerSameOrigin": true,
+  "devHooksPresent": true,
+  "attempt": 1,
+  "status": "REPLY_OBSERVED",
+  "elapsedMs": 9,
+  "sendReturned": true,
+  "openerClosed": false,
+  "readySeen": true,
+  "readySourceIsDebug": true,
+  "readyOriginMatches": true,
+  "authSeen": true,
+  "authSourceIsOpener": true,
+  "authOriginMatches": true,
+  "tokenPresent": true,
+  "screenshot": "pending manual capture",
+  "limits": [
+    "User-reported rendered result; no automated direct blob observation.",
+    "The product reply does not echo an attempt ID; exact request-response pairing is not established.",
+    "Boot-time token adoption and causality between this reply and the separately successful protected read are not established."
+  ]
+}

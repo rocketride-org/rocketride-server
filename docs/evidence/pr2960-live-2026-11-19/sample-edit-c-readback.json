@@ -1,0 +1,15 @@
+{
+  "revision": "EDIT_C",
+  "authenticated": true,
+  "files": {
+    "App.tsx": {
+      "matches": true,
+      "sha256": "f13ab9aead7ec8909f8bf53431a8096edf548c00d65e4850a55c878cc2ec3fd5"
+    },
+    "handshakeProbe.ts": {
+      "matches": true,
+      "sha256": "4e90d27484b4e38a3911972b3ffdfa59adbbb72aac605a5bc6d45c14695d345a"
+    }
+  },
+  "recordedAtUtc": "2026-11-19T09:56:23.049Z"
+}

@@ -1,0 +1,27 @@
+{
+  "recordedAtUtc": "2026-11-19T09:56:02.507799+00:00",
+  "fixtureRevision": "EDIT_C",
+  "controllerSha256": "4e90d27484b4e38a3911972b3ffdfa59adbbb72aac605a5bc6d45c14695d345a",
+  "method": "Tests transpile and execute the exact controller copied into the disposable app, using deterministic Window/event/timer doubles; no browser actions or credential traffic.",
+  "tests": 10,
+  "pass": 10,
+  "fail": 0,
+  "skipped": 0,
+  "cases": [
+    "construction and elapsed idle time never send or install listeners",
+    "a queued old timeout cannot overwrite the second attempt",
+    "waiting exposes monotonic elapsed time and send return",
+    "only tagged ready messages are observed; trusted auth reply is recorded without a token value",
+    "wrong-source and wrong-origin auth do not complete the attempt",
+    "a sender exception is explicit and cancels the timer and listeners",
+    "missing and closed opener are distinguished without a send",
+    "unmount interrupts pending work, ignores an already queued callback, and rehydrates safe metadata",
+    "completed reply metadata survives a component remount without replaying the handshake",
+    "a prematurely invoked current timer is labeled TIMER_EARLY instead of a five-second timeout"
+  ],
+  "limitations": [
+    "No live debug-tab outcome is claimed by these unit tests.",
+    "The product auth reply carries no attempt correlation id; diagnostic associates replies with the active attempt, expected source/origin and timing.",
+    "No automatic ready/auth replay; actual sends occur only on the user button click."
+  ]
+}
