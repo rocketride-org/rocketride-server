@@ -821,9 +821,10 @@ class Store(DocumentStoreBase):
                     break
                 offset += len(ids)
 
-            # Hand over the group; a chunk missing inside it renders as empty text
+            # Hand over the group in chunkId order; a missing chunk adds no text,
+            # and the join walks only the chunks present, not the gaps between them
             if pieces:
-                callback(''.join(pieces.get(chunk, '') for chunk in range(groupStart, max(pieces) + 1)))
+                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
             # Go on only while some chunk lies past this group
             later = self.collectionObj.get(

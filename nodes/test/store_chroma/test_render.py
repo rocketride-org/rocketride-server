@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import random
+import tracemalloc
 
 import pytest
 
@@ -150,6 +151,25 @@ def test_render_goes_on_past_an_empty_group():
     driver.renderChunkSize = 4
 
     assert _render(driver, 'o1') == [_expected(2), _expected(10, 9)]
+
+
+def test_render_does_not_walk_the_gap_between_sparse_chunks():
+    """Chunks 0 and 33554431 share the default group; joining them must not build an entry per missing id."""
+    rows = {
+        'o1-0': ({'objectId': 'o1', 'chunkId': 0, 'parent': '/o1'}, 'chunk 0'),
+        'o1-last': ({'objectId': 'o1', 'chunkId': 32 * 1024 * 1024 - 1, 'parent': '/o1'}, 'chunk last'),
+    }
+    driver = _store(rows)
+
+    tracemalloc.start()
+    try:
+        parts = _render(driver, 'o1')
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert parts == ['chunk 0chunk last']
+    assert peak < 16 * 1024 * 1024  # an entry per id in the group would take hundreds of MB
 
 
 def test_render_keeps_every_chunk_when_a_chunk_number_is_stored_twice():
