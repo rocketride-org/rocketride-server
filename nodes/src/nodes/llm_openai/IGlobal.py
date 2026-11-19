@@ -23,6 +23,7 @@
 
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config, warn_if_credential_unresolved
+from ai.common.model_gateway import hosted_engine, missing_key_message
 from ai.common.chat import ChatBase
 import os
 import re
@@ -68,6 +69,17 @@ class IGlobal(IGlobalBase):
             # its reply would say the key is wrong, not which variable is missing.
             if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
                 return
+
+            # No key. A hosted engine gives a run its models only when the run starts,
+            # so there is nothing to probe now. A self-hosted engine with no key
+            # anywhere says how to add one; otherwise it probes as before.
+            if not isinstance(apikey, str) or not apikey.strip():
+                if hosted_engine():
+                    return
+                message = missing_key_message(self.glb.logicalType)
+                if message:
+                    warning(message)
+                    return
 
             # Simple API validation using provider-driven exceptions
             try:
@@ -144,4 +156,7 @@ class IGlobal(IGlobalBase):
             self._chat = Chat(self.glb.logicalType, config, bag)
 
     def endGlobal(self):
+        chat = getattr(self, '_chat', None)
+        if chat is not None and hasattr(chat, 'close'):
+            chat.close()
         self._chat = None

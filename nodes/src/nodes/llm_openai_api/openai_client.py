@@ -6,6 +6,12 @@ Supports custom base_url for providers like Featherless, Together, Groq, Ollama,
 from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.model_gateway import (
+    close_http_clients,
+    hosted_http_clients,
+    hosted_output_tokens,
+    resolve_openai_credentials,
+)
 from langchain_openai import ChatOpenAI
 from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -18,6 +24,7 @@ class Chat(ChatBase):
     _llm: ChatOpenAI
 
     SUPPORTS_NATIVE_TOOLS = True
+    _http_clients: Dict[str, Any] = {}
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -29,9 +36,17 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = Config.getNodeConfig(provider, connConfig)
 
-        # Get the api key and base url
-        apikey = config.get('apikey')
-        base_url = config.get('base_url') or None
+        # The node's own key and base url, or on a hosted engine with neither,
+        # the run's hosted models pass
+        credentials = resolve_openai_credentials(provider, config.get('apikey'), config.get('base_url') or None)
+        apikey = credentials.apikey
+        base_url = credentials.base_url or None
+        self._hosted_models = credentials.hosted
+        if credentials.hosted:
+            self._modelOutputTokens = hosted_output_tokens(provider, self._modelOutputTokens, credentials.gateway)
+            if self._modelOutputTokens == credentials.gateway.max_output_tokens:
+                # At the pass's limit: a higher node limit would change nothing
+                self._hosted_output_cap = self._modelOutputTokens
 
         # Build kwargs for ChatOpenAI
         kwargs = {
@@ -42,12 +57,23 @@ class Chat(ChatBase):
         }
         if base_url:
             kwargs['base_url'] = base_url
+        if self._hosted_models:
+            # The run's limits, and one send per call: the backend charges each request it takes
+            self._http_clients = hosted_http_clients(credentials.gateway)
+            kwargs.update(self._http_clients, max_retries=0)
 
         # Get the llm
         self._llm = ChatOpenAI(**kwargs)
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def close(self) -> None:
+        """
+        Close the HTTP clients built for the hosted models pass.
+        """
+        close_http_clients(self._http_clients)
+        self._http_clients = {}
 
     def is_retryable_error(self, error):
         """
