@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-18T07:54:12.296Z
-// Source commit: b32ce47d01c2cfdb4357b3ac26b6e950e5aa8cf7
+// Generated:     2026-11-19T18:25:41.060Z
+// Source commit: b02b8bb9e7e23857e5698654a94ae90705c92d91
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -91,6 +91,7 @@ export declare const commonStyles: {
     indicatorWarning: React$1.CSSProperties;
     indicatorError: React$1.CSSProperties;
     indicatorMuted: React$1.CSSProperties;
+    srOnly: React$1.CSSProperties;
 };
 /**
  * MIT License
@@ -4756,7 +4757,7 @@ export interface AppVerifyReport {
 }
 /** The result of {@link createAppWorkspace}. */
 export interface CreatedApp {
-    /** The full app id (`<developerId>.<slug>`). */
+    /** The app id: the slug the manifest carries (the registry name is composed at deploy). */
     appId: string;
     /** Workspace-relative POSIX path of the created folder. */
     folder: string;
@@ -13417,6 +13418,12 @@ export interface IButtonProps {
      * `aria-expanded` so assistive tech knows the popup's open state.
      */
     ariaExpanded?: boolean;
+    /**
+     * Accessible name for an icon-only button (rendered as `aria-label`): a
+     * glyph such as a close mark is not a name. Omit when the children are the
+     * label; `title` is a tooltip, not a name.
+     */
+    ariaLabel?: string;
 }
 /**
  * Renders a themed action button.
@@ -13424,7 +13431,7 @@ export interface IButtonProps {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export declare function Button({ variant, small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React$1.ReactElement;
+export declare function Button({ variant, small, mini, disabled, onClick, children, title, pressed, ariaExpanded, ariaLabel }: IButtonProps): React$1.ReactElement;
 /** Semantic state variant shared by {@link StatusBadge} and {@link StatusDot}. */
 export type StatusVariant = "success" | "info" | "warning" | "error" | "muted";
 /** Props for the {@link StatusBadge} component. */
@@ -16201,6 +16208,7 @@ export declare const shellApi: {
         indicatorWarning: import("react").CSSProperties;
         indicatorError: import("react").CSSProperties;
         indicatorMuted: import("react").CSSProperties;
+        srOnly: import("react").CSSProperties;
     };
     readonly useShellConnection: typeof useShellConnection;
     readonly useShellApiKey: typeof useShellApiKey;
