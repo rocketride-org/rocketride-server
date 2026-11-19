@@ -88,6 +88,27 @@ class IInstance(IInstanceBase):
             self.instance.writeAnswers(answer)
             return self.preventDefault()
 
+        # An answer the LLM node marked as a failed call carries error text,
+        # not a model reply. Scoring it would report an ordinary failing score
+        # (an error message is never similar to the reference), so a provider
+        # outage would read as lower answer quality. Keep the pairing and the
+        # two-answers-per-input contract, but report the row as unscored.
+        metadata = getattr(answer, 'metadata', None)
+        llm_error = metadata.get('llm_error') if isinstance(metadata, dict) else None
+        if llm_error:
+            debug(f'Cobalt evaluator: answer is an LLM error ({llm_error}); not scored')
+            self.instance.writeAnswers(answer)
+            self.instance.writeAnswers(
+                self._score_answer(
+                    metadata,
+                    score=None,
+                    passed=None,
+                    evaluator_name=evaluator.eval_type,
+                    reasoning=f'Not scored: the LLM call failed ({llm_error}).',
+                )
+            )
+            return self.preventDefault()
+
         # Extract text from the answer
         output_text = ''
         json_data = None
@@ -110,7 +131,6 @@ class IInstance(IInstanceBase):
         # standalone quality). For similarity mode, a missing expected
         # value will produce a zero score.
         expected = ''
-        metadata = getattr(answer, 'metadata', None)
         context = getattr(answer, 'context', None)
         if evaluator.eval_type == 'grounding':
             candidates = [
@@ -165,18 +185,42 @@ class IInstance(IInstanceBase):
         # of the incoming metadata so a consumer can join the score to its
         # dataset item by key rather than by answer order, which is not stable
         # across fan-out or parallel workers.
+        self.instance.writeAnswers(
+            self._score_answer(
+                metadata,
+                score=result['score'],
+                passed=result['passed'],
+                evaluator_name=result['evaluator'],
+                reasoning=result.get('reasoning', ''),
+            )
+        )
+
+        # Both writes above are explicit, so the engine must not add its own.
+        return self.preventDefault()
+
+    @staticmethod
+    def _score_answer(metadata, *, score, passed, evaluator_name, reasoning) -> Answer:
+        """Build the JSON score answer emitted after each evaluated answer.
+
+        Args:
+            metadata: The incoming answer's metadata, copied onto the score.
+            score: The evaluator's score, or None when the row was not scored.
+            passed: Whether the score met the threshold, or None when unscored.
+            evaluator_name: The evaluator that produced (or would produce) it.
+            reasoning: Why the evaluator gave this score, or why there is none.
+
+        Returns:
+            A JSON ``Answer`` holding the ``cobalt_*`` fields.
+        """
         eval_answer = Answer(expectJson=True)
         if isinstance(metadata, dict):
             eval_answer.metadata = copy.deepcopy(metadata)
         eval_answer.setAnswer(
             {
-                'cobalt_score': result['score'],
-                'cobalt_passed': result['passed'],
-                'cobalt_evaluator': result['evaluator'],
-                'cobalt_reasoning': result.get('reasoning', ''),
+                'cobalt_score': score,
+                'cobalt_passed': passed,
+                'cobalt_evaluator': evaluator_name,
+                'cobalt_reasoning': reasoning,
             }
         )
-        self.instance.writeAnswers(eval_answer)
-
-        # Both writes above are explicit, so the engine must not add its own.
-        return self.preventDefault()
+        return eval_answer

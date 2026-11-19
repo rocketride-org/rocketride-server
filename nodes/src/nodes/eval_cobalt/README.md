@@ -85,10 +85,12 @@ The score answer carries a deep copy of the incoming answer's `metadata` (for ex
 
 | Key | Type | Description |
 |---|---|---|
-| `cobalt_score` | number | Evaluation score, 0.0–1.0. For `similarity` with cobalt installed it is the raw TF-IDF cosine |
-| `cobalt_passed` | boolean | `true` when `score >= threshold` — the node's **Pass threshold**, applied once |
+| `cobalt_score` | number \| null | Evaluation score, 0.0–1.0. For `similarity` with cobalt installed it is the raw TF-IDF cosine. `null` when the row was not scored |
+| `cobalt_passed` | boolean \| null | `true` when `score >= threshold` — the node's **Pass threshold**, applied once. `null` when the row was not scored |
 | `cobalt_evaluator` | string | Which evaluator produced the score (`semantic`, `llm_judge`, `custom`, `relevance`, `grounding`, `format`) |
 | `cobalt_reasoning` | string | Human-readable explanation |
+
+An answer an LLM node produced from a failed call, or an agent node from a failed or refused run (its `metadata` carries `llm_error`, the exception class name), is not scored. Its error text would score near 0 and read as a wrong answer, so a rate-limited run would report a lower pass rate with no sign why. The node still emits both answers, and the score answer has `cobalt_score` and `cobalt_passed` set to `null` and `cobalt_reasoning` naming the error. Count those rows apart when computing a pass rate.
 
 For `similarity`, cobalt's scorer divides its own result by whatever threshold it is handed, so the node hands it `1.0` and gets the cosine back — which is why the reason it writes reads `Similarity: <cosine> (threshold: 1.0)`. The `1.0` there is cobalt's internal divisor, not the gate; the gate is the node's **Pass threshold** and it is applied once, to that cosine. Passing the node's threshold on both sides applied it twice and reported every cosine in `[threshold², threshold)` as a pass — a cosine of 0.2606 passed at a threshold of 0.5.
 

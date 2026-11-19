@@ -555,6 +555,56 @@ class TestReferenceSurvivesEveryHop:
         assert answers[0].metadata.get('expected') == 'The capital of France is Paris.'
 
 
+def _failing_reply(question):
+    """Stand in for a provider call that fails, e.g. a rate limit."""
+    raise TimeoutError('rate limited')
+
+
+class TestFailedLlmCallKeepsThePairing:
+    """A failed LLM call still reaches the evaluator; it must not look like a score.
+
+    ``LLMBase.writeQuestions`` builds an error answer when the provider call
+    raises. That answer keeps the question's metadata (so the row stays paired
+    with its reference) and is marked ``llm_error`` (so ``eval_cobalt`` reports
+    the row as unscored instead of grading the error text as a wrong answer).
+    """
+
+    def test_error_answer_carries_the_question_metadata(self):
+        """The error path merges Question.metadata onto the answer, as the success path does."""
+        from ai.common.schema import Question
+
+        question = Question()
+        question.addQuestion('What is the capital of France?')
+        question.metadata = {'expected': 'The capital of France is Paris.'}
+
+        llm = _llm_node(_failing_reply)
+        llm.writeQuestions(question)
+
+        answers = llm.instance.answers
+        assert len(answers) == 1
+        assert answers[0].metadata.get('expected') == 'The capital of France is Paris.'
+        assert answers[0].metadata.get('llm_error') == 'TimeoutError'
+        assert 'LLM error' in answers[0].getText()
+
+    def test_error_answer_is_reported_unscored(self):
+        """eval_cobalt emits both answers, with a null score that names the error."""
+        _, _, _, eval_lane = _run_pipeline([_PARIS], _failing_reply)
+
+        assert len(eval_lane.answers) == 2
+        scores = _scores(eval_lane)
+        assert len(scores) == 1
+        assert scores[0]['cobalt_score'] is None
+        assert scores[0]['cobalt_passed'] is None
+        assert 'TimeoutError' in scores[0]['cobalt_reasoning']
+
+    def test_unscored_row_keeps_its_reference_for_joining(self):
+        """The score answer still carries the row's metadata, so it joins by key."""
+        _, _, _, eval_lane = _run_pipeline([_PARIS], _failing_reply)
+
+        score_answers = [answer for answer in eval_lane.answers if answer.isJson()]
+        assert score_answers[0].metadata.get('expected') == 'The capital of France is Paris.'
+
+
 class TestFullPipelineScores:
     """End-to-end scores for the shape in examples/cobalt-evaluation.pipe."""
 

@@ -118,9 +118,12 @@ class LLMBase(IInstanceBase):
                     err_msg = f'**LLM error** — {type(e).__name__}: {e}'
                     answer = Answer()
                     answer.setAnswer(err_msg)
-                # A failed call still reaches an evaluator downstream; keep the
-                # question pairing so it scores against its expected value.
+                # A failed call still reaches an evaluator downstream: keep the
+                # question pairing, and mark the answer as an error so the
+                # evaluator reports it as unscored instead of grading the error
+                # text as a wrong answer.
                 merge_metadata(answer, getattr(question, 'metadata', None))
+                merge_metadata(answer, {'llm_error': type(e).__name__})
                 # A turn that failed after burning tokens still spent them: the adapters
                 # report from their own finally, so the scope holds what was billed —
                 # hang it on the error answer or the Trace shows nothing for exactly the
