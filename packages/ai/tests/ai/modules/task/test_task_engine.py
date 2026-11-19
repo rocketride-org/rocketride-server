@@ -2528,6 +2528,7 @@ def _ending_task(process_exit_code, *, was_running=True):
     t._is_terminating = False
     t.state = EngineState.RUNNING if was_running else EngineState.STARTING
     t._debug_stdio = t._data_client = t._task_metrics = t._launch = None
+    t._launcher = SimpleNamespace(isolated=False)
     t._status_update_task = None
     t._final_events_sent = True
     t._stop_reason = None
@@ -2602,6 +2603,51 @@ async def test_a_crash_the_engine_did_not_report_reaches_the_console():
         if call.args[1].get('event') == 'output'
     ]
     assert outputs == [f'Unexpected termination: SIGSEGV (code {int(signal_module.SIGSEGV)})\n']
+
+
+@pytest.mark.asyncio
+async def test_a_container_task_that_left_with_0_and_no_report_was_cut_off():
+    """A task reports every end it reaches; with its input closed it leaves with 0 and no word."""
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=True)
+    run_log = AsyncMock()
+    t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log}
+    await TaskEngine._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        1,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    said = [str(call) for call in t._forward_task_event.await_args_list]
+    assert any('Unexpected termination: the task ended without reporting its end' in line for line in said)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'isolated, reported, stop_reason, status, outcome',
+    [
+        # It said >EXIT itself: the 0 is its own end
+        (True, True, None, 'Completed', 'ok'),
+        # The engine stopped it
+        (True, False, 'user', 'Stopped', 'cancelled'),
+        # No CLI process stands between a child process and the engine
+        (False, False, None, 'Completed', 'ok'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine', 'child-process'],
+)
+async def test_an_exit_code_0_with_a_known_reason_is_no_cut_off(isolated, reported, stop_reason, status, outcome):
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=isolated)
+    t._stop_reason = stop_reason
+    run_log = AsyncMock()
+    t._run_logs = {'dev.user-1.acme.proj-test.src-id': run_log}
+    if reported:
+        await TaskEngine.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': ''}})
+    await TaskEngine._terminated(t)
+    assert (t._status.status, t._status.exitCode) == (status, 0)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
 
 
 # ---------------------------------------------------------------------------
