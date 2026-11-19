@@ -5,12 +5,12 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Loader for the adapter tool-builder tests: real LangChain and Pydantic, engine stubs only where needed.
+"""Loader for the agent adapter tests: real LangChain and Pydantic, engine stubs only where needed.
 
-Other test modules keep hand-built ``langchain_core`` stubs in ``sys.modules``: the
-parser test from collection on, the DeepAgent envelope test while it runs. A tool
+Another test module may leave hand-built ``langchain_core`` stubs in ``sys.modules``. A tool
 built on a stub ``BaseTool`` proves nothing about whether the framework accepts
-``_rr_input_schema``, so these tests swap the stubs out and put them back afterwards.
+``_rr_input_schema``, and a stub ``AIMessage`` nothing about the message an adapter builds,
+so these tests swap the stubs out and put them back afterwards.
 """
 
 from __future__ import annotations
@@ -27,6 +27,12 @@ import pytest
 from ._sys_modules_guard import _is_stub_module
 
 _NODES_SRC = Path(__file__).resolve().parents[1] / 'src' / 'nodes'
+_PROTOCOL_SOURCE = (
+    Path(__file__)
+    .resolve()
+    .parents[2]
+    .joinpath('packages', 'ai', 'src', 'ai', 'common', 'agent', '_internal', 'protocol.py')
+)
 _REAL_PACKAGES = ('langchain_core', 'langchain', 'pydantic')
 
 
@@ -35,7 +41,9 @@ def _safe_str(value: Any) -> str:
 
 
 # What each adapter imports from the engine at module level. Names with no symbols are parent packages.
-LANGCHAIN_SYMBOLS: Dict[str, Dict[str, Any]] = {
+# A path stands for a module that has no stub: the shared protocol is the adapters' behavior, so without the
+# engine it is loaded from source. It needs only ``ai.common.utils.safe_str``, which is why it comes last.
+LANGCHAIN_SYMBOLS: Dict[str, Any] = {
     'rocketlib': {'ToolDescriptor': object},
     'ai': {},
     'ai.common': {},
@@ -47,8 +55,10 @@ LANGCHAIN_SYMBOLS: Dict[str, Dict[str, Any]] = {
         'normalize_bound_tools': lambda *a, **kw: [],
         'safe_str': _safe_str,
     },
+    'ai.common.agent._internal': {},
+    'ai.common.agent._internal.protocol': _PROTOCOL_SOURCE,
 }
-DEEPAGENT_SYMBOLS: Dict[str, Dict[str, Any]] = {
+DEEPAGENT_SYMBOLS: Dict[str, Any] = {
     **LANGCHAIN_SYMBOLS,
     'rocketlib': {'ToolDescriptor': object, 'error': lambda *a, **kw: None},
 }
@@ -95,27 +105,42 @@ def real_langchain_or_skip() -> Callable[[], None]:
     return restore
 
 
-def engine_stubs(symbols: Dict[str, Dict[str, Any]]) -> Callable[[], None]:
-    """Stub each named module that cannot be imported and return the function that removes those stubs."""
+def engine_stubs(symbols: Dict[str, Any]) -> Callable[[], None]:
+    """Stand in for each named module that cannot be imported and return the function that removes the stand-ins.
+
+    A dict of symbols becomes a stub module. A path is loaded from that source file under the module's name.
+    """
     installed = []
-    for name, attrs in symbols.items():
-        try:
-            importlib.import_module(name)
-        except Exception:
-            stub = types.ModuleType(name)
-            for attr, value in attrs.items():
-                setattr(stub, attr, value)
-            sys.modules[name] = stub
-            installed.append(name)
 
     def remove() -> None:
         for name in installed:
             sys.modules.pop(name, None)
 
+    try:
+        for name, attrs in symbols.items():
+            try:
+                importlib.import_module(name)
+            except Exception:
+                if isinstance(attrs, Path):
+                    spec = importlib.util.spec_from_file_location(name, attrs)
+                    stub = importlib.util.module_from_spec(spec)
+                    sys.modules[name] = stub
+                    installed.append(name)
+                    spec.loader.exec_module(stub)
+                    continue
+                stub = types.ModuleType(name)
+                for attr, value in attrs.items():
+                    setattr(stub, attr, value)
+                sys.modules[name] = stub
+                installed.append(name)
+    except BaseException:
+        # A source file that fails to load must not leave its half-built module, or the stubs before it, behind.
+        remove()
+        raise
     return remove
 
 
-def load_adapter(relative_path: str, module_name: str, symbols: Dict[str, Dict[str, Any]]) -> types.ModuleType:
+def load_adapter(relative_path: str, module_name: str, symbols: Dict[str, Any]) -> types.ModuleType:
     """Load an adapter by file path, which skips the node package's engine-only ``__init__``."""
     remove = engine_stubs(symbols)
     try:

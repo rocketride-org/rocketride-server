@@ -12,7 +12,9 @@ from __future__ import annotations
 import sys
 import types
 
-from ._real_langchain import real_langchain_or_skip
+import pytest
+
+from ._real_langchain import engine_stubs, real_langchain_or_skip
 
 
 def _langchain_core_modules():
@@ -20,7 +22,7 @@ def _langchain_core_modules():
 
 
 def test_restore_drops_the_real_modules_and_puts_the_stubs_back(monkeypatch):
-    # The stub tree test_agent_langchain_parser.py builds when the real package is not loaded yet.
+    # The stub tree a test module builds by hand when the real package is not loaded yet.
     for name in _langchain_core_modules():
         monkeypatch.delitem(sys.modules, name)
     stub = types.ModuleType('langchain_core')
@@ -36,3 +38,14 @@ def test_restore_drops_the_real_modules_and_puts_the_stubs_back(monkeypatch):
 
     assert _langchain_core_modules() == {'langchain_core': stub, 'langchain_core.messages': stub_messages}
     assert stub.messages is stub_messages
+
+
+def test_a_source_module_that_fails_to_load_leaves_nothing_behind(tmp_path):
+    broken = tmp_path / 'broken.py'
+    broken.write_text('raise RuntimeError("does not load")\n')
+    before = set(sys.modules)
+
+    with pytest.raises(RuntimeError, match='does not load'):
+        engine_stubs({'_rr_missing_parent': {'marker': 1}, '_rr_missing_parent.child': broken})
+
+    assert set(sys.modules) == before

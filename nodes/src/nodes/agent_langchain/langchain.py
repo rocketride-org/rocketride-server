@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 from rocketlib import ToolDescriptor
 
 from ai.common.agent import AgentBase, AgentContext
+from ai.common.agent._internal.protocol import run_model_turn
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
 
@@ -80,34 +81,19 @@ def _build_langchain_llm(agent_base: AgentBase, context: AgentContext) -> Any:
             tool_hint = _tool_call_protocol_prompt(self._bound_tools)
             prompt = (tool_hint + '\n\n' + transcript).strip()
 
-            raw = ''
-            for attempt in range(3):
-                raw = safe_str(
-                    agent_base.call_llm(
-                        context,
-                        prompt,
-                        role='You are a helpful assistant.',
-                        stop_words=stop,
-                    )
-                ).strip()
-                msg = _parse_tool_call_envelope(raw)
-                if msg is not None:
-                    return ChatResult(generations=[ChatGeneration(message=msg)])
-                if attempt < 2:
-                    prompt = (
-                        prompt
-                        + '\n\nsystem: Your last output was invalid. Output ONLY a single JSON object per the schema.'
-                    )
+            def ask(feedback: str) -> str:
+                return agent_base.call_llm(
+                    context,
+                    prompt + feedback,
+                    role='You are a helpful assistant.',
+                    stop_words=stop,
+                )
 
-            return ChatResult(
-                generations=[
-                    ChatGeneration(
-                        message=AIMessage(
-                            content='[agent_langchain] The language model produced unparseable output after 3 attempts. The task may be incomplete.'
-                        )
-                    )
-                ]
-            )
+            # Raises when no attempt gives a tool call or an answer. That fails the
+            # run, so it ends as an error and not as an answer about giving up.
+            turn = run_model_turn(ask)
+            message = AIMessage(content=turn.content, tool_calls=turn.tool_calls)
+            return ChatResult(generations=[ChatGeneration(message=message)])
 
     return RocketRideToolCallingChatModel()
 
@@ -327,8 +313,9 @@ class LangChainDriver(AgentBase):
 #
 # Problem: LangChain agents expect a chat model that returns structured `tool_calls`,
 # but RocketRide's LLM seam is text-only.  Solution: we prompt the model to emit a
-# strict JSON envelope describing either a tool call or a final answer, then parse
-# it into an `AIMessage` with `tool_calls`.
+# strict JSON envelope describing either a tool call or a final answer.  The reply is
+# parsed, retried and turned into a turn by `ai.common.agent._internal.protocol`,
+# which the deepagent driver shares.
 # ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -355,50 +342,3 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
             f'system: Available tools (name + description + args schema): {tools_json}',
         ]
     ).strip()
-
-
-def _parse_tool_call_envelope(raw: str) -> Any:
-    # Find the first '{' so preamble text and markdown fences are skipped.
-    start = raw.find('{')
-    if start < 0:
-        return None
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(raw, start)
-    except Exception:
-        return None
-    if not isinstance(obj, dict):
-        return None
-
-    msg_type = obj.get('type')
-    if msg_type == 'final':
-        content = safe_str(obj.get('content', ''))
-        try:
-            from langchain_core.messages import AIMessage
-
-            return AIMessage(content=content)
-        except Exception:
-            return None
-
-    if msg_type == 'tool_call':
-        name = safe_str(obj.get('name', '')).strip()
-        if not name:
-            return None
-        args = obj.get('args')
-        if args is None:
-            args = {}
-        if not isinstance(args, dict):
-            args = {'input': args}
-
-        tool_call = {'id': f'call_{safe_str(id(obj))}', 'type': 'tool_call', 'name': name, 'args': args}
-
-        try:
-            from langchain_core.messages import AIMessage
-
-            try:
-                return AIMessage(content='', tool_calls=[tool_call])
-            except Exception:
-                return AIMessage(content='', additional_kwargs={'tool_calls': [tool_call]})
-        except Exception:
-            return None
-
-    return None

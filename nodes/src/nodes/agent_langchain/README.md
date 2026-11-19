@@ -55,8 +55,9 @@ The input must be an object with required non-empty `query: string` and optional
 `{content, meta, stack}` to its caller instead of writing to `answers`.
 `meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included.
 Non-object input, a blank query, or a non-object context raises `ValueError`.
-If the LLM does not produce a parsable envelope after three attempts, the
-adapter supplies an explanatory final message rather than a tool call.
+If the LLM produces neither a tool call nor an answer in three attempts, the run
+fails: `content` says what was wrong with the model's last reply and
+`meta.stop_reason` is `error`.
 
 ## Configuration
 
@@ -95,10 +96,34 @@ guard error.
 RocketRide's LLM seam is text-based, while the LangChain agent expects
 structured tool calls. On each model turn, the adapter requests exactly one
 JSON object: `{"type":"tool_call","name":"server.tool","args":{...}}` or
-`{"type":"final","content":"..."}`. It retries malformed output twice with
-a correction prompt; after the third invalid response it returns an explanatory
-AI message. Connected tools receive dynamically built argument schemas from
-their declared input schemas, with a generic `input` field as the fallback.
+`{"type":"final","content":"..."}`. Connected tools receive dynamically built
+argument schemas from their declared input schemas, with a generic `input`
+field as the fallback.
+
+The reply is read by the parser `agent_deepagent` uses
+(`ai.common.agent._internal.protocol`), without its parallel `tool_calls` form:
+
+- A `final` envelope whose content was not escaped correctly (an inner `"`, a
+  literal line break) is recovered, as long as the reply ends with the
+  envelope's closing `"}`. One that was cut off, or has more text after it, is
+  retried.
+- A `content` that is not a string (a JSON object, array, number or boolean) is
+  delivered as JSON text.
+- `FINAL>>>` at the start of a line, followed by the answer as plain text, is
+  also an answer. Nothing after the marker needs escaping. The prompt does not
+  ask for this form; a retry does, when an answer did not parse.
+- A tool call with a `FINAL>>>` line stacked after it is run as the tool call:
+  the line is a claim about work not yet done.
+
+A reply that is neither a tool call nor an answer is retried twice, each time
+with a hint that says what was wrong and how to send it: a broken tool call is
+asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
+JSON object (it may be an answer, or a tool call that lost its `type`) either
+way. After the third reply, prose with no envelope is delivered as the answer.
+An empty reply, a `FINAL>>>` with nothing after it, a JSON object that is
+neither shape, and an envelope that never parsed are not answers: the run fails
+with `stop_reason: error`, and its answer says what was wrong with the model's
+last reply.
 
 ## Upstream docs
 
