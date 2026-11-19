@@ -36,7 +36,7 @@
  *   shell:clean   — remove build artifacts
  */
 const path = require('path');
-const { readdir } = require('node:fs/promises');
+const { readdir, rm } = require('node:fs/promises');
 const {
 	execCommand,
 	syncDir,
@@ -50,6 +50,9 @@ const {
 	setState,
 	exists,
 } = require('../../../scripts/lib');
+// Production-build stamp shared with the app modules (see appModule.js): the
+// bundle cache skip requires it, and `rsbuild dev` cleans it away.
+const { BUILD_STAMP } = require('../../../scripts/lib/appModule');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -145,9 +148,13 @@ function makeBundleAction() {
 			const localShellReal =
 				fs.existsSync(path.join(rootShell, 'shell.tgz')) &&
 				!fs.existsSync(path.join(rootShell, 'shell.tgz.stub'));
-			if (!ctx.options.force && !changed && (await exists(BUILD_DIR)) && localShellReal) {
+			const stampPath = path.join(BUILD_DIR, BUILD_STAMP);
+			if (!ctx.options.force && !changed && (await exists(stampPath)) && localShellReal) {
 				task.output = 'No changes detected';
 				return;
+			}
+			if (!changed && (await exists(BUILD_DIR)) && !(await exists(stampPath))) {
+				task.output = 'Build output is not a production build (no stamp) — rebuilding';
 			}
 
 			// Clean build output before rebuilding to prevent stale chunks
@@ -182,6 +189,10 @@ function makeBundleAction() {
 			});
 
 			await saveSourceHash(BUILD_HASH_KEY, hash);
+			await fs.promises.writeFile(
+				stampPath,
+				JSON.stringify({ mode: 'build', at: new Date().toISOString() }) + '\n'
+			);
 		},
 	};
 }
@@ -285,6 +296,9 @@ const shellModule = {
 					task.output = 'Clearing port 3000...';
 					await killPort(3000);
 					task.output = 'Starting development server...';
+					// The dev server writes a dev build into BUILD_DIR; drop the
+					// production stamp so the next shell:bundle rebuilds.
+					await rm(path.join(BUILD_DIR, BUILD_STAMP), { force: true });
 					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: APP_ROOT });
 				},
 			}),

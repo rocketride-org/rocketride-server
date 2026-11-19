@@ -59,6 +59,19 @@ const {
 	exists,
 } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
+
+// Written into the build output dir by a successful `rsbuild build` and
+// REQUIRED by the bundle cache skip. `rsbuild dev` (writeToDisk) owns the same
+// directory and cleans it on start, which removes the stamp — so a dev build
+// left behind by a dev server can never be mistaken for a production build and
+// copied into dist/server/static (where its HMR client reload-loops against
+// the engine). The :dev action also removes it explicitly.
+//
+// It is a dotfile on purpose: syncDir's '**' glob skips dotfiles, so the stamp
+// never reaches dist/server/static. Keep it that way; seed_apps hashes every
+// file in the served bundle, and a per-build timestamp would make each build
+// look like a new app version.
+const BUILD_STAMP = '.rr-build-stamp';
 const { registerApp, assertSafeAppId } = require('./registerApp');
 const registry = require('./registry');
 
@@ -158,14 +171,22 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 			run: async (ctx, task) => {
 				// Fingerprint inputs before building so concurrent edits are detected on the next run.
 				const { changed, hash } = await hasBuildInputChanged(buildHashKey, inputDirs, inputFiles);
-				if (!ctx.options.force && !changed && (await exists(buildDir))) {
+				const stampPath = path.join(buildDir, BUILD_STAMP);
+				if (!ctx.options.force && !changed && (await exists(stampPath))) {
 					task.output = 'No changes detected';
 					return;
+				}
+				if (!changed && (await exists(buildDir)) && !(await exists(stampPath))) {
+					task.output = 'Build output is not a production build (no stamp) — rebuilding';
 				}
 
 				// Clean build output before rebuilding to prevent stale chunks
 				await removeDir(buildDir);
 				await execCommand('npx', ['rsbuild', 'build'], { task, cwd: appRoot });
+				await fs.promises.writeFile(
+					stampPath,
+					JSON.stringify({ mode: 'build', at: new Date().toISOString() }) + '\n'
+				);
 
 				// Persist the pre-build hash so any concurrent edits force a rebuild next time
 				await saveSourceHash(buildHashKey, hash);
@@ -244,6 +265,9 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 				description: `Start ${name} (dev)`,
 				run: async (ctx, task) => {
 					task.output = 'Starting development server...';
+					// The dev server writes a dev build into buildDir; drop the
+					// production stamp so the next bundle step rebuilds.
+					await fs.promises.rm(path.join(buildDir, BUILD_STAMP), { force: true });
 					await execCommand('npx', ['rsbuild', 'dev'], { task, cwd: appRoot });
 				},
 			}),
@@ -253,4 +277,4 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 	return { name, description, actions };
 }
 
-module.exports = { createAppModule };
+module.exports = { createAppModule, BUILD_STAMP };
