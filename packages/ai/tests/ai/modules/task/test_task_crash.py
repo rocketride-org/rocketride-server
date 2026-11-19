@@ -140,6 +140,8 @@ def server(request, tmp_path_factory):
         args = [sys.executable, 'ai/eaas.py', f'--port={port}', f'--base_port={_free_port()}']
         if dumps:
             args.append('--dumps')
+            # DEBUG: the server's own steps (stdio reader, disconnect, _terminated) in its log
+            args.append('--trace=debugOut')
 
         # Its own crash database, so no other engine's dump reaches the test task
         env = dict(os.environ, ROCKETRIDE_APIKEY=_APIKEY, ROCKETRIDE_CRASHDB_DIR=str(workspace / 'crashdb'))
@@ -317,7 +319,7 @@ def _debug_engines(server) -> str:
     report.append(run('lsof', '-p', str(server['pid']))[-4000:])
     # A process other than the engine may hold the engine's output pipe open
     report.append(run('lsof', '-nP', '-c', 'crashpad')[-4000:])
-    report.append(server['log'].read_text(errors='replace')[-4000:])
+    report.append(server['log'].read_text(errors='replace')[-30000:])
     return '\n'.join(report)
 
 
