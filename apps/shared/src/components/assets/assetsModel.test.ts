@@ -127,6 +127,8 @@ test('img attributes: character references decode as the browser reads them; the
 	assert.equal(removeReference('<img src="assets/a&amp;b.png">\nEnd', 'assets/a&b.png'), 'End');
 	// A markdown destination is read as written: `&amp;` there names a different file
 	assert.equal(removeReference('![x](assets/a&amp;b.png)\nEnd', 'assets/a&b.png'), '![x](assets/a&amp;b.png)\nEnd');
+	// One table across the pane and both SDKs: a name outside the five, or a legacy no-semicolon reference, stays as written.
+	assert.equal(referenceWidth('<img src="assets/a&copy;.png" width="20"> <img src="assets/chart&notes.png" width="30">', 'assets/chart&notes.png'), 30);
 });
 
 test('inlineImageReferences: a reference definition takes the data URI in place, its usages and title kept', async () => {

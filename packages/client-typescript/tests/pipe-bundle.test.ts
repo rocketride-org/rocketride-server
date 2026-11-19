@@ -111,6 +111,8 @@ describe('scanReadmeReferences', () => {
 	it('decodes character references in an img src (the form a width edit writes); markdown destinations are read as written', () => {
 		const md = '<img src="assets/a&amp;b.png"> <img src=\'c&#x26;d.png\'> <img src=e&#38;f.png> <img src="q&quot;.png"> ![m](assets/a&amp;b.png)';
 		expect(scanReadmeReferences(md)).toEqual(['assets/a&b.png', 'c&d.png', 'e&f.png', 'q".png', 'assets/a&amp;b.png']);
+		// One table across the TS SDK, the Python SDK and the pane: a name outside the five, or a legacy no-semicolon reference, stays as written.
+		expect(scanReadmeReferences('<img src="assets/a&copy;.png"> <img src="assets/chart&notes.png">')).toEqual(['assets/a&copy;.png', 'assets/chart&notes.png']);
 	});
 
 	it('takes reference definitions, angle-delimited destinations with spaces and balanced parentheses, and skips tilde fences', () => {

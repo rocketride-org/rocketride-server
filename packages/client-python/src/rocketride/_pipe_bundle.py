@@ -41,7 +41,6 @@ rules) and ``app-pack/pipe-bundle.ts`` (the Node packer).
 
 from __future__ import annotations
 
-import html
 import io
 import json
 import os
@@ -335,6 +334,37 @@ def _is_local_reference(ref: str) -> bool:
     return _SCHEME_RE.match(ref) is None
 
 
+# A character reference in an attribute value: numeric, or one of the five
+# names every reader of this scanner decodes (the TS SDK and the editor pane
+# carry the same table). Terminated by ';' only: HTML5's legacy no-semicolon
+# names (``&notes`` -> ``\u00acotes``) are not applied, so a filename keeps its
+# ampersand unless it is written as a reference.
+_CHARACTER_REFERENCE_RE = re.compile(r'&(#x([0-9a-f]+)|#(\d+)|([a-z]+));', re.IGNORECASE)
+_NAMED_CHARACTER_REFERENCES = {'amp': '&', 'quot': '"', 'lt': '<', 'gt': '>', 'apos': "'"}
+
+
+def _decode_attribute(value: str) -> str:
+    """Decode the character references in an HTML attribute value with the
+    one table the TS SDK and the editor pane use, so every reader names the
+    same file. An unknown or unterminated reference stays as written.
+
+    Args:
+        value: The value as written between the quotes.
+
+    Returns:
+        The decoded value.
+    """
+
+    def _one(match: 're.Match[str]') -> str:
+        name = match.group(4)
+        if name is not None:
+            return _NAMED_CHARACTER_REFERENCES.get(name.lower(), match.group(0))
+        code = int(match.group(2), 16) if match.group(2) is not None else int(match.group(3))
+        return chr(code) if 0 < code <= 0x10FFFF else match.group(0)
+
+    return _CHARACTER_REFERENCE_RE.sub(_one, value)
+
+
 def _img_src_of(attrs: str) -> str:
     """The ``src`` an ``<img>`` tag names: its first ``src`` attribute (the one
     the browser keeps when it repeats), read by tokenizing the attributes in order,
@@ -349,7 +379,7 @@ def _img_src_of(attrs: str) -> str:
     """
     for match in _ATTRIBUTE_RE.finditer(attrs):
         if match.group(1).lower() == 'src':
-            return html.unescape(match.group(2) or match.group(3) or match.group(4) or '')
+            return _decode_attribute(match.group(2) or match.group(3) or match.group(4) or '')
     return ''
 
 

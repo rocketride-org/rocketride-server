@@ -144,6 +144,12 @@ def test_scan_finds_markdown_and_html_references_in_order_skipping_urls_anchors_
 def test_scan_decodes_character_references_in_img_src_but_not_markdown_destinations():
     md = '<img src="assets/a&amp;b.png"> <img src=\'c&#x26;d.png\'> <img src=e&#38;f.png> <img src="q&quot;.png"> ![m](assets/a&amp;b.png)'
     assert scan_readme_references(md) == ['assets/a&b.png', 'c&d.png', 'e&f.png', 'q".png', 'assets/a&amp;b.png']
+    # One table across the TS SDK, the pane and this scanner: a name outside the
+    # five, or a legacy no-semicolon reference, stays as written.
+    assert scan_readme_references('<img src="assets/a&copy;.png"> <img src="assets/chart&notes.png">') == [
+        'assets/a&copy;.png',
+        'assets/chart&notes.png',
+    ]
 
 
 def test_scan_takes_reference_definitions_angle_destinations_balanced_parentheses_and_skips_tilde_fences():
