@@ -47,6 +47,18 @@ own key for these tokens:
 Without the variable, tokens use the original format, which every engine
 reads.
 
+## Public pages
+
+An engine that serves a public site builds its page map from the
+`publicPages` of published platform apps (see
+[Public pages](/guides/apps#public-pages-platform-apps)).
+
+| Variable              | Effect                                                                                                                                                                                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RR_APP_URL`          | The public origin, such as `https://cloud.rocketride.ai`: canonical links, absolute sitemap and feed URLs, and a robots.txt that allows crawling. Set it to make published pages indexable. Unset, robots.txt disallows all crawling and the sitemap and llms.txt answer 404, which suits local and staging engines; an engine that serves published pages without it logs a warning once. |
+| `RR_PUBLIC_ROOT_APPS` | The app ids allowed to declare pages, separated by commas. Default `rocketride.home`. An id outside the `rocketride` developer namespace never may, even when it is listed.                                                                                              |
+| `RR_INDEXNOW_KEY`     | The IndexNow key: 8 to 128 letters, digits and `-`. With an `https://` `RR_APP_URL`, the engine serves it at `/<key>.txt` and, whenever the page map changes, submits the listed pages that changed to IndexNow. Unset or malformed, it serves and submits nothing.      |
+
 ## Related
 
 - [Self-hosting overview](/operate/self-hosting): install and run the engine.
