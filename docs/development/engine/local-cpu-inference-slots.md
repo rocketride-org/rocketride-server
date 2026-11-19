@@ -41,22 +41,28 @@ The usable cores are the fewest of:
 - the container's CPU quota (cgroup v2 `cpu.max` or v1 `cpu.cfs_quota_us`),
   rounded up to whole CPUs.
 
-A value that cannot be read is skipped. The process gets one slot per 4 usable
-cores, at least 1 and at most 4. The task logs the count once, when the CPU guard
-is created.
+A value that cannot be read is skipped. When none can be read, the process logs
+a warning that says what each read gave and counts 1 usable core. The process
+gets one slot per 4 usable cores, at least 1 and at most 4. When the CPU guard
+is created it writes the count once, as an info line of the
+`rocketlib.models.device_budget` logger, which shows only where that level is
+enabled.
 
 The operator can set `RR_CPU_INFERENCE_SLOTS` to a whole number from 1 to 16 in
 the engine's environment; tasks inherit it. `RR_CPU_INFERENCE_SLOTS=1` restores
-the old behaviour: one call at a time per model. A value outside that range is
-logged as a warning and the computed count applies.
+the old behaviour: one call at a time per model. A blank value counts as unset.
+Any other value is logged as a warning and gives 1 slot.
 
 ## Which models use it
 
 - The sentence-transformer embedding model, on the local CPU path only. A stock
   Hugging Face `BertModel` encoder (both MiniLM profiles of
   `embedding_transformer`) asks for up to 4 calls. The check reads the loaded
-  model once: evaluation mode, torch and BERT modules only, no hooks or replaced
-  `forward`, float32 CPU tensors. Any other embedding model asks for 1.
+  model once: evaluation mode, torch and BERT modules only, no hooks, no
+  `forward` set on a module, no class `forward` defined outside torch and
+  transformers, float32 CPU tensors. Any other embedding model asks for 1. A
+  model at 1 call also holds its own lock inside its place, so a forward that
+  reaches the same model another way cannot overlap it.
 - OCR (EasyOCR, docTR, Surya, TrOCR) names no model, so it stays at one call at a
   time on the CPU across all OCR nodes, as before. An OCR call never waits for
   the embedding model, and the embedding model's first forward never waits for
