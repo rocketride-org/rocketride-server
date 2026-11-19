@@ -111,55 +111,8 @@ class IInstance(IInstanceBase):
             )
             return self.preventDefault()
 
-        # Extract text from the answer
-        output_text = ''
-        json_data = None
-        if answer.isJson():
-            json_data = answer.getJson()
-            # Strip reserved reference fields before scoring to prevent
-            # the evaluator from grading text that contains the reference.
-            # This is a shallow, top-level strip and only applies to dict-shaped
-            # JSON answers: reference fields nested inside sub-objects, or a
-            # reference carried in a plain-text answer, are not removed here.
-            eval_payload = json_data
-            if isinstance(json_data, dict):
-                eval_payload = {k: v for k, v in json_data.items() if k not in {'expected', 'context', 'reference'}}
-            output_text = json.dumps(eval_payload) if eval_payload is not None else ''
-        else:
-            output_text = answer.getText() or ''
-
-        # Try to extract expected text from answer metadata or context.
-        # For LLM judge mode, expected can remain empty (judge evaluates
-        # standalone quality). For similarity mode, a missing expected
-        # value will produce a zero score.
-        expected = ''
-        context = getattr(answer, 'context', None)
-        if evaluator.eval_type == 'grounding':
-            candidates = [
-                metadata.get('context') if isinstance(metadata, dict) else None,
-                context if isinstance(context, str) else None,
-                json_data.get('context') if isinstance(json_data, dict) else None,
-                metadata.get('reference') if isinstance(metadata, dict) else None,
-                json_data.get('reference') if isinstance(json_data, dict) else None,
-                getattr(answer, 'expected', None),
-                metadata.get('expected') if isinstance(metadata, dict) else None,
-                json_data.get('expected') if isinstance(json_data, dict) else None,
-            ]
-        else:
-            candidates = [
-                getattr(answer, 'expected', None),
-                metadata.get('expected') if isinstance(metadata, dict) else None,
-                metadata.get('reference') if isinstance(metadata, dict) else None,
-                metadata.get('context') if isinstance(metadata, dict) else None,
-                context if isinstance(context, str) else None,
-                json_data.get('expected') if isinstance(json_data, dict) else None,
-                json_data.get('reference') if isinstance(json_data, dict) else None,
-                json_data.get('context') if isinstance(json_data, dict) else None,
-            ]
-        for candidate in candidates:
-            if candidate is not None and candidate != '':
-                expected = candidate if isinstance(candidate, str) else str(candidate)
-                break
+        output_text, json_data = self._output_text(answer)
+        expected = self._reference_text(evaluator.eval_type, answer, metadata, json_data)
 
         if not expected and evaluator.eval_type in ('similarity', 'relevance'):
             debug(f'Cobalt evaluator: no expected text found for {evaluator.eval_type} mode; score will be 0')
@@ -199,6 +152,88 @@ class IInstance(IInstanceBase):
 
         # Both writes above are explicit, so the engine must not add its own.
         return self.preventDefault()
+
+    @staticmethod
+    def _output_text(answer: Answer):
+        """Return the text to score and the answer's JSON payload.
+
+        A plain-text answer is scored on its text. A JSON answer is scored on
+        its serialised payload with the reserved reference fields removed, so
+        the evaluator never grades text that contains the reference. That strip
+        is shallow and top-level, and applies to dict-shaped payloads only: a
+        reference nested inside a sub-object, or carried in a plain-text
+        answer, is not removed.
+
+        Args:
+            answer: The answer to score.
+
+        Returns:
+            An ``(output_text, json_data)`` pair. ``json_data`` is the payload
+            as the answer holds it, reference fields included, or None for a
+            plain-text answer.
+        """
+        if not answer.isJson():
+            return answer.getText() or '', None
+
+        json_data = answer.getJson()
+        eval_payload = json_data
+        if isinstance(json_data, dict):
+            eval_payload = {k: v for k, v in json_data.items() if k not in {'expected', 'context', 'reference'}}
+        output_text = json.dumps(eval_payload) if eval_payload is not None else ''
+        return output_text, json_data
+
+    @staticmethod
+    def _reference_text(eval_type: str, answer: Answer, metadata, json_data) -> str:
+        """Return the text the answer is scored against, or '' when there is none.
+
+        ``grounding`` scores against the evidence the answer should be grounded
+        in, so it looks for ``context`` first; every other type looks for the
+        expected answer first. Within each order the answer's own attribute and
+        its metadata come before its JSON payload. The first candidate that is
+        neither None nor an empty string wins, so an explicit falsy value such
+        as ``0`` is kept, and a candidate that is not a string is converted
+        with ``str``.
+
+        An empty result is not an error: ``llm_judge`` can judge an answer on
+        its own, while ``similarity``, ``relevance`` and ``grounding`` then
+        score 0.
+
+        Args:
+            eval_type: The evaluator's configured type.
+            answer: The answer being scored.
+            metadata: The answer's metadata; ignored unless it is a dict.
+            json_data: The answer's JSON payload; ignored unless it is a dict.
+
+        Returns:
+            The reference text, or an empty string.
+        """
+        context = getattr(answer, 'context', None)
+        if eval_type == 'grounding':
+            candidates = [
+                metadata.get('context') if isinstance(metadata, dict) else None,
+                context if isinstance(context, str) else None,
+                json_data.get('context') if isinstance(json_data, dict) else None,
+                metadata.get('reference') if isinstance(metadata, dict) else None,
+                json_data.get('reference') if isinstance(json_data, dict) else None,
+                getattr(answer, 'expected', None),
+                metadata.get('expected') if isinstance(metadata, dict) else None,
+                json_data.get('expected') if isinstance(json_data, dict) else None,
+            ]
+        else:
+            candidates = [
+                getattr(answer, 'expected', None),
+                metadata.get('expected') if isinstance(metadata, dict) else None,
+                metadata.get('reference') if isinstance(metadata, dict) else None,
+                metadata.get('context') if isinstance(metadata, dict) else None,
+                context if isinstance(context, str) else None,
+                json_data.get('expected') if isinstance(json_data, dict) else None,
+                json_data.get('reference') if isinstance(json_data, dict) else None,
+                json_data.get('context') if isinstance(json_data, dict) else None,
+            ]
+        for candidate in candidates:
+            if candidate is not None and candidate != '':
+                return candidate if isinstance(candidate, str) else str(candidate)
+        return ''
 
     @staticmethod
     def _score_answer(metadata, *, score, passed, evaluator_name, reasoning) -> Answer:

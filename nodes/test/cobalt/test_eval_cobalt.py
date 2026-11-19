@@ -1058,6 +1058,115 @@ class TestIInstanceWriteAnswers:
         inst.IGlobal._evaluator.evaluate.assert_called_once_with('grounded response', 'source evidence context')
 
 
+class TestOutputText:
+    """``_output_text`` returns the text to score and the answer's JSON payload."""
+
+    @staticmethod
+    def _output_text(answer):
+        from eval_cobalt.IInstance import IInstance
+
+        return IInstance._output_text(answer)
+
+    def test_plain_text_answer_is_scored_on_its_text(self):
+        answer = MockAnswer()
+        answer.setAnswer('Paris')
+        assert self._output_text(answer) == ('Paris', None)
+
+    def test_plain_text_answer_without_text_is_an_empty_string(self):
+        answer = SimpleNamespace(isJson=lambda: False, getText=lambda: None)
+        assert self._output_text(answer) == ('', None)
+
+    def test_json_dict_loses_its_reference_fields_in_the_scored_text_only(self):
+        payload = {'output': 'Paris', 'expected': 'REF', 'context': 'CTX', 'reference': 'REFERENCE'}
+        answer = MockAnswer(expectJson=True)
+        answer.setAnswer(payload)
+
+        output_text, json_data = self._output_text(answer)
+
+        assert output_text == '{"output": "Paris"}'
+        assert json_data == payload
+
+    def test_json_list_is_scored_as_it_is(self):
+        answer = SimpleNamespace(isJson=lambda: True, getJson=lambda: ['expected', 'Paris'])
+        assert self._output_text(answer) == ('["expected", "Paris"]', ['expected', 'Paris'])
+
+    def test_json_answer_without_a_payload_is_an_empty_string(self):
+        answer = SimpleNamespace(isJson=lambda: True, getJson=lambda: None)
+        assert self._output_text(answer) == ('', None)
+
+
+class TestReferenceTextCandidateOrder:
+    """``_reference_text`` takes the first non-empty candidate, in an order set by the type.
+
+    Each place a reference can sit holds a value naming that place, so the
+    result names the place that won.
+    """
+
+    DEFAULT_ORDER = (
+        'answer.expected',
+        'metadata.expected',
+        'metadata.reference',
+        'metadata.context',
+        'answer.context',
+        'json.expected',
+        'json.reference',
+        'json.context',
+    )
+    GROUNDING_ORDER = (
+        'metadata.context',
+        'answer.context',
+        'json.context',
+        'metadata.reference',
+        'json.reference',
+        'answer.expected',
+        'metadata.expected',
+        'json.expected',
+    )
+
+    @staticmethod
+    def _reference_text(eval_type, answer, metadata, json_data):
+        from eval_cobalt.IInstance import IInstance
+
+        return IInstance._reference_text(eval_type, answer, metadata, json_data)
+
+    def _pick(self, eval_type, present):
+        """Return the winner when only the places in ``present`` hold a value."""
+        answer = SimpleNamespace(
+            expected='answer.expected' if 'answer.expected' in present else None,
+            context='answer.context' if 'answer.context' in present else None,
+        )
+        keys = ('expected', 'reference', 'context')
+        metadata = {key: f'metadata.{key}' for key in keys if f'metadata.{key}' in present}
+        json_data = {key: f'json.{key}' for key in keys if f'json.{key}' in present}
+        return self._reference_text(eval_type, answer, metadata, json_data)
+
+    @pytest.mark.parametrize('eval_type', ['similarity', 'llm_judge', 'custom', 'relevance', 'format'])
+    def test_default_order_looks_for_the_expected_answer_first(self, eval_type):
+        for position, winner in enumerate(self.DEFAULT_ORDER):
+            assert self._pick(eval_type, self.DEFAULT_ORDER[position:]) == winner
+
+    def test_grounding_order_looks_for_the_context_first(self):
+        for position, winner in enumerate(self.GROUNDING_ORDER):
+            assert self._pick('grounding', self.GROUNDING_ORDER[position:]) == winner
+
+    @pytest.mark.parametrize('eval_type', ['similarity', 'grounding'])
+    def test_no_candidate_is_an_empty_string(self, eval_type):
+        assert self._pick(eval_type, ()) == ''
+
+    def test_empty_string_is_skipped_and_an_explicit_zero_is_kept(self):
+        answer = SimpleNamespace(expected='', context=None)
+        assert self._reference_text('similarity', answer, {'expected': 0, 'reference': 'later'}, None) == '0'
+
+    def test_metadata_and_payload_that_are_not_dicts_are_ignored(self):
+        answer = SimpleNamespace(expected=None, context=None)
+        assert self._reference_text('similarity', answer, 'not a dict', ['not', 'a', 'dict']) == ''
+        assert self._reference_text('grounding', answer, None, None) == ''
+
+    def test_a_context_attribute_that_is_not_a_string_is_ignored(self):
+        answer = SimpleNamespace(expected=None, context=['a retrieved document'])
+        assert self._reference_text('grounding', answer, {}, {'context': 'json context'}) == 'json context'
+
+
 class TestIGlobalLifecycle:
     """Test IGlobal beginGlobal/endGlobal lifecycle."""
 
