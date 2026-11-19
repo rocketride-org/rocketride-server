@@ -31,6 +31,7 @@ leak), the normalization-bypass fuzz family, and cross-user write-lock
 exclusion on shared team paths.
 """
 
+import os
 import shutil
 import tempfile
 from types import SimpleNamespace
@@ -736,6 +737,20 @@ class TestSignedFetchUrls:
         assert response.status_code == 401, label
 
 
+def _set_signing_key(monkeypatch, key: str) -> None:
+    """Set RR_SIGNING_KEY as the UTF-8 bytes an operator's environment holds.
+
+    monkeypatch.setenv encodes a str with the filesystem encoding, which is
+    ASCII when the engine's Python runs under the C locale, so a non-ASCII key
+    could not even be set. The bytes view takes the UTF-8 key on any locale;
+    Windows has no bytes view and keeps the environment as text.
+    """
+    if os.supports_bytes_environ:
+        monkeypatch.setitem(os.environb, b'RR_SIGNING_KEY', key.encode('utf-8'))
+    else:
+        monkeypatch.setenv('RR_SIGNING_KEY', key)
+
+
 class TestFetchSigningKeyStaysInTheEngine:
     """Issue #1070: pipeline code must not be able to mint /task/fetch tokens.
 
@@ -753,7 +768,7 @@ class TestFetchSigningKeyStaysInTheEngine:
     def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
         from ai.modules import task
 
-        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        _set_signing_key(monkeypatch, key)
         started = []
         monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
         with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32') as error:
@@ -763,7 +778,7 @@ class TestFetchSigningKeyStaysInTheEngine:
 
     @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
     def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
-        monkeypatch.setenv('RR_SIGNING_KEY', key)
+        _set_signing_key(monkeypatch, key)
         assert file_store.fetch_signing_key() == key
 
     @pytest.fixture(autouse=True)
