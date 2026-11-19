@@ -369,6 +369,7 @@ def _cgroup_cpus(root: str = '/sys/fs/cgroup') -> Optional[int]:
             return None
         return -(-quota // period)
     except Exception:
+        # no cgroup file system here, or a file in a form this does not know: no quota is known
         return None
 
 
@@ -377,44 +378,64 @@ def _usable_cores() -> int:
 
     Returns:
         The fewest of the physical cores, the CPUs this process may run on and its container's
-        CPU quota, among those that can be read; at least 1.
+        CPU quota, among those that can be read; at least 1. When none can be read, 1, with a
+        warning that says what each read gave.
     """
-    known: List[Optional[int]] = []
+    reads: List[Tuple[str, Any]] = []  # (the read, the count it gave or what it raised)
     try:
         import psutil
 
-        known.append(psutil.cpu_count(logical=False))
-    except Exception:
-        pass
+        reads.append(('psutil.cpu_count', psutil.cpu_count(logical=False)))
+    except Exception as e:
+        # no psutil, or it cannot count here: the other reads may still give a number
+        reads.append(('psutil.cpu_count', e))
+    has_affinity = hasattr(os, 'sched_getaffinity')
+    name = 'os.sched_getaffinity' if has_affinity else 'os.cpu_count'
     try:
-        known.append(len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count())
-    except Exception:
-        pass
-    known.append(_cgroup_cpus())
-    counts = [n for n in known if n]
-    return max(1, min(counts)) if counts else 1
+        reads.append((name, len(os.sched_getaffinity(0)) if has_affinity else os.cpu_count()))
+    except Exception as e:
+        # the platform refuses the call: the other reads may still give a number
+        reads.append((name, e))
+    reads.append(('cgroup CPU quota', _cgroup_cpus()))
+    counts = [got for _, got in reads if isinstance(got, int) and got > 0]
+    if not counts:
+        why = '; '.join(f'{read}: {got!r}' for read, got in reads)
+        logger.warning('no core count could be read (%s); counting 1 usable core', why)
+        return 1
+    return min(counts)
 
 
-def cpu_slots() -> int:
+def cpu_slots(cores: Optional[int] = None) -> int:
     """Number of calls the CPU admits at once in this process; see the module docstring.
 
+    Args:
+        cores: The usable cores, when the caller has read them; ``None`` reads them here. They
+            are used only when ``RR_CPU_INFERENCE_SLOTS`` is unset or blank.
+
     Returns:
-        ``RR_CPU_INFERENCE_SLOTS`` when it is set to a whole number from 1 to ``CPU_SLOTS_LIMIT``;
-        otherwise one per ``CPU_CORES_PER_CALL`` usable cores, from 1 to ``MAX_CPU_SLOTS``. A value
-        set but outside that range is logged and ignored.
+        ``RR_CPU_INFERENCE_SLOTS`` when it is set to a whole number from 1 to ``CPU_SLOTS_LIMIT``
+        in plain ASCII digits; 1, with a warning, when it is set to anything else; when it is
+        unset or blank, one per ``CPU_CORES_PER_CALL`` usable cores, from 1 to ``MAX_CPU_SLOTS``.
     """
     value = os.environ.get(CPU_SLOTS_ENV, '').strip()
     if value:
-        try:
-            slots = int(value)
-        except ValueError:
-            slots = 0
+        slots = 0
+        # plain ASCII digits only: int() also takes '1_6', '+4' and the digits of other scripts
+        if value.isascii() and value.isdigit():
+            try:
+                slots = int(value)
+            except ValueError:
+                # more digits than int() converts (sys.get_int_max_str_digits): far past the limit
+                pass
         if 1 <= slots <= CPU_SLOTS_LIMIT:
             return slots
         logger.warning(
-            '%s=%r is not a whole number from 1 to %d; computing the CPU slots', CPU_SLOTS_ENV, value, CPU_SLOTS_LIMIT
+            '%s=%r is not a whole number from 1 to %d; using 1 CPU slot', CPU_SLOTS_ENV, value, CPU_SLOTS_LIMIT
         )
-    return max(1, min(MAX_CPU_SLOTS, _usable_cores() // CPU_CORES_PER_CALL))
+        return 1
+    if cores is None:
+        cores = _usable_cores()
+    return max(1, min(MAX_CPU_SLOTS, cores // CPU_CORES_PER_CALL))
 
 
 class _Ticket:
@@ -464,8 +485,10 @@ class DeviceBudget:
         self.device = device
         self._gpu = device.startswith('cuda')
         if slots is None and device == 'cpu':
-            slots = cpu_slots()
-            logger.info('cpu: %d inference slots (%d usable cores)', slots, _usable_cores())
+            # read once, so a failed read warns once and the log line shows the count cpu_slots() was given
+            cores = _usable_cores()
+            slots = cpu_slots(cores)
+            logger.info('cpu: %d inference slots (%d usable cores)', slots, cores)
         self._slots = 1 if slots is None else slots
         self._probe = probe if probe or not self._gpu else _cuda_probe(device)
         self._neighbours = neighbours if neighbours or not self._gpu else _nvml_neighbours(device)

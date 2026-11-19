@@ -648,7 +648,7 @@ def test_another_non_cuda_device_keeps_one_slot(monkeypatch):
     """A device other than ``cpu`` and CUDA (``mps``) keeps one slot whatever the CPU has; ``cpu`` takes ``cpu_slots()``."""
     infos = []
     monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(info=lambda *args: infos.append(args)))
-    monkeypatch.setattr(budgetmod, 'cpu_slots', lambda: 4)
+    monkeypatch.setattr(budgetmod, 'cpu_slots', lambda cores=None: 4)
     monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 16)
     budget = _watched(DeviceBudget('mps'))
     model = object()
@@ -683,48 +683,117 @@ def test_cpu_slots_follow_the_usable_cores(monkeypatch, cores, slots):
     assert budgetmod.cpu_slots() == slots
 
 
-@pytest.mark.parametrize('value, slots', [('1', 1), ('16', 16)])
+@pytest.mark.parametrize('value, slots', [('1', 1), ('16', 16), (' 4 ', 4)])
 def test_the_operator_sets_the_cpu_slots(monkeypatch, value, slots):
-    """``RR_CPU_INFERENCE_SLOTS`` from 1 to 16 replaces the computed slots.
+    """``RR_CPU_INFERENCE_SLOTS`` from 1 to 16, spaces around it stripped, replaces the computed slots; no core is read.
 
     Args:
         value: The variable's value.
         slots: The slots it gives.
     """
     monkeypatch.setenv('RR_CPU_INFERENCE_SLOTS', value)
-    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 8)
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: pytest.fail('cpu_slots() read the cores'))
     assert budgetmod.cpu_slots() == slots
 
 
-@pytest.mark.parametrize('value, warned', [('0', True), ('17', True), ('abc', True), ('', False)])
-def test_an_invalid_cpu_slots_setting_falls_back(monkeypatch, value, warned):
-    """A value outside 1 to 16 is logged once, naming the variable, and the computed slots apply; empty is unset.
+@pytest.mark.parametrize(
+    'value, slots, warned',
+    [
+        ('0', 1, True),
+        ('17', 1, True),
+        ('32', 1, True),
+        ('-1', 1, True),
+        ('abc', 1, True),
+        ('4.0', 1, True),
+        ('1_6', 1, True),  # int() reads 16
+        ('+4', 1, True),  # int() reads 4
+        ('\uff14', 1, True),  # a full-width 4, which int() reads
+        ('\u0664', 1, True),  # an Arabic-Indic 4, which int() reads
+        pytest.param('9' * 5000, 1, True, id='5000-digits'),  # more digits than int() converts
+        ('', 4, False),
+        ('   ', 4, False),
+    ],
+)
+def test_an_invalid_cpu_slots_setting_falls_back(monkeypatch, value, slots, warned):
+    """A value that is not a whole number from 1 to 16 in plain digits is logged once, naming the variable, and gives 1 slot.
+
+    A blank value is unset: the computed slots apply, with no warning.
 
     Args:
         value: The variable's value.
+        slots: The slots it gives.
         warned: Whether a warning is expected.
     """
     warnings = []
     monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
     monkeypatch.setenv('RR_CPU_INFERENCE_SLOTS', value)
-    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 8)
-    assert budgetmod.cpu_slots() == 2
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 16)  # computed: 4 slots, so a fallback to them shows
+    assert budgetmod.cpu_slots() == slots
     assert len(warnings) == int(warned)
     if warned:
         assert 'RR_CPU_INFERENCE_SLOTS' in warnings[0][0] % warnings[0][1:]
 
 
+def _core_reads(monkeypatch, physical, affinity, cpu_count, quota):
+    """Make the reads of ``_usable_cores`` give the values asked for, and collect what the module logs.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        physical: What psutil counts as physical cores; ``'missing'`` without psutil, ``'raises'`` when it raises.
+        affinity: How many CPUs ``os.sched_getaffinity`` lists; ``None`` where it does not exist, ``'raises'``
+            when it raises.
+        cpu_count: What ``os.cpu_count`` returns.
+        quota: The container quota in CPUs, or ``None``.
+
+    Returns:
+        A namespace whose ``warnings`` and ``infos`` lists get the arguments of each log call.
+    """
+    if physical == 'missing':
+        monkeypatch.setitem(sys.modules, 'psutil', None)
+    else:
+
+        def count(logical=True):
+            """Count as psutil does, or raise."""
+            if physical == 'raises':
+                raise RuntimeError('psutil cannot count here')
+            return 999 if logical else physical
+
+        monkeypatch.setitem(sys.modules, 'psutil', types.SimpleNamespace(cpu_count=count))
+    if affinity is None:
+        monkeypatch.delattr(budgetmod.os, 'sched_getaffinity', raising=False)
+    else:
+
+        def cpus(pid):
+            """List the CPUs the process may run on, or raise."""
+            if affinity == 'raises':
+                raise OSError('affinity refused')
+            return set(range(affinity))
+
+        monkeypatch.setattr(budgetmod.os, 'sched_getaffinity', cpus, raising=False)
+    monkeypatch.setattr(budgetmod.os, 'cpu_count', lambda: cpu_count)
+    monkeypatch.setattr(budgetmod, '_cgroup_cpus', lambda: quota)
+    logged = types.SimpleNamespace(warnings=[], infos=[])
+    monkeypatch.setattr(
+        budgetmod,
+        'logger',
+        types.SimpleNamespace(
+            warning=lambda *args: logged.warnings.append(args), info=lambda *args: logged.infos.append(args)
+        ),
+    )
+    return logged
+
+
 @pytest.mark.parametrize(
-    'physical, affinity, cpu_count, quota, usable',
+    'physical, affinity, cpu_count, quota, usable, warned',
     [
-        (16, 12, 32, 6, 6),  # the container quota is the fewest
-        (16, 32, 32, None, 16),  # physical cores, not SMT siblings
-        (None, 12, 32, None, 12),  # psutil cannot count physical cores
-        ('missing', None, 3, None, 3),  # no psutil, no affinity call: os.cpu_count
-        ('missing', None, None, None, 1),  # nothing known
+        (16, 12, 32, 6, 6, False),  # the container quota is the fewest
+        (16, 32, 32, None, 16, False),  # physical cores, not SMT siblings
+        (None, 12, 32, None, 12, False),  # psutil cannot count physical cores
+        ('missing', None, 3, None, 3, False),  # no psutil, no affinity call: os.cpu_count
+        ('missing', None, None, None, 1, True),  # nothing known: one warning
     ],
 )
-def test_usable_cores_are_the_fewest_known(monkeypatch, physical, affinity, cpu_count, quota, usable):
+def test_usable_cores_are_the_fewest_known(monkeypatch, physical, affinity, cpu_count, quota, usable, warned):
     """Usable cores are the fewest of physical cores, CPUs the process may use and the quota; unknown ones are skipped.
 
     Args:
@@ -733,19 +802,68 @@ def test_usable_cores_are_the_fewest_known(monkeypatch, physical, affinity, cpu_
         cpu_count: What ``os.cpu_count`` returns.
         quota: The container quota in CPUs, or ``None``.
         usable: The cores expected.
+        warned: Whether a warning is expected.
     """
-    if physical == 'missing':
-        monkeypatch.setitem(sys.modules, 'psutil', None)
-    else:
-        psutil = types.SimpleNamespace(cpu_count=lambda logical=True: 999 if logical else physical)
-        monkeypatch.setitem(sys.modules, 'psutil', psutil)
-    if affinity is None:
-        monkeypatch.delattr(budgetmod.os, 'sched_getaffinity', raising=False)
-    else:
-        monkeypatch.setattr(budgetmod.os, 'sched_getaffinity', lambda pid: set(range(affinity)), raising=False)
-    monkeypatch.setattr(budgetmod.os, 'cpu_count', lambda: cpu_count)
-    monkeypatch.setattr(budgetmod, '_cgroup_cpus', lambda: quota)
+    logged = _core_reads(monkeypatch, physical, affinity, cpu_count, quota)
     assert budgetmod._usable_cores() == usable
+    assert len(logged.warnings) == int(warned)
+
+
+@pytest.mark.parametrize(
+    'physical, affinity, usable',
+    [
+        ('raises', 12, 12),  # psutil raises: the CPUs the process may run on
+        (16, 'raises', 16),  # the affinity call raises: the physical cores
+    ],
+)
+def test_a_core_read_that_raises_is_skipped(monkeypatch, physical, affinity, usable):
+    """A read that raises is skipped like one that finds nothing: the other reads still give the count, with no warning.
+
+    Args:
+        physical: What psutil counts as physical cores, or ``'raises'``.
+        affinity: How many CPUs ``os.sched_getaffinity`` lists, or ``'raises'``.
+        usable: The cores expected.
+    """
+    logged = _core_reads(monkeypatch, physical, affinity, 32, None)
+    assert budgetmod._usable_cores() == usable
+    assert logged.warnings == []
+
+
+@pytest.mark.parametrize(
+    'physical, affinity, reasons',
+    [
+        ('raises', 'raises', ['psutil cannot count here', 'affinity refused', 'cgroup CPU quota: None']),
+        ('raises', None, ['psutil cannot count here', 'os.cpu_count: None']),
+        ('missing', 'raises', ['psutil.cpu_count: ', 'affinity refused']),
+        ('missing', None, ['psutil.cpu_count: ', 'os.cpu_count: None']),
+        # every read ran and found no number
+        (None, None, ['psutil.cpu_count: None', 'os.cpu_count: None', 'cgroup CPU quota: None']),
+    ],
+)
+def test_no_readable_core_count_gives_one_core_with_a_warning(monkeypatch, physical, affinity, reasons):
+    """With no count from psutil, the affinity call or ``os.cpu_count`` and no quota, 1 core counts, with one warning.
+
+    Args:
+        physical: ``'missing'`` without psutil, ``'raises'`` when it raises, ``None`` when it finds no count.
+        affinity: ``'raises'``, or ``None`` where the affinity call does not exist and ``os.cpu_count`` gives None.
+        reasons: Text the warning must carry: for each read, what it raised or the nothing it gave.
+    """
+    logged = _core_reads(monkeypatch, physical, affinity, None, None)
+    assert budgetmod._usable_cores() == 1
+    assert len(logged.warnings) == 1
+    message = logged.warnings[0][0] % logged.warnings[0][1:]
+    assert 'no core count could be read' in message and '1 usable core' in message
+    for reason in reasons:
+        assert reason in message
+
+
+def test_a_cpu_guard_with_no_readable_core_count_warns_once(monkeypatch):
+    """Creating the CPU guard reads the cores once: one warning when none can be read, and the log line says 1 slot, 1 core."""
+    monkeypatch.delenv(budgetmod.CPU_SLOTS_ENV, raising=False)
+    logged = _core_reads(monkeypatch, 'missing', None, None, None)
+    assert DeviceBudget('cpu')._slots == 1
+    assert len(logged.warnings) == 1
+    assert [args[1:] for args in logged.infos] == [(1, 1)]
 
 
 @pytest.mark.parametrize(
