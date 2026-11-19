@@ -243,6 +243,14 @@ export interface AppDescriptor {
 	id: string;
 	/** Display name shown in the app switcher. */
 	name: string;
+	/**
+	 * The `app` value stamped on this app's telemetry events; defaults to
+	 * `id`. Only honoured for first-party apps (`rocketride` or `rocketride.*`); for any other
+	 * app the shell ignores it and uses `id`. Never `'shell'` or another
+	 * app's id. Must match `^[A-Za-z0-9._-]{1,128}$`; any other value falls
+	 * back to `id` without a warning.
+	 */
+	telemetryId?: string;
 	/** Optional icon shown in the app switcher list. */
 	icon?: React.ReactNode;
 	/** Branding tokens (logo, welcome text) for the app. */

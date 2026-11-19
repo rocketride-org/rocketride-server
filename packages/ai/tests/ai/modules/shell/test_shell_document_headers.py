@@ -52,11 +52,15 @@ ENV = 'RR_SHELL_FRAME_ANCESTORS_EXTRA'
 
 
 def _client() -> TestClient:
-    """Mount shell_static as ``initModule`` does: ``/shell/*`` plus public routes."""
+    """Mount shell_static for ``/shell/*`` and for every other navigation path.
+
+    The public pages are no longer a fixed route list: a capture is served only
+    when the build carries it (see ``capture_candidate``), so a catch-all stands
+    in for the routes ``initModule`` registers.
+    """
     app = FastAPI()
     app.get('/shell/{file_path:path}')(shell_mod.shell_static)
-    for route in shell_mod.PUBLIC_ROUTES:
-        app.get(route)(shell_mod.shell_static)
+    app.get('/{file_path:path}')(shell_mod.shell_static)
     return TestClient(app)
 
 
