@@ -63,6 +63,16 @@ class _StubBase:
         pass
 
 
+class _UnresolvedCredentialError(ValueError):
+    pass
+
+
+def _check_credential_resolved(logicalType, field, value, connConfig=None):
+    """Stand-in for ai.common.config.check_credential_resolved: same detection, short message."""
+    if isinstance(value, str) and ('${' in value or '<REDACTED>' in value):
+        raise _UnresolvedCredentialError(f'{logicalType}: {field} is unresolved: {value}')
+
+
 class _StubTable:
     @staticmethod
     def generate_markdown_table(data, headers=None):
@@ -114,6 +124,8 @@ def _install_stubs() -> None:
 
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
+    config.UnresolvedCredentialError = _UnresolvedCredentialError
+    config.check_credential_resolved = _check_credential_resolved
 
     # Load the real config parsers rather than reimplementing them, so the node
     # is exercised against the same coercion rules it uses in production.
@@ -1171,6 +1183,8 @@ def test_password_field_fills_in_a_url_without_credentials(recording_client):
         ('falkor://:pw@host:6379', 'falkor://host:6379'),
         # unix:// carries its password in the query string instead.
         ('unix:///tmp/f.sock?db=0&password=pw', 'unix:///tmp/f.sock?db=0'),
+        # Other query pairs stay as written, so a ${...} in one is not percent-encoded.
+        ('unix:///tmp/f.sock?username=${ROCKETRIDE_U}&password=pw', 'unix:///tmp/f.sock?username=${ROCKETRIDE_U}'),
         ('falkor://host:6379', 'falkor://host:6379'),
     ],
 )
@@ -1348,3 +1362,77 @@ def test_reflect_schema_failure_does_not_break_begin(monkeypatch):
     graph_base.GraphGlobalBase.beginGlobal(glb)
 
     assert glb.graph_schema == {'nodes': {}, 'relationships': []}
+
+
+# ---------------------------------------------------------------------------
+# Unfilled ${ROCKETRIDE_*} credentials (#2712)
+# ---------------------------------------------------------------------------
+
+# The module the base lifecycle lives in; it holds the Config and warning it calls.
+_graph_global_mod = sys.modules['ai.common.graph.graph_global_base']
+
+
+def _begin_with_config(monkeypatch, config):
+    """Run the base beginGlobal on a FalkorDB global; return the configs _open_driver saw."""
+    glb = _FakeGlobal(_FakeGraph())
+    glb.glb = types.SimpleNamespace(logicalType='graph_falkordb', connConfig=dict(config))
+    monkeypatch.setattr(_graph_global_mod.Config, 'getNodeConfig', lambda *a, **kw: dict(config))
+    opened = []
+    monkeypatch.setattr(glb, '_open_driver', opened.append)
+    monkeypatch.setattr(glb, '_reflect_schema', lambda: {'nodes': {}, 'relationships': []})
+    graph_base.GraphGlobalBase.beginGlobal(glb)
+    return opened
+
+
+@pytest.mark.parametrize(
+    ('field', 'config'),
+    [
+        ('password', {'mode': 'manual', 'host': 'localhost', 'password': '${ROCKETRIDE_FALKOR_PASSWORD}'}),
+        ('url', {'mode': 'url', 'url': 'falkor://user:${ROCKETRIDE_FALKOR_PASSWORD}@host:6379'}),
+    ],
+)
+def test_begin_refuses_an_unfilled_credential_before_connecting(monkeypatch, field, config):
+    # ValueError, the stand-in's base: the graph base module is shared with the
+    # Neo4j tests, so whichever file loaded it first supplies the stand-in.
+    with pytest.raises(ValueError, match=f'graph_falkordb: {field} '):
+        _begin_with_config(monkeypatch, config)
+
+
+def test_begin_connects_with_filled_credentials(monkeypatch):
+    opened = _begin_with_config(monkeypatch, {'mode': 'url', 'url': 'falkor://h:6379', 'password': 's3cret'})
+    assert len(opened) == 1
+
+
+def test_a_filled_password_field_replaces_an_unfilled_url_password(monkeypatch):
+    # _connect drops the URL's own password when the field is filled, so that one is never sent.
+    config = {'mode': 'url', 'url': 'falkor://user:${ROCKETRIDE_FALKOR_PASSWORD}@h:6379', 'password': 's3cret'}
+    assert len(_begin_with_config(monkeypatch, config)) == 1
+
+
+@pytest.mark.parametrize(
+    'url',
+    [
+        'falkor://${ROCKETRIDE_FALKOR_USER}:x@h:6379',
+        'unix:///tmp/f.sock?username=${ROCKETRIDE_FALKOR_USER}&password=x',
+    ],
+)
+def test_the_rest_of_the_url_is_still_checked_when_the_password_field_is_filled(monkeypatch, url):
+    config = {'mode': 'url', 'url': url, 'password': 's3cret'}
+    with pytest.raises(ValueError, match='graph_falkordb: url '):
+        _begin_with_config(monkeypatch, config)
+
+
+def test_validate_config_warns_on_an_unfilled_password_and_does_not_probe(monkeypatch):
+    config = {'mode': 'manual', 'host': 'localhost', 'password': '${ROCKETRIDE_FALKOR_PASSWORD}'}
+    glb = _FakeGlobal(_FakeGraph())
+    glb.glb = types.SimpleNamespace(logicalType='graph_falkordb', connConfig=dict(config))
+    monkeypatch.setattr(_graph_global_mod.Config, 'getNodeConfig', lambda *a, **kw: dict(config))
+    probed = []
+    monkeypatch.setattr(glb, '_probe_connection', probed.append)
+    messages = []
+    monkeypatch.setattr(_graph_global_mod, 'warning', messages.append)
+
+    glb.validateConfig()
+
+    assert probed == []
+    assert len(messages) == 1 and 'ROCKETRIDE_FALKOR_PASSWORD' in messages[0]

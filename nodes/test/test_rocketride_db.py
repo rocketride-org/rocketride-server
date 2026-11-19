@@ -314,6 +314,9 @@ def _sql_iglobal_cls(monkeypatch):
     common_pkg.__path__ = []
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda *a, **kw: {})
+    # These tests cover the DSN and pool; the credential check has its own tests.
+    config.UnresolvedCredentialError = type('UnresolvedCredentialError', (ValueError,), {})
+    config.check_credential_resolved = lambda *a, **kw: None
     monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common.config', config)

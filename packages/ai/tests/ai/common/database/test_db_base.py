@@ -37,6 +37,8 @@ from sqlalchemy import (
 
 from sqlalchemy.exc import DBAPIError
 
+import ai.common.database.db_global_base as db_global_base_mod
+from ai.common.config import UnresolvedCredentialError
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase, MissingLlmError
 from ai.common.schema import Question
@@ -1456,3 +1458,49 @@ def test_write_questions_without_llm_does_not_raise_when_text_is_wired():
 
     assert fake_instance.text_written.startswith('No LLM is connected')
     assert fake_instance.table_written is None
+
+
+# ---------------------------------------------------------------------------
+# Unfilled ${ROCKETRIDE_*} password (#2712)
+# ---------------------------------------------------------------------------
+
+_UNFILLED = {'host': 'h', 'user': 'u', 'password': '${ROCKETRIDE_DB_PASSWORD}', 'database': 'd', 'table': 't'}
+
+
+def _global_with_config(monkeypatch, config):
+    """A _TestableGlobal whose node config is ``config``; create_engine records its calls."""
+    instance = _TestableGlobal.__new__(_TestableGlobal)
+    instance.glb = SimpleNamespace(logicalType='db_postgres', connConfig=dict(config))
+    monkeypatch.setattr(db_global_base_mod.Config, 'getNodeConfig', lambda *a, **k: dict(config))
+    engines = []
+    monkeypatch.setattr(db_global_base_mod, 'create_engine', lambda *a, **k: engines.append(a) or None)
+    return instance, engines
+
+
+def test_begin_global_refuses_an_unfilled_password_before_connecting(monkeypatch):
+    instance, engines = _global_with_config(monkeypatch, _UNFILLED)
+
+    with pytest.raises(UnresolvedCredentialError, match='ROCKETRIDE_DB_PASSWORD'):
+        instance.beginGlobal()
+
+    assert engines == []
+
+
+def test_validate_config_warns_with_the_variable_name_and_does_not_probe(monkeypatch):
+    instance, engines = _global_with_config(monkeypatch, _UNFILLED)
+    warnings = []
+    monkeypatch.setattr(db_global_base_mod, 'warning', warnings.append)
+
+    instance.validateConfig()
+
+    assert engines == []
+    assert len(warnings) == 1
+    assert 'password' in warnings[0] and 'ROCKETRIDE_DB_PASSWORD' in warnings[0]
+
+
+@pytest.mark.parametrize('password', ['', 's3cret', 'pa$$word', 'has ${ but no closing brace'])
+def test_a_filled_or_empty_password_passes_the_check(password):
+    instance = _TestableGlobal.__new__(_TestableGlobal)
+    instance.glb = SimpleNamespace(logicalType='db_postgres', connConfig={'password': password})
+
+    instance._check_credentials({'password': password})

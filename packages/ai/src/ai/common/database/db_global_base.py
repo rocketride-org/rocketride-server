@@ -63,7 +63,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 from rocketlib import IGlobalBase, error, warning
-from ai.common.config import Config
+from ai.common.config import Config, UnresolvedCredentialError, check_credential_resolved
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 
@@ -225,6 +225,16 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             return f"mysql+pymysql://{params['user']}:{password}@{params['host']}/{params['database']}"
         """
 
+    def _check_credentials(self, params: Dict[str, str]) -> None:
+        """Raise when the password is still a ${...} that no saved variable filled.
+
+        Checked before ``_build_connection_url`` URL-encodes it: sent as is, the
+        server's "authentication failed" reply would not say which variable is
+        missing. A node whose password does not come from its config overrides
+        this.
+        """
+        check_credential_resolved(self.glb.logicalType, 'password', params.get('password'), self.glb.connConfig)
+
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------
@@ -378,6 +388,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         try:
             raw = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             params = self._connection_params(raw)
+            self._check_credentials(params)
             db_url = self._build_connection_url(params)
 
             # Short connect timeout for the validation probe; pre_ping ensures
@@ -395,6 +406,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             # Do not reflect tables at save-time; let the runtime surface
             # table errors when the pipeline actually runs.
 
+        except UnresolvedCredentialError as e:
+            # Our own message, not the driver's: no statement echo to cut.
+            warning(str(e))
+            return
         except DBAPIError as e:
             warning(self._format_db_error(e))
             return
@@ -942,6 +957,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # Build the DSN via the subclass; it handles driver selection and
         # any required URL-encoding.
+        self._check_credentials(params)
         db_url = self._build_connection_url(params)
 
         # POOL_SIZE + MAX_OVERFLOW cap the node's concurrent connections

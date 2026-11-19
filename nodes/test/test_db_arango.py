@@ -97,6 +97,25 @@ class _StubQuestion:
 _QTYPE = SimpleNamespace(QUESTION='QUESTION', DIALECT='DIALECT', EXECUTE='EXECUTE')
 
 
+class _UnresolvedCredentialError(ValueError):
+    pass
+
+
+def _check_credential_resolved(logicalType, field, value, connConfig=None):
+    """Stand-in for ai.common.config.check_credential_resolved: same detection, short message."""
+    if isinstance(value, str) and ('${' in value or '<REDACTED>' in value):
+        raise _UnresolvedCredentialError(f'{logicalType}: {field} is unresolved: {value}')
+
+
+def _warn_if_credential_unresolved(logicalType, field, value, connConfig=None):
+    try:
+        _check_credential_resolved(logicalType, field, value, connConfig)
+    except _UnresolvedCredentialError as e:
+        _stub_warning(str(e))
+        return True
+    return False
+
+
 class _StubTable:
     @staticmethod
     def generate_markdown_table(data, headers=None) -> str:
@@ -129,6 +148,9 @@ def _build_import_stubs() -> dict:
     ai_common.__path__ = []
     ai_config = types.ModuleType('ai.common.config')
     ai_config.Config = SimpleNamespace(getNodeConfig=lambda *_a, **_k: {})
+    ai_config.UnresolvedCredentialError = _UnresolvedCredentialError
+    ai_config.check_credential_resolved = _check_credential_resolved
+    ai_config.warn_if_credential_unresolved = _warn_if_credential_unresolved
     ai_schema = types.ModuleType('ai.common.schema')
     ai_schema.Answer = _StubAnswer
     ai_schema.Question = _StubQuestion
@@ -603,6 +625,73 @@ class TestBeginGlobalClamps:
 # =============================================================================
 # (c) IInstance — tools, lanes, clamping, formatting
 # =============================================================================
+
+
+class TestUnfilledCredential:
+    """An unfilled ${ROCKETRIDE_*} password or token is refused before the server sees it (#2712)."""
+
+    @staticmethod
+    def _global(cfg):
+        ig = IGlobal.__new__(IGlobal)
+        ig.glb = SimpleNamespace(logicalType='db_arango', connConfig=dict(cfg))
+        return ig
+
+    @pytest.mark.parametrize(
+        ('field', 'cfg'),
+        [
+            ('password', {'endpoint': 'http://x:8529', 'password': '${ROCKETRIDE_ARANGO_PASSWORD}'}),
+            ('token', {'endpoint': 'http://x:8529', 'auth_method': 'token', 'token': '${ROCKETRIDE_ARANGO_TOKEN}'}),
+        ],
+    )
+    def test_begin_global_refuses_before_opening_a_client(self, field, cfg):
+        ig = self._global(cfg)
+        opened = []
+        ig._open_database = lambda *a, **k: opened.append(a)
+        orig = _IG.Config.getNodeConfig
+        _IG.Config.getNodeConfig = lambda *a, **k: cfg
+        try:
+            with pytest.raises(_UnresolvedCredentialError, match=f'db_arango: {field} '):
+                ig.beginGlobal()
+        finally:
+            _IG.Config.getNodeConfig = orig
+        assert opened == []
+
+    def test_validate_config_warns_and_does_not_open_a_client(self, monkeypatch):
+        cfg = {'endpoint': 'http://x:8529', 'password': '${ROCKETRIDE_ARANGO_PASSWORD}'}
+        ig = self._global(cfg)
+        clients = []
+        monkeypatch.setattr(_IG, 'ArangoClient', lambda *a, **k: clients.append(k))
+        monkeypatch.setattr(_IG.Config, 'getNodeConfig', lambda *a, **k: cfg)
+        _reset_logs()
+
+        ig.validateConfig()
+
+        assert clients == []
+        assert len(_WARNING_CALLS) == 1 and 'ROCKETRIDE_ARANGO_PASSWORD' in _WARNING_CALLS[0]
+
+    def test_validate_config_with_no_auth_method_warns_instead_of_raising(self, monkeypatch):
+        # A null auth_method means password sign-in, the same as a missing one.
+        cfg = {'endpoint': 'http://x:8529', 'auth_method': None, 'password': '${ROCKETRIDE_ARANGO_PASSWORD}'}
+        ig = self._global(cfg)
+        monkeypatch.setattr(_IG, 'ArangoClient', lambda *a, **k: pytest.fail('no client may be opened'))
+        monkeypatch.setattr(_IG.Config, 'getNodeConfig', lambda *a, **k: cfg)
+        _reset_logs()
+
+        ig.validateConfig()
+
+        assert len(_WARNING_CALLS) == 1 and 'db_arango: password ' in _WARNING_CALLS[0]
+
+    def test_no_auth_method_opens_with_the_password(self):
+        # A null auth_method signs in with the (resolved) password, as a missing one does.
+        calls = []
+        client = SimpleNamespace(db=lambda database, **kw: calls.append((database, kw)))
+        IGlobal._open_database(client, {'database': 'd', 'auth_method': None, 'user': 'u', 'password': 's3cret'})
+        assert calls == [('d', {'username': 'u', 'password': 's3cret', 'verify': False})]
+
+    def test_an_unused_placeholder_is_not_checked(self):
+        # The token is not sent under password sign-in.
+        cfg = {'auth_method': 'userpass', 'password': 's3cret', 'token': '${ROCKETRIDE_ARANGO_TOKEN}'}
+        self._global(cfg)._check_credentials(cfg)
 
 
 class TestClampLimit:

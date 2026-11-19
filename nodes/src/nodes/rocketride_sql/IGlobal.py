@@ -92,6 +92,9 @@ class IGlobal(DatabaseGlobalBase):
             'table': config.get('table', 'table').strip(),
         }
 
+    def _check_credentials(self, params: Dict[str, str]) -> None:
+        """Nothing to check: the password comes from the delivered DSN, not from a ${...} in the config."""
+
     def _build_connection_url(self, params: Dict[str, str]) -> str:
         """Return the SQLAlchemy engine URL for the per-tenant cloud DSN.
 

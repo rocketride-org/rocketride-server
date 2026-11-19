@@ -37,7 +37,7 @@ from arango import ArangoClient
 from arango.exceptions import ArangoError, ServerConnectionError
 
 from rocketlib import IGlobalBase, debug, error, warning
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved, warn_if_credential_unresolved
 
 from .utils import _is_aql_safe, _plan_is_modification
 
@@ -108,6 +108,8 @@ class IGlobal(IGlobalBase):
             )
         except (TypeError, ValueError):
             self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+
+        self._check_credentials(config)
 
         try:
             self.client = ArangoClient(hosts=self.endpoint)
@@ -232,6 +234,10 @@ class IGlobal(IGlobalBase):
 
         client = None
         try:
+            # Do not send an unfilled ${...} to the server as the password or token.
+            field, value = self._credential(config)
+            if warn_if_credential_unresolved(self.glb.logicalType, field, value, self.glb.connConfig):
+                return
             client = ArangoClient(hosts=endpoint)
             db = self._open_database(client, config, verify=True)
             db.aql.execute('RETURN 1')
@@ -345,6 +351,22 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _credential(config: Dict[str, Any]) -> Tuple[str, Any]:
+        """The ``(field, value)`` that ``_open_database`` signs in with for the chosen auth method."""
+        if str(config.get('auth_method') or 'userpass').strip() == 'token':
+            return 'token', config.get('token', '')
+        return 'password', config.get('password', '')
+
+    def _check_credentials(self, config: Dict[str, Any]) -> None:
+        """Raise when the password or token is still a ${...} that no saved variable filled.
+
+        Sent as is, the server's "not authorized" reply would not say which
+        variable is missing.
+        """
+        field, value = self._credential(config)
+        check_credential_resolved(self.glb.logicalType, field, value, self.glb.connConfig)
+
+    @staticmethod
     def _open_database(client: ArangoClient, config: Dict[str, Any], *, verify: bool = False) -> Any:
         """Open a database handle, honouring the ``auth_method`` field.
 
@@ -353,7 +375,7 @@ class IGlobal(IGlobalBase):
         raising ``ServerConnectionError`` on failure.
         """
         database = config.get('database', '_system').strip() or '_system'
-        auth_method = config.get('auth_method', 'userpass').strip()
+        auth_method = str(config.get('auth_method') or 'userpass').strip()
         if auth_method == 'token':
             return client.db(database, user_token=config.get('token', ''), verify=verify)
         user = config.get('user', 'root').strip() or 'root'

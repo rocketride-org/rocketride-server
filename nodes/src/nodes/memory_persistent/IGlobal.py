@@ -13,7 +13,7 @@ makes it available to all instances via ``self.store``.
 from __future__ import annotations
 
 from rocketlib import IGlobalBase, OPEN_MODE
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved, warn_if_credential_unresolved
 
 
 class IGlobal(IGlobalBase):
@@ -41,6 +41,11 @@ class IGlobal(IGlobalBase):
         from .memory_store import PersistentMemoryStore
 
         backend = self.config.get('backend', 'memory')
+        if backend == 'redis':
+            # Sent as is, Redis would answer "invalid password" without naming the missing variable.
+            check_credential_resolved(
+                self.glb.logicalType, 'redis_password', self.config.get('redis_password'), self.glb.connConfig
+            )
         self.store = PersistentMemoryStore(
             backend=backend,
             max_history=int(self.config.get('max_history', 100)),
@@ -50,6 +55,14 @@ class IGlobal(IGlobalBase):
             redis_password=self.config.get('redis_password') or None,
             session_ttl_hours=float(self.config.get('session_ttl_hours', 0)),
         )
+
+    def validateConfig(self) -> None:
+        """Save-time check: warn when the Redis password is an unfilled ${...} placeholder."""
+        config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+        if config.get('backend', 'memory') == 'redis':
+            warn_if_credential_unresolved(
+                self.glb.logicalType, 'redis_password', config.get('redis_password'), self.glb.connConfig
+            )
 
     def endGlobal(self) -> None:
         """Release resources and close backend connections.

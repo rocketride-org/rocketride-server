@@ -791,6 +791,61 @@ class TestIGlobalLifecycle:
         assert iglobal.store is None
         assert iglobal.config is None
 
+    @staticmethod
+    def _begin(config):
+        """Run beginGlobal in RUN mode on ``config``; return the store constructor mock."""
+        from rocketlib import OPEN_MODE
+
+        iglobal = IGlobal.__new__(IGlobal)
+        iglobal.IEndpoint = MagicMock()
+        iglobal.IEndpoint.endpoint.openMode = OPEN_MODE.INSTANCE
+        iglobal.glb = MagicMock(logicalType='memory_persistent', connConfig=dict(config))
+        depends_module = MagicMock()
+        with (
+            patch.dict(sys.modules, {'depends': depends_module}),
+            patch('nodes.memory_persistent.IGlobal.Config.getNodeConfig', return_value=dict(config)),
+            patch('nodes.memory_persistent.memory_store.PersistentMemoryStore') as store_cls,
+        ):
+            iglobal.beginGlobal()
+        return store_cls
+
+    def test_redis_backend_refuses_an_unfilled_password(self):
+        """An unsaved ${ROCKETRIDE_*} password names the variable instead of reaching Redis (#2712)."""
+        from ai.common.config import UnresolvedCredentialError
+
+        config = {'backend': 'redis', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'}
+        with pytest.raises(UnresolvedCredentialError, match='ROCKETRIDE_REDIS_PASSWORD'):
+            self._begin(config)
+
+    def test_memory_backend_ignores_the_redis_password(self):
+        """The in-memory backend never sends the Redis password, so it is not checked."""
+        store_cls = self._begin({'backend': 'memory', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'})
+        store_cls.assert_called_once()
+
+    @staticmethod
+    def _save_warnings(config):
+        """Run the save-time validateConfig on ``config``; return its warnings."""
+        iglobal = IGlobal.__new__(IGlobal)
+        iglobal.glb = MagicMock(logicalType='memory_persistent', connConfig=dict(config))
+        warnings = []
+        with (
+            patch('nodes.memory_persistent.IGlobal.Config.getNodeConfig', return_value=dict(config)),
+            patch('ai.common.config.warning', side_effect=warnings.append),
+        ):
+            iglobal.validateConfig()
+        return warnings
+
+    def test_save_warns_on_an_unfilled_redis_password(self):
+        warnings = self._save_warnings({'backend': 'redis', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'})
+        assert len(warnings) == 1 and 'ROCKETRIDE_REDIS_PASSWORD' in warnings[0]
+
+    def test_save_does_not_check_the_redis_password_of_the_memory_backend(self):
+        assert self._save_warnings({'backend': 'memory', 'redis_password': '${ROCKETRIDE_REDIS_PASSWORD}'}) == []
+
+    def test_redis_backend_with_a_filled_password_builds_the_store(self):
+        store_cls = self._begin({'backend': 'redis', 'redis_password': 's3cret'})
+        assert store_cls.call_args.kwargs['redis_password'] == 's3cret'
+
 
 # =============================================================================
 # 14. IInstance Lifecycle Tests
