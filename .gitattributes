@@ -13,6 +13,10 @@
 # Markdown files should use LF (node doc generator writes LF; prevents spurious diffs on Windows)
 *.md text eol=lf
 
+# The server hashes this file (runtime.json capabilitiesSha256): one byte
+# sequence on every checkout, or a Windows build serves a different sha
+packages/shell/isolation/capabilities.json text eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf
