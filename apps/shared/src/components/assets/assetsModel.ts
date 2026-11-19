@@ -338,17 +338,67 @@ export function assetMarkdown(assetRelPath: string): string {
 /** Code the SDK scanner skips (fenced blocks and inline spans): an example is never a live reference. */
 const CODE_RE = /```[\s\S]*?```|`[^`\n]*`/g;
 
-/** A markdown image or link: `![alt](dest "title")`, `[text](dest)`; groups: the `!`, the text, the destination, the title part. */
-const MARKDOWN_LINK_RE = /(!?)\[([^\]]*)\]\(\s*<?([^)\s>]+)>?((?:\s+"[^"]*")?)\s*\)/g;
+/**
+ * A markdown image or link: `![alt](dest "title")`, `[text](dest)`; groups:
+ * the `!`, the text, the destination, the title part. The destination is
+ * the SDK scanner's: one level of balanced parentheses allowed
+ * (`plot(1).png`), so every reference the scanner lists is one the edits find.
+ */
+const MARKDOWN_LINK_RE = /(!?)\[([^\]]*)\]\(\s*<?((?:[^\s()<>]|\([^\s()]*\))+)>?((?:\s+"[^"]*")?)\s*\)/g;
 
 /** An HTML `<img>` tag (the tag name case-insensitive; the path inside is compared exactly); group 1 = its attribute text. */
 const HTML_IMG_RE = /<img\b([^>]*)>/gi;
 
-/** The `src` attribute in an `<img>`'s attribute text; group 1 or 2 = the quoted value. */
-const SRC_ATTR_RE = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+/**
+ * One attribute in a tag's attribute text, as the HTML tokenizer reads it:
+ * the name, then an optional `=` (spaces allowed around it) and a double-
+ * quoted, single-quoted or bare value. Groups: the name, then the value by
+ * quoting. Walking the text token by token is what keeps a `src=` inside
+ * another attribute's value (`alt="see src='x'"`) from passing for the source.
+ */
+const ATTRIBUTE_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
-/** A `width` attribute in an `<img>`'s attribute text, for removal. */
-const WIDTH_ATTR_RE = /\swidth=(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+/** One attribute of an `<img>`: its name (lower-cased), its value, and where both sit in the attribute text. */
+interface IAttribute {
+	name: string;
+	value: string;
+	/** The token's span (name through closing quote). */
+	start: number;
+	end: number;
+	/** The value's span (inside the quotes). */
+	valueStart: number;
+	valueEnd: number;
+}
+
+/** The attributes of a tag's attribute text, in order. */
+function attributesOf(attrs: string): IAttribute[] {
+	const out: IAttribute[] = [];
+	for (const match of attrs.matchAll(ATTRIBUTE_RE)) {
+		const start = match.index ?? 0;
+		const end = start + match[0].length;
+		const value = match[2] ?? match[3] ?? match[4] ?? '';
+		const quoted = match[2] !== undefined || match[3] !== undefined;
+		const valueEnd = end - (quoted ? 1 : 0);
+		out.push({ name: match[1].toLowerCase(), value, start, end, valueStart: valueEnd - value.length, valueEnd });
+	}
+	return out;
+}
+
+/** The first attribute of a name (the one the browser keeps when it repeats), or undefined. */
+function firstAttribute(attrs: string, name: string): IAttribute | undefined {
+	return attributesOf(attrs).find((attribute) => attribute.name === name);
+}
+
+/** The attribute text without any attribute of the given name (each taken with the whitespace before it). */
+function withoutAttribute(attrs: string, name: string): string {
+	let out = attrs;
+	for (const attribute of attributesOf(attrs).filter((candidate) => candidate.name === name).reverse()) {
+		let from = attribute.start;
+		while (from > 0 && /\s/.test(out[from - 1])) from--;
+		out = out.slice(0, from) + out.slice(attribute.end);
+	}
+	return out;
+}
 
 /** A destination's predicate: which spellings an edit touches. */
 type Admits = (dest: string) => boolean;
@@ -368,16 +418,120 @@ function names(ref: string): Admits {
 	return (dest) => canonicalRef(dest) === wanted;
 }
 
-/** Applies a text transform to the parts of the markdown outside code, the code kept verbatim. */
-function outsideCode(markdown: string, transform: (segment: string) => string): string {
+/** Applies a text transform to the parts of the markdown outside code (each with its offset in the text), the code kept verbatim. */
+function outsideCode(markdown: string, transform: (segment: string, offset: number) => string): string {
 	let out = '';
 	let last = 0;
 	for (const match of markdown.matchAll(CODE_RE)) {
 		const at = match.index ?? 0;
-		out += transform(markdown.slice(last, at)) + match[0];
+		out += transform(markdown.slice(last, at), last) + match[0];
 		last = at + match[0].length;
 	}
-	return out + transform(markdown.slice(last));
+	return out + transform(markdown.slice(last), last);
+}
+
+/**
+ * The lines a rewrite emptied, dropped — only those that held something
+ * before, so no blank hole remains where a reference stood and the text's
+ * own blank lines stay. Every rewrite here keeps the line count, so the two
+ * texts line up by index.
+ */
+function dropEmptiedLines(before: string, after: string): string {
+	if (after === before) return before;
+	const was = before.split('\n');
+	return after
+		.split('\n')
+		.filter((line, i) => !(line.trim() === '' && was[i] !== undefined && was[i].trim() !== ''))
+		.join('\n');
+}
+
+// ── Reference-style references: `![alt][label]` over `[label]: dest` ─────────
+
+/**
+ * A markdown reference definition at a line start, the scanner's spelling:
+ * `[label]: dest "title"`; groups: the text up to the destination, the
+ * label, the destination, the rest of the line.
+ */
+const MARKDOWN_DEF_RE = /^([ \t]{0,3}\[([^\]]+)\]:[ \t]*<?)([^\s<>]+)(>?.*)$/gm;
+
+/** A reference-style image or link usage: `![alt][label]`, `[text][label]`, collapsed `![label][]`; groups: the `!`, the text, the label. */
+const MARKDOWN_REF_USAGE_RE = /(!?)\[([^\]]*)\]\[([^\]]*)\]/g;
+
+/** A label as definitions and usages match (CommonMark: case-insensitive, inner whitespace collapsed). */
+function labelKey(label: string): string {
+	return label.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** The label a usage names: its own, or its text when collapsed (`![label][]`). */
+function usageKey(text: string, label: string): string {
+	return labelKey(label === '' ? text : label);
+}
+
+/**
+ * The reference definitions outside code whose destination the predicate
+ * admits: label key to destination as written. The first definition of a
+ * label is the live one (CommonMark), so a later one never stands in.
+ */
+function admittedDefinitions(markdown: string, admits: Admits): Map<string, string> {
+	const seen = new Set<string>();
+	const found = new Map<string, string>();
+	rewriteDefinitions(markdown, null, (prefix, label, dest, rest) => {
+		const key = labelKey(label);
+		if (!seen.has(key)) {
+			seen.add(key);
+			if (admits(dest)) found.set(key, dest);
+		}
+		return `${prefix}${dest}${rest}`;
+	});
+	return found;
+}
+
+/**
+ * Rewrites the reference definitions outside code whose label is in the
+ * set (every definition for null). A definition is one that starts its
+ * line: a segment that opens mid-line (behind an inline code span) does not
+ * start one.
+ *
+ * @param markdown - The README text.
+ * @param labels - The label keys to rewrite, or null for all.
+ * @param rewrite - The replacement for one definition (its prefix up to the destination, label, destination and the rest of the line).
+ * @returns The rewritten text.
+ */
+function rewriteDefinitions(markdown: string, labels: Set<string> | null, rewrite: (prefix: string, label: string, dest: string, rest: string) => string): string {
+	return outsideCode(markdown, (segment, offset) =>
+		segment.replace(MARKDOWN_DEF_RE, (m, prefix: string, label: string, dest: string, rest: string, index: number) => {
+			const atLineStart = index > 0 || offset === 0 || markdown[offset - 1] === '\n';
+			return atLineStart && (labels === null || labels.has(labelKey(label))) ? rewrite(prefix, label, dest, rest) : m;
+		})
+	);
+}
+
+/**
+ * Rewrites the reference-style usages outside code whose label is in the set.
+ *
+ * @param markdown - The README text.
+ * @param labels - The label keys whose usages to rewrite.
+ * @param imagesOnly - Leave plain links alone.
+ * @param rewrite - The replacement for one usage (its `!`, text and label key).
+ * @returns The rewritten text.
+ */
+function rewriteReferenceUsages(markdown: string, labels: Set<string>, imagesOnly: boolean, rewrite: (bang: string, text: string, key: string) => string): string {
+	return outsideCode(markdown, (segment) =>
+		segment.replace(MARKDOWN_REF_USAGE_RE, (m, bang: string, text: string, label: string) => {
+			const key = usageKey(text, label);
+			return (imagesOnly && bang === '') || !labels.has(key) ? m : rewrite(bang, text, key);
+		})
+	);
+}
+
+/** The label keys of the set that no usage outside code still names. */
+function unusedLabels(markdown: string, labels: Set<string>): Set<string> {
+	const used = new Set<string>();
+	rewriteReferenceUsages(markdown, labels, false, (bang, text, key) => {
+		used.add(key);
+		return `${bang}[${text}][${key}]`;
+	});
+	return new Set([...labels].filter((key) => !used.has(key)));
 }
 
 /**
@@ -399,15 +553,15 @@ function rewriteMarkdownLinks(markdown: string, admits: Admits, imagesOnly: bool
  *
  * @param markdown - The README text.
  * @param admits - Which sources to rewrite.
- * @param rewrite - The replacement for one tag (its attribute text and source as written).
+ * @param rewrite - The replacement for one tag (its attribute text and its `src` attribute, the source as written in its value).
  * @returns The rewritten text.
  */
-function rewriteImageTags(markdown: string, admits: Admits, rewrite: (attrs: string, src: string) => string): string {
+function rewriteImageTags(markdown: string, admits: Admits, rewrite: (attrs: string, src: IAttribute) => string): string {
 	return outsideCode(markdown, (segment) =>
 		segment.replace(HTML_IMG_RE, (tag, attrs: string) => {
-			const src = attrs.match(SRC_ATTR_RE);
-			const dest = src ? (src[1] ?? src[2] ?? '') : '';
-			return dest !== '' && admits(dest) ? rewrite(attrs, dest) : tag;
+			// Step: the real src attribute, never a `src=` inside another attribute's value
+			const src = firstAttribute(attrs, 'src');
+			return src && src.value !== '' && admits(src.value) ? rewrite(attrs, src) : tag;
 		})
 	);
 }
@@ -428,8 +582,9 @@ export function referenceWidth(markdown: string, ref: string): number | null {
 		if (found.attrs === null) found.attrs = attrs;
 		return '';
 	});
-	const attribute = found.attrs?.match(/\swidth=["']?(\d+)/i);
-	return attribute ? Number(attribute[1]) : null;
+	// Step: the same attribute reader the width edit uses, so `width = "50"` reads as it rewrites
+	const digits = found.attrs === null ? undefined : firstAttribute(found.attrs, 'width')?.value.match(/^\s*(\d+)/);
+	return digits ? Number(digits[1]) : null;
 }
 
 /**
@@ -447,10 +602,16 @@ export function referenceWidth(markdown: string, ref: string): number | null {
 export function setReferenceWidth(markdown: string, ref: string, width: number | null): string {
 	const admits = names(ref);
 	const size = width !== null && Number.isFinite(width) && width > 0 ? ` width="${Math.round(width)}"` : '';
+	// Step 0: reference-style images (`![alt][label]`) become img tags over the
+	// definition's destination; a definition nothing else uses any more goes
+	const definitions = admittedDefinitions(markdown, admits);
+	const labels = new Set(definitions.keys());
+	const fromUsages = rewriteReferenceUsages(markdown, labels, true, (_bang, alt, key) => imageTag(definitions.get(key) ?? '', alt, width));
+	const fromReferences = dropEmptiedLines(fromUsages, rewriteDefinitions(fromUsages, unusedLabels(fromUsages, labels), () => ''));
 	// Step 1: markdown images become img tags
-	const fromMarkdown = rewriteMarkdownLinks(markdown, admits, true, (_bang, alt, dest) => imageTag(dest, alt, width));
+	const fromMarkdown = rewriteMarkdownLinks(fromReferences, admits, true, (_bang, alt, dest) => imageTag(dest, alt, width));
 	// Step 2: img tags keep their other attributes, width replaced or dropped
-	return rewriteImageTags(fromMarkdown, admits, (attrs) => `<img${attrs.replace(WIDTH_ATTR_RE, '').replace(/\s+$/, '')}${size}>`);
+	return rewriteImageTags(fromMarkdown, admits, (attrs) => `<img${withoutAttribute(attrs, 'width').replace(/\s+$/, '')}${size}>`);
 }
 
 /**
@@ -525,12 +686,13 @@ export async function uniqueAssetName(name: string, exists: (candidate: string) 
  */
 export function removeReference(markdown: string, ref: string): string {
 	const admits = names(ref);
-	const stripped = rewriteImageTags(rewriteMarkdownLinks(markdown, admits, false, () => ''), admits, () => '');
-	if (stripped === markdown) return markdown;
-	// Step: drop the lines the removal emptied (only those that held a reference)
-	const before = markdown.split('\n');
-	const after = stripped.split('\n');
-	return after.filter((line, i) => !(line.trim() === '' && before[i] !== undefined && before[i].trim() !== '')).join('\n');
+	// Step 1: reference-style: the definitions naming the file and every usage of their labels
+	const labels = new Set(admittedDefinitions(markdown, admits).keys());
+	const withoutDefinitions = rewriteReferenceUsages(rewriteDefinitions(markdown, labels, () => ''), labels, false, () => '');
+	// Step 2: inline links, images and img tags
+	const stripped = rewriteImageTags(rewriteMarkdownLinks(withoutDefinitions, admits, false, () => ''), admits, () => '');
+	// Step 3: drop the lines the removal emptied (only those that held a reference)
+	return dropEmptiedLines(markdown, stripped);
 }
 
 /**
@@ -554,9 +716,11 @@ export async function inlineImageReferences(markdown: string, resolve: (ref: str
 	if (inlined.size === 0) return markdown;
 	const admits: Admits = (dest) => inlined.has(canonicalRef(dest));
 	const uriOf = (dest: string): string => inlined.get(canonicalRef(dest)) ?? dest;
-	// Step 2: the swap, outside code, titles and other attributes kept
-	const withMarkdown = rewriteMarkdownLinks(markdown, admits, true, (bang, alt, dest, title) => `${bang}[${alt}](${uriOf(dest)}${title})`);
-	return rewriteImageTags(withMarkdown, admits, (attrs, dest) => `<img${attrs.replace(SRC_ATTR_RE, (attribute) => attribute.replace(dest, () => uriOf(dest)))}>`);
+	// Step 2: the swap, outside code, titles and other attributes kept — a
+	// reference definition's destination swaps in place, its usages untouched
+	const withDefinitions = rewriteDefinitions(markdown, new Set(admittedDefinitions(markdown, admits).keys()), (prefix, _label, dest, rest) => `${prefix}${uriOf(dest)}${rest}`);
+	const withMarkdown = rewriteMarkdownLinks(withDefinitions, admits, true, (bang, alt, dest, title) => `${bang}[${alt}](${uriOf(dest)}${title})`);
+	return rewriteImageTags(withMarkdown, admits, (attrs, src) => `<img${attrs.slice(0, src.valueStart)}${uriOf(src.value)}${attrs.slice(src.valueEnd)}>`);
 }
 
 /** Percent-decodes when the text is a valid encoding; the text otherwise. */

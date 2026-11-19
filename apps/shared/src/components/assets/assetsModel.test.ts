@@ -89,6 +89,35 @@ test('removeReference: every spelling of the file goes, a code example and anoth
 	assert.equal(removeReference(md, 'assets/my shot.png'), '<img src="assets/My shot.png">\n`![c](assets/my shot.png)`\n\n```\n<img src="assets/my shot.png">\n```');
 });
 
+test('removeReference: a parenthesised destination the scanner lists is found; a src= inside another attribute is not a source', () => {
+	// The scanner admits one balanced pair in a destination: the edit must find the same reference
+	assert.equal(removeReference('![Plot](assets/plot(1).png)\nEnd', 'assets/plot(1).png'), 'End');
+	// The alt text mentions a.png as a src=; the tag's real source is b.png
+	const md = '<img alt="Example src=\'assets/a.png\'" src="assets/b.png">\nEnd';
+	assert.equal(removeReference(md, 'assets/a.png'), md);
+	assert.equal(removeReference(md, 'assets/b.png'), 'End');
+});
+
+test('removeReference: a reference definition goes with every usage of its label; labels match case-insensitively', () => {
+	const md = '![Diagram][figure]\n\n[figure]: assets/diagram.png "t"\nSee [the figure][Figure] and ![figure][] here.\n`[figure]: assets/diagram.png`\nEnd';
+	assert.equal(removeReference(md, 'assets/diagram.png'), '\nSee  and  here.\n`[figure]: assets/diagram.png`\nEnd');
+	// A definition of another file, and a definition that does not start its line, stay
+	const other = '![x][a] text [a]: assets/diagram.png\n\n[a]: assets/other.png';
+	assert.equal(removeReference(other, 'assets/diagram.png'), other);
+});
+
+test('setReferenceWidth: a reference-style image becomes an img tag over the definition; the definition goes unless a link still uses it', () => {
+	assert.equal(setReferenceWidth('![Diagram][figure]\n\n[figure]: <assets/diagram.png>', 'assets/diagram.png', 300), '<img src="assets/diagram.png" alt="Diagram" width="300">\n');
+	assert.equal(setReferenceWidth('![d][fig] and [doc][fig]\n[fig]: assets/d.png', 'assets/d.png', 40), '<img src="assets/d.png" alt="d" width="40"> and [doc][fig]\n[fig]: assets/d.png');
+	assert.equal(referenceWidth('![d][fig]\n[fig]: assets/d.png', 'assets/d.png'), null);
+});
+
+test('inlineImageReferences: a reference definition takes the data URI in place, its usages and title kept', async () => {
+	const md = '![d][fig] and ![d][]\n\n[fig]: <assets/d.png> "t"\n[d]: assets/d.png';
+	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/d.png' ? 'data:image/png;base64,AAAA' : null));
+	assert.equal(out, '![d][fig] and ![d][]\n\n[fig]: <data:image/png;base64,AAAA> "t"\n[d]: data:image/png;base64,AAAA');
+});
+
 test('setReferenceWidth: every spelling is rewritten with its destination kept; code examples stay', () => {
 	assert.equal(setReferenceWidth('![a](./assets/a.png) `![a](assets/a.png)`', 'assets/a.png', 50), '<img src="./assets/a.png" alt="a" width="50"> `![a](assets/a.png)`');
 	assert.equal(setReferenceWidth('<img src="assets/A.png">', 'assets/a.png', 50), '<img src="assets/A.png">');
@@ -105,6 +134,12 @@ test('inlineImageReferences: a query, an encoding or a ./ prefix still names the
 	const md = '![a](assets/my%20shot.png?v=2 "t") <img alt="x" src=\'./assets/my shot.png\' width="40"> `![a](assets/my shot.png)`';
 	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/my shot.png' ? 'data:image/png;base64,AAAA' : null));
 	assert.equal(out, '![a](data:image/png;base64,AAAA "t") <img alt="x" src=\'data:image/png;base64,AAAA\' width="40"> `![a](assets/my shot.png)`');
+});
+
+test('inlineImageReferences: a parenthesised destination swaps; only the real src attribute is rewritten', async () => {
+	const md = '![p](assets/plot(1).png) <img alt="see src=\'assets/plot(1).png\'" src = "assets/plot(1).png">';
+	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/plot(1).png' ? 'data:image/png;base64,AAAA' : null));
+	assert.equal(out, '![p](data:image/png;base64,AAAA) <img alt="see src=\'assets/plot(1).png\'" src = "data:image/png;base64,AAAA">');
 });
 
 test('lineCount: a trailing newline adds no line; empty is one line', () => {
@@ -143,6 +178,15 @@ test('referenceWidth: read from the img tag; null for markdown images and tags w
 	assert.equal(referenceWidth("<img width='120' src='assets/a.png'>", 'assets/a.png'), 120);
 	assert.equal(referenceWidth('<img src="assets/a.png" alt="a">', 'assets/a.png'), null);
 	assert.equal(referenceWidth('![a](assets/a.png)', 'assets/a.png'), null);
+	// Spaces around `=` and a bare value read as the browser reads them; the first width is the one kept
+	assert.equal(referenceWidth('<img src="assets/a.png" width = \'50\'>', 'assets/a.png'), 50);
+	assert.equal(referenceWidth('<img src="assets/a.png" width=64 width="99">', 'assets/a.png'), 64);
+});
+
+test('setReferenceWidth: a width written with spaces around = is replaced or removed, not doubled', () => {
+	assert.equal(setReferenceWidth('<img src="assets/a.png" width = "50">', 'assets/a.png', 80), '<img src="assets/a.png" width="80">');
+	assert.equal(setReferenceWidth('<img src="assets/a.png" width = "50" alt="a">', 'assets/a.png', null), '<img src="assets/a.png" alt="a">');
+	assert.equal(setReferenceWidth('<img width=50 src="assets/a.png">', 'assets/a.png', 80), '<img src="assets/a.png" width="80">');
 });
 
 test('setReferenceWidth: markdown images convert to img, img tags keep other attributes, empty removes', () => {

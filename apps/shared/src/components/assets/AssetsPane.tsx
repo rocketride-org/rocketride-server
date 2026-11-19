@@ -400,6 +400,9 @@ const styles = {
 // HELPERS
 // =============================================================================
 
+/** How many names running the host may fail to check before the import gives up (a host that cannot answer, not a run of taken names). */
+const NAME_CHECK_FAILURE_LIMIT = 3;
+
 /** The bytes of a browser File. */
 async function fileBytes(file: File): Promise<Uint8Array> {
 	return new Uint8Array(await file.arrayBuffer());
@@ -553,6 +556,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 	const writeChain = useRef<Promise<void>>(Promise.resolve());
 	const pasteCount = useRef(0);
 	const caretAfterInsert = useRef<number | null>(null);
+	// Bumped when the README this pane edits changes or the pane unmounts: an
+	// asset import that finishes behind that bump never inserts its link.
+	const documentGeneration = useRef(0);
 	// Set by "Write the README": the reload its path change triggers opens on Edit, not Preview.
 	const openOnEdit = useRef(false);
 	const [textDrop, setTextDrop] = useState(false);
@@ -586,7 +592,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		setReadProblem(null);
 		if (!readmePath) {
 			setText(null);
-			return;
+			return () => {
+				documentGeneration.current += 1;
+			};
 		}
 		setText(undefined);
 		void host.readFile(readmePath).then(
@@ -607,6 +615,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		);
 		return () => {
 			cancelled = true;
+			// The document this pane edited is gone (another README, or the pane
+			// closed): an import still writing its file must not link into it
+			documentGeneration.current += 1;
 		};
 	}, [host, readmePath]);
 
@@ -720,17 +731,24 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 	const insertAsset = useCallback(
 		async (file: { name: string; type?: string; data: Uint8Array }, pasted: boolean): Promise<void> => {
 			if (typeof textRef.current !== 'string') return;
+			const generation = documentGeneration.current;
 			setNotice('');
 			try {
 				// Step 1: the name — pasted images are numbered after the document in the
 				// clipboard's format; collisions get -2, -3, ... A name the host cannot
-				// read is taken, not free: only a confirmed absence is reused.
+				// read is taken, not free: only a confirmed absence is reused. A host
+				// that fails several names running is a host that cannot answer (the
+				// connection gone, say), not a run of files: the search stops there.
 				const wanted = pasted ? pastedImageName(docStem, ++pasteCount.current, file.type) : safeAssetName(file.name);
 				const assetsDir = posixJoin(readmeDir, ASSETS_DIR);
+				let failedChecks = 0;
 				const name = await uniqueAssetName(wanted, async (candidate) => {
 					try {
-						return (await host.readFile(posixJoin(assetsDir, candidate))) !== null;
-					} catch {
+						const taken = (await host.readFile(posixJoin(assetsDir, candidate))) !== null;
+						failedChecks = 0;
+						return taken;
+					} catch (err) {
+						if (++failedChecks >= NAME_CHECK_FAILURE_LIMIT) throw new Error(`could not check ${ASSETS_DIR}/ for a free name (${messageOf(err)})`);
 						return true;
 					}
 				});
@@ -740,7 +758,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 				imageCache.current.delete(relPath);
 				// Step 3: the link at the caret, into the draft as it is NOW (edits and
 				// other insertions landed while the file was written), through the same
-				// ordered save path as typing
+				// ordered save path as typing — unless that draft is no longer this
+				// document's (the pane closed or moved on): the file stays, the link does not
+				if (generation !== documentGeneration.current) return;
 				const current = textRef.current;
 				if (typeof current !== 'string') return;
 				const caret = textareaRef.current?.selectionStart ?? current.length;
@@ -769,13 +789,25 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			event.preventDefault();
 			setTextDrop(false);
 			if (readonly) return;
-			// Step: one file at a time; a file the browser cannot read is named and the rest still land
+			// Step 1: one file at a time; a file the browser cannot read is skipped
+			// and the rest still land
+			const skipped: string[] = [];
 			for (const file of transferFiles(event.dataTransfer)) {
-				const data = await readTransferFile(file);
-				if (data) await insertAsset({ name: file.name, type: file.type, data }, false);
+				let data: Uint8Array;
+				try {
+					data = await fileBytes(file);
+				} catch (err) {
+					skipped.push(`Could not read ${file.name || 'the file'}: ${messageOf(err)}`);
+					continue;
+				}
+				await insertAsset({ name: file.name, type: file.type, data }, false);
 			}
+			// Step 2: the skipped files are named once the drop is done, behind
+			// whatever the last import left — an import after a skip clears the
+			// notice, so naming them as they fail would lose them
+			if (skipped.length > 0) setNotice((current) => [current, ...skipped].filter((line) => line !== '').join(' '));
 		},
-		[readonly, insertAsset, readTransferFile]
+		[readonly, insertAsset]
 	);
 
 	const onTextPaste = useCallback(

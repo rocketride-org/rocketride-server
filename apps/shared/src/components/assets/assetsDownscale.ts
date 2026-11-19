@@ -58,7 +58,9 @@ const DOWNSCALED_TYPES: Record<string, string> = {
  * the webview and the page alike) and re-encodes it in its own format: PNG
  * stays PNG, JPEG and WebP at {@link RASTER_QUALITY}. An image that already
  * fits, an SVG, a GIF, a non-image, and any decode or encode failure all
- * answer the original bytes.
+ * answer the original bytes — as does a canvas that cannot encode the
+ * format (it answers PNG instead, per the HTML spec), so PNG bytes never
+ * land under a `.webp` name.
  *
  * @param name - The file name (its extension picks the format).
  * @param bytes - The image bytes.
@@ -73,9 +75,10 @@ export async function downscaleImage(name: string, bytes: Uint8Array): Promise<U
 		try {
 			const fit = fitWithin(bitmap.width, bitmap.height);
 			if (!fit.scaled) return bytes;
-			// Step 2: draw at the fitted size and re-encode in the same format
+			// Step 2: draw at the fitted size and re-encode in the same format; a
+			// blob of another type is the canvas's PNG fallback, not this format
 			const blob = await encodeBitmap(bitmap, fit.width, fit.height, type);
-			return blob ? new Uint8Array(await blob.arrayBuffer()) : bytes;
+			return blob && blob.type === type ? new Uint8Array(await blob.arrayBuffer()) : bytes;
 		} finally {
 			bitmap.close();
 		}

@@ -184,15 +184,22 @@ const ICON_MAX_CHARS = 128 * 1024;
 export class WebDevSession {
 	/** Workspace-manifest registration meta; refreshed with each deps settle. */
 	private registrationMeta: DevRegistrationMeta | null = null;
+	/** The newest refresh's generation: an older refresh that finishes later never assigns. */
+	private metaGeneration = 0;
 
 	/**
 	 * Rebuilds the registration meta from a freshly read package.json — in
 	 * dev, the workspace manifest is the truth for name, icon, description,
 	 * version, and the settings schema. Icon resolves to a data: URI.
 	 *
+	 * Two refreshes can overlap (an icon change reading manifest A while a
+	 * package.json change registers manifest B); only the newest one assigns,
+	 * so an earlier read finishing last cannot restore stale meta.
+	 *
 	 * @param pkg - The parsed package.json (possibly {} on read failure).
 	 */
 	private async refreshRegistrationMeta(pkg: Record<string, unknown>): Promise<void> {
+		const generation = ++this.metaGeneration;
 		const m = (pkg.appManifest ?? {}) as Record<string, unknown>;
 		// step: contributes.configuration preferred, bare configuration
 		// tolerated — the same extraction shape the server deploy uses
@@ -224,6 +231,9 @@ export class WebDevSession {
 				/* icon unreadable — chrome falls back to the monogram */
 			}
 		}
+		// step: a newer refresh started while the icon read was pending — its
+		// meta is the truth, this one is stale
+		if (generation !== this.metaGeneration) return;
 		this.registrationMeta = meta;
 	}
 

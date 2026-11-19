@@ -300,20 +300,44 @@ export function validateStoreBlock(store: unknown): PipeStoreBlock {
 // =============================================================================
 
 /**
- * A markdown image or link: `![alt](path)` / `[text](path)`, optional title;
- * the destination may hold one level of balanced parentheses
+ * A markdown image or link: `![alt](path)` / `[text](path)`, optional title.
+ * The destination is angle-delimited (`<a b.png>`, spaces allowed; group 1)
+ * or bare (group 2), where it may hold one level of balanced parentheses
  * (`plot(1).png`), as CommonMark allows.
  */
-const MARKDOWN_REF_RE = /!?\[[^\]]*\]\(\s*<?((?:[^\s()<>]|\([^\s()]*\))+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+const MARKDOWN_REF_RE = /!?\[[^\]]*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()]*\))+))(?:\s+["'][^"']*["'])?\s*\)/g;
 
 /**
  * A markdown reference definition: `[label]: path` at the start of a line,
- * the destination of a reference-style image or link (`![alt][label]`).
+ * the destination of a reference-style image or link (`![alt][label]`);
+ * angle-delimited (group 1, spaces allowed) or bare (group 2).
  */
-const MARKDOWN_DEF_RE = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*<?([^\s<>]+)>?/gm;
+const MARKDOWN_DEF_RE = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(?:<([^<>\n]*)>|([^\s<>]+))/gm;
 
-/** An HTML image: `<img src="path">`, either quote. */
-const HTML_IMG_RE = /<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+/** An HTML `<img>` tag (the tag name case-insensitive); group 1 = its attribute text. */
+const HTML_IMG_RE = /<img\b([^>]*)>/gi;
+
+/**
+ * One attribute token in a tag's attribute text: the name, then optionally
+ * `=` and a double-quoted, single-quoted or bare value (the Assets pane's
+ * rule, mirrored: a `src=` inside another attribute's VALUE is never a
+ * token of its own).
+ */
+const ATTRIBUTE_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+
+/**
+ * The `src` an `<img>` tag names: its first `src` attribute (the one the
+ * browser keeps when it repeats), read by tokenizing the attributes in order.
+ *
+ * @param attrs - The tag's attribute text.
+ * @returns The source as written, or '' when the tag has none.
+ */
+function imgSrcOf(attrs: string): string {
+	for (const match of attrs.matchAll(ATTRIBUTE_RE)) {
+		if (match[1].toLowerCase() === 'src') return match[2] ?? match[3] ?? match[4] ?? '';
+	}
+	return '';
+}
 
 /** Fenced code blocks (backtick or tilde fences) and inline code spans — never references. */
 const CODE_RE = /(```|~~~)[\s\S]*?\1|`[^`\n]*`/g;
@@ -360,9 +384,9 @@ export function scanReadmeReferences(markdown: string): string[] {
 	// step: both syntaxes, each in document order; links and images first
 	// (the common case), then HTML images
 	const found: Array<{ index: number; ref: string }> = [];
-	for (const match of text.matchAll(MARKDOWN_REF_RE)) found.push({ index: match.index ?? 0, ref: match[1] });
-	for (const match of text.matchAll(MARKDOWN_DEF_RE)) found.push({ index: match.index ?? 0, ref: match[1] });
-	for (const match of text.matchAll(HTML_IMG_RE)) found.push({ index: match.index ?? 0, ref: match[1] ?? match[2] ?? '' });
+	for (const match of text.matchAll(MARKDOWN_REF_RE)) found.push({ index: match.index ?? 0, ref: match[1] ?? match[2] ?? '' });
+	for (const match of text.matchAll(MARKDOWN_DEF_RE)) found.push({ index: match.index ?? 0, ref: match[1] ?? match[2] ?? '' });
+	for (const match of text.matchAll(HTML_IMG_RE)) found.push({ index: match.index ?? 0, ref: imgSrcOf(match[1]) });
 	found.sort((a, b) => a.index - b.index);
 	for (const { ref } of found) take(ref);
 	return refs;

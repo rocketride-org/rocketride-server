@@ -122,6 +122,7 @@ def test_scan_finds_markdown_and_html_references_in_order_skipping_urls_anchors_
             '![flow](assets/flow.png "The flow")',
             'See [the guide](docs/guide.md#setup) and [the site](https://example.com/x.png).',
             '<img src="assets/shot%201.png?v=2" alt="shot"> <IMG SRC=\'assets/b.gif\'>',
+            '<img alt="see src=\'x.png\'" src="y.png"> <img width=40 src=bare.png>',
             '[mail](mailto:a@b.c) [data](data:image/png;base64,AAAA) [proto](//cdn/x.png) [anchor](#top)',
             '![again](assets/flow.png)',
             '`![code](assets/nope.png)`',
@@ -130,23 +131,37 @@ def test_scan_finds_markdown_and_html_references_in_order_skipping_urls_anchors_
             '```',
         ]
     )
-    assert scan_readme_references(md) == ['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif']
+    assert scan_readme_references(md) == [
+        'assets/flow.png',
+        'docs/guide.md',
+        'assets/shot 1.png',
+        'assets/b.gif',
+        'y.png',
+        'bare.png',
+    ]
 
 
-def test_scan_takes_reference_definitions_balanced_parentheses_and_skips_tilde_fences():
+def test_scan_takes_reference_definitions_angle_destinations_balanced_parentheses_and_skips_tilde_fences():
     md = '\n'.join(
         [
             '![Diagram][figure] and [the paper][ref]',
             '',
             '[figure]: assets/diagram.png',
             '[ref]: <https://example.com/paper.pdf> "Paper"',
+            '[shot]: <assets/diagram one.png>',
+            '![Two](<assets/plot two.png> "Two")',
             '![Plot](assets/plot(1).png)',
             '~~~markdown',
             '[Example](example.png)',
             '~~~',
         ]
     )
-    assert scan_readme_references(md) == ['assets/diagram.png', 'assets/plot(1).png']
+    assert scan_readme_references(md) == [
+        'assets/diagram.png',
+        'assets/diagram one.png',
+        'assets/plot two.png',
+        'assets/plot(1).png',
+    ]
 
 
 def test_store_files_resolve_against_the_readme_relative_to_the_pipe():

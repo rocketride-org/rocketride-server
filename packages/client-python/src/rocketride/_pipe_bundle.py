@@ -84,16 +84,26 @@ PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG
 _PIPE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
 #: A markdown image or link: ``![alt](path)`` / ``[text](path)``, optional
-#: title; the destination may hold one level of balanced parentheses
-#: (``plot(1).png``), as CommonMark allows.
-_MARKDOWN_REF_RE = re.compile(r'!?\[[^\]]*\]\(\s*<?((?:[^\s()<>]|\([^\s()]*\))+)>?(?:\s+["\'][^"\']*["\'])?\s*\)')
+#: title. The destination is angle-delimited (``<a b.png>``, spaces allowed;
+#: group 1) or bare (group 2), where it may hold one level of balanced
+#: parentheses (``plot(1).png``), as CommonMark allows.
+_MARKDOWN_REF_RE = re.compile(
+    r'!?\[[^\]]*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()]*\))+))(?:\s+["\'][^"\']*["\'])?\s*\)'
+)
 
 #: A markdown reference definition: ``[label]: path`` at the start of a line,
-#: the destination of a reference-style image or link (``![alt][label]``).
-_MARKDOWN_DEF_RE = re.compile(r'^[ \t]{0,3}\[[^\]]+\]:[ \t]*<?([^\s<>]+)>?', re.MULTILINE)
+#: the destination of a reference-style image or link (``![alt][label]``);
+#: angle-delimited (group 1, spaces allowed) or bare (group 2).
+_MARKDOWN_DEF_RE = re.compile(r'^[ \t]{0,3}\[[^\]]+\]:[ \t]*(?:<([^<>\n]*)>|([^\s<>]+))', re.MULTILINE)
 
-#: An HTML image: ``<img src="path">``, either quote.
-_HTML_IMG_RE = re.compile(r'<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.IGNORECASE)
+#: An HTML ``<img>`` tag (the tag name case-insensitive); group 1 = its attribute text.
+_HTML_IMG_RE = re.compile(r'<img\b([^>]*)>', re.IGNORECASE)
+
+#: One attribute token in a tag's attribute text: the name, then optionally
+#: ``=`` and a double-quoted, single-quoted or bare value (the Assets pane's
+#: rule, mirrored: a ``src=`` inside another attribute's VALUE is never a
+#: token of its own).
+_ATTRIBUTE_RE = re.compile(r'([^\s"\'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+)))?')
 
 #: Fenced code blocks (backtick or tilde fences) and inline code spans — never references.
 _CODE_RE = re.compile(r'(```|~~~).*?\1|`[^`\n]*`', re.DOTALL)
@@ -324,6 +334,22 @@ def _is_local_reference(ref: str) -> bool:
     return _SCHEME_RE.match(ref) is None
 
 
+def _img_src_of(attrs: str) -> str:
+    """The ``src`` an ``<img>`` tag names: its first ``src`` attribute (the one
+    the browser keeps when it repeats), read by tokenizing the attributes in order.
+
+    Args:
+        attrs: The tag's attribute text.
+
+    Returns:
+        The source as written, or '' when the tag has none.
+    """
+    for match in _ATTRIBUTE_RE.finditer(attrs):
+        if match.group(1).lower() == 'src':
+            return match.group(2) or match.group(3) or match.group(4) or ''
+    return ''
+
+
 def scan_readme_references(markdown: str) -> List[str]:
     """The relative files a README references.
 
@@ -341,9 +367,9 @@ def scan_readme_references(markdown: str) -> List[str]:
         The references, relative to the README.
     """
     text = _CODE_RE.sub('', markdown)
-    found = [(match.start(), match.group(1)) for match in _MARKDOWN_REF_RE.finditer(text)]
-    found += [(match.start(), match.group(1)) for match in _MARKDOWN_DEF_RE.finditer(text)]
-    found += [(match.start(), match.group(1) or match.group(2) or '') for match in _HTML_IMG_RE.finditer(text)]
+    found = [(match.start(), match.group(1) or match.group(2) or '') for match in _MARKDOWN_REF_RE.finditer(text)]
+    found += [(match.start(), match.group(1) or match.group(2) or '') for match in _MARKDOWN_DEF_RE.finditer(text)]
+    found += [(match.start(), _img_src_of(match.group(1))) for match in _HTML_IMG_RE.finditer(text)]
     found.sort(key=lambda item: item[0])
     refs: List[str] = []
     for _, raw in found:

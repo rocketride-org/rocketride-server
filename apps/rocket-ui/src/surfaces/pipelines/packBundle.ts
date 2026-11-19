@@ -41,7 +41,7 @@ import type { Zippable } from 'fflate';
 import type { RocketRideClient } from 'shell';
 import { normalizePosixPath, pipeStoreFiles, validateStoreBlock } from 'rocketride';
 import type { PipeStoreBlock } from 'rocketride';
-import { toScopedStorePath } from '../workspace/vfs/workspace';
+import { getStagedWorkspace, toScopedStorePath } from '../workspace/vfs/workspace';
 
 // =============================================================================
 // CONSTANTS
@@ -90,14 +90,22 @@ export interface PackedPipe {
  * and one fsReadMany call is capped at 32 MiB in total while a referenced
  * file may be 10 MiB, so every file goes in a call of its own.
  *
+ * The pack operates on COMMITTED files only (the app packer's commit-first
+ * gate): in manual commit mode a save stages the change in the workspace
+ * layer while the store keeps the committed text, so a file with a pending
+ * change is refused by name instead of packed stale.
+ *
  * @param client - The connected client.
  * @param pipeDir - The pipe's directory under the pipelines mount ('' at the root).
  * @param rel - The file's path relative to the pipe's directory.
  * @returns The bytes.
- * @throws Error naming the file when it cannot be read.
+ * @throws Error naming the file when it carries an uncommitted change or cannot be read.
  */
 async function readOne(client: RocketRideClient, pipeDir: string, rel: string): Promise<Uint8Array> {
 	const full = pipeDir ? `${pipeDir}/${rel}` : rel;
+	if (getStagedWorkspace().changedPaths().has(`pipelines/${full}`)) {
+		throw new Error(`${rel} has an uncommitted change — commit it first (status bar: Commit all), then deploy.`);
+	}
 	const [entry] = await client.fsReadMany([toScopedStorePath(`${PROJECTS_DIR}/${full}`)]);
 	if (!entry?.ok || !entry.data) throw new Error(`The pipeline's store listing names ${rel}, but there is no such file beside the pipe (${entry?.error ?? 'unreadable'}).`);
 	return entry.data;
@@ -138,8 +146,9 @@ function requireUnderCap(rel: string, bytes: Uint8Array, cap: number): void {
  * @param pipePath - The document's path under the pipelines mount (`<dir>/<name>.pipe`).
  * @returns The pipe dict, its store block and the zip.
  * @throws Error when the pipe is not valid JSON, its `store` block is malformed,
- *   a listed file is missing, escapes the pipe's directory or breaches its cap,
- *   or the zip is over the deploy cap.
+ *   a packed file carries an uncommitted change (manual commit mode), a listed
+ *   file is missing, escapes the pipe's directory or breaches its cap, or the
+ *   zip is over the deploy cap.
  */
 export async function packPipe(client: RocketRideClient, pipePath: string): Promise<PackedPipe> {
 	// Step 1: the pipe, parsed (the artifact the server snapshots)

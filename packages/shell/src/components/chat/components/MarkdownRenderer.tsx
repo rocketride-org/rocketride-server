@@ -197,6 +197,26 @@ const urlTransform = (url: string): string => (url.startsWith('data:image/') || 
 /** The link schemes the anchor renderer follows; artifact paths are admitted beside them. */
 const SAFE_LINK_SCHEME = /^(https?|mailto|tel):/i;
 
+/**
+ * The href the anchor renderer follows, or undefined for a link it keeps as
+ * text: a safe scheme, a same-origin artifact path, or a scheme-relative
+ * `//host/...` (a network-path reference can only ever resolve to http(s))
+ * given the page's scheme — https where the page is not http(s) itself (a
+ * VS Code webview), so the host stays reachable.
+ *
+ * @param href - The href as resolved.
+ * @returns The href to follow, or undefined.
+ */
+function followableHref(href: string | undefined): string | undefined {
+	if (!href) return undefined;
+	if (SAFE_LINK_SCHEME.test(href) || isArtifactUrl(href)) return href;
+	if (href.startsWith('//')) {
+		const pageScheme = typeof window !== 'undefined' ? window.location?.protocol : undefined;
+		return `${pageScheme && /^https?:$/.test(pageScheme) ? pageScheme : 'https:'}${href}`;
+	}
+	return undefined;
+}
+
 export interface MarkdownRendererProps {
 	content: string;
 	/**
@@ -255,9 +275,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, bas
 				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: 12, color: 'var(--rr-text-secondary)' }}>{children}</th>,
 				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: 12 }}>{children}</td>,
 				a: ({ href, children }: any) => {
-					// Only safe URL schemes and same-origin artifact paths — never
-					// javascript:, data:, vbscript: etc.
-					const safeHref = SAFE_LINK_SCHEME.test(href ?? '') || isArtifactUrl(href ?? '') ? href : undefined;
+					// Only safe URL schemes, same-origin artifact paths and
+					// scheme-relative hosts — never javascript:, data:, vbscript: etc.
+					const safeHref = followableHref(href);
 					return (
 						<a href={safeHref} target="_blank" rel="noopener noreferrer" style={S.link} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}>
 							{children}

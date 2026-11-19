@@ -77,6 +77,14 @@ test('a scheme-relative source keeps its host under either base shape', () => {
 	assert.match(renderToStaticMarkup(<MarkdownRenderer content="![i](//cdn.example/shot.png)" baseUrl="https://rr.example/apps/a/v1/README.md" />), /src="https:\/\/cdn\.example\/shot\.png"/);
 });
 
+test('a scheme-relative link stays clickable under a path-only base', () => {
+	// No page scheme here (no window): https is the scheme a network-path
+	// reference gets, under either base shape and with none
+	for (const baseUrl of [undefined, README_URL, 'https://rr.example/apps/a/v1/README.md']) {
+		assert.match(renderToStaticMarkup(<MarkdownRenderer content="[Guide](//docs.example/guide)" baseUrl={baseUrl} />), /href="https:\/\/docs\.example\/guide"/);
+	}
+});
+
 test('a foreign origin never qualifies as an artifact path, artifact-shaped or not', () => {
 	// The anchor renderer follows it because it is https (today's rule), not
 	// because of the artifact rule: a path that only LOOKS like an artifact on

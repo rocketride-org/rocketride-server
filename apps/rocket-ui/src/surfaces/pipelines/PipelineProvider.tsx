@@ -214,15 +214,16 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				return;
 			}
 			try {
-				// A save stamps the store block when the file has none.
+				// A save stamps the store block when the file has none. The
+				// stamped content goes into the document BEFORE the first await:
+				// the Documents save writes the DOCUMENT's content to the same
+				// path before it marks the document clean, so both writes carry
+				// one value (updateContent lands synchronously; only its
+				// notification is deferred) — and an edit made while the write is
+				// in flight is never replaced by this older snapshot.
 				const stamped = stampStoreBlock(project);
-				await projectVfs.write(saveFilename, stamped);
-				// The Documents save writes the DOCUMENT's content to the same
-				// path before it marks the document clean: the stamped content
-				// goes into the document first, so both writes carry one value
-				// (updateContent lands synchronously; only its notification is
-				// deferred).
 				if (stamped !== project) onContentChanged(stamped);
+				await projectVfs.write(saveFilename, stamped);
 				// Mark clean in Documents model
 				await getDocs()?.saveDocument(uri);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
@@ -423,8 +424,11 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			if (!client || !pipeline) throw new Error('Not connected');
 			// A pipeline publishes PER PIPE, BY REFERENCE (plan §9): the pipe
 			// file, the readme and icon its `store` block declares and every file
-			// the readme references, packed from the store as saved. A packer
-			// error IS the publish failure.
+			// the readme references, packed from the store as COMMITTED: in
+			// manual commit mode a save only stages, so the packer refuses a
+			// pipe whose files carry uncommitted changes (the app packer's
+			// commit-first gate) rather than deploying the committed text
+			// behind a staged save. A packer error IS the publish failure.
 			const packed = await packPipe(client, filename);
 			await client.deploy.add({
 				pipeline: packed.pipeline as unknown as PipelineConfig & { name: string },

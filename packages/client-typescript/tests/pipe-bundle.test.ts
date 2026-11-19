@@ -97,6 +97,7 @@ describe('scanReadmeReferences', () => {
 			'![flow](assets/flow.png "The flow")',
 			'See [the guide](docs/guide.md#setup) and [the site](https://example.com/x.png).',
 			'<img src="assets/shot%201.png?v=2" alt="shot"> <IMG SRC=\'assets/b.gif\'>',
+			'<img alt="see src=\'x.png\'" src="y.png"> <img width=40 src=bare.png>',
 			'[mail](mailto:a@b.c) [data](data:image/png;base64,AAAA) [proto](//cdn/x.png) [anchor](#top)',
 			'![again](assets/flow.png)',
 			'`![code](assets/nope.png)`',
@@ -104,12 +105,23 @@ describe('scanReadmeReferences', () => {
 			'[fenced](assets/nope2.png)',
 			'```',
 		].join('\n');
-		expect(scanReadmeReferences(md)).toEqual(['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif']);
+		expect(scanReadmeReferences(md)).toEqual(['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif', 'y.png', 'bare.png']);
 	});
 
-	it('takes reference definitions and balanced parentheses, and skips tilde fences', () => {
-		const md = ['![Diagram][figure] and [the paper][ref]', '', '[figure]: assets/diagram.png', '[ref]: <https://example.com/paper.pdf> "Paper"', '![Plot](assets/plot(1).png)', '~~~markdown', '[Example](example.png)', '~~~'].join('\n');
-		expect(scanReadmeReferences(md)).toEqual(['assets/diagram.png', 'assets/plot(1).png']);
+	it('takes reference definitions, angle-delimited destinations with spaces and balanced parentheses, and skips tilde fences', () => {
+		const md = [
+			'![Diagram][figure] and [the paper][ref]',
+			'',
+			'[figure]: assets/diagram.png',
+			'[ref]: <https://example.com/paper.pdf> "Paper"',
+			'[shot]: <assets/diagram one.png>',
+			'![Two](<assets/plot two.png> "Two")',
+			'![Plot](assets/plot(1).png)',
+			'~~~markdown',
+			'[Example](example.png)',
+			'~~~',
+		].join('\n');
+		expect(scanReadmeReferences(md)).toEqual(['assets/diagram.png', 'assets/diagram one.png', 'assets/plot two.png', 'assets/plot(1).png']);
 	});
 
 	it('resolves references against the README and lays them out relative to the pipe', () => {
