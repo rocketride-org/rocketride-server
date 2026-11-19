@@ -1,0 +1,20 @@
+
+> local-rr2960@0.1.0 build /private/tmp/rr2960-sample/apps/rr2960-ui
+> tsc --noEmit && rsbuild build
+
+Rsbuild v2.0.15
+
+info    build started...
+ready   built in 0.07 s
+
+File (web)                                                             Size       Gzip   
+dist/index.html                                                        0.31 kB    0.22 kB
+dist/mf-manifest.json                                                  1.7 kB     0.46 kB
+dist/mf-stats.json                                                     2.1 kB     0.55 kB
+dist/static/js/async/__federation_expose_AppDescriptor.1062573d6b.js   4.2 kB     2.0 kB
+dist/static/js/336.bff607dbfc.js                                       6.5 kB     2.6 kB
+dist/static/js/index.00b67869a2.js                                     112.7 kB   32.0 kB
+dist/remoteEntry.js                                                    119.2 kB   34.2 kB
+
+                                                              Total:   246.6 kB   72.1 kB
+

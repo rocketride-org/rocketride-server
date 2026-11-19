@@ -1,0 +1,22 @@
+PR 2960 current head: 7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b
+Observation: actual App Builder 'linked in browser' link opened a new Chrome tab.
+Observed URL transport: blob:http://localhost:5565/[ephemeral-id omitted]
+Initial native accessibility snapshot returned by cua.getTab, before browser URL-policy rejection:
+
+PR 2960 — live preview
+RR2960_20261119_LIVE · EDIT_B
+Connected: yes
+User: RocketRide Developer
+Authenticated engine read: PASS · completed reads: 3
+Origin: http://localhost:5565 · protocol: blob:
+Diagnostics target: rendered ownerDocument.defaultView
+Framed: false · opener present: true · opener same origin: true
+Dev hooks present: true
+Opener handshake: not observed
+
+Limitations:
+- The browser tool rejected the follow-up handshake-button click because blob: is outside its allowed http:/https: protocols.
+- The same URL policy rejected a read-only screenshot request.
+- No screenshot, direct auth-reply observation, or extra read-button action is claimed for this tab.
+- No workaround or alternate browser surface was used after that rejection.
+- The actual debug tab remains open for a user capture.

@@ -1,0 +1,74 @@
+Observed iframe src: blob:http://localhost:5565/[ephemeral-id omitted]
+
+- tablist "Sidebar views":
+  - tab "Explorer":
+  - tab "Source Control":
+  - tab "Agent":
+  - tab "Apps":
+  - tab "Nodes":
+  - tab "Pipelines":
+  - tab "Dev Tools":
+  - button "Documentation":
+  - button "RD":
+    - generic: RD
+- generic: New session
+- button "×"
+- generic: PR 2960 Live Check
+- button "×"
+- button "┃"
+- tablist:
+  - tab "Dashboard"
+  - tab "Design" [selected]
+  - tab "Package"
+  - tab "Store"
+  - tab "Deploy"
+  - generic: local.rr2960 · v0.1.0
+- button "Preview" [pressed]
+- button "Components"
+- button "Console"
+- generic: DEV
+- text: →
+- link "linked in browser":
+  - /url: "#"
+- generic: "watch: ok · 0.3s"
+- 'button "Desktop layout: HD+ 1536 x 864 (hover for resolutions)"':
+- 'button "Tablet layout: iPad Air 11 820 x 1180 (hover for resolutions)"':
+- 'button "Phone layout: iPhone 17 402 x 874 (hover for resolutions)"':
+- button "Rotate 90 degrees (portrait/landscape)":
+- button "Fit"
+- button "Zoom"
+- group "Preview zoom":
+  - button "-" [disabled]
+  - slider "Preview zoom percent" [disabled]: "105"
+  - button "+" [disabled]
+  - generic: 105%
+- button "Refresh the preview":
+- button "The hand tool is driven by Fit. Toggle Fit off to pan." [disabled]:
+- button "Preview options":
+- iframe [active]:
+  - main:
+    - heading "PR 2960 — live preview" [level=1]
+    - paragraph:
+      - strong: RR2960_20261119_LIVE · EDIT_B
+    - paragraph:
+      - text: "Connected:"
+      - strong: "yes"
+    - paragraph:
+      - text: "User:"
+      - strong: RocketRide Developer
+    - paragraph:
+      - text: "Authenticated engine read:"
+      - strong: PASS
+      - text: "· completed reads: 4"
+    - paragraph: "Origin: http://localhost:5565 · protocol: blob:"
+    - paragraph: "Diagnostics target: rendered ownerDocument.defaultView"
+    - paragraph: "Framed: true · opener present: false · opener same origin: false"
+    - paragraph: "Dev hooks present: true"
+    - button "Recheck authenticated engine read" [active]
+    - paragraph: No credentials are displayed or logged by this fixture.
+  - generic: PR 2960 Live Check
+  - generic: Connected
+  - generic: Ready
+- generic: Rocket Builder
+- generic: Connected
+- generic: Ready

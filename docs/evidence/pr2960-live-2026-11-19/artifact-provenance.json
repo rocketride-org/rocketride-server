@@ -1,0 +1,57 @@
+{
+  "recordedAtUtc": "2026-11-19T08:38:37.154376+00:00",
+  "head": "7c36f51af7d4a58af5bf2efdd4db55fe54b5b86b",
+  "worktree": "/Users/nihalnihalani/Desktop/Github/rr-worktrees/pr2960-live-20261119",
+  "engineSourceHash": "6083bbc82493e229211d0cd9e23fe186be91d619c2ab70447522b8a95114121f",
+  "engineSource": "rocketride-org/rocketride-server GitHub release engine-cache; builder accepted full source hash and vcpkg version",
+  "artifacts": {
+    "dist/server/engine": {
+      "sha256": "2e6a21b0f4c8fcfbc949eb38b11c1f05f2361cad9263cab9a0ebe3fd47a5156c",
+      "bytes": 33784
+    },
+    "dist/server/libengine.dylib": {
+      "sha256": "3bc7c405fea1cb3b19e2fb5058d0e00cdf8b53f553b1ee717cf5a17fa6ceb837",
+      "bytes": 60610976
+    },
+    "dist/server/static/shell/index.html": {
+      "sha256": "2210f1b5ecbf8b2e2420a6f430b959bf2436dc69ffd970b0f897f50a887b1973",
+      "bytes": 2904
+    },
+    "dist/server/static/apps/rocketride.pipeBuilder/remoteEntry.js": {
+      "sha256": "f8a62034ff38539abf0a4eaf50923c10ca02234f99301ddef58eee85466280f9",
+      "bytes": 257103
+    },
+    "dist/server/static/apps.json": {
+      "sha256": "7a87f0e0e03a9fba87affc2a8adf45eae32faf92b04d04a344b6abd0ae0ebf3e",
+      "bytes": 16054
+    },
+    "dist/server/static/clients/shell/shell.tgz": {
+      "sha256": "6832580cc8b4a77eaf15a5c3abcbb3a3cf05e4142a5ee58c91027218c821bb68",
+      "bytes": 1289515
+    },
+    "dist/server/static/clients/typescript/rocketride-1.6.0.tgz": {
+      "sha256": "611dd06c8c3ca972f7f18dfdb3d2802ce9bb880cb5538bc8f3b7f105048d6886",
+      "bytes": 664767
+    },
+    "build/vscode/rocketride.js": {
+      "sha256": "0bce666c58b3c2445f7649feaf4ce1a1c43f9aaeddaf14a7eca86f0c467f3a70",
+      "bytes": 1575515
+    },
+    "build/vscode/package.json": {
+      "sha256": "e79a73652e14926c30a7b73706fc31d6f2cf072f16c56f21822f250046a31b0e",
+      "bytes": 13743
+    }
+  },
+  "stagingChecks": {
+    "build/shell/index.html matches dist/server/static/shell/index.html": true,
+    "build/apps/rocketride.pipeBuilder/remoteEntry.js matches dist/server/static/apps/rocketride.pipeBuilder/remoteEntry.js": true,
+    "dist/clients/typescript/rocketride-1.6.0.tgz matches dist/server/static/clients/typescript/rocketride-1.6.0.tgz": true
+  },
+  "generatedSourceChange": "Standard client-typescript:sync-version updates SDK_VERSION from committed 1.5.0 to package manifest 1.6.0 during build. No hand-edited product source.",
+  "servedRoot": {
+    "endpoint": "http://localhost:5565/",
+    "status": 200,
+    "sha256": "2210f1b5ecbf8b2e2420a6f430b959bf2436dc69ffd970b0f897f50a887b1973",
+    "matchesStagedIndex": true
+  }
+}

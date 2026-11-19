@@ -1,0 +1,4 @@
+
+> local-rr2960@0.1.0 typecheck /private/tmp/rr2960-sample/apps/rr2960-ui
+> tsc --noEmit
+

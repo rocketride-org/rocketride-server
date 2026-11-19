@@ -1,0 +1,11 @@
+0 standard window [Extension Development Host] PR 2960 Live Check — rr2960-sample, URL: file:///private/tmp/rr2960-sample/apps/rr2960-ui/rr2960.rrapp, Secondary Actions: Raise
+							252 HTML content RocketRide, URL: vscode-webview://0ehq9nhi3jflbqs44d6qbvf0mdr6ufpj0qee9ml61v1t9fo7s3li/index.html?id=8330f6fa-b155-4f3e-9dd1-4b9c3f0a55c6&parentId=2&origin=0029460d-8509-4d59-9e89-8880c8975ee2&swVersion=6&extensionId=rocketride.rocketride&platform=electron&vscode-resource-base-authority=vscode-resource.vscode-cdn.net&parentOrigin=vscode-file%3A%2F%2Fvscode-app&mountId=99d62361-8576-456a-8f0d-8ee3c06af95f
+											282 HTML content RocketRide, URL: localhost:3957/?appid=local.rr2960&rrdev=1&_ts=1795077712263
+															288 text RR2960_20261119_LIVE  ·  EDIT_B
+														289 text Connected: 
+														290 text yes
+														291 text User: 
+														292 text RocketRide Developer
+														293 text Authenticated engine read: 
+														294 text PASS
+														295 text  · completed reads:  4 Origin:  http://localhost:3957  · protocol:  http: Diagnostics target: rendered ownerDocument.defaultView Framed:  true  · opener present:  false  · opener same origin:  false Dev hooks present:  true

@@ -1,0 +1,22 @@
+14:11:52 log Rsbuild v2.0.15
+14:11:52 log ➜  Local:    http://localhost:3957/
+14:11:52 log ➜  Network:  use --host to expose
+14:11:52 log start   build started...
+14:11:52 log ready   built in 0.18 s
+14:11:57 log [preview] [devMode] Dev hooks installed (window.__rrShellDev)
+14:11:57 log [preview] [devMode] boot flavor=development href=http://localhost:3957/?appid=local.rr2960&rrdev=1&_ts=1795077712263 referrer=(none)
+14:11:57 log [preview] [devMode] embedder session received — continuing boot
+14:11:57 log [preview] [appLoader] Local override registered for "local.rr2960"
+14:11:57 warn [preview] [appLoader] invalidateAppDescriptor("local.rr2960") before WorkspaceProvider mounted — nothing to evict
+14:11:57 log [preview] [devMode] self-registering "local.rr2960" from /apps/local.rr2960/dev (URL convention)
+14:11:57 warn [preview] [ Federation Runtime ]: The remote "local_rr2960" is already registered. Please note that overriding it may cause unexpected errors.
+14:11:57 log [preview] [appLoader] Local override registered for "local.rr2960"
+14:11:57 warn [preview] [appLoader] invalidateAppDescriptor("local.rr2960") before WorkspaceProvider mounted — nothing to evict
+14:11:57 log [preview] [WorkspaceContext] holding "local.rr2960" until its dev remote registers
+14:11:57 log [preview] RR2960_20261119_LIVE_CONSOLE_SENTINEL EDIT_A
+14:11:57 log [preview] RR2960_20261119_LIVE_SURFACE origin=http://localhost:3957 protocol=http: framed=true opener=false
+14:11:57 log [preview] RR2960_20261119_LIVE_CONSOLE_SENTINEL EDIT_A
+14:11:57 log [preview] RR2960_20261119_LIVE_SURFACE origin=http://localhost:3957 protocol=http: framed=true opener=false
+14:11:57 log [preview] RR2960_20261119_LIVE_AUTHENTICATED_ENGINE_READ PASS
+14:11:57 log [preview] RR2960_20261119_LIVE_AUTHENTICATED_ENGINE_READ PASS
+14:12:28 log [preview] RR2960_20261119_LIVE_AUTHENTICATED_ENGINE_READ PASS
