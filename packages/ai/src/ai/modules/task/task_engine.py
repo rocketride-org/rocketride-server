@@ -1931,6 +1931,8 @@ class Task(DAPBase):
         the engine: a task reports every end it reaches by itself, and leaves
         with 0 and no word once its input closes (``--autoterm``). Its 0
         records 1, because the dashboard's task_error goes by a non-zero code.
+        A task its runtime lost (``Launch.lost``) did not end by itself either,
+        whoever killed what was left of it.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
@@ -1940,6 +1942,9 @@ class Task(DAPBase):
                     'the task ended without reporting its end, as it does when its connection to the engine drops'
                 )
                 self._status.exitCode = 1
+                return
+            if self._launch and self._launch.lost:
+                self._crash = self._launch.lost
                 return
             if exit_code is None or self._process_killed:
                 return

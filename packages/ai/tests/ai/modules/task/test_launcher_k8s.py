@@ -1336,12 +1336,28 @@ async def test_the_first_exit_code_stays():
     assert launch.returncode == 7
 
 
-async def test_a_pod_deleted_without_an_exit_code_is_lost():
-    """Deleted by force, or by someone else: no code will come, so it reads as killed."""
+REMOVED = "the task's pod was removed before it showed an exit code"
+
+
+async def test_a_pod_that_went_without_an_exit_code_is_lost():
+    """Gone, and not by the engine's own delete: no code will come, and the task's end says so."""
     cli = FakeKubectl()
     launch = await _launcher(cli).start(_spec())
+    assert launch.lost is None
     cli.emit('Running', event='DELETED')
     assert await launch.wait() == -9
+    assert launch.lost == REMOVED
+
+
+async def test_a_pod_the_engine_deleted_is_not_lost():
+    """A stop deletes the pod: it goes without an exit code, as asked."""
+    cli = FakeKubectl()
+    launch = await _launcher(cli).start(_spec())
+    launch.terminate()
+    await asyncio.gather(*launch._signals)
+    cli.emit('Running', event='DELETED')
+    assert await launch.wait() == -9
+    assert launch.lost is None
 
 
 async def test_the_watch_is_started_again_when_it_ends(monkeypatch):
@@ -1438,6 +1454,8 @@ async def test_terminate_and_kill_delete_the_pod():
         ['delete', 'pod', cli.pod, '--grace-period=5', '--wait=false'],
         ['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false'],
     ]
+    # Its stream is still up: the engine ended it, nothing was lost
+    assert launch.lost is None
 
 
 async def test_kill_keeps_the_exit_code_of_a_pod_that_has_ended():
@@ -1451,6 +1469,23 @@ async def test_kill_keeps_the_exit_code_of_a_pod_that_has_ended():
     # The engine waits five seconds for the end after a kill: the look must be shorter
     assert look.timeout == 3.0
     assert cli.deletes('pod') == []
+
+
+async def test_kill_leaves_a_pod_whose_end_the_watch_showed_during_the_look():
+    """The watch can also be first: an end it shows while the look is on its way stands, and nothing is deleted."""
+    cli = FakeKubectl()
+    launch = await _launcher(cli).start(_spec())
+
+    def look(args, stdin):
+        """The pod still runs for the look; the watch shows its end before the answer is back."""
+        launch._pod.seen(cli.pod, 'Failed', '', '', 7, False)
+        return CliResult(0, '', '')
+
+    cli.responses['get'] = look
+    launch.kill()
+    assert await launch.wait() == 7
+    assert cli.deletes('pod') == []
+    assert launch.lost is None
 
 
 def _timed_out(args, stdin):
@@ -1474,6 +1509,49 @@ async def test_kill_deletes_a_pod_that_shows_no_exit_code(look):
     launch.kill()
     await asyncio.gather(*launch._signals)
     assert cli.deletes('pod') == [['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false']]
+
+
+@pytest.mark.parametrize(
+    'phase, look, lost',
+    [
+        (
+            'Running',
+            CliResult(0, '', ''),
+            "the task's output ended while its pod still ran; the engine asked the cluster to delete the pod",
+        ),
+        (
+            'Running',
+            CliResult(1, '', 'Unable to connect to the server: dial tcp 127.0.0.1:6443: connect: connection refused'),
+            "the task's output ended and its pod could not be read",
+        ),
+        ('Running', _timed_out, "the task's output ended and its pod could not be read"),
+        # An evicted pod, or one whose node went: a phase that ends it, and no container's end on it
+        ('Failed', CliResult(0, '', ''), "the task's pod ended (Failed) without showing an exit code"),
+    ],
+    ids=['still-running', 'unreachable', 'timed-out', 'ended-without-a-code'],
+)
+async def test_a_pod_that_shows_no_exit_code_after_its_stream_ended_is_lost(phase, look, lost):
+    """The attach ended and the pod shows no exit code: the engine deletes it, and the task's end says what was seen."""
+    cli = FakeKubectl(get=look)
+    launch = await _launcher(cli).start(_spec())
+    cli.emit(phase)
+    await _settle()
+    launch.process.exit(1)
+    launch.kill()
+    await asyncio.gather(*launch._signals)
+    assert cli.deletes('pod') == [['delete', 'pod', cli.pod, '--grace-period=0', '--force', '--wait=false']]
+    assert launch.lost == lost
+
+
+async def test_a_pod_already_gone_at_the_kill_is_lost_and_not_deleted():
+    """The watch can be late with a pod's going too: the look finds no pod, and nothing is left to delete."""
+    cli = FakeKubectl(get=CliResult(1, '', 'Error from server (NotFound): pods "rr-x" not found'))
+    launch = await _launcher(cli).start(_spec())
+    launch.process.exit(1)
+    launch.kill()
+    assert await launch.wait() == -9
+    assert cli.deletes('pod') == []
+    assert launch.lost == REMOVED
 
 
 async def test_a_task_that_has_ended_is_not_signalled():

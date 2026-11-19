@@ -142,6 +142,15 @@ class Launch(abc.ABC):
     def returncode(self) -> Optional[int]:
         """The task's exit code, or None while it runs."""
 
+    @property
+    def lost(self) -> Optional[str]:
+        """What the runtime saw of a task it lost, for the task's console; else None.
+
+        Read for a task that ended without reporting it (no ``>EXIT``) and that
+        nobody asked to stop.
+        """
+        return None
+
     @abc.abstractmethod
     async def wait(self) -> int:
         """Wait for the task to exit and return its exit code."""
