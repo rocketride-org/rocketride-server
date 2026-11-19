@@ -35,3 +35,4 @@ langchain-core              # agent_langchain, agent_deepagent: test_tool_builde
 astrapy                     # store_astra: test_active_paths.py
 pymilvus                    # store_milvus: test_store_milvus_live.py
 langchain-text-splitters    # summarization: test_summarization.py
+basalt-ai-cobalt            # eval_cobalt: test_eval_cobalt_integration.py
