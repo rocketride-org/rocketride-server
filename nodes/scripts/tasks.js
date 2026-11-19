@@ -141,12 +141,18 @@ const SYNC = {
 // The server keeps core, autopipe and the C++ nodes; every other node goes into the archive beside
 // index.json, and only its requirement files stay in the server. Returns the index's nodes
 async function syncNodes(stats, sync = SYNC) {
-	const { srcNodeDirs, distDir, packagesDir, archiveName, libraryOf, copyFile, copyNode, forget } = {
-		...SYNC,
-		...sync,
-	};
-	const requirementsDir = path.join(distDir, path.basename(REQUIREMENTS_DIR));
-	const archive = await archiveName();
+	sync = { ...SYNC, ...sync };
+	const requirementsDir = path.join(sync.distDir, path.basename(REQUIREMENTS_DIR));
+	const archive = await sync.archiveName();
+	const { zip, packages, sources } = await packageNodes(stats, sync, requirementsDir);
+	await dropStale(sync, packages, sources, requirementsDir, archive);
+	await writeIndex(stats, sync, archive, zip, packages);
+	return packages;
+}
+
+// Copies the server's nodes into it and packs every other one into the archive, with only its
+// requirement files left in the server; the archive, the index's entries and each node's source folder
+async function packageNodes(stats, { srcNodeDirs, distDir, libraryOf, copyFile, copyNode, forget }, requirementsDir) {
 	const zip = new AdmZip();
 	const packages = {};
 	const sources = {};
@@ -183,15 +189,20 @@ async function syncNodes(stats, sync = SYNC) {
 	for (const entry of Object.values(packages)) {
 		entry.requires = entry.requires.filter((other) => other in packages);
 	}
+	return { zip, packages, sources };
+}
 
-	// Drop what an older build left behind, such as a nodes/__init__.py
+// Removes what this build no longer ships: a file an older build left in the server, another
+// version's archive, and the requirement files of a node that is gone or no longer has them
+async function dropStale({ srcNodeDirs, distDir, packagesDir, forget }, packages, sources, requirementsDir, archive) {
+	// Such as a nodes/__init__.py
 	for (const name of await readDirSafe(distDir)) {
 		if (srcNodeDirs.has(name) || name === path.basename(requirementsDir)) continue;
 		await fs.promises.rm(path.join(distDir, name), { recursive: true, force: true });
 		await forget(path.join(PACKAGE_DIR, 'src', 'nodes', name));
 	}
 
-	// And another version's archive, so it is not published again, and the requirement files of a node that is gone
+	// Another version's archive, so it is not published again
 	for (const file of await readDirSafe(packagesDir)) {
 		if (file !== archive && file !== 'index.json') {
 			await fs.promises.rm(path.join(packagesDir, file), { recursive: true, force: true });
@@ -208,14 +219,16 @@ async function syncNodes(stats, sync = SYNC) {
 			await fs.promises.rm(path.join(requirementsDir, name), { recursive: true, force: true });
 		}
 	}
+}
 
+// Writes the archive and its index beside the server, and the index into the server too
+async function writeIndex(stats, { distDir, packagesDir, copyFile }, archive, zip, packages) {
 	const index = { contract: NODES_CONTRACT, archive, nodes: packages };
 	await fs.promises.mkdir(packagesDir, { recursive: true });
 	await fs.promises.writeFile(path.join(packagesDir, archive), zip.toBuffer());
 	await fs.promises.writeFile(path.join(packagesDir, 'index.json'), JSON.stringify(index));
 	// The server archive carries its own copy, so an engine reads the index of the build that made it
 	await copyFile(path.join(packagesDir, 'index.json'), path.join(distDir, 'index.json'), stats);
-	return packages;
 }
 
 // The digest of a node's files ({path inside the node: bytes}), as ai.common.node_packages.content_digest:
