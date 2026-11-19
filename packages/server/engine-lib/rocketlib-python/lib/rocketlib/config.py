@@ -50,7 +50,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
 # ==== Constants ==============================================================
 
@@ -96,6 +96,33 @@ class ConfigError(ValueError):
     when a node reads a ``param``-flagged key from ``IGlobal.config``: a
     parameter is per call and lives on ``IInstance.settings``.
     """
+
+
+# ==== The node's identity ====================================================
+
+
+class NodeInfo(NamedTuple):
+    """
+    The reserved ``config.node`` record: what a node is, filled by the engine (plan 5.6.4).
+
+    Read-only, present on every ``ConfigView`` (``settings`` included). Later
+    framework facts join this record, never a new attribute on the Python
+    object.
+    """
+
+    id: str  #: The component id in the ``.pipe``; what ``settings`` keys its params by.
+    name: str  #: The author's display name, else the id.
+    provider: str  #: The logical type: the pipeline's ``provider`` word.
+    physicalType: str  #: The factory the engine built: ``python``, ``cpp``, ...
+    capabilities: int  #: The node's PROTOCOL_CAPS bitmask.
+    controlId: str  #: The control this IGlobal serves (transient; '' for the default slot).
+
+
+#: The one name no schema leaf may take: it is the identity record on every view.
+RESERVED_KEY = 'node'
+
+#: The record of a view built without an identity (a test, a bare resolve).
+NO_NODE = NodeInfo(id='', name='', provider='', physicalType='', capabilities=0, controlId='')
 
 
 # ==== Schema walk ============================================================
@@ -339,6 +366,11 @@ class ConfigView(Mapping):
     with a teaching message while ``settings`` serves them, and which keys
     the spec sets from the environment (``${ROCKETRIDE_*}``; the server
     expands them before the config reaches the control's IGlobal).
+
+    ``config.node`` is the one reserved group: the node's identity as a
+    read-only ``NodeInfo`` (plan 5.6.4), served by attribute, item and ``in``
+    on every view, derived views included. It is a record, not a declared
+    key: it is not iterated and not in ``to_dict()``.
     """
 
     __slots__ = (
@@ -349,6 +381,7 @@ class ConfigView(Mapping):
         '_env_keys',
         '_params',
         '_capabilities',
+        '_node',
         '_refuse_params',
     )
 
@@ -360,6 +393,7 @@ class ConfigView(Mapping):
         params: List[Dict[str, Any]],
         capabilities: int = 0,
         *,
+        node: Optional[NodeInfo] = None,
         refuse_params: bool = False,
         env_keys: Optional[frozenset] = None,
     ):
@@ -372,6 +406,8 @@ class ConfigView(Mapping):
             paths (dict): Short name -> the leaf's dotted path.
             params (list): The node's self-contained ``params`` descriptors.
             capabilities (int): The node's PROTOCOL_CAPS bitmask.
+            node (NodeInfo): The node's identity record (``config.node``);
+                ``NO_NODE`` when the view has none.
             refuse_params (bool): Raise ``ConfigError`` on param-flagged keys.
             env_keys (frozenset): The env-valued keys of the view this one
                 derives from. A derived view (overlaid, restricted) keeps
@@ -383,6 +419,7 @@ class ConfigView(Mapping):
         object.__setattr__(self, '_paths', dict(paths))
         object.__setattr__(self, '_params', list(params))
         object.__setattr__(self, '_capabilities', int(capabilities))
+        object.__setattr__(self, '_node', node if node is not None else NO_NODE)
         object.__setattr__(self, '_refuse_params', refuse_params)
         object.__setattr__(
             self, '_param_keys', frozenset(key for key, desc in descriptors.items() if desc.get('param'))
@@ -398,14 +435,18 @@ class ConfigView(Mapping):
     # ---- Mapping protocol ------------------------------------------------
 
     def __getitem__(self, key: str) -> Any:
-        """Return the resolved value of ``key``; unknown keys raise ``KeyError``."""
+        """Return the resolved value of ``key`` (or the ``node`` record); unknown keys raise ``KeyError``."""
+        if key == RESERVED_KEY:
+            return self._node
         if key not in self._values:
             raise KeyError(self._unknown_message(key))
         self._refuse(key)
         return self._values[key]
 
     def __getattr__(self, name: str) -> Any:
-        """Return the resolved value of ``name``; unknown keys raise ``AttributeError``."""
+        """Return the resolved value of ``name`` (or the ``node`` record); unknown keys raise ``AttributeError``."""
+        if name == RESERVED_KEY:
+            return self._node
         if name.startswith('_') or name not in self._values:
             raise AttributeError(self._unknown_message(name))
         self._refuse(name)
@@ -420,8 +461,8 @@ class ConfigView(Mapping):
         return len(self._values)
 
     def __contains__(self, key: object) -> bool:
-        """Return True when ``key`` is a declared key of the active branch."""
-        return key in self._values
+        """Return True when ``key`` is a declared key of the active branch, or the ``node`` record."""
+        return key == RESERVED_KEY or key in self._values
 
     def __repr__(self) -> str:
         """Show the declared keys without forcing any refusal."""
@@ -493,6 +534,7 @@ class ConfigView(Mapping):
             self._paths,
             self._params,
             self._capabilities,
+            node=self._node,
             refuse_params=refuse_params,
             env_keys=self._env_keys,
         )
@@ -530,9 +572,15 @@ class ConfigView(Mapping):
     # ---- Internals --------------------------------------------------------
 
     def _with_values(self, values: Dict[str, Any]) -> 'ConfigView':
-        """Clone with ``values`` and no refusal (settings never refuses); the env-valued keys stay known."""
+        """Clone with ``values`` and no refusal (settings never refuses); the env-valued keys and the node record stay."""
         return ConfigView(
-            values, self._descriptors, self._paths, self._params, self._capabilities, env_keys=self._env_keys
+            values,
+            self._descriptors,
+            self._paths,
+            self._params,
+            self._capabilities,
+            node=self._node,
+            env_keys=self._env_keys,
         )
 
     def _refuse(self, key: str) -> None:
@@ -583,7 +631,7 @@ def _flatten_conn_config(
             problems.append(f'unknown config key "{path}"')
 
 
-def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView:
+def resolveConfig(schema: Dict[str, Any], connConfig: Any, node: Optional[NodeInfo] = None) -> ConfigView:
     """
     Resolve a node's stored configuration against its engine-resolved schema.
 
@@ -592,13 +640,16 @@ def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView:
             ``properties`` with a ``path`` on every leaf, ``params`` descriptors,
             and the node's ``capabilities`` bitmask.
         connConfig (dict): The node's config as the pipeline stores it, a tree
-            addressed by the leaf paths. Already native (``IJson.toDict``).
+            addressed by the leaf paths. Native: the owned dict the engine
+            hands the control's IGlobal.
+        node (NodeInfo): The node's identity, served as ``config.node``.
 
     Returns:
         ConfigView: Defaults + stored values, validated and flattened to the active branch.
 
     Raises:
-        ConfigError: Unknown key, a selector value with no branch, a
+        ConfigError: A leaf named ``node`` (the reserved identity record),
+            an unknown key, a selector value with no branch, a
             type/range/enum/required/length violation on a reachable leaf, or
             two reachable leaves sharing a short name. Every problem found is
             listed in the one message.
@@ -607,6 +658,17 @@ def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView:
         raise ConfigError('schema must be a dict')
     indexed = _index_schema(schema)
     problems: List[str] = []
+
+    # Step 0: the reserved name. A leaf called "node" would shadow the identity
+    # record on every view, so the services.json that declares one is refused
+    # at load, whatever its stored values
+    for path, leaf in indexed.leaves.items():
+        if leaf.name == RESERVED_KEY:
+            service = schema.get('title') or schema.get('type') or 'this node'
+            raise ConfigError(
+                f'"{path}" in the services.json of {service!s} declares a leaf named "{RESERVED_KEY}": '
+                f'that name is reserved for the node identity record (config.{RESERVED_KEY})'
+            )
 
     # Step 1: the stored tree, by path. Unknown keys are reported here.
     stored: Dict[str, Any] = {}
@@ -677,4 +739,4 @@ def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView:
     params = schema.get('params')
     if not isinstance(params, list):
         params = []
-    return ConfigView(values, descriptors, paths, params, capabilities)
+    return ConfigView(values, descriptors, paths, params, capabilities, node=node)

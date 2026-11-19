@@ -28,7 +28,7 @@ import json
 from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
-from .config import ConfigError, ConfigView, resolveConfig
+from .config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -286,11 +286,21 @@ class IFilterGlobal(IServiceGlobal, Protocol):
     controlId: str
 
     """
-    The control's resolved node configuration, as the server delivered it
-    with the control's open: env-expanded, a tree addressed by the schema's
-    paths. One IGlobal, one control, one config.
+    The control's node configuration, as the server delivered it with the
+    control's open: env-expanded, a tree addressed by the schema's paths, an
+    OWNED dict built by the engine at slot build (never a view into engine
+    memory). One IGlobal, one control, one config.
     """
     connConfig: Dict
+
+    """
+    The component id in the pipeline, the author's display name (else the
+    id) and the node's PROTOCOL_CAPS bitmask: with controlId, logicalType
+    and physicalType they fill the reserved ``config.node`` record.
+    """
+    id: str
+    name: str
+    capabilities: int
 
     """
     Logical type of the driver as defined by your services.json.
@@ -338,10 +348,31 @@ class IGlobalBase:
     # ------------------------------------------------------------------
     # Configuration
     #
-    # The engine sets self.glb (controlId, logicalType, connConfig) before
-    # beginGlobal. The schema is the engine-resolved service schema, so the
-    # resolver is the schema validation: resolving IS validating.
+    # The engine sets self.glb (the node's identity and connConfig, the
+    # control's configuration as an owned dict) before beginGlobal. The
+    # schema is the engine-resolved service schema, so the resolver is the
+    # schema validation: resolving IS validating. Until C.24 moves node
+    # reads to self.config.node.*, glb's own fields keep answering too.
     # ------------------------------------------------------------------
+
+    def _node_info(self) -> NodeInfo:
+        """
+        Return this node's identity record from glb, for ``config.node``.
+
+        Returns:
+            NodeInfo: id, name (else the id), provider (the logical type),
+            physicalType, capabilities, controlId.
+        """
+        glb = self.glb
+        node_id = str(getattr(glb, 'id', '') or '')
+        return NodeInfo(
+            id=node_id,
+            name=str(getattr(glb, 'name', '') or node_id),
+            provider=str(getattr(glb, 'logicalType', '') or ''),
+            physicalType=str(getattr(glb, 'physicalType', '') or ''),
+            capabilities=int(getattr(glb, 'capabilities', 0) or 0),
+            controlId=str(getattr(glb, 'controlId', '') or ''),
+        )
 
     def _schema(self) -> Dict[str, Any]:
         """
@@ -372,7 +403,7 @@ class IGlobalBase:
             ConfigView: Defaults + connConfig, validated and flattened.
         """
         if self._config_view is None:
-            self._config_view = resolveConfig(self._schema(), IJson.toDict(self.glb.connConfig))
+            self._config_view = resolveConfig(self._schema(), self.glb.connConfig, node=self._node_info())
         return self._config_view
 
     @property
@@ -448,7 +479,6 @@ class IServiceFilterInstance(Protocol):
         logicalType: str
         physicalType: str
         capabilities: int
-        connConfig: Dict[str, Any]
 
     currentObject: Entry
     pipeType: IServiceFilterInstance_PipeType
@@ -989,8 +1019,10 @@ class IInstanceBase:
         """
         if self._settings is None:
             caller = self._caller or {}
-            params = (caller.get('params') or {}).get(self.instance.pipeType.id)
-            self._settings = self.IGlobal.config.overlay(params)
+            # The server keys a node's params by its component id: config.node.id
+            config = self.IGlobal.config
+            params = (caller.get('params') or {}).get(config.node.id)
+            self._settings = config.overlay(params)
         return self._settings
 
     # ------------------------------------------------------------------

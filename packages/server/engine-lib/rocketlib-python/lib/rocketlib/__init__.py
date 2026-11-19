@@ -59,6 +59,7 @@ from .error import APERR
 from .error import Ec
 from .config import ConfigError
 from .config import ConfigView
+from .config import NodeInfo
 from .config import resolveConfig
 from .filters import BindingLogger
 from .filters import IEndpointBase
@@ -152,6 +153,7 @@ __all__ = [
     'monitorSSE',
     'monitorStatus',
     'monitorDependencyDownload',
+    'NodeInfo',
     'OPEN_MODE',
     'outputEndpointParameters',
     'outputEntry',

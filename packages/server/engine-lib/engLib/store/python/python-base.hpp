@@ -147,13 +147,21 @@ _const int CONST_IGLOBAL_SWEEP_SECONDS = 60;
 ///		What rocketlib reads as IGlobal.glb: one control's view of the
 ///		node. The node is one C++ global; the configuration is the
 ///		control's (the resolved config that rode its open, plan 5.3), so
-///		every IGlobal object carries its own copy of this
+///		every IGlobal object carries its own copy of this. The identity
+///		fields fill the reserved `config.node` record (plan 5.6.4: id,
+///		name, provider = logicalType, physicalType, capabilities,
+///		controlId); connConfig is an OWNED python dict built once at slot
+///		build, never a view into engine memory, so a reference a node
+///		keeps past the idle sweep stays valid
 //-------------------------------------------------------------------------
 struct GlobalContext {
     Text controlId;
+    Text id;
+    Text name;
     Text logicalType;
     Text physicalType;
-    json::Value connConfig;
+    uint32_t capabilities = 0;
+    py::object connConfig;
 };
 
 //-------------------------------------------------------------------------
@@ -307,6 +315,9 @@ private:
     Error endSlot(GlobalSlot &slot) noexcept;
     void sweepIdle(Clock::time_point before) noexcept;
     Opt<size_t> stackIndex() noexcept;
+    Text componentName() noexcept;
+    GlobalContext makeContext(const Text &controlId,
+                              const json::Value &connConfig);
     static void sweepProcess() noexcept;
 
     //-------------------------------------------------------------

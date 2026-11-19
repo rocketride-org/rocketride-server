@@ -119,6 +119,21 @@ export function revivalFor(key: string): (() => Promise<void>) | undefined {
 	return revivals.get(key);
 }
 
+/**
+ * The control id a direct endpoint's temp pipeline answers on RIGHT NOW.
+ *
+ * A revival (by this document or another holding the same connection)
+ * replaces the id after the idle ttl ended the control, so a session reads
+ * it here before every call instead of keeping the id it was created with.
+ *
+ * @param key - The endpoint key.
+ * @returns The current control id, or undefined for a pipeline-bound
+ *          endpoint or a direct one that is not started.
+ */
+export function directAddressFor(key: string): string | undefined {
+	return addresses.get(key);
+}
+
 // =============================================================================
 // RESOLUTION
 // =============================================================================

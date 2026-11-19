@@ -464,7 +464,7 @@ Sent the same way as `rrext_monitor`:
 | `rrext_get_token`       | `{ projectId, source }`                                                          | `{ token }`      | Resolve a running task's control id (a restart mints a new one) |
 | `execute`               | `{ pipeline, token?, threads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, address, ... }` | Start a pipeline; `token` is the control id (transient, never persist it), `address` the stable identity; `pipeline.project_id` is required (`invalid_argument`) |
 | `terminate`             | - (uses `token`, the control id)                                                 | -                | Stop a running pipeline; the control is removed at once |
-| `restart`               | `{ projectId, source, pipeline, token?, teamId? }`                               | -                | Terminate the control and create a new one: a NEW control id; resubscribe monitors |
+| `restart`               | `{ token, pipeline, projectId, source, teamId? }`                                | `{ token, address, ... }` | Terminate the control `token` names and create its successor: a NEW control id in `token`; `token` is required (a request without one is `permission_denied`; resolve it with `rrext_get_token` first); resubscribe monitors keyed on the old id |
 | `rrext_engine_stop`     | `{ engineKey, reason? }`                                                         | -                | Stop an engine outright, whoever holds it: `sys.admin`, or the OWNER of an engine whose key carries their owner id; every holder's next request gets `engine_unavailable` |
 
 ---

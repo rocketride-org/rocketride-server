@@ -1852,19 +1852,22 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Restart a running pipeline with a new configuration.
 	 *
-	 * Looks up the existing task by project/source, terminates its control
-	 * and creates a new one in one server round-trip. The restart MINTS A NEW
-	 * CONTROL ID: the id you held before is dead afterwards, so read the
-	 * replacement from `getTaskToken()` (or the next `use()`) before sending
-	 * again. Play on a changed spec in the IDEs is this same restart.
+	 * Terminates the control `token` names and creates its successor in one
+	 * server round-trip. The restart MINTS A NEW CONTROL ID: the id you held
+	 * before is dead afterwards, so read the replacement with
+	 * `getTaskToken()` (or the next `use()`) before sending again, and
+	 * resubscribe monitors keyed on the old id. Read it right after the
+	 * restart: the lookup answers the most recently touched of your controls
+	 * under that project/source, which the successor is at that moment. The
+	 * IDEs' Restart action is this call (Play is `use()`).
 	 *
-	 * @param options.token - The existing control id (optional, resolved server-side from project/source when omitted).
+	 * @param options.token - The existing control id (required; resolve it with `getTaskToken()` first when you hold only project/source).
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
 	 * @param options.pipeline - The pipeline configuration to restart with.
 	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
+	async restart(options: { token: string; projectId: string; source: string; pipeline: Record<string, unknown>; teamId?: string }): Promise<void> {
 		try {
 			await this.call('restart', {
 				token: options.token,

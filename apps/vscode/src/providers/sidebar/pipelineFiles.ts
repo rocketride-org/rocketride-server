@@ -445,7 +445,10 @@ export class PipelineFiles {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
 
+			// No token = no running task to restart; the server rejects a
+			// tokenless restart outright, so there is nothing to send
 			const token = await client.getTaskToken({ projectId, source: sourceId });
+			if (!token) return;
 			await client.restart({ token, projectId, source: sourceId, pipeline: pipelineJson });
 		} catch (error) {
 			this.logger.error(`[SidebarProvider] restartPipeline failed: ${error}`);

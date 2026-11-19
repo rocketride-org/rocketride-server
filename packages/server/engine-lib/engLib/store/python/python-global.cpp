@@ -168,9 +168,8 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
             // task file's configuration through the same glb an IGlobal does
             m_pyValidator = pyClass();
             m_pyValidator.attr("IEndpoint") = m_pyEndpoint;
-            m_pyValidator.attr("glb") = py::cast(GlobalContext{
-                {}, pipeType.logicalType, pipeType.physicalType,
-                pipeType.connConfig});
+            m_pyValidator.attr("glb") =
+                py::cast(makeContext({}, pipeType.connConfig));
             return {};
         }
 
@@ -280,6 +279,46 @@ Opt<size_t> IPythonGlobalBase::stackIndex() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		The author's display name for this node: the task-file component
+///		entry's `name`, else the component id (what the server labels a
+///		node by). A stack built without a pipeline has only the id
+//-------------------------------------------------------------------------
+Text IPythonGlobalBase::componentName() noexcept {
+    auto &components = endpoint->config.pipeline.components();
+    if (components.isArray()) {
+        for (json::Value::ArrayIndex i = 0; i < components.size(); ++i) {
+            if (!components[i].isObject() ||
+                components[i].lookup<Text>("id", "") != pipeType.id)
+                continue;
+            auto name = components[i].lookup<Text>("name", "");
+            return name.empty() ? pipeType.id : name;
+        }
+    }
+    return pipeType.id;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		One control's view of this node, as rocketlib reads it through
+///		glb: the identity the reserved `config.node` record carries
+///		(plan 5.6.4) and an OWNED python copy of the control's
+///		configuration. Nothing in it points into engine memory, so a
+///		reference a node keeps past the idle sweep stays valid. Called
+///		with the GIL held
+//-------------------------------------------------------------------------
+GlobalContext IPythonGlobalBase::makeContext(const Text &controlId,
+                                            const json::Value &connConfig) {
+    return GlobalContext{controlId,
+                         pipeType.id,
+                         componentName(),
+                         pipeType.logicalType,
+                         pipeType.physicalType,
+                         pipeType.capabilities,
+                         engine::python::pyjson::jsonToDict(connConfig)};
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Nothing per control is begun with the endpoint: a control's
 ///		IGlobal is built by the first binding under it (acquireSlot)
 //-------------------------------------------------------------------------
@@ -381,10 +420,8 @@ Error IPythonGlobalBase::buildSlot(GlobalSlot &slot, const Text &controlId,
         slot.global.attr("IEndpoint") = m_pyEndpoint;
 
         // The control's view of the node: rocketlib resolves self.config
-        // from glb.connConfig, the control's resolved configuration
-        slot.global.attr("glb") = py::cast(GlobalContext{
-            controlId, pipeType.logicalType, pipeType.physicalType,
-            _mv(connConfig)});
+        // from glb.connConfig, the control's configuration as an owned copy
+        slot.global.attr("glb") = py::cast(makeContext(controlId, connConfig));
 
         // Begin it
         if (py::hasattr(slot.global, "beginGlobal"))

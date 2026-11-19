@@ -313,7 +313,7 @@ const result = await client.use({ pipeline });
 
 Start a RocketRide pipeline. Returns the server response body; `token` is the CONTROL ID — an opaque transient handle, valid for the life of the control, that every subsequent per-task call (`send`, `pipe`, `terminate`, `getTaskStatus`, the monitor verbs) takes. Never persist it: it dies with the control and a restart mints a new one. The task address `developerId.pipelineId[.source]` rides beside it as `address`.
 
-A spec call addresses your own `@spec` rung: the server reuses your live control with the same `project_id` and the same resolved configuration (the same `token` comes back) or creates one. A spec whose configuration differs under the same `project_id` is a NEW control on the same engine; the earlier one lives until it is stopped or its idle ttl ends. There is no change policy to pass: Play on a changed spec in the IDEs restarts the control (a new `token`).
+A spec call addresses your own `@spec` rung: the server reuses your live control with the same `project_id` and the same resolved configuration (the same `token` comes back) or creates one. A spec whose configuration differs under the same `project_id` is a NEW control on the same engine; the earlier one lives until it is stopped or its idle ttl ends. There is no change policy to pass: Play in the IDEs is this same spec call, so a changed configuration starts a new control beside the earlier one; replacing a control is the IDEs' Restart action, `restart()`.
 
 **Options (all optional, but one of `pipeline`/`filepath` is required):**
 
@@ -359,10 +359,14 @@ const { token } = await client.use({ pipeline, args: ['--trace=debugOut'] });
 
 ### `restart(options): Promise<void>`
 
-Restart a running pipeline with a new configuration: the server looks up the existing task by project/source, terminates its control and creates a new one in one round trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `getTaskToken()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Play on a changed spec in the IDEs is this same restart. Options: `projectId`, `source`, `pipeline` (required); `token?` (the existing control id; resolved server-side when omitted); `teamId?` (address the team's DEPLOY run; omit for your own dev run).
+Restart a running pipeline with a new configuration: the server terminates the control `token` names and creates its successor in one round trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `getTaskToken()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Read it right after the restart: the lookup answers the most recently touched of your controls under that project/source, which the successor is at that moment (several live controls can share one `project_id`, one per configuration). The IDEs' Restart action is this call (Play is `use()`). Options: `token` (the existing control id, required: resolve it with `getTaskToken()` first when you hold only project/source), `projectId`, `source`, `pipeline` (required); `teamId?` (address the team's DEPLOY run; omit for your own dev run). A missing or foreign `token` rejects with `permission_denied`.
 
 ```typescript
-await client.restart({ projectId: 'proj-123', source: 'webhook_1', pipeline });
+const token = await client.getTaskToken({ projectId: 'proj-123', source: 'webhook_1' });
+if (token) {
+	await client.restart({ token, projectId: 'proj-123', source: 'webhook_1', pipeline });
+	const successor = await client.getTaskToken({ projectId: 'proj-123', source: 'webhook_1' }); // the old id is dead
+}
 ```
 
 ### `submit(options): Promise<SUBMIT_RESULT>`

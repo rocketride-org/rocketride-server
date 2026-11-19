@@ -134,7 +134,7 @@ than inferring one from the prose.
 
 | `code` | Meaning |
 | --- | --- |
-| `TASK_NOT_REGISTERED` | The control id or project/source names no live control of yours: never started, terminated, restarted (a restart mints a new control id), or the server restarted (the control registry is in-memory and rebuilt at boot, so every previously issued control id is invalid after a restart). A control id another account owns is `permission_denied`, never this code. |
+| `TASK_NOT_REGISTERED` | A project/source (or address) lookup names no live control of yours: never started, terminated, restarted, or the server restarted (the control registry is in-memory and rebuilt at boot). A request that names a CONTROL ID never gets this code: an id that is not yours, or that no longer exists (terminated, replaced by a restart, or issued before a server restart), is `permission_denied` either way, so the registry is no existence oracle. Recover by resolving the id again (`rrext_get_token`) or starting the pipeline. |
 | `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |

@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, Optional, Protocol, TypedDict, overload
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Mapping, NamedTuple, Optional, Protocol, TypedDict, overload
 
 # ---------------------------------------------------------------------------
 # Re-exports — everything listed in __all__
@@ -598,7 +598,6 @@ class IServiceFilterPipe(Protocol):
         logicalType: str
         physicalType: str
         capabilities: int
-        connConfig: Dict[str, Any]
 
     currentObject: Entry
     pipeType: 'IServiceFilterPipe.IServiceFilterInstance_PipeType'
@@ -697,9 +696,20 @@ class IEndpointBase:
 class ConfigError(ValueError):
     """A node configuration does not fit its schema, or a param-flagged key was read from IGlobal.config."""
 
-class ConfigView(Mapping[str, Any]):
-    """Read-only, schema-only node configuration with attribute and item access."""
+class NodeInfo(NamedTuple):
+    """The reserved ``config.node`` record: the node's identity, filled by the engine (plan 5.6.4)."""
 
+    id: str
+    name: str
+    provider: str
+    physicalType: str
+    capabilities: int
+    controlId: str
+
+class ConfigView(Mapping[str, Any]):
+    """Read-only, schema-only node configuration with attribute and item access; ``node`` is the identity record."""
+
+    node: NodeInfo
     def __getitem__(self, key: str) -> Any: ...
     def __getattr__(self, name: str) -> Any: ...
     def __iter__(self) -> Iterator[str]: ...
@@ -718,13 +728,15 @@ class ConfigView(Mapping[str, Any]):
     def restricted(self, *, refuse_params: bool) -> ConfigView: ...
     def overlay(self, params: Optional[Mapping[str, Any]]) -> ConfigView: ...
 
-def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView: ...
+def resolveConfig(schema: Dict[str, Any], connConfig: Any, node: Optional[NodeInfo] = None) -> ConfigView: ...
 
 class IGlobalBase:
     """Base class for all Python global driver implementations: one object per CONTROL per node."""
 
     IEndpoint: IEndpointBase
-    glb: Any  # IFilterGlobal Protocol - controlId, logicalType, physicalType, connConfig (the control's)
+    # IFilterGlobal: controlId, id, name, logicalType, physicalType, capabilities (the
+    # config.node record) and connConfig, the control's configuration as an owned dict
+    glb: Any
 
     @property
     def config(self) -> ConfigView: ...
@@ -968,12 +980,11 @@ def shorten_path_components(path: str, max_len: int = ...) -> str:
 # ---- C++ engLib classes (imported directly in __init__.py) ----
 
 class IPipeType:
-    """Pipeline node metadata (C++ class exposed via PyBind11)."""
+    """Pipeline node metadata (C++ class exposed via PyBind11); the configuration itself rides glb.connConfig."""
 
     id: str
     logicalType: str
     physicalType: str
-    connConfig: IJson
 
 class IOBuffer:
     """Target-mode I/O buffer (C++ class exposed via PyBind11)."""

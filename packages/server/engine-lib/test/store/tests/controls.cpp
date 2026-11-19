@@ -59,16 +59,22 @@ from rocketlib import IGlobalBase, IInstanceBase, IJson
 log = []              # ('begin' | 'end', controlId, label), in order
 seen = []             # (IGlobal.glb.controlId, IGlobal.label, _caller controlId)
 raise_on_end = set()  # control ids whose endGlobal raises
-state = {'begin_delay': 0.0}  # seconds beginGlobal sleeps: widens the build window
+state = {'begin_delay': 0.0,  # seconds beginGlobal sleeps: widens the build window
+         'stash': False}      # stash glb.connConfig and self.config at MODULE scope
+kept = {}             # what beginGlobal stashed: outlives the IGlobal
 
 
 class IGlobal(IGlobalBase):
     label = None
 
     def beginGlobal(self):
-        self.label = IJson.toDict(self.glb.connConfig).get('label')
+        # glb.connConfig is the control's configuration as an owned dict
+        self.label = self.glb.connConfig.get('label')
         if state['begin_delay']:
             time.sleep(state['begin_delay'])
+        if state['stash']:
+            kept['connConfig'] = self.glb.connConfig
+            kept['config'] = self.config
         log.append(('begin', self.glb.controlId, self.label))
 
     def endGlobal(self):
@@ -91,7 +97,7 @@ def _module(name, **attrs):
     return module
 
 
-package = _module('ctltest', log=log, seen=seen, raise_on_end=raise_on_end, state=state)
+package = _module('ctltest', log=log, seen=seen, raise_on_end=raise_on_end, state=state, kept=kept)
 package.__path__ = []
 _module('ctltest.IGlobal', IGlobal=IGlobal)
 _module('ctltest.IInstance', IInstance=IInstance)
@@ -151,6 +157,11 @@ std::vector<Record> entries(const char *kind) {
 void setBeginDelay(double seconds) {
     engine::python::LockPython lock;
     py::module_::import(kNodePackage).attr("state")["begin_delay"] = seconds;
+}
+
+void setStash(bool stash) {
+    engine::python::LockPython lock;
+    py::module_::import(kNodePackage).attr("state")["stash"] = stash;
 }
 
 void raiseOnEnd(const char *controlId) {
@@ -414,6 +425,49 @@ TEST_CASE("store::controls") {
         REQUIRE(begins.size() == 2);
         REQUIRE(begins[1] == Record{"begin", "control-a", "a-cfg-2"});
         REQUIRE_NO_ERROR(closeUnder(endpoint, again));
+    }
+
+    SECTION("the config a node keeps past the sweep is its own: connConfig and config outlive the slot") {
+        // The node stashes glb.connConfig (the owned dict) and self.config
+        // (the ConfigView resolved from it) at module scope
+        setStash(true);
+        util::Guard unstash{[] {}, [] { setStash(false); }};
+        Binding a;
+        REQUIRE_NO_ERROR(openUnder(test, endpoint, a, "control-a", "a-cfg"));
+        REQUIRE_NO_ERROR(closeUnder(endpoint, a));
+
+        // The sweep ends the control and erases its slot: the engine
+        // releases the IGlobal and its glb, and a python garbage pass
+        // collects whatever nothing holds any more
+        sweepNow();
+        REQUIRE(entries("end").size() == 1);
+        REQUIRE(global->controlIds().empty());
+        {
+            engine::python::LockPython lock;
+            py::module_::import("gc").attr("collect")();
+        }
+
+        // Both still answer the values the open carried: they are the
+        // node's own objects, nothing in them pointed into the slot
+        {
+            engine::python::LockPython lock;
+            auto stashed = py::module_::import(kNodePackage).attr("kept");
+            REQUIRE(py::cast<std::string>(stashed["connConfig"]["label"]) == "a-cfg");
+            REQUIRE(py::isinstance<py::dict>(stashed["connConfig"]));
+            auto config = stashed["config"];
+            REQUIRE(py::cast<std::string>(config.attr("label")) == "a-cfg");
+
+            // The reserved config.node record: the node's identity as the
+            // engine filled it (plan 5.6.4)
+            auto node = config.attr("node");
+            REQUIRE(py::cast<std::string>(node.attr("id")) == kNodeType);
+            REQUIRE(py::cast<std::string>(node.attr("name")) == kNodeType);
+            REQUIRE(py::cast<std::string>(node.attr("provider")) == kNodeType);
+            REQUIRE(py::cast<std::string>(node.attr("physicalType")) == "python");
+            REQUIRE(py::cast<std::string>(node.attr("controlId")) == "control-a");
+            REQUIRE(py::isinstance<py::int_>(node.attr("capabilities")));
+            stashed.attr("clear")();
+        }
     }
 
     SECTION("a control with an open binding is never swept") {

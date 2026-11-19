@@ -328,7 +328,7 @@ Start a RocketRide pipeline for processing data.
 - `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
 
-A spec call addresses your own `@spec` rung: the server reuses your live control with the same `project_id` and the same resolved configuration (the same `token` comes back) or creates one. A spec whose configuration differs under the same `project_id` is a NEW control on the same engine; the earlier one lives until it is stopped or its idle ttl ends. There is no change policy to pass: Play on a changed spec in the IDEs restarts the control (a new `token`).
+A spec call addresses your own `@spec` rung: the server reuses your live control with the same `project_id` and the same resolved configuration (the same `token` comes back) or creates one. A spec whose configuration differs under the same `project_id` is a NEW control on the same engine; the earlier one lives until it is stopped or its idle ttl ends. There is no change policy to pass: Play in the IDEs is this same spec call, so a changed configuration starts a new control beside the earlier one; replacing a control is the IDEs' Restart action, `restart()`.
 
 **Returns:** Dictionary containing `token` (the CONTROL ID: an opaque transient handle, valid for the life of the control, that `send`/`pipe`/`terminate`/`get_task_status` and the monitor verbs take; never persist it, it dies with the control and a restart mints a new one), `address` (the task address `developerId.pipelineId[.source]`, the stable identity beside the id) and other startup metadata.
 
@@ -398,12 +398,14 @@ result = await client.submit(filepath='docBrain.pipe', data=b'...')
 
 Terminate a running pipeline. `token` is the control id; the control is removed at once and its id is dead afterwards. Termination is graceful (in-flight items finish) and final — start a new pipeline for further processing.
 
-### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None, team_id: str = '') -> None`
+### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: str, team_id: str = '') -> None`
 
-Restart a running pipeline with a new configuration. Looks up the existing task by project/source, terminates its control and creates a new one in one server round-trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `get_task_token()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Play on a changed spec in the IDEs is this same restart. All arguments are keyword-only; `token` (the existing control id) is resolved server-side if omitted; pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure.
+Restart a running pipeline with a new configuration: terminates the control `token` names and creates its successor in one server round-trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `get_task_token()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Read it right after the restart: the lookup answers the most recently touched of your controls under that project/source, which the successor is at that moment (several live controls can share one `project_id`, one per configuration). The IDEs' Restart action is this call (Play is `use()`). All arguments are keyword-only; `token` (the existing control id) is required: resolve it with `get_task_token()` first when you hold only project/source; pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure (a missing or foreign `token` is `permission_denied`).
 
 ```python
-await client.restart(project_id='my-project', source='webhook_1', pipeline=updated_pipeline)
+token = await client.get_task_token(project_id='my-project', source='webhook_1')
+await client.restart(project_id='my-project', source='webhook_1', pipeline=updated_pipeline, token=token)
+token = await client.get_task_token(project_id='my-project', source='webhook_1')  # the successor; the old id is dead
 ```
 
 ### `async get_task_status(token: str) -> TASK_STATUS`

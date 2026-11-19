@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from rocketlib.config import ConfigError, ConfigView, resolveConfig
+from rocketlib.config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
 from tests.rocketlib.schemas import CAP_GPU, CAP_MULTITENANT, DEPTH_ESTIMATE, GOOGLE_WORKSPACE, QDRANT, multitenant
 
@@ -339,3 +339,63 @@ class TestConfigView:
         schema['properties'].append({'name': 'threads', 'path': 'threads', 'type': 'integer', 'default': 1})
         with pytest.raises(ConfigError, match='both resolve to "threads"'):
             resolveConfig(schema, {})
+
+
+class TestNodeGroup:
+    """``config.node``: the reserved identity record on every view (plan 5.6.4)."""
+
+    NODE = NodeInfo(
+        id='depth_1',
+        name='Depth',
+        provider='depth_estimate',
+        physicalType='python',
+        capabilities=CAP_GPU,
+        controlId='control-1',
+    )
+
+    def test_record_by_attribute_item_and_in(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert view.node is self.NODE
+        assert view['node'] is self.NODE
+        assert 'node' in view
+        assert (
+            view.node.id,
+            view.node.name,
+            view.node.provider,
+            view.node.physicalType,
+            view.node.capabilities,
+            view.node.controlId,
+        ) == ('depth_1', 'Depth', 'depth_estimate', 'python', CAP_GPU, 'control-1')
+
+    def test_record_is_not_a_declared_key(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert 'node' not in list(view)
+        assert 'node' not in view.to_dict()
+        assert len(view) == len(view.to_dict())
+
+    def test_record_is_read_only(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        with pytest.raises(AttributeError):
+            view.node.id = 'other'
+        with pytest.raises(TypeError):
+            view.node = self.NODE
+
+    def test_record_rides_derived_views(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert view.restricted(refuse_params=True).node is self.NODE
+        assert view.overlay({'maxEdge': 1024}).node is self.NODE
+        assert view.overlay(None).node is self.NODE
+
+    def test_no_identity_is_the_empty_record(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {})
+        assert view.node == NodeInfo(id='', name='', provider='', physicalType='', capabilities=0, controlId='')
+
+    def test_schema_leaf_named_node_is_refused(self):
+        # The one reserved name: a services.json declaring it is refused at
+        # load, naming the service, whatever the stored values
+        schema = copy.deepcopy(DEPTH_ESTIMATE)
+        schema['properties'].append({'name': 'node', 'path': 'node', 'type': 'string', 'title': 'Node'})
+        with pytest.raises(ConfigError, match=r'"node".*Depth estimate.*reserved'):
+            resolveConfig(schema, {})
+        with pytest.raises(ConfigError, match=r'reserved'):
+            resolveConfig(schema, {'node': 'x'}, node=self.NODE)

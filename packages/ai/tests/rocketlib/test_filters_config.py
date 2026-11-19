@@ -30,10 +30,10 @@ from types import SimpleNamespace
 
 import pytest
 import rocketlib.engine
-from rocketlib.config import ConfigError, ConfigView
+from rocketlib.config import ConfigError, ConfigView, NodeInfo
 from rocketlib.filters import IGlobalBase, IInstanceBase, IValidatorBase
 
-from tests.rocketlib.schemas import DEPTH_ESTIMATE
+from tests.rocketlib.schemas import CAP_GPU, DEPTH_ESTIMATE
 
 # ==== Fixtures ===============================================================
 
@@ -49,8 +49,26 @@ def _engine_schemas(monkeypatch):
 class _Global(IGlobalBase):
     """A node global the way the engine builds it for ONE control: glb set before beginGlobal."""
 
-    def __init__(self, logical_type: str = 'depth_estimate', conn_config=None, control_id: str = 'control-1'):
-        self.glb = SimpleNamespace(controlId=control_id, logicalType=logical_type, connConfig=conn_config or {})
+    def __init__(
+        self,
+        logical_type: str = 'depth_estimate',
+        conn_config=None,
+        control_id: str = 'control-1',
+        node_id: str = 'depth_estimate_1',
+        name: str = 'Depth estimate',
+        capabilities: int = 0,
+    ):
+        # glb as the engine stamps it: the config.node identity fields and
+        # connConfig, the control's configuration as an owned dict
+        self.glb = SimpleNamespace(
+            controlId=control_id,
+            id=node_id,
+            name=name,
+            logicalType=logical_type,
+            physicalType='python',
+            capabilities=capabilities,
+            connConfig=conn_config or {},
+        )
         self.counter = 0
 
     def bump(self) -> int:
@@ -235,3 +253,66 @@ class TestInstanceSettings:
         inst.instance = SimpleNamespace(pipeType=SimpleNamespace(id='x'))
         with pytest.raises(AttributeError):
             inst.settings
+
+
+class TestNodeRecord:
+    """``config.node``: the identity the engine stamps on glb, read through the view (plan 5.6.4)."""
+
+    def test_record_from_glb(self):
+        glb = _Global(node_id='depth_7', name='Depth seven', capabilities=CAP_GPU)
+        assert glb.config.node == NodeInfo(
+            id='depth_7',
+            name='Depth seven',
+            provider='depth_estimate',
+            physicalType='python',
+            capabilities=CAP_GPU,
+            controlId='control-1',
+        )
+
+    def test_name_defaults_to_the_id(self):
+        glb = _Global(node_id='depth_7', name='')
+        assert glb.config.node.name == 'depth_7'
+
+    def test_settings_carry_the_record(self):
+        inst = _Instance(_Global())
+        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
+        assert inst.settings.node == inst.IGlobal.config.node
+        assert inst.settings.node.id == 'depth_estimate_1'
+        assert inst.settings.maxEdge == 1024
+
+    def test_settings_key_params_by_config_node_id(self):
+        # The old spelling (instance.pipeType.id) names another id on purpose:
+        # the params that apply are the ones keyed by config.node.id
+        glb = _Global(node_id='renamed_node')
+        inst = _Instance(glb, node_id='depth_estimate_1')
+        inst._caller = {'params': {'renamed_node': {'maxEdge': 1024}, 'depth_estimate_1': {'maxEdge': 256}}}
+        assert inst.settings.maxEdge == 1024
+
+    def test_old_spellings_still_answer(self):
+        # Until C.24 moves the reads, glb.* and instance.pipeType.* keep working
+        glb = _Global()
+        inst = _Instance(glb)
+        assert glb.glb.logicalType == 'depth_estimate'
+        assert glb.glb.physicalType == 'python'
+        assert inst.instance.pipeType.id == 'depth_estimate_1'
+
+    def test_validator_record_has_no_control(self):
+        validator = IValidatorBase()
+        validator.glb = SimpleNamespace(
+            controlId='',
+            id='depth_estimate',
+            name='',
+            logicalType='depth_estimate',
+            physicalType='python',
+            capabilities=0,
+            connConfig={},
+        )
+        validator.validateConfig()
+        assert validator.config.node == NodeInfo(
+            id='depth_estimate',
+            name='depth_estimate',
+            provider='depth_estimate',
+            physicalType='python',
+            capabilities=0,
+            controlId='',
+        )

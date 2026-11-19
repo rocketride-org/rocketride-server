@@ -540,18 +540,20 @@ class ExecutionMixin(DAPClient):
         project_id: str,
         source: str,
         pipeline: PipelineConfig,
-        token: Optional[str] = None,
+        token: str,
         team_id: str = '',
     ) -> None:
         """
         Restart a running pipeline with a new configuration.
 
-        Looks up the existing task by project/source, terminates its control
-        and creates a new one in one server round-trip. The restart MINTS A
-        NEW CONTROL ID: the id you held before is dead afterwards, so read
-        the replacement from :meth:`get_task_token` (or the next ``use()``)
-        before sending again. Play on a changed spec in the IDEs is this
-        same restart.
+        Terminates the control ``token`` names and creates its successor in
+        one server round-trip. The restart MINTS A NEW CONTROL ID: the id
+        you held before is dead afterwards, so read the replacement from
+        :meth:`get_task_token` (or the next ``use()``) before sending again,
+        and resubscribe monitors keyed on the old id. Read it right after
+        the restart: the lookup answers the most recently touched of your
+        controls under that project/source, which the successor is at that
+        moment. The IDEs' Restart action is this call (Play is ``use()``).
 
         The scope IS the kind: pass ``team_id`` to address the team's
         DEPLOYED run; omit it to address your own dev run.
@@ -560,12 +562,14 @@ class ExecutionMixin(DAPClient):
             project_id: The project identifier.
             source: The source component identifier.
             pipeline: The pipeline configuration to restart with.
-            token: The existing control id (optional; resolved server-side
-                from project/source when omitted).
+            token: The existing control id (required; resolve it with
+                :meth:`get_task_token` first when you hold only
+                project/source).
             team_id: Address the team's deploy run; empty for your own dev run.
 
         Raises:
-            RuntimeError: If the restart fails.
+            RuntimeError: If the restart fails (a missing or foreign
+                ``token`` is ``permission_denied``).
         """
         arguments: Dict[str, Any] = {
             'token': token,
