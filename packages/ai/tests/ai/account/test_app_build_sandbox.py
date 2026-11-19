@@ -52,6 +52,7 @@ def test_required_boundary_refuses_an_outside_cwd(monkeypatch, tmp_path):
         sandbox.command([sys.executable], str(outside), str(job), str(tools))
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='a quote is not a legal Windows file name character')
 def test_policy_paths_cannot_inject_an_allow_rule(monkeypatch, tmp_path):
     job = tmp_path / 'job ")(allow default)("'
     tools = tmp_path / 'tools'
