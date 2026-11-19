@@ -325,16 +325,40 @@ const HTML_IMG_RE = /<img\b([^>]*)>/gi;
  */
 const ATTRIBUTE_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
+/** A character reference in an attribute value: hex numeric, decimal numeric or named; groups 2-4. */
+const CHARACTER_REFERENCE_RE = /&(#x([0-9a-f]+)|#(\d+)|([a-z]+));/gi;
+
+/** The named character references an attribute value carries (the ones the Assets pane writes, plus `&apos;`). */
+const NAMED_CHARACTER_REFERENCES: Record<string, string> = { amp: '&', quot: '"', lt: '<', gt: '>', apos: "'" };
+
+/**
+ * Decodes the character references in an HTML attribute value, as the
+ * browser reads it: `&amp;`, `&quot;`, `&#39;`, `&#x27;`, ... An unknown
+ * reference stays as written. Markdown destinations are NOT decoded here;
+ * only HTML attributes carry character references in this scanner.
+ *
+ * @param value - The value as written between the quotes.
+ * @returns The decoded value.
+ */
+function decodeAttribute(value: string): string {
+	return value.replace(CHARACTER_REFERENCE_RE, (m, _ref: string, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+		if (name !== undefined) return NAMED_CHARACTER_REFERENCES[name.toLowerCase()] ?? m;
+		const code = hex !== undefined ? parseInt(hex, 16) : Number(dec);
+		return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+	});
+}
+
 /**
  * The `src` an `<img>` tag names: its first `src` attribute (the one the
- * browser keeps when it repeats), read by tokenizing the attributes in order.
+ * browser keeps when it repeats), read by tokenizing the attributes in order,
+ * its character references decoded (`a&amp;b.png` names `a&b.png`).
  *
  * @param attrs - The tag's attribute text.
- * @returns The source as written, or '' when the tag has none.
+ * @returns The source as the browser reads it, or '' when the tag has none.
  */
 function imgSrcOf(attrs: string): string {
 	for (const match of attrs.matchAll(ATTRIBUTE_RE)) {
-		if (match[1].toLowerCase() === 'src') return match[2] ?? match[3] ?? match[4] ?? '';
+		if (match[1].toLowerCase() === 'src') return decodeAttribute(match[2] ?? match[3] ?? match[4] ?? '');
 	}
 	return '';
 }

@@ -41,6 +41,7 @@ rules) and ``app-pack/pipe-bundle.ts`` (the Node packer).
 
 from __future__ import annotations
 
+import html
 import io
 import json
 import os
@@ -336,17 +337,19 @@ def _is_local_reference(ref: str) -> bool:
 
 def _img_src_of(attrs: str) -> str:
     """The ``src`` an ``<img>`` tag names: its first ``src`` attribute (the one
-    the browser keeps when it repeats), read by tokenizing the attributes in order.
+    the browser keeps when it repeats), read by tokenizing the attributes in order,
+    its character references decoded (``a&amp;b.png`` names ``a&b.png``). Markdown
+    destinations are not decoded; only HTML attributes carry character references here.
 
     Args:
         attrs: The tag's attribute text.
 
     Returns:
-        The source as written, or '' when the tag has none.
+        The source as the browser reads it, or '' when the tag has none.
     """
     for match in _ATTRIBUTE_RE.finditer(attrs):
         if match.group(1).lower() == 'src':
-            return match.group(2) or match.group(3) or match.group(4) or ''
+            return html.unescape(match.group(2) or match.group(3) or match.group(4) or '')
     return ''
 
 

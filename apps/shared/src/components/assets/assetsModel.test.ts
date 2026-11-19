@@ -112,6 +112,23 @@ test('setReferenceWidth: a reference-style image becomes an img tag over the def
 	assert.equal(referenceWidth('![d][fig]\n[fig]: assets/d.png', 'assets/d.png'), null);
 });
 
+test('setReferenceWidth: a definition a shortcut reference still uses stays; the shortcut itself is left as written', () => {
+	assert.equal(setReferenceWidth('![d][fig] and [fig]\n[fig]: assets/d.png', 'assets/d.png', 40), '<img src="assets/d.png" alt="d" width="40"> and [fig]\n[fig]: assets/d.png');
+	assert.equal(setReferenceWidth('![d][fig] and ![Fig]\n[fig]: assets/d.png', 'assets/d.png', 40), '<img src="assets/d.png" alt="d" width="40"> and ![Fig]\n[fig]: assets/d.png');
+	// The label half of a two-bracket usage, an inline link's text and the definition's own bracket are not shortcut uses
+	assert.equal(setReferenceWidth('![d][fig] [fig](x.md) `[fig]`\n\n[fig]: assets/d.png', 'assets/d.png', 40), '<img src="assets/d.png" alt="d" width="40"> [fig](x.md) `[fig]`\n');
+});
+
+test('img attributes: character references decode as the browser reads them; the source text is kept for rewriting', () => {
+	// A width edit on a markdown image writes the escaped form; the next edit reads it back as the same file
+	assert.equal(setReferenceWidth('![x](assets/a&b.png)', 'assets/a&b.png', 40), '<img src="assets/a&amp;b.png" alt="x" width="40">');
+	assert.equal(setReferenceWidth('<img src="assets/a&amp;b.png" alt="x" width="40">', 'assets/a&b.png', 50), '<img src="assets/a&amp;b.png" alt="x" width="50">');
+	assert.equal(referenceWidth('<img src="assets/a&#x26;b.png" width="20"> <img src=\'assets/a&#38;b.png\' width="30">', 'assets/a&b.png'), 20);
+	assert.equal(removeReference('<img src="assets/a&amp;b.png">\nEnd', 'assets/a&b.png'), 'End');
+	// A markdown destination is read as written: `&amp;` there names a different file
+	assert.equal(removeReference('![x](assets/a&amp;b.png)\nEnd', 'assets/a&b.png'), '![x](assets/a&amp;b.png)\nEnd');
+});
+
 test('inlineImageReferences: a reference definition takes the data URI in place, its usages and title kept', async () => {
 	const md = '![d][fig] and ![d][]\n\n[fig]: <assets/d.png> "t"\n[d]: assets/d.png';
 	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/d.png' ? 'data:image/png;base64,AAAA' : null));

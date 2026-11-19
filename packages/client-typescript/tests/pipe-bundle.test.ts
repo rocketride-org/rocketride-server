@@ -108,6 +108,11 @@ describe('scanReadmeReferences', () => {
 		expect(scanReadmeReferences(md)).toEqual(['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif', 'y.png', 'bare.png']);
 	});
 
+	it('decodes character references in an img src (the form a width edit writes); markdown destinations are read as written', () => {
+		const md = '<img src="assets/a&amp;b.png"> <img src=\'c&#x26;d.png\'> <img src=e&#38;f.png> <img src="q&quot;.png"> ![m](assets/a&amp;b.png)';
+		expect(scanReadmeReferences(md)).toEqual(['assets/a&b.png', 'c&d.png', 'e&f.png', 'q".png', 'assets/a&amp;b.png']);
+	});
+
 	it('takes reference definitions, angle-delimited destinations with spaces and balanced parentheses, and skips tilde fences', () => {
 		const md = [
 			'![Diagram][figure] and [the paper][ref]',

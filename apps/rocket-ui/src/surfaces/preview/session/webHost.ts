@@ -79,6 +79,39 @@ export interface WebHostOptions {
 }
 
 // =============================================================================
+// LISTING WRITE QUEUE
+// =============================================================================
+
+/**
+ * The pending listing write per app folder. Each read-patch-write of
+ * package.json starts after the previous one for the same folder settles, so
+ * an Identity save and an Assets save that overlap never read the same
+ * manifest and drop each other's patch. The tail lives at module level, not
+ * on the host: the provider rebuilds the host whenever the preview URL or the
+ * dev session changes, and a save on the new host must still wait for the
+ * old host's in-flight write. Folders queue independently of each other.
+ */
+const listingWrites = new Map<string, Promise<void>>();
+
+/**
+ * Runs one listing write after the folder's pending one.
+ *
+ * @param folder - The app's folder under .appdev.
+ * @param work - The read-patch-write.
+ * @returns The write's own settlement; a failure is the caller's to report, the queue goes on.
+ */
+function enqueueListingWrite(folder: string, work: () => Promise<void>): Promise<void> {
+	const write = (listingWrites.get(folder) ?? Promise.resolve()).then(work);
+	const tail = write.catch(() => undefined);
+	listingWrites.set(folder, tail);
+	// Step: the entry goes once it is the settled tail, so the map only ever holds in-flight folders
+	void tail.then(() => {
+		if (listingWrites.get(folder) === tail) listingWrites.delete(folder);
+	});
+	return write;
+}
+
+// =============================================================================
 // FACTORY
 // =============================================================================
 
@@ -90,10 +123,6 @@ export interface WebHostOptions {
  */
 export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 	const { client, appId, folder, hasReviewLadder, previewUrl, session, onReloadPreview, onOpenDebugTab, onSetInheritAuth, prefs } = o;
-	// Listing saves queue: each read-patch-write of package.json starts after
-	// the previous one settles, so an Identity save and an Assets save that
-	// overlap never read the same manifest and drop each other's patch.
-	let listingWrite: Promise<void> = Promise.resolve();
 
 	return {
 		// The SDK half — the brokered client.* ops + realm-local shell:event
@@ -149,16 +178,12 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 				return null;
 			}
 		},
-		saveListing: (draft) => {
-			const write = listingWrite.then(async () => {
+		saveListing: (draft) =>
+			enqueueListingWrite(folder, async () => {
 				const pkg = await readAppPackage(folder);
 				applyListing(pkg, draft);
 				await writeAppPackage(folder, pkg);
-			});
-			// A failed write is the caller's to report; the queue goes on
-			listingWrite = write.catch(() => undefined);
-			return write;
-		},
+			}),
 		runPreflight: async () => {
 			// The SHARED tiered bar (one implementation for every host), fed
 			// with this host's IO: store-VFS file existence + the live

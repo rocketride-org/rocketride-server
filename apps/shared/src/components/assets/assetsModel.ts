@@ -358,9 +358,33 @@ const HTML_IMG_RE = /<img\b([^>]*)>/gi;
  */
 const ATTRIBUTE_RE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
-/** One attribute of an `<img>`: its name (lower-cased), its value, and where both sit in the attribute text. */
+/** A character reference in an attribute value: hex numeric, decimal numeric or named; groups 2-4. */
+const CHARACTER_REFERENCE_RE = /&(#x([0-9a-f]+)|#(\d+)|([a-z]+));/gi;
+
+/** The named character references an attribute value carries ({@link attributeValue} writes the first four; `&apos;` is the HTML5 name). */
+const NAMED_CHARACTER_REFERENCES: Record<string, string> = { amp: '&', quot: '"', lt: '<', gt: '>', apos: "'" };
+
+/**
+ * Decodes the character references in an HTML attribute value, as the
+ * browser reads it: `&amp;`, `&quot;`, `&#39;`, `&#x27;`, ... An unknown
+ * reference stays as written. The SDK scanner and the Python SDK decode the
+ * same way, so the file an `<img>` names is one file on every side.
+ *
+ * @param value - The value as written between the quotes.
+ * @returns The decoded value.
+ */
+function decodeAttribute(value: string): string {
+	return value.replace(CHARACTER_REFERENCE_RE, (m, _ref: string, hex: string | undefined, dec: string | undefined, name: string | undefined) => {
+		if (name !== undefined) return NAMED_CHARACTER_REFERENCES[name.toLowerCase()] ?? m;
+		const code = hex !== undefined ? parseInt(hex, 16) : Number(dec);
+		return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+	});
+}
+
+/** One attribute of an `<img>`: its name (lower-cased), its decoded value, and where both sit in the attribute text. */
 interface IAttribute {
 	name: string;
+	/** The value as the browser reads it (character references decoded); the spans below are the source text's. */
 	value: string;
 	/** The token's span (name through closing quote). */
 	start: number;
@@ -376,10 +400,11 @@ function attributesOf(attrs: string): IAttribute[] {
 	for (const match of attrs.matchAll(ATTRIBUTE_RE)) {
 		const start = match.index ?? 0;
 		const end = start + match[0].length;
-		const value = match[2] ?? match[3] ?? match[4] ?? '';
+		// Step: the spans come from the value as written; the value itself is decoded for matching
+		const written = match[2] ?? match[3] ?? match[4] ?? '';
 		const quoted = match[2] !== undefined || match[3] !== undefined;
 		const valueEnd = end - (quoted ? 1 : 0);
-		out.push({ name: match[1].toLowerCase(), value, start, end, valueStart: valueEnd - value.length, valueEnd });
+		out.push({ name: match[1].toLowerCase(), value: decodeAttribute(written), start, end, valueStart: valueEnd - written.length, valueEnd });
 	}
 	return out;
 }
@@ -524,12 +549,33 @@ function rewriteReferenceUsages(markdown: string, labels: Set<string>, imagesOnl
 	);
 }
 
-/** The label keys of the set that no usage outside code still names. */
+/**
+ * A shortcut reference, `[label]` / `![label]`: a bracket pair that no `[`
+ * (full or collapsed form), `(` (inline link) or `:` (definition) follows;
+ * group 1 = the label. The pair must also not be the label half of a
+ * two-bracket usage, which the caller checks by the character before it.
+ */
+const MARKDOWN_SHORTCUT_RE = /\[([^[\]]+)\](?![[(:])/g;
+
+/**
+ * The label keys of the set that no usage outside code still names. Full,
+ * collapsed and shortcut forms all use a definition; the shortcut form is
+ * one the edits leave as written (a bare `[label]` is also plain text), so
+ * it only counts here, to keep its definition alive.
+ */
 function unusedLabels(markdown: string, labels: Set<string>): Set<string> {
 	const used = new Set<string>();
 	rewriteReferenceUsages(markdown, labels, false, (bang, text, key) => {
 		used.add(key);
 		return `${bang}[${text}][${key}]`;
+	});
+	// Step: shortcut usages, skipping the second pair of `[text][label]`
+	outsideCode(markdown, (segment) => {
+		for (const match of segment.matchAll(MARKDOWN_SHORTCUT_RE)) {
+			const key = labelKey(match[1]);
+			if (segment[(match.index ?? 0) - 1] !== ']' && labels.has(key)) used.add(key);
+		}
+		return segment;
 	});
 	return new Set([...labels].filter((key) => !used.has(key)));
 }

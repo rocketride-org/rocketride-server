@@ -141,6 +141,11 @@ def test_scan_finds_markdown_and_html_references_in_order_skipping_urls_anchors_
     ]
 
 
+def test_scan_decodes_character_references_in_img_src_but_not_markdown_destinations():
+    md = '<img src="assets/a&amp;b.png"> <img src=\'c&#x26;d.png\'> <img src=e&#38;f.png> <img src="q&quot;.png"> ![m](assets/a&amp;b.png)'
+    assert scan_readme_references(md) == ['assets/a&b.png', 'c&d.png', 'e&f.png', 'q".png', 'assets/a&amp;b.png']
+
+
 def test_scan_takes_reference_definitions_angle_destinations_balanced_parentheses_and_skips_tilde_fences():
     md = '\n'.join(
         [
