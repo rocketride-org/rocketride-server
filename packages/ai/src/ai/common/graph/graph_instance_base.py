@@ -78,6 +78,14 @@ class GraphInstanceBase(IInstanceBase, ABC):
         """Query language name for the LLM prompt. Override for non-Cypher engines."""
         return 'Cypher'
 
+    def _read_tools_hint(self) -> str:
+        """Name the read-only tools an agent should use instead of execute.
+
+        Override when the node adds a read tool of its own, as FalkorDB does
+        with ``query``.
+        """
+        return 'use get_data, which takes the question in plain language'
+
     # ------------------------------------------------------------------
     # Tool methods — dispatched by IInstanceBase.invoke() via @tool_function
     # ------------------------------------------------------------------
@@ -113,6 +121,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
             },
         },
         description=lambda self: (
+            'The tool to use for read-only questions about the graph. '
             f'Accepts a natural-language description of the data you want, converts it to a safe read-only '
             f'{self._query_language()} query, runs it against the {self._db_display_name()} graph database, and returns the '
             f'result rows. No schema lookup or {self._query_language()} knowledge required -- just describe what you need. '
@@ -242,11 +251,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
                 },
             },
         },
-        description=lambda self: (
-            f'Execute a raw {self._query_language()} statement against this {self._db_display_name()} graph. '
-            f'Bypasses LLM translation and the read-only gate, so writes are possible. '
-            f'Disabled unless the node owner enables allow_execute.'
-        ),
+        description=lambda self: self._execute_description(),
     )
     def execute(self, args):
         """Execute a raw statement, bypassing translation and the read-only gate.
@@ -270,7 +275,10 @@ class GraphInstanceBase(IInstanceBase, ABC):
         args = normalize_tool_input(args, tool_name='execute')
         # A disabled node reports that first, whatever the arguments are.
         if not self.IGlobal.allow_execute:
-            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+            raise ValueError(
+                'execute tool is disabled for this node (set allow_execute=true). '
+                f'To read data, {self._read_tools_hint()}.'
+            )
 
         key = 'sql' if 'query' not in args and 'sql' in args else 'query'
         query = require_str(args, key, tool_name='execute')
@@ -309,6 +317,25 @@ class GraphInstanceBase(IInstanceBase, ABC):
     # ------------------------------------------------------------------
     # Sanitization helpers
     # ------------------------------------------------------------------
+
+    def _execute_description(self) -> str:
+        """Description of the execute tool, stating whether it can be used.
+
+        Returns:
+            str: When ``allow_execute`` is off, the description says that a
+            call fails and names the read tools to use instead, so an agent
+            does not try execute for a read-only question.
+        """
+        text = (
+            f'Execute a raw {self._query_language()} statement against this {self._db_display_name()} graph. '
+            f'Bypasses LLM translation and the read-only gate, so writes are possible. '
+        )
+        if getattr(getattr(self, 'IGlobal', None), 'allow_execute', False):
+            return text + f'Use it for writes: to read data, {self._read_tools_hint()}.'
+        return (
+            text
+            + f'Disabled on this node (allow_execute is off), so every call fails: to read data, {self._read_tools_hint()}.'
+        )
 
     def _execute_input_schema(self) -> Dict[str, Any]:
         """Input schema of the execute tool for this driver.

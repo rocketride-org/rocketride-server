@@ -64,7 +64,8 @@ instead of rows.
 otherwise the response includes `{database, labels, nodes, relationships}`.
 `execute` requires a non-empty raw `query`, accepts an optional object `params`
 whose values bind to `$name` placeholders, and returns `{rows, affected_rows}`;
-it raises an error while direct execution is disabled. `dialect` accepts no
+it raises an error while direct execution is disabled, and that error and the
+tool's description name `get_data` as the tool for reads. `dialect` accepts no
 meaningful arguments. Generation failures return an error rather than an
 executable query, and `get_cypher` preserves those outcomes while adding
 `cypher` when a query is available.
