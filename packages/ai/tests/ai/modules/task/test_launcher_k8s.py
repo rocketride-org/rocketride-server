@@ -61,6 +61,7 @@ from ai.modules.task.launcher.k8s import (
     K8sError,
     K8sLauncher,
     K8sMetricsSampler,
+    PodMetrics,
     KubectlCli,
     double_dollars,
     env_file,
@@ -73,7 +74,9 @@ from ai.modules.task.launcher.k8s import (
 
 TOKEN_SHA = 'a' * 64
 SELECTOR = 'rocketride.eas=host-a_5565-7fbe1a96'
-METRICS_PATH = '/apis/metrics.k8s.io/v1beta1/namespaces/rocketride-tasks/pods/'
+METRICS_PATH = (
+    '/apis/metrics.k8s.io/v1beta1/namespaces/rocketride-tasks/pods?labelSelector=rocketride.eas%3Dhost-a_5565-7fbe1a96'
+)
 
 # The bootstrap as it runs on a cluster; the launcher must send exactly this.
 # umask 077 covers what is unpacked; 022 is the image's own, which the engine has under docker
@@ -1669,32 +1672,53 @@ async def test_a_dsns_value_that_is_no_map_of_strings_passes_as_it_is(value):
 # ---------------------------------------------------------------------------
 
 
-def _pod_metrics(*usages):
-    """What the metrics API answers for a pod: one usage per container."""
+def _pod_metrics(*usages, pod='rr-x-abc'):
+    """What the metrics API answers for the namespace: here one pod, one usage per container."""
+    containers = [{'name': f'c{i}', 'usage': usage} for i, usage in enumerate(usages)]
     return json.dumps(
-        {
-            'kind': 'PodMetrics',
-            'window': '15s',
-            'containers': [{'name': f'c{i}', 'usage': usage} for i, usage in enumerate(usages)],
-        }
+        {'kind': 'PodMetricsList', 'items': [{'metadata': {'name': pod}, 'window': '15s', 'containers': containers}]}
     )
+
+
+def _sampler(cli, pod='rr-x-abc'):
+    """The sampler of one pod, on the namespace's list."""
+    return K8sMetricsSampler(PodMetrics(cli, 'rocketride-tasks', SELECTOR), pod)
 
 
 async def test_metrics_sampler_reads_cpu_and_memory():
     """Nanocores to percent summed over cores, the way psutil reports it."""
     cli = FakeKubectl(get=CliResult(0, _pod_metrics({'cpu': '1502500000n', 'memory': '262144Ki'}), ''))
-    assert await K8sMetricsSampler(cli, 'rocketride-tasks', 'rr-x-abc').sample() == (
-        pytest.approx(150.25),
-        256 * 1024**2,
-    )
-    assert cli.calls[0].args == ['get', '--raw', f'{METRICS_PATH}rr-x-abc']
+    assert await _sampler(cli).sample() == (pytest.approx(150.25), 256 * 1024**2)
+    assert cli.calls[0].args == ['get', '--raw', METRICS_PATH]
 
 
 async def test_metrics_sampler_adds_up_the_containers():
     cli = FakeKubectl(
         get=CliResult(0, _pod_metrics({'cpu': '250m', 'memory': '1Mi'}, {'cpu': '1', 'memory': '1024'}), '')
     )
-    assert await K8sMetricsSampler(cli, 'ns', 'pod').sample() == (pytest.approx(125.0), 2**20 + 1024)
+    assert await _sampler(cli).sample() == (pytest.approx(125.0), 2**20 + 1024)
+
+
+async def test_one_metrics_request_serves_every_task(monkeypatch):
+    """Every task reads its own pod out of one list, taken again only once it is older than the interval."""
+    listed = {
+        'items': [
+            {'metadata': {'name': 'rr-a'}, 'containers': [{'usage': {'cpu': '1', 'memory': '1Mi'}}]},
+            {'metadata': {'name': 'rr-b'}, 'containers': [{'usage': {'cpu': '500m', 'memory': '2Mi'}}]},
+        ]
+    }
+    cli = FakeKubectl(get=CliResult(0, json.dumps(listed), ''))
+    metrics = PodMetrics(cli, 'rocketride-tasks', SELECTOR)
+    a, b = K8sMetricsSampler(metrics, 'rr-a'), K8sMetricsSampler(metrics, 'rr-b')
+    assert await asyncio.gather(a.sample(), b.sample(), a.sample()) == [
+        (pytest.approx(100.0), 2**20),
+        (pytest.approx(50.0), 2 * 2**20),
+        (pytest.approx(100.0), 2**20),
+    ]
+    assert cli.commands() == ['get']
+    monkeypatch.setattr(PodMetrics, 'min_interval', 0.0)
+    await b.sample()
+    assert cli.commands() == ['get', 'get']
 
 
 @pytest.mark.parametrize(
@@ -1703,7 +1727,7 @@ async def test_metrics_sampler_adds_up_the_containers():
         # No metrics API in the cluster
         CliResult(1, '', 'Error from server (NotFound): the server could not find the requested resource'),
         # No sample of this pod yet
-        CliResult(1, '', 'Error from server (NotFound): pods.metrics.k8s.io "rr-x-abc" not found'),
+        CliResult(0, _pod_metrics({'cpu': '1', 'memory': '1Mi'}, pod='rr-other'), ''),
         CliResult(0, 'not json', ''),
         CliResult(0, '[]', ''),
         CliResult(0, _pod_metrics(), ''),
@@ -1713,7 +1737,35 @@ async def test_metrics_sampler_adds_up_the_containers():
 )
 async def test_metrics_sampler_returns_none_when_it_cannot_read(result):
     cli = FakeKubectl(get=result)
-    assert await K8sMetricsSampler(cli, 'rocketride-tasks', 'rr-x-abc').sample() is None
+    assert await _sampler(cli).sample() is None
+
+
+async def test_a_pod_that_cannot_be_read_does_not_cost_the_others_their_reading():
+    listed = {
+        'items': [
+            {'metadata': {}, 'containers': [{'usage': {'cpu': '1', 'memory': '1Mi'}}]},
+            {'metadata': {'name': 'rr-x-abc'}, 'containers': [{'usage': {'cpu': '1', 'memory': '1Mi'}}]},
+        ]
+    }
+    cli = FakeKubectl(get=CliResult(0, json.dumps(listed), ''))
+    assert await _sampler(cli).sample() == (pytest.approx(100.0), 2**20)
+
+
+async def test_a_listing_that_fails_is_taken_again_by_the_next_task(monkeypatch):
+    """Whatever a listing dies of, it does not stay in the way of the next one."""
+    monkeypatch.setattr(PodMetrics, 'min_interval', 0.0)
+    cli = FakeKubectl(get=CliResult(0, _pod_metrics({'cpu': '1', 'memory': '1Mi'}), ''))
+    answer = cli.run
+
+    async def broken(args, *, stdin=None, check=True):
+        raise RuntimeError('the subprocess layer gave up')
+
+    cli.run = broken
+    sampler = _sampler(cli)
+    with pytest.raises(RuntimeError):
+        await sampler.sample()
+    cli.run = answer
+    assert await sampler.sample() == (pytest.approx(100.0), 2**20)
 
 
 async def test_metrics_sampler_returns_none_when_kubectl_times_out():
@@ -1724,7 +1776,7 @@ async def test_metrics_sampler_returns_none_when_kubectl_times_out():
         raise K8sError('kubectl get timed out after 60 s')
 
     cli.run = hung
-    assert await K8sMetricsSampler(cli, 'rocketride-tasks', 'rr-x-abc').sample() is None
+    assert await _sampler(cli).sample() is None
 
 
 class HungKubectl:
@@ -1798,7 +1850,7 @@ async def test_metrics_sampler_returns_none_without_kubectl():
         raise OSError('no kubectl binary')
 
     cli.run = no_cli
-    assert await K8sMetricsSampler(cli, 'rocketride-tasks', 'rr-x-abc').sample() is None
+    assert await _sampler(cli).sample() is None
 
 
 async def test_metrics_come_from_the_metrics_api_no_oftener_than_it_measures():
@@ -1808,7 +1860,7 @@ async def test_metrics_come_from_the_metrics_api_no_oftener_than_it_measures():
     assert isinstance(sampler, K8sMetricsSampler)
     assert sampler.min_interval == 15.0
     await sampler.sample()
-    assert cli.calls[-1].args == ['get', '--raw', f'{METRICS_PATH}{cli.pod}']
+    assert cli.calls[-1].args == ['get', '--raw', METRICS_PATH]
 
 
 @pytest.mark.parametrize(

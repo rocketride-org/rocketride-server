@@ -234,7 +234,7 @@ enforces the `restricted` Pod Security Standard.
 | `pods`                    | `get`, `list`, `watch`, `delete` | Following a task's pod, and stopping it.                                                                               |
 | `pods/attach`             | `create`, `get`                  | The task's input and output.                                                                                           |
 | `pods/portforward`        | `create`, `get`                  | Tasks dialled through a forwarded port: `RR_K8S_REACH=forward`, or `auto` with the engine outside the cluster (below). |
-| `pods` (`metrics.k8s.io`) | `get`                            | Only CPU and memory readings; optional.                                                                                |
+| `pods` (`metrics.k8s.io`) | `list`                           | Only CPU and memory readings; optional.                                                                                |
 
 ### Start the engine with it
 
