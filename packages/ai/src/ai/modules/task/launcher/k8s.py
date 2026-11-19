@@ -55,6 +55,7 @@ import tarfile
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from urllib.parse import quote
 
 from rocketlib import debug
 
@@ -938,23 +939,99 @@ class PodWatcher:
                 pod.lost()
 
 
-class K8sMetricsSampler:
-    """CPU and memory of one pod, from the cluster's metrics API."""
+class PodMetrics:
+    """
+    CPU and memory of this engine's pods, from one request for every task.
+
+    A request per task would start a CLI process per task for every sample, so
+    the pods are listed once and each task reads its own out of that list. A
+    list is taken again once it is older than the metrics server's interval.
+    """
 
     # The metrics server measures a pod about this often; asking sooner returns the same sample
     min_interval = 15.0
 
-    def __init__(self, cli: KubectlCli, namespace: str, pod: str) -> None:
+    def __init__(self, cli: KubectlCli, namespace: str, selector: str) -> None:
+        """
+        Bind to the pods of one engine in a namespace.
+
+        Args:
+            cli: The kubectl CLI.
+            namespace: The namespace of the task pods.
+            selector: The label selector of this engine's pods.
+        """
+        self._cli = cli
+        # Other engines may share the namespace: their pods are not asked for
+        self._path = (
+            f'/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods?labelSelector={quote(selector, safe="")}'
+        )
+        # Each pod's containers' usage, as last listed, and when
+        self._usages: Dict[str, List[Dict[str, Any]]] = {}
+        self._listed: Optional[float] = None
+        # The listing in progress, shared by every task that asks meanwhile
+        self._listing: Optional[asyncio.Future] = None
+        self._refused = False
+
+    async def usages(self, pod: str) -> List[Dict[str, Any]]:
+        """
+        The usage of each container of a pod.
+
+        Args:
+            pod: The pod's name.
+
+        Returns:
+            One usage per container; none when the cluster has no metrics API
+            or no sample of this pod yet.
+        """
+        if self._listed is None or time.monotonic() - self._listed >= self.min_interval:
+            if self._listing is None:
+                self._listing = asyncio.ensure_future(self._list())
+            await asyncio.shield(self._listing)
+        return self._usages.get(pod, [])
+
+    async def _list(self) -> None:
+        """List the pods once; a list that cannot be read leaves every task without a reading until the next one."""
+        usages: Dict[str, List[Dict[str, Any]]] = {}
+        started = time.monotonic()
+        try:
+            result = await self._cli.run(['get', '--raw', self._path], check=False)
+            if result.returncode == 0:
+                for item in json.loads(result.stdout).get('items') or []:
+                    try:
+                        containers = item.get('containers') or []
+                        usages[item['metadata']['name']] = [container.get('usage') or {} for container in containers]
+                    except (AttributeError, KeyError, TypeError):
+                        # One pod that cannot be read does not cost the others their reading
+                        continue
+            elif not self._refused:
+                # Said once: a cluster without a metrics API, or a role without `list`, answers the same every time
+                self._refused = True
+                debug(f'[k8s] the pod metrics cannot be listed, tasks read no CPU or memory: {result.stderr.strip()}')
+        except (OSError, ValueError, AttributeError, K8sError):
+            usages = {}
+        finally:
+            # Whatever happened, the next task that asks starts a new listing. Its age counts from
+            # the request, so a task that samples once an interval finds the list due again
+            self._usages = usages
+            self._listed = started
+            self._listing = None
+
+
+class K8sMetricsSampler:
+    """CPU and memory of one pod, out of the list every task shares."""
+
+    min_interval = PodMetrics.min_interval
+
+    def __init__(self, metrics: PodMetrics, pod: str) -> None:
         """
         Bind to a pod.
 
         Args:
-            cli: The kubectl CLI.
-            namespace: The pod's namespace.
+            metrics: The namespace's pod metrics.
             pod: The pod to read.
         """
-        self._cli = cli
-        self._path = f'/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods/{pod}'
+        self._metrics = metrics
+        self._pod = pod
 
     async def sample(self) -> Optional[Tuple[float, int]]:
         """
@@ -964,14 +1041,7 @@ class K8sMetricsSampler:
             ``(cpu_percent, memory_bytes)``, or None when the cluster has no
             metrics API or no sample of this pod yet.
         """
-        try:
-            result = await self._cli.run(['get', '--raw', self._path], check=False)
-            if result.returncode != 0:
-                return None
-            containers = json.loads(result.stdout).get('containers') or []
-            usages = [container.get('usage') or {} for container in containers]
-        except (OSError, ValueError, AttributeError, K8sError):
-            return None
+        usages = await self._metrics.usages(self._pod)
         cpus = [parse_quantity(usage.get('cpu')) for usage in usages]
         memories = [parse_quantity(usage.get('memory')) for usage in usages]
         if not usages or None in cpus or None in memories:
@@ -1055,7 +1125,7 @@ class K8sLaunch(Launch):
 
     def metrics(self) -> Dict[str, Any]:
         """CPU and memory from the metrics API; no local PID, so the GPU half reads zero."""
-        return {'sampler': K8sMetricsSampler(self._cli, self._launcher.config['namespace'], self._pod.name)}
+        return {'sampler': K8sMetricsSampler(self._launcher.pod_metrics, self._pod.name)}
 
     async def cleanup(self) -> None:
         """Stop the port-forward, delete the Job and give the forwarded port back; safe to call twice."""
@@ -1100,6 +1170,7 @@ class K8sLauncher(Launcher):
         # Which pods and Jobs are this engine instance's
         self._selector = f'{LABEL_EAS}={label_value(self.config["instance"])}'
         self._watcher = PodWatcher(self._cli, self._selector)
+        self.pod_metrics = PodMetrics(self._cli, self.config['namespace'], self._selector)
         # Dial a forwarded port (True) or the pod IP (False)
         self.forwarded = self.forward_mode()
 
