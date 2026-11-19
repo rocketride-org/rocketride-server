@@ -25,8 +25,10 @@ model may be inside at once (`calls`). Calls that name no model share one group.
 
 With one slot, every model runs one call at a time, as before.
 
-Because a first call always enters, a task with more models than slots has more
-calls inside than slots. Only the further calls of a model are limited.
+Because a first call always enters, the calls inside can pass the slots. When
+one model's calls fill the slots, every other model still runs its first call,
+so the most a task can have inside is the slots plus one for each other model.
+Only the further calls of a model are limited.
 
 ## How many slots
 
