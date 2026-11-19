@@ -96,7 +96,8 @@ class ChatBase:
     _raw_client = None
 
     # Opt-in: a driver sets True when its request builder reads PROMPT_CACHE_PREFIX_VAR
-    # and marks that prefix for the provider's prompt cache (Anthropic).
+    # and marks that prefix for the provider's prompt cache (Anthropic), or sends it as
+    # its own content part for a gateway to mark (OpenAI-compatible, when configured).
     SUPPORTS_PROMPT_CACHE_PREFIX: bool = False
 
     # Opt-in: a driver sets True when its model takes a turn-mode Question natively

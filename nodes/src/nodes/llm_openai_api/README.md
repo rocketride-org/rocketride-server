@@ -89,6 +89,20 @@ Provider errors are mapped to friendly messages and classified for retry:
 
 Anything else falls through to the shared LLM base's default retry and mapping logic.
 
+### Prompt cache boundary
+
+An agent prompt starts with text that is the same on every call. A gateway in front
+of the model can cache that text only if it can see where it ends. Turn on
+`cachePrefixParts` (custom profile) and a question that sets `cachePrefix` is sent as
+two text content parts: the unchanging start, then the rest. The node adds no
+`cache_control` marker; marking the first part is the gateway's job. Turn-mode requests
+do not change. Models that this node sends to the Responses API also stay one string, so
+the option has no effect on them.
+
+The option is off by default, and the request is then one string, as before. Turn it on
+only for an endpoint that accepts a list of content parts: one that does not will reject
+the call, and the caller gets the error. The call is not resent as a string.
+
 ### Testing
 
 `services.json` includes a `test` block that runs the `custom` profile against a local
