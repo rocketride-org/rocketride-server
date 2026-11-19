@@ -253,7 +253,7 @@ Question(
 | `addMessage` | `addMessage(self, message: UserMessage \| AssistantMessage \| dict)` | Appends a message, such as `answer.message`. Raises `ValueError` if the question uses a field turn mode rejects. |
 | `addToolResult` | `addToolResult(self, callId: str, content: str, isError: bool = False)` | Adds a tool result to the user message after the assistant turn that made the call. Raises `ValueError` for an unknown `callId`. |
 | `checkTurn` | `checkTurn(self)` | Checks the turn-mode rules (parsing runs it); raises `ValueError` naming the broken rule. |
-| `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
+| `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. The OpenAI-Compatible API node with `cachePrefixParts` turned on sends that start as its own content part, for a gateway to mark. Other providers ignore it. |
 
 ## Answer
 

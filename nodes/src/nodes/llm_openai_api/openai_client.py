@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterator
 from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_breakpoint
+from ai.common.utils import parse_bool
 from langchain_openai import ChatOpenAI as _LangChainChatOpenAI
 from openai import APIError, APIStatusError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -149,6 +151,24 @@ class ChatOpenAI(_LangChainChatOpenAI):
         yield from chunks
 
 
+class _CacheBoundaryChatOpenAI(ChatOpenAI):
+    """ChatOpenAI that sends the cacheable start of the prompt as its own content part.
+
+    The split is the Anthropic driver's, without its marker: what to mark is left to
+    the gateway in front of the model, and a plain endpoint would reject the field.
+    """
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        apply_prompt_cache_breakpoint(payload, PROMPT_CACHE_PREFIX_VAR.get())
+        messages = payload.get('messages') or []
+        content = messages[-1].get('content') if messages else None
+        if isinstance(content, list):
+            for part in content:
+                part.pop('cache_control', None)
+        return payload
+
+
 class Chat(ChatBase):
     """
     Create an OpenAI-compatible API chat bot with custom base_url support.
@@ -184,11 +204,33 @@ class Chat(ChatBase):
         if base_url:
             kwargs['base_url'] = base_url
 
-        # Get the llm
-        self._llm = ChatOpenAI(**kwargs)
+        # Off by default: some endpoints accept only a string as message content.
+        send_boundary = parse_bool(config.get('cachePrefixParts'))
+        self.SUPPORTS_PROMPT_CACHE_PREFIX = send_boundary
+
+        # Get the llm. Turns stay on the plain class: reasoning is replayed only to the
+        # class that wrote it, so the option must not change which class that is.
+        self._plain_llm = ChatOpenAI(**kwargs)
+        self._llm = _CacheBoundaryChatOpenAI(**kwargs) if send_boundary else self._plain_llm
 
         # Save our chat class into the bag
         bag['chat'] = self
+
+    def _turn_llm(self) -> ChatOpenAI:
+        return self._plain_llm
+
+    def chat_turn(self, question, *args, **kwargs):
+        """Send a turn unmarked: ChatBase would add cache_control, which this node never sends.
+
+        Args:
+            question: The turn-mode Question.
+            *args: Passed on to ChatBase.chat_turn.
+            **kwargs: Passed on to ChatBase.chat_turn.
+
+        Returns:
+            The model's Answer.
+        """
+        return super().chat_turn(question.model_copy(update={'cachePrefix': False}), *args, **kwargs)
 
     def is_retryable_error(self, error):
         """
