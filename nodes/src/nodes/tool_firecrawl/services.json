@@ -9,7 +9,7 @@
 	"prefix": "firecrawl",
 	"icon": "firecrawl.svg",
 	"documentation": "https://docs.rocketride.org/nodes/tool_firecrawl",
-	"description": ["Exposes Firecrawl web-scraping operations as agent tools.", "Provides scrape_url (single page) and map_url (site structure discovery)."],
+	"description": ["Exposes Firecrawl web search and scraping operations as agent tools.", "Provides search_web (web search), scrape_url (single page), and map_url (site structure discovery)."],
 	"tile": [],
 	"lanes": {},
 	"preconfig": {
@@ -17,7 +17,8 @@
 		"profiles": {
 			"default": {
 				"title": "Firecrawl",
-				"apikey": ""
+				"apikey": "",
+				"maxResults": 5
 			}
 		}
 	},
@@ -31,13 +32,21 @@
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
 			}
+		},
+		"tool_firecrawl.maxResults": {
+			"type": "integer",
+			"title": "Max Results",
+			"description": "Maximum number of search results to return (1-20)",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "Firecrawl",
-			"properties": ["type", "tool_firecrawl.apikey"]
+			"properties": ["type", "tool_firecrawl.apikey", "tool_firecrawl.maxResults"]
 		}
 	]
 }

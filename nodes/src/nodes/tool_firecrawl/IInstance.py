@@ -26,7 +26,7 @@
 """
 Firecrawl tool node instance.
 
-Exposes ``scrape_url`` and ``map_url`` tools for web scraping via Firecrawl.
+Exposes ``scrape_url``, ``map_url``, and ``search_web`` tools for web scraping and search via Firecrawl.
 """
 
 from __future__ import annotations
@@ -75,9 +75,12 @@ class IInstance(IInstanceBase):
         if not url:
             raise ValueError('scrape_url requires a `url` parameter')
 
-        result = firecrawl_wrapper(lambda: self.IGlobal.app.scrape(url))
-
         fmt = args.get('format', 'markdown')
+        if fmt not in ('markdown', 'html'):
+            fmt = 'markdown'
+
+        result = firecrawl_wrapper(lambda: self.IGlobal.app.scrape(url, formats=[fmt], integration='_rocketride'))
+
         content = getattr(result, fmt, None) or getattr(result, 'markdown', None) or ''
         if not isinstance(content, str):
             content = json.dumps(content)
@@ -116,7 +119,7 @@ class IInstance(IInstanceBase):
         if not url:
             raise ValueError('map_url requires a `url` parameter')
 
-        result = firecrawl_wrapper(lambda: self.IGlobal.app.map(url))
+        result = firecrawl_wrapper(lambda: self.IGlobal.app.map(url, integration='_rocketride'))
 
         links = []
         if hasattr(result, 'links') and result.links:
@@ -127,3 +130,105 @@ class IInstance(IInstanceBase):
                     links.append(link)
 
         return {'success': True, 'links': links}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['query'],
+            'properties': {
+                'query': {'type': 'string', 'description': 'The search query.'},
+                'limit': {
+                    'type': 'integer',
+                    'description': 'Maximum number of results to return (1-20). Defaults to the node config value.',
+                },
+                'scrape_markdown': {
+                    'type': 'boolean',
+                    'description': 'Whether to scrape each result page and include its markdown content (default: false).',
+                    'default': False,
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'results': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        description='Search the web and return matching results.',
+    )
+    def search_web(self, args):
+        """Search the web using Firecrawl."""
+        args = normalize_tool_input(args, tool_name='firecrawl')
+        raw_query = args.get('query')
+        query = raw_query.strip() if isinstance(raw_query, str) else ''
+        if not query:
+            raise ValueError('search_web requires a `query` parameter')
+
+        default_max = getattr(self.IGlobal, 'max_results', 5)
+        raw_limit = args.get('limit', default_max)
+        if raw_limit is None or isinstance(raw_limit, bool):
+            limit = default_max
+        else:
+            try:
+                limit = int(raw_limit)
+            except (ValueError, TypeError):
+                limit = default_max
+        limit = max(1, min(20, limit))
+
+        scrape_markdown = args.get('scrape_markdown', False)
+        if not isinstance(scrape_markdown, bool):
+            raise ValueError('scrape_markdown must be a boolean')
+        search_kwargs: dict = {'limit': limit, 'integration': '_rocketride'}
+        if scrape_markdown:
+            search_kwargs['scrape_options'] = {'formats': ['markdown']}
+
+        result = firecrawl_wrapper(lambda: self.IGlobal.app.search(query, **search_kwargs))
+
+        raw_items = (
+            getattr(result, 'web', None)
+            or getattr(result, 'data', None)
+            or (result.get('web') or result.get('data') if isinstance(result, dict) else None)
+            or (result if isinstance(result, list) else [])
+        )
+
+        results = []
+        for item in raw_items or []:
+            if isinstance(item, dict):
+                metadata = item.get('metadata')
+                if isinstance(metadata, dict):
+                    metadata_url = metadata.get('url')
+                    metadata_title = metadata.get('title')
+                    metadata_description = metadata.get('description')
+                else:
+                    metadata_url = getattr(metadata, 'url', None)
+                    metadata_title = getattr(metadata, 'title', None)
+                    metadata_description = getattr(metadata, 'description', None)
+                entry = {
+                    'url': item.get('url', '') or metadata_url or '',
+                    'title': item.get('title', '') or metadata_title or '',
+                    'description': item.get('description', '') or metadata_description or '',
+                }
+                markdown = item.get('markdown')
+            else:
+                metadata = getattr(item, 'metadata', None)
+                if isinstance(metadata, dict):
+                    metadata_url = metadata.get('url')
+                    metadata_title = metadata.get('title')
+                    metadata_description = metadata.get('description')
+                else:
+                    metadata_url = getattr(metadata, 'url', None)
+                    metadata_title = getattr(metadata, 'title', None)
+                    metadata_description = getattr(metadata, 'description', None)
+                entry = {
+                    'url': getattr(item, 'url', '') or metadata_url or '',
+                    'title': getattr(item, 'title', '') or metadata_title or '',
+                    'description': getattr(item, 'description', '') or metadata_description or '',
+                }
+                markdown = getattr(item, 'markdown', None)
+
+            if scrape_markdown or markdown:
+                entry['markdown'] = markdown or ''
+            results.append(entry)
+
+        return {'success': True, 'results': results}

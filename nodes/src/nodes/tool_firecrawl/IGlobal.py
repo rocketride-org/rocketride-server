@@ -42,6 +42,7 @@ class IGlobal(IGlobalBase):
     """Global state for tool_firecrawl."""
 
     app: FirecrawlApp | None = None
+    max_results: int = 5
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -52,6 +53,17 @@ class IGlobal(IGlobalBase):
 
         if not apikey:
             raise Exception('tool_firecrawl: apikey is required')
+
+        raw_max = cfg.get('maxResults', 5)
+        if raw_max is None or isinstance(raw_max, bool):
+            if isinstance(raw_max, bool):
+                warning(f'tool_firecrawl: maxResults must be a number, got {raw_max!r}; using default 5')
+            raw_max = 5
+        try:
+            self.max_results = max(1, min(20, int(raw_max)))
+        except (ValueError, TypeError):
+            warning(f'tool_firecrawl: maxResults must be a number, got {raw_max!r}; using default 5')
+            self.max_results = 5
 
         try:
             self.app = FirecrawlApp(api_key=apikey)
@@ -70,3 +82,4 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         self.app = None
+        self.max_results = 5
