@@ -146,6 +146,12 @@ STATED_BESIDE_A_COPY = (
         }
     },
 )
+# A server that lists nothing in `detail` and states the refusal in a `message` beside it.
+# (A shape, not a captured run.)
+MESSAGE_BESIDE_A_DETAIL_LIST = (
+    400,
+    {'message': 'temperature is not supported by this model', 'detail': []},
+)
 TEMPERATURE_REJECTIONS = [
     pytest.param(OPENAI, id='openai'),
     pytest.param(ANTHROPIC, id='anthropic'),
@@ -155,6 +161,7 @@ TEMPERATURE_REJECTIONS = [
     pytest.param(NAMED_AS_A_KEY, id='named-only-as-a-key'),
     pytest.param(FASTAPI_WHOLE_REQUEST, id='fastapi-422-whole-request'),
     pytest.param(STATED_BESIDE_A_COPY, id='stated-beside-a-copy-of-the-request'),
+    pytest.param(MESSAGE_BESIDE_A_DETAIL_LIST, id='message-beside-a-detail-list'),
 ]
 
 # Refusals that are not about the temperature, whatever the message mentions.
@@ -222,6 +229,25 @@ OTHER_REJECTIONS = [
             },
         ),
         id='validation-detail-that-copies-the-request',
+    ),
+    # The same with a `message` beside the list that is about something else: the message is
+    # read, the copy in `input` still is not.
+    pytest.param(
+        (
+            422,
+            {
+                'message': 'Request validation failed',
+                'detail': [
+                    {
+                        'type': 'missing',
+                        'loc': ['body', 'user'],
+                        'msg': 'Field required',
+                        'input': {'model': 'any-model', 'messages': [], 'temperature': 0},
+                    }
+                ],
+            },
+        ),
+        id='validation-detail-that-copies-the-request-beside-another-message',
     ),
 ]
 
@@ -458,6 +484,30 @@ def test_a_value_the_node_set_is_dropped_the_same_way(node, endpoint):
 
     assert bodies[0]['temperature'] == 0.7 and 'temperature' not in bodies[1]
     assert 'temperature=0.7' in warnings[0]
+
+
+def test_the_warning_leaves_out_what_the_endpoint_wrote(node, endpoint):
+    """Some endpoints copy the request, prompt included, into the refusal. None of that text reaches the warning."""
+    build, warnings = node
+    _Endpoint.rejection = (
+        400,
+        {
+            'error': {
+                'message': "Unsupported parameters: {'temperature': 0}. Request: {'model': 'deployment', "
+                "'messages': [{'role': 'user', 'content': 'PROMPT-TEXT'}], 'temperature': 0}",
+                'type': 'invalid_request_error',
+                'param': None,
+                'code': '400',
+            }
+        },
+    )
+    chat = build()
+
+    assert _ask(chat, 'invoke') == 'ok'
+
+    assert len(warnings) == 1
+    assert 'PROMPT-TEXT' not in warnings[0] and 'Unsupported parameters' not in warnings[0]
+    assert 'temperature=0' in warnings[0] and 'HTTP 400' in warnings[0]
 
 
 def test_a_model_with_tools_bound_recovers_too(node, endpoint):

@@ -149,6 +149,7 @@ user types for their own OpenAI-compatible endpoint.
 | `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Profile selection | `"custom"` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature: 0 is generally more deterministic, higher values increase variety. Some models run only at their own default and reject any other value (newer Claude models, OpenAI's reasoning models, and gateways in front of them). The node then sends the request again without a temperature and, if that goes through, warns and leaves it out for the rest of the run. | `0` |
 
 ### Nebius (`services.nebius.json`)
 

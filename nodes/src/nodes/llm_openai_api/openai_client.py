@@ -31,9 +31,10 @@ def rejects_temperature(error: Exception) -> bool:
 
     OpenAI names the parameter in the error's `param`, which then decides. A FastAPI-based
     server lists what it refused: the field is the last step of an item's `loc`, or for a
-    check on the whole request is named in its `msg`; the `input` it copies back is not
-    looked at. Anthropic's OpenAI-compatible endpoint, LiteLLM and gateways that wrap a
-    provider's error name the parameter only somewhere in the error text.
+    check on the whole request is named in its `msg`, or in a `message` beside the list;
+    the `input` it copies back is not looked at. Anthropic's OpenAI-compatible endpoint,
+    LiteLLM and gateways that wrap a provider's error name the parameter only somewhere in
+    the error text.
 
     This leans towards yes. A wrong yes costs one more request on a call that was failing
     anyway and changes nothing (see ChatOpenAI). A wrong no leaves the endpoint unusable.
@@ -52,11 +53,14 @@ def rejects_temperature(error: Exception) -> bool:
     detail = body.get('detail') if isinstance(body, dict) else None
     if isinstance(detail, list):
         items = [item for item in detail if isinstance(item, dict)]
-        return any(
+        if any(
             list(item.get('loc') or [])[-1:] == ['temperature']
             or _TEMPERATURE_WORD.search(str(item.get('msg') or '')) is not None
             for item in items
-        )
+        ):
+            return True
+        # Only the `message` beside the list: the whole error text carries the `input` copies.
+        return _TEMPERATURE_WORD.search(str(body.get('message') or '')) is not None
     return _TEMPERATURE_WORD.search(str(error)) is not None
 
 
@@ -94,9 +98,11 @@ class ChatOpenAI(_LangChainChatOpenAI):
         """
         with _DROP_LOCK:
             if self.temperature is not None:
+                # The endpoint's own message is left out: some copy the request into it, prompt included.
+                status = getattr(refusal, 'status_code', None)
                 warning(
                     f'{self.model_name}: the endpoint rejected temperature={sent} '
-                    f'({type(refusal).__name__}: {refusal}). The request went through without a '
+                    f'({type(refusal).__name__}, HTTP {status}). The request went through without a '
                     f'temperature, so it is left out for the rest of this run.'
                 )
                 self.temperature = None
