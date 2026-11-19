@@ -160,10 +160,15 @@ left behind.
 - A task's crash dump stays in its container. When the engine runs with
   `--dumps`, a task that crashes writes one and its console names the file,
   but the container is removed when the task ends, and the dump with it.
-- A task that is killed without reporting it (by the kernel's out-of-memory
-  killer, for example) ends as `Stopped` with the container's exit code, 137
-  for `SIGKILL`, not as `Stopped unexpectedly`. A crash the engine reports
-  itself ends as `Stopped unexpectedly`, as without containers.
+- A task that is killed from outside the engine without reporting it (by the
+  kernel's out-of-memory killer, for example) ends as `Stopped` with the
+  container's exit code, 137 for `SIGKILL`, not as `Stopped unexpectedly`. A
+  crash the engine reports itself ends as `Stopped unexpectedly`, as without
+  containers.
+- A task that loses its connection to the engine stops at once: its input
+  closes, and it does not run on without the engine. It ends as
+  `Stopped unexpectedly`, with what happened in its console. A node whose own
+  code ends the process with exit code 0 reads the same.
 - Task containers can reach whatever the Docker network allows. Restrict
   egress on the host if tasks must not reach your internal network. On Docker
   Desktop they can also reach services on the host's loopback, the engine's
