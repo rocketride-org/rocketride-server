@@ -96,8 +96,8 @@ def test_bind_tools_sends_the_original_schema_once(adapter):
     prompts: List[str] = []
 
     class _Host(_FakeAgent):
-        def call_llm(self, context: Any, prompt: str, **kwargs: Any) -> str:
-            prompts.append(prompt)
+        def call_llm(self, context: Any, prompt: Any, **kwargs: Any) -> str:
+            prompts.append(prompt.getPrompt())
             return 'FINAL>>>done'
 
     host = _Host()

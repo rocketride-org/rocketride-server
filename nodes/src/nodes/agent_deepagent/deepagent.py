@@ -29,7 +29,7 @@ import asyncio
 import json
 import re
 import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from rocketlib import ToolDescriptor, error
 
@@ -50,11 +50,12 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
     """Build a LangChain BaseChatModel that delegates to AgentBase.call_llm.
 
     DeepAgents is built on LangChain/LangGraph and shares the same model
-    interface as the langchain driver.  The wrapper converts a LangChain
-    message list into a plain-text transcript, prepends the JSON tool-call
-    protocol prompt, calls ``agent_base.call_llm``, and parses the response
-    envelope back into a ``ChatResult``.  Up to three attempts are made when
-    the LLM produces malformed JSON.
+    interface as the langchain driver.  The wrapper splits a LangChain message
+    list into the text every call repeats (the JSON tool-call protocol prompt
+    and the opening system messages) and the conversation so far, sends both
+    to ``agent_base.call_llm`` as a ``Question`` whose repeated start may be
+    cached, and parses the response envelope back into a ``ChatResult``.  Up
+    to three attempts are made when the LLM produces malformed JSON.
     """
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import AIMessage, HumanMessage
@@ -101,19 +102,12 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
             return count_tokens_approximately(messages)
 
         def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
-            transcript = langchain_messages_to_transcript(messages)
-            tool_hint = _tool_call_protocol_prompt(self._bound_tools)
-            prompt = (tool_hint + '\n\n' + transcript).strip()
+            fixed, conversation = _split_fixed_prompt(self._bound_tools, messages)
 
             raw = ''
             for attempt in range(3):
                 raw = safe_str(
-                    agent_base.call_llm(
-                        context,
-                        prompt,
-                        role='You are a helpful assistant.',
-                        stop_words=stop,
-                    )
+                    agent_base.call_llm(context, _model_question(fixed, conversation), stop_words=stop)
                 ).strip()
                 msg = _parse_tool_call_envelope(raw)
                 if msg is not None:
@@ -122,7 +116,7 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                     # Say WHAT was wrong. The model cannot see the character that
                     # broke its output, so a bare "invalid" buys three identical
                     # answers at full token cost and no chance of a different one.
-                    prompt = prompt + '\n\nsystem: ' + _parse_failure_hint(raw)
+                    conversation = conversation + '\n\nsystem: ' + _parse_failure_hint(raw)
 
             # Out of attempts. Anything readable beats handing over the protocol.
             salvaged = _salvage_final_content(raw)
@@ -513,6 +507,9 @@ class DeepAgentDriver(AgentBase):
 #: longer what we ask for.
 FINAL_SENTINEL = 'FINAL>>>'
 
+#: The persona every model call opens with.
+_MODEL_ROLE = 'You are a helpful assistant.'
+
 #: The opening of a `final` envelope, up to the first byte of its content. Used
 #: to salvage an answer out of a JSON envelope that does not parse.
 _FINAL_ENVELOPE_OPEN = re.compile(r'^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"content"\s*:\s*"', re.S)
@@ -719,13 +716,54 @@ def _prompt_tools(bound_tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _split_fixed_prompt(bound_tools: List[Dict[str, Any]], messages: Any) -> Tuple[str, str]:
+    """Split one model call into the text every call repeats and the conversation so far.
+
+    The fixed part is the tool protocol and the system messages that open the
+    conversation. A system message later in the conversation stays where it is.
+
+    Args:
+        bound_tools: The tools bound to the model.
+        messages: The LangChain messages of this call.
+
+    Returns:
+        ``(fixed, conversation)``, both as plain text.
+    """
+    messages = list(messages or [])
+    count = 0
+    while count < len(messages) and getattr(messages[count], 'type', '') == 'system':
+        count += 1
+    opening = langchain_messages_to_transcript(messages[:count])
+    fixed = '\n\n'.join(part for part in (_tool_call_protocol_prompt(bound_tools), opening) if part)
+    return fixed, langchain_messages_to_transcript(messages[count:]).strip()
+
+
+def _model_question(fixed: str, conversation: str) -> Question:
+    """Build the Question for one model call, with the fixed text where it can be cached.
+
+    A provider caches only the start of a prompt, and ``Question`` treats the role
+    as part of that start. The role is rendered as written, so the protocol and the
+    system prompt reach the model unchanged; a Question instruction would re-indent them.
+
+    Args:
+        fixed: The text every call repeats.
+        conversation: The conversation so far.
+
+    Returns:
+        The Question to send.
+    """
+    question = Question(role=f'{_MODEL_ROLE}\n\n{fixed}', cachePrefix=True)
+    question.addQuestion(conversation)
+    return question
+
+
 def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
     """
     Build the system-prompt preamble that instructs the LLM to output a JSON envelope.
 
-    The returned string is prepended to the message transcript before every LLM call so
-    that models without native tool-calling support can still drive agentic behaviour via
-    the JSON envelope schema below.
+    The returned string opens the fixed text of every LLM call (``_split_fixed_prompt``),
+    ahead of the message transcript, so that models without native tool-calling support
+    can still drive agentic behaviour via the JSON envelope schema below.
 
     Supports three response shapes:
       - Single tool call: ``{"type":"tool_call","name":"...","args":{...}}``
