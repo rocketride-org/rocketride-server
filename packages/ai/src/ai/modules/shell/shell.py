@@ -173,6 +173,12 @@ _SHELL_DOCUMENT_HEADERS = {
     'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
 }
 
+
+def document_headers() -> Dict[str, str]:
+    """A fresh copy of the shell document headers, for HTML the public-pages layer serves itself."""
+    return dict(_SHELL_DOCUMENT_HEADERS)
+
+
 # Suffixes served as documents. SVG is left out: the shell only loads its SVGs
 # (favicon, icons) as images, where neither header applies.
 _DOCUMENT_SUFFIXES = frozenset({'.html', '.htm', '.xhtml'})

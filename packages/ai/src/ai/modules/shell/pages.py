@@ -108,7 +108,7 @@ from .feeds import atom
 from .head import feed_links, inject_head, social_tags
 from .not_found_page import NOT_FOUND_HTML
 from .settings import app_url
-from .shell import CACHE_CONTROL, capture_candidate, shell_document_path, shell_static
+from .shell import CACHE_CONTROL, capture_candidate, document_headers, shell_document_path, shell_static
 from .template import TemplateError, render
 
 _T = TypeVar('_T')
@@ -805,7 +805,7 @@ async def _not_found_page(request: Request, aggregate: public_pages.Aggregate) -
         cached = await _render_not_found(aggregate.site, root, snapshot, crawler, index, now)
         if generation == _generation:
             _render_cache.put(key, cached, len(cached.body))
-    return HTMLResponse(cached.body, status_code=404, headers=cached.headers)
+    return HTMLResponse(cached.body, status_code=404, headers={**cached.headers, **document_headers()})
 
 
 async def _render_not_found(
@@ -1019,7 +1019,7 @@ def _not_found(request: Request, path: str) -> Response:
         # The same address answers HTML to a browser: say it varies by Accept.
         raise HTTPException(status_code=404, detail='Not Found', headers={'Vary': 'Accept'})
     headers = {'Vary': 'Accept', 'Cache-Control': 'private, no-cache', 'X-Robots-Tag': 'noindex'}
-    return HTMLResponse(NOT_FOUND_HTML, status_code=404, headers=headers)
+    return HTMLResponse(NOT_FOUND_HTML, status_code=404, headers={**headers, **document_headers()})
 
 
 async def _render_page(request: Request, path: str, page: Page, aggregate: public_pages.Aggregate) -> Response:
@@ -1049,7 +1049,9 @@ async def _render_page(request: Request, path: str, page: Page, aggregate: publi
         cached, cacheable = await _render(path, page, aggregate, crawler, document, now)
         if generation != _generation:
             # A swap or an invalidation landed mid-render: this copy may already be stale.
-            return HTMLResponse(cached.body, headers={**cached.headers, 'Cache-Control': 'private, no-cache'})
+            return HTMLResponse(
+                cached.body, headers={**cached.headers, 'Cache-Control': 'private, no-cache', **document_headers()}
+            )
         if cacheable:
             _render_cache.put(key, cached, len(cached.body))
     headers = dict(cached.headers)
@@ -1059,7 +1061,7 @@ async def _render_page(request: Request, path: str, page: Page, aggregate: publi
         # floating point, and ceil would round that up a whole second.
         max_age = math.ceil(min(cached.expires - now, data_sources.TTL_SECONDS))
         headers['Cache-Control'] = f'public, max-age={max_age}'
-    return HTMLResponse(cached.body, headers=headers)
+    return HTMLResponse(cached.body, headers={**headers, **document_headers()})
 
 
 def _shell_document(request: Request, path: str) -> Tuple[Path, int, int]:
