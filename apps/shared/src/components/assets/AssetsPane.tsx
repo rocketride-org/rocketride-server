@@ -347,6 +347,18 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 		borderTop: '1px solid var(--rr-border)',
 	} as CSSProperties,
+	/** Visually hidden text that gives an icon-only button its accessible name (the shell has no sr-only helper). */
+	srOnly: {
+		position: 'absolute',
+		width: 1,
+		height: 1,
+		padding: 0,
+		margin: -1,
+		overflow: 'hidden',
+		clip: 'rect(0 0 0 0)',
+		whiteSpace: 'nowrap',
+		border: 0,
+	} as CSSProperties,
 	thumbWidthInput: {
 		...commonStyles.inputField,
 		width: 64,
@@ -1013,7 +1025,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 									<div style={{ ...styles.thumbName, ...(tile.missing ? styles.thumbNameMissing : {}) }}>
 										<span style={styles.thumbPath} title={tile.relPath}>{tile.relPath}</span>
 										{!readonly && (
-											<Button variant="ghost" small title={`Remove the reference to ${tile.relPath} from the README (the file stays)`} onClick={() => dropReference(tile)}>✕</Button>
+											<Button variant="ghost" small title={`Remove the reference to ${tile.relPath} from the README (the file stays)`} onClick={() => dropReference(tile)}>
+												✕<span style={styles.srOnly}>Remove the reference to {tile.relPath} from the README</span>
+											</Button>
 										)}
 									</div>
 									{tile.isImage && (
