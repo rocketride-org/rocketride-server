@@ -69,6 +69,9 @@ public:
     ///		Declare our factory type
     //-----------------------------------------------------------------
     _const auto FactoryType = "iFilterInstance";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = IServiceFilterInstance;
 
     template <typename Buffer>
     auto __toString(Buffer &buff) const noexcept {
@@ -563,6 +566,9 @@ public:
     ///		Declare our factory type
     //-----------------------------------------------------------------
     _const auto FactoryType = "iFilterGlobal";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = IServiceFilterGlobal;
 
     template <typename Buffer>
     auto __toString(Buffer &buff) const noexcept {
