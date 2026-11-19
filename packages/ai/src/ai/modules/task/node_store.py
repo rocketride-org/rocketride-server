@@ -123,9 +123,16 @@ def _replace_stale(index: Dict[str, Any]) -> None:
             continue
         try:
             with _unpacking:
-                node_packages.unpack(
-                    name, account.node_package(name, entry['sha256']), entry['sha256'], node_release.nodes_dir()
-                )
+                # The new copy may import a node not on disk, which no pipeline naming this one would place
+                for other in _with_requires([name], index['nodes']):
+                    sha256 = index['nodes'][other]['sha256']
+                    path = os.path.join(node_release.nodes_dir(), other)
+                    on_disk = node_packages.digest_of(path)
+                    # A folder with no digest is the server's own
+                    if other == name or (on_disk != sha256 and (on_disk is not None or not os.path.isdir(path))):
+                        node_packages.unpack(
+                            other, account.node_package(other, sha256), sha256, node_release.nodes_dir()
+                        )
         except Exception as e:
             warning(f"Node {name}: {folder} holds an earlier release's copy and could not be replaced ({e}); delete it")
             continue
@@ -198,12 +205,13 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
     return found
 
 
-def _with_requires(names: Iterable[str]) -> List[str]:
-    """The names with the served nodes they import (the index's `requires`), each after the nodes it imports.
+def _with_requires(names: Iterable[str], nodes: Optional[Dict[str, Any]] = None) -> List[str]:
+    """The names with the nodes they import (the `requires` of nodes, by default the served ones), each after them.
 
     A node is unpacked only once what it imports is, so a failed unpack never leaves one on disk without them:
     after a restart the engine loads it as its own and nothing would place them.
     """
+    nodes = _nodes if nodes is None else nodes
     order: List[str] = []
     seen: Set[str] = set()
 
@@ -211,8 +219,8 @@ def _with_requires(names: Iterable[str]) -> List[str]:
         if name in seen:
             return
         seen.add(name)
-        for other in sorted(_nodes[name].get('requires', [])):
-            if other in _nodes:
+        for other in sorted(nodes[name].get('requires', [])):
+            if other in nodes:
                 visit(other)
         order.append(name)
 

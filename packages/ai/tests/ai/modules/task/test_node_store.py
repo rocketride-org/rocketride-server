@@ -296,6 +296,26 @@ def test_a_copy_an_earlier_release_unpacked_is_replaced_at_start(server):
     assert len(server['warnings']) == 1 and 'webhook' in server['warnings'][0] and 'replaced' in server['warnings'][0]
 
 
+def test_a_copy_replaced_at_start_comes_with_the_nodes_it_now_imports(server, monkeypatch):
+    # Release N unpacked llm_x, so the scan registered it; this release's llm_x imports embed_y, not on disk
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y', 'webhook']
+    index['nodes']['embed_y'] = {'sha256': 'e', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    monkeypatch.setattr(
+        node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p in ('webhook', 'provider_x') else None
+    )
+    _unpacked_before(server, 'llm_x', 'older')
+    # The server's own folder, which it imports too, stays as it is
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+
+    node_store.start()
+
+    # What it imports first; a pipeline naming llm_x places nothing, as the engine has it
+    assert [args[0] for args in server['unpacked']] == ['embed_y', 'llm_x']
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == []
+
+
 def test_a_copy_with_this_releases_digest_is_left_alone(server):
     _unpacked_before(server, 'webhook', 'w')
 
