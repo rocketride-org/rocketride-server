@@ -192,6 +192,31 @@ def test_a_finished_answer_reports_done(driver):
     assert driver.events[-1]['stop_reason'] == 'done'
 
 
+def test_running_out_of_waves_reports_max_steps(wave, driver, monkeypatch):
+    """The fallback answer is a best effort, and says so in the same words every agent uses (#3356)."""
+    reply = {'done': False, 'tool_calls': [{'tool': 'workspace.read', 'args': {}}]}
+    monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: reply)
+    monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', lambda calls, **kw: [dict(READ)])
+    driver._max_waves = 1
+    driver._synthesize = lambda **kw: 'best effort'
+    context = wave.rocketride_agent.AgentContext(
+        invoker=None,
+        llm=None,
+        tools=None,
+        memory=FakeMemory(),
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
+    )
+
+    answer, trace = driver._run(context=context, question=None)
+
+    assert answer == 'best effort'
+    assert trace['stop_reason'] == 'max_steps'
+    assert driver.events[-1]['stop_reason'] == 'max_steps'
+
+
 def test_a_failed_retry_keeps_the_first_replys_notes(wave):
     """The retry raised, so plan returns nothing; the notes travel with the error instead."""
     context = SimpleNamespace(tools=SimpleNamespace(list=[]))

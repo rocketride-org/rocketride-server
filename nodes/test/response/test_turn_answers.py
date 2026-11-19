@@ -62,6 +62,25 @@ def test_text_and_json_answers_are_written_as_before():
     assert node.instance.currentObject.response['answers'] == ['hello', {'message': 'a JSON answer, not a turn'}]
 
 
+@pytest.mark.parametrize(
+    'reasons, expected',
+    [([None], None), (['done', 'done'], 'done'), (['done', 'max_steps', 'error'], 'max_steps')],
+    ids=['no-agent', 'every-run-finished', 'first-unfinished-run-stands'],
+)
+def test_the_result_says_why_the_agent_runs_stopped(reasons, expected):
+    """The answers keep their shape; stop_reason beside them is done only when every run finished (#3356)."""
+    node = _response_node()
+    for reason in reasons:
+        answer = Answer()
+        answer.setAnswer('C = 42')
+        answer.agentStopReason = reason
+        node.writeAnswers(answer)
+
+    response = node.instance.currentObject.response
+    assert response['answers'] == ['C = 42'] * len(reasons)
+    assert response.get('stop_reason') == expected
+
+
 def _anthropic_chat(monkeypatch, bodies):
     pytest.importorskip('langchain_anthropic')
     import langchain_anthropic.chat_models as lca
