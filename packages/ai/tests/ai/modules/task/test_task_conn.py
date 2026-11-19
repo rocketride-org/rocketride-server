@@ -232,6 +232,10 @@ async def test_on_auth_success_sets_account_and_releases_unauthed_slot():
     account.to_connect_result = MagicMock(return_value={'session': 'abc'})
 
     server = MagicMock()
+    # TaskServer always sets _authz; None is an account edition without the
+    # live re-check. A bare MagicMock would invent an authz whose
+    # check_credential cannot be awaited, and on_auth rightly fails closed.
+    server._authz = None
     server._server = MagicMock()
     server._server.authenticate_credential = AsyncMock(return_value=account)
     server.release_unauthed_slot = MagicMock()
