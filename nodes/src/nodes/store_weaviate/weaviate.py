@@ -614,18 +614,27 @@ class Store(DocumentStoreBase):
         # A document may hold tens of thousands of chunks. Weaviate returns 10
         # objects when no limit is given and rejects a limit above
         # QUERY_MAXIMUM_RESULTS, so page through the document in chunkId
-        # order with a keyset cursor: each page starts at the last chunkId of
-        # the one before. ChunkIds need not be contiguous, and a chunk number
-        # can be stored twice (an upsert without chunk 0 that repeats one), so
-        # neither a gap nor a page's chunkId span says where the document
-        # ends; only a short page does. Objects at the cursor chunkId that an
-        # earlier page already returned are recognized by uuid.
+        # order with a keyset cursor. ChunkIds need not be contiguous, and a
+        # chunk number can be stored more than once (an upsert without chunk 0
+        # that repeats one), so neither a gap nor a page's chunkId span says
+        # where the document ends; only a short page does.
+        #
+        # Render keeps one copy of each chunk number, so after a full page the
+        # next one starts at that page's last chunkId (whose copies may not all
+        # have fit), or past it when the page held copies of that one chunkId
+        # only. The cursor moves forward on every full page, so any number of
+        # copies is passed, and re-reading a copy only replaces it in place.
         groupSize = max(1, self.renderChunkSize)
         groupStart = 0
         pieces: Dict[int, str] = {}
 
+        def handOver() -> None:
+            # In chunkId order; a missing chunk adds no text, and the join walks
+            # only the chunks present, not the gaps between them
+            if pieces:
+                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
+
         cursor = 0
-        seenAtCursor: set = set()
         while True:
             points = self.collectionObj.query.fetch_objects(
                 filters=(
@@ -636,38 +645,24 @@ class Store(DocumentStoreBase):
                 limit=_RENDER_PAGE_SIZE,
             )
 
-            fresh = 0
             lastChunk = cursor
             for point in points.objects:
                 chunk = point.properties.get('chunkId')
-                if chunk is None or chunk < cursor:
+                if not isinstance(chunk, int) or chunk < cursor:
                     continue
                 lastChunk = max(lastChunk, chunk)
-                if chunk == cursor and point.uuid in seenAtCursor:
-                    continue
-                fresh += 1
 
-                # Chunks arrive in order, so a chunk past the current group
-                # completes it: hand it over, with a missing chunk as empty text
+                # Chunks arrive in order, so a chunk past the current group completes it
                 if chunk >= groupStart + groupSize:
-                    if pieces:
-                        callback(''.join(pieces.get(index, '') for index in range(groupStart, max(pieces) + 1)))
+                    handOver()
                     pieces = {}
                     groupStart = chunk - chunk % groupSize
 
-                # Of two copies of one chunk number, the last one read is kept
+                # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = point.properties.get('content') or ''
 
-            # A short page is the last one. A full page of chunks already read
-            # (more copies of one chunk number than a page holds) cannot move
-            # the cursor, so it ends the document too.
-            if len(points.objects) < _RENDER_PAGE_SIZE or fresh == 0:
+            if len(points.objects) < _RENDER_PAGE_SIZE:
                 break
+            cursor = lastChunk if lastChunk > cursor else cursor + 1
 
-            if lastChunk != cursor:
-                seenAtCursor = set()
-                cursor = lastChunk
-            seenAtCursor.update(point.uuid for point in points.objects if point.properties.get('chunkId') == cursor)
-
-        if pieces:
-            callback(''.join(pieces.get(index, '') for index in range(groupStart, max(pieces) + 1)))
+        handOver()

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import random
+import tracemalloc
 
 from .test_record_updates import _make_obj_records, _make_store
 
@@ -117,6 +118,47 @@ def test_render_keeps_every_chunk_when_copies_straddle_a_page(monkeypatch):
     monkeypatch.setattr(collection.query, 'fetch_objects', counted_fetch)
 
     assert _render(store, 'doc') == [_expected(10)]
+
+
+def test_render_passes_a_full_page_of_copies_of_one_chunk(monkeypatch):
+    """More copies of one chunk number than a page holds must not hide the chunks after it."""
+    records = _make_obj_records('doc', 4, is_deleted=False)
+    for copy in range(9):
+        _second_copy(records, 1, 'chunk 1')
+        records[f'doc-1-copy-{copy}'] = records.pop('doc-1-copy')
+    store, collection = _make_store(_shuffled(records))
+    monkeypatch.setitem(store.render.__globals__, '_RENDER_PAGE_SIZE', 4)
+    fetch = collection.query.fetch_objects
+    calls = []
+
+    def counted_fetch(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) <= 10, 'render is not making progress'
+        return fetch(**kwargs)
+
+    monkeypatch.setattr(collection.query, 'fetch_objects', counted_fetch)
+
+    assert _render(store, 'doc') == [_expected(4)]
+
+
+def test_render_does_not_walk_the_gap_between_sparse_chunks():
+    """Chunks 0 and 33554431 share the default group; joining them must not build an entry per missing id."""
+    records = _make_obj_records('doc', 1, is_deleted=False)
+    last = 32 * 1024 * 1024 - 1
+    records['doc-last'] = dict(
+        records['doc-0'], properties=dict(records['doc-0']['properties'], chunkId=last, content='chunk last')
+    )
+    store, _ = _make_store(records)
+
+    tracemalloc.start()
+    try:
+        parts = _render(store, 'doc')
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert parts == ['chunk 0chunk last']
+    assert peak < 16 * 1024 * 1024  # an entry per id in the group would take hundreds of MB
 
 
 def test_render_of_an_unknown_document_calls_nothing():
