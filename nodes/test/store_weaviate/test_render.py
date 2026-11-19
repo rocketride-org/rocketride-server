@@ -51,7 +51,7 @@ def test_render_pages_past_the_query_maximum(monkeypatch):
     monkeypatch.setattr(collection.query, 'fetch_objects', recorded_fetch)
 
     assert _render(store, 'doc') == [_expected(25_001)]
-    assert limits == [10_000, 10_000, 10_000, 10_000]  # three data pages, then an empty one
+    assert limits == [10_000, 10_000, 10_000]  # two full pages, then a short one
 
 
 def test_render_hands_over_one_render_chunk_size_group_at_a_time():
@@ -67,6 +67,56 @@ def test_render_leaves_a_missing_chunk_empty():
     store, _ = _make_store(_shuffled(records))
 
     assert _render(store, 'doc') == [_expected(3) + _expected(15, 4)]
+
+
+def test_render_reaches_a_chunk_past_a_wide_gap():
+    """ChunkIds need not be contiguous: an upsert can store chunks 0 and 20000 alone."""
+    records = _make_obj_records('doc', 20_001, is_deleted=False)
+    records = {key: records[key] for key in ('doc-0', 'doc-20000')}
+    store, _ = _make_store(records)
+
+    assert _render(store, 'doc') == ['chunk 0chunk 20000']
+
+
+def _second_copy(records: dict[str, dict], chunk: int, content: str) -> None:
+    """Store another object with an existing chunk number, as an upsert without chunk 0 can."""
+    copy = dict(records[f'doc-{chunk}'], properties=dict(records[f'doc-{chunk}']['properties'], content=content))
+    records[f'doc-{chunk}-copy'] = copy
+
+
+def test_render_keeps_every_chunk_when_a_chunk_number_is_stored_twice():
+    """A second copy of chunk 1 must not push chunk 3 out of a group of 4."""
+    records = _make_obj_records('doc', 4, is_deleted=False)
+    _second_copy(records, 1, 'chunk 1 again')
+    # Weaviate's order: 0, 1, 2, the copy of 1, then 3
+    order = ('doc-0', 'doc-1', 'doc-2', 'doc-1-copy', 'doc-3')
+    store, _ = _make_store({key: records[key] for key in order})
+    store.renderChunkSize = 4
+
+    assert _render(store, 'doc') in (
+        [_expected(4)],
+        ['chunk 0chunk 1 againchunk 2chunk 3'],
+    )
+
+
+def test_render_keeps_every_chunk_when_copies_straddle_a_page(monkeypatch):
+    """Copies of the chunk a page ends on are read once, and the next page goes on from there."""
+    records = _make_obj_records('doc', 10, is_deleted=False)
+    _second_copy(records, 3, 'chunk 3')
+    _second_copy(records, 4, 'chunk 4')
+    store, collection = _make_store(_shuffled(records))
+    monkeypatch.setitem(store.render.__globals__, '_RENDER_PAGE_SIZE', 4)
+    fetch = collection.query.fetch_objects
+    calls = []
+
+    def counted_fetch(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) <= 10, 'render is not making progress'
+        return fetch(**kwargs)
+
+    monkeypatch.setattr(collection.query, 'fetch_objects', counted_fetch)
+
+    assert _render(store, 'doc') == [_expected(10)]
 
 
 def test_render_of_an_unknown_document_calls_nothing():

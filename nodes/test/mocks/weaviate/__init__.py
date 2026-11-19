@@ -203,6 +203,18 @@ class MetadataQuery:
         self.distance = distance
 
 
+class Sort:
+    """Sort order for fetch_objects: one property, ascending or descending."""
+
+    def __init__(self, name: str, ascending: bool = True):
+        self.name = name
+        self.ascending = ascending
+
+    @staticmethod
+    def by_property(name: str, ascending: bool = True) -> 'Sort':
+        return Sort(name, ascending)
+
+
 # =============================================================================
 # Mock Collection Components
 # =============================================================================
@@ -291,9 +303,17 @@ class MockQuery:
         return QueryResult(objects=results[:limit])
 
     def fetch_objects(
-        self, filters: Optional[Filter] = None, limit: Optional[int] = None, offset: int = 0
+        self,
+        filters: Optional[Filter] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        sort: Optional[Sort] = None,
     ) -> QueryResult:
-        """Fetch objects matching filters, with Weaviate's default and maximum result limits."""
+        """Fetch objects matching filters, with Weaviate's default and maximum result limits.
+
+        Without ``sort`` the objects come back in storage order. With it they are
+        ordered by that property; objects with equal values keep storage order.
+        """
         if limit is None:
             limit = QUERY_DEFAULTS_LIMIT
         if offset + limit > QUERY_MAXIMUM_RESULTS:
@@ -320,6 +340,9 @@ class MockQuery:
                     metadata=MetadataResult(),
                 )
             )
+
+        if sort is not None:
+            results.sort(key=lambda obj: obj.properties.get(sort.name), reverse=not sort.ascending)
 
         return QueryResult(objects=results[offset : offset + limit])
 

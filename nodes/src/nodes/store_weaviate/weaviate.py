@@ -40,7 +40,7 @@ import time
 import weaviate
 from weaviate.client import WeaviateClient
 from weaviate.classes.init import AdditionalConfig, Timeout, Auth
-from weaviate.classes.query import Filter, MetadataQuery
+from weaviate.classes.query import Filter, MetadataQuery, Sort
 from weaviate.collections.collection import Collection
 from weaviate.classes.config import VectorDistances
 from weaviate.util import generate_uuid5
@@ -60,7 +60,7 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
-# The most chunks render asks Weaviate for in one query. Weaviate rejects a
+# The most chunks render asks Weaviate for in one page. Weaviate rejects a
 # query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
 _RENDER_PAGE_SIZE = 10000
 
@@ -611,50 +611,63 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return
 
-        # Chunks come back in any order, and a document may hold tens of
-        # thousands of them. Weaviate returns 10 objects when no limit is
-        # given and rejects a limit above QUERY_MAXIMUM_RESULTS, so read the
-        # chunks one chunkId window at a time: chunkIds are unique within a
-        # document, so a window of N ids never holds more than N objects and
-        # limit=N returns all of them. The callback still gets the joined
-        # text one renderChunkSize group at a time.
+        # A document may hold tens of thousands of chunks. Weaviate returns 10
+        # objects when no limit is given and rejects a limit above
+        # QUERY_MAXIMUM_RESULTS, so page through the document in chunkId
+        # order with a keyset cursor: each page starts at the last chunkId of
+        # the one before. ChunkIds need not be contiguous, and a chunk number
+        # can be stored twice (an upsert without chunk 0 that repeats one), so
+        # neither a gap nor a page's chunkId span says where the document
+        # ends; only a short page does. Objects at the cursor chunkId that an
+        # earlier page already returned are recognized by uuid.
         groupSize = max(1, self.renderChunkSize)
-        pageSize = min(groupSize, _RENDER_PAGE_SIZE)
-
         groupStart = 0
         pieces: Dict[int, str] = {}
-        pageStart = 0
+
+        cursor = 0
+        seenAtCursor: set = set()
         while True:
-            groupEnd = groupStart + groupSize
-            pageEnd = min(pageStart + pageSize, groupEnd)
             points = self.collectionObj.query.fetch_objects(
                 filters=(
                     Filter.by_property('objectId').equal(objectId)
-                    & Filter.by_property('chunkId').greater_or_equal(pageStart)
-                    & Filter.by_property('chunkId').less_than(pageEnd)
+                    & Filter.by_property('chunkId').greater_or_equal(cursor)
                 ),
-                limit=pageEnd - pageStart,
+                sort=Sort.by_property('chunkId', ascending=True),
+                limit=_RENDER_PAGE_SIZE,
             )
 
+            fresh = 0
+            lastChunk = cursor
             for point in points.objects:
                 chunk = point.properties.get('chunkId')
-                if chunk is None or chunk < pageStart or chunk >= pageEnd:
+                if chunk is None or chunk < cursor:
                     continue
+                lastChunk = max(lastChunk, chunk)
+                if chunk == cursor and point.uuid in seenAtCursor:
+                    continue
+                fresh += 1
+
+                # Chunks arrive in order, so a chunk past the current group
+                # completes it: hand it over, with a missing chunk as empty text
+                if chunk >= groupStart + groupSize:
+                    if pieces:
+                        callback(''.join(pieces.get(index, '') for index in range(groupStart, max(pieces) + 1)))
+                    pieces = {}
+                    groupStart = chunk - chunk % groupSize
+
+                # Of two copies of one chunk number, the last one read is kept
                 pieces[chunk] = point.properties.get('content') or ''
 
-            # An empty window means the document has no more chunks
-            done = not points.objects
-            pageStart = pageEnd
-
-            # Hand over the group when it is complete or the document ends;
-            # a chunk missing inside the group renders as empty text
-            if pieces and (done or pageStart >= groupEnd):
-                lastChunk = max(pieces)
-                callback(''.join(pieces.get(chunk, '') for chunk in range(groupStart, lastChunk + 1)))
-                pieces = {}
-
-            if done:
+            # A short page is the last one. A full page of chunks already read
+            # (more copies of one chunk number than a page holds) cannot move
+            # the cursor, so it ends the document too.
+            if len(points.objects) < _RENDER_PAGE_SIZE or fresh == 0:
                 break
 
-            if pageStart >= groupEnd:
-                groupStart = groupEnd
+            if lastChunk != cursor:
+                seenAtCursor = set()
+                cursor = lastChunk
+            seenAtCursor.update(point.uuid for point in points.objects if point.properties.get('chunkId') == cursor)
+
+        if pieces:
+            callback(''.join(pieces.get(index, '') for index in range(groupStart, max(pieces) + 1)))
