@@ -73,6 +73,7 @@ def get_with_retry(
     max_attempts: int = 4,
     base_delay: float = 2.0,
     max_delay: float = 60.0,
+    allow_redirects: bool = True,
 ) -> requests.Response:
     """GET with exponential-backoff retry (via ``tenacity``).
 
@@ -80,10 +81,15 @@ def get_with_retry(
     retries timeouts, connection errors, and 429 / 5xx responses; other 4xx are raised
     immediately. Returns the successful ``requests.Response``; the last exception is
     re-raised when all attempts are exhausted.
+
+    Pass ``allow_redirects=False`` when the request carries a credential in a custom
+    header (e.g. ``X-API-Key``): ``requests`` strips ``Authorization`` on a cross-host
+    redirect but forwards every other header. A 3xx is then returned to the caller
+    (``raise_for_status`` does not raise on it) for the caller to reject.
     """
 
     def _attempt() -> requests.Response:
-        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+        resp = requests.get(url, headers=headers, params=params, timeout=timeout, allow_redirects=allow_redirects)
         resp.raise_for_status()
         return resp
 
